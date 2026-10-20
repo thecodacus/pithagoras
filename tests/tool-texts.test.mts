@@ -9,16 +9,10 @@ import { inProcessHome } from "./helpers.mts";
 // back fails here. The caps are the lengths agreed for each tool (about a quarter of a token to the character is
 // the measure, as in the review of issue #183), with a little room for a word to be changed.
 inProcessHome("pitha-tool-texts-");
-const { putSetting } = await import("../core/server/src/db.ts");
 const { ToolsGateway } = await import("../core/server/src/pi/tools-gateway.ts");
 const { browserTools } = await import("../core/server/src/browser/tools.ts");
 const { askPrimaryTool } = await import("../core/server/src/pi/ask-primary.ts");
 const { askQuestionTool } = await import("../core/server/src/pi/ask-question.ts");
-const { GenerateImageTool } = await import("../core/server/src/pi/generate-image-tool.ts");
-const { EditImageTool } = await import("../core/server/src/pi/edit-image-tool.ts");
-const { GenerateVideoTool } = await import("../core/server/src/pi/generate-video-tool.ts");
-const { showImageTool } = await import("../core/server/src/pi/show-image-tool.ts");
-const { showVideoTool } = await import("../core/server/src/pi/show-video-tool.ts");
 const { heartbeatTool } = await import("../core/server/src/pi/heartbeat-tool.ts");
 const { reportTool } = await import("../core/server/src/pi/report-tool.ts");
 const { routineTools } = await import("../core/server/src/pi/routine-tools.ts");
@@ -49,30 +43,18 @@ const tokens = (text: string) => Math.ceil(text.length / 4);
 const cost = (tool: Registered) =>
   tokens(tool.description) + tokens(JSON.stringify(tool.parameters)) + (tool.promptSnippet ? tokens(`- ${tool.name}: ${tool.promptSnippet}`) : 0);
 
-putSetting("image_generation", JSON.stringify({ enabled: true, baseUrl: "https://images.example.com/v1", editEnabled: true, editMultiple: false }));
-putSetting("video_generation", JSON.stringify({ enabled: true, baseUrl: "https://videos.example.com/v1" }));
-
 const all: Registered[] = [];
 load(new ToolsGateway(["browser", "media"]).extension, all);
 load(browserTools("s"), all);
 load(askPrimaryTool("s"), all);
 load(askQuestionTool(), all);
-load(new GenerateImageTool("/nowhere").extension, all);
-const editOne: Registered[] = [];
-load(new EditImageTool("/nowhere").extension, editOne);
-load(new GenerateVideoTool("/nowhere").extension, all);
-load(showImageTool("/nowhere", "chat"), all);
-load(showVideoTool("/nowhere", "chat"), all);
 load(heartbeatTool("a", "s"), all);
 load(reportTool(null), all);
 load(routineTools("s"), all);
 const agentDir = process.env.PI_CODING_AGENT_DIR!;
 writeFileSync(path.join(agentDir, "settings.json"), JSON.stringify({ subagentMode: "interrupt" }));
 load(subagent, all);
-// The shapes that depend on a setting are looked at as well: several pictures to an edit, and a subagent that runs in the background.
-putSetting("image_generation", JSON.stringify({ enabled: true, baseUrl: "https://images.example.com/v1", editEnabled: true, editMultiple: true }));
-const editSeveral: Registered[] = [];
-load(new EditImageTool("/nowhere").extension, editSeveral);
+// The shape that depends on a setting is looked at as well: a subagent that runs in the background.
 writeFileSync(path.join(agentDir, "settings.json"), JSON.stringify({ subagentMode: "background" }));
 const subagentBackground: Registered[] = [];
 load(subagent, subagentBackground);
@@ -94,12 +76,6 @@ const AGREED: Record<string, number> = {
   browser_screenshot: 105,
   ask_primary: 218,
   ask_question: 393,
-  generate_image: 143,
-  edit_image: 318,
-  "edit_image#several": 383,
-  generate_video: 317,
-  show_image: 105,
-  show_video: 105,
   activity_note: 131,
   report: 88,
   routines_list: 43,
@@ -112,8 +88,7 @@ const AGREED: Record<string, number> = {
 
 test("every tool of the portal's own is within the length agreed for it", () => {
   const tools: [string, Registered][] = [
-    ...[...all, ...editOne].map((tool): [string, Registered] => [tool.name, tool]),
-    ["edit_image#several", editSeveral[0]],
+    ...all.map((tool): [string, Registered] => [tool.name, tool]),
     ["subagent#background", subagentBackground[0]],
   ];
   assert.deepEqual(tools.map(([key]) => key).sort(), Object.keys(AGREED).sort(), "a tool without an agreed length, or an agreed length without a tool");
@@ -123,14 +98,15 @@ test("every tool of the portal's own is within the length agreed for it", () => 
 });
 
 test("all of them together stay near the length agreed", () => {
-  // The review measured 6,880 tokens for these texts and proposed 4,550; the rules are counted once, as pi prints each once.
-  const rules = new Set([...all, ...editOne].flatMap((tool) => (tool.promptGuidelines ?? []).map((line) => line.trim())));
-  const total = [...all, ...editOne].reduce((sum, tool) => sum + cost(tool), 0) + [...rules].reduce((sum, line) => sum + tokens(`- ${line}`), 0);
-  assert.ok(total <= 4700, `${total} tokens, where 4,550 were agreed`);
+  // The review measured 6,880 tokens for these texts and proposed 4,550, of which the 988 of the picture and video tools are
+  // the Media extension's now; the rules are counted once, as pi prints each once.
+  const rules = new Set(all.flatMap((tool) => (tool.promptGuidelines ?? []).map((line) => line.trim())));
+  const total = all.reduce((sum, tool) => sum + cost(tool), 0) + [...rules].reduce((sum, line) => sum + tokens(`- ${line}`), 0);
+  assert.ok(total <= 3712, `${total} tokens, where 3,562 were agreed`);
 });
 
 test("a tool's snippet does not begin with its own name again, as pi lists it as `- name: snippet`", () => {
-  for (const tool of [...all, ...editOne]) {
+  for (const tool of all) {
     if (!tool.promptSnippet) continue;
     assert.doesNotMatch(tool.promptSnippet, new RegExp(`^${tool.name}\\b`), tool.name);
   }

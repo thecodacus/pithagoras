@@ -1,6 +1,5 @@
 import { closeSync, readSync } from "node:fs";
-import path from "node:path";
-import { type AgentUse, FileError, openDownload, openFile, readOpened } from "./workspace-files.js";
+import { type AgentUse, FileError, openFile, readOpened } from "./workspace-files.js";
 
 /**
  * What a clip is, by its first bytes, and how one is opened to be shown.
@@ -10,18 +9,17 @@ import { type AgentUse, FileError, openDownload, openFile, readOpened } from "./
  * MP4 — by what its bytes say and not by its name, so that no page and no script
  * is ever served under this portal's origin from a file the agent wrote.
  *
- * That is a rule about what is played, not about what is kept: whatever an endpoint
- * finishes a clip as is stored and listed, with the kind its bytes say it is (see
- * sniffVideo), and a kind a browser does not play is served to be downloaded, never inline.
+ * That is a rule about what is played, not about what a call may give: a file its
+ * bytes say is another kind (see sniffVideo) is a file to download, never one played inline.
  */
 
-/** The most a clip may weigh, whether the portal takes it from an endpoint or lists and serves it. It is read whole into memory when an endpoint answers with it as base64, which is what the limit is for. */
+/** The most a clip may weigh to be played in the page, or read whole into memory to be sent on to a channel. */
 export const MAX_VIDEO_BYTES = 100 * 1024 * 1024;
 
-/** What a stored clip's file is named with: its kind, as far as its bytes say; `bin` for a file they say nothing of. */
+/** A clip's kind, as far as its bytes say; `bin` for a file they say nothing of. */
 export type VideoExt = "webm" | "mp4" | "mov" | "avi" | "webp" | "gif" | "mkv" | "ogg" | "bin";
 
-/** What a file is, as the page is told: the kind, what it is called to a person, the type it is served as, and whether a browser plays it here. */
+/** What a file is: the kind, what it is called to a person, the type it is served as, and whether a browser plays it here. */
 export interface VideoFormat {
   id: VideoExt;
   label: string;
@@ -122,17 +120,6 @@ export function sniffVideo(head: Buffer): VideoFormat {
 }
 
 /**
- * What a file is called for, by its extension, which is how the tool names what it saves (see VideoExt): the best that is
- * known of a clip whose bytes cannot be read. Only ever shown, never served by: whatever is sent is sent for what its
- * bytes say. A name that says nothing is taken for a WebM, as the clips of the list were before their bytes were looked at.
- */
-export function formatByName(name: string): VideoFormat {
-  const ext = path.extname(name).slice(1).toLowerCase();
-  if (ext === "mkv") return ebmlFormat();
-  return Object.hasOwn(FORMATS, ext) ? FORMATS[ext as keyof typeof FORMATS] : FORMATS.webm;
-}
-
-/**
  * What a clip is by its first bytes, or nothing when a browser does not play it here: only a WebM and an MP4
  * are (see sniffVideo). What shows a clip in the page or in the chat goes by this.
  */
@@ -165,40 +152,3 @@ export function openVideo(base: string, rel: unknown, options: AgentUse = {}): {
 /** A clip in the folder, read whole, for a channel to send on: opened as one that is played is, `options` as for openVideo. */
 export const readVideo = (base: string, rel: unknown, options: AgentUse = {}): { bytes: Buffer; mimeType: string; name: string } =>
   readOpened(openVideo(base, rel, options));
-
-/** What the open file is, by its first bytes. */
-function formatAt(fd: number): VideoFormat {
-  const head = Buffer.alloc(VIDEO_HEAD);
-  const read = readSync(fd, head, 0, head.length, 0);
-  return sniffVideo(head.subarray(0, read));
-}
-
-/**
- * What a file of any size is by its first bytes: for the list, which tells what a clip is that is over the size a clip
- * may have (see openClip) and so is neither played nor sent. A link out of the folder is not followed here either.
- */
-export function formatOf(base: string, rel: unknown): VideoFormat {
-  const opened = openDownload(base, rel);
-  try {
-    return formatAt(opened.fd);
-  } finally {
-    closeSync(opened.fd);
-  }
-}
-
-/**
- * A file of the gallery's, opened to be listed or sent, whatever it is: checked by its size and never through a link out of
- * the folder (see openDownload), and told what it is by its first bytes (see sniffVideo), which says whether it may be
- * played inline or only downloaded. The descriptor is the caller's to close.
- */
-export function openClip(base: string, rel: unknown): { fd: number; size: number; name: string; mimeType: string; format: VideoFormat } {
-  const opened = openDownload(base, rel);
-  try {
-    if (opened.size > MAX_VIDEO_BYTES) throw new FileError("too_large", `The video is over ${MAX_VIDEO_BYTES / 1024 / 1024} MB; download it instead`);
-    const format = formatAt(opened.fd);
-    return { ...opened, mimeType: format.mimeType, format };
-  } catch (e) {
-    closeSync(opened.fd);
-    throw e;
-  }
-}

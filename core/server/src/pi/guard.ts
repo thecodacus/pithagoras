@@ -1305,13 +1305,13 @@ const NEVER_FILES = new Set(["bash", "mcp", "mcp_script", "mcpScript", "codemode
 
 /**
  * The files a call of a tool is approved for, where the tool's own definition
- * names them (`approvalFiles`: the parameters that hold its files, edit_image's
- * `path` and `paths`). Each value of those, a path or a list of them, is then a
+ * names them (`approvalFiles`: the parameters that hold its files, such as a
+ * `path` and a `paths`). Each value of those, a path or a list of them, is then a
  * subject of its own, and the rest of the call (a prompt) is not part of what
  * is approved. Taken only where at least one of the names is a parameter the
  * tool declares, and every one it declares is text or a list of text: a name
- * that one shape of the tool has and another has not (edit_image is given one
- * picture or a list) is checked wherever a call carries it. Never for a
+ * that one shape of the tool has and another has not (one picture or a list,
+ * as its settings say) is checked wherever a call carries it. Never for a
  * command, a tool server's tools or the portal's ways to other tools, which a
  * model or a server could otherwise make look like a file. Nothing for any
  * other tool: it is approved on its command, its path or its arguments whole,

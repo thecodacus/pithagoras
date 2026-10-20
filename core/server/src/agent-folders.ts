@@ -7,9 +7,8 @@ import { workspaceRoot } from "./workspaces.js";
 import { baseDir } from "./workspace-files.js";
 
 /**
- * The folders the agents work in, as the portal knows them: what the galleries look through for what the agents made
- * (media-folders.ts) and what a server half is given (`portal.folders`). Each is a real path: a folder reached by a
- * link is named by where it is.
+ * The folders the agents work in, as the portal knows them: what a server half is given (`portal.folders`). Each is a
+ * real path: a folder reached by a link is named by where it is.
  */
 
 /** A folder the agents work in: an agent's home, a project, or one a chat works in that is neither. */

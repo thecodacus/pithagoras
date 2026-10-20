@@ -63,3 +63,16 @@ test("a server half has the open chats loaded again, through the portal's own re
   assert.throws(() => globalThis.portals.painter.tools.offer(["paint"]), /offer takes a function/);
   await host.syncServerHalves([]);
 });
+
+test("a chat that has not started can switch on a tool a server half offers that is off by default and that no chat has reported", async () => {
+  const { sessions } = await import("../dist/session-manager.js");
+  await host.syncServerHalves([half("painter", `portal.tools.offer(() => [{ name: "varnish" }]);`)]);
+  assert.equal(db.knownTools().some((t) => t.name === "varnish"), false);
+  db.setToolDefaultsOff(["varnish"]);
+  db.createSession({ id: "later", title: "later", workspace: home, executor: "host" });
+  const state = async () => (await sessions.getTools("later")).tools.find((t) => t.name === "varnish")?.enabled;
+  assert.equal(await state(), false);
+  await sessions.setTools("later", []);
+  assert.equal(await state(), true, "the exception is written, not only answered");
+  await host.syncServerHalves([]);
+});

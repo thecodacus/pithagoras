@@ -13,6 +13,12 @@ import { inProcessHome } from "./server-harness.mjs";
 const home = inProcessHome("pithagoras-browser-mcp-rules-");
 mkdirSync(path.join(process.env.PI_CODING_AGENT_DIR, "extensions"), { recursive: true });
 mkdirSync(process.env.WORKSPACE_ROOT, { recursive: true });
+// A tool an extension brings, which a chat has only where the resource loader, which loads the extensions, was made.
+writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR, "extensions", "notes.ts"), `
+export default function (pi: any) {
+  pi.registerTool({ name: "note_down", label: "Note down", description: "Note something down.", parameters: { type: "object", properties: {} }, execute: async () => ({ content: [{ type: "text", text: "ok" }], details: {} }) });
+}
+`);
 
 const model = await fakeModel(() => "Done.");
 writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR, "models.json"), JSON.stringify(model.models()));
@@ -93,8 +99,8 @@ test("a configuration that cannot be read says there is no browser server, and l
       rmSync(mcp, { recursive: true, force: true });
       put();
       const request = await ask();
-      // Without the resource loader a chat has pi's own tools only: no pictures, and no guard.
-      assert.ok(names(request).includes("show_image"), `${why}: the portal's tools are there`);
+      // Without the resource loader a chat has pi's own tools only: no extension's, and no guard.
+      assert.ok(names(request).includes("note_down"), `${why}: the extensions' tools are there`);
       const system = systemOf(request);
       assert.ok(!system.includes(BROWSER_READING_RULE) && !system.includes(BROWSER_SCREENSHOT_RULE), `${why}: no Playwright rules`);
       assert.equal(errors.mock.calls.filter((call) => /resource loader unavailable/.test(String(call.arguments[0]))).length, 0, `${why}: the loader was made`);

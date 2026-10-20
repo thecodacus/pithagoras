@@ -2772,7 +2772,7 @@ class SessionManager extends EventEmitter {
         name,
         ...(description !== undefined ? { description } : {}),
         source: toolSource(name, source, servers),
-        // The portal's own tools are told from an extension's of the same name, so the page can group its picture tools.
+        // The portal's own tools are told from an extension's of the same name, so the page can group its code mode apart.
         ...(inline ? { inline: true as const } : {}),
         ...(cached ? { cached: true as const } : {}),
         enabled: toolEnabled(name, defaults, exceptions),
