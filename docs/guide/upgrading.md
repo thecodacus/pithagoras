@@ -216,13 +216,15 @@ rm -rf handoff/media handoff/.media.*
 mv extension-data/pithagoras-media "backups/pithagoras-media-$(date +%Y%m%d-%H%M%S)"
 ```
 
-In a container, the volume is found as for [a damaged database](#a-damaged-database):
+In a container, run it with the portal container's own mounts
+(`--volumes-from`), so that a folder of `/data` mounted on its own (a disk for
+`videos/`, say) has its files put back on it, where the older version will see
+them:
 
 ```sh
 docker stop pithagoras
-DATA=$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/data"}}{{if .Name}}{{.Name}}{{else}}{{.Source}}{{end}}{{end}}{{end}}' pithagoras)
 
-docker run --rm -v "$DATA:/data" alpine sh -c '
+docker run --rm --volumes-from pithagoras alpine sh -c '
 cd /data
 for from in extension-data/pithagoras-media handoff/media handoff/.media.*; do
   [ -d "$from" ] || continue
