@@ -44,6 +44,11 @@ running commands, so install ones you trust. The registry can be another one
 | url | `https://github.com/user/repo` |
 | path | `/absolute/path/to/package` |
 
+They persist across restarts, because `HOME` points at the data volume. **Update
+all** upgrades the installed packages; pi itself comes with the portal's version,
+so a new pi arrives with an update of the portal. The bin icon removes one. Chats
+started from then on have the package; open ones pick it up with `/reload`.
+
 An extension that needs others to run (it [requires](/guide/extension-ui#installing-what-it-requires)
 them) says so first: **Install** lists each one that is not there, from the
 portal's own folder or npm, or switched off, and on yes installs or switches on
@@ -51,11 +56,6 @@ those before it. One that cannot be found is listed as such; the extension can
 still be installed, and waits for it, which its card under **Installed** says.
 Nothing more is asked when all it needs is there. A git URL or a folder is read
 only once it is installed, so nothing is installed with it.
-
-They persist across restarts, because `HOME` points at the data volume. **Update
-all** upgrades the installed packages; pi itself comes with the portal's version,
-so a new pi arrives with an update of the portal. The bin icon removes one. Chats
-started from then on have the package; open ones pick it up with `/reload`.
 
 ## What a portal starts with
 

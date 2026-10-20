@@ -164,6 +164,8 @@ export function ExtensionsPanel({
       setSpec("");
     } catch (e) {
       onError((e as Error).message);
+      // What it did before it failed stays done (what an extension needs, installed before it): the list is read again.
+      await onRefresh();
     } finally {
       busyRef.current = false;
       setBusy(null);

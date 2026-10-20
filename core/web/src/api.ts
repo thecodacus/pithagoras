@@ -1318,8 +1318,8 @@ export interface ShippedExtension {
 /**
  * Something an extension being installed needs that is not there as it is needed (see install-plan.ts on the
  * server): installed first by `spec`, from the portal's own folder or npm, or switched on; or said, where it is
- * nowhere in a version taken (`missing`, with `error` where npm could not be asked) or is installed in a `version`
- * not taken.
+ * nowhere in a version taken (`missing`, with `error` where npm could not be asked) or is there in a `version` not
+ * taken (installed, or, with `from`, the one in the portal's own folder or the one installed from npm for another).
  */
 export interface InstallNeed {
   name: string;

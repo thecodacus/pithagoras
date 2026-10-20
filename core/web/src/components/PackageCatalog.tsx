@@ -25,7 +25,8 @@ export function PackageCatalog({
   topic?: "provider";
   /** npm names already installed. */
   installed: Set<string>;
-  onInstalled: (name: string) => void;
+  /** Told when what is installed has changed: after an install, and after one that failed once what it needs was installed. */
+  onInstalled: () => void;
   onError: (e: string) => void;
   limit?: number;
   searchable?: boolean;
@@ -65,19 +66,25 @@ export function PackageCatalog({
   const install = async (p: CatalogPackage) => {
     // Busy from the start, as what it needs is asked of the server before the question that lists it; said to be installing once it is.
     setBusy(p.name);
+    // Which package it came to: one that fails after what it needs was installed has changed what is installed all the same.
+    let reached = 0;
     try {
       const installed = await installExtension(`npm:${p.name}`, {
         ask: {
           title: t("Install {name}?", { name: p.name }),
           message: `${t("It is installed from npm and runs inside pi with the same rights as the agent — reading files, running commands. Install packages you trust.")}${p.author ? ` ${t("Published by {author}.", { author: p.author })}` : ""}`,
         },
-        progress: setStep,
+        progress: (step) => {
+          setStep(step);
+          if (step) reached = step.n;
+        },
       });
       if (!installed) return;
       setDone((d) => new Set(d).add(p.name));
-      onInstalled(p.name);
+      onInstalled();
     } catch (e) {
       onError((e as Error).message);
+      if (reached > 1) onInstalled();
     } finally {
       setBusy(null);
     }

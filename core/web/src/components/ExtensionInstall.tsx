@@ -36,7 +36,11 @@ function Need({ need, root }: { need: InstallNeed; root: string }) {
       : need.action === "switch-on"
         ? tx("{name} is installed but switched off: it is switched on.", { name })
         : need.action === "version"
-          ? tx("{name} is installed, and {range} is needed: update it.", { name, range: <span className="font-mono text-xs">{need.range}</span> })
+          ? need.from === "shipped"
+            ? tx("{name} is the one in the portal's own folder, and {range} is needed.", { name, range: <span className="font-mono text-xs">{need.range}</span> })
+            : need.from === "npm"
+              ? tx("{name} is the one installed from npm, and {range} is needed.", { name, range: <span className="font-mono text-xs">{need.range}</span> })
+              : tx("{name} is installed, and {range} is needed: update it.", { name, range: <span className="font-mono text-xs">{need.range}</span> })
           : need.error
             ? tx("{name} could not be looked for on npm: {reason}", { name, reason: need.error })
             : tx("{name} is not in the portal's own folder or on npm.", { name });
@@ -55,9 +59,14 @@ function Needs({ name, needs, below }: { name: string; needs: InstallNeed[]; bel
       <p>{t("{name} needs other extensions to run:", { name })}</p>
       <ul className="mt-1.5 list-disc space-y-1 pl-5">
         {needs.map((need) => (
-          <Need key={need.name} need={need} root={name} />
+          // One needed by two is listed twice where the version one leaves is not one the other takes.
+          <Need key={`${need.name} ${need.for}`} need={need} root={name} />
         ))}
       </ul>
+      {/* Anyone can publish to npm: what is installed from there is said to run with the agent's rights, whatever the install began with. */}
+      {needs.some((need) => need.from === "npm" && need.action === "install") && (
+        <p className="mt-1.5">{t("Those installed from npm run inside pi with the same rights as the agent — reading files, running commands. Install packages you trust.")}</p>
+      )}
       {needs.some((need) => need.action === "missing" || need.action === "version") && (
         <p className="mt-1.5">{t("It can be installed without what is not there: it then waits, and Settings → Extensions says what for.")}</p>
       )}

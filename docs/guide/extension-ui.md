@@ -1455,20 +1455,25 @@ Someone who installs an extension that requires others, from Settings →
 Extensions, is first told what that brings with it, and asked. Each extension it
 requires that is not there as it needs it is listed, with what is done for it:
 
-- one that comes with the portal (its own `extensions` folder) by that name, in
-  a version the range takes, is installed from there;
+- one that comes with the portal (its own `extensions` folder) by that name is
+  installed from there. npm is never asked for a name the portal ships, as
+  anyone can publish a package under it there;
 - otherwise one on npm by that name, in a version the range takes, is installed
-  from npm by the range (`npm:pithagoras-docker@^1.0.0`), so that an update
-  keeps it within the range;
+  from npm by the range (`npm:my-engine@^1.0.0`), so that an update keeps it
+  within the range. The question says that what comes from npm runs inside pi
+  with the agent's rights;
 - one installed and switched off is switched on;
-- one installed in a version the range does not take, and one found nowhere,
-  are said, and nothing is done for them. The extension can be installed all the
-  same, and waits for them, saying so as above.
+- one installed, or in the portal's folder, in a version the range does not
+  take, and one found nowhere, are said, and nothing is done for them. The
+  extension can be installed all the same, and waits for them, saying so as
+  above.
 
-What those require is looked at too, each once, and a circle ends. On yes, each
-is installed or switched on before what needs it, the extension last, and the
-page says which it has come to. One that fails stops the rest, and says why.
-With all it requires there, nothing is asked.
+What those require is looked at too, each once, and a circle ends. One required
+by two, where the version the first leaves is not one the second takes, is said
+for the second. On yes, each is installed or switched on before what needs it,
+the extension last, and the page says which it has come to. One that fails stops
+the rest, and says why; what was installed before it stays. With all it requires
+there, nothing is asked.
 
 This is known beforehand for an extension that comes with the portal and for a
 package on npm, whose registry has the package.json of each version. A git URL

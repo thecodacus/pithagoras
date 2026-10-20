@@ -12,7 +12,9 @@ file in its chat's folder, which are off until you switch them on.
 It is not installed by default. Install it from Settings → Extensions →
 Discover, where the extensions that come with the portal are listed, when an
 extension you want needs it: one that requires it does not start without it,
-and says so in Settings → Extensions.
+and says so in Settings → Extensions. Installing that extension from Settings →
+Extensions installs Docker with it, first
+([Installing what it requires](/guide/extension-ui#installing-what-it-requires)).
 
 ## Giving the portal Docker
 
