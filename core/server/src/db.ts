@@ -683,8 +683,9 @@ function browserGrantsToSwitches(d: Database.Database): void {
   // Unmarked in a database no portal that carried grants has opened: one with no chat had nothing to carry, one with chats waited.
   const adopted = settingIn(d, "browser_tools_adopted") ?? (d.prepare("SELECT 1 FROM sessions LIMIT 1").get() ? "pending" : "1");
   if (adopted === "1") return;
+  // Waiting, the grant answered for all of them; carrying, each was carried as it was first seen, and the rest are to be.
   const seen = new Set(toolsSeenIn(d).map((tool) => tool?.name));
-  const unseen = BROWSER_TOOLS.filter((name) => !seen.has(name));
+  const unseen = adopted === "pending" ? BROWSER_TOOLS : BROWSER_TOOLS.filter((name) => !seen.has(name));
   if (!unseen.length) return;
   d.prepare("INSERT INTO settings (key, value) VALUES ('tools_off_default', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(
     clean([...parseToolsOff(settingIn(d, "tools_off_default")), ...unseen]).join("\n"),

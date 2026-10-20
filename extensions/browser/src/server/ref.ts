@@ -19,8 +19,8 @@ export const REF_TOKEN = /^(?:f\d+)?e\d+$/;
  * arrived, so real selectors — `[disabled]`, `a[href="..."]`, `#id` — are
  * never touched.
  *
- * One reading for both the portal's own browser tools and the guard, which
- * normalises the arguments of a Playwright MCP's: two of them had drifted apart.
+ * One reading for both Browser's tools and the portal's guard, which keeps a
+ * copy of it for the arguments of a Playwright MCP's: two of them had drifted apart.
  */
 export function bareRef(value: string): string {
   const stripped = value
