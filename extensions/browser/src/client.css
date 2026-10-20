@@ -1,0 +1,4 @@
+/*
+ * Browser's own stylesheet: what its parts need that the portal's Tailwind preset cannot say (the utilities it uses
+ * are made after this, see build.mjs).
+ */

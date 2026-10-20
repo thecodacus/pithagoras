@@ -1,0 +1,22 @@
+{
+  "name": "pithagoras-browser",
+  "version": "0.1.0",
+  "description": "The agent's browser for Pithagoras: a Chromium the agent drives with its browser tools, run in a container through Docker or as the machine's own Chrome, with a page, a panel beside a chat and a window in voice mode to watch it",
+  "type": "module",
+  "keywords": ["pi-package"],
+  "pi": {},
+  "pithagoras": {
+    "client": "./web/client.js",
+    "style": "./web/client.css",
+    "server": "./server.js",
+    "requires": { "pithagoras-docker": "^1.0.0" }
+  },
+  "scripts": { "build": "node build.mjs && tsc --noEmit -p ." },
+  "dependencies": {
+    "playwright-core": "1.63.0"
+  },
+  "devDependencies": {
+    "react-icons": "5.7.0"
+  },
+  "license": "Apache-2.0"
+}
