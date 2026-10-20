@@ -61,13 +61,20 @@ export function setNavigate(navigate: (path: string, options?: { replace?: boole
   go = navigate;
 }
 
-/** The page's address, as the app's router last said it: what `portal.useLocation` gives. Replaced when it changes, never changed in place. */
+/** The page's address, as last read: what `portal.useLocation` gives. Replaced when it changes, never changed in place. */
 let here = { path: window.location.pathname, search: window.location.search };
 const hereWatchers = new Set<() => void>();
-/** Where the app's router is now: told by the app on every change of address, Back and Forward among them. */
-export function setLocation(path: string, search: string): void {
-  if (here.path === path && here.search === search) return;
-  here = { path, search };
+/**
+ * The address as the browser has it. The router has written it there before it draws the page it leads to,
+ * so a part drawn for the first time at a new address reads that address, and not the one the app last told.
+ */
+function currentHere(): { path: string; search: string } {
+  const { pathname, search } = window.location;
+  if (here.path !== pathname || here.search !== search) here = { path: pathname, search };
+  return here;
+}
+/** Told by the app on every change of address, Back and Forward among them: what is drawn already reads it again. */
+export function locationChanged(): void {
   for (const watcher of [...hereWatchers]) watcher();
 }
 function watchHere(watcher: () => void) {
@@ -76,7 +83,7 @@ function watchHere(watcher: () => void) {
 }
 /** The hook behind `portal.useLocation`. */
 function useHere(): { path: string; search: string } {
-  return useSyncExternalStore(watchHere, () => here);
+  return useSyncExternalStore(watchHere, currentHere);
 }
 
 const quietly = (fn: () => void) => {

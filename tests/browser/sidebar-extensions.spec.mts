@@ -223,6 +223,17 @@ test.describe('with extension pages', () => {
     await expect(page).toHaveURL(new RegExp(`${NOTES}$`));
     await expect(page.getByRole('heading', { name: 'Notes' })).toBeVisible();
   });
+
+  test.describe('in a browser set to German', () => {
+    test.use({ locale: 'de-DE' });
+
+    test("on a phone the bar at the top names the page shown as the sidebar does, in the extension's own words", async ({ page }) => {
+      await page.setViewportSize({ width: 390, height: 800 });
+      await portal(page);
+      await page.goto(NOTES);
+      await expect(page.locator('.app-mobile-bar')).toHaveText('Notizen');
+    });
+  });
 });
 
 test.describe('with a slow extension first in the list', () => {

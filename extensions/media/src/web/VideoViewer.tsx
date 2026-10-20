@@ -74,6 +74,7 @@ export function VideoViewer({
 
   const { iconButton } = portal.ui.classes;
   const dialog = useRef<HTMLDivElement>(null);
+  const leaving = portal.ui.useLeaveRef<HTMLDivElement>("dialog");
   const [failed, setFailed] = useState<string | null>(null);
   // The playable copies made while this is open, and the one being made now, or the reason one could not be.
   const [made, setMade] = useState<ReadonlySet<string>>(new Set());
@@ -184,7 +185,7 @@ export function VideoViewer({
 
   return createPortal(
     <div data-extension={portal.extension} style={{ display: "contents" }}>
-      <div className="ui-backdrop video-viewer fixed inset-0 z-[55] bg-canvas/95 backdrop-blur-md">
+      <div ref={leaving} className="ui-backdrop video-viewer fixed inset-0 z-[55] bg-canvas/95 backdrop-blur-md">
         <div ref={dialog} role="dialog" aria-modal="true" aria-label={t("Video viewer")} tabIndex={-1} onClick={closeOnBlank} className="flex h-full w-full flex-col outline-none">
           <header onClick={closeOnBlank} className="flex shrink-0 flex-wrap items-center justify-end gap-1 px-2 pb-1 pt-[max(0.5rem,env(safe-area-inset-top))] sm:px-3">
             {many && <span aria-hidden className="px-2 text-xs tabular-nums text-fg-muted">{index + 1} / {videos.length}</span>}
@@ -207,7 +208,8 @@ export function VideoViewer({
             <div className="absolute inset-0 grid place-items-center px-2 sm:px-14" onClick={closeOnBlank}>
               {offered && !copy ? (
                 <div className="flex max-w-md flex-col items-center gap-3 px-6 text-center">
-                  <LuFileVideo aria-hidden className="h-10 w-10 text-fg-subtle" />
+                  {/* One class for both sides: a height and a width class of that size, in this extension's stylesheet, would win over the smaller sizes the portal's buttons (`ui.classes`) take on a wide screen. */}
+                  <LuFileVideo aria-hidden className="size-10 text-fg-subtle" />
                   <p className="text-sm text-fg">{t("Its format is {format}, which a browser cannot play here.", { format: video.format!.label })}</p>
                   <div className="flex flex-wrap items-center justify-center gap-2">
                     <a href={video.src} download={video.fileName ?? ""} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-accent px-3 text-sm text-black transition hover:opacity-90">

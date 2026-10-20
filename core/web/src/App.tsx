@@ -27,10 +27,10 @@ import { reconcile } from "./reconcile";
 import { useStable } from "./use-stable";
 import { useDialogFocus } from "./dialog-focus";
 import { t, useLanguage } from "./i18n";
-import { setLocation, setNavigate, startExtensions } from "./extensions/loader";
+import { locationChanged, setNavigate, startExtensions } from "./extensions/loader";
 import { extensionMessage } from "./extensions/channel";
 import { serverPush, setChatOnScreen } from "./extensions/server-feed";
-import { useSlot } from "./extensions/slots";
+import { titleOf, useSlot } from "./extensions/slots";
 
 // What the first draw needs is the shell, the chat and the sign-in page. The other pages, and the dialogs that
 // open over them, are fetched when they are first opened, so that they are not in the file everyone waits for.
@@ -173,8 +173,10 @@ function Shell({
     startExtensions();
   }, [navigate]);
   // Before anything is painted at the new address: a page of an extension's that keeps what it shows in its address reads it there.
-  useLayoutEffect(() => setLocation(pathname, search), [pathname, search]);
+  useLayoutEffect(() => locationChanged(), [pathname, search]);
   const pages = useSlot("nav.page");
+  // The extension's page shown, which the phone's top bar names as the sidebar does: in the language in effect.
+  const extensionPage = view === "extension" ? pages.find((p) => p.key === extensionPart) : undefined;
   const [mobileNav, setMobileNav] = useState(false);
   useEffect(() => { setMobileNav(false); }, [sessionId, view, settings]);
   // The drawer covers the page and keeps the keyboard; widened to a window with the sidebar in place, it is only the sidebar.
@@ -733,7 +735,7 @@ function Shell({
             would only repeat its title; in voice mode that header is gone. */}
         <header className="app-mobile-bar flex shrink-0 items-center gap-3 border-b border-line px-3 py-2 md:hidden">
           <button type="button" aria-label={t("Open navigation")} aria-expanded={mobileNav} aria-controls="mobile-navigation" onClick={() => setMobileNav(true)} className="rounded-lg p-2 text-fg hover:bg-fg/10"><LuMenu size={20}/></button>
-          <span className="truncate text-sm text-fg">{(view === "extension" && pages.find((p) => p.key === extensionPart)?.title) || active?.title || "Pithagoras"}</span>
+          <span className="truncate text-sm text-fg">{(extensionPage && titleOf(extensionPage)) || active?.title || "Pithagoras"}</span>
         </header>
         <UpdateNotice onDetails={openUpdate} />
         {error && <ErrorBanner className="mx-4 mt-2" onClose={() => setError(null)}>{error}</ErrorBanner>}

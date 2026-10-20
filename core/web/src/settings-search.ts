@@ -31,7 +31,7 @@ export const SETTINGS_INDEX: SettingEntry[] = [
   { tab: "general", section: msg("Context"), title: msg("Context window"), words: "tokens ctx context window size length kontext fenster" },
   { tab: "general", section: msg("Context"), title: msg("Kept when compacting"), words: "compaction compact keep recent summary kompaktieren zusammenfassung" },
   { tab: "general", section: msg("Routine reports"), title: msg("Routine reports"), words: "routine schedule cron report destination channel bericht" },
-  { tab: "tools", title: msg("Default tools"), words: "tools enable disable default on off werkzeuge show_image generate_image edit_image generate_video show_video picture images video videos bild bilder" },
+  { tab: "tools", title: msg("Default tools"), words: "tools enable disable default on off werkzeuge" },
   { tab: "tools", title: msg("Questions from the agent"), words: "ask_question question questions wait timeout answer fragen frage warten antwort" },
   { tab: "skills", title: msg("Skills"), words: "skill procedure import repository fähigkeiten" },
   { tab: "mcp", title: msg("MCP servers"), words: "mcp model context protocol server adapter tools" },
