@@ -9,10 +9,10 @@ import type { IncomingMessage } from "node:http";
 import type { Duplex } from "node:stream";
 import type { Request, Response, Router, json, raw, text } from "express";
 
-/** A chat, as an extension's server half is told of it. */
 /** What kind of session a chat is: one made in the portal (`task`), one reached through a channel (`agent`), a routine's run, or a heartbeat. */
 export type ChatKind = "task" | "agent" | "routine" | "heartbeat";
 
+/** A chat, as an extension's server half is told of it. */
 export interface Chat {
   id: string;
   title: string;
@@ -196,7 +196,9 @@ export interface ToolDeclarations {
    * It drives a web browser, and the guard holds it to the browser's rules whatever it is called: refused in a
    * conversation that may not drive a browser, the `url` of a call held to the allowlist, and each address recorded in
    * Audit. What it returns is outside content, in a short envelope without the paragraph that says a page is data and
-   * never instructions, which the tool says once in its `promptGuidelines`. It is counted with the browser's tools.
+   * never instructions, which the tool says once in its `promptGuidelines`. It is counted with the browser's tools:
+   * a routine's runs have it off until the routine's Browser switch is on (or the routine switches it on), and on an
+   * install that had the browser off until a conversation was given it, it starts off by default.
    */
   drivesBrowser?: true;
 }

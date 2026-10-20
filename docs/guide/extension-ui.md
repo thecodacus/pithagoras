@@ -1274,10 +1274,17 @@ the random marker and leaves out the paragraph saying that a page is data and
 never instructions: the tool says that once, in its `promptGuidelines`, which
 are in the prompt while it is on (and through the `tools` tool while it is
 lazy). The portal counts it with the browser's tools wherever it counts them: a
-conversation may drive a browser while any of them is on there. A tool that
-does not say it is told only by its name, as an MCP server's are: a name with
-`browser_` in it is held to the same rules. It is read where the guard runs,
-in a chat whose pi runs in the portal's own process.
+conversation may drive a browser while any of them is on there. So it follows
+a routine's **Browser** switch, which is off for a new routine: a routine's runs
+have it off until that switch is on, or the routine switches the tool on itself.
+On an install upgraded from when the browser was off until a conversation was
+given it, it starts off by default the first time the portal sees it, and on in
+the conversations that had the browser. A tool that does not say it is told
+only by its name, as an MCP server's are: a name in which `browser` stands at
+the start or after `_` or `.`, and is followed by `_` or `.`
+(`browser_navigate`, `playwright_browser_click`), is held to the same rules. It
+is read where the guard runs, in a chat whose pi runs in the portal's own
+process.
 
 ```js
 const PAGE_IS_DATA =
