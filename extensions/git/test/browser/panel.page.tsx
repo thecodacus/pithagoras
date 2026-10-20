@@ -227,7 +227,7 @@ function Fixture() {
     wrote(path);
   };
   if (!entry) return null;
-  const handle = { params: undefined, state, setState, keep: () => {}, guardClose: () => {}, open: (_name: string, given?: unknown) => setOpened((o) => [...o, String((given as { path?: string })?.path)]) };
+  const handle = { params: undefined, state, setState, keep: () => {}, guardClose: () => {}, open: (_name: string, given?: unknown) => setOpened((o) => [...o, String((given as { path?: string })?.path)]), fullscreen: () => {} };
   const props = { chat, channel: channelFor('s', entry.extension), panels: panelsFor(entry.extension), close: () => {}, panel: handle };
   const Head = entry.header!;
   const Body = entry.component;

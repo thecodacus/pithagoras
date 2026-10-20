@@ -345,12 +345,13 @@ overrides; `defaults` is what an unset field falls back to. An empty string in
 | | |
 | --- | --- |
 | `GET /api/packages` | Raw `pi list` output |
-| `POST /api/packages` | `{ spec }` |
+| `POST /api/packages` | `{ spec }`: a spec of a form pi documents, or `npm:<name>@<range>` with a semver range, as an extension that requires the package installs it |
 | `DELETE /api/packages` | `{ spec }` |
 | `POST /api/packages/update` | Update the installed pi packages (`pi update --extensions`); pi itself comes with the portal's version |
 | `GET /api/extensions` | Parsed packages with their recovered settings, each with `kinds`: what it brings, of `pi`, `pithagoras` and `themes` |
-| `GET /api/extensions/shipped` | `{ extensions: [{ name, version?, description?, kinds, spec }] }` — the extensions that come with the portal; `spec` is the folder each is installed by |
-| `GET /api/extension-ui` | `{ extensions: [{ name, version, entry?, style?, server?, serverError?, themes? }] }` — the installed packages, switched on, that bring a browser half, a server half or themes: the addresses its module and stylesheet are fetched from, where its server half's routes are, and why that half is not running if it could not be started |
+| `GET /api/extensions/shipped` | `{ extensions: [{ name, version?, description?, kinds, spec, requires? }] }` — the extensions that come with the portal; `spec` is the folder each is installed by, `requires` the extensions each cannot work without |
+| `GET /api/extensions/plan?spec=` | `{ name?, version?, needs: [{ name, range, for, action, spec?, from?, version?, error? }] }` — what installing `spec` brings with it: each extension it requires, and each those require, that is not there as it is needed, each before what needs it. `action` is `install` (by `spec`, `from` the portal's folder or npm), `switch-on`, `missing` or `version` (there in a version not taken: installed, or with `from`, the portal's folder's or the one npm gives what needed it first). No `name` and no needs for a spec that cannot be read beforehand: a git URL, a folder ([Installing what it requires](/guide/extension-ui#installing-what-it-requires)) |
+| `GET /api/extension-ui` | `{ extensions: [{ name, version, entry?, style?, server?, serverError?, requires?, themes? }] }` — the installed packages, switched on, that bring a browser half, a server half or themes: the addresses its module and stylesheet are fetched from, where its server half's routes are, why that half is not running if it could not be started, and what it requires |
 | `GET /api/extension-ui/<package>/<file>` | A file of that package's web folder |
 | `/api/x/<package>/…` | The routes of that package's server half, whatever it serves there, behind the portal's login; no body is read for them unless the route asks. WebSocket upgrades under the same address go to it, checked for the login and for the page they come from |
 | `PUT /api/extensions/enabled` | `{ spec, enabled }` — switch a package off or on without uninstalling it; reloads idle open sessions and says how many were left waiting |
@@ -456,6 +457,29 @@ The endpoint's address, key and model are the settings' (see [above](#media)).
 | `DELETE …/videos/jobs/:id` | Stops a job that runs (the portal stops waiting and tells the server to drop it, which only a job still in the queue can be, and no video comes of it) or forgets one that has finished. 404 for none |
 | `DELETE …/videos/:id` | Takes the video away, file and all, from the page's own folder, a chat's or the folder it was found in; a file that is gone already counts as deleted, but a chat's folder that cannot be reached is an error (404) and the video stays in the list |
 | `POST …/videos/delete` | `{ ids }` (at most 200) — the same for several: `{ deleted, failed: [{ id, error }] }`, each as asked and what could not be said for each |
+
+## Kanban
+
+The [Kanban](/guide/kanban) extension's routes (`extensions/kanban`), while it is
+installed. A board is `{ id, name, description, version, created, updated, columns, cards }`: `columns` left to right,
+each `{ id, name }`, and `cards` in their order, each `{ id, title, description, labels, assignee, due, column, archived,
+created, updated, activity }`, a column's cards being those with its id, top first. `version` changes with every write. A
+change answers with the board as it is after it, and is put down in a card's activity as the person's. A refusal is 400
+(`code: "invalid"`), 404 (`missing`) or 409 (`conflict`), with `error` saying why.
+
+| | |
+| --- | --- |
+| `GET /api/x/pithagoras-kanban/boards?have=` | `{ version, boards }`, each board `{ id, name, description, version, updated, columns: [{ id, name, cards }], archived }` with the number of cards in each column and archived. With `have`, the list's `version` the caller has: `{ version, unchanged: true }` while it is that |
+| `POST …/boards` | `{ name, description?, columns? }` — a new board, with the columns named or To do, In progress and Done. 409 for a name another board has, capitals aside |
+| `GET …/boards/:board?have=` | The board; with `have`, the version the caller has, `{ version, unchanged: true }` while it is that |
+| `PATCH …/boards/:board` · `DELETE` | `{ name?, description? }`; delete it, with its cards: `{ deleted }` |
+| `POST …/boards/:board/columns` | `{ name, index? }` — a column, at the end or at `index` |
+| `PATCH …/columns/:column` · `POST …/columns/:column/move` · `DELETE …/columns/:column?to=` | `{ name }`; `{ index }`; take it away: one with cards, archived ones included, only with `to`, the column they go to (409 otherwise) |
+| `POST …/boards/:board/cards` | `{ title, column?, index?, description?, labels?, assignee?, due? }` — a card, at the bottom of `column` (the first column without one) or at `index` among its cards that are not archived. `due` is `YYYY-MM-DD` |
+| `PATCH …/cards/:card` · `DELETE` | Any of `title`, `description`, `labels`, `assignee`, `due` (`null` or `""` for none); delete it |
+| `POST …/cards/:card/move` | `{ column, index? }` |
+| `POST …/cards/:card/archive` · `…/restore` · `…/notes` | Archive it; restore it to the bottom of its column; `{ text }`, a note in its activity |
+| `GET …/chats/:chat/board` | `{ board }`: the id of the board the chat's agent last worked on with a kanban tool, or `null` |
 
 ## Channels
 

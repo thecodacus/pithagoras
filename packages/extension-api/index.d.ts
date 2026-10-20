@@ -55,6 +55,12 @@ export interface PanelHandle {
   guardClose(guard: (() => boolean | Promise<boolean>) | null): void;
   /** Opens another panel from this one (a file it lists, in Files): this one is not the one closed to make room for it. */
   open(name: string, params?: unknown): void;
+  /**
+   * Shows the panel, its head and its body, on the whole screen, where the browser lets a page: the panel beside it
+   * stays where it is. Closed, it leaves the screen. Escape gives it its place back. Called from something the person
+   * did (a click), while the panel is open; otherwise nothing happens.
+   */
+  fullscreen(): void;
 }
 
 export type PanelProps = ChatProps & { close(): void; panel: PanelHandle };
@@ -138,6 +144,8 @@ export interface SlotMap {
    * one of those is the portal's, it is the one.
    * Of two extensions that name a panel alike, the one first in the slot's
    * order has it (a lower `order`, then the one whose extension is first in the list of installed extensions).
+   * `bleed` makes its body black from edge to edge, and not a box that
+   * scrolls: for what fills it by itself, a frame or another program's screen.
    */
   "chat.panel": {
     entry: {
@@ -147,6 +155,7 @@ export interface SlotMap {
       header?: ComponentType<PanelProps>;
       actions?: ComponentType<PanelProps>;
       useButton?: (props: ChatProps) => { hidden?: boolean; live?: boolean; title?: string };
+      bleed?: boolean;
     };
     props: PanelProps;
   };
@@ -192,7 +201,10 @@ export interface SlotMap {
    * that opens the window each time it grows (the agent ran a command). A
    * card of a call in voice mode that `opensFor` says yes to opens it when
    * tapped, for calls the portal's own windows are not for. Its own shortcut
-   * is `portal.shortcuts`.
+   * is `portal.shortcuts`. `useButton` is a hook, called as voice mode's
+   * toolbar is drawn, while the window is open too (it has no button then):
+   * how the window's button there is for this chat, as a panel's is in the
+   * chat's header.
    *
    * `maximizable` gives its head a Maximize button: the window then fills the
    * stage, over the others and above the dock, until it is restored by its
@@ -211,6 +223,8 @@ export interface SlotMap {
       maximizable?: boolean;
       keepLoaded?: boolean;
       useAutoOpen?: (props: ChatProps) => number;
+      /** `hidden`: no button while it is closed (it still opens for work, a card and a shortcut). `live`: a dot that says something in it is running. `title`: what the button says when pointed at. */
+      useButton?: (props: ChatProps) => { hidden?: boolean; live?: boolean; title?: string };
       /** `chat` is the chat on screen: its `workspace` tells a path in its folder from one elsewhere. */
       opensFor?: (call: ToolCallView, chat: Chat) => boolean;
       /** What the card of a call it opens for says, in place of the portal's words for a tool it does not know ("Using canvas write"). */

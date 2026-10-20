@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { LuCheck, LuDownload, LuExternalLink, LuPackage, LuRefreshCw, LuSearch, LuTrendingUp } from "react-icons/lu";
 import { api, type CatalogPackage } from "../api";
 import { ago, compactCount, webLink } from "../package-names";
-import { confirmDialog } from "./ConfirmDialog";
+import { InstallProgress, installExtension, type InstallStep } from "./ExtensionInstall";
 import { load, peek } from "../settings-cache";
 import { gridCls, inputCls } from "./SettingsUi";
 import { formatNumber, t } from "../i18n";
@@ -25,7 +25,8 @@ export function PackageCatalog({
   topic?: "provider";
   /** npm names already installed. */
   installed: Set<string>;
-  onInstalled: (name: string) => void;
+  /** Told when what is installed has changed: after an install, and after one that failed once what it needs was installed. */
+  onInstalled: () => void;
   onError: (e: string) => void;
   limit?: number;
   searchable?: boolean;
@@ -39,6 +40,8 @@ export function PackageCatalog({
   const [failed, setFailed] = useState<string | null>(null);
   const [more, setMore] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
+  // Which package an install of more than one has come to: one that needs others installs them first.
+  const [step, setStep] = useState<InstallStep | null>(null);
   const [done, setDone] = useState<Set<string>>(new Set());
 
   // Asked a moment after the last key, not on every one.
@@ -61,19 +64,27 @@ export function PackageCatalog({
   useEffect(() => fetchList(asked), [asked, topic]);
 
   const install = async (p: CatalogPackage) => {
-    const ok = await confirmDialog({
-      title: t("Install {name}?", { name: p.name }),
-      message: `${t("It is installed from npm and runs inside pi with the same rights as the agent — reading files, running commands. Install packages you trust.")}${p.author ? ` ${t("Published by {author}.", { author: p.author })}` : ""}`,
-      confirmLabel: t("Install"),
-    });
-    if (!ok) return;
+    // Busy from the start, as what it needs is asked of the server before the question that lists it; said to be installing once it is.
     setBusy(p.name);
+    // Which package it came to: one that fails after what it needs was installed has changed what is installed all the same.
+    let reached = 0;
     try {
-      await api.installPackage(`npm:${p.name}`);
+      const installed = await installExtension(`npm:${p.name}`, {
+        ask: {
+          title: t("Install {name}?", { name: p.name }),
+          message: `${t("It is installed from npm and runs inside pi with the same rights as the agent — reading files, running commands. Install packages you trust.")}${p.author ? ` ${t("Published by {author}.", { author: p.author })}` : ""}`,
+        },
+        progress: (step) => {
+          setStep(step);
+          if (step) reached = step.n;
+        },
+      });
+      if (!installed) return;
       setDone((d) => new Set(d).add(p.name));
-      onInstalled(p.name);
+      onInstalled();
     } catch (e) {
       onError((e as Error).message);
+      if (reached > 1) onInstalled();
     } finally {
       setBusy(null);
     }
@@ -96,6 +107,7 @@ export function PackageCatalog({
           />
         </div>
       )}
+      <InstallProgress step={step} />
 
       {failed ? (
         <div className="mt-2 flex items-center gap-2 rounded-xl border border-dashed border-line px-3 py-4 text-xs text-fg-subtle">
@@ -154,8 +166,8 @@ export function PackageCatalog({
                       aria-label={t("Install {name}", { name: p.name })}
                       className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-accent/12 px-2 py-1 text-[11px] text-accent ring-1 ring-inset ring-accent/25 transition hover:bg-accent/20 disabled:opacity-40"
                     >
-                      {busy === p.name ? <LuRefreshCw className="h-3.5 w-3.5 animate-spin" /> : <LuDownload className="h-3.5 w-3.5" />}
-                      {busy === p.name ? t("Installing…") : t("Install")}
+                      {busy === p.name && step ? <LuRefreshCw className="h-3.5 w-3.5 animate-spin" /> : <LuDownload className="h-3.5 w-3.5" />}
+                      {busy === p.name && step ? t("Installing…") : t("Install")}
                     </button>
                   )}
                 </div>

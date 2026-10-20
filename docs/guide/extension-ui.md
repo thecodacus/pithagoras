@@ -310,14 +310,14 @@ puts it before entries with a higher one, or none.
 
 | Slot | Where | Entry | The component is given |
 | --- | --- | --- | --- |
-| `chat.panel` | Beside the conversation, docked, floated and sized like Files and Git | `title`, `icon?`, `header?`, `actions?`, `useButton?`, `name?` | `chat`, `channel`, `panels`, `close()`, `panel` |
+| `chat.panel` | Beside the conversation, docked, floated and sized like Files and Git | `title`, `icon?`, `header?`, `actions?`, `useButton?`, `name?`, `bleed?` | `chat`, `channel`, `panels`, `close()`, `panel` |
 | `chat.header.action` | The chat's header, before the panels' buttons | | `chat`, `channel`, `panels` |
 | `chat.tool` | A call of one tool in the conversation, in place of the portal's card | `tool` (its name), `tile?` (drawn small on its card in voice mode), `describe?` (what that card says of it) | `chat`, `channel`, `panels`, `call`, `card` |
 | `chat.tool.action` | On the portal's card of a call, under what it returned, when the card is opened | `tool?` (a name or a pattern; every call without it) | `call`, `cut`, `panels` |
 | `chat.composer.above` | Above the message box | | `chat`, `channel`, `panels` |
 | `chat.overlay` | Over the chat, placed by you | | `chat`, `channel`, `panels` |
 | `chat.background` | Nowhere: there while the chat is on screen, drawing nothing | | `chat`, `channel`, `panels` |
-| `voice.window` | A window in voice mode, placed and sized like the portal's own | `title`, `icon?`, `place?`, `maximizable?`, `keepLoaded?`, `useAutoOpen?`, `opensFor?`, `describe?` | `chat`, `channel`, `panels`, `close()`, `opened`, `maximized`, `maximize()`, `restore()` |
+| `voice.window` | A window in voice mode, placed and sized like the portal's own | `title`, `icon?`, `place?`, `maximizable?`, `keepLoaded?`, `useAutoOpen?`, `useButton?`, `opensFor?`, `describe?` | `chat`, `channel`, `panels`, `close()`, `opened`, `maximized`, `maximize()`, `restore()` |
 | `nav.page` | A page at `/x/<package>/<id>`, with an entry in the sidebar | `title`, `icon?`, `useShown?` | |
 | `settings.page` | Your package's page in Settings, at `/settings/x/<package>`, above the fields the portal found for it | `title?` and `icon?`: its entry in Settings' list, in place of the package's name and the mark every extension has; `search`: what Settings' search finds on it, each `{ title, section?, words? }`, `section` being the heading it goes to | |
 
@@ -355,6 +355,22 @@ portal.slots.register("chat.panel", {
 the portal's Subagents button is like this), `live` (a dot that says something
 in it is running) and `title`.
 
+`bleed: true` is for a panel whose body is filled by what it draws, a frame or
+another program's screen, as the browser's is: its body is black from edge to
+edge and does not scroll, so nothing of the portal's surface shows around it or
+while it loads.
+
+```js
+// Another program's screen in a frame, with a Fullscreen in the panel's head.
+portal.slots.register("chat.panel", {
+  id: "screen",
+  title: "Screen",
+  bleed: true,
+  actions: ({ panel }) => h("button", { onClick: () => panel.fullscreen() }, "Fullscreen"),
+  component: () => h("iframe", { src: portal.api.url("/screen/"), style: { flex: 1, border: 0 } }),
+});
+```
+
 The body, `header` and `actions` are each handed `panel`, the panel's say over
 itself:
 
@@ -365,6 +381,7 @@ itself:
 | `keep(true)` | It is not the one closed to make room for a third: there is something in it that would be lost |
 | `guardClose(fn)` | Asked before it is closed by hand; it stays open if `fn` answers false. `null` to stop asking |
 | `open(name, params?)` | Opens another panel from this one, as `portal.panels.open` does, but this one is not the one closed to make room for it: Git opening a file it lists in Files |
+| `fullscreen()` | Shows the panel, its head and body, on the whole screen, where the browser lets a page, as the browser's Fullscreen does: the panel beside it stays where it is. Escape gives it its place back, and closed, it leaves the screen. A browser allows it only for something the person did, a click, and only while the panel is open: otherwise nothing happens |
 
 ```js
 // A note being written would be lost.
@@ -461,6 +478,14 @@ behaves beside the portal's own windows:
 - `useAutoOpen(props)`: a hook, called while voice mode is on in a chat. It
   returns a count, and the window opens each time the count grows: the number
   of commands the agent ran, say, from `portal.chats.use`.
+- `useButton(props)`: a hook, called as the toolbar is drawn, while the window
+  is open too (it has no button then): how the window's button is for this
+  chat, as a panel's `useButton` says it in the chat's header. `hidden` leaves
+  the button out while the window is closed (no button
+  until there is something to see: the browser's is there only while a browser
+  runs), `live` puts a dot on it that says something in it is running, and
+  `title` is what it says when pointed at. A hidden window still opens for
+  `useAutoOpen`, for a card `opensFor` says it is for, and for a shortcut.
 - `opensFor(call, chat)`: whether the card of a call in voice mode opens this
   window when it is tapped. It is asked for the calls the portal's own windows
   are not for: a page's card opens the browser, and a file's or a shell call's,
@@ -1455,7 +1480,8 @@ await docker.containers.start("pithagoras-browser");
   it takes (a semver range). Without one of them, or with one in a version it
   does not take, it does not start, and Settings → Extensions says why ("It
   needs pithagoras-docker (^1.0.0), which is not installed, or is switched
-  off"). Nothing is installed for it: the person installs what it needs.
+  off"). Installed from Settings → Extensions, it brings them with it: see
+  [Installing what it requires](#installing-what-it-requires).
 - **`optional`**: the ones it uses when they are there. It starts without them,
   and `use` gives nothing then, or while one is there in a version it does not
   take.
@@ -1477,6 +1503,39 @@ await docker.containers.start("pithagoras-browser");
 
 This is for server halves. A provider's routes are its own, as any extension's
 are: a page asks its own server half, which asks the provider.
+
+#### Installing what it requires
+
+Someone who installs an extension that requires others, from Settings →
+Extensions, is first told what that brings with it, and asked. Each extension it
+requires that is not there as it needs it is listed, with what is done for it:
+
+- one that comes with the portal (its own `extensions` folder) by that name is
+  installed from there. npm is never asked for a name the portal ships, as
+  anyone can publish a package under it there;
+- otherwise one on npm by that name, in a version the range takes, is installed
+  from npm by the range (`npm:my-engine@^1.0.0`), so that an update keeps it
+  within the range. The question says that what comes from npm runs inside pi
+  with the agent's rights;
+- one installed and switched off is switched on;
+- one installed, or in the portal's folder, in a version the range does not
+  take, and one found nowhere, are said, and nothing is done for them. The
+  extension can be installed all the same, and waits for them, saying so as
+  above.
+
+What those require is looked at too, each once, and a circle ends. One required
+by two, where the version the first leaves is not one the second takes, is said
+for the second. On yes, each is installed or switched on before what needs it,
+the extension last, and the page says which it has come to. One that fails stops
+the rest, and says why; what was installed before it stays. With all it requires
+there, nothing is asked.
+
+This is known beforehand for an extension that comes with the portal and for a
+package on npm, whose registry has the package.json of each version. A git URL
+or a folder of the server's is read only once it is installed: nothing is
+installed with it, and it waits as above until what it requires is there.
+Before anything is installed, Discover says what one that comes with the portal
+requires ("Needs pithagoras-docker").
 
 ## Panels and commands
 

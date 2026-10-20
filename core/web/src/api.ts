@@ -338,6 +338,8 @@ export interface ExtensionUi {
   /** Where its server half's own routes are, when it has one; why it is not running, when it could not be started. */
   server?: string;
   serverError?: string;
+  /** The extensions its server half cannot start without, each with the versions it takes. */
+  requires?: Record<string, string>;
   /** The themes its package.json names: colours in place of the portal's own, with no code. See extensions/themes.ts. */
   themes?: { id: string; name: string; light?: Record<string, string>; dark?: Record<string, string> }[];
 }
@@ -1123,6 +1125,8 @@ export const api = {
     json<{ extensions: ExtensionInfo[]; settingsPath: string }>("/api/extensions"),
   /** What comes with the portal and can be installed with a click. */
   shippedExtensions: () => json<{ extensions: ShippedExtension[] }>("/api/extensions/shipped"),
+  /** What installing `spec` brings with it: the extensions it requires that are not there as it needs them. */
+  installPlan: (spec: string) => json<InstallPlan>(`/api/extensions/plan?${new URLSearchParams({ spec })}`),
   setExtensionSetting: (key: string, value: unknown) =>
     json<{ ok: true }>("/api/extensions/settings", {
       method: "PUT",
@@ -1305,6 +1309,33 @@ export interface ShippedExtension {
   description?: string;
   kinds: PackageKind[];
   spec: string;
+  /** The extensions it cannot work without, each with the versions it takes. */
+  requires?: Record<string, string>;
+}
+
+/**
+ * Something an extension being installed needs that is not there as it is needed (see install-plan.ts on the
+ * server): installed first by `spec`, from the portal's own folder or npm, or switched on; or said, where it is
+ * nowhere in a version taken (`missing`, with `error` where npm could not be asked) or is there in a `version` not
+ * taken (installed, or, with `from`, the one in the portal's own folder or the one installed from npm for another).
+ */
+export interface InstallNeed {
+  name: string;
+  range: string;
+  /** The extension that needs it. */
+  for: string;
+  action: "install" | "switch-on" | "missing" | "version";
+  spec?: string;
+  from?: "shipped" | "npm";
+  version?: string;
+  error?: string;
+}
+
+/** What installing a spec brings with it, each need before what needs it. Without a name, nothing could be known beforehand. */
+export interface InstallPlan {
+  name?: string;
+  version?: string;
+  needs: InstallNeed[];
 }
 
 export interface GlobalSettings {

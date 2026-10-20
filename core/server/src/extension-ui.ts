@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
+import semver from "semver";
 
 /**
  * An extension's interface in the portal.
@@ -80,6 +81,12 @@ function buildsOn(given: unknown): Record<string, string> | undefined {
   const entries = Object.entries(given).filter(([name, range]) => validName(name) && typeof range === "string");
   return entries.length ? Object.fromEntries(entries) : undefined;
 }
+
+/** What a package's package.json (`meta`) says it cannot work without (`pithagoras.requires`): extensions by name, each with the versions it takes. */
+export const requiresOf = (meta: any): Record<string, string> | undefined => buildsOn(meta?.pithagoras?.requires);
+
+/** Whether `version` of an extension is one that `range` takes; a range that is none takes nothing. */
+export const takes = (range: string, version: string | undefined) => Boolean(version && semver.validRange(range) && semver.satisfies(version, range, { includePrerelease: true }));
 
 /**
  * A name a package's files, addresses and data folder can go by: an npm name,
@@ -247,7 +254,7 @@ export function serverHalf(packageDir: string): ServerHalf | undefined {
   const root = path.resolve(packageDir);
   const file = path.resolve(root, meta.pithagoras.server);
   if (!fileIn(root, file)) return undefined;
-  const requires = buildsOn(meta.pithagoras.requires), optional = buildsOn(meta.pithagoras.optional);
+  const requires = requiresOf(meta), optional = buildsOn(meta.pithagoras.optional);
   return {
     name: meta.name,
     ...(typeof meta.version === "string" ? { version: meta.version } : {}),

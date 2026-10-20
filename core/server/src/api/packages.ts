@@ -6,6 +6,7 @@ import { sourceOf } from "../extension-switch.js";
 import { piPackageArg } from "../features.js";
 import { packageRemoved } from "../db.js";
 import express, { type Router } from "express";
+import semver from "semver";
 import { searchCatalog } from "../catalog.js";
 import { oneAtATime } from "../one-at-a-time.js";
 import { followPackages } from "./extensions.js";
@@ -38,6 +39,12 @@ async function runPi(args: string[]): Promise<{ stdout: string; stderr: string }
 // string), but keep it to shapes pi documents so typos fail fast and nothing
 // odd reaches execFile.
 const SPEC_RE = /^(npm:|git:|https:\/\/|\.{0,2}\/)[\w@./:+-]+$/;
+/** An npm package within a range of versions, as an extension that requires it says it: `npm:<name>@^1.0.0` (see install-plan.ts). */
+const inRange = (spec: string) => {
+  const match = /^npm:((?:@[\w.~-]+\/)?[\w.~-]+)@(.+)$/.exec(spec);
+  return !!match && semver.validRange(match[2]) !== null;
+};
+const isSpec = (spec: unknown): spec is string => typeof spec === "string" && (SPEC_RE.test(spec) || inRange(spec));
 
 export function packagesRouter(): Router {
   const router = express.Router();
@@ -64,7 +71,7 @@ export function packagesRouter(): Router {
 
   router.post("/packages", async (req, res) => {
     const spec = req.body?.spec;
-    if (typeof spec !== "string" || !SPEC_RE.test(spec)) {
+    if (!isSpec(spec)) {
       return res.status(400).json({
         error: "Spec must look like npm:pkg@1.0.0, git:github.com/user/repo, https://…, or a path",
       });
@@ -83,7 +90,7 @@ export function packagesRouter(): Router {
     // What the list shows comes back, so also a folder inside pi's own one, which is written there without a leading "./".
     const packages = readPiSettings().packages;
     const listed = Array.isArray(packages) && packages.some((e) => sourceOf(e) === spec);
-    if (typeof spec !== "string" || !(listed || SPEC_RE.test(spec))) {
+    if (typeof spec !== "string" || !(listed || isSpec(spec))) {
       return res.status(400).json({ error: "Invalid package spec" });
     }
     try {

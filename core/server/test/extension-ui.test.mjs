@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { request } from "node:http";
+import { createServer, request } from "node:http";
 import test from "node:test";
 import { brotliDecompressSync, gunzipSync } from "node:zlib";
 import { inProcessHome } from "./server-harness.mjs";
@@ -46,8 +46,8 @@ const scoped = pkg("scoped", "@codacus/notes", { ...WEB, server: "./server.js" }
 const off = pkg("off", "switched-off", { ...WEB, server: "./server.js" }, { ...files("off"), "server.js": SERVER });
 const plain = pkg("plain", "no-interface", undefined, { "index.ts": "export default () => {};" });
 const project = pkg("project", "from-a-folder", { ...WEB, server: "./server.js" }, { ...files("project"), "server.js": SERVER });
-// A server half and no browser half, and one whose server half cannot start.
-const headless = pkg("headless", "server-only", { server: "./lib/server.js" }, { "lib/server.js": SERVER });
+// A server half and no browser half, which requires another, and one whose server half cannot start.
+const headless = pkg("headless", "server-only", { server: "./lib/server.js", requires: { "@codacus/notes": "^1.0.0" } }, { "lib/server.js": SERVER });
 // Nothing but themes: no code at all.
 const themed = pkg("themed", "only-themes", { themes: [{ id: "dusk", name: "Dusk", dark: { accent: "#ff79c6" } }] }, {});
 // A second package under a name another has: the first is the one, whole.
@@ -92,7 +92,7 @@ writeFileSync(
 );
 
 const { default: express } = await import("express");
-const { extensionsRouter, syncExtensionServers } = await import("../dist/api/extensions.js");
+const { extensionsRouter, shippedExtensions, syncExtensionServers } = await import("../dist/api/extensions.js");
 const { extensionRoutes, stopServerHalves } = await import("../dist/extension-host.js");
 const app = express();
 app.use("/api/x", extensionRoutes);
@@ -140,9 +140,76 @@ test("each installed package is listed with what it brings, for the page to tell
   assert.deepEqual(kinds["npm:from-a-folder"], ["pi", "pithagoras"]);
 });
 
+test("what a server half requires is listed with it, and what comes with the portal says what each requires, before it is installed", async () => {
+  const { extensions } = await (await fetch(at("/api/extension-ui"))).json();
+  assert.deepEqual(extensions.find((e) => e.name === "server-only").requires, { "@codacus/notes": "^1.0.0" });
+  assert.equal(extensions.find((e) => e.name === "@codacus/notes").requires, undefined);
+  // A folder of the portal's own, as `extensions` is: one package in each folder. What is not a package's name is not read.
+  const folder = path.join(home, "shipped");
+  const ship = (dir, name, declared) => {
+    mkdirSync(path.join(folder, dir), { recursive: true });
+    writeFileSync(path.join(folder, dir, "package.json"), JSON.stringify({ name, version: "1.0.0", pithagoras: declared }));
+  };
+  ship("viewer", "pithagoras-viewer", { server: "./server.js", requires: { "pithagoras-docker": "^1.0.0", "../odd": "1" } });
+  ship("docker", "pithagoras-docker", { server: "./server.js" });
+  assert.deepEqual(shippedExtensions(folder).map((e) => [e.name, e.requires]), [["pithagoras-docker", undefined], ["pithagoras-viewer", { "pithagoras-docker": "^1.0.0" }]]);
+});
+
+test("what installing a package brings with it is worked out from what is installed: one switched off is switched on, one on is left", async () => {
+  const wants = { name: "pi-needs", version: "1.0.0", pithagoras: { requires: { "switched-off": "^1.0.0", "server-only": "^1.0.0" } } };
+  const registry = createServer((req, res) => {
+    res.setHeader("content-type", "application/json");
+    if (req.url !== "/pi-needs") return res.writeHead(404).end("{}");
+    res.end(JSON.stringify({ name: "pi-needs", "dist-tags": { latest: "1.0.0" }, versions: { "1.0.0": wants } }));
+  });
+  await new Promise((r) => registry.listen(0, "127.0.0.1", r));
+  process.env.NPM_REGISTRY_URL = `http://127.0.0.1:${registry.address().port}`;
+  try {
+    const plan = await (await fetch(at(`/api/extensions/plan?spec=${encodeURIComponent("npm:pi-needs")}`))).json();
+    assert.deepEqual(plan, { name: "pi-needs", version: "1.0.0", needs: [{ name: "switched-off", range: "^1.0.0", for: "pi-needs", action: "switch-on", spec: "npm:switched-off", version: "1.0.0" }] });
+    assert.equal((await fetch(at("/api/extensions/plan"))).status, 400);
+  } finally {
+    delete process.env.NPM_REGISTRY_URL;
+    registry.close();
+  }
+});
+
+test("of two installed under one name, the one switched on is the one a plan finds, as the host does; a folder's is not the portal's", async () => {
+  const wants = { name: "pi-wants", version: "1.0.0", pithagoras: { requires: { "@codacus/notes": "^1.0.0", "from-a-folder": "^1.0.0" } } };
+  const registry = createServer((req, res) => {
+    res.setHeader("content-type", "application/json");
+    if (req.url !== "/pi-wants") return res.writeHead(404).end("{}");
+    res.end(JSON.stringify({ name: "pi-wants", "dist-tags": { latest: "1.0.0" }, versions: { "1.0.0": wants } }));
+  });
+  await new Promise((r) => registry.listen(0, "127.0.0.1", r));
+  process.env.NPM_REGISTRY_URL = `http://127.0.0.1:${registry.address().port}`;
+  const settings = path.join(process.env.PI_CODING_AGENT_DIR, "settings.json");
+  const was = readFileSync(settings, "utf8");
+  const switchedOff = (source) => ({ source, extensions: [], skills: [], prompts: [], themes: [] });
+  const needs = async (packages) => {
+    writeFileSync(settings, JSON.stringify({ packages }));
+    return (await (await fetch(at(`/api/extensions/plan?spec=${encodeURIComponent("npm:pi-wants")}`))).json()).needs;
+  };
+  // The one a project brings is not installed for the portal: it is looked for as any other, and is nowhere.
+  const nowhere = { name: "from-a-folder", range: "^1.0.0", for: "pi-wants", action: "missing" };
+  try {
+    // The first switched off, the second (the twin) on: the host runs the twin, and nothing is to be switched on.
+    assert.deepEqual(await needs([switchedOff("npm:@codacus/notes"), "npm:twin"]), [nowhere]);
+    // Both off: the first is the one switched on.
+    assert.deepEqual(await needs([switchedOff("npm:@codacus/notes"), switchedOff("npm:twin")]), [
+      { name: "@codacus/notes", range: "^1.0.0", for: "pi-wants", action: "switch-on", spec: "npm:@codacus/notes", version: "1.0.0" },
+      nowhere,
+    ]);
+  } finally {
+    writeFileSync(settings, was);
+    delete process.env.NPM_REGISTRY_URL;
+    registry.close();
+  }
+});
+
 test("what comes with the portal is listed to install from its own folder, without the add-on that has a switch of its own", async () => {
   const { extensions } = await (await fetch(at("/api/extensions/shipped"))).json();
-  assert.deepEqual(extensions.map((e) => [e.name, e.kinds]), [["pithagoras-canvas", ["pithagoras"]], ["pithagoras-docker", ["pithagoras"]], ["pithagoras-docs", ["pithagoras"]], ["pithagoras-files", ["pithagoras"]], ["pithagoras-git", ["pithagoras"]], ["pithagoras-media", ["pithagoras"]], ["pithagoras-terminal", ["pithagoras"]], ["pithagoras-themes", ["themes"]]]);
+  assert.deepEqual(extensions.map((e) => [e.name, e.kinds]), [["pithagoras-canvas", ["pithagoras"]], ["pithagoras-docker", ["pithagoras"]], ["pithagoras-docs", ["pithagoras"]], ["pithagoras-files", ["pithagoras"]], ["pithagoras-git", ["pithagoras"]], ["pithagoras-kanban", ["pithagoras"]], ["pithagoras-media", ["pithagoras"]], ["pithagoras-terminal", ["pithagoras"]], ["pithagoras-themes", ["themes"]]]);
   for (const shipped of extensions) {
     assert.ok(path.isAbsolute(shipped.spec) && shipped.spec.endsWith(path.join("extensions", shipped.name.replace(/^pithagoras-/, ""))), shipped.spec);
     assert.ok(shipped.version && shipped.description, shipped.name);

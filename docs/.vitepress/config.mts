@@ -59,6 +59,7 @@ export default defineConfig({
           { text: "Terminal and background jobs", link: "/guide/terminal" },
           { text: "Memory and audit", link: "/guide/memory" },
           { text: "Media", link: "/guide/media" },
+          { text: "Kanban", link: "/guide/kanban" },
         ],
       },
       {

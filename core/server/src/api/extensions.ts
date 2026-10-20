@@ -7,11 +7,12 @@ import { piSettingsPath, readPiSettings, updatePiSettings } from "../pi-settings
 import { extensionStash, setExtensionStash } from "../db.js";
 import { isFiltered, isSwitchedOff, setPackageEnabled, sourceOf } from "../extension-switch.js";
 import { sessions } from "../session-manager.js";
-import { clientHalf, packageKinds, staticImports, packageThemes, serverHalf, type ClientHalf, type PackageKind, type PackageThemes, type ServerHalf } from "../extension-ui.js";
+import { clientHalf, packageKinds, requiresOf, staticImports, packageThemes, serverHalf, type ClientHalf, type PackageKind, type PackageThemes, type ServerHalf } from "../extension-ui.js";
 import { sendCompressed } from "../compressed-file.js";
 import { bundledPath } from "../bundled.js";
 import { SUBAGENT_PACKAGE } from "../features.js";
 import { isServing, serverFailure, serversSettled, syncServerHalves } from "../extension-host.js";
+import { planInstall, type InstalledExtension } from "../install-plan.js";
 
 const run = promisify(execFile);
 
@@ -49,6 +50,8 @@ export interface ShippedExtension {
   kinds: PackageKind[];
   /** What it is installed by: its folder. */
   spec: string;
+  /** The extensions it cannot work without, each with the versions it takes (`pithagoras.requires`). */
+  requires?: Record<string, string>;
 }
 
 /**
@@ -69,12 +72,14 @@ export function shippedExtensions(dir = bundledPath("extensions")): ShippedExten
       continue;
     }
     if (typeof meta?.name !== "string" || meta.name === SUBAGENT_PACKAGE) continue;
+    const requires = requiresOf(meta);
     out.push({
       name: meta.name,
       ...(typeof meta.version === "string" ? { version: meta.version } : {}),
       ...(typeof meta.description === "string" ? { description: meta.description } : {}),
       kinds: packageKinds(folder),
       spec: folder,
+      ...(requires ? { requires } : {}),
     });
   }
   return out.sort((x, y) => x.name.localeCompare(y.name));
@@ -317,6 +322,40 @@ async function halves(): Promise<{ clients: ClientHalf[]; servers: ServerHalf[];
 const clientHalves = async () => (await halves()).clients;
 
 /**
+ * The extensions installed for the portal, each by what its package.json says, with whether it is switched on: what an
+ * install that requires one finds there (see install-plan.ts). Of two under one name, the first that is switched on,
+ * as `halves` has it; the first of them where none is, to be switched on.
+ */
+async function installedExtensions(): Promise<InstalledExtension[]> {
+  const settings = readPiSettings();
+  const listed = Array.isArray(settings.packages) ? settings.packages : [];
+  const out: InstalledExtension[] = [];
+  for (const pkg of await installedPackages(settings)) {
+    if (!pkg.path || (pkg.scope && !/^user/i.test(pkg.scope))) continue;
+    let meta: any;
+    try {
+      meta = JSON.parse(readFileSync(path.join(pkg.path, "package.json"), "utf8"));
+    } catch {
+      continue;
+    }
+    if (typeof meta?.name !== "string") continue;
+    const entry = listed.find((e) => sourceOf(e) === pkg.spec);
+    const requires = requiresOf(meta);
+    const ext: InstalledExtension = {
+      name: meta.name,
+      ...(typeof meta.version === "string" ? { version: meta.version } : {}),
+      spec: pkg.spec,
+      enabled: entry === undefined || !isSwitchedOff(entry),
+      ...(requires ? { requires } : {}),
+    };
+    const at = out.findIndex((other) => other.name === ext.name);
+    if (at === -1) out.push(ext);
+    else if (ext.enabled && !out[at]!.enabled) out[at] = ext;
+  }
+  return out;
+}
+
+/**
  * Bring the server halves that run in line with what is installed and switched
  * on: as the portal starts, and whenever a package is installed, removed,
  * updated or switched.
@@ -390,6 +429,8 @@ export function extensionsRouter(): Router {
             ...(client && preloadOf(client).length ? { preload: preloadOf(client) } : {}),
             // Where its server half's own routes are, when it has one that is running.
             ...(server && isServing(name) ? { server: `/api/x/${name.split("/").map(encodeURIComponent).join("/")}` } : {}),
+            // What its server half cannot start without.
+            ...(server?.requires ? { requires: server.requires } : {}),
             ...(failure ? { serverError: failure } : {}),
           };
         }),
@@ -478,6 +519,20 @@ export function extensionsRouter(): Router {
   router.get("/extensions/shipped", (_req, res) => {
     try {
       res.json({ extensions: shippedExtensions() });
+    } catch (e) {
+      res.status(500).json({ error: (e as Error).message });
+    }
+  });
+
+  /**
+   * What installing `spec` brings with it: the extensions it requires that are not there as it needs them, and what is
+   * done for each (see install-plan.ts). Asked by the page before it installs, to say so and do it first.
+   */
+  router.get("/extensions/plan", async (req, res) => {
+    const spec = typeof req.query.spec === "string" ? req.query.spec : "";
+    if (!spec) return res.status(400).json({ error: "spec is required" });
+    try {
+      res.json(await planInstall(spec, { installed: await installedExtensions(), folder: shippedExtensions() }));
     } catch (e) {
       res.status(500).json({ error: (e as Error).message });
     }

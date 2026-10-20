@@ -382,6 +382,12 @@ export function Chat({
           setOpenedFrom(key);
           panelControl.current.open(name, opened);
         },
+        // Its own box, as the browser's is: the panel beside it stays where it is, and closed, the box leaves the page, and fullscreen with it.
+        // Not open, there is no box on the page to show; and a browser refuses it but for something the person did.
+        fullscreen: () => {
+          const box = boxes.box(`x:${key}`);
+          if (box.isConnected) box.requestFullscreen?.().catch(() => {});
+        },
       },
     };
     panelParts.current.set(key, now);
@@ -1591,7 +1597,8 @@ export function Chat({
     if (!entry) return null;
     const Body = entry.component;
     return (
-      <div className="flex min-h-0 flex-1 flex-col overflow-auto bg-surface" data-extension={entry.extension}>
+      // From edge to edge (`bleed`): black, as the browser's box is, and what it draws fills it rather than scrolls in it.
+      <div className={`flex min-h-0 flex-1 flex-col ${entry.bleed ? "overflow-hidden bg-black" : "overflow-auto bg-surface"}`} data-extension={entry.extension}>
         <ErrorBoundary resetKey={`${entry.key}:${session.id}`} fallback={(error) => <div className="p-4"><PartFailed error={error} /></div>}>
           <Body key={session.id} {...panelProps(entry)} />
         </ErrorBoundary>

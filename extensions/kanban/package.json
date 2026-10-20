@@ -1,0 +1,14 @@
+{
+  "name": "pithagoras-kanban",
+  "version": "0.1.0",
+  "description": "Kanban boards for Pithagoras: many boards on a page of their own and beside a chat, and tools for the agent to keep track of its work on them",
+  "type": "module",
+  "keywords": ["pi-package"],
+  "pi": {},
+  "pithagoras": { "client": "./web/client.js", "style": "./web/client.css", "server": "./server.js" },
+  "scripts": { "build": "node build.mjs && tsc --noEmit -p ." },
+  "devDependencies": {
+    "react-icons": "5.7.0"
+  },
+  "license": "Apache-2.0"
+}
