@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
+import { LuContainer } from "react-icons/lu";
 import type { Portal } from "@pithagoras/extension-api";
 import type { ContainerInfo, VolumeInfo } from "./api";
 import { de } from "./de";
-import { portal, setPortal, t } from "./portal";
+import { msg, portal, setPortal, t } from "./portal";
 import "./client.css";
 
 /**
@@ -171,5 +172,5 @@ function DockerPage() {
 export default function docker(given: Portal) {
   setPortal(given);
   portal.locale.add("de", de);
-  portal.slots.register("settings.page", { id: "docker", component: DockerPage });
+  portal.slots.register("settings.page", { id: "docker", title: msg("Docker"), icon: LuContainer, component: DockerPage });
 }

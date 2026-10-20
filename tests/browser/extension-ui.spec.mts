@@ -750,6 +750,11 @@ test.describe('an extension with a page of pictures and a page in Settings', () 
     await expect(entry).toHaveAttribute('aria-current', 'page');
     await expect(entry.getByTestId('album-icon')).toHaveCount(1);
     await expect(dialog.getByRole('navigation').getByRole('button', { name: 'test-album' })).toHaveCount(0);
+    // The page is headed the same way: by its title and its mark, not the package's name.
+    const heading = dialog.getByRole('heading', { name: 'Album', exact: true });
+    await expect(heading).toBeVisible();
+    await expect(heading.locator('xpath=../..').getByTestId('album-icon')).toHaveCount(1);
+    await expect(dialog.getByRole('heading', { name: 'test-album' })).toHaveCount(0);
 
     // Something typed in the page and not saved: closing Settings asks first.
     await dialog.getByRole('textbox', { name: 'Album title' }).fill('Summer');

@@ -1214,14 +1214,18 @@ function ExtensionPanel({
     }
   };
 
+  // Headed as its entry in the rail is: by the title and the icon its own page gives.
+  const { label, icon } = railEntry(ext.name, settingsPages);
+
   return (
     <>
       <div className="mb-5 flex items-start gap-3">
-        <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-accent/10 text-accent">
-          <LuPuzzle className="h-4 w-4" />
+        {/* At the size the mark had here: the icon sizes itself by the text. */}
+        <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-accent/10 text-base text-accent">
+          {icon}
         </div>
         <div className="min-w-0 flex-1">
-          <h3 className="truncate text-sm font-medium text-fg">{ext.name}</h3>
+          <h3 className="truncate text-sm font-medium text-fg">{label}</h3>
           {ext.description && <p className="text-xs text-fg-subtle">{ext.description}</p>}
           <p className="mt-0.5 truncate font-mono text-[10px] text-fg-faint">{ext.spec}</p>
         </div>

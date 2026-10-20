@@ -92,3 +92,13 @@ test('a volume is deleted only once the person says so, being what an extension 
   await page.getByRole('alertdialog').getByRole('button', { name: 'Delete' }).click();
   await expect.poll(() => asked).toEqual(['DELETE /volumes/pithagoras_browser-profile']);
 });
+
+test("in Settings' list it is Docker, with its own icon, not the package's name and the mark every extension has", async ({ page }) => {
+  const { dialog } = await open(page, REACHED);
+  const entry = dialog.locator('.rail-item').filter({ hasText: /^Docker$/ });
+  await expect(entry).toBeVisible();
+  await expect(dialog.locator('.rail-item').filter({ hasText: 'pithagoras-docker' })).toHaveCount(0);
+  // The portal's own Add-ons tab is drawn with that mark.
+  const mark = await dialog.locator('.rail-item').filter({ hasText: 'Add-ons' }).locator('svg').innerHTML();
+  expect(await entry.locator('svg').innerHTML()).not.toBe(mark);
+});
