@@ -9,7 +9,7 @@ import { agentOf, defaultAgent, listAgents } from "./agents.js";
 import { DATA_DIR } from "./data-dir.js";
 import { getSession, getSetting, listSessions, putSetting, sessionsByWorkspace, setServerHalfOffers, type SessionRow } from "./db.js";
 import { EXECUTOR_KIND } from "./executor-kind.js";
-import type { ServerHalf } from "./extension-ui.js";
+import { takes, type ServerHalf } from "./extension-ui.js";
 import { asAgent, runAsAgent, sandboxEnv } from "./sandbox/exec.js";
 import { identityOf } from "./sandbox/identity.js";
 import { sandboxOn, sandboxSupport } from "./sandbox/policy.js";
@@ -448,9 +448,6 @@ async function start(half: ServerHalf, sig: string, uses: Set<string>): Promise<
     console.error(`[extension ${half.name}] its server half could not be started:`, e);
   }
 }
-
-/** Whether `version` of an extension is one that `range` takes; a range that is none takes nothing. */
-const takes = (range: string, version: string | undefined) => Boolean(version && semver.validRange(range) && semver.satisfies(version, range, { includePrerelease: true }));
 
 /**
  * How the halves that are wanted are to run, as they build on one another (`pithagoras.requires` and `optional`): the

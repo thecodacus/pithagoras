@@ -100,3 +100,26 @@ export function searchCatalog(text: string, topic?: "provider"): Promise<Catalog
   cache.set(key, { at: Date.now(), value });
   return value;
 }
+
+/** A package as the registry has it: each version's package.json by its version, and its tags ("latest"). */
+export interface RegistryPackage {
+  versions: Record<string, Json>;
+  tags: Record<string, string>;
+}
+
+/**
+ * A package's own document on the registry, asked as the search is: each of its versions with all its package.json
+ * says, the portal's own key with the rest. Nothing for a package the registry does not have; a registry that cannot
+ * be asked, or does not answer, is an error.
+ */
+export async function registryPackage(name: string): Promise<RegistryPackage | undefined> {
+  // A scoped name's slash is part of the name, as npm writes it in the address: "@scope%2fname".
+  const url = `${REGISTRY()}/${encodeURIComponent(name).replace(/^%40/, "@")}`;
+  const res = await fetch(url, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(8000) });
+  if (res.status === 404) return undefined;
+  if (!res.ok) throw new Error(`npm answered ${res.status}.`);
+  const body = (await res.json()) as Json;
+  const versions = body.versions && typeof body.versions === "object" ? (body.versions as Record<string, Json>) : {};
+  const tags = body["dist-tags"] && typeof body["dist-tags"] === "object" ? (body["dist-tags"] as Record<string, string>) : {};
+  return { versions, tags };
+}

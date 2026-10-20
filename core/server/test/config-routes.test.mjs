@@ -182,7 +182,7 @@ test("the raw editor of settings.json refuses what pi cannot parse, comments too
 
 // --- packages ---
 
-const BAD_SPECS = ["--registry=https://registry.example.test", "-g", "npm:pkg --registry=x", "npm:a;rm", "npm:a\nb", "$(id)", "ftp://host/pkg", "pkg", "npm:", "./--registry=x", "", 42, null, undefined];
+const BAD_SPECS = ["--registry=https://registry.example.test", "-g", "npm:pkg --registry=x", "npm:a;rm", "npm:a\nb", "$(id)", "ftp://host/pkg", "pkg", "npm:", "./--registry=x", "npm:pkg@^1 --registry=x", "npm:pkg@^1;rm", "npm:pkg@^1\n-g", "npm:--registry=x@^1", "", 42, null, undefined];
 
 test("a package spec that is not one pi documents is refused before pi is run", async () => {
   for (const spec of BAD_SPECS) {
@@ -193,7 +193,8 @@ test("a package spec that is not one pi documents is refused before pi is run", 
 });
 
 test("a spec of a documented shape reaches pi as one argument of its own", async () => {
-  const specs = ["npm:pkg@1.0.0", "npm:@scope/pkg@2.1.0", "git:github.com/user/repo", "https://example.test/pkg.tgz", "./local/pkg", "/abs/pkg"];
+  // A range, as an extension that requires a package installs it: within the versions it takes.
+  const specs = ["npm:pkg@1.0.0", "npm:@scope/pkg@2.1.0", "npm:pkg@^1.0.0", "npm:@scope/pkg@>=0.2.0 <1", "git:github.com/user/repo", "https://example.test/pkg.tgz", "./local/pkg", "/abs/pkg"];
   for (const spec of specs) assert.equal((await send("/api/packages", "POST", { spec })).status, 200, spec);
   assert.equal((await send("/api/packages", "DELETE", { spec: "npm:pkg@1.0.0" })).status, 200);
   assert.deepEqual(runs(), [...specs.map((s) => ["pi", "install", s]), ["pi", "remove", "npm:pkg@1.0.0"]]);
