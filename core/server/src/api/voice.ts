@@ -647,7 +647,12 @@ export function voiceRouter(): Router {
       // The line may still be on its way from the start of voice mode (the engine warming up, or on a later try): wait for it,
       // for about as long as the tries take, rather than say it was never made.
       const making = makingLines.get(key);
-      if (making) await Promise.race([making.catch(() => {}), delay(errorLineWaitMs)]);
+      if (making) {
+        // The wait ends with the line: its timer is not left running out the rest of the time.
+        const waited = new AbortController();
+        await Promise.race([making.catch(() => {}), delay(errorLineWaitMs, undefined, { signal: waited.signal }).catch(() => {})]);
+        waited.abort();
+      }
       const wav = storedErrorLine(key);
       if (!wav) return res.status(404).json({ error: "The spoken error line has not been made for this voice yet" });
       res.set({ "Content-Type": "audio/wav", "Cache-Control": "no-store" }).send(wav);

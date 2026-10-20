@@ -339,6 +339,8 @@ export function startLlamaProxy(onProgress: OnProgress, onModel?: OnModel, onTim
     port = (server!.address() as AddressInfo).port;
   });
   server.unref();
+  // Nor its connections: one kept alive between pi's requests would hold the process until it times out.
+  server.on("connection", socket => socket.unref());
 }
 
 /**
