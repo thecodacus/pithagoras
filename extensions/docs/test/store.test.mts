@@ -1135,7 +1135,7 @@ test('a store of an earlier version that cannot be written anew leaves the old o
   const before = snapshot(old);
   const docs = await portal({ a: folder }, { onStep: (step) => { if (step === 'move') throw Object.assign(new Error('cross-device link'), { code: 'EXDEV' }); } });
   try {
-    const answered = await Promise.race([docs.call('GET', url), new Promise<null>((resolve) => setTimeout(() => resolve(null), 15_000))]);
+    const answered = await Promise.race([docs.call('GET', url), new Promise<null>((resolve) => setTimeout(() => resolve(null), 15_000).unref())]);
     assert.ok(answered, 'answered, not waiting at the pipe');
     assert.equal(answered.status, 409, JSON.stringify(answered.body));
     assert.match(answered.body.error, /could not be moved into the portal's data folder \(pipe is a link or something that is not a file\)/);
@@ -1276,12 +1276,12 @@ test('a git run that hangs is stopped, and the folder goes on with the next requ
   const docs = await portal({ a: folder }, { gitTimeoutMs: 400 });
   try {
     const f = folderIdOf(folder);
-    const answered = await Promise.race([docs.call('POST', `/folders/${f}/documents`, { title: 'Plan', markdown: '# Plan\n' }), new Promise<null>((resolve) => setTimeout(() => resolve(null), 15_000))]);
+    const answered = await Promise.race([docs.call('POST', `/folders/${f}/documents`, { title: 'Plan', markdown: '# Plan\n' }), new Promise<null>((resolve) => setTimeout(() => resolve(null), 15_000).unref())]);
     assert.ok(answered, 'answered before the hung git would have ended');
     assert.equal(answered.status, 500);
     rmSync(flag);
     // The queue moved on: the document written before git hung is taken in.
-    const listed = await Promise.race([docs.listed(), new Promise<null>((resolve) => setTimeout(() => resolve(null), 15_000))]);
+    const listed = await Promise.race([docs.listed(), new Promise<null>((resolve) => setTimeout(() => resolve(null), 15_000).unref())]);
     assert.deepEqual(listed?.[0].documents.map((d: any) => d.name), ['plan.md']);
   } finally {
     restore();
@@ -1358,7 +1358,7 @@ test('a link, or a pipe, in the store is refused when it is opened: git does not
     plant();
     const again = await portal({ a: folder });
     try {
-      const answered = await Promise.race([again.call('GET', url), new Promise<null>((resolve) => setTimeout(() => resolve(null), 15_000))]);
+      const answered = await Promise.race([again.call('GET', url), new Promise<null>((resolve) => setTimeout(() => resolve(null), 15_000).unref())]);
       assert.ok(answered, 'answered, not waiting at the pipe');
       assert.equal(answered.status, 409, JSON.stringify(answered.body));
       assert.match(answered.body.error, /not its own/);
