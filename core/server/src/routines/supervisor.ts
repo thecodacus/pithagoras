@@ -4,8 +4,6 @@ import { agentHome } from "../agent-home.js";
 import { checkWorkspace } from "../workspaces.js";
 import { EXECUTOR_KIND } from "../executor-kind.js";
 import { sessions } from "../session-manager.js";
-import { forgetBrowserSession } from "../browser/tools.js";
-import { chatLife } from "../extension-host.js";
 import { isDue, nextRun, parseCron } from "./cron.js";
 import { reportFraming, reportToFor } from "../pi/report-tool.js";
 
@@ -228,13 +226,11 @@ class RoutineSupervisor {
         // and no agent looks around while anything is working.
         if (!sessions.closing && getSession(fresh.id)?.status === "running") await endRun(fresh.id);
         // Looked at now: the job was started by the last call, a moment ago. A portal that is stopping lets every pi go.
-        // Its pi stopped and will not run again: the server halves are told it is finished, which a stop for being idle is not.
-        if (sessions.closing || !(await sessions.holdsJobs(fresh.id, true))) {
-          await sessions.stop(fresh.id).catch(() => {});
-          chatLife("finished", fresh.id);
-          forgetBrowserSession(fresh.id);
-        }
+        if (sessions.closing || !(await sessions.holdsJobs(fresh.id, true))) await sessions.stop(fresh.id).catch(() => {});
       }
+      // The run is over either way: the server halves are told it is finished once its pi has stopped, now or when the
+      // idle reaper lets it go. A stop for being idle alone is not that.
+      if (fresh) sessions.finished(fresh.id);
       // A one-off has nothing left to do. Disabled rather than deleted, so the
       // result stays readable and it can be re-armed by giving it a new time.
       // Not one run by hand ahead of its moment: that was a try, and the

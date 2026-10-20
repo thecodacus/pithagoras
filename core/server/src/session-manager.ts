@@ -344,6 +344,8 @@ class SessionManager extends EventEmitter {
   private stopping = new WeakSet<PiClient>();
   /** The pis being let go, by chat: a new one is not started beside the old one's shutdown. */
   private releasing = new Map<string, Promise<void>>();
+  /** Chats whose run is over and whose pi was kept for work the run left going: finished when it is let go (see finished). */
+  private over = new Set<string>();
   /**
    * Chats being deleted: from `discard` to the end of the delete. Letting a pi
    * go takes as long as its extensions need, and a message that comes in
@@ -3003,6 +3005,25 @@ class SessionManager extends EventEmitter {
   }
 
   /**
+   * The run a chat was started for is over, and the portal will not start its
+   * pi again: a routine run in a session of its own. The server halves are told
+   * it is finished once its pi has stopped: now, if it has, or when it is let
+   * go, which for a run that left a subagent or a job going is the idle
+   * reaper's doing. What the portal's browser kept for the chat goes with it.
+   * A person who goes on with the chat starts its pi again, and it is told
+   * `started` as any chat is.
+   */
+  finished(sessionId: string): void {
+    if (this.live.has(sessionId)) this.over.add(sessionId);
+    else this.tellFinished(sessionId);
+  }
+
+  private tellFinished(sessionId: string): void {
+    chatLife("finished", sessionId);
+    forgetBrowserSession(sessionId);
+  }
+
+  /**
    * Lets go of a pi the way pi's own runtime does: its extensions are told
    * first, so that they stop their timers and processes, and then it is
    * disposed. Without the first step each release left them running, and the
@@ -3027,6 +3048,7 @@ class SessionManager extends EventEmitter {
   /** pi is gone, and what it was holding with it. */
   private forgetPi(sessionId: string): void {
     chatLife("stopped", sessionId);
+    if (this.over.delete(sessionId)) this.tellFinished(sessionId);
     this.activity.delete(sessionId);
     this.dropCommands(sessionId);
     // No memory tool of its is running any more, whatever it last said.

@@ -5,9 +5,10 @@ import { mkdirSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { inProcessHome } from "./server-harness.mjs";
 
-// A server half is told a chat is finished when its pi stopped and will not run again: a routine run in a session of
-// its own that is over. Not when a chat's pi is stopped for being idle, which starts again with the next message, and
-// not for a routine run whose session is kept for the next.
+// A server half is told a chat is finished when the run it was started for is over and its pi has stopped: a routine
+// run in a session of its own, now or, where the run left work going, when the idle reaper lets its pi go. Not when a
+// chat's pi is stopped for being idle, which starts again with the next message, and not for a routine run whose
+// session is kept for the next. A person who goes on with a finished run's chat starts its pi again.
 const home = inProcessHome("pithagoras-chat-finished-");
 mkdirSync(path.join(home, "work"), { recursive: true });
 
@@ -19,6 +20,7 @@ const host = await import("../dist/extension-host.js");
 
 /** What stands in for pi: enough of it to be started and let go. */
 class FakePi extends EventEmitter {
+  running = true;
   constructor(opts) {
     super();
     this.sessionFile = path.join(opts.sessionDir, "conversation.jsonl");
@@ -32,7 +34,10 @@ class FakePi extends EventEmitter {
   clearQueue() { return []; }
   async abort() {}
   async shutdown() {}
-  dispose() { this.emit("exit", { code: 0, signal: null }); }
+  dispose() {
+    this.running = false;
+    this.emit("exit", { code: 0, signal: null });
+  }
 }
 SdkPiClient.create = async (opts) => new FakePi(opts);
 
@@ -79,9 +84,35 @@ async function run(fresh) {
   return { id: asked, heard: heard().filter((line) => line.endsWith(` ${asked}`)) };
 }
 
+const of = (id) => heard().filter((line) => line.endsWith(` ${id}`));
+
 test("a routine run in a session of its own is finished once it is over, after its pi stopped", async () => {
   const { id, heard: said } = await run(true);
   assert.deepEqual(said, [`started ${id}`, `stopped ${id}`, `finished ${id}`]);
+});
+
+test("a run that left work going is finished when the idle reaper lets its pi go", async () => {
+  const background = sessions.backgroundWork;
+  sessions.backgroundWork = () => true;
+  let ran;
+  try {
+    ran = await run(true);
+  } finally {
+    sessions.backgroundWork = background;
+  }
+  assert.deepEqual(ran.heard, [`started ${ran.id}`], "its pi is kept for the work");
+  heard().length = 0;
+  await sessions.reapIdle(0, Date.now() + 60_000);
+  assert.deepEqual(of(ran.id), [`stopped ${ran.id}`, `finished ${ran.id}`]);
+});
+
+test("a person who goes on with a finished run's chat starts its pi again, and it is a chat like any other then", async () => {
+  const { id } = await run(true);
+  heard().length = 0;
+  await sessions.prompt(id, "And one more thing");
+  assert.deepEqual(of(id), [`started ${id}`]);
+  await sessions.stop(id);
+  assert.deepEqual(of(id), [`started ${id}`, `stopped ${id}`]);
 });
 
 test("a routine run whose session is kept for the next is not finished, and neither is a chat stopped for being idle", async () => {

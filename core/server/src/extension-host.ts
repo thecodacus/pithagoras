@@ -659,7 +659,7 @@ export function openingFor(chatId: string, name: string): unknown[] {
     .filter((data) => data !== undefined && !(data instanceof Promise) && wire(name, data) !== undefined);
 }
 
-/** A chat's pi started or stopped, the chat was deleted, or it is finished and will not run again. */
+/** A chat's pi started or stopped, the chat was deleted, or the run it was started for is over (finished). */
 export function chatLife(event: Life, chatId: string): void {
   for (const ext of running.values()) {
     for (const handler of ext.life.listeners(event)) guarded(ext.half.name, `hearing a chat was ${event}`, () => handler(chatId));
