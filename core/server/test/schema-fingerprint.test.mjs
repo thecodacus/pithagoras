@@ -17,7 +17,7 @@ import { freePort, inProcessHome } from "./server-harness.mjs";
 // src/schema-version.ts (once for the release, not once for each change),
 // pin the new version and fingerprint here, and have an upgrade test for what
 // changed (below) that starts from a database made before it.
-const PINNED = { version: 7, fingerprint: "409b5243d409e83047250a4c34dea217699b16f8e7ab13e861396938f3bf78ee" };
+const PINNED = { version: 8, fingerprint: "409b5243d409e83047250a4c34dea217699b16f8e7ab13e861396938f3bf78ee" };
 
 const home = inProcessHome("pithagoras-schema-");
 
@@ -176,6 +176,9 @@ test("a database at the schema before this one is checked and backed up, brought
   assert.equal(existsSync(path.join(dir, "backups")), true);
 });
 
+/** The tools the portal's browser registered, which the Browser extension registers under the same names, sorted. */
+const BROWSER_TOOLS = ["browser_back", "browser_click", "browser_find", "browser_get_text", "browser_key", "browser_navigate", "browser_screenshot", "browser_scroll", "browser_select", "browser_snapshot", "browser_type"];
+
 /** Runs prepareDatabase() as the server would, then reads what each routine of fixtures/portal-v3.db says about tools. */
 function startToolsUpgrade(dataDir, port) {
   const dist = (f) => JSON.stringify(new URL(`../dist/${f}`, import.meta.url).href);
@@ -183,8 +186,6 @@ function startToolsUpgrade(dataDir, port) {
     const m = await import(${dist("db-upgrade.js")});
     await m.prepareDatabase();
     const db = await import(${dist("db.js")});
-    // The browser's tools, as a chat would have reported them.
-    db.rememberTools([{ name: "browser_navigate", source: "browser", package: null }, { name: "bash", source: "built in", package: null }]);
     console.log("RESULT " + JSON.stringify({
       news: db.routineTools("news"),
       tidy: db.routineTools("tidy"),
@@ -207,7 +208,8 @@ function startToolsUpgrade(dataDir, port) {
 
 // fixtures/portal-v3.db was made by the code of v0.1.0 (SCHEMA_VERSION 3): a routine with its Browser switch on (news), one
 // with it off in a project (tidy), a project that switches bash off, and web_search off by default. Version 4 gives routines
-// tool switches of their own and agents a table of them (#81), and projects a table of the agent they work with (#127).
+// tool switches of their own and agents a table of them (#81), and projects a table of the agent they work with (#127);
+// version 8 writes the Browser switch into the routine's tools, for the browser's tools, which an extension brings now.
 test("a database of v0.1.0 is brought to the pinned schema, and each routine keeps the browser it had", async () => {
   const dir = path.join(home, "from-v3");
   mkdirSync(dir, { recursive: true });
@@ -226,8 +228,8 @@ test("a database of v0.1.0 is brought to the pinned schema, and each routine kee
   d.close();
 
   const result = JSON.parse(/RESULT (.*)/.exec(run.output())[1]);
-  assert.deepEqual(result.news, { off: [], on: ["browser_navigate"] }, "Browser on stays on");
-  assert.deepEqual(result.tidy, { off: ["browser_navigate"], on: [] }, "Browser off stays off");
+  assert.deepEqual(result.news, { off: [], on: BROWSER_TOOLS }, "Browser on stays on");
+  assert.deepEqual(result.tidy, { off: BROWSER_TOOLS, on: [] }, "Browser off stays off");
   assert.deepEqual(result.project, { off: ["bash"], on: [] });
   // And code mode, which an upgrade switches off by default beside what the operator had.
   assert.deepEqual(result.defaults, ["codemode", "web_search"]);
@@ -538,4 +540,185 @@ test("what the Media page kept that cannot be left is kept for the next start, w
   await upgraded(dir);
   assert.deepEqual(tables(), { version: SCHEMA_VERSION, tables: [], settings: 0 });
   assert.equal(readFileSync(path.join(dir, "handoff", "media", "files", "images", "aaaaaaaaaaa1.png"), "utf8"), "the page's kite");
+});
+
+// The agent's browser is an extension's from version 8 (extensions/browser), with settings of its own. A database of
+// version 7 is the schema pinned now: made here from a fresh one, with what the portal kept of its browser.
+const BROWSER_PASSWORD = "the-container-was-made-with-it";
+/** The browser's tools as a chat of version 7 reported them, all but two that came later, an MCP server's, and another. */
+const BROWSER_SEEN = [
+  ...BROWSER_TOOLS.filter((name) => name !== "browser_find" && name !== "browser_get_text").map((name) => ({ name, source: "browser", package: null, inline: true })),
+  { name: "browser_browser_click", source: "pi-mcp-adapter", package: "npm:pi-mcp-adapter@2.18.0" },
+  { name: "web_fetch", source: "pi-web-access", package: "npm:pi-web-access", inline: false },
+];
+
+/**
+ * A data folder as version 7 left it, with what it kept of the browser: four of its six settings, its allowlist, its
+ * tools' set marked lazy and given a name, how far it had carried the per-chat grant into the tools (`adopted`), chats
+ * with and without the grant, a routine run with it, routines with the Browser switch on and off, and the local
+ * Chrome's profile beside the database.
+ */
+function browserOfV7(dir, adopted = "carry") {
+  const file = path.join(dir, "portal.db");
+  getDb().exec(`VACUUM INTO '${file}'`);
+  const d = new Database(file);
+  d.pragma("user_version = 7");
+  assert.equal(schemaFingerprint(d), PINNED.fingerprint, "the schema of version 7 is the one pinned");
+  const setting = d.prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value");
+  for (const [key, value] of [
+    ["browser_password", BROWSER_PASSWORD],
+    ["browser_https_port", "4443"],
+    ["browser_cursor", "0"],
+    ["browser_tools", "1"],
+    ["browser_tools_adopted", adopted],
+    ["browser_allowlist", "*.example.com"],
+    ["tools_off_default", "codemode"],
+    ["tools_lazy", "<tool>web_fetch\nbrowser"],
+    ["tool_group_names", JSON.stringify({ browser: "Agent's browser", "pi-web-access": "Web" })],
+    ["tools_seen", JSON.stringify(BROWSER_SEEN)],
+  ]) setting.run(key, value);
+  const chat = d.prepare("INSERT INTO sessions (id, title, workspace, kind, browser, tools_on) VALUES (?, ?, ?, ?, ?, ?)");
+  chat.run("granted", "Shopping", path.join(dir, "ws"), "task", 1, "web_fetch");
+  chat.run("plain", "Notes", path.join(dir, "ws"), "task", 0, "");
+  chat.run("run", "A run", path.join(dir, "ws"), "routine", 1, "");
+  const routine = d.prepare("INSERT INTO routines (id, slug, name, browser, tools_off, tools_on) VALUES (?, ?, ?, ?, ?, ?)");
+  routine.run("r1", "news", "News", 1, "", "");
+  routine.run("r2", "tidy", "Tidy", 0, "web_fetch", "");
+  // One whose page wrote down one browser tool: what it said stands, and the rest follow its switch.
+  routine.run("r3", "picky", "Picky", 0, "", "browser_navigate");
+  d.close();
+  mkdirSync(path.join(dir, "browser-profile", "Default"), { recursive: true });
+  writeFileSync(path.join(dir, "browser-profile", "Default", "Cookies"), "the agent's logins");
+}
+
+/** What the upgraded database holds of the browser: the settings, and the tools of each chat and routine. */
+function browserIn(dir) {
+  const d = new Database(path.join(dir, "portal.db"), { readonly: true });
+  try {
+    const settings = Object.fromEntries(d.prepare("SELECT key, value FROM settings").all().map((row) => [row.key, row.value]));
+    const lines = (text) => (text ? text.split("\n") : []);
+    return {
+      version: d.pragma("user_version", { simple: true }),
+      fingerprint: schemaFingerprint(d),
+      value: (key) => settings[key],
+      chats: Object.fromEntries(d.prepare("SELECT id, tools_on FROM sessions ORDER BY id").all().map((row) => [row.id, lines(row.tools_on)])),
+      routines: Object.fromEntries(d.prepare("SELECT slug, tools_off, tools_on FROM routines ORDER BY slug").all().map((row) => [row.slug, { off: lines(row.tools_off), on: lines(row.tools_on) }])),
+    };
+  } finally {
+    d.close();
+  }
+}
+
+test("what the portal kept of its browser is left for its extension, the local profile moved, and its settings go; the allowlist stays the guard's", async () => {
+  const dir = path.join(home, "browser-out");
+  mkdirSync(dir, { recursive: true });
+  browserOfV7(dir);
+  assert.deepEqual(upgradeCheck(path.join(dir, "portal.db")), { needed: true, from: 7 });
+  assert.match(await upgraded(dir), new RegExp(`upgrading the database from version 7 to ${SCHEMA_VERSION}`));
+  assert.match(path.basename(backupsIn(path.join(dir, "backups"))[0]), /^portal-v7-\d{8}-\d{6}\.db$/);
+
+  const now = browserIn(dir);
+  assert.equal(now.version, SCHEMA_VERSION);
+  assert.equal(now.fingerprint, PINNED.fingerprint, "no table or column goes");
+  for (const key of ["browser_user", "browser_password", "browser_port", "browser_https_port", "browser_cursor", "browser_tools"]) assert.equal(now.value(key), undefined, key);
+  assert.equal(now.value("browser_allowlist"), "*.example.com");
+  assert.equal(now.value("browser_tools_adopted"), "carry");
+  // The set the tools were filed in is the extension's package now, its name and lazy mark with it; and so is each as
+  // the lists remember it. An MCP server's tool, and another package's, stay as they were.
+  assert.equal(now.value("tools_lazy"), "<tool>web_fetch\npithagoras-browser");
+  assert.deepEqual(JSON.parse(now.value("tool_group_names")), { "pi-web-access": "Web", "pithagoras-browser": "Agent's browser" });
+  assert.deepEqual(JSON.parse(now.value("tools_seen")), BROWSER_SEEN.map((tool) => (tool.source === "browser" ? { ...tool, source: "pithagoras-browser" } : tool)));
+
+  // Left whole, closed to all but the portal: the six settings as they were stored, and the profile, moved.
+  const left = path.join(dir, "handoff", "browser");
+  assert.deepEqual(readdirSync(path.join(dir, "handoff")), ["browser"], "nothing half done beside it");
+  assert.equal(modeOf(left), 0o700);
+  assert.deepEqual(readdirSync(left).sort(), ["handoff.json", "profile", "settings.json"]);
+  for (const json of ["handoff.json", "settings.json"]) assert.equal(modeOf(path.join(left, json)), 0o600, json);
+  const read = (file) => JSON.parse(readFileSync(path.join(left, file), "utf8"));
+  const { made, ...about } = read("handoff.json");
+  assert.deepEqual(about, { format: 1, name: "browser", schema: 8 });
+  assert.ok(Number.isFinite(Date.parse(made)));
+  assert.deepEqual(read("settings.json"), { browser_user: null, browser_password: BROWSER_PASSWORD, browser_port: null, browser_https_port: "4443", browser_cursor: "0", browser_tools: "1" });
+  assert.equal(readFileSync(path.join(left, "profile", "Default", "Cookies"), "utf8"), "the agent's logins");
+  assert.equal(existsSync(path.join(dir, "browser-profile")), false);
+});
+
+test("who may drive the browser is written into the tools' switches: each routine's switch into its lists, and the grants still to be carried into the chats that had them", async () => {
+  const dir = path.join(home, "browser-grants");
+  mkdirSync(dir, { recursive: true });
+  browserOfV7(dir);
+  await upgraded(dir);
+  const now = browserIn(dir);
+  // The two tools no chat had reported yet were still to be carried: off by default, and on where a chat had the grant.
+  assert.equal(now.value("tools_off_default"), "browser_find\nbrowser_get_text\ncodemode");
+  assert.deepEqual(now.chats, { granted: ["browser_find", "browser_get_text", "web_fetch"], plain: [], run: [] }, "a routine's run answers by its routine");
+  assert.deepEqual(now.routines, {
+    news: { off: [], on: BROWSER_TOOLS },
+    picky: { off: BROWSER_TOOLS.filter((name) => name !== "browser_navigate"), on: ["browser_navigate"] },
+    tidy: { off: [...BROWSER_TOOLS, "web_fetch"].sort(), on: [] },
+  });
+
+  // Once: a start at version 8 writes nothing again.
+  rmSync(path.join(dir, "handoff"), { recursive: true });
+  await upgraded(dir);
+  const again = browserIn(dir);
+  assert.deepEqual([again.value("tools_off_default"), again.chats, again.routines], [now.value("tools_off_default"), now.chats, now.routines]);
+  assert.equal(existsSync(path.join(dir, "handoff", "browser")), false, "nothing to leave again");
+});
+
+test("a portal still waiting for the browser's tools to carry the grants over carries them now, for all of them; one that had carried them has nothing to carry", async () => {
+  const waiting = path.join(home, "browser-pending");
+  mkdirSync(waiting, { recursive: true });
+  browserOfV7(waiting, "pending");
+  await upgraded(waiting);
+  const pending = browserIn(waiting);
+  // The tools it had seen were never carried while it waited: the grant was read from the column all along.
+  assert.equal(pending.value("tools_off_default"), [...BROWSER_TOOLS, "codemode"].sort().join("\n"));
+  assert.deepEqual(pending.chats.granted, [...BROWSER_TOOLS, "web_fetch"].sort());
+  assert.deepEqual(pending.chats.plain, []);
+
+  const done = path.join(home, "browser-adopted");
+  mkdirSync(done, { recursive: true });
+  browserOfV7(done, "1");
+  await upgraded(done);
+  const adopted = browserIn(done);
+  assert.equal(adopted.value("tools_off_default"), "codemode");
+  assert.deepEqual(adopted.chats.granted, ["web_fetch"]);
+  assert.deepEqual(adopted.routines.news, { off: [], on: BROWSER_TOOLS }, "a routine's switch is written all the same");
+});
+
+test("what the browser kept that cannot be left is kept for the next start, which leaves it; one left before the database rolled back is not left again", async () => {
+  const dir = path.join(home, "browser-later");
+  mkdirSync(dir, { recursive: true });
+  browserOfV7(dir);
+  writeFileSync(path.join(dir, "handoff"), "not a folder");
+  assert.match(await upgraded(dir), /what the browser kept could not be left for its extension, and is kept for the next start/);
+  let now = browserIn(dir);
+  assert.equal(now.version, SCHEMA_VERSION, "upgraded all the same");
+  assert.equal(now.value("browser_password"), BROWSER_PASSWORD, "with all of it kept");
+  assert.equal(now.value("tools_lazy"), "<tool>web_fetch\nbrowser");
+  assert.equal(readFileSync(path.join(dir, "browser-profile", "Default", "Cookies"), "utf8"), "the agent's logins");
+  // Out of the way: the next start, which is no upgrade, leaves it.
+  rmSync(path.join(dir, "handoff"));
+  await upgraded(dir);
+  now = browserIn(dir);
+  assert.equal(now.value("browser_password"), undefined);
+  assert.equal(now.value("tools_lazy"), "<tool>web_fetch\npithagoras-browser");
+  assert.equal(JSON.parse(readFileSync(path.join(dir, "handoff", "browser", "settings.json"), "utf8")).browser_password, BROWSER_PASSWORD);
+
+  // A try that left it whole, and whose database rolled back: not filled again, and the settings go.
+  const rolled = path.join(home, "browser-left");
+  mkdirSync(rolled, { recursive: true });
+  browserOfV7(rolled);
+  const left = path.join(rolled, "handoff", "browser");
+  mkdirSync(left, { recursive: true });
+  const about = JSON.stringify({ format: 1, name: "browser", schema: 8, made: "2026-10-21T08:00:00.000Z" });
+  writeFileSync(path.join(left, "handoff.json"), about);
+  await upgraded(rolled);
+  assert.equal(readFileSync(path.join(left, "handoff.json"), "utf8"), about);
+  assert.equal(readFileSync(path.join(rolled, "browser-profile", "Default", "Cookies"), "utf8"), "the agent's logins", "what is not in it stays where it is");
+  const after = browserIn(rolled);
+  assert.equal(after.value("browser_password"), undefined);
+  assert.equal(JSON.parse(after.value("tools_seen")).find((tool) => tool.name === "browser_navigate").source, "pithagoras-browser");
 });

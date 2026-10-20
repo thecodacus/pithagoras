@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { diffViews, findNodes, pinned, renderView, sectionText, textPage } from "../dist/browser/view.js";
-import { cleanRef, keyCombo } from "../dist/browser/tools.js";
+import { diffViews, findNodes, pinned, renderView, sectionText, textPage } from "../src/server/view.ts";
+import { cleanRef, keyCombo } from "../src/server/tools.ts";
 
 const vp = { width: 1280, height: 720, scrollY: 0, scrollHeight: 3000 };
 const meta = { title: "Test", url: "https://example.test/page" };

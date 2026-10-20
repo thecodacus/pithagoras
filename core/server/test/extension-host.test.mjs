@@ -265,7 +265,7 @@ test("a chat's pi is kept while a server half holds it, and let go when every ho
 });
 
 test("upgrades under a server half's routes go to it, with the address as its routes see it", () => {
-  assert.equal(host.extensionUpgrade("/browser-ui/websockify"), undefined);
+  assert.equal(host.extensionUpgrade("/elsewhere/websockify"), undefined);
   assert.equal(host.extensionUpgrade("/api/x/@codacus/other/socket"), undefined);
   assert.equal(host.extensionUpgrade(undefined), undefined);
   const handler = host.extensionUpgrade("/api/x/%40codacus/notes/socket?chat=a");

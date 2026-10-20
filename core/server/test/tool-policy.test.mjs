@@ -5,7 +5,6 @@ import {
   defaultsFor,
   effectiveOff,
   exceptionsFor,
-  browserTool,
   mcpServerOf,
   toolSource,
 } from "../dist/tool-policy.js";
@@ -70,19 +69,6 @@ test("but not one that did", () => {
   assert.equal(toolEnabled("a", ["a"], exceptions), true);
 });
 
-test("the browser's tools are known by the server they came through", () => {
-  const servers = ["browser", "browser_staging"];
-  assert.ok(browserTool("browser_browser_click", servers));
-  assert.ok(browserTool("browser_navigate", servers));
-  assert.ok(!browserTool("web_search", servers));
-  assert.ok(!browserTool("browserify", servers));
-  // The one the prefix test used to get wrong, and it decides whether a
-  // conversation may drive a browser signed into real accounts.
-  assert.ok(!browserTool("browser_staging_click", servers));
-  // With no browser attached, nothing is the browser's.
-  assert.ok(!browserTool("browser_browser_click", ["jira"]));
-});
-
 test("a tool is filed under the MCP server it came through", () => {
   const servers = ["browser", "jira"];
   assert.equal(toolSource("browser_browser_click", "pi-mcp-adapter", servers), "browser");
@@ -103,7 +89,7 @@ test("a server with hyphens is found by the underscored name the adapter gives i
   assert.equal(mcpServerOf("brave_search_brave_web_search", servers), "brave-search");
   assert.equal(mcpServerOf("brave_news", servers), "brave");
   assert.equal(toolSource("brave_search_brave_web_search", "pi-mcp-adapter", servers), "brave-search");
-  assert.equal(browserTool("playwright_mcp_click", ["playwright-mcp"], ["playwright-mcp"]), true);
+  assert.equal(mcpServerOf("playwright_mcp_click", ["playwright-mcp"]), "playwright-mcp");
 });
 
 test("a default-off tool nobody was shown is left alone, not switched on", () => {
@@ -147,13 +133,6 @@ test("what the chat held is dropped once the switch is flipped back", () => {
 
 test("without anything held, nothing changes", () => {
   assert.deepEqual(exceptionsFor(["T"], ["T"], ["T"]), { off: [], on: [] });
-});
-
-test("a browser can be called anything, given which servers are it", () => {
-  assert.equal(browserTool("chrome_browser_click", ["chrome"], ["chrome"]), true);
-  assert.equal(browserTool("chrome_browser_click", ["chrome"]), false);
-  // And a server that is not one of them is still not.
-  assert.equal(browserTool("scratch_browser_click", ["chrome", "scratch"], ["chrome"]), false);
 });
 
 test("a project bends the default, in both directions", () => {

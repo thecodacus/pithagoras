@@ -9,7 +9,6 @@ const db = await import("../dist/db.js");
 const row = (key) => db.getDb().prepare("SELECT value FROM settings WHERE key = ?").get(key);
 
 test("the stored model defaults are the three keys of them, and nothing else the table holds", () => {
-  db.putSetting("browser_password", "hunter2");
   db.putSetting("tools_seen", "[]");
   db.putSetting("voice", "{}");
   db.setSettings({ provider: " local ", model: "a-model", thinkingLevel: "" });
@@ -48,28 +47,4 @@ test("a setting that is emptied leaves no row, whichever way it is written", () 
   // A stored number the portal would not take is not one.
   db.putSetting("context_limit_default", "12");
   assert.equal(db.getDefaultContextLimit(), undefined);
-});
-
-test("the browser cursor's switch is its own key, which the three model defaults do not carry", () => {
-  assert.equal(db.browserCursorOn(), true, "on where nobody said otherwise");
-  db.setBrowserCursor(false);
-  assert.equal(row("browser_cursor")?.value, "0");
-  assert.equal(db.browserCursorOn(), false);
-  assert.equal("browser_cursor" in db.getStoredSettings(), false, "and not in the model defaults");
-  db.setBrowserCursor(true);
-  assert.equal(db.browserCursorOn(), true);
-});
-
-test("the browser's address settings are read one by one, with the environment behind them", async () => {
-  const service = await import("../dist/extensions/browser-service.js");
-  delete process.env.BROWSER_USER;
-  delete process.env.BROWSER_PORT;
-  assert.deepEqual([service.config().user, service.config().port], ["agent", "3010"]);
-  process.env.BROWSER_PORT = "4010";
-  assert.equal(service.config().port, "4010");
-  assert.equal(service.saveConfig({ port: "4020", user: "alice" }).user, "alice");
-  // Not saved, and not the way to forget what was: putSetting would clear it.
-  assert.equal(service.saveConfig({ user: "" }).user, "alice");
-  delete process.env.BROWSER_PORT;
-  assert.equal(service.config().port, "4020");
 });

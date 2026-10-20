@@ -5,46 +5,26 @@ import path from "node:path";
 import { inProcessHome } from "./server-harness.mjs";
 
 // A browser wired under another name, as an older portal or a hand-written
-// mcp.json would have it. What makes it the browser is where it connects.
-const home = inProcessHome("pithagoras-name-");
+// mcp.json would have it. What makes it a browser the agent is signed into is
+// that it attaches to one that is running, wherever that is.
+inProcessHome("pithagoras-name-");
 const mcp = path.join(process.env.PI_CODING_AGENT_DIR, "mcp.json");
-const CDP = "http://127.0.0.1:9222";
-writeFileSync(
-  mcp,
-  JSON.stringify({
-    mcpServers: {
-      chrome: { command: "npx", args: ["-y", "@playwright/mcp@0.0.79", "--cdp-endpoint", CDP] },
-      // Another Playwright server with a browser of its own: not ours.
-      scratch: { command: "npx", args: ["-y", "@playwright/mcp@0.0.79"] },
-    },
-  })
-);
+const attached = (at) => ({ command: "npx", args: ["-y", "@playwright/mcp@0.0.79", "--cdp-endpoint", at] });
+const { browserServers } = await import("../dist/api/mcp.js");
 
-const { browserAllowed, browserPolicy, createSession, getSession, rememberTools, setSessionTools, toolsDifferWith } =
-  await import("../dist/db.js");
-/** Whether a conversation that has said nothing about the browser has it, as the Browser page is told. */
-const browserByDefault = () => toolsDifferWith(browserPolicy()).byDefault;
-const { browserServers, findConnection } = await import("../dist/api/mcp.js");
-
-createSession({ id: "c1", title: "c", workspace: home, executor: "host" });
-
-test("the browser is the server that connects to it, not the one with a certain name", () => {
-  assert.deepEqual(browserServers(), ["chrome"]);
-  assert.equal(findConnection(), "chrome");
-});
-
-test("its tools are the browser's, and a conversation with them has it", () => {
-  rememberTools([
-    { name: "chrome_browser_click", source: "pi-mcp-adapter" },
-    { name: "scratch_browser_click", source: "pi-mcp-adapter" },
-  ]);
-  assert.equal(browserAllowed(getSession("c1")), true);
-  assert.equal(browserByDefault(), true);
-});
-
-test("switching them off takes the browser away, and the other server's do not give it back", () => {
-  setSessionTools("c1", { off: ["chrome_browser_click"], on: ["scratch_browser_click"] });
-  assert.equal(browserAllowed(getSession("c1")), false);
+test("a browser server is one that attaches to a running browser, at any address, not the one with a certain name", () => {
+  writeFileSync(
+    mcp,
+    JSON.stringify({
+      mcpServers: {
+        chrome: attached("http://127.0.0.1:9222"),
+        remote: attached("http://10.0.0.5:9333"),
+        // Another Playwright server with a browser of its own: nobody's logins.
+        scratch: { command: "npx", args: ["-y", "@playwright/mcp@0.0.79"] },
+      },
+    })
+  );
+  assert.deepEqual(browserServers(), ["chrome", "remote"]);
 });
 
 test("one that is called browser still counts, as it always has", () => {
@@ -53,7 +33,6 @@ test("one that is called browser still counts, as it always has", () => {
 });
 
 test("an entry that is not an object is no browser, and does not stop the others from being found", () => {
-  writeFileSync(mcp, JSON.stringify({ mcpServers: { old: null, odd: 3, chrome: { command: "npx", args: ["-y", "@playwright/mcp@0.0.79", "--cdp-endpoint", CDP] } } }));
+  writeFileSync(mcp, JSON.stringify({ mcpServers: { old: null, odd: 3, chrome: attached("http://127.0.0.1:9222") } }));
   assert.deepEqual(browserServers(), ["chrome"]);
-  assert.equal(findConnection(), "chrome");
 });

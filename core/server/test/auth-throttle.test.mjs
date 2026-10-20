@@ -2,11 +2,11 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync, readlinkSync } from "node:fs";
 import net from "node:net";
-import { BROWSER_PASSWORD, security, issued, browser, base, port, server, sharedPortal, signedIn, api, upgrade, until, basic } from "./auth-harness.mjs";
+import { security, issued, base, port, server, sharedPortal, signedIn, api, upgrade, opened, until } from "./auth-harness.mjs";
 
 /**
- * The login throttle, and the agent's browser, which the portal proxies and signs into for whoever
- * it let in (see auth.test.mjs for the login).
+ * The login throttle, and the login on every stream, which an extension's server half takes under its routes
+ * (a stand-in's here, see auth-harness.mjs) only once the portal has let it through (see auth.test.mjs for the login).
  */
 sharedPortal();
 
@@ -91,14 +91,9 @@ test("the window's budget is a fresh one when the window is over", () => {
   assert.deepEqual(attempts(limiter, "198.51.100.9", 1), { through: 1, refused: 0 }, "and it is new once the window is over");
 });
 
-// --- the agent's browser ---
+// --- streams ---
 
-test("the browser page and its stream are behind the login: nothing reaches the browser without it", async () => {
-  browser.requests.length = browser.upgrades.length = 0;
-  const page = await fetch(`${base}/browser-ui/`);
-  assert.equal(page.status, 401);
-  assert.doesNotMatch(await page.text(), /the desktop/);
-
+test("a stream is behind the login: no extension is asked for it without one", async () => {
   const stream = upgrade();
   await until(() => stream.text().includes("\r\n\r\n"), "an answer");
   assert.match(stream.text(), /^HTTP\/1\.1 401 /);
@@ -107,21 +102,23 @@ test("the browser page and its stream are behind the login: nothing reaches the 
   await until(() => wrong.text().includes("\r\n\r\n"), "an answer to a made-up cookie");
   assert.match(wrong.text(), /^HTTP\/1\.1 401 /);
   wrong.socket.destroy();
-
-  assert.deepEqual([browser.requests.length, browser.upgrades.length], [0, 0], "the browser was never asked");
+  // And none that is not there is told apart from one that is, without it.
+  const nobody = upgrade({}, "", "/api/x/nobody/stream");
+  await until(() => nobody.text().includes("\r\n\r\n"), "an answer for an extension that is not there");
+  assert.match(nobody.text(), /^HTTP\/1\.1 401 /);
+  nobody.socket.destroy();
 });
 
-test("an upgrade that is not the browser's is answered and closed, not held open for whoever sent it", async () => {
-  browser.upgrades.length = 0;
-  // Nothing else takes upgrades, so each of these is the portal's to answer: the page, the API, and the browser's prefix in other letters.
-  for (const url of ["/", "/api/sessions", "/browser-uifoo", "/BROWSER-UI/websockify"]) {
+test("an upgrade that is not an extension's is answered and closed, not held open for whoever sent it", async () => {
+  // Only an extension takes upgrades, so each of these is the portal's to answer: the page, the API, and an extension's
+  // routes without the login.
+  for (const url of ["/", "/api/sessions", "/api/xfoo", "/api/x/test-streams/stream"]) {
     const stream = upgrade({}, "", url);
     await until(() => stream.text().includes("\r\n\r\n"), `an answer to ${url}`);
-    assert.match(stream.text(), url.startsWith("/BROWSER") ? /^HTTP\/1\.1 401 / : /^HTTP\/1\.1 404 /, url);
+    assert.match(stream.text(), url.startsWith("/api/x/") ? /^HTTP\/1\.1 401 / : /^HTTP\/1\.1 404 /, url);
     // Closed from the portal's side too, with the client still connected.
     await Promise.race([stream.closed, new Promise((_, reject) => setTimeout(() => reject(new Error(`${url} was left open`)), 3000))]);
   }
-  assert.equal(browser.upgrades.length, 0, "and nothing went to the browser");
 });
 
 /** Whether the server process itself still holds the connection a client opened from `clientPort`, which is what a left-open one costs it. */
@@ -148,7 +145,7 @@ function heldByServer(clientPort) {
 test("clients that reset the connection while an upgrade is refused do not take the portal down", async () => {
   // Written, and reset as soon as the bytes are out: the answer the portal then writes meets a closed connection.
   const resets = [];
-  for (const url of ["/", "/browser-ui/websockify", "/browser-ui/websockify"]) {
+  for (const url of ["/", "/api/x/test-streams/stream", "/api/x/test-streams/stream"]) {
     for (let i = 0; i < 30; i++) {
       resets.push(new Promise((resolve) => {
         const socket = net.connect(port, "127.0.0.1");
@@ -187,62 +184,30 @@ test("a refused upgrade whose client keeps its side open is let go of after a fe
   }
 });
 
-test("signed in, the page is the browser's, with the browser's own login added and the portal's left out", async () => {
-  browser.requests.length = 0;
+test("a stream of another site's page is refused, and the one of the portal's own is handed to the extension that takes it", async () => {
   const cookie = await signedIn();
-  const page = await fetch(`${base}/browser-ui/vnc.html?x=1`, { headers: { Cookie: `${cookie}; other=1`, Authorization: basic("someone", "else") } });
-  assert.equal(page.status, 200);
-  assert.equal(await page.text(), "the desktop");
-  assert.equal(page.headers.get("content-security-policy"), "frame-ancestors 'self'", "only the portal's own pages may frame it");
-  const [seen] = browser.requests;
-  assert.equal(seen.url, "/vnc.html?x=1");
-  assert.equal(seen.headers.authorization, basic("agent", BROWSER_PASSWORD), "the client's own credentials are not passed on");
-  assert.equal(seen.headers.cookie, undefined, "the portal's login stays with the portal");
-});
-
-test("a stream of another site's page is refused, and the one of the portal's own is passed on, each side's first bytes to the other", async () => {
-  const cookie = await signedIn();
-  browser.upgrades.length = 0;
   const foreign = upgrade({ Cookie: cookie, Origin: "https://elsewhere.example" });
   await until(() => foreign.text().includes("\r\n\r\n"), "an answer to another site's page");
   assert.match(foreign.text(), /^HTTP\/1\.1 403 /);
   foreign.socket.destroy();
-  assert.equal(browser.upgrades.length, 0);
 
-  browser.mode = "accept";
-  const mine = upgrade({ Cookie: `${cookie}; other=1`, Origin: `http://127.0.0.1:${port}`, Authorization: basic("someone", "else") }, "client-first");
-  await until(() => mine.text().includes("RFB 003.008"), "the container's greeting reaching the page");
+  const mine = await opened({ Cookie: cookie, Origin: `http://127.0.0.1:${port}` });
   assert.match(mine.text(), /^HTTP\/1\.1 101 /);
-  await until(() => browser.received.includes("client-first"), "the page's first bytes reaching the container");
-  assert.doesNotMatch(mine.text(), /client-first/, "not sent back to where they came from");
-  assert.doesNotMatch(browser.received, /RFB/, "nor the container's");
-  const [seen] = browser.upgrades;
-  assert.equal(seen.url, "/websockify");
-  assert.equal(seen.headers.authorization, basic("agent", BROWSER_PASSWORD));
-  assert.equal(seen.headers.cookie, undefined);
   mine.socket.destroy();
-  await browser.socketClosed;
 });
 
 test("behind a reverse proxy that rewrites Host, the page of the host it was asked for is accepted, and another site's still is not", async () => {
   const cookie = await signedIn();
-  browser.mode = "accept";
-  browser.upgrades.length = 0;
   // Host is the portal's own address behind the proxy; the page's origin is what the visitor typed.
   const asked = { Cookie: cookie, "X-Forwarded-Host": "portal.example" };
-  const mine = upgrade({ ...asked, Origin: "https://portal.example" });
-  await until(() => mine.text().includes("RFB 003.008"), "the stream of the page behind the proxy");
+  const mine = await opened({ ...asked, Origin: "https://portal.example" });
   assert.match(mine.text(), /^HTTP\/1\.1 101 /);
   mine.socket.destroy();
-  await browser.socketClosed;
 
   // The default port of the scheme is the same host, and a list of proxies names the visitor's first.
-  const withPort = upgrade({ Cookie: cookie, "X-Forwarded-Host": "portal.example:443, inner.proxy:8080", Origin: "https://portal.example" });
-  await until(() => withPort.text().includes("RFB 003.008"), "the stream with the port spelled out");
+  const withPort = await opened({ Cookie: cookie, "X-Forwarded-Host": "portal.example:443, inner.proxy:8080", Origin: "https://portal.example" });
   withPort.socket.destroy();
-  await browser.socketClosed;
 
-  browser.upgrades.length = 0;
   for (const origin of ["https://elsewhere.example", "https://portal.example.elsewhere.example", "null"]) {
     const foreign = upgrade({ ...asked, Origin: origin });
     await until(() => foreign.text().includes("\r\n\r\n"), `an answer to ${origin}`);
@@ -254,37 +219,5 @@ test("behind a reverse proxy that rewrites Host, the page of the host it was ask
   await until(() => tricked.text().includes("\r\n\r\n"), "an answer to a made-up host");
   assert.match(tricked.text(), /^HTTP\/1\.1 403 /);
   tricked.socket.destroy();
-  assert.equal(browser.upgrades.length, 0, "the browser was never asked");
-});
-
-test("a stream the browser refuses is answered, not left waiting", async () => {
-  const cookie = await signedIn();
-  browser.mode = "refuse";
-  try {
-    const stream = upgrade({ Cookie: cookie });
-    await until(() => stream.text().includes("\r\n\r\n"), "an answer");
-    assert.match(stream.text(), /^HTTP\/1\.1 401 /);
-    stream.socket.destroy();
-  } finally {
-    browser.mode = "accept";
-  }
-});
-
-test("a visitor who leaves during the handshake takes the portal's request to the browser with them", async () => {
-  const cookie = await signedIn();
-  browser.mode = "slow";
-  browser.upgrades.length = 0;
-  try {
-    const stream = upgrade({ Cookie: cookie });
-    await until(() => browser.release, "the browser being asked");
-    // Gone as a closed tab or a lost connection is: not with a goodbye.
-    stream.socket.resetAndDestroy();
-    // Without being answered: the portal lets go of the request when its visitor has gone.
-    await Promise.race([browser.socketClosed, new Promise((_, no) => setTimeout(() => no(new Error("the browser is still being asked for a stream nobody is waiting for")), 3000))]);
-  } finally {
-    browser.release?.();
-    browser.release = undefined;
-    browser.mode = "accept";
-  }
   assert.equal((await api(cookie)).status, 200, "and the portal is still there");
 });
