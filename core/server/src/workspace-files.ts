@@ -709,10 +709,10 @@ export function openPicture(base: string, rel: unknown, options: AgentUse = {}):
 }
 
 /**
- * A picture in the folder, read whole, for one that is sent on as it is, to an
- * image endpoint to be changed. Opened as a picture shown is: checked by its
- * bytes and its size, and never through a link out of the folder; `options` as
- * for openPicture.
+ * A picture in the folder, read whole, for one that is sent on as it is, such
+ * as to a channel. Opened as a picture shown is: checked by its bytes and its
+ * size, and never through a link out of the folder; `options` as for
+ * openPicture.
  */
 export function readPicture(base: string, rel: unknown, options: AgentUse = {}): { bytes: Buffer; mimeType: string; name: string } {
   return readOpened(openPicture(base, rel, options));

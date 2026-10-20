@@ -7,7 +7,7 @@ import semver from "semver";
 import express, { type NextFunction, type Request, type RequestHandler, type Response, type Router } from "express";
 import { agentOf, defaultAgent, listAgents } from "./agents.js";
 import { DATA_DIR } from "./data-dir.js";
-import { getSession, listSessions, sessionsByWorkspace, setServerHalfOffers, type SessionRow } from "./db.js";
+import { getSession, getSetting, listSessions, putSetting, sessionsByWorkspace, setServerHalfOffers, type SessionRow } from "./db.js";
 import { EXECUTOR_KIND } from "./executor-kind.js";
 import type { ServerHalf } from "./extension-ui.js";
 import { asAgent, runAsAgent, sandboxEnv } from "./sandbox/exec.js";
@@ -115,9 +115,60 @@ interface Running {
   removed: ((folder: string) => void)[];
 }
 
-/** The portal deleted a folder the agents worked in, `folder` being where it really was: each server half is told. */
+/**
+ * The folders the portal deleted, the latest last, each with when (ms), and by package the time up to which its server
+ * half has been told of them: one that was not running then, switched off, removed or failing to start, is told when
+ * it next starts. The latest few hundred are kept.
+ */
+const REMOVED = "folders_removed";
+const TOLD = "folders_told";
+const KEPT_REMOVED = 300;
+type Removal = { folder: string; at: number };
+
+/** A setting the host keeps as JSON, or `none` where there is none, or it cannot be read. */
+function kept<T>(key: string, none: T): T {
+  try {
+    return JSON.parse(getSetting(key) ?? "null") ?? none;
+  } catch {
+    return none;
+  }
+}
+
+/** The portal deleted a folder the agents worked in, `folder` being where it really was: each server half running is told now, and it is kept for the others. */
 export function folderRemoved(folder: string): void {
-  for (const ext of running.values()) for (const told of ext.removed) guarded(ext.half.name, "hearing of a folder that was removed", () => told(folder));
+  const removals = kept<Removal[]>(REMOVED, []);
+  // Later than the one before, even within a millisecond or with the clock set back: a half is told what it missed by when it was.
+  const at = Math.max(Date.now(), (removals.at(-1)?.at ?? 0) + 1);
+  putSetting(REMOVED, JSON.stringify([...removals, { folder, at }].slice(-KEPT_REMOVED)));
+  const told = kept<Record<string, number>>(TOLD, {});
+  for (const ext of running.values()) {
+    for (const handler of ext.removed) guarded(ext.half.name, "hearing of a folder that was removed", () => handler(folder));
+    told[ext.half.name] = at;
+  }
+  putSetting(TOLD, JSON.stringify(told));
+}
+
+/**
+ * The time up to which a package's server half has been told of the folders deleted, as it starts. A package seen for
+ * the first time starts from the latest: what it keeps is of no folder deleted before.
+ */
+function toldUpTo(name: string): number {
+  const told = kept<Record<string, number>>(TOLD, {});
+  if (told[name] === undefined) {
+    told[name] = kept<Removal[]>(REMOVED, []).at(-1)?.at ?? 0;
+    putSetting(TOLD, JSON.stringify(told));
+  }
+  return told[name];
+}
+
+/** A server half that has just started is told of each folder deleted after `since`, while it was not running, once. */
+function tellMissed(ext: Running, since: number): void {
+  const missed = kept<Removal[]>(REMOVED, []).filter((removal) => removal.at > since);
+  if (!missed.length) return;
+  for (const { folder } of missed) for (const handler of ext.removed) guarded(ext.half.name, "hearing of a folder that was removed", () => handler(folder));
+  const told = kept<Record<string, number>>(TOLD, {});
+  told[ext.half.name] = missed[missed.length - 1].at;
+  putSetting(TOLD, JSON.stringify(told));
 }
 
 /** A tool a server half says it offers now: see `tools.offer`. */
@@ -374,6 +425,8 @@ async function stop(ext: Running): Promise<void> {
 
 async function start(half: ServerHalf, sig: string, uses: Set<string>): Promise<void> {
   const ext: Running = { half, router: express.Router(), stops: [], opens: [], life: new EventEmitter(), events: [], factories: [], holds: new Map(), apis: new Map(), uses, sig, removed: [] };
+  // Read before it starts: a folder deleted while it does is one it missed.
+  const since = toldUpTo(half.name);
   try {
     // By its revision: the same file changed is another module, and the one already loaded is not served again.
     const stopper = await within(
@@ -388,6 +441,7 @@ async function start(half: ServerHalf, sig: string, uses: Set<string>): Promise<
     running.set(half.name, ext);
     failures.delete(half.name);
     say(half.name, "server half started");
+    tellMissed(ext, since);
   } catch (e) {
     for (const fn of ext.stops.reverse()) await guarded(half.name, "stopping", () => within(STOP_MS, Promise.resolve().then(fn), "stopping"));
     failures.set(half.name, (e as Error)?.message || String(e));

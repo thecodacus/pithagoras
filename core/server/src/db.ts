@@ -14,7 +14,7 @@ import { baseDir, fitBytes, makeFolder, saveNewFile } from "./workspace-files.js
 import { agentHome, agentHomePath, homeAgentName } from "./agent-home.js";
 import { DATA_DIR } from "./data-dir.js";
 import { writeFileAtomic } from "./atomic-write.js";
-import { leaveHandoff, moveTo } from "./handoff.js";
+import { leaveHandoff, moveFolderTo, moveTo } from "./handoff.js";
 import { EXECUTOR_KIND } from "./executor-kind.js";
 import { RUNS_AS_PRIMARY } from "./pi/runs-as-primary.js";
 import { CODEMODE_TOOL } from "./pi/codemode.js";
@@ -520,14 +520,15 @@ function handOffMedia(d: Database.Database): void {
     const settings = { image_generation: settingIn(d, "image_generation") ?? null, video_generation: settingIn(d, "video_generation") ?? null };
     leaveHandoff("media", (dir) => {
       // What an earlier try moved is there already, and a file that is gone is gone: its row is left all the same, as the page would have kept it until it looked.
-      const move = (from: string, to: string) => {
+      const move = (from: string, to: string, by = moveTo) => {
         if (existsSync(to) || !existsSync(from)) return;
         mkdirSync(path.dirname(to), { recursive: true, mode: 0o700 });
-        moveTo(from, to);
+        by(from, to);
       };
       for (const row of images) if (row.origin === "page") move(path.join(data, "images", row.path), path.join(dir, "files", "images", row.path));
-      move(path.join(data, "videos"), path.join(dir, "files", "videos"));
-      for (const cache of ["image-thumbs", "video-posters", "video-copies"]) move(path.join(data, cache), path.join(dir, "cache", cache));
+      // A folder mounted on its own, or a link to one elsewhere, stays where it is: what is in it is moved.
+      move(path.join(data, "videos"), path.join(dir, "files", "videos"), moveFolderTo);
+      for (const cache of ["image-thumbs", "video-posters", "video-copies"]) move(path.join(data, cache), path.join(dir, "cache", cache), moveFolderTo);
       // Written last, and anew on each try, from the rows as they are.
       writeFileAtomic(path.join(dir, "images.json"), JSON.stringify({ rows: images }), 0o600);
       writeFileAtomic(path.join(dir, "videos.json"), JSON.stringify({ rows: videos }), 0o600);

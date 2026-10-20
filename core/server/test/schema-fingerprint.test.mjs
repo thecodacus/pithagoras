@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
 import { schemaFingerprint } from "./schema-fingerprint.mjs";
@@ -473,10 +473,13 @@ test("an upgrade whose database rolled back after it left what the Media page ke
   mkdirSync(left, { recursive: true });
   const about = JSON.stringify({ format: 1, name: "media", schema: 7, made: "2026-10-19T08:00:00.000Z" });
   writeFileSync(path.join(left, "handoff.json"), about);
-  // And a tool of the same name an extension brought, which a chat reported since: it stays the extension's.
+  // And a tool of the same name an extension brought, under the very name the portal's was filed under (a loose
+  // extension file of that name), which a chat reported since as not inline: it stays the extension's. One the lists
+  // remember from before they said whether a tool is inline is the portal's.
   const before = new Database(path.join(dir, "portal.db"));
-  const theirs = { name: "generate_image", source: "my-images", package: "npm:my-images", inline: false };
-  before.prepare("UPDATE settings SET value = ? WHERE key = 'tools_seen'").run(JSON.stringify(SEEN.map((tool) => (tool.name === theirs.name ? theirs : tool))));
+  const theirs = { name: "generate_image", source: "image-generation", package: null, inline: false };
+  const unsaid = ({ inline, ...tool }) => tool;
+  before.prepare("UPDATE settings SET value = ? WHERE key = 'tools_seen'").run(JSON.stringify(SEEN.map((tool) => (tool.name === theirs.name ? theirs : tool.name === "edit_image" ? unsaid(tool) : tool))));
   before.close();
   await upgraded(dir);
 
@@ -489,7 +492,25 @@ test("an upgrade whose database rolled back after it left what the Media page ke
   const seen = JSON.parse(d.prepare("SELECT value FROM settings WHERE key = 'tools_seen'").get().value);
   assert.deepEqual(seen.find((tool) => tool.name === "generate_image"), theirs);
   assert.deepEqual(seen.find((tool) => tool.name === "show_image"), { name: "show_image", source: "pithagoras-media", package: null, inline: true });
+  assert.deepEqual(seen.find((tool) => tool.name === "edit_image"), { name: "edit_image", source: "pithagoras-media", package: null, inline: true });
   d.close();
+});
+
+test("the Media page's clips in a folder that is a link to one elsewhere are left for its extension, and the link stays", async () => {
+  const dir = path.join(home, "media-linked");
+  mkdirSync(dir, { recursive: true });
+  mediaOfV6(dir);
+  // videos/ is a link, relative, to a folder beside the data folder: moved as it is, it would lead nowhere.
+  const elsewhere = path.join(home, "media-linked-clips");
+  renameSync(path.join(dir, "videos"), elsewhere);
+  symlinkSync(path.relative(dir, elsewhere), path.join(dir, "videos"));
+  await upgraded(dir);
+
+  const clips = path.join(dir, "handoff", "media", "files", "videos");
+  assert.equal(lstatSync(clips).isDirectory(), true, "a folder, not a link");
+  assert.equal(readFileSync(path.join(clips, "bbbbbbbbbbb1.webm"), "utf8"), "the page's clip");
+  assert.equal(lstatSync(path.join(dir, "videos")).isSymbolicLink(), true);
+  assert.deepEqual(readdirSync(elsewhere), []);
 });
 
 test("what the Media page kept that cannot be left is kept for the next start, which leaves it", async () => {
