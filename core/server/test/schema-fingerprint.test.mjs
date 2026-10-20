@@ -473,10 +473,13 @@ test("an upgrade whose database rolled back after it left what the Media page ke
   mkdirSync(left, { recursive: true });
   const about = JSON.stringify({ format: 1, name: "media", schema: 7, made: "2026-10-19T08:00:00.000Z" });
   writeFileSync(path.join(left, "handoff.json"), about);
-  // And a tool of the same name an extension brought, which a chat reported since: it stays the extension's.
+  // And a tool of the same name an extension brought, under the very name the portal's was filed under (a loose
+  // extension file of that name), which a chat reported since as not inline: it stays the extension's. One the lists
+  // remember from before they said whether a tool is inline is the portal's.
   const before = new Database(path.join(dir, "portal.db"));
-  const theirs = { name: "generate_image", source: "my-images", package: "npm:my-images", inline: false };
-  before.prepare("UPDATE settings SET value = ? WHERE key = 'tools_seen'").run(JSON.stringify(SEEN.map((tool) => (tool.name === theirs.name ? theirs : tool))));
+  const theirs = { name: "generate_image", source: "image-generation", package: null, inline: false };
+  const unsaid = ({ inline, ...tool }) => tool;
+  before.prepare("UPDATE settings SET value = ? WHERE key = 'tools_seen'").run(JSON.stringify(SEEN.map((tool) => (tool.name === theirs.name ? theirs : tool.name === "edit_image" ? unsaid(tool) : tool))));
   before.close();
   await upgraded(dir);
 
@@ -489,6 +492,7 @@ test("an upgrade whose database rolled back after it left what the Media page ke
   const seen = JSON.parse(d.prepare("SELECT value FROM settings WHERE key = 'tools_seen'").get().value);
   assert.deepEqual(seen.find((tool) => tool.name === "generate_image"), theirs);
   assert.deepEqual(seen.find((tool) => tool.name === "show_image"), { name: "show_image", source: "pithagoras-media", package: null, inline: true });
+  assert.deepEqual(seen.find((tool) => tool.name === "edit_image"), { name: "edit_image", source: "pithagoras-media", package: null, inline: true });
   d.close();
 });
 
