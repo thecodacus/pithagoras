@@ -1,4 +1,4 @@
-import { cpSync, existsSync, mkdirSync, renameSync, rmSync } from "node:fs";
+import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, renameSync, rmSync } from "node:fs";
 import path from "node:path";
 import { DATA_DIR } from "./data-dir.js";
 
@@ -40,6 +40,34 @@ export function moveTo(from: string, to: string): void {
     renameSync(copy, to);
     rmSync(from, { recursive: true, force: true });
   }
+}
+
+/**
+ * The folder `from` put at `to`, where nothing is yet: by one rename where it can be. One that cannot be moved whole (a
+ * folder mounted on its own, or one on another file system than `to`), and a link to a folder elsewhere, which a
+ * rename would move as a link, stays where it is, a link with the folder it leads to; what is in it is moved, each by
+ * `moveTo`, into a folder beside `to` of a fixed name, which is put in place by one rename once all of it is there. A
+ * try that stopped half way leaves that folder, and the next goes on filling it, even where `from` could be moved
+ * whole by then (it is not mounted any more, say): what was moved before is in it.
+ */
+export function moveFolderTo(from: string, to: string): void {
+  const filling = path.join(path.dirname(to), `.${path.basename(to)}.partial`);
+  if (!existsSync(filling) && !lstatSync(from).isSymbolicLink()) {
+    try {
+      renameSync(from, to);
+      return;
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException).code;
+      if (code !== "EBUSY" && code !== "EXDEV") throw e;
+    }
+  }
+  mkdirSync(filling, { recursive: true, mode: 0o700 });
+  for (const name of readdirSync(from)) {
+    // Copied over by a try that stopped as it removed what it had copied: what is left of it goes.
+    if (existsSync(path.join(filling, name))) rmSync(path.join(from, name), { recursive: true, force: true });
+    else moveTo(path.join(from, name), path.join(filling, name));
+  }
+  renameSync(filling, to);
 }
 
 /**
