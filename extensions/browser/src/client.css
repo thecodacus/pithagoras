@@ -2,3 +2,10 @@
  * Browser's own stylesheet: what its parts need that the portal's Tailwind preset cannot say (the utilities it uses
  * are made after this, see build.mjs).
  */
+
+/* The browser's screen, switched on like an old tube: a line of light that opens into the picture. */
+.browser-power { animation: browser-power-on .75s cubic-bezier(.2, .9, .2, 1) backwards; }
+@keyframes browser-power-on { 0% { transform: scale(.4, .006); filter: brightness(4); } 30% { transform: scale(1, .006); filter: brightness(2.4); } 100% { transform: none; filter: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .browser-power { animation: none; }
+}

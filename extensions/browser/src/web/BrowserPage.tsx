@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
 import {
   LuCircleAlert,
   LuExternalLink,
@@ -9,12 +8,11 @@ import {
   LuRefreshCw,
   LuShieldCheck,
 } from "react-icons/lu";
-import { PageHeader } from "./PageHeader";
 import { BrowserInstall } from "./BrowserInstall";
-import { ErrorBanner, LoadFailed, SwitchRow } from "./SettingsUi";
-import { api, type BrowserStatus } from "../api";
-import { pollWhileVisible } from "../poll";
-import { labelOf, msg, t, tx } from "../i18n";
+import { api, type BrowserState } from "./api";
+import { publish } from "./state";
+import { pollWhileVisible } from "./poll";
+import { Link, msg, portal, t, tx } from "../portal";
 
 /** What kind of conversation allowed or refused the browser, as the portal names it. */
 const SESSION_KIND: Record<string, string> = {
@@ -24,6 +22,9 @@ const SESSION_KIND: Record<string, string> = {
   heartbeat: msg("heartbeat"),
 };
 
+/** Settings → Guard, where the sites every tool may reach are listed. */
+const GUARD = "/settings/guard";
+
 /**
  * The agent's browser.
  *
@@ -31,8 +32,10 @@ const SESSION_KIND: Record<string, string> = {
  * log into it once by hand through the link here; every run after that finds
  * the accounts already there, and no password ever reaches the model.
  */
-export function BrowserPage({ onOpenSession }: { onOpenSession: (id: string) => void }) {
-  const [status, setStatus] = useState<BrowserStatus | null>(null);
+export function BrowserPage() {
+  portal.locale.use();
+  const { ui } = portal;
+  const [status, setStatus] = useState<BrowserState | null>(null);
   // What a button was refused, kept until the next press; and what the poll could not read, which is only true
   // until the next poll that can. Two messages, so that a poll that works does not take back one nobody read yet.
   const [error, setError] = useState<string | null>(null);
@@ -52,10 +55,11 @@ export function BrowserPage({ onOpenSession }: { onOpenSession: (id: string) => 
 
   const load = () =>
     api
-      .browser()
+      .state()
       .then((s) => {
         setStatus(s);
         setLoadError(null);
+        publish(s);
       })
       .catch((e) => setLoadError((e as Error).message));
 
@@ -69,7 +73,7 @@ export function BrowserPage({ onOpenSession }: { onOpenSession: (id: string) => 
       <div className="h-full overflow-y-auto px-4 py-6">
         <div className="mx-auto w-full max-w-3xl">
           {loadError ? (
-            <LoadFailed error={loadError} onRetry={load} />
+            <ui.LoadFailed error={loadError} onRetry={load} />
           ) : (
             <p className="flex items-center gap-2 text-sm text-fg-subtle">
               <LuRefreshCw className="h-3.5 w-3.5 animate-spin" /> {t("Loading…")}
@@ -91,9 +95,9 @@ export function BrowserPage({ onOpenSession }: { onOpenSession: (id: string) => 
   // HTTPS port, which is a secure context on its own — if that port is open to
   // other machines, which it is not unless someone chose it. Pointing the
   // fallback at the proxy would have offered a link to the same dead end.
-  const proxyUrl = "/browser-ui/";
+  const proxyUrl = api.uiUrl();
   const guardLink = (
-    <Link to="/settings/guard" className="text-accent hover:underline">
+    <Link to={GUARD} className="text-accent hover:underline">
       {t("Settings → Guard")}
     </Link>
   );
@@ -107,14 +111,14 @@ export function BrowserPage({ onOpenSession }: { onOpenSession: (id: string) => 
     <div className="h-full overflow-y-auto px-4 py-6">
       <div className="mx-auto w-full max-w-3xl">
         {(error || loadError) && (
-          <ErrorBanner className="mb-4" onClose={error ? () => setError(null) : undefined}>
+          <ui.ErrorBanner className="mb-4" onClose={error ? () => setError(null) : undefined}>
             {error || loadError}
-          </ErrorBanner>
+          </ui.ErrorBanner>
         )}
 
         <InstallPanel status={status} reload={load} onError={(message) => setError(message || null)} />
 
-        <PageHeader
+        <ui.PageHeader
           icon={<LuGlobe />}
           title={t("Browser")}
           className="mb-5"
@@ -143,7 +147,7 @@ export function BrowserPage({ onOpenSession }: { onOpenSession: (id: string) => 
             )}
             {status.install.container === "running" && (
               <button
-                onClick={() => act(() => api.stopBrowser())}
+                onClick={() => act(() => api.stop())}
                 className="inline-flex items-center gap-1.5 rounded-lg bg-fg/5 px-3 py-1.5 text-xs text-fg-muted transition hover:bg-fg/10"
               >
                 {t("Stop")}
@@ -165,18 +169,18 @@ export function BrowserPage({ onOpenSession }: { onOpenSession: (id: string) => 
               </a>
             )}
           </div>
-        </PageHeader>
+        </ui.PageHeader>
 
         {/* Two failures that each look fine on their own: a browser nobody can
             drive, and tools pointing at a browser that is gone. */}
-        {status.running && !status.connectedAs && (
+        {status.running && !status.connected && (
           <div className="mb-5 flex items-start gap-2 rounded-xl border border-warn/30 bg-warn/10 p-3 text-xs text-fg-muted">
             <LuCircleAlert className="mt-0.5 h-4 w-4 shrink-0 text-warn" />
             <span className="flex-1">
-              {t("The browser is running but the agent has no way to reach it. Connecting gives the agent the portal's browser tools, which read only what is on screen and answer each action with what it changed.")}
+              {t("The browser is running but the agent has no way to reach it. Connecting gives the agent the browser tools, which read only what is on screen and answer each action with what it changed.")}
             </span>
             <button
-              onClick={() => act(() => api.connectBrowser())}
+              onClick={() => act(() => api.connect())}
               className="shrink-0 rounded-lg bg-accent/12 px-2.5 py-1 text-[11px] text-accent ring-1 ring-inset ring-accent/25 transition hover:bg-accent/20"
             >
               {t("Connect the agent")}
@@ -184,14 +188,14 @@ export function BrowserPage({ onOpenSession }: { onOpenSession: (id: string) => 
           </div>
         )}
 
-        {!status.running && status.connectedAs && (
+        {!status.running && status.connected && (
           <div className="mb-5 flex items-start gap-2 rounded-xl border border-warn/30 bg-warn/10 p-3 text-xs text-fg-muted">
             <LuCircleAlert className="mt-0.5 h-4 w-4 shrink-0 text-warn" />
             <span className="flex-1">
-              {tx("The agent still holds browser tools ({name}) for a browser that is not running. They will fail when it reaches for one.", { name: <span className="font-mono">{status.connectedAs}</span> })}
+              {t("The agent still holds the browser tools for a browser that is not running. They will fail when it reaches for one.")}
             </span>
             <button
-              onClick={() => act(() => api.disconnectBrowser())}
+              onClick={() => act(() => api.disconnect())}
               className="shrink-0 rounded-lg bg-fg/5 px-2.5 py-1 text-[11px] text-fg-muted transition hover:bg-fg/10"
             >
               {t("Disconnect")}
@@ -213,7 +217,9 @@ export function BrowserPage({ onOpenSession }: { onOpenSession: (id: string) => 
             <LuCircleAlert className="mt-0.5 h-4 w-4 shrink-0 text-danger" />
             <span>
               <strong className="text-danger">{t("This browser has no password.")}</strong>{" "}
-              {tx("Anyone who can reach it drives a browser signed into the agent's accounts. Set {name} in {file} and recreate the container.", { name: <span className="font-mono">BROWSER_PASSWORD</span>, file: <span className="font-mono">.env</span> })}
+              {status.install.mode === "external"
+                ? t("Anyone who can reach it drives a browser signed into the agent's accounts. Give it a password where it is run.")
+                : t("Anyone who can reach it drives a browser signed into the agent's accounts. Remove it and install it again with a password; the profile and its logins stay.")}
             </span>
           </div>
         )}
@@ -237,7 +243,7 @@ export function BrowserPage({ onOpenSession }: { onOpenSession: (id: string) => 
                 // The height lives on the wrapper so fullscreen can override
                 // it. On the iframe it stayed at 32rem and left the bottom of
                 // the screen black.
-                className="fx-power relative h-[32rem] overflow-hidden rounded-xl border border-line bg-black [&:fullscreen]:h-screen [&:fullscreen]:rounded-none [&:fullscreen]:border-0"
+                className="browser-power relative h-[32rem] overflow-hidden rounded-xl border border-line bg-black [&:fullscreen]:h-screen [&:fullscreen]:rounded-none [&:fullscreen]:border-0"
               >
                 <iframe
                   src={proxyUrl}
@@ -257,11 +263,11 @@ export function BrowserPage({ onOpenSession }: { onOpenSession: (id: string) => 
         )}
 
         <section className="mb-6">
-          <SwitchRow
+          <ui.SwitchRow
             title={t("Show the agent's cursor")}
             detail={t("Before each click, typed text or choice, an arrow glides to the element and says what it is about to do, so you can follow along. Off, the actions do not wait for it.")}
             on={status.cursor}
-            onChange={(on) => act(() => api.setBrowserCursor(on))}
+            onChange={(on) => act(() => api.setCursor(on))}
           />
         </section>
 
@@ -309,23 +315,23 @@ export function BrowserPage({ onOpenSession }: { onOpenSession: (id: string) => 
               </>
             )}
           </p>
-          {status.sessions.length === 0 && status.routines.length === 0 ? (
+          {status.chats.length === 0 && status.routines.length === 0 ? (
             <p className="rounded-xl border border-dashed border-line px-3 py-5 text-center text-xs text-fg-faint">
               {t("Nothing has said otherwise. A routine gets it on its own page.")}
             </p>
           ) : (
             <ul className="space-y-1">
-              {status.sessions.map((s) => (
+              {status.chats.map((s) => (
                 <li key={s.id}>
                   <button
-                    onClick={() => onOpenSession(s.id)}
+                    onClick={() => portal.navigate(`/s/${s.id}`)}
                     className="flex w-full items-center gap-2 rounded-xl border border-line bg-raised/40 px-3 py-2 text-left transition hover:bg-fg/5"
                   >
                     <span className="min-w-0 flex-1 truncate text-sm text-fg">{s.title}</span>
                     <span className="shrink-0 text-[11px] text-fg-faint">
                       {s.allowed ? t("on") : t("off")}
                     </span>
-                    <span className="shrink-0 text-[11px] text-fg-faint">{labelOf(SESSION_KIND, s.kind)}</span>
+                    <span className="shrink-0 text-[11px] text-fg-faint">{Object.hasOwn(SESSION_KIND, s.kind) ? t(SESSION_KIND[s.kind]) : s.kind}</span>
                   </button>
                 </li>
               ))}
@@ -335,6 +341,9 @@ export function BrowserPage({ onOpenSession }: { onOpenSession: (id: string) => 
                   className="flex items-center gap-2 rounded-xl border border-line bg-raised/40 px-3 py-2"
                 >
                   <span className="min-w-0 flex-1 truncate text-sm text-fg">{r.name}</span>
+                  <span className="shrink-0 text-[11px] text-fg-faint">
+                    {r.allowed ? t("on") : t("off")}
+                  </span>
                   <span className="shrink-0 text-[11px] text-fg-faint">{t("routine")}</span>
                 </li>
               ))}
@@ -342,11 +351,17 @@ export function BrowserPage({ onOpenSession }: { onOpenSession: (id: string) => 
           )}
         </section>
 
-        {/* Only for a browser that is supposed to be up: one that was stopped, never installed, or is the machine's own Chrome is not broken, and has no compose service to start. */}
-        {!status.running && (status.install.mode === "external" || (status.install.mode === "docker" && status.install.container === "running")) && (
+        {/* Only for a browser that is supposed to be up: one that was stopped, never installed, or is the machine's own Chrome is not broken. */}
+        {!status.running && status.install.mode === "docker" && status.install.container === "running" && (
           <p className="mt-4 flex items-start gap-2 rounded-xl border border-warn/30 bg-warn/10 p-3 text-xs text-fg-muted">
             <LuCircleAlert className="mt-0.5 h-4 w-4 shrink-0 text-warn" />
-            <span>{tx("The browser container is not answering. It is a separate service — {command} on the host that runs the portal.", { command: <span className="font-mono">docker compose up -d browser</span> })}</span>
+            <span>{t("The browser's container is running, but the browser in it is not answering. Stop it and start it again; what it wrote is in Settings → Docker.")}</span>
+          </p>
+        )}
+        {!status.running && status.install.mode === "external" && (
+          <p className="mt-4 flex items-start gap-2 rounded-xl border border-warn/30 bg-warn/10 p-3 text-xs text-fg-muted">
+            <LuCircleAlert className="mt-0.5 h-4 w-4 shrink-0 text-warn" />
+            <span>{t("The browser is not answering. It is run outside the portal, and is started where it is run.")}</span>
           </p>
         )}
       </div>
@@ -367,7 +382,7 @@ function InstallPanel({
   reload,
   onError,
 }: {
-  status: BrowserStatus;
+  status: BrowserState;
   reload: () => Promise<unknown>;
   onError: (message: string) => void;
 }) {

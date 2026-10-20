@@ -747,20 +747,6 @@ export const api = {
 
   people: () => json<{ people: Person[] }>("/api/people"),
   browser: () => json<BrowserStatus>("/api/browser"),
-  installBrowser: () => json<{ ok: true }>("/api/browser/install", { method: "POST" }),
-  startBrowser: () => json<{ ok: true }>("/api/browser/start", { method: "POST" }),
-  stopBrowser: () => json<{ ok: true }>("/api/browser/stop", { method: "POST" }),
-  removeBrowser: (forgetProfile = false) =>
-    json<{ ok: true }>(`/api/browser/install${forgetProfile ? "?profile=forget" : ""}`, {
-      method: "DELETE",
-    }),
-  setBrowserConfig: (patch: { user?: string; password?: string }) =>
-    json<{ user: string; hasPassword: boolean }>("/api/browser/config", {
-      method: "PUT",
-      body: JSON.stringify(patch),
-    }),
-  suggestBrowserPassword: () =>
-    json<{ password: string }>("/api/browser/suggest-password"),
   features: () => json<Features>("/api/features"),
   /** The subagent tool alone: nothing of Understory or Docker asked for. */
   subagentFeature: () => json<{ subagent: SubagentFeature }>("/api/features/subagent"),
@@ -823,10 +809,6 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(patch),
     }),
-  connectBrowser: () =>
-    json<{ connectedAs: string | null }>("/api/browser/connect", { method: "POST" }),
-  disconnectBrowser: () =>
-    json<{ connectedAs: string | null }>("/api/browser/connect", { method: "DELETE" }),
   sandbox: () => json<SandboxState>("/api/sandbox"),
   guard: () => json<GuardState>("/api/guard"),
   setGuardServer: (name: string, trusted: boolean) =>
@@ -841,8 +823,6 @@ export const api = {
     json<{ ok: true }>(`/api/guard/trusted/${encodeURIComponent(sessionId)}/${encodeURIComponent(id)}`, { method: "DELETE" }),
   setSandbox: (policy: SandboxPolicy) =>
     json<{ policy: SandboxPolicy; report: SandboxReport; chats: { reloaded: number; waiting: number } }>("/api/sandbox", { method: "PUT", body: JSON.stringify(policy) }),
-  setBrowserCursor: (on: boolean) =>
-    json<{ cursor: boolean }>("/api/browser/cursor", { method: "PUT", body: JSON.stringify({ on }) }),
 
   audit: (limit = 200) => json<{ entries: AuditEntry[] }>(`/api/audit?limit=${limit}`),
   /** Up to and including `through`, the newest entry the caller has seen. */
