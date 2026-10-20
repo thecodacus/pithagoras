@@ -28,11 +28,12 @@ test("one installed from npm is scanned again only when it is installed again", 
   assert.deepEqual(settingKeysOf(dir, true), ["first", "second"]);
 });
 
-test("a package that gives pi no extension reads none of pi's settings, whatever its own code calls settings", () => {
+test("a package that gives pi no extension reads none of pi's settings, whatever its own code calls settings", async () => {
   const dir = scratch("ext-");
   writeFileSync(path.join(dir, "server.js"), "const { seed, size } = settings; settings.model;");
   writeFileSync(path.join(dir, "package.json"), '{"name":"x","version":"1.0.0","pi":{}}');
   assert.deepEqual(settingKeysOf(dir, true), []);
+  await new Promise((r) => setTimeout(r, 20));
   writeFileSync(path.join(dir, "package.json"), '{"name":"x","version":"1.0.1","pi":{"extensions":["./server.js"]}}');
   assert.deepEqual(settingKeysOf(dir, true), ["model", "seed", "size"]);
 });
