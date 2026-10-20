@@ -6,7 +6,8 @@ import { placeOf } from "./board-view";
  * Dragging a card with the pointer, within its column and to another. A mouse or a pen drags once it has moved a few
  * pixels; a finger once it has been held still for a moment, so that a finger that moves at once scrolls the board as
  * it always does. While a card is dragged, the board is not scrolled by the touch, and is scrolled by the drag near
- * its edges.
+ * its edges. A board that snaps to its columns (the page on a phone) turns to the next column instead, once the
+ * pointer has stayed near its edge for a moment.
  *
  * Where it would go is found under the pointer: the column (`data-kb-column`) and, among that column's other cards
  * (`data-kb-card`), the first whose middle is below the pointer. Escape, or a drop outside the columns, puts it back.
@@ -36,6 +37,8 @@ const HOLD_MS = 300;
 /** How near an edge the pointer scrolls what holds the cards, and how fast at most. */
 const EDGE_PX = 48;
 const SPEED_PX = 14;
+/** How long the pointer stays near an edge of a board that snaps to its columns before it turns to the next. */
+const TURN_MS = 600;
 
 /**
  * Whether a finger is dragging a card now. A card says no to the browser's scrolling while it is (CardTile.tsx): the
@@ -55,6 +58,14 @@ function dropAt(x: number, y: number, card: string): DropAt | null {
     return y < box.top + box.height / 2;
   });
   return { column: column.dataset.kbColumn!, index: below === -1 ? others.length : below };
+}
+
+/** Which way `el` can scroll sideways towards an edge the pointer at `x` is near: -1 left, 1 right, 0 neither. */
+function edgeOf(el: HTMLElement, x: number): -1 | 0 | 1 {
+  const box = el.getBoundingClientRect();
+  if (x - box.left < EDGE_PX && el.scrollLeft > 0) return -1;
+  if (box.right - x < EDGE_PX && el.scrollLeft + el.clientWidth < el.scrollWidth) return 1;
+  return 0;
 }
 
 /** Scrolls `el` towards the edge the pointer is near, and says whether it did. */
@@ -104,6 +115,9 @@ export function useCardDrag({ board, onDrop, hold, scroller }: { board: Board | 
     let current: Dragging | null = null;
     let frame = 0;
     let timer = 0;
+    /** Whether what holds the columns snaps to them; since when the pointer has been near its edge (0: it is not). */
+    let snaps = false;
+    let near = 0;
 
     const set = (next: Dragging | null) => {
       current = next;
@@ -116,16 +130,38 @@ export function useCardDrag({ board, onDrop, hold, scroller }: { board: Board | 
       const box = el.getBoundingClientRect();
       const from = latest.current.board ? placeOf(latest.current.board, card) : null;
       set({ card, at: from, x: last.x, y: last.y, dx: last.x - box.left, dy: last.y - box.top, width: box.width });
+      const holder = latest.current.scroller();
+      snaps = !!holder && getComputedStyle(holder).scrollSnapType !== "none";
       document.documentElement.classList.add("kb-dragging");
       frame = requestAnimationFrame(scroll);
     };
-    // Near an edge, what holds the cards scrolls, and so does the column under the pointer; the place is found again.
+    // Near an edge, what holds the cards scrolls, and so does the column under the pointer.
     const scroll = () => {
       if (!current) return;
+      const holder = latest.current.scroller();
       const column = document.elementFromPoint(last.x, last.y)?.closest<HTMLElement>("[data-kb-column]")?.querySelector<HTMLElement>("[data-kb-cards]") ?? null;
-      const moved = nudge(latest.current.scroller(), last.x, last.y) || nudge(column, last.x, last.y);
-      if (moved) set({ ...current, at: dropAt(last.x, last.y, card.id) });
+      const moved = snaps ? turn(holder) : nudge(holder, last.x, last.y);
+      if (!moved) nudge(column, last.x, last.y);
       frame = requestAnimationFrame(scroll);
+    };
+    // Scrolled a little at a time, a board that snaps to its columns would snap back to the one it is on: it turns a
+    // whole column, and the browser puts it in place.
+    const turn = (holder: HTMLElement | null) => {
+      const way = holder && edgeOf(holder, last.x);
+      if (!holder || !way) {
+        near = 0;
+        return false;
+      }
+      const now = performance.now();
+      if (!near) near = now;
+      if (now - near < TURN_MS) return false;
+      near = now;
+      holder.scrollBy({ left: way * holder.clientWidth, behavior: "smooth" });
+      return true;
+    };
+    // What is under the pointer changes as anything under it scrolls: the place is found again.
+    const scrolled = () => {
+      if (current) set({ ...current, at: dropAt(last.x, last.y, card.id) });
     };
     const end = () => {
       window.clearTimeout(timer);
@@ -135,6 +171,7 @@ export function useCardDrag({ board, onDrop, hold, scroller }: { board: Board | 
       document.removeEventListener("pointercancel", end);
       document.removeEventListener("contextmenu", still);
       document.removeEventListener("keydown", key, true);
+      document.removeEventListener("scroll", scrolled, true);
       document.documentElement.classList.remove("kb-dragging");
       fingerHolding = false;
       live.current = null;
@@ -185,6 +222,7 @@ export function useCardDrag({ board, onDrop, hold, scroller }: { board: Board | 
     document.addEventListener("pointercancel", end);
     document.addEventListener("contextmenu", still);
     document.addEventListener("keydown", key, true);
+    document.addEventListener("scroll", scrolled, true);
     if (finger)
       timer = window.setTimeout(() => {
         armed = true;

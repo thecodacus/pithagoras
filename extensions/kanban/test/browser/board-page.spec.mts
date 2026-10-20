@@ -69,6 +69,25 @@ test('Boards is a page among the extensions\' in the sidebar, and keeps the boar
   await expect(page).toHaveURL(new RegExp(`board=${home.id}$`));
 });
 
+test('Back with a card open goes to the board before, and leaves the card behind', async ({ page }) => {
+  const release = await realisticBoard(server);
+  const home = await server.call('POST', '/boards', { name: 'Homelab' });
+  await page.goto(`/x/pithagoras-kanban/boards?board=${home.id}`);
+  await expect(page.getByRole('heading', { name: 'Homelab' })).toBeVisible();
+  await pick(page, 'Release 0.2');
+  await card(page, 'Kanban extension').locator('.kb-card-open').click();
+  await expect(page.getByRole('dialog', { name: 'Kanban extension' })).toBeVisible();
+  await page.goBack();
+  await expect(page.getByRole('heading', { name: 'Homelab' })).toBeVisible();
+  await expect(page.getByRole('region', { name: /^Column / })).toHaveCount(3);
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  // Forward: the board again, with nothing open on it.
+  await page.goForward();
+  await expect(page).toHaveURL(new RegExp(`board=${release.id}$`));
+  await expect(cardsOf(page, 'In progress')).toHaveText(['Fix the flaky login test', 'Kanban extension']);
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+});
+
 test('a board is made from the board\'s menu and opens, and with no board at all the page offers to make one', async ({ page }) => {
   await page.goto('/x/pithagoras-kanban/boards');
   await expect(page.getByText('No boards yet.')).toBeVisible();
@@ -278,6 +297,26 @@ test('the card\'s dialog edits every field, moves and archives the card, and sho
   await expect(cardsOf(page, 'Review')).toHaveText(['Faster prefill on llama.cpp', 'Fix the flaky login test for good']);
 });
 
+test('a card is deleted from its dialog after the portal\'s question, which names the card', async ({ page }) => {
+  const board = await realisticBoard(server);
+  await page.goto(`/x/pithagoras-kanban/boards?board=${board.id}`);
+  await card(page, 'Kanban extension').locator('.kb-card-open').click();
+  const dialog = page.getByRole('dialog', { name: 'Kanban extension' });
+  await dialog.getByRole('button', { name: 'Delete' }).click();
+  const question = page.getByRole('alertdialog');
+  await expect(question).toContainText('Delete the card “Kanban extension”?');
+  await question.getByRole('button', { name: 'Cancel' }).click();
+  await expect(question).toHaveCount(0);
+  await expect(dialog).toBeVisible();
+  expect(server.asked.some((a) => a.method === 'DELETE')).toBe(false);
+  await dialog.getByRole('button', { name: 'Delete' }).click();
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Delete' }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(cardsOf(page, 'In progress')).toHaveText(['Fix the flaky login test']);
+  const gone = board.cards.find((c: { title: string }) => c.title === 'Kanban extension');
+  expect(server.asked.filter((a) => a.method === 'DELETE').map((a) => a.path)).toEqual([`/boards/${board.id}/cards/${gone.id}`]);
+});
+
 test('a change an agent makes elsewhere shows by itself, and a dialog open meanwhile keeps what was typed in it', async ({ page }) => {
   const board = await realisticBoard(server);
   await page.goto(`/x/pithagoras-kanban/boards?board=${board.id}`);
@@ -375,6 +414,27 @@ test('columns are added, renamed, moved and deleted; one with cards asks where t
   expect(server.asked.filter((a) => a.method === 'DELETE').map((a) => a.path)).toEqual([expect.stringMatching(/\/columns\/col-\w+$/), `/boards/${board.id}/columns/${board.columns[0].id}?to=${board.columns[4].id}`]);
 });
 
+test('the dialog that deletes a column keeps to the board as it changes elsewhere', async ({ page }) => {
+  const board = await realisticBoard(server);
+  await page.goto(`/x/pithagoras-kanban/boards?board=${board.id}`);
+  await page.getByRole('button', { name: 'Actions for column Backlog' }).click();
+  await page.getByRole('menuitem', { name: 'Delete column' }).click();
+  await expect(page.getByRole('dialog', { name: 'Delete the column “Backlog”?' })).toContainText('It holds 2 cards');
+  // Meanwhile an agent adds a card to it, and it is renamed on another page.
+  await server.tools('chat-1').kanban_add_card.execute('1', { board: board.id, title: 'Added meanwhile', column: 'Backlog' });
+  await server.call('PATCH', `/boards/${board.id}/columns/${board.columns[0].id}`, { name: 'Someday' });
+  const dialog = page.getByRole('dialog', { name: 'Delete the column “Someday”?' });
+  await expect(dialog).toContainText('It holds 3 cards', { timeout: 10_000 });
+  // Its cards go to one of the other columns, never to itself.
+  await dialog.getByRole('combobox', { name: 'Move the cards to' }).click();
+  await expect(page.getByRole('option')).toHaveText(['To do', 'In progress', 'Review', 'Done']);
+  await page.getByRole('option', { name: 'Review' }).click();
+  await dialog.getByRole('button', { name: 'Move them and delete the column' }).click();
+  await expect(page.locator('.kb-column-name')).toHaveText(['To do', 'In progress', 'Review', 'Done']);
+  await expect(cardsOf(page, 'Review')).toHaveText(['Faster prefill on llama.cpp', 'Dark mode for the settings page', 'Export a board as Markdown', 'Added meanwhile']);
+  expect(server.asked.filter((a) => a.method === 'DELETE').map((a) => a.path)).toEqual([`/boards/${board.id}/columns/${board.columns[0].id}?to=${board.columns[3].id}`]);
+});
+
 test('on a phone the board is one column wide, and snaps from one column to the next', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   const board = await realisticBoard(server);
@@ -425,5 +485,37 @@ test.describe('with a finger', () => {
     await touch('touchEnd');
     await expect(cardsOf(page, 'In progress')).toHaveText(['Write the upgrade notes', 'Fix the flaky login test', 'Kanban extension']);
     expect(server.asked.filter((a) => a.path.endsWith('/move')).map((a) => a.body)).toEqual([{ column: board.columns[2].id, index: 0 }]);
+  });
+
+  test('on a phone a card held near the edge turns the board to the next column, and is let go there', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    const board = await realisticBoard(server);
+    const todo = board.columns[1].id;
+    await page.goto(`/x/pithagoras-kanban/boards?board=${board.id}`);
+    await expect(cardsOf(page, 'Backlog')).toHaveCount(2);
+    const cdp = await page.context().newCDPSession(page);
+    const touch = (type: 'touchStart' | 'touchMove' | 'touchEnd', x = 0, y = 0) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x, y }] });
+    const room = (await page.locator('.kb-columns').boundingBox())!;
+    const from = (await card(page, 'Export a board as Markdown').boundingBox())!;
+    const [x0, y0] = [from.x + 40, from.y + from.height / 2];
+    await touch('touchStart', x0, y0);
+    await page.waitForTimeout(450);
+    await expect(page.locator('.kb-ghost')).toBeVisible();
+    // Carried near the right edge and held there: the board turns to the next column, To do, under the finger.
+    const edge = room.x + room.width - 12;
+    for (let i = 1; i <= 6; i++) await touch('touchMove', x0 + ((edge - x0) * i) / 6, y0);
+    await page.waitForFunction((id) => !!document.querySelector(`[data-kb-column="${id}"] .kb-drop`), todo, { polling: 'raf', timeout: 5000 });
+    // Back from the edge, it stays on To do.
+    await touch('touchMove', room.x + room.width / 2, y0);
+    await page.waitForTimeout(800);
+    await expect(column(page, 'To do').locator('.kb-drop')).toHaveCount(1);
+    expect(await page.locator('.kb-columns').evaluate((el) => getComputedStyle(el).scrollSnapType)).toBe('x mandatory');
+    await touch('touchEnd');
+    await expect(cardsOf(page, 'To do')).toContainText(['Export a board as Markdown']);
+    await expect(cardsOf(page, 'Backlog')).toHaveText(['Dark mode for the settings page']);
+    expect(server.asked.filter((a) => a.path.endsWith('/move')).map((a) => a.body.column)).toEqual([todo]);
+    // To do fills the phone.
+    const shown = (await column(page, 'To do').boundingBox())!;
+    expect(Math.abs(shown.x - room.x)).toBeLessThanOrEqual(1);
   });
 });

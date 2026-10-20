@@ -95,7 +95,8 @@ html.kb-dragging, html.kb-dragging * { cursor: grabbing !important; user-select:
 .kb-call-row { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 13px; color: rgb(var(--fg)); }
 .kb-call-icon { display: grid; place-items: center; flex-shrink: 0; width: 22px; height: 22px; border-radius: 6px; background: rgb(var(--accent) / .12); color: rgb(var(--accent)); }
 .kb-call-icon svg { width: 13px; height: 13px; }
-.kb-call-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* What the call did is said whole, on as many lines as the chat's width needs. */
+.kb-call-text { min-width: 0; overflow-wrap: anywhere; }
 .kb-call-board { flex-shrink: 1; min-width: 0; max-width: 14rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: rgb(var(--fg-subtle)); }
 .kb-call-board::before { content: "· "; }
 .kb-call-id { flex-shrink: 0; margin-left: auto; font-size: 11px; color: rgb(var(--fg-faint)); }

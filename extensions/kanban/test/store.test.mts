@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { scratch } from "../../../tests/helpers.mts";
 import { KanbanStore } from "../src/server/store.ts";
@@ -240,6 +240,33 @@ test("a write that cannot be put in place changes nothing: not the file, not wha
   assert.equal(readFileSync(file, "utf8"), before);
   const { board } = await store.edit(made.id, (b, now) => addCard(b, { title: "Kept" }, store.cardId(), PERSON, now));
   assert.equal(board.version, 2);
+});
+
+test("an index that cannot be written leaves the boards listed as their files say, as the next start reads them", async () => {
+  const { dir, store } = open();
+  const kept = await store.createBoard({ name: "Kept" });
+  const gone = await store.createBoard({ name: "Gone" });
+  // The index's place is a folder with something in it: no file can be renamed over it.
+  rmSync(path.join(dir, "index.json"));
+  mkdirSync(path.join(dir, "index.json", "in-the-way"), { recursive: true });
+  // The board's file is removed, and the board is gone from the list with it.
+  await assert.rejects(store.deleteBoard(gone.id), { code: "EISDIR" });
+  assert.equal(existsSync(path.join(dir, "boards", `${gone.id}.json`)), false);
+  assert.deepEqual(store.list().boards.map((b) => b.name), ["Kept"]);
+  assert.throws(() => store.resolve("Gone"), { code: "missing" });
+  // A board whose file is written is listed, and its name is taken.
+  await assert.rejects(store.createBoard({ name: "Made" }), { code: "EISDIR" });
+  assert.deepEqual(store.list().boards.map((b) => b.name), ["Kept", "Made"]);
+  await assert.rejects(store.createBoard({ name: "made" }), { code: "conflict" });
+  // What a start reads.
+  const again = KanbanStore.open(dir);
+  assert.deepEqual(again.list().boards.map((b) => [b.id, b.name]), store.list().boards.map((b) => [b.id, b.name]));
+  assert.equal(again.list().boards[0].id, kept.id);
+  // With its place free again, the index is written as ever.
+  rmSync(path.join(dir, "index.json"), { recursive: true });
+  await store.renameBoard(kept.id, { name: "Still kept" });
+  await store.touch("chat-1", kept.id);
+  assert.deepEqual(JSON.parse(readFileSync(path.join(dir, "index.json"), "utf8")).boards, store.list().boards.map((b) => b.id));
 });
 
 test("writes asked for at once are made one after the other, each on the board the one before left", async () => {

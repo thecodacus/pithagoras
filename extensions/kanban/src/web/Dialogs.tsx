@@ -100,10 +100,14 @@ export function ArchivedCards({ board, onOpen, onRestore, onClose }: { board: Bo
   );
 }
 
-/** A column with cards is deleted once its cards have somewhere to go. Resolves true once it is gone. */
+/**
+ * A column with cards is deleted once its cards have somewhere to go. Resolves true once it is gone. `column` is the
+ * column as it was when the dialog opened: it is found in the board by its id, as the board keeps coming in.
+ */
 export function RemoveColumn({ board, column, onRemove, onClose }: { board: Board; column: Column; onRemove: (to: string) => Promise<boolean>; onClose: () => void }) {
   const { ui } = portal;
-  const others = board.columns.filter((c) => c !== column);
+  const others = board.columns.filter((c) => c.id !== column.id);
+  const name = board.columns.find((c) => c.id === column.id)?.name ?? column.name;
   const [to, setTo] = useState(others[0]?.id ?? "");
   const [busy, setBusy] = useState(false);
   const count = board.cards.filter((c) => c.column === column.id).length;
@@ -115,7 +119,7 @@ export function RemoveColumn({ board, column, onRemove, onClose }: { board: Boar
   };
   return (
     <ui.Modal
-      title={t("Delete the column “{name}”?", { name: column.name })}
+      title={t("Delete the column “{name}”?", { name })}
       onClose={onClose}
       footer={
         <div className="flex w-full justify-end gap-2">

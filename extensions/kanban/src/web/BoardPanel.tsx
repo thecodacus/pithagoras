@@ -11,7 +11,8 @@ import { BoardView } from "./Board";
  * on the one last opened on the Boards page, else on the first.
  *
  * Each kanban call of the chat that ends has the board asked for at once, so that the person sees the agent's work as
- * it goes; and, until the person chooses a board here, the panel follows the agent to the board it works on.
+ * it goes; and, until the person chooses a board here, the panel follows the agent to the board it works on. While a
+ * dialog is open or a card is held, it waits until that is done: neither is lost to another board.
  */
 
 /** Which board the panel shows, kept while it is open; `chosen` once the person chose it here, or a card asked for it. */
@@ -32,7 +33,9 @@ export function BoardPanel({ chat, panel }: PanelProps) {
   const params = panel.params as { board?: unknown } | undefined;
   const [touched, setTouched] = useState<string | null | undefined>(undefined);
   const call = portal.chats.use(chat.id, (feed) => lastCall(feed.items), (a, b) => a?.id === b?.id && a?.board === b?.board);
-  const first = useRef(call?.id);
+  /** The call the panel last went after, or the one there was as it opened. */
+  const followed = useRef(call?.id);
+  const [busy, setBusy] = useState(false);
 
   // A card asked for a board: each open is a new ask.
   useEffect(() => {
@@ -50,11 +53,12 @@ export function BoardPanel({ chat, panel }: PanelProps) {
     };
   }, [chat.id]);
 
-  // The agent worked on a board: shown, unless the person chose one here.
+  // The agent worked on a board: shown, unless the person chose one here; once the dialog or the drag is done.
   useEffect(() => {
-    if (!call || call.id === first.current) return;
+    if (!call || call.id === followed.current || busy) return;
+    followed.current = call.id;
     if (!shown.chosen && call.board && call.board !== shown.board) set({ board: call.board });
-  }, [call?.id]);
+  }, [call?.id, busy]);
 
   const asked = typeof params?.board === "string" ? params.board : undefined;
   const board = shown.board !== undefined ? shown.board : (asked ?? touched);
@@ -71,7 +75,10 @@ export function BoardPanel({ chat, panel }: PanelProps) {
           layout="panel"
           nudge={call?.id}
           onPick={(id, replace) => set({ board: id, chosen: shown.chosen || !replace })}
-          onBusy={(busy) => panel.keep(busy)}
+          onBusy={(now) => {
+            setBusy(now);
+            panel.keep(now);
+          }}
         />
       )}
     </div>

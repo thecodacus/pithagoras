@@ -70,6 +70,19 @@ test('a kanban call in the chat says what it did and on which board, and opens t
   await expect(page.locator('.chat-tool.is-error')).toHaveCount(1);
 });
 
+test('on a phone a kanban call\'s card says what it did whole', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const release = await realisticBoard(server);
+  const flaky = release.cards.find((c: { title: string }) => c.title === 'Fix the flaky login test');
+  await open(page);
+  await agent(page, 'kanban_move_card', { card: flaky.id, column: 'Review' });
+  const text = page.locator('.kb-call .kb-call-text');
+  await expect(text).toHaveText('Moved “Fix the flaky login test” from In progress to Review');
+  // Nothing of it is cut off: it goes on to another line.
+  expect(await text.evaluate((el) => el.scrollWidth <= el.clientWidth && el.getBoundingClientRect().right <= window.innerWidth)).toBe(true);
+  await expect(page.locator('.kb-call .kb-call-id')).toBeInViewport();
+});
+
 test('the panel\'s button in the chat\'s header opens it on the board this chat\'s agent worked on last, else on the one last opened on the page', async ({ page }) => {
   const release = await realisticBoard(server);
   const home = await server.call('POST', '/boards', { name: 'Homelab' });
@@ -139,8 +152,9 @@ test('the panel follows the agent: its calls show at once, and it goes to the bo
   await page.getByRole('button', { name: 'Board', exact: true }).click();
   await expect(cardsOf(page, 'Review')).toHaveText(['Faster prefill on llama.cpp']);
 
-  // A call that ends has the board asked for again at once, well before the next look.
+  // A call that ends has the board asked for again at once: it ends just after a look, and shows well before the next.
   const prefill = release.cards.find((c: { title: string }) => c.title === 'Faster prefill on llama.cpp');
+  await page.waitForRequest((r) => r.url().includes(`/boards/${release.id}?have=`));
   await agent(page, 'kanban_move_card', { card: prefill.id, column: 'Done', position: 1 });
   await expect(cardsOf(page, 'Done')).toHaveText(['Faster prefill on llama.cpp', 'Media is an extension', 'Docker settings page'], { timeout: 1500 });
 
@@ -161,4 +175,31 @@ test('the panel follows the agent: its calls show at once, and it goes to the bo
   await page.locator('.kb-call').last().getByRole('button', { name: 'Open the board' }).click();
   await expect(switcher(page)).toHaveText(/Release 0\.3/);
   await expect(cardsOf(page, 'To do')).toHaveText(['Plan 0.3']);
+});
+
+test('a card open in the panel stays open while the agent works on another board, and the panel goes there once it is closed', async ({ page }) => {
+  const release = await realisticBoard(server);
+  const home = await server.call('POST', '/boards', { name: 'Homelab' });
+  await server.tools('preview').kanban_board.execute('x', { board: release.id });
+  await open(page);
+  await page.getByRole('button', { name: 'Board', exact: true }).click();
+  await expect(switcher(page)).toHaveText(/Release 0\.2/);
+  await card(panels(page), 'Write the upgrade notes').locator('.kb-card-open').click();
+  const dialog = page.getByRole('dialog', { name: 'Write the upgrade notes' });
+  await dialog.getByLabel('Assignee').fill('Someone else');
+  const before = server.asked.length;
+  await agent(page, 'kanban_add_card', { board: home.id, title: 'Replace the fan' });
+  // The call is seen (the board shown is asked for at once), and the board it was on is not shown under the dialog.
+  await expect.poll(() => server.since(before)).toContain(`GET /boards/${release.id}`);
+  await page.waitForTimeout(1000);
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByLabel('Assignee')).toHaveValue('Someone else');
+  await expect(page.getByRole('dialog', { name: 'Card' })).toHaveCount(0);
+  await expect(switcher(page)).toHaveText(/Release 0\.2/);
+  expect(server.asked.some((a) => a.path.startsWith(`/boards/${home.id}`))).toBe(false);
+  // Closed, the panel goes to the board the agent worked on.
+  await dialog.getByRole('button', { name: 'Cancel' }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(switcher(page)).toHaveText(/Homelab/);
+  await expect(cardsOf(page, 'To do')).toHaveText(['Replace the fan']);
 });

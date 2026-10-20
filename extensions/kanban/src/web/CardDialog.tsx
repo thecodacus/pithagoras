@@ -127,7 +127,7 @@ export function CardDialog({
     if (await run(() => onNote(card, note))) setNote("");
   };
   const remove = async () => {
-    const yes = await ui.confirm({ title: t("Delete the card “{title}”?"), message: t("It is gone for good, with its activity. Archiving keeps it instead."), confirmLabel: t("Delete"), danger: true, deletes: true });
+    const yes = await ui.confirm({ title: t("Delete the card “{title}”?", { title: card.title }), message: t("It is gone for good, with its activity. Archiving keeps it instead."), confirmLabel: t("Delete"), danger: true, deletes: true });
     if (yes && (await run(() => onDelete(card)))) onClose();
   };
 

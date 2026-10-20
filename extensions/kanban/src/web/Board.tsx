@@ -32,7 +32,7 @@ export interface BoardViewProps {
   layout: "page" | "panel";
   /** Changes when something says the board changed (an agent's call ended): it is asked for at once. */
   nudge?: unknown;
-  /** Says whether a dialog is open, with something that would be lost if it went. */
+  /** Says whether a dialog is open or a card is held, with something that would be lost if it went. */
   onBusy?: (open: boolean) => void;
 }
 
@@ -58,6 +58,12 @@ export function BoardView({ board: wanted, fallback, onPick, layout, nudge, onBu
     if (next !== wanted) onPick(next, true);
   }, [list.list, wanted, shown.gone, fallback]);
 
+  // Another board: what was open on the one before is not on it.
+  useEffect(() => {
+    setCard(null);
+    setDialog(null);
+  }, [wanted]);
+
   // Asked for at once when told something changed; as it is drawn, it is being asked for already.
   const told = useRef(nudge);
   useEffect(() => {
@@ -66,8 +72,6 @@ export function BoardView({ board: wanted, fallback, onPick, layout, nudge, onBu
     void shown.refresh();
     void list.refresh();
   }, [nudge]);
-
-  useEffect(() => onBusy?.(card !== null || dialog !== null), [card, dialog]);
 
   // After a card was moved by the keyboard, the keyboard is on it in its new place.
   useEffect(() => {
@@ -104,6 +108,8 @@ export function BoardView({ board: wanted, fallback, onPick, layout, nudge, onBu
     }
   };
   const { dragging, grab } = useCardDrag({ board, hold: shown.hold, scroller: () => scroller.current, onDrop: (c, at) => void move(c, at.column, at.index) });
+  const held = dragging !== null;
+  useEffect(() => onBusy?.(card !== null || dialog !== null || held), [card, dialog, held]);
 
   const createBoard = async (name: string) => {
     try {

@@ -44,7 +44,9 @@ field for the next, <kbd>Escape</kbd> closes it.
 Drag a card to another place in its column or to another column. A line shows
 where it will go; let go there. With a mouse it moves as soon as you drag it;
 with a finger, hold it still for a moment first, since a finger that moves at
-once scrolls the board. Near an edge the board scrolls with the drag.
+once scrolls the board. Near an edge the board scrolls with the drag; on a
+phone, where it shows one column, hold the card near the edge and it turns to
+the next column.
 <kbd>Escape</kbd>, or letting go outside the columns, leaves it where it was.
 
 From the keyboard, each card's menu (the button on the card, **Actions for
@@ -96,9 +98,11 @@ and **Details**, the call as the portal shows any other.
 
 ## What agents can do
 
-Every chat has these tools, on by default and listed in Settings → Tools in the
-group `pithagoras-kanban`, where they can be switched off or made lazy like any
-other:
+With the host executor (pi runs in the portal's own process) each chat's agent
+has these tools, on by default and listed in Settings → Tools in the group
+`pithagoras-kanban`, where they can be switched off or made lazy like any
+other. With `EXECUTOR=container` the agent has none: the runner image does not
+get extensions.
 
 | | |
 | --- | --- |
@@ -116,7 +120,7 @@ and a card by its id. Ids are short, so that an agent can type them: `b-` for a
 board, `col-` for a column and `c-` for a card, then four letters and digits.
 A card's id names it on whichever board it is. What a tool answers is text an
 agent can act on, with the ids it needs next; a refusal says what is there
-instead ("There is no column "Later". Its columns: To do (col-…), …").
+instead (`The board "Release 0.2" has no column "Later". Its columns: To do (col-…), …`).
 
 What an agent does is in the card's activity as its chat's. Agents **cannot
 delete** a board, a column or a card: no tool does, and that is yours, on the

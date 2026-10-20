@@ -104,10 +104,13 @@ export class KanbanStore {
     return done;
   }
 
+  /**
+   * The index follows the boards' files as soon as they are written or removed, whether its own file is written after
+   * them or not: a start lists a board whose file the index does not name, and leaves out one it names that has none.
+   */
   private writeIndex(next: Index) {
-    return writeWhole(path.join(this.dir, "index.json"), JSON.stringify(next, null, 2)).then(() => {
-      this.index = next;
-    });
+    this.index = next;
+    return writeWhole(path.join(this.dir, "index.json"), JSON.stringify(next, null, 2));
   }
 
   private writeBoard(board: Board) {
