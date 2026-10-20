@@ -137,7 +137,7 @@ agent you would let run containers.
 Name it in your package.json, and ask for it in your server half:
 
 ```json
-"pithagoras": { "server": "./server.js", "requires": { "pithagoras-docker": "^0.1.0" } }
+"pithagoras": { "server": "./server.js", "requires": { "pithagoras-docker": "^1.0.0" } }
 ```
 
 ```js
@@ -160,7 +160,7 @@ What it gives (`extensions/docker/src/api.ts`, with its types):
 | --- | --- |
 | `available()` | Whether the portal reaches Docker now |
 | `images.present(image)`, `images.ensure(image, onProgress?)` | Whether an image is there; downloads it when it is not, telling `onProgress` how it goes. One download of an image at a time, whoever asks |
-| `containers.list()`, `containers.get(name)` | Your containers; a container by name, with `owner` saying whose it is |
+| `containers.list()`, `containers.get(name)` | Your containers; a container by name, with `owner` saying whose it is and `labels` the labels it was made with |
 | `containers.create(name, spec)` | Makes one, not started, from Docker's own create body (`Image`, `Env`, `Cmd`, `HostConfig`, …). One of yours by that name is removed first |
 | `containers.start`, `stop`, `remove`, `logs(name, { tail })` | Your container's life, and the end of what it wrote |
 | `containers.adopt(name)` | Takes over a container that carries no extension's name: one made before your app was an extension, so that what it kept is kept |
