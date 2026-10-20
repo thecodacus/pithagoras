@@ -105,7 +105,8 @@ import { peopleRouter } from "./api/people.js";
 import { voiceRouter } from "./api/voice.js";
 import { adoptPortalBrowser, browserRouter, pinConnection } from "./api/browser.js";
 import { BACKGROUND_SUPPORTED, MARKER, clearFinished, listJobs, readOutput, stopJob, stopJobsIn } from "./background.js";
-import { attachBrowserUpgrade, mountBrowserProxy } from "./browser-proxy.js";
+import { BROWSER_UI, browserUpgrade, mountBrowserProxy } from "./browser-proxy.js";
+import { attachUpgrades } from "./upgrades.js";
 import { watchBrowserFrames } from "./extensions/browser-frames.js";
 import { startLlamaProxy } from "./llama-progress.js";
 import { applyOnStart } from "./sandbox/apply.js";
@@ -1897,7 +1898,8 @@ const cannotListen = (e: Error) => {
 };
 server.once("error", cannotListen);
 server.once("listening", () => server.off("error", cannotListen));
-attachBrowserUpgrade(server);
+// Every WebSocket upgrade: an extension's under its routes, and the portal's own browser view under /browser-ui.
+attachUpgrades(server, { [BROWSER_UI]: browserUpgrade });
 // Keeps the agent's browser rendering when nobody has the panel open.
 watchBrowserFrames();
 // Reports how far llama.cpp has got through a prompt, which is otherwise a
