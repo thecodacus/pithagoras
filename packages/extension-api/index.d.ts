@@ -102,6 +102,13 @@ export interface ViewerPicture {
   from?: string;
 }
 
+/**
+ * How something goes, for `ui.useLeaveRef`: as a dialog does (the dimming lets go and what is in it sinks), a menu,
+ * a panel (out through the edge it is docked at, its `data-dock`), a deleted row, a message, a page, or something that
+ * no longer exists.
+ */
+export type Leave = "dialog" | "menu" | "panel" | "row" | "message" | "page" | "gone";
+
 /** A file a call gave the person, in the chat's folder: see ToolCallView.files. */
 export interface CallFile {
   /** Relative to the chat's folder. */
@@ -521,6 +528,14 @@ export interface Ui {
   useNow(on: boolean, every?: number): number;
   /** Arrow keys for a row of tabs: on the element with `role="tablist"`. */
   tabKeys(event: KeyboardEvent<HTMLElement>): void;
+  /**
+   * A hook: the ref for the one element a part draws (a viewer of its own over
+   * the page, say), so that when it goes, a picture of it leaves as the
+   * portal's own do, where the animations are on (Settings → This browser)
+   * and the system does not ask for less motion. `how` may be a function,
+   * asked as it goes, that says null for "not this time".
+   */
+  useLeaveRef<T extends HTMLElement>(how: Leave | (() => Leave | null)): (element: T | null) => void;
 }
 
 // --- shortcuts ---

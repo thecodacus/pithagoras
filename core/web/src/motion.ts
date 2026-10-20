@@ -226,6 +226,10 @@ export function picture(source: HTMLElement | null, clip?: HTMLElement | null): 
   frame.setAttribute("aria-hidden", "true");
   frame.setAttribute("data-ghost", "");
   frame.setAttribute("inert", "");
+  // A copy of what an extension drew is marked as the extension's too: its
+  // stylesheet reaches only what is inside an element marked with its name.
+  const extension = source.closest("[data-extension]")?.getAttribute("data-extension");
+  if (extension) frame.setAttribute("data-extension", extension);
   Object.assign(frame.style, {
     position: "fixed", left: `${bounds.left}px`, top: `${bounds.top}px`, width: `${bounds.width}px`, height: `${bounds.height}px`,
     overflow: clip ? "hidden" : "visible", pointerEvents: "none",

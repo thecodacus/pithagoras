@@ -661,6 +661,20 @@ test.describe('an extension with a page of pictures and a page in Settings', () 
     await expect(first).toHaveText('/x/test-album/album');
   });
 
+  test("a part of its own over the page goes as the portal's dialogs do, as a picture of itself that its stylesheet still reaches", async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem('animations', 'on'));
+    await album(page);
+    await page.goto('/x/test-album/album');
+    await page.getByRole('button', { name: 'Start the slideshow' }).click();
+    const show = page.getByRole('dialog', { name: 'Slideshow' });
+    await expect(show).toBeVisible();
+    // Nobody has seen it in less than this, and then nothing is made to leave (motion.ts).
+    await page.waitForTimeout(250);
+    await show.getByRole('button', { name: 'Close the slideshow' }).click();
+    await expect(show).toHaveCount(0);
+    await expect(page.locator('[data-ghost][data-extension="test-album"]')).toHaveCount(1);
+  });
+
   test("its pictures open in the portal's viewer, with a button of its own beside the viewer's, and the one shown last has the focus back", async ({ page }) => {
     await album(page);
     await page.goto('/x/test-album/album');

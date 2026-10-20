@@ -15,6 +15,7 @@ import {
 import { RowsSkeleton, SkeletonGroup } from "../components/Skeleton";
 import { StatusDot } from "../components/StatusDot";
 import { lazyComponent } from "../lazy";
+import { useLeaveRef } from "../motion";
 import { local, session } from "../safe-storage";
 import { tabKeys } from "../tab-keys";
 import { useFollowBottom } from "../use-follow-bottom";
@@ -99,6 +100,8 @@ export const ui: Ui = {
   useNow,
   /** Arrow keys for a row of tabs. */
   tabKeys,
+  /** The ref for the one element a part draws, which leaves as a picture of itself, as the portal's own parts do. */
+  useLeaveRef,
 };
 
 

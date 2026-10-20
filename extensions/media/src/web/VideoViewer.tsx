@@ -74,6 +74,7 @@ export function VideoViewer({
 
   const { iconButton } = portal.ui.classes;
   const dialog = useRef<HTMLDivElement>(null);
+  const leaving = portal.ui.useLeaveRef<HTMLDivElement>("dialog");
   const [failed, setFailed] = useState<string | null>(null);
   // The playable copies made while this is open, and the one being made now, or the reason one could not be.
   const [made, setMade] = useState<ReadonlySet<string>>(new Set());
@@ -184,7 +185,7 @@ export function VideoViewer({
 
   return createPortal(
     <div data-extension={portal.extension} style={{ display: "contents" }}>
-      <div className="ui-backdrop video-viewer fixed inset-0 z-[55] bg-canvas/95 backdrop-blur-md">
+      <div ref={leaving} className="ui-backdrop video-viewer fixed inset-0 z-[55] bg-canvas/95 backdrop-blur-md">
         <div ref={dialog} role="dialog" aria-modal="true" aria-label={t("Video viewer")} tabIndex={-1} onClick={closeOnBlank} className="flex h-full w-full flex-col outline-none">
           <header onClick={closeOnBlank} className="flex shrink-0 flex-wrap items-center justify-end gap-1 px-2 pb-1 pt-[max(0.5rem,env(safe-area-inset-top))] sm:px-3">
             {many && <span aria-hidden className="px-2 text-xs tabular-nums text-fg-muted">{index + 1} / {videos.length}</span>}
