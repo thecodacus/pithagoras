@@ -178,7 +178,7 @@ test("the worker leaves the live parts of the portal to the server", async () =>
   const sw = worker();
   assert.equal(await sw.get("/api/sessions"), undefined);
   assert.equal(await sw.get("/api/sessions/x/events", { mode: "navigate" }), undefined);
-  assert.equal(await sw.get("/browser-ui/", { mode: "navigate" }), undefined);
+  assert.equal(await sw.get("/api/x/pithagoras-browser/ui/", { mode: "navigate" }), undefined);
   assert.equal(await sw.get("/voice-assets/silero_vad_v5.onnx"), undefined);
   assert.equal(await sw.get("/assets/index-abc.js", { method: "POST" }), undefined);
   assert.equal(await sw.get("/assets/index-abc.js", { origin: "https://elsewhere.test" }), undefined);

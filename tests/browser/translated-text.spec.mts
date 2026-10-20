@@ -3,8 +3,8 @@ import { test, expect, mockPortal } from './portal-mock';
 import { DEFAULT_ORB } from '../../core/server/src/orb-style';
 
 /**
- * Words the page used to show as the code had them, whatever the language: a badge, a count with its noun, a kind, a
- * source, the example in an empty file.
+ * Words the page used to show as the code had them, whatever the language: a badge, a count with its noun, a source,
+ * the example in an empty file.
  */
 
 const session = { id: 'demo', title: 'A chat', workspace: '/workspaces/demo', status: 'idle', kind: 'task', pinned: false };
@@ -17,21 +17,6 @@ async function agentPage(page: Page) {
     if (p === '/api/agents') return { agents: [agent] };
     if (p === '/api/agent/sessions') return { sessions: [{ ...session, id: 's1', kind: 'agent', updated_at: new Date().toISOString(), channel_key: 'telegram:1', channel: null }], agentHome: '/a' };
     if (p === '/api/agents/home/setup') return { initialised: true, home: '/a', files: [{ name: 'WATCH.md', exists: false, content: '', mtime: 0 }] };
-  }, { settings: true });
-}
-
-/** The page that lists who may drive the browser: one chat that has said so, of the kind the portal names `task`. */
-async function browserPage(page: Page) {
-  await mockPortal(page, ({ path: p, method }) => {
-    if (p === '/api/browser' && method === 'GET') {
-      return {
-        running: true, unprotected: false, connectedAs: 'browser', version: '1', pages: [], uiPort: '3011', uiExposed: false, uiOutdated: false, cursor: true, configured: true, byDefault: false,
-        sessions: [{ id: 'demo', title: 'A chat', kind: 'task', allowed: true }, { id: 'beat', title: 'Its rounds', kind: 'heartbeat', allowed: false }, { id: 'new', title: 'From a newer portal', kind: 'future-kind', allowed: true }], routines: [],
-        install: { available: true, mode: 'docker', image: true, container: 'running', binary: null, pulling: { active: false, line: '' } },
-        config: { user: 'abc', hasPassword: true },
-      };
-    }
-    if (p === '/api/sessions') return { sessions: [session], executor: 'host' };
   }, { settings: true });
 }
 
@@ -72,13 +57,6 @@ test('the agent page counts its one chat in the singular, and shows the example 
   await expect(page.getByRole('textbox', { name: 'WATCH.md' })).toHaveAttribute('placeholder', /^# What to keep an eye on\n\n- The open pull requests/);
 });
 
-test('the browser page names the kind of chat in English, and one it does not know as it is', async ({ page }) => {
-  await browserPage(page);
-  await page.goto('/browser');
-  await expect(page.getByRole('button', { name: /A chat/ })).toContainText('task');
-  await expect(page.getByRole('button', { name: /From a newer portal/ })).toContainText('future-kind');
-});
-
 test.describe('in a browser set to German', () => {
   test.use({ locale: 'de-DE' });
 
@@ -95,15 +73,6 @@ test.describe('in a browser set to German', () => {
     await page.goto('/agents?agent=home&tab=files');
     await page.getByRole('button', { name: 'WATCH.md' }).click();
     await expect(page.getByRole('textbox', { name: 'WATCH.md' })).toHaveAttribute('placeholder', /^# Worauf du ein Auge haben sollst\n\n- Die offenen Pull Requests/);
-  });
-
-  test('the browser page names the kind of chat in German', async ({ page }) => {
-    await browserPage(page);
-    await page.goto('/browser');
-    await expect(page.getByRole('button', { name: /A chat/ })).toContainText('Aufgabe');
-    await expect(page.getByRole('button', { name: /Its rounds/ })).toContainText('Herzschlag');
-    // A kind the table does not know is shown as the portal sent it.
-    await expect(page.getByRole('button', { name: /From a newer portal/ })).toContainText('future-kind');
   });
 
   test('the list of commands says where each comes from, in German', async ({ page }) => {

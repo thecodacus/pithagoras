@@ -140,12 +140,12 @@ test('the sections of an agent and the add-ons take the arrow keys the same way'
 
   await page.goto('/settings/add-ons');
   const addons = page.getByRole('tablist', { name: 'Add-ons' });
-  const browser = addons.getByRole('tab').first();
-  await browser.focus();
+  const voice = addons.getByRole('tab').first();
+  await voice.focus();
   await page.keyboard.press('ArrowRight');
   await expect(addons.getByRole('tab').nth(1)).toBeFocused();
   await expect(addons.getByRole('tab').nth(1)).toHaveAttribute('aria-selected', 'true');
   await page.keyboard.press('Home');
-  await expect(browser).toBeFocused();
-  await expect(browser).toHaveAttribute('aria-selected', 'true');
+  await expect(voice).toBeFocused();
+  await expect(voice).toHaveAttribute('aria-selected', 'true');
 });

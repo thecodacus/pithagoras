@@ -1,4 +1,7 @@
-import { test, expect, mockPortal } from './portal-mock';
+import { test, expect } from '../../../../tests/browser/portal-mock';
+import { browserState, withBrowser } from './state';
+
+test.use({ installed: ['extensions/docker', 'extensions/browser'] });
 
 /**
  * What the Browser page offers when the portal is not on HTTPS and so cannot embed the browser. The direct link goes to the
@@ -8,16 +11,13 @@ import { test, expect, mockPortal } from './portal-mock';
 async function open(page: import('@playwright/test').Page, ui: { uiExposed: boolean; uiOutdated: boolean }) {
   // Plain HTTP as seen from another machine: the dev server is on localhost, which counts as secure.
   await page.addInitScript(() => Object.defineProperty(window, 'isSecureContext', { value: false }));
-  await mockPortal(page, ({ path, method }) => {
-    if (path === '/api/browser' && method === 'GET') {
-      return {
-        running: true, unprotected: false, connectedAs: 'built-in', version: 'Chrome/1', pages: [], uiPort: '3011', ...ui, cursor: true, configured: true, byDefault: true, sessions: [], routines: [],
-        install: { available: true, mode: 'docker', image: true, container: 'running', pulling: { active: false, line: '' } },
-        config: { user: 'abc', hasPassword: true },
-      };
-    }
-  }, { settings: true });
-  await page.goto('/browser');
+  await withBrowser(page, () =>
+    browserState({
+      running: true, connected: true, version: 'Chrome/1', ...ui,
+      install: { available: true, mode: 'docker', image: true, container: 'running', pulling: { active: false, line: '' } },
+    }),
+  );
+  await page.goto('/x/pithagoras-browser/browser');
   await expect(page.getByText('The portal is on plain HTTP')).toBeVisible();
 }
 

@@ -71,7 +71,6 @@ const scenes: Scene[] = [
   { name: 'routines', url: '/routines', shows: (page) => page.getByText('Morning').first() },
   { name: 'a routine', url: '/routines', open: (page) => page.getByRole('button', { name: /Morning/ }).first().click(), shows: field('Routine name') },
   { name: 'a new routine', url: '/routines', open: (page) => page.getByRole('button', { name: 'New routine' }).click(), shows: field('Schedule') },
-  { name: 'browser', url: '/browser', shows: (page) => page.getByRole('link', { name: 'Settings → Guard' }) },
   { name: 'the guard', url: '/settings/guard', shows: field("Sites the agent's tools may reach") },
 ];
 for (const { name, url, open, shows } of scenes) {

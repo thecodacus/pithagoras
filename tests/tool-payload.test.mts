@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import { toolArgsOf, toolNameOf } from '../core/web/src/tool-payload.js';
 import { describeCall } from '../core/web/src/tool-activity.js';
 import { latestFileActivity } from '../extensions/files/src/activity.ts';
-import { latestBrowserActivity } from '../core/web/src/voice-browser.js';
 import { latestCommand } from '../extensions/terminal/src/runs.ts';
 
 /** A tool event of pi's names the tool `toolName` or `name`, and its arguments `args`, `input` or `parameters`. */
@@ -39,10 +38,8 @@ test('every reader of a tool event reads each spelling alike', () => {
   for (const bash of spellings('bash', { command: 'ls' })) {
     assert.equal(latestCommand([{ seq: 5, type: 'tool_execution_start', payload: bash } as any]), 5, JSON.stringify(bash));
   }
-  // The browser behind the MCP adapter: the server it is asked for is in the arguments.
+  // A tool behind the MCP adapter: what the adapter was asked to call is what is told, not "mcp".
   for (const wrapped of spellings('mcp', { server: 'browser', tool: 'navigate', args: { url: 'https://example.com/a' } })) {
-    assert.equal(latestBrowserActivity([{ seq: 6, type: 'tool_execution_start', payload: wrapped } as any]), 6, JSON.stringify(wrapped));
-    // What the adapter was asked to call is what is told, not "mcp".
     assert.equal(describeCall(wrapped, folder).label, 'Using navigate', JSON.stringify(wrapped));
   }
 });

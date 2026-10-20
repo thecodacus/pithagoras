@@ -5,7 +5,9 @@
  * the portal ships, any of which can be removed.
  *
  *   chat.panel     "Viewer", the second of two beside the conversation, with the console's: black from edge to edge
- *                  (`bleed`), with a Fullscreen of its own in its head; `window.viewerPanel` is its handle, once drawn
+ *                  (`bleed`), filled by a frame of its own (named "viewer-pane") that takes no pointer, so that a press
+ *                  on it is the panel's, with a Fullscreen of its own in its head; `window.viewerPanel` is its handle,
+ *                  once drawn
  *   voice.window   "Viewer" in the middle, that can be maximized and is kept loaded while minimized, with a frame of
  *                  its own in which Escape restores it; `window.viewerLoads` counts the frame's loads. Its button in
  *                  the toolbar is as a spec says with `window.viewerButton({ hidden, live, title })`, and
@@ -80,7 +82,16 @@ export default function (portal) {
       React.useEffect(() => {
         window.viewerPanel = panel;
       }, [panel]);
-      return h("div", { className: "viewer-pane", style: { flex: 1, minHeight: 0, padding: 12, color: "#d1d8e3" } }, "In view.");
+      return h(
+        "div",
+        { className: "viewer-pane", style: { flex: 1, minHeight: 0, display: "flex" } },
+        h("iframe", {
+          name: "viewer-pane",
+          title: "What the viewer's panel shows",
+          srcDoc: "<body style='height:3000px;margin:0;padding:12px;background:#171a20;color:#d1d8e3;font:14px sans-serif'>In view.</body>",
+          style: { flex: 1, border: 0, pointerEvents: "none" },
+        }),
+      );
     },
     actions: ({ panel }) => h("button", { type: "button", onClick: () => panel.fullscreen(), className: "rounded px-1.5 py-0.5 text-[11px]" }, "Fullscreen"),
     useButton: () => ({ title: "What the viewer shows" }),
