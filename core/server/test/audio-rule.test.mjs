@@ -711,6 +711,29 @@ test("what a tool asks to be told in a spoken turn is in the voice rule while th
     const spoken = await say(client, "Spoken", true);
     assert.ok(spoken.includes(audioSystemRule(DEFAULT_VOICE_INSTRUCTIONS, line)), "in the rule of a spoken one");
     assert.ok(offered.at(-1).includes("board_write"));
+    // Switched off in the chat's menu: the line goes with the tool, at the next message, a typed one.
+    await client.setToolsOff(["board_write"]);
+    assert.ok(!(await say(client, "Typed, tool off")).includes(line));
+    assert.ok(!offered.at(-1).includes("board_write"));
+  } finally {
+    client.dispose();
+    globalThis.boardTool = false;
+  }
+});
+
+test("a lazy tool that the chat reaches through the tools tool is told of in a spoken turn, as one offered by its name is", async () => {
+  const line = "Write long things on the board, and say only a line about it.";
+  saveInstructions(undefined);
+  globalThis.boardTool = true;
+  const client = await open(undefined, { sessionId: "board-lazy-chat", toolsLazy: ["board_write"], lazySets: ["board"] });
+  try {
+    const spoken = await say(client, "Spoken", true);
+    assert.ok(!offered.at(-1).includes("board_write"), "not offered by its name");
+    assert.ok(offered.at(-1).includes("tools"), "but through the tools tool");
+    assert.ok(spoken.includes(audioSystemRule(DEFAULT_VOICE_INSTRUCTIONS, line)));
+    // Switched off, it is reached no way, and not told of.
+    await client.setToolsOff(["board_write"]);
+    assert.ok(!(await say(client, "Typed, tool off")).includes(line));
   } finally {
     client.dispose();
     globalThis.boardTool = false;

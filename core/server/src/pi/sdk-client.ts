@@ -650,18 +650,20 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       const tool = (session.getAllTools?.() ?? []).find((one: any) => one?.name === name);
       return tool !== undefined && adapterTool({ source: sourceLabel(tool.sourceInfo), package: packageOf(tool.sourceInfo) });
     };
+
+    const client = new SdkPiClient(session, modelRuntime, () => {});
+    switchedOff = () => client.switchedOff;
+    gateway.attach({ session: () => session, lazy: () => client.reachableLazy(), off: () => client.switchedOff });
+    // The lazy tools the chat reaches through the `tools` tool as well: the model can call those too, and a line that
+    // says how to use one is no less true for its being found that way.
     toolVoiceLines = () => {
       const lines = new Set<string>();
-      for (const name of session.getActiveToolNames()) {
+      for (const name of new Set([...session.getActiveToolNames(), ...client.reachableLazy()])) {
         const asked = (session.getToolDefinition(name) as { voiceGuidelines?: unknown } | undefined)?.voiceGuidelines;
         if (Array.isArray(asked)) for (const line of asked) if (typeof line === "string") lines.add(line);
       }
       return [...lines];
     };
-
-    const client = new SdkPiClient(session, modelRuntime, () => {});
-    switchedOff = () => client.switchedOff;
-    gateway.attach({ session: () => session, lazy: () => client.reachableLazy(), off: () => client.switchedOff });
     client.portalSessionId = opts.sessionId;
     client.dialogs = opts.dialogs !== false;
     client.rememberChatModel = opts.rememberChatModel;
