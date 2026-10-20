@@ -10,6 +10,9 @@ import type { Duplex } from "node:stream";
 import type { Request, Response, Router, json, raw, text } from "express";
 
 /** A chat, as an extension's server half is told of it. */
+/** What kind of session a chat is: one made in the portal (`task`), one reached through a channel (`agent`), a routine's run, or a heartbeat. */
+export type ChatKind = "task" | "agent" | "routine" | "heartbeat";
+
 export interface Chat {
   id: string;
   title: string;
@@ -262,6 +265,14 @@ export interface ServerPortal {
      * that are open.
      */
     offer(tools: () => { name: string; description?: string }[]): void;
+    /**
+     * Where these tools are not what the default says, as the portal works it out now: `byDefault`, whether a chat
+     * that has never said anything about them has any of them on; the chats that have them otherwise, by their own
+     * switches or by their agent's or project's (newest first); and the routines whose runs have them otherwise (by
+     * name). Each one listed is the opposite of `byDefault`. For a page that says who may use them, as the Browser
+     * page's "Who may drive it" does.
+     */
+    exceptions(names: string[]): { byDefault: boolean; chats: { id: string; title: string; kind: ChatKind }[]; routines: { slug: string; name: string }[] };
   };
   extensions: {
     /**

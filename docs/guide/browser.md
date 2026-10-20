@@ -240,6 +240,11 @@ the browser — a conversation with them all off is not offered them and does no
 reach the container. A routine has its own **Browser** switch on its own page,
 off by default.
 
+**Browser → Who may drive it** says what the default is, and lists the
+conversations and the routines that have it otherwise, each marked **on** or
+**off**: with the browser on by default, the routines whose switch keeps it off
+are listed, and with it off by default, those that have it.
+
 With a Playwright MCP server added by hand instead, which server is the browser
 comes from where it connects, not from what it is called: the one whose
 `--cdp-endpoint` points at this browser. The same switches then apply to its

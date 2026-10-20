@@ -2,10 +2,9 @@ import express, { type Router } from "express";
 import {
   agentTools,
   browserAllowlist,
-  browserByDefault,
   browserConfigured,
   browserCursorOn,
-  browserExceptions,
+  browserPolicy,
   getDb,
   getSession,
   knownTools,
@@ -23,6 +22,7 @@ import {
   setSessionTools,
   setToolDefaultsOff,
   toolDefaultsOff,
+  toolsDifferWith,
 } from "../db.js";
 import { EXECUTOR_KIND } from "../executor-kind.js";
 import { PORTAL_BROWSER_TOOLS, browserTool } from "../tool-policy.js";
@@ -205,14 +205,13 @@ export function browserRouter(): Router {
       // optional, and the portal works without it.
     }
 
-    // The conversations that disagree with the default, not every one that
-    // may drive it: the browser is on unless switched off, so "all of them"
-    // is the answer almost always and it tells nobody anything.
-    const sessions = browserExceptions();
-    const byDefault = browserByDefault();
-    const routines = getDb()
-      .prepare("SELECT slug, name FROM routines WHERE browser = 1")
-      .all() as { slug: string; name: string }[];
+    // The conversations and routines that disagree with the default, not every
+    // one that may drive it: the browser is on unless switched off, so "all of
+    // them" is the answer almost always and it tells nobody anything. As any
+    // tools' exceptions are worked out (portal.tools.exceptions), with the
+    // browser's own policy: where none of its tools has been seen, its old
+    // column still answers.
+    const { byDefault, chats: sessions, routines } = toolsDifferWith(browserPolicy());
 
     const ui = await service.uiState();
     res.json({
@@ -247,7 +246,7 @@ export function browserRouter(): Router {
         // They are the ones that differ from the default, so this is the other answer: not worked out again for each.
         allowed: !byDefault,
       })),
-      routines,
+      routines: routines.map((r) => ({ ...r, allowed: !byDefault })),
     });
   });
 

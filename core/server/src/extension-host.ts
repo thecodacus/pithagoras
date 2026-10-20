@@ -7,7 +7,7 @@ import semver from "semver";
 import express, { type NextFunction, type Request, type RequestHandler, type Response, type Router } from "express";
 import { agentOf, defaultAgent, listAgents } from "./agents.js";
 import { DATA_DIR } from "./data-dir.js";
-import { getSession, getSetting, listSessions, putSetting, sessionsByWorkspace, setServerHalfOffers, type SessionRow } from "./db.js";
+import { getSession, getSetting, listSessions, putSetting, sessionsByWorkspace, setServerHalfOffers, toolExceptions, type SessionRow } from "./db.js";
 import { EXECUTOR_KIND } from "./executor-kind.js";
 import type { ServerHalf } from "./extension-ui.js";
 import { asAgent, runAsAgent, sandboxEnv } from "./sandbox/exec.js";
@@ -321,6 +321,11 @@ function portalFor(ext: Running): ServerPortal {
       offer(names) {
         if (typeof names !== "function") throw new TypeError("offer takes a function: () => the tools offered now");
         ext.offers = names;
+      },
+      exceptions(names) {
+        if (!Array.isArray(names) || !names.every((name) => typeof name === "string")) throw new TypeError("exceptions takes a list of tool names");
+        const { byDefault, chats, routines } = toolExceptions(names);
+        return { byDefault, chats: chats.map(({ id, title, kind }) => ({ id, title, kind })), routines };
       },
     },
     extensions: {

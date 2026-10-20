@@ -749,6 +749,7 @@ restart the portal.
 | `chats.tell(chatId, data)` | To the package's own pi extension in a chat (`pithagoras:v1:ui:receive`) |
 | `chats.extend(factory)` | [Tools that share this module's state](#tools-that-share-the-server-half-s-state) |
 | `tools.offer(fn)`, `chats.reload()` | [Tools that follow the settings](#tools-that-follow-the-settings): which of them it offers now, and the open chats given the change |
+| `tools.exceptions(names)` | [Who has its tools](#who-has-its-tools): the chats and routines where those tools are not what the default says |
 | `chats.offers(chatId, tool)` | How the chat's model is offered a tool now: `"direct"`, `"lazy"` (through the `tools` tool) or nothing (switched off, out of reach, or the chat's pi not running here) |
 | `chats.hold(chatId)` | Keeps the chat's pi from being let go for being idle, or reloaded, while work goes on; returns what lets it go |
 | `sandbox.run(chatId, argv, options?)`, `sandbox.spawnAs(chatId)`, `sandbox.on()` | [Running things as the chat's agent](#running-things-as-the-chat-s-agent) |
@@ -1312,6 +1313,23 @@ Media's tools are built this way (`extensions/media/src/server/pi/tools.ts`):
 endpoint is set up, and `generate_video` and `show_video` while video
 generation is; a save of its settings that changes which there are, or the
 shape of `edit_image`, reloads the idle chats.
+
+#### Who has its tools
+
+A page that says who may use its tools asks the portal where they are not
+what the default says. `tools.exceptions(names)` answers for those tools, by
+name, as the switches have them now: `byDefault`, whether a chat that has
+never said anything about them has any of them on; `chats`, those that have
+them otherwise, by their own switches or by their agent's or project's, newest
+first, each `{ id, title, kind }`; and `routines`, those whose runs have them
+otherwise, by name, each `{ slug, name }`. Each one listed is the opposite of
+`byDefault`. The switches themselves stay in Settings → Tools and beside each
+chat's composer.
+
+```js
+portal.router.get("/who", (_req, res) => res.json(portal.tools.exceptions(["page_open", "page_read"])));
+// { byDefault: true, chats: [{ id: "a1", title: "Shopping", kind: "task" }], routines: [{ slug: "nightly", name: "Nightly" }] }
+```
 
 ### Files a tool gives
 

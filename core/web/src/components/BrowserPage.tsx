@@ -364,6 +364,7 @@ export function BrowserPage({ onOpenSession }: { onOpenSession: (id: string) => 
                   className="flex items-center gap-2 rounded-xl border border-line bg-raised/40 px-3 py-2"
                 >
                   <span className="min-w-0 flex-1 truncate text-sm text-fg">{r.name}</span>
+                  <span className="shrink-0 text-[11px] text-fg-faint">{r.allowed ? t("on") : t("off")}</span>
                   <span className="shrink-0 text-[11px] text-fg-faint">{t("routine")}</span>
                 </li>
               ))}
