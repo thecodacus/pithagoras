@@ -1,7 +1,7 @@
 import type { ViewerPicture } from "@pithagoras/extension-api";
 import type { GalleryPicture, PictureJob, PictureKind, PictureOrigin, PictureSettingsBody } from "./api";
 import { appendNew, mergeHead, sameList } from "./gallery-list";
-import { COMPRESSIBLE as COMPRESSIBLE_FORMATS, LIMITS, OUTPUT_FORMATS, type OutputFormat } from "./limits";
+import { COMPRESSIBLE as COMPRESSIBLE_FORMATS, LIMITS, OUTPUT_FORMATS, type OutputFormat } from "../server/image-settings";
 
 /**
  * What the Media page (MediaPage.tsx) works out for its pictures without a page:

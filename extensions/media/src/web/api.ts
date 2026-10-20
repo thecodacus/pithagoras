@@ -1,5 +1,5 @@
 import { isApiError, portal, t } from "../portal";
-import type { OutputFormat } from "./limits";
+import type { OutputFormat } from "../server/image-settings";
 
 /**
  * What the browser half asks of Media's server half: its own routes, under the

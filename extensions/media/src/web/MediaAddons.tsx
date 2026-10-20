@@ -3,7 +3,8 @@ import { LuRefreshCw, LuTriangleAlert } from "react-icons/lu";
 import { local, portal, t, tp, tx } from "../portal";
 import { api, type ImagesFeaturePatch, type VideosFeaturePatch } from "./api";
 import { mediaChanged } from "./changes";
-import { MAX_SIZE, TIMEOUT_SECONDS, VIDEO_LIMITS, VIDEO_TIMEOUT_SECONDS } from "./limits";
+import { MAX_SIZE, TIMEOUT_SECONDS } from "../server/image-settings";
+import { VIDEO_LIMITS, VIDEO_TIMEOUT_SECONDS } from "../server/video-settings";
 
 /**
  * The settings of the two endpoints, each a section of Media's page in Settings

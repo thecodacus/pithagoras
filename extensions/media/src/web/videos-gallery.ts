@@ -1,6 +1,6 @@
 import type { GalleryVideo, VideoJob, VideoKind, VideoOrigin, VideoRequest } from "./api";
 import { appendNew, mergeHead, sameList } from "./gallery-list";
-import { VIDEO_LIMITS } from "./limits";
+import { VIDEO_LIMITS } from "../server/video-settings";
 
 /**
  * What the Media page (MediaPage.tsx) works out for its videos without a page:

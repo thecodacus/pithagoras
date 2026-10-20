@@ -1,6 +1,6 @@
 import { portal } from "../portal";
 import type { GalleryPicture } from "./api";
-import { MAX_EDIT_PICTURES } from "./limits";
+import { MAX_EDIT_PICTURES } from "../server/image-settings";
 
 /**
  * The pictures an edit on the Media page works from, and how that list
