@@ -381,7 +381,7 @@ itself:
 | `keep(true)` | It is not the one closed to make room for a third: there is something in it that would be lost |
 | `guardClose(fn)` | Asked before it is closed by hand; it stays open if `fn` answers false. `null` to stop asking |
 | `open(name, params?)` | Opens another panel from this one, as `portal.panels.open` does, but this one is not the one closed to make room for it: Git opening a file it lists in Files |
-| `fullscreen()` | Shows the panel, its head and body, on the whole screen, where the browser lets a page, as the browser's Fullscreen does: the panel beside it stays where it is. Escape gives it its place back, and closed, it leaves the screen |
+| `fullscreen()` | Shows the panel, its head and body, on the whole screen, where the browser lets a page, as the browser's Fullscreen does: the panel beside it stays where it is. Escape gives it its place back, and closed, it leaves the screen. A browser allows it only for something the person did, a click, and only while the panel is open: otherwise nothing happens |
 
 ```js
 // A note being written would be lost.
@@ -478,9 +478,10 @@ behaves beside the portal's own windows:
 - `useAutoOpen(props)`: a hook, called while voice mode is on in a chat. It
   returns a count, and the window opens each time the count grows: the number
   of commands the agent ran, say, from `portal.chats.use`.
-- `useButton(props)`: a hook, called as the toolbar is drawn: how the window's
-  button is for this chat, as a panel's `useButton` says it in the chat's
-  header. `hidden` leaves the button out while the window is closed (no button
+- `useButton(props)`: a hook, called as the toolbar is drawn, while the window
+  is open too (it has no button then): how the window's button is for this
+  chat, as a panel's `useButton` says it in the chat's header. `hidden` leaves
+  the button out while the window is closed (no button
   until there is something to see: the browser's is there only while a browser
   runs), `live` puts a dot on it that says something in it is running, and
   `title` is what it says when pointed at. A hidden window still opens for

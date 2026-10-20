@@ -86,14 +86,16 @@ function BroughtWindow({ entry, main, open, opened, maximized, onClose, onMaximi
 }
 
 /**
- * The toolbar's button for a window an extension brought, while it is closed.
- * A part of its own, so that what the extension says of its button
+ * The toolbar's button for a window an extension brought, drawn while it is
+ * closed. A part of its own, so that what the extension says of its button
  * (`useButton`, a hook) is asked when something of it changes, not each time
- * the stage is drawn.
+ * the stage is drawn; and there while the window is open, as a panel's is in
+ * the chat's header, so that what the hook keeps is kept.
  */
-const WindowButton = memo(function WindowButton({ entry, onOpen, ...props }: ChatProps & { entry: Registered<"voice.window">; onOpen: (key: string) => void }) {
+const WindowButton = memo(function WindowButton({ entry, open, onOpen, ...props }: ChatProps & { entry: Registered<"voice.window">; open: boolean; onOpen: (key: string) => void }) {
   const button = entry.useButton?.(props) ?? {};
-  if (button.hidden) return null;
+  // Open, it is reached by its own head.
+  if (open || button.hidden) return null;
   return (
     <button type="button" aria-label={t("Show {panel}", { panel: titleOf(entry) })} title={button.title ?? titleOf(entry)} onClick={() => onOpen(entry.key)}>
       {entry.icon ? <entry.icon /> : <LuPuzzle />}
@@ -499,10 +501,10 @@ export function VoiceStage({ sessionId, folder, workPhase, title, phase, startin
         {!conversation && <button type="button" onClick={() => { setConversation(true); onCue("focus"); }} title={`${t("Conversation")}${hint("voice.conversation")}`} aria-label={t("Show the conversation")}><LuMessageSquareText /></button>}
         {pictures.length > 0 && !picturesShown && <button type="button" onClick={openPictures} title={`${t("Show pictures")}${hint("voice.pictures")}`} aria-label={t("Show pictures")}><LuImage /></button>}
         {(browserAvailable || loaded) && !shown && <button type="button" onClick={open} title={`${t("Show browser")}${hint("voice.browser")}`} aria-label={t("Show browser")}><LuGlobe /></button>}
-        {windowEntries.filter((entry) => !broughtOpen.includes(entry.key)).map((entry) => (
+        {windowEntries.map((entry) => (
           // Its button is its own to say about (hidden, live): one whose say fails is left out, and the toolbar stays.
           <ErrorBoundary key={entry.key} resetKey={`${entry.key}:${sessionId}`} fallback={() => null}>
-            <WindowButton key={sessionId} entry={entry} chat={chat} channel={channelFor(sessionId, entry.extension)} panels={panelsFor(entry.extension)} onOpen={openByPerson} />
+            <WindowButton key={sessionId} entry={entry} chat={chat} channel={channelFor(sessionId, entry.extension)} panels={panelsFor(entry.extension)} open={broughtOpen.includes(entry.key)} onOpen={openByPerson} />
           </ErrorBoundary>
         ))}
         <button ref={settingsToggle} type="button" data-voice-settings-toggle onClick={() => setSettings(v => !v)} title={`${t("Voice settings")}${hint("voice.settings")}`} aria-label={t("Voice settings")} aria-expanded={settings}><LuSlidersHorizontal /></button>

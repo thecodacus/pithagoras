@@ -5,10 +5,11 @@
  * the portal ships, any of which can be removed.
  *
  *   chat.panel     "Viewer", the second of two beside the conversation, with the console's: black from edge to edge
- *                  (`bleed`), with a Fullscreen of its own in its head
+ *                  (`bleed`), with a Fullscreen of its own in its head; `window.viewerPanel` is its handle, once drawn
  *   voice.window   "Viewer" in the middle, that can be maximized and is kept loaded while minimized, with a frame of
  *                  its own in which Escape restores it; `window.viewerLoads` counts the frame's loads. Its button in
- *                  the toolbar is as a spec says with `window.viewerButton({ hidden, live, title })`
+ *                  the toolbar is as a spec says with `window.viewerButton({ hidden, live, title })`, and
+ *                  `window.viewerButtonMounts` counts the times the hook that says so is mounted
  *   nav.page       "Viewer", listed while a spec says so with `window.viewerListed(true)`
  *
  * Plain JavaScript with the portal's React, as the Notes example is: nothing
@@ -36,6 +37,13 @@ export default function (portal) {
   window.viewerListed = listed.set;
   const button = told({});
   window.viewerButton = button.set;
+  window.viewerButtonMounts = 0;
+  const useButton = () => {
+    React.useEffect(() => {
+      window.viewerButtonMounts++;
+    }, []);
+    return button.use();
+  };
 
   window.viewerLoads = 0;
 
@@ -68,12 +76,17 @@ export default function (portal) {
     title: "Viewer",
     icon: Icon,
     bleed: true,
-    component: () => h("div", { className: "viewer-pane", style: { flex: 1, minHeight: 0, padding: 12, color: "#d1d8e3" } }, "In view."),
+    component: function Pane({ panel }) {
+      React.useEffect(() => {
+        window.viewerPanel = panel;
+      }, [panel]);
+      return h("div", { className: "viewer-pane", style: { flex: 1, minHeight: 0, padding: 12, color: "#d1d8e3" } }, "In view.");
+    },
     actions: ({ panel }) => h("button", { type: "button", onClick: () => panel.fullscreen(), className: "rounded px-1.5 py-0.5 text-[11px]" }, "Fullscreen"),
     useButton: () => ({ title: "What the viewer shows" }),
   });
 
-  portal.slots.register("voice.window", { id: "viewer", title: "Viewer", icon: Icon, place: "middle", maximizable: true, keepLoaded: true, useButton: button.use, component: Viewer });
+  portal.slots.register("voice.window", { id: "viewer", title: "Viewer", icon: Icon, place: "middle", maximizable: true, keepLoaded: true, useButton, component: Viewer });
 
   portal.slots.register("nav.page", { id: "viewer", title: "Viewer", icon: Icon, useShown: listed.use, component: () => h("p", null, "The viewer's page") });
 }

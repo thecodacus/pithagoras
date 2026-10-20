@@ -383,7 +383,11 @@ export function Chat({
           panelControl.current.open(name, opened);
         },
         // Its own box, as the browser's is: the panel beside it stays where it is, and closed, the box leaves the page, and fullscreen with it.
-        fullscreen: () => void boxes.box(`x:${key}`).requestFullscreen?.(),
+        // Not open, there is no box on the page to show; and a browser refuses it but for something the person did.
+        fullscreen: () => {
+          const box = boxes.box(`x:${key}`);
+          if (box.isConnected) box.requestFullscreen?.().catch(() => {});
+        },
       },
     };
     panelParts.current.set(key, now);

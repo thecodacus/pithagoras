@@ -560,6 +560,20 @@ test.describe('a window an extension lets be maximized', () => {
     await expect(show.locator('.header-live-dot')).toHaveCount(0);
   });
 
+  test('what says how its button is stays while the window is open, as a panel\'s does: what it keeps is kept', async ({ page }) => {
+    const viewer = viewerOf(page);
+    const mounts = () => page.evaluate(() => (window as any).viewerButtonMounts as number);
+    await expect(page.getByRole('button', { name: 'Show Viewer' })).toBeVisible();
+    const before = await mounts();
+    expect(before).toBeGreaterThan(0);
+    await page.getByRole('button', { name: 'Show Viewer' }).click();
+    await expect(viewer).toHaveClass(/is-open/);
+    await page.getByRole('button', { name: 'Minimize Viewer' }).click();
+    await expect(viewer).not.toHaveClass(/is-open/);
+    await expect(page.getByRole('button', { name: 'Show Viewer' })).toBeVisible();
+    expect(await mounts()).toBe(before);
+  });
+
   test('Escape in a frame of its own restores it, where the extension listens for it', async ({ page }) => {
     const viewer = viewerOf(page);
     await page.getByRole('button', { name: 'Show Viewer' }).click();

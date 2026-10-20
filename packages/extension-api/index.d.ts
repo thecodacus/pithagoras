@@ -55,7 +55,11 @@ export interface PanelHandle {
   guardClose(guard: (() => boolean | Promise<boolean>) | null): void;
   /** Opens another panel from this one (a file it lists, in Files): this one is not the one closed to make room for it. */
   open(name: string, params?: unknown): void;
-  /** Shows the panel, its head and its body, on the whole screen, where the browser lets a page: the panel beside it stays where it is. Closed, it leaves the screen. Escape gives it its place back. */
+  /**
+   * Shows the panel, its head and its body, on the whole screen, where the browser lets a page: the panel beside it
+   * stays where it is. Closed, it leaves the screen. Escape gives it its place back. Called from something the person
+   * did (a click), while the panel is open; otherwise nothing happens.
+   */
   fullscreen(): void;
 }
 
@@ -198,8 +202,9 @@ export interface SlotMap {
    * card of a call in voice mode that `opensFor` says yes to opens it when
    * tapped, for calls the portal's own windows are not for. Its own shortcut
    * is `portal.shortcuts`. `useButton` is a hook, called as voice mode's
-   * toolbar is drawn: how the window's button there is for this chat, as a
-   * panel's is in the chat's header.
+   * toolbar is drawn, while the window is open too (it has no button then):
+   * how the window's button there is for this chat, as a panel's is in the
+   * chat's header.
    *
    * `maximizable` gives its head a Maximize button: the window then fills the
    * stage, over the others and above the dock, until it is restored by its

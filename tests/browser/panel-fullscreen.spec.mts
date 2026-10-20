@@ -38,3 +38,16 @@ test('its own Fullscreen takes it alone to the whole screen, and closed, it take
   await expect.poll(() => page.evaluate(() => document.fullscreenElement)).toBeNull();
   await expect(page.getByRole('button', { name: 'Close Console' })).toBeVisible();
 });
+
+test('asked for while it is closed, nothing happens, and nothing fails', async ({ page }) => {
+  const failed: Error[] = [];
+  page.on('pageerror', (e) => failed.push(e));
+  await expect.poll(() => page.evaluate(() => !!(window as any).viewerPanel)).toBe(true);
+  await page.getByRole('button', { name: 'Close Viewer' }).click();
+  await expect(page.locator('.viewer-pane')).toHaveCount(0);
+  await page.evaluate(() => (window as any).viewerPanel.fullscreen());
+  // A rejection nobody caught is said a moment later.
+  await page.evaluate(() => new Promise((r) => setTimeout(r, 200)));
+  expect(await page.evaluate(() => document.fullscreenElement)).toBeNull();
+  expect(failed).toEqual([]);
+});
