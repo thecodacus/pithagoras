@@ -226,11 +226,11 @@ class RoutineSupervisor {
         // and no agent looks around while anything is working.
         if (!sessions.closing && getSession(fresh.id)?.status === "running") await endRun(fresh.id);
         // Looked at now: the job was started by the last call, a moment ago. A portal that is stopping lets every pi go.
-        if (sessions.closing || !(await sessions.holdsJobs(fresh.id, true))) await sessions.stop(fresh.id).catch(() => {});
+        if (sessions.closing || !(await sessions.holdsJobs(fresh.id, true))) {
+          await sessions.stop(fresh.id).catch(() => {});
+          sessions.finished(fresh.id);
+        }
       }
-      // The run is over either way: the server halves are told it is finished once its pi has stopped, now or when the
-      // idle reaper lets it go. A stop for being idle alone is not that.
-      if (fresh) sessions.finished(fresh.id);
       // A one-off has nothing left to do. Disabled rather than deleted, so the
       // result stays readable and it can be re-armed by giving it a new time.
       // Not one run by hand ahead of its moment: that was a try, and the

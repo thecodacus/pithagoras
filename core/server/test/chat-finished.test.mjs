@@ -5,10 +5,10 @@ import { mkdirSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { inProcessHome } from "./server-harness.mjs";
 
-// A server half is told a chat is finished when the run it was started for is over and its pi has stopped: a routine
-// run in a session of its own, now or, where the run left work going, when the idle reaper lets its pi go. Not when a
-// chat's pi is stopped for being idle, which starts again with the next message, and not for a routine run whose
-// session is kept for the next. A person who goes on with a finished run's chat starts its pi again.
+// A server half is told a chat is finished when the run it was started for is over and the portal stopped its pi for
+// good: a routine run in a session of its own. Not when a chat's pi is stopped for being idle, which starts again with
+// the next message, and not for a routine run whose session is kept for the next. A person who goes on with a finished
+// run's chat starts its pi again.
 const home = inProcessHome("pithagoras-chat-finished-");
 mkdirSync(path.join(home, "work"), { recursive: true });
 
@@ -86,24 +86,9 @@ async function run(fresh) {
 
 const of = (id) => heard().filter((line) => line.endsWith(` ${id}`));
 
-test("a routine run in a session of its own is finished once it is over, after its pi stopped", async () => {
+test("a routine run in a session of its own is finished once it is over and its pi stopped", async () => {
   const { id, heard: said } = await run(true);
   assert.deepEqual(said, [`started ${id}`, `stopped ${id}`, `finished ${id}`]);
-});
-
-test("a run that left work going is finished when the idle reaper lets its pi go", async () => {
-  const background = sessions.backgroundWork;
-  sessions.backgroundWork = () => true;
-  let ran;
-  try {
-    ran = await run(true);
-  } finally {
-    sessions.backgroundWork = background;
-  }
-  assert.deepEqual(ran.heard, [`started ${ran.id}`], "its pi is kept for the work");
-  heard().length = 0;
-  await sessions.reapIdle(0, Date.now() + 60_000);
-  assert.deepEqual(of(ran.id), [`stopped ${ran.id}`, `finished ${ran.id}`]);
 });
 
 test("a person who goes on with a finished run's chat starts its pi again, and it is a chat like any other then", async () => {
