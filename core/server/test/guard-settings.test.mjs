@@ -18,7 +18,6 @@ writeFileSync(
 const { default: express } = await import("express");
 const { guardRouter } = await import("../dist/api/guard.js");
 const { routinesRouter } = await import("../dist/api/routines.js");
-const { browserRouter } = await import("../dist/api/browser.js");
 const { GUARD_RULES, guardExtension, trustFlagged } = await import("../dist/pi/guard.js");
 const { GUARD_RULE_NAMES } = await import("../dist/pi/guard-rule-names.js");
 const { addGrant, browserAllowlist, createSession, getDb, getSetting, listAudit, routineExemptions, trustedResults, useGrant } = await import("../dist/db.js");
@@ -33,7 +32,6 @@ async function withApi(fn) {
   app.use(express.json());
   app.use("/api", guardRouter());
   app.use("/api", routinesRouter());
-  app.use("/api", browserRouter());
   const server = app.listen(0, "127.0.0.1");
   await new Promise((r) => server.once("listening", r));
   const base = `http://127.0.0.1:${server.address().port}/api`;
@@ -92,7 +90,7 @@ test("the guard's state for the page, and the MCP servers counted as the person'
   });
 });
 
-test("where a tool that drives a browser may go is the guard's: one list, read and written here, and still where the Browser page wrote it", async () => {
+test("the sites the agent's tools may reach are the guard's: one list, read and written here", async () => {
   await withApi(async (call) => {
     assert.equal((await call("GET", "/guard")).body.allowlist, "", "none: no restriction");
     const saved = await call("PUT", "/guard/allowlist", { domains: "  *.example.com\ngithub.com  " });
@@ -102,9 +100,6 @@ test("where a tool that drives a browser may go is the guard's: one list, read a
     assert.deepEqual(browserAllowlist(), ["*.example.com", "github.com"]);
     for (const wrong of [undefined, ["github.com"], 3]) assert.deepEqual(await call("PUT", "/guard/allowlist", { domains: wrong }), { status: 400, body: { error: "domains required" } });
     assert.equal(getSetting("browser_allowlist"), "*.example.com\ngithub.com", "a refused list changes nothing");
-    // The Browser page's own way to it writes the same list, until it goes.
-    assert.deepEqual((await call("PUT", "/browser/allowlist", { domains: "docs.test" })).body, { allowlist: "docs.test" });
-    assert.equal((await call("GET", "/guard")).body.allowlist, "docs.test");
     assert.deepEqual((await call("PUT", "/guard/allowlist", { domains: "" })).body, { allowlist: "" });
     assert.deepEqual(browserAllowlist(), []);
   });

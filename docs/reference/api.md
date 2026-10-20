@@ -272,7 +272,6 @@ See [Models and providers](/guide/models).
 | `DELETE /api/browser/install` | Remove it; `?profile=forget` drops the logins too |
 | `POST /api/browser/connect` · `DELETE /api/browser/connect` | Give the agent the browser's tools, or take them away |
 | `PUT /api/browser/config` · `GET /api/browser/suggest-password` | The login of the browser view; a suggestion |
-| `PUT /api/browser/allowlist` | Domains it may be pointed at; empty means no restriction. Settings → Guard writes the same list with `PUT /api/guard/allowlist` (`{ domains }`), and `GET /api/guard` has it as `allowlist` |
 | `PUT /api/sessions/:id/browser` | Whether this chat may use it |
 
 See [The agent's browser](/guide/browser).
@@ -541,6 +540,13 @@ Each agent has a home folder of its own, with its own `SOUL.md`,
 | `GET /api/tool-rules` | List standing tool permissions. |
 | `POST /api/tool-rules` | Add a role/tool/pattern rule. The role is `colleague`, `guest`, `heartbeat` (an agent looking around on its own) or `all`. A rule for `subagent`, `routine_create`, `routine_update` or `routine_run` is refused (400) for every role but `heartbeat`: they would run what the person writes with the primary user's rights. |
 | `DELETE /api/tool-rules/:id` | Remove a rule. |
+
+## Guard
+
+| Route | Purpose |
+| --- | --- |
+| `GET /api/guard` | What Settings → Guard shows, with `allowlist`: the sites the agent's tools may reach, one domain per line, `*.example.com` for its subdomains. Empty means any site. |
+| `PUT /api/guard/allowlist` | `{ domains }` — that list, as text. Answers `{ allowlist }` as it is kept; 400 when `domains` is not text. |
 
 ## MCP servers
 
