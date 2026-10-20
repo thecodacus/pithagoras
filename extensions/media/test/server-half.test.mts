@@ -1,22 +1,32 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { randomBytes } from 'node:crypto';
 import { EventEmitter, once } from 'node:events';
-import { realpathSync } from 'node:fs';
+import { chmodSync, closeSync, existsSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type AddressInfo } from 'node:net';
+import path from 'node:path';
 import express from 'express';
+import sharp from 'sharp';
 import media from '../src/server.ts';
+import { addPagePicture, openListedThumb } from '../src/server/image-gallery.ts';
 import { getDb } from '../src/server/store.ts';
+import { addPageVideo, openListedCopy, openListedPoster } from '../src/server/video-gallery.ts';
+import { forgetPosterProbe } from '../src/server/video-posters.ts';
 import { folderFiles } from '../../../core/server/src/folder-files.ts';
 import { scratch } from '../../../tests/helpers.mts';
+import { WEBM } from './video-fixtures.mts';
+
+/** A clip as a server may finish one that a browser does not play: an AVI, which is a RIFF file with the AVI tag. */
+const AVI = Buffer.concat([Buffer.from('RIFF'), Buffer.from([0x24, 0, 0, 0]), Buffer.from('AVI LIST'), Buffer.alloc(40)]);
 
 /**
  * Media's server half as the portal starts it, over a stand-in for the portal: the tools it offers and registers as
  * the settings change, the routes of its settings, what it does when a chat or a folder goes, and a stop that ends
- * its jobs and closes its store, after which it starts again.
+ * its jobs and what it was making, and closes its store, after which it starts again.
  */
 
-/** The portal a start is given, its routes served at `base`. */
-async function start(data: string) {
+/** The portal a start is given, its routes served at `base`; what the half logs goes to `logged`. */
+async function start(data: string, logged: string[] = []) {
   const life = new EventEmitter();
   const removed: ((folder: string) => void)[] = [];
   const factories: ((pi: any, chat: any) => void)[] = [];
@@ -25,7 +35,7 @@ async function start(data: string) {
   const router = express.Router();
   const stop = media({
     extension: 'pithagoras-media',
-    log: () => {},
+    log: (line: string) => void logged.push(line),
     dataDir: () => data,
     handoffs: { take: () => undefined, done: () => {} },
     tools: { offer: (fn: typeof offered) => void (offered = fn) },
@@ -166,5 +176,84 @@ test('a stop ends the jobs that are running and closes the store, and a start af
     }
   } finally {
     endpoint.close();
+  }
+});
+
+/**
+ * A stand-in for ffmpeg that says what it is run for (`look` at a clip, a `poster`, or a playable `copy`) in `runs`, and
+ * then makes a poster or a copy only once the file `hold` is gone, saying `done` when it gets that far.
+ */
+function heldFfmpeg(dir: string, frame: Buffer) {
+  const at = (name: string) => JSON.stringify(path.join(dir, name));
+  writeFileSync(path.join(dir, 'frame.png'), frame);
+  writeFileSync(path.join(dir, 'out.webm'), WEBM);
+  writeFileSync(path.join(dir, 'hold'), '');
+  const script = path.join(dir, 'ffmpeg');
+  writeFileSync(
+    script,
+    `#!/bin/sh\nif [ "$1" = "-version" ]; then echo fake; exit 0; fi\n` +
+      `case "$*" in *" -frames:v 1 "*) what=poster;; *" -f webm "*) what=copy;; *) what=look;; esac\n` +
+      `echo "$what" >> ${at('runs')}\ncat > /dev/null\n` +
+      `if [ $what = look ]; then echo "  Stream #0:0: Video: ffv1, yuv420p, 640x360, 5 fps" >&2; exit 1; fi\n` +
+      `while [ -e ${at('hold')} ]; do sleep 0.02; done\necho "done $what" >> ${at('runs')}\n` +
+      `if [ $what = poster ]; then cat ${at('frame.png')}; else for last; do :; done; cat ${at('out.webm')} > "$last"; fi\n`,
+  );
+  chmodSync(script, 0o755);
+  const runs = () => (existsSync(path.join(dir, 'runs')) ? readFileSync(path.join(dir, 'runs'), 'utf8').trim().split('\n') : []);
+  return { script, runs, release: () => rmSync(path.join(dir, 'hold'), { force: true }) };
+}
+
+test('a stop gives up the small copies, posters and playable copies being made and those waiting their turn, and a start after it makes them again', async () => {
+  const data = realpathSync(scratch('media-half-'));
+  const frame = await sharp({ create: { width: 64, height: 48, channels: 3, background: '#336699' } }).png().toBuffer();
+  const ffmpeg = heldFfmpeg(realpathSync(scratch('media-ffmpeg-')), frame);
+  process.env.FFMPEG_PATH = ffmpeg.script;
+  forgetPosterProbe();
+  const logged: string[] = [];
+  const files = (folder: string) => (existsSync(path.join(data, folder)) ? readdirSync(path.join(data, folder)) : []);
+  const close = (opened: { fd: number } | undefined) => opened && closeSync(opened.fd);
+  // Each start is stopped at the end, whatever went wrong.
+  const halves: Awaited<ReturnType<typeof start>>[] = [];
+  try {
+    const first = await start(data, logged);
+    halves.push(first);
+    // Three of each: clips a browser plays, which get posters; clips it does not, which get playable copies; large pictures, which get small copies.
+    const clips = [1, 2, 3].map((n) => addPageVideo({ bytes: WEBM, ext: 'webm', kind: 'generated', prompt: `clip ${n}`, params: {} }).id);
+    const avis = [1, 2, 3].map((n) => addPageVideo({ bytes: AVI, ext: 'avi', kind: 'generated', prompt: `avi ${n}`, params: {} }).id);
+    const noise = () => sharp(randomBytes(200 * 200 * 3), { raw: { width: 200, height: 200, channels: 3 } }).png().toBuffer();
+    const pictures = await Promise.all([1, 2, 3].map(async (n) => addPagePicture({ bytes: await noise(), ext: 'png', kind: 'uploaded', prompt: `picture ${n}`, params: {} }).id));
+
+    // Two posters are being made and the third waits its turn; one copy is being made and two wait theirs.
+    const posters = clips.map((id) => openListedPoster(id));
+    const copies = avis.map((id) => openListedCopy(id, true));
+    while (ffmpeg.runs().filter((run) => run === 'poster' || run === 'copy').length < 3) await new Promise((resolve) => setTimeout(resolve, 10));
+    const before = ffmpeg.runs();
+    assert.deepEqual(before.toSorted(), ['copy', 'look', 'poster', 'poster']);
+    // Two small copies are being made and the third waits its turn, as Media stops and starts again.
+    const thumbs = pictures.map((id) => openListedThumb(id));
+    const stopped = halves.shift()!.stop();
+    halves.push(await start(data, logged));
+    await stopped;
+    ffmpeg.release();
+
+    for (const opened of await Promise.all([...posters, ...copies])) assert.equal(opened, undefined, 'none was made');
+    for (const opened of await Promise.all(thumbs)) close(opened);
+    assert.deepEqual(ffmpeg.runs(), before, 'what ran was killed, and what waited never ran');
+    assert.deepEqual([files('video-posters'), files('video-copies')], [[], []]);
+    assert.equal(files('image-thumbs').some((name) => name.startsWith(`${pictures[2]}-`)), false, 'the small copy that waited was not made');
+    assert.deepEqual(logged, [], 'what was given up is no failure');
+
+    close(await openListedPoster(clips[2]));
+    close(await openListedCopy(avis[0], true));
+    close(await openListedThumb(pictures[2]));
+    assert.equal(files('video-posters').filter((name) => name.startsWith(`${clips[2]}-`)).length, 1);
+    assert.equal(files('video-copies').filter((name) => name.startsWith(`${avis[0]}-`)).length, 1);
+    assert.equal(files('image-thumbs').filter((name) => name.startsWith(`${pictures[2]}-`)).length, 1);
+    assert.deepEqual(ffmpeg.runs().slice(before.length).toSorted(), ['copy', 'done copy', 'done poster', 'look', 'poster']);
+  } finally {
+    ffmpeg.release();
+    for (const half of halves) await half.stop();
+    delete process.env.FFMPEG_PATH;
+    forgetPosterProbe();
   }
 });

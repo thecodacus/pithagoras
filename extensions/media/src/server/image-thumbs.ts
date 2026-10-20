@@ -1,7 +1,7 @@
 import { closeSync, fstatSync, mkdirSync, readSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import sharp from "sharp";
-import { portal } from "./host";
+import { portal, stopSignal } from "./host";
 import { openPicture } from "./picture-files";
 import { baseDir } from "./within";
 
@@ -102,7 +102,10 @@ function readWhole(fd: number, size: number): Buffer {
 function make(fd: number, size: number, modifiedMs: number, id: string, name: string, listed: () => boolean): Promise<boolean> {
   const wip = making.get(name);
   if (wip) return wip;
+  const stopped = stopSignal();
   const job = turn(async () => {
+    // Media stopped while it waited its turn: not made.
+    if (stopped.aborted) return false;
     try {
       const bytes = readWhole(fd, size);
       const now = fstatSync(fd);
@@ -119,7 +122,8 @@ function make(fd: number, size: number, modifiedMs: number, id: string, name: st
       for (const old of readdirSync(thumbsDir())) if (old !== name && old.startsWith(`${id}-`)) rmSync(path.join(thumbsDir(), old), { force: true });
       return true;
     } catch (e) {
-      portal().log(`images: small copy failed: ${(e as Error).message}`);
+      // Media stopped meanwhile, and closed the gallery it asks: no failure of the copy's.
+      if (!stopped.aborted) portal().log(`images: small copy failed: ${(e as Error).message}`);
       return false;
     }
   }).finally(() => making.delete(name));

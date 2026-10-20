@@ -4,7 +4,7 @@ import { once } from "node:events";
 import path from "node:path";
 import { promisify } from "node:util";
 import sharp from "sharp";
-import { portal } from "./host";
+import { portal, stopSignal } from "./host";
 import { keepCopy } from "./image-thumbs";
 import { openPicture } from "./picture-files";
 import { baseDir } from "./within";
@@ -132,10 +132,10 @@ export async function feed(fd: number, size: number, into: NodeJS.WritableStream
   into.end();
 }
 
-/** The first frame of the open clip, as a PNG, from ffmpeg. */
-function firstFrame(fd: number, size: number): Promise<Buffer> {
+/** The first frame of the open clip, as a PNG, from ffmpeg, which is killed when `stopped` is aborted. */
+function firstFrame(fd: number, size: number, stopped: AbortSignal): Promise<Buffer> {
   return new Promise((resolve, reject) => {
-    const child = spawn(tool(), ["-v", "error", "-protocol_whitelist", "pipe", "-i", "pipe:0", "-frames:v", "1", "-f", "image2pipe", "-vcodec", "png", "pipe:1"], { stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawn(tool(), ["-v", "error", "-protocol_whitelist", "pipe", "-i", "pipe:0", "-frames:v", "1", "-f", "image2pipe", "-vcodec", "png", "pipe:1"], { stdio: ["pipe", "pipe", "pipe"], signal: stopped, killSignal: "SIGKILL" });
     const out: Buffer[] = [];
     let total = 0;
     let errors = "";
@@ -169,9 +169,12 @@ function firstFrame(fd: number, size: number): Promise<Buffer> {
 function make(fd: number, size: number, modifiedMs: number, id: string, name: string, listed: () => boolean): Promise<boolean> {
   const wip = making.get(name);
   if (wip) return wip;
+  const stopped = stopSignal();
   const job = turn(async () => {
+    // Media stopped while it waited its turn: not made.
+    if (stopped.aborted) return false;
     try {
-      const frame = await firstFrame(fd, size);
+      const frame = await firstFrame(fd, size, stopped);
       const now = fstatSync(fd);
       if (now.size !== size || now.mtimeMs !== modifiedMs) return false;
       const copy = await sharp(frame, { failOn: "error" }).resize({ width: POSTER_SIDE, height: POSTER_SIDE, fit: "inside", withoutEnlargement: true }).webp({ quality: 82 }).toBuffer();
@@ -183,6 +186,8 @@ function make(fd: number, size: number, modifiedMs: number, id: string, name: st
       for (const old of readdirSync(postersDir())) if (old !== name && old.startsWith(`${id}-`)) rmSync(path.join(postersDir(), old), { force: true });
       return true;
     } catch (e) {
+      // Media stopped meanwhile, which killed ffmpeg: no failure of the clip's.
+      if (stopped.aborted) return false;
       portal().log(`videos: poster failed: ${(e as Error).message}`);
       if (e instanceof NoFrame) {
         if (failed.size >= MAX_FAILED) failed.clear();

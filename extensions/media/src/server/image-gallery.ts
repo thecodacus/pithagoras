@@ -155,7 +155,19 @@ function shown(row: Row): GalleryPicture {
   };
 }
 
-const rowOf = (id: string): Row | undefined => getDb().prepare("SELECT * FROM images WHERE id = ?").get(id) as Row | undefined;
+const rowById = (id: string): Row | undefined => getDb().prepare("SELECT * FROM images WHERE id = ?").get(id) as Row | undefined;
+
+/**
+ * A picture of the list by its id. One of a chat that was deleted while Media was not running, which it was not
+ * told of, is kept as a picture of its folder first, as the look from the top keeps it (see pruneMissing): what is
+ * opened or deleted before that look is the picture of the folder it is in.
+ */
+function rowOf(id: string): Row | undefined {
+  const row = rowById(id);
+  if (!row?.session_id || portal().chats.get(row.session_id)) return row;
+  keepChatPictures(row.session_id);
+  return rowById(id);
+}
 
 const WHAT = "picture";
 /** Where the page's own pictures are, and where the agent's tools put theirs: how a row's file is found (see media-folders.ts). */
@@ -623,8 +635,10 @@ export function readListed(id: string): { bytes: Buffer; picture: GalleryPicture
  * file may well be in it, so this says so and leaves the picture in the list.
  */
 export async function deletePicture(id: string): Promise<void> {
+  if (!rowById(id)) throw new FileError("missing", "There is no such picture");
   const row = rowOf(id);
-  if (!row) throw new FileError("missing", "There is no such picture");
+  // Its chat went while Media was not told, with no folder to keep it in: it went from the list, and nothing is left of it to delete.
+  if (!row) return;
   const missing = (e: unknown) => refusalOf(e) === "missing";
   let at: { base: string; rel: string } | undefined;
   try {

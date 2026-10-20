@@ -1,13 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, readdirSync, realpathSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, readdirSync, realpathSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { setPortal } from '../src/server/host.ts';
-import { forgetPicturesIn, keepChatPictures, listPictures, recordChatPicture } from '../src/server/image-gallery.ts';
+import { deletePicture, forgetPicturesIn, keepChatPictures, listPictures, openListed, recordChatPicture } from '../src/server/image-gallery.ts';
 import { closeStore, getDb, openStore } from '../src/server/store.ts';
-import { forgetVideosIn, keepChatVideos, recordChatVideo } from '../src/server/video-gallery.ts';
+import { deleteVideo, forgetVideosIn, keepChatVideos, listVideos, openListedVideo, recordChatVideo } from '../src/server/video-gallery.ts';
 import { folderFiles } from '../../../core/server/src/folder-files.ts';
 import { scratch } from '../../../tests/helpers.mts';
+import { WEBM } from './video-fixtures.mts';
 
 /**
  * What becomes of the pictures and clips of a chat that goes, and of a folder the portal deletes: a chat's stay as
@@ -124,6 +125,56 @@ test('the pictures of a chat that went while Media did not hear of it are kept a
     chats.delete('c');
     const kept = listPictures().pictures.find((p) => p.id === id)!;
     assert.deepEqual([kept.origin, kept.chat, kept.folder, kept.prompt], ['folder', null, { name: path.basename(project), home: false }, 'made a.png']);
+  } finally {
+    closeStore();
+  }
+});
+
+test('the clips of a chat that went while Media did not hear of it are kept as its folder\'s when the gallery is looked at', () => {
+  const { project, chats } = media();
+  try {
+    writeFileSync(path.join(project, 'generated-videos', 'v.webm'), WEBM);
+    recordChatVideo({ sessionId: 'c', path: 'generated-videos/v.webm', kind: 'generated', prompt: 'waves', params: {}, bytes: WEBM.length });
+    const id = idOf(videos(), 'v.webm');
+    chats.delete('c');
+    const kept = listVideos().videos.find((v) => v.id === id)!;
+    assert.deepEqual([kept.origin, kept.chat, kept.folder, kept.prompt], ['folder', null, { name: path.basename(project), home: false }, 'waves']);
+  } finally {
+    closeStore();
+  }
+});
+
+test('a picture or clip of a chat that went while Media did not hear of it is its folder\'s before it is opened or deleted, as before the gallery is looked at', async () => {
+  const { project, chats } = media();
+  try {
+    picture('c', 'a.png');
+    picture('c', 'lost.png');
+    for (const name of ['v.webm', 'w.webm']) {
+      writeFileSync(path.join(project, 'generated-videos', name), WEBM);
+      recordChatVideo({ sessionId: 'c', path: `generated-videos/${name}`, kind: 'generated', prompt: `made ${name}`, params: {}, bytes: WEBM.length });
+    }
+    chats.delete('c');
+
+    // Opened: sent from its folder, and still what it was asked for.
+    const pictureId = idOf(images(), 'a.png');
+    closeSync(openListed(pictureId).fd);
+    assert.deepEqual(images().find((row) => row.id === pictureId), { id: pictureId, origin: 'folder', session_id: null, folder: project, path: 'generated-images/a.png', prompt: 'made a.png', source_id: null, chat_folder: null });
+    const clipId = idOf(videos(), 'v.webm');
+    closeSync(openListedVideo(clipId).fd);
+    assert.deepEqual(videos().find((row) => row.id === clipId), { id: clipId, origin: 'folder', session_id: null, folder: project, path: 'generated-videos/v.webm', chat_folder: null });
+
+    // Deleted: its file goes from the folder, so that it is not found there again.
+    await deletePicture(idOf(images(), 'lost.png'));
+    assert.equal(existsSync(path.join(project, 'generated-images', 'lost.png')), false);
+    await deleteVideo(idOf(videos(), 'w.webm'));
+    assert.equal(existsSync(path.join(project, 'generated-videos', 'w.webm')), false);
+    assert.deepEqual([images().map((row) => row.path), videos().map((row) => row.path)], [['generated-images/a.png'], ['generated-videos/v.webm']]);
+
+    // One with no folder to be kept in goes from the list, and a delete of it is done: nothing is left of it to remove.
+    getDb().prepare("INSERT INTO videos (id, origin, session_id, path, kind, created_at) VALUES ('000000000001', 'chat', 'b', 'generated-videos/lost.webm', 'generated', 1)").run();
+    chats.delete('b');
+    await deleteVideo('000000000001');
+    assert.deepEqual(videos().map((row) => row.path), ['generated-videos/v.webm']);
   } finally {
     closeStore();
   }

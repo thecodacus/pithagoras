@@ -69,8 +69,8 @@ export const api = {
     try {
       return (await call<{ picture: GalleryPicture }>(`/images/upload?name=${encodeURIComponent(file.name)}`, { method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: file })).picture;
     } catch (e) {
-      // The server's words when it has any; otherwise which file, and why.
-      if (isApiError(e) && typeof e.body.error !== "string") throw new portal.api.ApiError(t("Could not upload {name} ({status})", { name: file.name, status: e.status }), e.status, e.body);
+      // The server's words when it has any; otherwise which file, and why. A portal that cannot be reached answered nothing, and says so itself.
+      if (isApiError(e) && e.status !== 0 && typeof e.body.error !== "string") throw new portal.api.ApiError(t("Could not upload {name} ({status})", { name: file.name, status: e.status }), e.status, e.body);
       throw e;
     }
   },

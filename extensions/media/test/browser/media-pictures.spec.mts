@@ -1950,6 +1950,19 @@ test('a file that is no picture is said so by name, and the pictures with it are
   await expect(maker(page).getByRole('alert')).toContainText('notes.pdf is not a PNG, JPEG, GIF or WebP picture');
 });
 
+test('an upload the portal answers without words is said by name and status, and one that cannot reach the portal says that', async ({ page }) => {
+  const p = await portal(page, { images: feature({ editMultiple: true }) });
+  await page.goto('/x/pithagoras-media/media');
+  await toEdit(page);
+  await page.route('**/api/x/pithagoras-media/images/upload*', (route) => route.fulfill({ status: 500, body: '' }));
+  await page.getByLabel('Upload a picture').setInputFiles([png('a.png')]);
+  await expect(maker(page).getByRole('alert')).toHaveText('Could not upload a.png (500)');
+  await page.route('**/api/x/pithagoras-media/images/upload*', (route) => route.abort('internetdisconnected'));
+  await page.getByLabel('Upload a picture').setInputFiles([png('b.png')]);
+  await expect(maker(page).getByRole('alert')).toHaveText('Cannot reach the portal');
+  expect(p.state.uploads).toEqual([]);
+});
+
 test('where only generation is set up a drop or a paste does nothing, and the browser does not open the file', async ({ page }) => {
   const p = await portal(page, { images: feature({ editEnabled: false, editReady: false }) });
   await page.goto('/x/pithagoras-media/media');
