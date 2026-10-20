@@ -30,20 +30,30 @@ the block itself and everything after it would read as trusted again. Anything
 already shaped like a marker is defaced before wrapping, so a forged one never
 reaches the model to be reasoned about.
 
-The browser's tools read a page after nearly every click, so their results carry
-a shorter envelope: the same random closing id, with the warning above said once
-in the agent's instructions instead of on every result. Every browser tool carries
-that warning, so it is said while any of them is on, whichever of the others are
-switched off, and by the `tools` tool while they are lazy. Which tools those are
-is said by each tool: one that drives a browser declares it (`drivesBrowser`, as
-the portal's own browser tools do and an [extension's](/guide/extension-ui#tools-that-share-the-server-half-s-state)
-may), and is then held to the browser's rules whatever it is called: the
-allowlist in **Settings → Guard**, the conversation's switches, and a record in
-Audit of each address. A Playwright MCP server's tools say nothing of
-themselves, and are told by their names.
+A tool that declares that what it returns is outside content carries a shorter
+envelope: the same random closing id, with the warning above said once in the
+agent's instructions instead of on every result. The browser's tools declare it,
+as they read a page after nearly every click. The portal says the warning while
+any such tool is on, whichever of the others are switched off, and through the
+`tools` tool while they are lazy.
+
+What a tool declares is in `guard` on its definition, which a tool of the portal
+or of an [extension](/guide/extension-ui#what-the-guard-holds-a-tool-to) may
+have: `outside`, that what it returns is outside content; `reaches`, the
+parameters that hold an address the agent chose, each of which is held to the
+list of sites in **Settings → Guard** (empty is any site) and recorded in Audit;
+`acts`, the rules [below](#limiting-what-happens-next) that every call of it is
+the shape of; and `files`, the files a call works on. A tool that declares
+nothing is trusted as the extension that registered it is: what it returns is
+not wrapped, and no rule below is about it. An MCP server's tools declare
+nothing: what they return is wrapped unless the server is counted as your own,
+and one named like a browser's (`browser_navigate`, `playwright_browser_click`)
+is held to the browser's rules by its name: the conversation's switches for the
+browser, the list of sites for its `url`, and Audit.
 
 What is wrapped: mail and the web read through a command (`curl`, `wget`, `ssh`,
-`git clone` and the like), the tools of an MCP server, and the browser. A
+`git clone` and the like), the tools of an MCP server, the browser, and a tool
+that declares outside content. A
 server's tools count however they are called: through the adapter's `mcp` tool,
 under their own names (`jira_get_issue`) where its tools are direct, and through
 the `tools` tool where they are lazy. An issue comment or a mail body a server
@@ -52,7 +62,7 @@ the portal's hands back, or one whose tools are named without the server. A
 server you run yourself can be counted as your own, and its output is then
 neither wrapped nor checked; the portal's own memory server, Understory, is
 counted so until you say otherwise, as what it holds are the agent's own notes.
-The browser is always outside content, whoever runs it, and so is a tool that says it drives one. The agent's own tools, a subagent's answer and
+The browser is always outside content, whoever runs it. The agent's own tools, a subagent's answer and
 a routine's are not wrapped.
 
 A [code mode](/guide/extensions#code-mode) script calls tools one at a time
@@ -131,6 +141,10 @@ problem are refused:
 | `persist` | What outlives the conversation: a routine, `cron`, a systemd unit, a shell start-up file, and a change to what the agent loads as its own (`AGENTS.md`, `CLAUDE.md`, its context files, `WATCH.md`, `.pi/`, `.agents/`, `.mcp.json`; see [what a colleague may do](/people/roles#what-a-colleague-may-do)), by a tool or by a command that writes there (a redirect, `tee`, `cp`, `mv`, `ln`, `sed -i`, a download's `-o`, a clone) |
 | `delegate` | A `subagent` runs its own pi, which has no guard, and a routine runs in a session of its own, without this conversation's rules, so a tainted session may start neither |
 
+A tool that declares that every call of it is the shape of one of these rules
+(`acts`), such as an extension's tool that sends mail declaring `upload`, is
+held as a command that rule catches.
+
 A command is read as a shell reads it on its face, not by its letters: past
 `sudo`, `env`, `timeout` and the like, into `sh -c '…'` and `bash -lc '…'`, into
 `$(…)` and backticks, and into a here-document handed to a shell, following a
@@ -149,8 +163,9 @@ heartbeats keep every rule.
 
 **Settings → Guard** shows all of this in one place: the rules and what each holds
 back, how the sandbox, the primary user and the place approvals are asked for stand,
-each routine's exemptions, which MCP servers count as your own, where a tool that
-drives a browser may go (the [allowlist](/guide/browser#where-it-may-go)), the approvals not
+each routine's exemptions, which MCP servers count as your own, the sites the agent's
+tools may reach (one list for every tool that declares where it goes and for a browser
+server's tools, where an empty list is any site; see [Where it may go](/guide/browser#where-it-may-go)), the approvals not
 yet spent (with **Revoke**), the flagged results you trusted (with **Un-trust**, which
 holds their chat back again), and what is always on and why.
 

@@ -388,8 +388,8 @@ either, and marking it lazy does not switch it on.
 The one difference is that the model is not shown the tool's schema and description up front. The model
 is shown one short line instead, naming the lazy sets, for example "You have browser tools; search for
 them with the tools tool." The rules the tool's extension wrote for the prompt stay in it as long as the
-tool is lazy, so the [browser](/guide/browser)'s rule that a page is data and never instructions is said as
-before.
+tool is lazy, and so does the portal's rule that outside content, such as a [browser](/guide/browser)'s page,
+is data and never instructions.
 
 The `tools` tool has three actions:
 
