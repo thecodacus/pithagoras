@@ -142,7 +142,7 @@ test("each installed package is listed with what it brings, for the page to tell
 
 test("what comes with the portal is listed to install from its own folder, without the add-on that has a switch of its own", async () => {
   const { extensions } = await (await fetch(at("/api/extensions/shipped"))).json();
-  assert.deepEqual(extensions.map((e) => [e.name, e.kinds]), [["pithagoras-canvas", ["pithagoras"]], ["pithagoras-docker", ["pithagoras"]], ["pithagoras-docs", ["pithagoras"]], ["pithagoras-files", ["pithagoras"]], ["pithagoras-git", ["pithagoras"]], ["pithagoras-terminal", ["pithagoras"]], ["pithagoras-themes", ["themes"]]]);
+  assert.deepEqual(extensions.map((e) => [e.name, e.kinds]), [["pithagoras-canvas", ["pithagoras"]], ["pithagoras-docker", ["pithagoras"]], ["pithagoras-docs", ["pithagoras"]], ["pithagoras-files", ["pithagoras"]], ["pithagoras-git", ["pithagoras"]], ["pithagoras-media", ["pithagoras"]], ["pithagoras-terminal", ["pithagoras"]], ["pithagoras-themes", ["themes"]]]);
   for (const shipped of extensions) {
     assert.ok(path.isAbsolute(shipped.spec) && shipped.spec.endsWith(path.join("extensions", shipped.name.replace(/^pithagoras-/, ""))), shipped.spec);
     assert.ok(shipped.version && shipped.description, shipped.name);
