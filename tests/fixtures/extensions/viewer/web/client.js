@@ -4,7 +4,8 @@
  * the portal's own tests the portal with it and needs none of the extensions
  * the portal ships, any of which can be removed.
  *
- *   chat.panel     "Viewer", a plain panel: the second of two beside the conversation, with the console's
+ *   chat.panel     "Viewer", the second of two beside the conversation, with the console's: black from edge to edge
+ *                  (`bleed`), with a Fullscreen of its own in its head
  *   voice.window   "Viewer" in the middle, that can be maximized and is kept loaded while minimized, with a frame of
  *                  its own in which Escape restores it; `window.viewerLoads` counts the frame's loads. Its button in
  *                  the toolbar is as a spec says with `window.viewerButton({ hidden, live, title })`
@@ -66,7 +67,9 @@ export default function (portal) {
     id: "viewer",
     title: "Viewer",
     icon: Icon,
-    component: () => h("div", { className: "viewer-pane", style: { flex: 1, minHeight: 0, overflow: "auto", padding: 12 } }, "In view."),
+    bleed: true,
+    component: () => h("div", { className: "viewer-pane", style: { flex: 1, minHeight: 0, padding: 12, color: "#d1d8e3" } }, "In view."),
+    actions: ({ panel }) => h("button", { type: "button", onClick: () => panel.fullscreen(), className: "rounded px-1.5 py-0.5 text-[11px]" }, "Fullscreen"),
     useButton: () => ({ title: "What the viewer shows" }),
   });
 

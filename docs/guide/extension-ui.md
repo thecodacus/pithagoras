@@ -310,7 +310,7 @@ puts it before entries with a higher one, or none.
 
 | Slot | Where | Entry | The component is given |
 | --- | --- | --- | --- |
-| `chat.panel` | Beside the conversation, docked, floated and sized like Files and Git | `title`, `icon?`, `header?`, `actions?`, `useButton?`, `name?` | `chat`, `channel`, `panels`, `close()`, `panel` |
+| `chat.panel` | Beside the conversation, docked, floated and sized like Files and Git | `title`, `icon?`, `header?`, `actions?`, `useButton?`, `name?`, `bleed?` | `chat`, `channel`, `panels`, `close()`, `panel` |
 | `chat.header.action` | The chat's header, before the panels' buttons | | `chat`, `channel`, `panels` |
 | `chat.tool` | A call of one tool in the conversation, in place of the portal's card | `tool` (its name), `tile?` (drawn small on its card in voice mode), `describe?` (what that card says of it) | `chat`, `channel`, `panels`, `call`, `card` |
 | `chat.tool.action` | On the portal's card of a call, under what it returned, when the card is opened | `tool?` (a name or a pattern; every call without it) | `call`, `cut`, `panels` |
@@ -355,6 +355,22 @@ portal.slots.register("chat.panel", {
 the portal's Subagents button is like this), `live` (a dot that says something
 in it is running) and `title`.
 
+`bleed: true` is for a panel whose body is filled by what it draws, a frame or
+another program's screen, as the browser's is: its body is black from edge to
+edge and does not scroll, so nothing of the portal's surface shows around it or
+while it loads.
+
+```js
+// Another program's screen in a frame, with a Fullscreen in the panel's head.
+portal.slots.register("chat.panel", {
+  id: "screen",
+  title: "Screen",
+  bleed: true,
+  actions: ({ panel }) => h("button", { onClick: () => panel.fullscreen() }, "Fullscreen"),
+  component: () => h("iframe", { src: portal.api.url("/screen/"), style: { flex: 1, border: 0 } }),
+});
+```
+
 The body, `header` and `actions` are each handed `panel`, the panel's say over
 itself:
 
@@ -365,6 +381,7 @@ itself:
 | `keep(true)` | It is not the one closed to make room for a third: there is something in it that would be lost |
 | `guardClose(fn)` | Asked before it is closed by hand; it stays open if `fn` answers false. `null` to stop asking |
 | `open(name, params?)` | Opens another panel from this one, as `portal.panels.open` does, but this one is not the one closed to make room for it: Git opening a file it lists in Files |
+| `fullscreen()` | Shows the panel, its head and body, on the whole screen, where the browser lets a page, as the browser's Fullscreen does: the panel beside it stays where it is. Escape gives it its place back, and closed, it leaves the screen |
 
 ```js
 // A note being written would be lost.

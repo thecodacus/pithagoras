@@ -55,6 +55,8 @@ export interface PanelHandle {
   guardClose(guard: (() => boolean | Promise<boolean>) | null): void;
   /** Opens another panel from this one (a file it lists, in Files): this one is not the one closed to make room for it. */
   open(name: string, params?: unknown): void;
+  /** Shows the panel, its head and its body, on the whole screen, where the browser lets a page: the panel beside it stays where it is. Closed, it leaves the screen. Escape gives it its place back. */
+  fullscreen(): void;
 }
 
 export type PanelProps = ChatProps & { close(): void; panel: PanelHandle };
@@ -138,6 +140,8 @@ export interface SlotMap {
    * one of those is the portal's, it is the one.
    * Of two extensions that name a panel alike, the one first in the slot's
    * order has it (a lower `order`, then the one whose extension is first in the list of installed extensions).
+   * `bleed` makes its body black from edge to edge, and not a box that
+   * scrolls: for what fills it by itself, a frame or another program's screen.
    */
   "chat.panel": {
     entry: {
@@ -147,6 +151,7 @@ export interface SlotMap {
       header?: ComponentType<PanelProps>;
       actions?: ComponentType<PanelProps>;
       useButton?: (props: ChatProps) => { hidden?: boolean; live?: boolean; title?: string };
+      bleed?: boolean;
     };
     props: PanelProps;
   };
