@@ -25,7 +25,7 @@ const answers: Record<string, unknown> = {
   '/api/channels': { channels: [], kinds: [], agentHome: '/a/home' },
   '/api/skills': { skills: [{ name: 'release-notes', description: 'How releases are cut', editable: true, enabled: true, source: 'user', path: '/a/skills/release-notes' }], diagnostics: [], root: '/a/skills' },
   '/api/browser': {
-    running: false, unprotected: false, connectedAs: null, version: null, pages: [], uiPort: '3011', uiExposed: false, uiOutdated: false, cursor: true, allowlist: '', configured: false, byDefault: true, sessions: [], routines: [],
+    running: false, unprotected: false, connectedAs: null, version: null, pages: [], uiPort: '3011', uiExposed: false, uiOutdated: false, cursor: true, configured: false, byDefault: true, sessions: [], routines: [],
     install: { available: true, mode: 'docker', image: false, container: 'absent', binary: '/usr/bin/chromium', pulling: { active: false, line: '' } }, config: { user: 'abc', hasPassword: true },
   },
   '/api/voice': { enabled: false, whisperUrl: 'http://127.0.0.1:8178/inference', breezeUrl: 'http://127.0.0.1:7860/v1/audio/speech', instruction: 'Clear speech', voice: 'design', runtime: 'breeze', language: 'auto', cfgScale: 4 },

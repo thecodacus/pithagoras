@@ -11,7 +11,7 @@ async function open(page: import('@playwright/test').Page, ui: { uiExposed: bool
   await mockPortal(page, ({ path, method }) => {
     if (path === '/api/browser' && method === 'GET') {
       return {
-        running: true, unprotected: false, connectedAs: 'built-in', version: 'Chrome/1', pages: [], uiPort: '3011', ...ui, cursor: true, allowlist: '', configured: true, byDefault: true, sessions: [], routines: [],
+        running: true, unprotected: false, connectedAs: 'built-in', version: 'Chrome/1', pages: [], uiPort: '3011', ...ui, cursor: true, configured: true, byDefault: true, sessions: [], routines: [],
         install: { available: true, mode: 'docker', image: true, container: 'running', pulling: { active: false, line: '' } },
         config: { user: 'abc', hasPassword: true },
       };

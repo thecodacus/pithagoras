@@ -190,7 +190,7 @@ const de: Locale = {
     "Allowed by approval": "Per Freigabe erlaubt",
     "Turned away": "Abgewiesen",
     "You answered": "Von dir beantwortet",
-    "Page opened": "Seite geöffnet",
+    "Address reached": "Adresse aufgerufen",
     "Everything": "Alles",
     "Allowed": "Erlaubt",
     "Strangers": "Fremde",

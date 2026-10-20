@@ -1,7 +1,6 @@
 import express, { type Router } from "express";
 import {
   agentTools,
-  browserAllowlist,
   browserConfigured,
   browserCursorOn,
   browserPolicy,
@@ -226,7 +225,6 @@ export function browserRouter(): Router {
       // is one that made it so before this could be chosen.
       uiExposed: ui.exposed,
       uiOutdated: ui.outdated,
-      allowlist: browserAllowlist().join("\n"),
       // Whether the tools glide a cursor to what they act on, for whoever watches.
       cursor: browserCursorOn(),
       // Two separate things that each look fine alone: a browser nobody can

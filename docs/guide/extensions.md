@@ -378,10 +378,11 @@ not the primary user, such as the places secrets are kept. (A standing approval 
 the `mcp` call itself.)
 
 Lazy is not a switch. A lazy tool is **on** like any other, and behaves exactly like one: it is run by
-the same code, held to the same [guard](/guide/security) (the [browser](/guide/browser)'s allowlist, the
-rules after untrusted content, what a colleague may run), its arguments are checked and converted as for
-a direct call, and its result is wrapped as somebody else's words where it would be. A picture it shows
-or makes appears in the chat and in voice mode, and the browser's window opens for it, as for a direct call.
+the same code, held to the same [guard](/guide/security) (the [list of sites the agent's tools may
+reach](/guide/browser#where-it-may-go) in Settings → Guard, the rules after untrusted content, what a
+colleague may run), its arguments are checked and converted as for a direct call, and its result is
+wrapped as somebody else's words where it would be. A picture it shows or makes appears in the chat and
+in voice mode, and the browser's window opens for it, as for a direct call.
 Tools that run one at a time, as the browser's do, still do when the model calls several in one message.
 A tool that its extension keeps inactive (one that waits for its moment) is not reached through `tools`
 either, and marking it lazy does not switch it on.

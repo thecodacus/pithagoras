@@ -9,7 +9,7 @@ async function portal(page: Page, overrides: Record<string, unknown>) {
   await mockPortal(page, ({ path, method }) => {
     if (path === '/api/browser' && method === 'GET') {
       return {
-        running: false, unprotected: false, connectedAs: null, version: null, pages: [], uiPort: '3011', uiExposed: false, uiOutdated: false, cursor: true, allowlist: '', configured: false, byDefault: true, sessions: [], routines: [],
+        running: false, unprotected: false, connectedAs: null, version: null, pages: [], uiPort: '3011', uiExposed: false, uiOutdated: false, cursor: true, configured: false, byDefault: true, sessions: [], routines: [],
         install: { available: true, mode: 'docker', image: true, container: 'stopped', binary: null, pulling: { active: false, line: '' } },
         config: { user: 'agent', hasPassword: true },
         ...overrides,

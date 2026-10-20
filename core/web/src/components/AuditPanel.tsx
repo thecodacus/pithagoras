@@ -23,7 +23,7 @@ const KIND: Record<string, { label: string; icon: JSX.Element; tone: string }> =
   },
   stranger: { label: msg("Turned away"), icon: <LuUserX className="h-3.5 w-3.5" />, tone: "text-warn" },
   answered: { label: msg("You answered"), icon: <LuShield className="h-3.5 w-3.5" />, tone: "text-accent" },
-  browsed: { label: msg("Page opened"), icon: <LuGlobe className="h-3.5 w-3.5" />, tone: "text-fg-muted" },
+  browsed: { label: msg("Address reached"), icon: <LuGlobe className="h-3.5 w-3.5" />, tone: "text-fg-muted" },
   cleared: { label: msg("Log cleared"), icon: <LuTrash2 className="h-3.5 w-3.5" />, tone: "text-fg-muted" },
   flagged: { label: msg("Suspected injection"), icon: <LuShieldAlert className="h-3.5 w-3.5" />, tone: "text-warn" },
   trusted: { label: msg("You trusted"), icon: <LuShieldCheck className="h-3.5 w-3.5" />, tone: "text-ok" },

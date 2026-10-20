@@ -1711,7 +1711,6 @@ export interface BrowserStatus {
   uiExposed: boolean;
   /** A container made before the port was kept to one address: it answers every machine until it is installed again. */
   uiOutdated: boolean;
-  allowlist: string;
   /** Whether the browser tools glide a cursor to what they act on. */
   cursor: boolean;
   /** Is the browser wired up at all, whether or not it is running right now? */

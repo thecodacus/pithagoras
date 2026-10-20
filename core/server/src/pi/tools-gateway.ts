@@ -17,7 +17,7 @@ import { oneOf } from "./tool-schema.js";
  * A call is the same call as a direct one. pi puts every call through the extensions' hooks, the guard's
  * among them, and a call made from inside a tool would skip them, so the hooks are run here for the tool
  * that is called, with its name and its arguments. Everything the guard holds a direct call to holds
- * this one too: the browser's allowlist, the rules after untrusted content, who may run what.
+ * this one too: the allowlist of sites the agent's tools may reach, the rules after untrusted content, who may run what.
  */
 
 /** What the gateway asks of the conversation it serves, which the client that owns the tool switches provides. */

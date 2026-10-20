@@ -555,7 +555,7 @@ and, for a tool, which tool and what it was asked to do:
 | Allowed by approval | Somebody [approved it](/people/approvals) |
 | Turned away | A stranger on a channel was refused |
 | You answered | A question from the agent was answered |
-| Page opened | The agent's [browser](/guide/browser) was pointed at a page |
+| Address reached | A tool went to an address: the agent's [browser](/guide/browser) was pointed at a page, or a tool that [declares `reaches`](/guide/extension-ui#what-the-guard-holds-a-tool-to) was given one |
 | `allowed-by-exemption` | A routine [let off a rule](/guide/routines#the-injection-guard) did something that rule would have stopped |
 | `revoked` | An approval not yet spent was taken back in Settings → Guard |
 | `untrusted` | A flagged result you had trusted was untrusted in Settings → Guard, and holds its chat back again |
