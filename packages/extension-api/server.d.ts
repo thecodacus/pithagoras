@@ -194,7 +194,12 @@ export interface ServerPortal {
     list(): AgentFolder[];
     /** Whether a folder, by its real path, is one the agents may work in: an agent's home, or one inside the workspace root. Only from one of these is what the agents made there to be served. */
     allowed(folder: string): boolean;
-    /** The portal deleted one: a project with its folder, or an agent with its home. `folder` is where it really was, as `list` named it. */
+    /**
+     * The portal deleted one: a project with its folder, or an agent with its home. `folder` is where it really was, as
+     * `list` named it. One deleted while this server half was not running (switched off, removed, or failing to start)
+     * it is told of once, when it next starts, as soon as its default export is done; of none deleted before the
+     * package first started.
+     */
     on(event: "removed", handler: (folder: string) => void): void;
     /**
      * What the person calls a folder, by its real path, whether or not `list` has it now: its agent's name for an
