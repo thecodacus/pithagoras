@@ -7,6 +7,7 @@ import { sessions } from "../session-manager.js";
 import { getPerson } from "../people.js";
 import { debugLog } from "../logs.js";
 import { approvalCannotHelp } from "./guard.js";
+import type { GuardRuleName } from "./guard-rule-names.js";
 import { fail, say } from "./tool-result.js";
 
 /**
@@ -20,7 +21,11 @@ import { fail, say } from "./tool-result.js";
  * the recipient nor the route, which is the property worth keeping: a session
  * serving someone else must not be able to choose who hears from it.
  */
-export function askPrimaryTool(sessionId: string, filesOf: (toolName: string) => readonly string[] | undefined = () => undefined) {
+export function askPrimaryTool(
+  sessionId: string,
+  filesOf: (toolName: string) => readonly string[] | undefined = () => undefined,
+  actsOf: (toolName: string) => readonly GuardRuleName[] | undefined = () => undefined,
+) {
   return (pi: any): void => {
     pi.registerTool({
       name: "ask_primary",
@@ -61,7 +66,7 @@ export function askPrimaryTool(sessionId: string, filesOf: (toolName: string) =>
         // conversation has read something untrusted: asked anyway, they would be
         // told that something could be done once, and it could not.
         const wanted = typeof p.actionTool === "string" ? p.actionTool : "bash";
-        const never = typeof p.action === "string" && p.action.trim() ? approvalCannotHelp(wanted, p.action.trim(), session.workspace, sessionId, filesOf(wanted)) : undefined;
+        const never = typeof p.action === "string" && p.action.trim() ? approvalCannotHelp(wanted, p.action.trim(), session.workspace, sessionId, filesOf(wanted), actsOf(wanted)) : undefined;
         if (never) {
           return fail(
             `That cannot be approved: ${never}. Not even the primary user can allow it for somebody else, ` +

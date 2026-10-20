@@ -20,7 +20,7 @@ test.after(() => host.stopServerHalves());
 
 const BROWSER = ["browser_click", "browser_navigate"];
 db.rememberTools([
-  ...BROWSER.map((name) => db.remembered({ name, source: "browser", inline: true, drivesBrowser: true })),
+  ...BROWSER.map((name) => db.remembered({ name, source: "browser", inline: true })),
   db.remembered({ name: "paint", source: "painter", inline: true }),
 ]);
 const project = path.join(process.env.WORKSPACE_ROOT, "alpha");

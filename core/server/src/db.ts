@@ -2012,12 +2012,13 @@ export function adoptBrowserGrants(d: Database.Database = getDb(), fresh: string
   // server has cached some of its tools and not others, and a pinned version
   // that is bumped adds names — so the posture has to reach whatever turns up
   // later, not only what was there on the first day. What was carried over and
-  // since changed by the operator is not touched again. A tool that says it
-  // drives a browser is told by what is remembered of it, the new ones included.
-  const known = knownTools();
-  const declared = new Set(known.filter((t) => t.drivesBrowser).map((t) => t.name));
-  const browser = (name: string) => browserTool(name, servers, browsers, declared.has(name));
-  const names = state === "pending" ? known.map((t) => t.name).filter(browser) : fresh.filter(browser);
+  // since changed by the operator is not touched again.
+  const names =
+    state === "pending"
+      ? knownTools()
+          .map((t) => t.name)
+          .filter((name) => browserTool(name, servers, browsers))
+      : fresh.filter((name) => browserTool(name, servers, browsers));
   if (!names.length) return;
 
   setToolDefaultsOff([...new Set([...toolDefaultsOff(), ...names])]);
@@ -2104,15 +2105,15 @@ export function toolsOnWith(session: Pick<SessionRow, "id" | "kind" | "routine_s
   return policy.names.some((name) => toolEnabled(name, defaults, own));
 }
 
-/** The browser's tools, as far as any session has registered them: a browser server's, and those that say they drive a browser. */
+/** The browser's tools, as far as any session has registered them. */
 export function seenBrowserTools(): string[] {
   // Asked for by every routine's tools, so kept until the MCP file or the settings (what was seen) are written.
   const stamp = `${fileStamp(mcpConfigPath())}|${settingsWrites}`;
   if (lastBrowserTools?.stamp === stamp) return lastBrowserTools.names;
   const { servers, browsers } = serversAndBrowsers();
   const names = knownTools()
-    .filter((t) => browserTool(t.name, servers, browsers, t.drivesBrowser === true))
-    .map((t) => t.name);
+    .map((t) => t.name)
+    .filter((name) => browserTool(name, servers, browsers));
   lastBrowserTools = { stamp, names };
   return names;
 }
@@ -2795,8 +2796,6 @@ export interface KnownTool {
   offByDefault?: true;
   /** The parameters that hold the files it is approved for, as its definition declares them: what an approval of it is written as, answered when no chat of it is running. */
   approvalFiles?: string[];
-  /** Said by the tool: it drives a web browser, so it is one of the browser's tools wherever they are counted, answered when no chat of it is running. */
-  drivesBrowser?: true;
 }
 
 /** The parameters that hold the files a tool is approved for, as it last declared them: see declaredFiles in guard.ts. */
@@ -2805,7 +2804,7 @@ export function approvalFilesOf(toolName: string): string[] | undefined {
 }
 
 /** A tool a session reported, as it is remembered. */
-export const remembered = (t: { name: string; source: string; description?: string; package?: string; inline?: true; scriptsOnly?: true; offByDefault?: true; approvalFiles?: string[]; drivesBrowser?: true }): KnownTool => ({
+export const remembered = (t: { name: string; source: string; description?: string; package?: string; inline?: true; scriptsOnly?: true; offByDefault?: true; approvalFiles?: string[] }): KnownTool => ({
   name: t.name,
   source: t.source,
   description: t.description,
@@ -2814,7 +2813,6 @@ export const remembered = (t: { name: string; source: string; description?: stri
   ...(t.scriptsOnly ? { scriptsOnly: true } : {}),
   ...(t.offByDefault ? { offByDefault: true } : {}),
   ...(t.approvalFiles?.length ? { approvalFiles: t.approvalFiles } : {}),
-  ...(t.drivesBrowser ? { drivesBrowser: true } : {}),
 });
 
 /**
@@ -2872,7 +2870,6 @@ export function knownTools(): KnownTool[] {
         ...(typeof t.inline === "boolean" ? { inline: t.inline } : {}),
         ...(t.scriptsOnly === true ? { scriptsOnly: true } : {}),
         ...(Array.isArray(t.approvalFiles) && t.approvalFiles.length && t.approvalFiles.every((n: unknown) => typeof n === "string") ? { approvalFiles: t.approvalFiles as string[] } : {}),
-        ...(t.drivesBrowser === true ? { drivesBrowser: true } : {}),
       }));
   } catch {
     return [];
@@ -3257,8 +3254,6 @@ export function rememberTools(reported: KnownTool[]): string[] {
       ...(tool.scriptsOnly ? { scriptsOnly: true } : {}),
       // As its latest report says: a tool that stopped declaring its files is approved whole again.
       ...(tool.approvalFiles?.length ? { approvalFiles: tool.approvalFiles } : {}),
-      // Likewise: one that stopped saying it drives a browser is counted by its name and its server again.
-      ...(tool.drivesBrowser ? { drivesBrowser: true } : {}),
     });
   }
   const sorted = [...merged.values()].sort((a, b) => a.name.localeCompare(b.name));

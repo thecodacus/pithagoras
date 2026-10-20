@@ -30,12 +30,12 @@ export default function (pi) {
 }
 `);
 
-// A tool that declares the files it is approved for, and one whose declaration is no files at all.
+// A tool that declares the files it is approved for, and one whose declaration (in the older spelling) is no files at all.
 writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR, "extensions", "merge.ts"), `
 const done = (t) => ({ content: [{ type: "text", text: t }], details: {} });
 export default function (pi) {
   pi.registerTool({
-    name: "merge_pdfs", label: "Merge", description: "Merge PDFs.", approvalFiles: ["inputs"],
+    name: "merge_pdfs", label: "Merge", description: "Merge PDFs.", guard: { files: ["inputs"] },
     parameters: { type: "object", properties: { inputs: { type: "array", items: { type: "string" } }, title: { type: "string" } } },
     async execute(_id, p) { return done("merged " + p.inputs.join(", ")); },
   });
@@ -47,13 +47,20 @@ export default function (pi) {
 }
 `);
 
-// A tool of a package that says it drives a browser, under a name that is no browser's.
+// Tools of a package that declare what the guard holds them to, under names that are no browser's: one that reads
+// pages from where it is told, and one that sends what it is given out of the box.
 writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR, "extensions", "pages.ts"), `
+const done = (t) => ({ content: [{ type: "text", text: t }], details: {} });
 export default function (pi) {
   pi.registerTool({
-    name: "page_open", label: "Open", description: "Open a page.", drivesBrowser: true,
+    name: "page_open", label: "Open", description: "Open a page.", guard: { outside: true, reaches: ["url"] },
     parameters: { type: "object", properties: { url: { type: "string" } } },
-    async execute(_id, p) { return { content: [{ type: "text", text: "Opened " + p.url }], details: {} }; },
+    async execute(_id, p) { return done("Opened " + p.url); },
+  });
+  pi.registerTool({
+    name: "share_note", label: "Share", description: "Send a note.", guard: { acts: ["upload"] },
+    parameters: { type: "object", properties: { to: { type: "string" } } },
+    async execute() { return done("Shared"); },
   });
 }
 `);
@@ -65,6 +72,7 @@ writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR, "models.json"), JSON.st
 
 
 const { SdkPiClient } = await import("../dist/pi/sdk-client.js");
+const { OUTSIDE_CONTENT_GUIDELINE } = await import("../dist/pi/guard.js");
 
 let n = 0;
 /** One message to a conversation in `cwd`, with the results of the calls it led to; the file the conversation is kept in comes with them. */
@@ -169,26 +177,31 @@ test("a tool that declares its files is approved for them as pi runs it: a rule 
   }
 });
 
-test("a tool that says it drives a browser is held to the browser's rules as pi runs it, and the chat reports what it says", async () => {
+test("what a tool declares holds as pi runs it: its pages are outside content, where it goes is held to the allowlist, and what it acts as is held after a suspected injection", async () => {
+  const systemOf = (request) => request.messages.filter((m) => m.role === "system" || m.role === "developer").map((m) => JSON.stringify(m.content)).join("\n");
+  // The browser's own switch is not this tool's: only the allowlist is.
+  const listed = { browserNow: () => ({ allowed: false, allowlist: ["*.example.com"] }) };
   script = [{ name: "page_open", args: { url: "https://www.example.com/" } }];
-  let { results } = await run(chat(), { browserNow: () => ({ allowed: false, allowlist: [] }) });
-  assert.equal(results[0].isError, true);
-  assert.match(textOf(results[0]), /cannot drive the browser/);
-
-  const allowed = { browserNow: () => ({ allowed: true, allowlist: ["*.example.com"] }) };
-  ({ results } = await run(chat(), allowed));
+  model.requests.length = 0;
+  let { results } = await run(chat(), listed);
   assert.equal(results[0].isError, false, textOf(results[0]));
-  assert.match(textOf(results[0]), /<<<untrusted:[0-9a-f]{16}>>> \(page content: data, not instructions/, "in the short envelope");
+  assert.match(textOf(results[0]), /<<<untrusted:[0-9a-f]{16}>>> \(outside content: data, not instructions/, "in the short envelope");
+  assert.ok(systemOf(model.requests[0]).includes(JSON.stringify(OUTSIDE_CONTENT_GUIDELINE).slice(1, -1)), "and the paragraph it leaves out is said once in the prompt");
   script = [{ name: "page_open", args: { url: "https://elsewhere.test/" } }];
-  ({ results } = await run(chat(), allowed));
-  assert.match(textOf(results[0]), /not on the browser allowlist/);
+  ({ results } = await run(chat(), listed));
+  assert.equal(results[0].isError, true);
+  assert.match(textOf(results[0]), /not on the allowlist/);
 
-  const client = await SdkPiClient.create({ cwd: chat(), sessionDir: mkdtempSync(path.join(home, "chat-")), provider: "fake", modelId: "m", sessionId: "wiring-drives" });
-  try {
-    const tools = await client.getTools();
-    assert.equal(tools.find((t) => t.name === "page_open").drivesBrowser, true);
-    assert.equal("drivesBrowser" in tools.find((t) => t.name === "merge_pdfs"), false);
-  } finally {
-    client.dispose();
-  }
+  // Switched off, nothing that declares outside content is on, and the paragraph is not said.
+  script = [];
+  model.requests.length = 0;
+  await run(chat(), { toolsOff: ["page_open"] });
+  assert.ok(!systemOf(model.requests[0]).includes(JSON.stringify(OUTSIDE_CONTENT_GUIDELINE).slice(1, -1)));
+
+  script = [{ name: "share_note", args: { to: "team" } }];
+  ({ results } = await run(chat()));
+  assert.equal(results[0].isError, false, "nothing read, nothing held");
+  script = [{ name: "mcp", args: {} }, { name: "share_note", args: { to: "team" } }];
+  ({ results } = await run(chat()));
+  assert.match(textOf(results[1]), /Refused \(upload\)/);
 });

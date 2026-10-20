@@ -23,9 +23,8 @@
 export const BROWSER_MCP = "browser";
 
 /**
- * The portal's own browser tools (browser/tools.ts) by name. They say they
- * drive a browser (`drivesBrowser` on each), as any tool may; the names are
- * read only for a tool remembered before tools said so.
+ * The portal's own browser tools (browser/tools.ts): browser tools by name,
+ * whatever MCP servers there are, since they come from no server.
  */
 export const PORTAL_BROWSER_TOOLS = [
   "browser_navigate",
@@ -74,10 +73,8 @@ export function mcpServerOf(name: string, servers: Iterable<string>): string | u
 /**
  * Does this tool come from the agent's browser?
  *
- * `declared` is the tool saying so itself (`drivesBrowser` on its definition,
- * as the portal remembers it), which a tool of any package may. `browsers` is
- * the servers that are the browser, which the caller works out from what they
- * connect to; it defaults to the name the portal writes.
+ * `browsers` is the servers that are the browser, which the caller works out
+ * from what they connect to; it defaults to the name the portal writes.
  *
  * Asked through mcpServerOf rather than by prefix, because the prefix is
  * ambiguous: a server called `browser_staging` names a tool
@@ -88,10 +85,9 @@ export function mcpServerOf(name: string, servers: Iterable<string>): string | u
 export function browserTool(
   name: string,
   servers: Iterable<string>,
-  browsers: string[] = [BROWSER_MCP],
-  declared = false,
+  browsers: string[] = [BROWSER_MCP]
 ): boolean {
-  if (declared || (PORTAL_BROWSER_TOOLS as readonly string[]).includes(name)) return true;
+  if ((PORTAL_BROWSER_TOOLS as readonly string[]).includes(name)) return true;
   const server = mcpServerOf(name, servers);
   return server !== undefined && browsers.includes(server);
 }

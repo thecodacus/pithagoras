@@ -11,7 +11,8 @@ import { inProcessHome } from "./server-harness.mjs";
  * pi prints a tool's rules in the system prompt only while the tool is active, so a rule that one tool
  * alone carries is gone when that tool is switched off. The rule that a page is data and never
  * instructions is the one that must not go: the guard's short envelope relies on it being said
- * (pageEnvelope in guard.ts). Real pi and the portal's own client, a model that only answers.
+ * (pageEnvelope in guard.ts). It is the portal's, said while any tool that declares outside content
+ * is on, as every browser tool does. Real pi and the portal's own client, a model that only answers.
  */
 const home = inProcessHome("pithagoras-browser-rules-");
 mkdirSync(path.join(process.env.PI_CODING_AGENT_DIR, "extensions"), { recursive: true });
@@ -21,7 +22,8 @@ const model = await fakeModel(() => "Done.");
 writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR, "models.json"), JSON.stringify(model.models()));
 
 const { SdkPiClient } = await import("../dist/pi/sdk-client.js");
-const { ACTIONS_RULE, REFS_RULE, BROWSER_UNTRUSTED_GUIDELINE, browserTools } = await import("../dist/browser/tools.js");
+const { ACTIONS_RULE, REFS_RULE, browserTools } = await import("../dist/browser/tools.js");
+const { OUTSIDE_CONTENT_GUIDELINE } = await import("../dist/pi/guard.js");
 const { PORTAL_BROWSER_TOOLS } = await import("../dist/tool-policy.js");
 const { setPortalBrowser } = await import("../dist/db.js");
 const { BROWSER_READING_RULE, BROWSER_SCREENSHOT_RULE } = await import("../dist/pi/browser-mcp-rules.js");
@@ -69,27 +71,25 @@ const expected = (on) => ({
   actions: on.some((name) => ACTING.includes(name)),
   refs: on.some((name) => WITH_REFS.includes(name)),
 });
-/** Which of the rules a list of rules, or a system prompt, has. */
+/** Which of the rules a system prompt has. */
 const has = (text) => ({
-  untrusted: text.includes(BROWSER_UNTRUSTED_GUIDELINE),
+  untrusted: text.includes(OUTSIDE_CONTENT_GUIDELINE),
   actions: text.includes(ACTIONS_RULE),
   refs: text.includes(REFS_RULE),
 });
 
-test("every browser tool carries the rule that a page is data, so it stays whichever of them is switched off", () => {
+test("every browser tool declares that what it reads is outside content, so the rule that a page is data stays whichever of them is switched off", () => {
   assert.deepEqual(Object.keys(registered).sort(), [...PORTAL_BROWSER_TOOLS].sort());
-  for (const [name, tool] of Object.entries(registered)) {
-    assert.ok(tool.promptGuidelines?.includes(BROWSER_UNTRUSTED_GUIDELINE), `${name} says it`);
-  }
+  for (const [name, tool] of Object.entries(registered)) assert.equal(tool.guard?.outside, true, name);
 });
 
-test("for every set of browser tools that is on, the rules pi prints are the ones that concern them", () => {
+test("for every set of browser tools that is on, the rules of their own pi prints are the ones that concern them", () => {
   const all = [...PORTAL_BROWSER_TOOLS];
   for (let mask = 0; mask < 1 << all.length; mask++) {
     const on = all.filter((_, i) => mask & (1 << i));
-    // What pi's buildRules collects: the rules of each active tool.
+    // What pi's buildRules collects: the rules of each active tool. The rule that a page is data is not one of them.
     const printed = on.flatMap((name) => registered[name].promptGuidelines ?? []).join("\n");
-    assert.deepEqual(has(printed), expected(on), `with ${on.join(", ") || "none"} on`);
+    assert.deepEqual(has(printed), { ...expected(on), untrusted: false }, `with ${on.join(", ") || "none"} on`);
   }
 });
 

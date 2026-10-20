@@ -181,26 +181,35 @@ export interface GitHandle {
 }
 
 /**
- * What a tool's definition says to the portal, beside what pi reads of it: `pi.registerTool({ name, …, drivesBrowser: true })`.
- * Read for a tool of `chats.extend` and of any package's pi extension, in a chat whose pi runs in the portal's own process.
- * See "Tools that share the server half's state" in the guide.
+ * What the guard holds a tool to, as its definition says it: `pi.registerTool({ name, …, guard: { … } })`. Read at
+ * each call, for a tool of `chats.extend` and of any package's pi extension, in a chat whose pi runs in the portal's
+ * own process. A tool that declares no `guard` is trusted as its extension is: what it returns is not marked as
+ * outside content, and no rule after a suspected prompt injection is about it. See "What the guard holds a tool to"
+ * in the guide.
  */
-export interface ToolDeclarations {
-  /** Off in every chat until somebody switches it on, from the first time the portal sees it. */
-  offByDefault?: true;
-  /** The names of its parameters that hold files (text, or a list of text): a call is approved for each of those files, and for nothing else of it. */
-  approvalFiles?: string[];
-  /** What a spoken turn is told while the tool is on, once however many tools say the same. */
-  voiceGuidelines?: string[];
+export interface ToolGuard {
   /**
-   * It drives a web browser, and the guard holds it to the browser's rules whatever it is called: refused in a
-   * conversation that may not drive a browser, the `url` of a call held to the allowlist, and each address recorded in
-   * Audit. What it returns is outside content, in a short envelope without the paragraph that says a page is data and
-   * never instructions, which the tool says once in its `promptGuidelines`. It is counted with the browser's tools:
-   * a routine's runs have it off until the routine's Browser switch is on (or the routine switches it on), and on an
-   * install that had the browser off until a conversation was given it, it starts off by default.
+   * What it returns is outside content: wrapped as data between markers the content cannot close, and flagged where
+   * it tries to instruct the agent, which holds the conversation to the rules after a suspected prompt injection. The
+   * paragraph that says such content is data is the portal's, said once in the prompt while such a tool is on.
    */
-  drivesBrowser?: true;
+  outside?: boolean;
+  /**
+   * The names of its parameters that hold an address the agent chose, a URL or a host. Each value a call has in them
+   * (text, or each text of a list) is held to the list of sites in Settings → Guard, where an empty list is any site,
+   * and recorded in Audit.
+   */
+  reaches?: string[];
+  /**
+   * The rules after a suspected prompt injection that every call of it is the shape of: once the conversation has read
+   * a flagged result, a call is held as a command that rule catches. A name that is no rule's is left out.
+   */
+  acts?: ("pipe-to-shell" | "write-to-path" | "upload" | "read-credentials" | "publish" | "persist" | "delegate")[];
+  /**
+   * The names of its parameters that hold files (text, or a list of text): a call is approved for each of those files,
+   * and for nothing else of it. `approvalFiles` on the definition is the older spelling.
+   */
+  files?: string[];
 }
 
 export interface ServerPortal {
@@ -274,9 +283,9 @@ export interface ServerPortal {
      * that has never said anything about them has any of them on; the chats that have them otherwise, by their own
      * switches or by their agent's or project's (newest first), each the opposite of `byDefault`; and the routines
      * whose own switches give their runs another answer than a routine that sets nothing would have in the same place
-     * (by name), each with its runs' answer (`allowed`). A routine that sets nothing has a tool that drives a browser
-     * off until its Browser switch is on, and every other tool as a chat in its place has it. For a page that says
-     * who may use them.
+     * (by name), each with its runs' answer (`allowed`). A routine that sets nothing has the browser's tools off until
+     * its Browser switch is on, and every other tool as a chat in its place has it. For a page that says who may use
+     * them.
      */
     exceptions(names: string[]): { byDefault: boolean; chats: { id: string; title: string; kind: ChatKind }[]; routines: { slug: string; name: string; allowed: boolean }[] };
   };
@@ -360,9 +369,7 @@ export interface ServerPortal {
      * pi as it starts, so its tools hold what this module holds. Only where pi
      * runs in the portal's own process. A tool registered with
      * `offByDefault: true` is off in every chat until somebody switches it on,
-     * one with `approvalFiles` (names of its parameters that hold files)
-     * is approved for those files, each on its own, and one with
-     * `drivesBrowser: true` is held to the browser's rules: see ToolDeclarations.
+     * and one with `guard` is held to what it declares: see ToolGuard.
      */
     extend(factory: (pi: any, chat: Chat) => void): void;
     /**

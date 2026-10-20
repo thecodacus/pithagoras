@@ -19,7 +19,7 @@ import type { DraftStore, PiClient, PiCommand, PiState, PiStats, PiTool, PromptT
 import type { ImageContent } from "../prompt-images.js";
 import { routineTools } from "./routine-tools.js";
 import { reportTool, reportToFor } from "./report-tool.js";
-import { declaredFiles, drivesBrowser, guardExtension } from "./guard.js";
+import { OUTSIDE_CONTENT_GUIDELINE, declaredFiles, declaredGuard, guardExtension, type DeclaredGuard } from "./guard.js";
 import { CODEMODE_TOOLS, codemodeExtension } from "./codemode.js";
 import { findSessionFile } from "./session-file.js";
 import { CONTEXT_FILES, SHARED_FILES } from "./context-files.js";
@@ -520,8 +520,10 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     let filesOf: (name: string) => readonly string[] | undefined = () => undefined;
     // Whether the MCP adapter registered a tool, from what the session knows of it once there is one: see untrustedResult.
     let fromAdapter: (name: string) => boolean = () => false;
-    // Whether a tool says it drives a web browser, from its definition once the session has it: see drivesBrowser.
-    let drives: (name: string) => boolean = () => false;
+    // What a tool declares the guard is to hold it to, from its definition once the session has it: see declaredGuard.
+    let guardOf: (name: string) => DeclaredGuard | undefined = () => undefined;
+    // The line that outside content is data, while a tool that declares it is on or lazy: asked once the session is there (below).
+    let outsideLines: () => string[] = () => [];
     const gateway = new ToolsGateway(opts.lazySets);
     // What the tools that are on ask to be told in a spoken turn, whoever registered them: `voiceGuidelines` on a
     // tool, as pi's own promptGuidelines are for every turn. Asked once the session is there (below).
@@ -553,7 +555,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
             () => gateway.owns(),
             (name) => filesOf(name),
             (name) => fromAdapter(name),
-            (name) => drives(name),
+            (name) => guardOf(name),
           ) },
         // Offered only while the conversation has a lazy tool: see applyToolsOff.
         { name: "tools-gateway", factory: gateway.extension },
@@ -566,7 +568,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       // Only where it means something: a conversation with the primary user has
       // nobody to escalate to, and the tool would just be noise.
       if (opts.sessionId && opts.role && opts.role !== "primary") {
-        factories.push({ name: "ask-primary", factory: askPrimaryTool(opts.sessionId, (name) => filesOf(name)) });
+        factories.push({ name: "ask-primary", factory: askPrimaryTool(opts.sessionId, (name) => filesOf(name), (name) => guardOf(name)?.acts) });
       }
       // Only when there is somewhere for it to go — a tool that always fails is
       // worse than no tool, and the model will keep trying it.
@@ -624,6 +626,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
         // Where its own skills go: only for the person it works for; a look or a colleague does not write them.
         ...(skillsOf && (!opts.role || opts.role === "primary") && !opts.heartbeatAgent ? [skillsLine(skillsOf)] : []),
         ...((!opts.role || opts.role === "primary") && understoryAt(opts.cwd) ? [UNDERSTORY_RULE] : []),
+        ...outsideLines(),
       ],
       // What the installed extensions' server halves add to the chat's pi, each under its package's name, as they are
       // at each load: see extension-host.ts.
@@ -675,7 +678,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       ...(opts.thinkingLevel ? { thinkingLevel: opts.thinkingLevel } : {}),
     });
     filesOf = (name) => declaredFiles(session.getToolDefinition(name));
-    drives = (name) => drivesBrowser(session.getToolDefinition(name));
+    guardOf = (name) => declaredGuard(session.getToolDefinition(name));
     fromAdapter = (name) => {
       const tool = (session.getAllTools?.() ?? []).find((one: any) => one?.name === name);
       return tool !== undefined && adapterTool({ source: sourceLabel(tool.sourceInfo), package: packageOf(tool.sourceInfo) });
@@ -694,6 +697,12 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       }
       return [...lines];
     };
+    // Said once, whichever of the tools that declare outside content are on, and through the `tools` tool where they
+    // are lazy: what they return comes in the short envelope (see pageEnvelope in guard.ts), which leaves it out.
+    outsideLines = () =>
+      [...new Set([...session.getActiveToolNames(), ...client.reachableLazy()])].some((name) => guardOf(name)?.outside)
+        ? [OUTSIDE_CONTENT_GUIDELINE]
+        : [];
     client.portalSessionId = opts.sessionId;
     client.dialogs = opts.dialogs !== false;
     client.rememberChatModel = opts.rememberChatModel;
@@ -1671,7 +1680,6 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       ...(forScripts(tool) ? { scriptsOnly: true as const } : {}),
       ...(this.offByDefault(String(tool.name)) ? { offByDefault: true as const } : {}),
       ...((files) => (files ? { approvalFiles: [...files] } : {}))(declaredFiles(this.session.getToolDefinition(String(tool.name)))),
-      ...(drivesBrowser(this.session.getToolDefinition(String(tool.name))) ? { drivesBrowser: true as const } : {}),
       enabled: !this.switchedOff.has(String(tool.name)),
     }));
   }

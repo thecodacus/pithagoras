@@ -45,8 +45,6 @@ export interface PiTool {
   offByDefault?: true;
   /** The parameters that hold the files it is approved for, as its definition declares them (see declaredFiles in guard.ts). */
   approvalFiles?: string[];
-  /** Registered with `drivesBrowser: true`: it drives a web browser, and the guard holds its calls to the browser's rules (see drivesBrowser in guard.ts). */
-  drivesBrowser?: true;
   /** False when this conversation has it switched off. */
   enabled: boolean;
   /** Whether it is on by default, so the page can say where a chat disagrees. */

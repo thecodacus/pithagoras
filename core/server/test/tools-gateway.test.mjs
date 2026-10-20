@@ -537,15 +537,15 @@ test("the rules a lazy tool's extension wrote for the prompt stay in the prompt,
 test("a lazy browser keeps the rule that a page is data and not instructions", async () => {
   const { setPortalBrowser } = await import("../dist/db.js");
   const { PORTAL_BROWSER_TOOLS } = await import("../dist/tool-policy.js");
-  const { BROWSER_UNTRUSTED_GUIDELINE } = await import("../dist/browser/tools.js");
+  const { OUTSIDE_CONTENT_GUIDELINE } = await import("../dist/pi/guard.js");
   setPortalBrowser(true);
   try {
     const direct = await run([], { cwd: chat() });
     assert.ok(names(direct.requests[0]).includes("browser_snapshot"));
-    assert.ok(systemOf(direct.requests[0]).includes(BROWSER_UNTRUSTED_GUIDELINE), "offered one by one, the rule is in the prompt");
+    assert.ok(systemOf(direct.requests[0]).includes(OUTSIDE_CONTENT_GUIDELINE), "offered one by one, the rule is in the prompt");
     const lazyBrowser = await run([], { toolsLazy: [...PORTAL_BROWSER_TOOLS], lazySets: ["browser"] });
     assert.deepEqual(names(lazyBrowser.requests[0]).filter((name) => name.startsWith("browser_")), []);
-    assert.ok(systemOf(lazyBrowser.requests[0]).includes(BROWSER_UNTRUSTED_GUIDELINE), "lazy, it still is: the guard's short envelope relies on it");
+    assert.ok(systemOf(lazyBrowser.requests[0]).includes(OUTSIDE_CONTENT_GUIDELINE), "lazy, it still is: the guard's short envelope relies on it");
     assert.match(systemOf(lazyBrowser.requests[0]), /Browser refs come from browser_snapshot or browser_find; never guess one/, "and so are the rules for its refs");
   } finally {
     setPortalBrowser(false);
