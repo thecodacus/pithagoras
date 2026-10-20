@@ -192,7 +192,9 @@ export interface SlotMap {
    * that opens the window each time it grows (the agent ran a command). A
    * card of a call in voice mode that `opensFor` says yes to opens it when
    * tapped, for calls the portal's own windows are not for. Its own shortcut
-   * is `portal.shortcuts`.
+   * is `portal.shortcuts`. `useButton` is a hook, called as voice mode's
+   * toolbar is drawn: how the window's button there is for this chat, as a
+   * panel's is in the chat's header.
    *
    * `maximizable` gives its head a Maximize button: the window then fills the
    * stage, over the others and above the dock, until it is restored by its
@@ -211,6 +213,8 @@ export interface SlotMap {
       maximizable?: boolean;
       keepLoaded?: boolean;
       useAutoOpen?: (props: ChatProps) => number;
+      /** `hidden`: no button while it is closed (it still opens for work, a card and a shortcut). `live`: a dot that says something in it is running. `title`: what the button says when pointed at. */
+      useButton?: (props: ChatProps) => { hidden?: boolean; live?: boolean; title?: string };
       /** `chat` is the chat on screen: its `workspace` tells a path in its folder from one elsewhere. */
       opensFor?: (call: ToolCallView, chat: Chat) => boolean;
       /** What the card of a call it opens for says, in place of the portal's words for a tool it does not know ("Using canvas write"). */

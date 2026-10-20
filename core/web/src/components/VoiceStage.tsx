@@ -2,7 +2,7 @@ import { ActivityProgress } from './ActivityProgress';
 import type { Activity } from '../transcript';
 import { useWorkPanels } from "../use-work-panels";
 import { VoiceToolActivity } from "./VoiceToolActivity";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent, type MouseEvent as ReactMouseEvent, type MutableRefObject, type PointerEvent as ReactPointerEvent } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent, type MouseEvent as ReactMouseEvent, type MutableRefObject, type PointerEvent as ReactPointerEvent } from "react";
 import type { Item } from "../transcript";
 import { LuMic, LuMicOff, LuX, LuGlobe, LuMaximize2, LuMinimize2, LuMinus, LuImage, LuImagePlus, LuRotateCcw, LuSquare, LuMessageSquareText, LuSlidersHorizontal } from "react-icons/lu";
 import { VoicePictures, shownPictures } from "./VoicePictures";
@@ -84,6 +84,23 @@ function BroughtWindow({ entry, main, open, opened, maximized, onClose, onMaximi
     </section>
   );
 }
+
+/**
+ * The toolbar's button for a window an extension brought, while it is closed.
+ * A part of its own, so that what the extension says of its button
+ * (`useButton`, a hook) is asked when something of it changes, not each time
+ * the stage is drawn.
+ */
+const WindowButton = memo(function WindowButton({ entry, onOpen, ...props }: ChatProps & { entry: Registered<"voice.window">; onOpen: (key: string) => void }) {
+  const button = entry.useButton?.(props) ?? {};
+  if (button.hidden) return null;
+  return (
+    <button type="button" aria-label={t("Show {panel}", { panel: titleOf(entry) })} title={button.title ?? titleOf(entry)} onClick={() => onOpen(entry.key)}>
+      {entry.icon ? <entry.icon /> : <LuPuzzle />}
+      {button.live && <i className="header-live-dot" aria-hidden />}
+    </button>
+  );
+});
 
 /**
  * What opens an extension's window by itself (`useAutoOpen`): a count of the
@@ -174,6 +191,10 @@ export function VoiceStage({ sessionId, folder, workPhase, title, phase, startin
     setBroughtOnce((once) => (once.includes(key) ? once : [...once, key]));
     onCue("focus");
   };
+  // The same function each time the stage is drawn: a window's button is drawn again only for what is new in what it is handed.
+  const opening = useRef(openBrought);
+  opening.current = openBrought;
+  const openByPerson = useCallback((key: string) => opening.current(key, { by: "person" }), []);
   /** An extension's own windows, by the ids it registered them with: for its shortcuts. */
   const windowsOf = (extension: string): VoiceWindows => ({
     isOpen: (id) => broughtOpen.includes(`${extension}/${id}`),
@@ -479,9 +500,10 @@ export function VoiceStage({ sessionId, folder, workPhase, title, phase, startin
         {pictures.length > 0 && !picturesShown && <button type="button" onClick={openPictures} title={`${t("Show pictures")}${hint("voice.pictures")}`} aria-label={t("Show pictures")}><LuImage /></button>}
         {(browserAvailable || loaded) && !shown && <button type="button" onClick={open} title={`${t("Show browser")}${hint("voice.browser")}`} aria-label={t("Show browser")}><LuGlobe /></button>}
         {windowEntries.filter((entry) => !broughtOpen.includes(entry.key)).map((entry) => (
-          <button key={entry.key} type="button" aria-label={t("Show {panel}", { panel: titleOf(entry) })} title={titleOf(entry)} onClick={() => openBrought(entry.key, { by: "person" })}>
-            {entry.icon ? <entry.icon /> : <LuPuzzle />}
-          </button>
+          // Its button is its own to say about (hidden, live): one whose say fails is left out, and the toolbar stays.
+          <ErrorBoundary key={entry.key} resetKey={`${entry.key}:${sessionId}`} fallback={() => null}>
+            <WindowButton key={sessionId} entry={entry} chat={chat} channel={channelFor(sessionId, entry.extension)} panels={panelsFor(entry.extension)} onOpen={openByPerson} />
+          </ErrorBoundary>
         ))}
         <button ref={settingsToggle} type="button" data-voice-settings-toggle onClick={() => setSettings(v => !v)} title={`${t("Voice settings")}${hint("voice.settings")}`} aria-label={t("Voice settings")} aria-expanded={settings}><LuSlidersHorizontal /></button>
       </div>

@@ -164,7 +164,7 @@
 
 .voice-stage-header { position: static; }
 .voice-utilities { position: absolute; z-index: 20; right: 16px; bottom: 16px; display: flex; gap: 8px; align-items: center; }
-.voice-stage .voice-utilities button { width: 36px; height: 36px; }
+.voice-stage .voice-utilities button { position: relative; width: 36px; height: 36px; }
 @media (max-width: 600px) {
   .voice-utilities { bottom: 8px; right: 8px; gap: 6px; }
 }

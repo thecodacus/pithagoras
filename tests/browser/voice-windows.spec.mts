@@ -531,6 +531,35 @@ test.describe('a window an extension lets be maximized', () => {
     await expect(page.getByRole('button', { name: 'Maximize Console' })).toHaveCount(0);
   });
 
+  test('its button in the toolbar is as the extension says: hidden while it is closed, with a dot while something in it runs, in its own words', async ({ page }) => {
+    const viewer = viewerOf(page);
+    const show = page.getByRole('button', { name: 'Show Viewer' });
+    const say = (button: Record<string, unknown>) => page.evaluate((b) => (window as any).viewerButton(b), button);
+    await expect(show).toHaveAttribute('title', 'Viewer');
+    await expect(show.locator('.header-live-dot')).toHaveCount(0);
+
+    // Hidden: no button, and the others' are where they were.
+    await say({ hidden: true });
+    await expect(show).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Show Console' })).toBeVisible();
+
+    // Shown again, live and in its own words.
+    await say({ live: true, title: 'Something is showing' });
+    await expect(show).toHaveAttribute('title', 'Something is showing');
+    await expect(show.locator('.header-live-dot')).toHaveCount(1);
+    await show.click();
+    await expect(viewer).toHaveClass(/is-open/);
+    // Open, it is reached by its own head: the toolbar has no button for it.
+    await expect(show).toHaveCount(0);
+    await say({ hidden: true });
+    await page.getByRole('button', { name: 'Minimize Viewer' }).click();
+    await expect(viewer).not.toHaveClass(/is-open/);
+    await expect(show).toHaveCount(0);
+    await say({});
+    await expect(show).toHaveAttribute('title', 'Viewer');
+    await expect(show.locator('.header-live-dot')).toHaveCount(0);
+  });
+
   test('Escape in a frame of its own restores it, where the extension listens for it', async ({ page }) => {
     const viewer = viewerOf(page);
     await page.getByRole('button', { name: 'Show Viewer' }).click();

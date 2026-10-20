@@ -317,7 +317,7 @@ puts it before entries with a higher one, or none.
 | `chat.composer.above` | Above the message box | | `chat`, `channel`, `panels` |
 | `chat.overlay` | Over the chat, placed by you | | `chat`, `channel`, `panels` |
 | `chat.background` | Nowhere: there while the chat is on screen, drawing nothing | | `chat`, `channel`, `panels` |
-| `voice.window` | A window in voice mode, placed and sized like the portal's own | `title`, `icon?`, `place?`, `maximizable?`, `keepLoaded?`, `useAutoOpen?`, `opensFor?`, `describe?` | `chat`, `channel`, `panels`, `close()`, `opened`, `maximized`, `maximize()`, `restore()` |
+| `voice.window` | A window in voice mode, placed and sized like the portal's own | `title`, `icon?`, `place?`, `maximizable?`, `keepLoaded?`, `useAutoOpen?`, `useButton?`, `opensFor?`, `describe?` | `chat`, `channel`, `panels`, `close()`, `opened`, `maximized`, `maximize()`, `restore()` |
 | `nav.page` | A page at `/x/<package>/<id>`, with an entry in the sidebar | `title`, `icon?`, `useShown?` | |
 | `settings.page` | Your package's page in Settings, at `/settings/x/<package>`, above the fields the portal found for it | `title?` and `icon?`: its entry in Settings' list, in place of the package's name and the mark every extension has; `search`: what Settings' search finds on it, each `{ title, section?, words? }`, `section` being the heading it goes to | |
 
@@ -461,6 +461,13 @@ behaves beside the portal's own windows:
 - `useAutoOpen(props)`: a hook, called while voice mode is on in a chat. It
   returns a count, and the window opens each time the count grows: the number
   of commands the agent ran, say, from `portal.chats.use`.
+- `useButton(props)`: a hook, called as the toolbar is drawn: how the window's
+  button is for this chat, as a panel's `useButton` says it in the chat's
+  header. `hidden` leaves the button out while the window is closed (no button
+  until there is something to see: the browser's is there only while a browser
+  runs), `live` puts a dot on it that says something in it is running, and
+  `title` is what it says when pointed at. A hidden window still opens for
+  `useAutoOpen`, for a card `opensFor` says it is for, and for a shortcut.
 - `opensFor(call, chat)`: whether the card of a call in voice mode opens this
   window when it is tapped. It is asked for the calls the portal's own windows
   are not for: a page's card opens the browser, and a file's or a shell call's,
