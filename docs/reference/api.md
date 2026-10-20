@@ -272,7 +272,7 @@ See [Models and providers](/guide/models).
 | `DELETE /api/browser/install` | Remove it; `?profile=forget` drops the logins too |
 | `POST /api/browser/connect` · `DELETE /api/browser/connect` | Give the agent the browser's tools, or take them away |
 | `PUT /api/browser/config` · `GET /api/browser/suggest-password` | The login of the browser view; a suggestion |
-| `PUT /api/browser/allowlist` | Domains it may be pointed at; empty means no restriction |
+| `PUT /api/browser/allowlist` | Domains it may be pointed at; empty means no restriction. Settings → Guard writes the same list with `PUT /api/guard/allowlist` (`{ domains }`), and `GET /api/guard` has it as `allowlist` |
 | `PUT /api/sessions/:id/browser` | Whether this chat may use it |
 
 See [The agent's browser](/guide/browser).

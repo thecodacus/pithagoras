@@ -149,7 +149,8 @@ heartbeats keep every rule.
 
 **Settings → Guard** shows all of this in one place: the rules and what each holds
 back, how the sandbox, the primary user and the place approvals are asked for stand,
-each routine's exemptions, which MCP servers count as your own, the approvals not
+each routine's exemptions, which MCP servers count as your own, where a tool that
+drives a browser may go (the [allowlist](/guide/browser#where-it-may-go)), the approvals not
 yet spent (with **Revoke**), the flagged results you trusted (with **Un-trust**, which
 holds their chat back again), and what is always on and why.
 

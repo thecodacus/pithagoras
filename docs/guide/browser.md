@@ -289,8 +289,11 @@ is what the old switch wrote.
 
 ## Where it may go
 
-**Browser → Where it may go** takes one domain per line, `*.example.com` for
-subdomains. Empty means no restriction.
+**Settings → Guard → Where a browser may go** takes one domain per line,
+`*.example.com` for subdomains. Empty means no restriction. It is one list for
+every tool that drives a browser: the portal's own browser tools, a Playwright
+MCP server, and an extension's tool that says it drives one. **Browser → Where it
+may go** says whether the list restricts anything, and links to it.
 
 ::: danger Read this one together with the section above
 That default was written when the browser was off until somebody turned it on,

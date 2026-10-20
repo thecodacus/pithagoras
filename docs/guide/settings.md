@@ -78,9 +78,11 @@ that, a session asking for a local model silently started on pi's fallback.
 
 **Guard**, beside **Sandbox**, is the [guard](/guide/security)'s page: the rules that hold after a suspected
 injection, each routine's exemptions from them (one switch per rule), which MCP servers count as your own and are
-not marked as outside content (the portal's own memory server until you say otherwise; the browser never), the
-approvals not yet spent and the flagged results you trusted, each of which can be taken back, and what is always on.
-Each change is saved as it is made.
+not marked as outside content (the portal's own memory server until you say otherwise; the browser never), where a
+browser may go (one list, one domain per line, for every tool that drives a browser: the portal's own browser tools,
+a Playwright MCP server and an extension's alike; saved with its **Save** button), the approvals not yet spent and the
+flagged results you trusted, each of which can be taken back, and what is always on. Each other change is saved as it
+is made.
 
 **Tools** sets which tools every conversation starts with, see
 [The interface](/guide/interface#tools). **Skills** lists, creates, imports and

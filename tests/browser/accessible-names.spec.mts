@@ -32,6 +32,7 @@ async function portal(page: Page) {
     if (p === '/api/mcp') return mcp;
     if (p === '/api/extensions') return { settingsPath: '/a/settings.json', extensions: [extension] };
     if (p === '/api/routines') return { routines: [routine] };
+    if (p === '/api/guard') return { running: true, sandbox: 'on', primary: true, approvalsTo: true, rules: [], servers: [], routines: [], allowlist: 'github.com', approvals: [], trusted: [] };
     if (p === '/api/routines/preview') return { runs: [] };
     // A routine's and an agent's own tool switches: the list of checkboxes the page draws, which have to be named too.
     if (p === '/api/routines/r1/tools' || p === '/api/agents/home/tools') {
@@ -70,7 +71,8 @@ const scenes: Scene[] = [
   { name: 'routines', url: '/routines', shows: (page) => page.getByText('Morning').first() },
   { name: 'a routine', url: '/routines', open: (page) => page.getByRole('button', { name: /Morning/ }).first().click(), shows: field('Routine name') },
   { name: 'a new routine', url: '/routines', open: (page) => page.getByRole('button', { name: 'New routine' }).click(), shows: field('Schedule') },
-  { name: 'browser', url: '/browser', shows: field('Where it may go') },
+  { name: 'browser', url: '/browser', shows: (page) => page.getByRole('link', { name: 'Settings → Guard' }) },
+  { name: 'the guard', url: '/settings/guard', shows: field('Where a browser may go') },
 ];
 for (const { name, url, open, shows } of scenes) {
   test(`every field and button on ${name} has a name`, async ({ page }) => {

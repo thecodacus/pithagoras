@@ -1,6 +1,7 @@
 import express, { type Router } from "express";
 import {
   allTrustedResults,
+  browserAllowlist,
   getDb,
   getDefaultReportTo,
   getSession,
@@ -8,6 +9,7 @@ import {
   recordAudit,
   revokeGrant,
   routineExemptions,
+  setBrowserAllowlist,
   setRoutineExemptions,
   setTrustedMcpServers,
   trustedMcpServers,
@@ -23,8 +25,8 @@ import { serversAndBrowsers } from "./mcp.js";
  * The Guard page in Settings: what the guard holds and what of it can be changed (see pi/guard.ts and
  * docs/guide/security.md). What can be changed is where the owner decided it may be: a routine's exemption from a
  * rule after a suspected injection, one rule at a time; an MCP server counted as the person's own and not outside
- * content; and taking back what was allowed once, an approval not yet spent or a flagged result that was trusted.
- * Everything else is shown, and stays as it is.
+ * content; where a tool that drives a browser may go; and taking back what was allowed once, an approval not yet
+ * spent or a flagged result that was trusted. Everything else is shown, and stays as it is.
  */
 
 /** What a trusted result was, read from the call that carried it: its tool, the signs it carried and the start of what it said. */
@@ -76,6 +78,8 @@ export function guardRouter(): Router {
       rules: GUARD_RULES,
       servers: [...new Set([...servers, ...browsers])].sort().map((name) => ({ name, trusted: !browsers.includes(name) && trusted.has(name), browser: browsers.includes(name) })),
       routines: routines.map((routine) => ({ id: routine.id, name: routine.name, exempt: [...routineExemptions(routine.slug)] })),
+      // Where a tool that drives a browser may go, one domain per line: the portal's own browser tools and a Playwright MCP's alike.
+      allowlist: browserAllowlist().join("\n"),
       approvals: openGrants().map((grant) => ({
         id: grant.id,
         sessionId: grant.session_id,
@@ -117,6 +121,14 @@ export function guardRouter(): Router {
     if (!routine) return res.status(404).json({ error: "Not found" });
     setRoutineExemptions(routine.id, exempt);
     res.json({ id: routine.id, exempt: [...routineExemptions(routine.slug)] });
+  });
+
+  /** Where a tool that drives a browser may go: one domain per line, `*.example.com` for its subdomains. Empty means no restriction. */
+  router.put("/guard/allowlist", (req, res) => {
+    const domains = req.body?.domains;
+    if (typeof domains !== "string") return res.status(400).json({ error: "domains required" });
+    setBrowserAllowlist(domains);
+    res.json({ allowlist: browserAllowlist().join("\n") });
   });
 
   /** An approval taken back before it is spent. */

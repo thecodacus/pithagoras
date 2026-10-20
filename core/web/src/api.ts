@@ -832,17 +832,15 @@ export const api = {
   setGuardRoutine: (id: string, exempt: string[]) =>
     json<{ id: string; exempt: string[] }>(`/api/guard/routines/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify({ exempt }) }),
   revokeApproval: (id: string) => json<{ ok: true }>(`/api/guard/approvals/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  /** Where a tool that drives a browser may go: one domain per line, empty for anywhere. */
+  setGuardAllowlist: (domains: string) =>
+    json<{ allowlist: string }>("/api/guard/allowlist", { method: "PUT", body: JSON.stringify({ domains }) }),
   untrustResult: (sessionId: string, id: string) =>
     json<{ ok: true }>(`/api/guard/trusted/${encodeURIComponent(sessionId)}/${encodeURIComponent(id)}`, { method: "DELETE" }),
   setSandbox: (policy: SandboxPolicy) =>
     json<{ policy: SandboxPolicy; report: SandboxReport; chats: { reloaded: number; waiting: number } }>("/api/sandbox", { method: "PUT", body: JSON.stringify(policy) }),
   setBrowserCursor: (on: boolean) =>
     json<{ cursor: boolean }>("/api/browser/cursor", { method: "PUT", body: JSON.stringify({ on }) }),
-  setBrowserAllowlist: (domains: string) =>
-    json<{ allowlist: string }>("/api/browser/allowlist", {
-      method: "PUT",
-      body: JSON.stringify({ domains }),
-    }),
 
   audit: (limit = 200) => json<{ entries: AuditEntry[] }>(`/api/audit?limit=${limit}`),
   /** Up to and including `through`, the newest entry the caller has seen. */
@@ -1740,6 +1738,8 @@ export interface GuardState {
   /** The MCP servers, and whether each is counted as the person's own; the browser's never is. */
   servers: { name: string; trusted: boolean; browser: boolean }[];
   routines: { id: string; name: string; exempt: string[] }[];
+  /** Where a tool that drives a browser may go, one domain per line; empty for anywhere. */
+  allowlist: string;
   approvals: { id: string; sessionId: string; chat: string | null; tool: string; subject: string; expiresAt: string }[];
   trusted: { sessionId: string; chat: string | null; results: { id: string; tool?: string; signals?: string[]; excerpt?: string }[] }[];
 }

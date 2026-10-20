@@ -2,9 +2,10 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { LuRefreshCw } from "react-icons/lu";
 import { useSearchParams } from "react-router-dom";
 import { api, type GuardState } from "../api";
-import { formatDateTime, msg, t, tp } from "../i18n";
+import { formatDateTime, msg, t, tp, tx } from "../i18n";
 import type { Tab } from "../settings-tabs";
-import { DetailsGroup, Empty, LoadFailed, Section, SwitchRow, WarnBanner, btnCls, ghostCls } from "./SettingsUi";
+import { useUnsavedDraft } from "./Modal";
+import { DetailsGroup, Empty, LoadFailed, Section, SwitchRow, WarnBanner, btnCls, codeAreaCls, ghostCls, primaryCls } from "./SettingsUi";
 
 /** What each rule after a suspected injection holds back, by its name, as the page says it. */
 const RULE_TEXT: Record<string, string> = {
@@ -65,9 +66,10 @@ function StatusRow({ label, value, warn, tab, onOpen }: { label: string; value: 
 /**
  * Settings → Guard: what the guard holds the agent to, and the little of it that is a switch. A routine may be let
  * do what a rule after a suspected injection holds back, one rule at a time; an MCP server may be counted as the
- * person's own; what was allowed once, an approval not yet spent or a flagged result that was trusted, may be taken
- * back. The rest is shown with its reason. Each change is shown at once and saved, as the tool switches are; changes
- * made while another saves are saved too, and one the server refuses is put back by itself.
+ * person's own; where a tool that drives a browser may go is a list; what was allowed once, an approval not yet
+ * spent or a flagged result that was trusted, may be taken back. The rest is shown with its reason. Each switch is
+ * shown at once and saved, as the tool switches are; changes made while another saves are saved too, and one the
+ * server refuses is put back by itself. The list is saved with its button.
  */
 export function GuardSettings({ onError, onOpen }: { onError: (message: string) => void; onOpen: (tab: Tab) => void }) {
   const [state, setState] = useState<GuardState | null>(null);
@@ -248,6 +250,13 @@ export function GuardSettings({ onError, onOpen }: { onError: (message: string) 
       </Section>
 
       <Section
+        title={t("Where a browser may go")}
+        hint={t("For every tool that drives a browser: the portal's own browser tools, a Playwright MCP server, and an extension's that says it drives one. It holds in every conversation that may drive a browser.")}
+      >
+        <AllowlistEditor initial={state.allowlist} onSaved={(allowlist) => setState((s) => (s ? { ...s, allowlist } : s))} onError={onError} />
+      </Section>
+
+      <Section
         title={t("Allowed once")}
         hint={t("Approvals the primary user gave for one go that are not spent yet. Each runs out after 15 minutes; take one back before then if it should not run.")}
       >
@@ -338,6 +347,62 @@ export function GuardSettings({ onError, onOpen }: { onError: (message: string) 
           ))}
         </ul>
       </Section>
+    </div>
+  );
+}
+
+/**
+ * The domains a tool that drives a browser may be pointed at, one to a line, saved with its button. What was typed and
+ * not saved is asked about before Settings closes, and is not replaced when the page is read again.
+ */
+function AllowlistEditor({ initial, onSaved, onError }: { initial: string; onSaved: (allowlist: string) => void; onError: (message: string) => void }) {
+  const [text, setText] = useState(initial);
+  /** What `text` started from: it is changed once it is not that. */
+  const [from, setFrom] = useState(initial);
+  const [saving, setSaving] = useState(false);
+  useUnsavedDraft(!saving && text !== from);
+
+  useEffect(() => {
+    if (text === from) setText(initial);
+    setFrom(initial);
+  }, [initial]);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const { allowlist } = await api.setGuardAllowlist(text);
+      setText(allowlist);
+      setFrom(allowlist);
+      onSaved(allowlist);
+    } catch (e) {
+      onError((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div>
+      <p className="mb-2 text-xs text-fg-faint">
+        {tx("One domain per line. {pattern} covers its subdomains. Leave it empty for no restriction — the per-session switch is the gate, and a list nobody filled in should not quietly block everything.", { pattern: <span className="font-mono">*.example.com</span> })}
+      </p>
+      <textarea
+        rows={4}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        placeholder={"*.google.com\ngithub.com"}
+        aria-label={t("Where a browser may go")}
+        spellCheck={false}
+        className={codeAreaCls}
+      />
+      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2">
+        <button type="button" className={primaryCls} disabled={saving || text === from} onClick={() => void save()}>
+          {t("Save")}
+        </button>
+        <p className="min-w-0 flex-1 basis-60 text-xs text-fg-faint">
+          {t("Checked when the agent asks for a URL, and every allowed one is recorded in Audit. A page that redirects itself is not covered — that needs a filtering proxy, which is not built yet.")}
+        </p>
+      </div>
     </div>
   );
 }

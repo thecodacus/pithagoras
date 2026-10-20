@@ -330,7 +330,7 @@ export function browserRouter(): Router {
     res.json({ cursor: browserCursorOn() });
   });
 
-  /** Domains the browser may be pointed at. Empty means no restriction. */
+  /** Domains the browser may be pointed at. Empty means no restriction. Settings → Guard edits it now (PUT /api/guard/allowlist); this stays for what still asks here. */
   router.put("/browser/allowlist", (req, res) => {
     const domains = req.body?.domains;
     if (typeof domains !== "string") return res.status(400).json({ error: "domains required" });

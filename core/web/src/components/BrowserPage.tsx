@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import {
   LuCircleAlert,
   LuExternalLink,
@@ -10,7 +11,7 @@ import {
 } from "react-icons/lu";
 import { PageHeader } from "./PageHeader";
 import { BrowserInstall } from "./BrowserInstall";
-import { ErrorBanner, LoadFailed, SwitchRow, inputCls } from "./SettingsUi";
+import { ErrorBanner, LoadFailed, SwitchRow } from "./SettingsUi";
 import { api, type BrowserStatus } from "../api";
 import { pollWhileVisible } from "../poll";
 import { labelOf, msg, t, tx } from "../i18n";
@@ -32,8 +33,6 @@ const SESSION_KIND: Record<string, string> = {
  */
 export function BrowserPage({ onOpenSession }: { onOpenSession: (id: string) => void }) {
   const [status, setStatus] = useState<BrowserStatus | null>(null);
-  const [allowlist, setAllowlist] = useState("");
-  const [dirty, setDirty] = useState(false);
   // What a button was refused, kept until the next press; and what the poll could not read, which is only true
   // until the next poll that can. Two messages, so that a poll that works does not take back one nobody read yet.
   const [error, setError] = useState<string | null>(null);
@@ -57,14 +56,13 @@ export function BrowserPage({ onOpenSession }: { onOpenSession: (id: string) => 
       .then((s) => {
         setStatus(s);
         setLoadError(null);
-        if (!dirty) setAllowlist(s.allowlist);
       })
       .catch((e) => setLoadError((e as Error).message));
 
   useEffect(() => {
     load();
     return pollWhileVisible(load, 8000);
-  }, [dirty]);
+  }, []);
 
   if (!status) {
     return (
@@ -94,6 +92,11 @@ export function BrowserPage({ onOpenSession }: { onOpenSession: (id: string) => 
   // other machines, which it is not unless someone chose it. Pointing the
   // fallback at the proxy would have offered a link to the same dead end.
   const proxyUrl = "/browser-ui/";
+  const guardLink = (
+    <Link to="/settings/guard" className="text-accent hover:underline">
+      {t("Settings → Guard")}
+    </Link>
+  );
   const uiUrl = embeddable
     ? proxyUrl
     : status.uiExposed
@@ -281,44 +284,16 @@ export function BrowserPage({ onOpenSession }: { onOpenSession: (id: string) => 
           </section>
         )}
 
+        {/* The list is the guard's, for every tool that drives a browser: it is edited in Settings → Guard, and only said here. */}
         <section className="mb-6">
           <div className="mb-1.5 flex items-center gap-2">
             <LuShieldCheck className="h-3.5 w-3.5 text-fg-faint" />
             <h3 className="text-sm font-medium text-fg">{t("Where it may go")}</h3>
-            {dirty && (
-              <button
-                onClick={async () => {
-                  setError(null);
-                  try {
-                    await api.setBrowserAllowlist(allowlist);
-                    setDirty(false);
-                    await load();
-                  } catch (e) {
-                    setError((e as Error).message);
-                  }
-                }}
-                className="ml-auto rounded-lg bg-accent/12 px-3 py-1.5 text-xs text-accent ring-1 ring-inset ring-accent/25 transition hover:bg-accent/20"
-              >
-                {t("Save")}
-              </button>
-            )}
           </div>
-          <p className="mb-2 text-[11px] text-fg-faint">
-            {tx("One domain per line. {pattern} covers its subdomains. Leave it empty for no restriction — the per-session switch is the gate, and a list nobody filled in should not quietly block everything.", { pattern: <span className="font-mono">*.example.com</span> })}
-          </p>
-          <textarea
-            rows={4}
-            value={allowlist}
-            onChange={(e) => {
-              setAllowlist(e.target.value);
-              setDirty(true);
-            }}
-            placeholder={"*.google.com\ngithub.com"}
-            aria-label={t("Where it may go")}
-            className={`${inputCls} font-mono text-xs`}
-          />
-          <p className="mt-1.5 text-[11px] text-fg-faint">
-            {t("Checked when the agent asks for a URL, and every allowed one is recorded in Audit. A page that redirects itself is not covered — that needs a filtering proxy, which is not built yet.")}
+          <p className="text-[11px] text-fg-faint">
+            {status.allowlist.trim()
+              ? tx("Only to the domains listed in {place}, which holds for every tool that drives a browser.", { place: guardLink })
+              : tx("Anywhere, while the list in {place} is empty. It holds for every tool that drives a browser.", { place: guardLink })}
           </p>
         </section>
 
