@@ -15,3 +15,18 @@ export function portal(): ServerPortal {
   if (!current) throw new Error("Media's server half has not started");
   return current;
 }
+
+let life = new AbortController();
+
+/**
+ * Aborted as the half stops. What the half sets going that runs on by itself, the small copies, posters and playable
+ * copies being made and those waiting their turn, takes it as it is set going, and gives up then: a running ffmpeg is
+ * killed, and what waits is not made. A start after the stop has a new one.
+ */
+export const stopSignal = (): AbortSignal => life.signal;
+
+/** Gives up what the half set going, as it stops (see stopSignal). */
+export function stopWork(): void {
+  life.abort();
+  life = new AbortController();
+}

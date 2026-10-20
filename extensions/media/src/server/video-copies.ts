@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { closeSync, existsSync, fstatSync, mkdirSync, readdirSync, renameSync, rmSync } from "node:fs";
 import path from "node:path";
-import { portal } from "./host";
+import { portal, stopSignal } from "./host";
 import { MAX_VIDEO_BYTES, openClip } from "./video-files";
 import { feed, posterAvailable, tool } from "./video-posters";
 import { baseDir } from "./within";
@@ -82,11 +82,11 @@ function command(args: string[]): [string, string[]] {
 /** The clip comes in on the standard input, decoded by one thread. */
 const FROM_PIPE = ["-protocol_whitelist", "pipe", "-threads", "1", "-i", "pipe:0"];
 
-/** Runs ffmpeg over the open clip with these arguments, and tells how it ended and what it said (the first `keep` characters of it). */
-function run(args: string[], fd: number, size: number, ms: number, keep: number): Promise<{ code: number | null; signal: NodeJS.Signals | null; said: string }> {
+/** Runs ffmpeg over the open clip with these arguments, and tells how it ended and what it said (the first `keep` characters of it). It is killed when `stopped` is aborted. */
+function run(args: string[], fd: number, size: number, ms: number, keep: number, stopped: AbortSignal): Promise<{ code: number | null; signal: NodeJS.Signals | null; said: string }> {
   return new Promise((resolve, reject) => {
     const [file, argv] = command(args);
-    const child = spawn(file, argv, { stdio: ["pipe", "ignore", "pipe"] });
+    const child = spawn(file, argv, { stdio: ["pipe", "ignore", "pipe"], signal: stopped, killSignal: "SIGKILL" });
     let said = "";
     const timer = setTimeout(() => child.kill("SIGKILL"), ms);
     child.stdin.on("error", () => {});
@@ -118,10 +118,10 @@ function pictureIn(said: string): { width: number; height: number } | undefined 
   return largest;
 }
 
-/** Runs ffmpeg over the open clip, to the file `to`. */
-async function convert(fd: number, size: number, to: string): Promise<void> {
+/** Runs ffmpeg over the open clip, to the file `to`, until `stopped` is aborted. */
+async function convert(fd: number, size: number, to: string, stopped: AbortSignal): Promise<void> {
   // Asked first how large the picture is, as ffmpeg reads it: before anything is converted a clip that declares more than a copy is made of is refused.
-  const looked = await run(["-hide_banner", "-v", "info", ...FROM_PIPE], fd, size, PROBE_MS, 64 * 1024);
+  const looked = await run(["-hide_banner", "-v", "info", ...FROM_PIPE], fd, size, PROBE_MS, 64 * 1024, stopped);
   const picture = pictureIn(looked.said);
   if (!picture) {
     // What ffmpeg says last of a look with nothing to make is that there is nothing to make: its word before that is the clip's.
@@ -132,7 +132,7 @@ async function convert(fd: number, size: number, to: string): Promise<void> {
   // A box of COPY_SIDE that is no larger than the picture, so that a small picture keeps its size: `decrease` alone would fill the box.
   const fit = `scale=w='min(${COPY_SIDE},iw)':h='min(${COPY_SIDE},ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,format=yuv420p`;
   // Video only, in VP9, at a quality that is a copy to look at, not an archive. The output stops at one byte over the size a clip may have, which is then refused.
-  const done = await run(["-v", "error", ...FROM_PIPE, "-an", "-vf", fit, "-c:v", "libvpx-vp9", "-b:v", "0", "-crf", "34", "-row-mt", "1", "-threads", "2", "-lag-in-frames", "5", "-fs", String(MAX_VIDEO_BYTES + 1), "-f", "webm", "-y", to], fd, size, COPY_MS, 2000);
+  const done = await run(["-v", "error", ...FROM_PIPE, "-an", "-vf", fit, "-c:v", "libvpx-vp9", "-b:v", "0", "-crf", "34", "-row-mt", "1", "-threads", "2", "-lag-in-frames", "5", "-fs", String(MAX_VIDEO_BYTES + 1), "-f", "webm", "-y", to], fd, size, COPY_MS, 2000, stopped);
   if (done.code !== 0) throw new Error(done.said.trim().split("\n").pop() || `ffmpeg ended with ${done.code ?? done.signal}`);
 }
 
@@ -160,11 +160,14 @@ export async function openCopy(whole: Opened, id: string, listed: () => boolean,
     if (kept || !make || !posterAvailable()) return kept;
     let job = making.get(name);
     if (!job) {
+      const stopped = stopSignal();
       const run = async (): Promise<boolean> => {
+        // Media stopped while it waited its turn: not made.
+        if (stopped.aborted) return false;
         mkdirSync(copiesDir(), { recursive: true });
         const tmp = path.join(copiesDir(), `${name}.part`);
         try {
-          await convert(whole.fd, whole.size, tmp);
+          await convert(whole.fd, whole.size, tmp, stopped);
           const now = fstatSync(whole.fd);
           // The clip may have been written over, or deleted, while it was converted: that copy is of nothing that is there.
           if (now.size !== whole.size || now.mtimeMs !== modifiedMs || !listed()) return false;
@@ -176,7 +179,8 @@ export async function openCopy(whole: Opened, id: string, listed: () => boolean,
           renameSync(tmp, path.join(copiesDir(), name));
           return true;
         } catch (e) {
-          portal().log(`videos: playable copy failed: ${(e as Error).message}`);
+          // Media stopped meanwhile, which killed ffmpeg: no failure of the clip's.
+          if (!stopped.aborted) portal().log(`videos: playable copy failed: ${(e as Error).message}`);
           return false;
         } finally {
           rmSync(tmp, { force: true });

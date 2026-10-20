@@ -4,7 +4,7 @@ import { imagesRoutes } from "./server/api/images";
 import { settingsRoutes } from "./server/api/settings";
 import { videosRoutes } from "./server/api/videos";
 import { takeHandoff } from "./server/handoff";
-import { setPortal } from "./server/host";
+import { setPortal, stopWork } from "./server/host";
 import { forgetPicturesIn, keepChatPictures } from "./server/image-gallery";
 import { stopJobs as stopPictureJobs } from "./server/image-jobs";
 import { offeredTools, registerTools } from "./server/pi/tools";
@@ -46,6 +46,7 @@ export default function media(portal: ServerPortal) {
   return () => {
     stopPictureJobs();
     stopVideoJobs();
+    stopWork();
     closeStore();
   };
 }
