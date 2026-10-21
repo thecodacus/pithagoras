@@ -316,7 +316,8 @@ export interface PortalEvent {
 /**
  * Fired when what is installed changed (a package installed, removed, updated
  * or switched), so the page loads or drops an extension's interface at once:
- * see extensions/loader.ts.
+ * see extensions/loader.ts. And by Settings → Extensions as it is shown or
+ * refreshed: a server half may have crashed meanwhile.
  */
 export const EXTENSIONS_CHANGED = "pithagoras:extensions-changed";
 const changesExtensions = <T>(request: Promise<T>): Promise<T> =>
@@ -326,6 +327,15 @@ const changesExtensions = <T>(request: Promise<T>): Promise<T> =>
   });
 
 /** An installed extension's browser half: where its module is fetched from, and its stylesheet if it has one. */
+export interface ServerCrash {
+  name: string;
+  at: string;
+  rev: string;
+  error: string;
+  stack?: string;
+  lines: string[];
+}
+
 export interface ExtensionUi {
   name: string;
   version?: string;
@@ -337,6 +347,12 @@ export interface ExtensionUi {
   /** Where its server half's own routes are, when it has one; why it is not running, when it could not be started. */
   server?: string;
   serverError?: string;
+  /**
+   * Its server half crashed (an error of its code reached the portal's process, or it called process.exit()), and is
+   * off until another revision of it is installed or it is switched off and on: when, which revision, the error, and
+   * the last lines it said, as a log file has them.
+   */
+  crash?: ServerCrash;
   /** The extensions its server half cannot start without, each with the versions it takes. */
   requires?: Record<string, string>;
   /** The themes its package.json names: colours in place of the portal's own, with no code. See extensions/themes.ts. */

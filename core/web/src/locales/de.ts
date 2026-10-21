@@ -707,6 +707,8 @@ const de: Locale = {
     "Save file": "Datei speichern",
     "Its interface could not be loaded: {reason}": "Die Oberfläche konnte nicht geladen werden: {reason}",
     "Its server half could not be started: {reason}": "Der Serverteil konnte nicht gestartet werden: {reason}",
+    "Its server half crashed at {time}, and is off until another version of it is installed, or it is switched off and on: {error}": "Der Serverteil ist um {time} abgestürzt und bleibt aus, bis eine andere Version installiert oder die Erweiterung aus- und wieder eingeschaltet wird: {error}",
+    "What it said last": "Was er zuletzt ausgegeben hat",
     "The portal's own": "Die des Portals",
     "Themes the installed extensions brought.": "Themes, die die installierten Erweiterungen mitbringen.",
     "Configure": "Konfigurieren",

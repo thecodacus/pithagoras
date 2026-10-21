@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { LuCheck, LuCompass, LuDownload, LuPackageCheck, LuPalette, LuPanelsTopLeft, LuPuzzle, LuRefreshCw, LuTrash2 } from "react-icons/lu";
-import { api, type ExtensionInfo, type PackageKind, type ShippedExtension } from "../api";
+import { api, EXTENSIONS_CHANGED, type ExtensionInfo, type PackageKind, type ShippedExtension } from "../api";
 import { displayName } from "../tool-groups";
 import { packageName } from "../package-names";
 import { useExtensions } from "../extensions/loader";
@@ -8,7 +8,7 @@ import { useSlot } from "../extensions/slots";
 import { useCached } from "../settings-cache";
 import { isEnter } from "../shortcuts";
 import { tabKeys } from "../tab-keys";
-import { msg, t, tp } from "../i18n";
+import { formatDateTime, msg, t, tp } from "../i18n";
 import { confirmDialog } from "./ConfirmDialog";
 import { InstallProgress, installExtension, type InstallStep } from "./ExtensionInstall";
 import { PackageCatalog } from "./PackageCatalog";
@@ -133,7 +133,10 @@ export function ExtensionsPanel({
   // Which package an install of more than one has come to.
   const [step, setStep] = useState<InstallStep | null>(null);
   // Why a package's interface is not in the page, or its server half not running, where it brings one: see extensions/loader.ts.
-  const { failures, serverFailures } = useExtensions();
+  // Gone through again as the list is shown, and as it is refreshed: a server half can crash at any time, and nothing tells the page.
+  const { failures, serverFailures, serverCrashes } = useExtensions();
+  const goThrough = () => void window.dispatchEvent(new Event(EXTENSIONS_CHANGED));
+  useEffect(goThrough, []);
   const ownPages = useSlot("settings.page");
   // The same, readable by a second Enter that comes before the draw.
   const busyRef = useRef(false);
@@ -262,7 +265,13 @@ export function ExtensionsPanel({
                   <LuDownload className="h-4 w-4" />
                   {busy === "update" ? t("Updating…") : t("Update all")}
                 </button>
-                <button onClick={() => onRefresh()} className={btnCls}>
+                <button
+                  onClick={() => {
+                    goThrough();
+                    void onRefresh();
+                  }}
+                  className={btnCls}
+                >
                   <LuRefreshCw className="h-4 w-4" /> {t("Refresh")}
                 </button>
               </div>
@@ -340,10 +349,29 @@ export function ExtensionsPanel({
                           {t("Its interface could not be loaded: {reason}", { reason: failures[ext.name] })}
                         </p>
                       )}
-                      {serverFailures[ext.name] && (
-                        <p role="alert" className="basis-full break-words text-xs text-warn">
-                          {t("Its server half could not be started: {reason}", { reason: serverFailures[ext.name] })}
-                        </p>
+                      {serverCrashes[ext.name] ? (
+                        <div role="alert" className="basis-full text-xs text-warn">
+                          <p className="break-words">
+                            {t("Its server half crashed at {time}, and is off until another version of it is installed, or it is switched off and on: {error}", {
+                              time: formatDateTime(serverCrashes[ext.name].at),
+                              error: serverCrashes[ext.name].error,
+                            })}
+                          </p>
+                          {serverCrashes[ext.name].lines.length > 0 && (
+                            <details className="mt-1">
+                              <summary className="cursor-pointer text-fg-subtle">{t("What it said last")}</summary>
+                              <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-md bg-fg/5 p-2 font-mono text-[10px] leading-4 text-fg-muted">
+                                {serverCrashes[ext.name].lines.join("\n")}
+                              </pre>
+                            </details>
+                          )}
+                        </div>
+                      ) : (
+                        serverFailures[ext.name] && (
+                          <p role="alert" className="basis-full break-words text-xs text-warn">
+                            {t("Its server half could not be started: {reason}", { reason: serverFailures[ext.name] })}
+                          </p>
+                        )
                       )}
                     </Card>
                   );

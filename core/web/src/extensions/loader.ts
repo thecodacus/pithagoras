@@ -2,7 +2,7 @@ import * as React from "react";
 import { createContext, useContext, useSyncExternalStore } from "react";
 import * as ReactDOM from "react-dom";
 import * as jsxRuntime from "react/jsx-runtime";
-import { api, ApiError, EXTENSIONS_CHANGED, json, type ExtensionUi } from "../api";
+import { api, ApiError, EXTENSIONS_CHANGED, json, type ExtensionUi, type ServerCrash } from "../api";
 import { formatDate, formatDateTime, formatNumber, formatTime, useLanguage } from "../i18n";
 import type { Portal } from "@pithagoras/extension-api";
 import { onChatFeed, useChatFeed } from "./chat-feed";
@@ -50,6 +50,8 @@ const loaded = new Map<string, Loaded>();
 let failures: Readonly<Record<string, string>> = {};
 /** Why an extension's server half is not running, as the portal says. */
 let serverFailures: Readonly<Record<string, string>> = {};
+/** The crash an extension's server half is held off for, as the portal says. */
+let serverCrashes: Readonly<Record<string, ServerCrash>> = {};
 /** Whether the list has been gone through once: before that, an entry not there may only not be there yet. */
 let settled = false;
 const watchers = new Set<() => void>();
@@ -278,6 +280,7 @@ async function sync(): Promise<void> {
     }
     failures = {};
     serverFailures = Object.fromEntries(extensions.filter((ext) => ext.serverError).map((ext) => [ext.name, ext.serverError!]));
+    serverCrashes = Object.fromEntries(extensions.filter((ext) => ext.crash).map((ext) => [ext.name, ext.crash!]));
     onlyWaitFor(extensions.filter((ext) => ext.entry).map((ext) => ext.name));
     rankExtensions(extensions.map((ext) => ext.name));
     // All at once: one that is slow, or has files of its own to fetch, holds up none of the others.
@@ -323,11 +326,17 @@ function watch(watcher: () => void) {
   return () => void watchers.delete(watcher);
 }
 
-/** Whether the installed extensions have been gone through, and why any of them is not in the page. */
-export function useExtensions(): { settled: boolean; failures: Readonly<Record<string, string>>; serverFailures: Readonly<Record<string, string>> } {
+/** Whether the installed extensions have been gone through, and why any of them is not in the page, or its server half not running. */
+export function useExtensions(): {
+  settled: boolean;
+  failures: Readonly<Record<string, string>>;
+  serverFailures: Readonly<Record<string, string>>;
+  serverCrashes: Readonly<Record<string, ServerCrash>>;
+} {
   return {
     settled: useSyncExternalStore(watch, () => settled),
     failures: useSyncExternalStore(watch, () => failures),
     serverFailures: useSyncExternalStore(watch, () => serverFailures),
+    serverCrashes: useSyncExternalStore(watch, () => serverCrashes),
   };
 }
