@@ -16,7 +16,7 @@ export function insidePath(href: string | undefined, from: string): string | und
   return path.endsWith("/") ? `${path}index.md` : path;
 }
 
-export const NOTE_LINK = "/memory?note=";
+export const NOTE_LINK = "/x/pithagoras-understory/memory?note=";
 
 /**
  * Its links inside the memory, made into links to this page: written

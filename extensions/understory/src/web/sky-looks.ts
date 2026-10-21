@@ -12,7 +12,7 @@
  * Somebody who asks for less motion gets each world standing still (`still`):
  * no drift, no time, and no secrets, which are all motion.
  */
-import { brainOutline, galaxyStars, GALAXY_TURN, heart, helixAt, helixOrder, intoBrain, lobeOf, ringsFrom, seeded, WINDING, type Camera, type GalaxyStar, type Point3, type Projected, type SkyTheme } from "../memory-sky";
+import { brainOutline, galaxyStars, GALAXY_TURN, heart, helixAt, helixOrder, intoBrain, lobeOf, ringsFrom, seeded, WINDING, type Camera, type GalaxyStar, type Point3, type Projected, type SkyTheme } from "./memory-sky";
 
 /** A note as the graph has it. */
 export interface GraphNote {

@@ -861,7 +861,7 @@ function AgentFiles({ agent, setup, onSaved }: { agent: string; setup: Setup; on
           )}
           {unread(file.name) && (
             <p role="note" className="mb-2 text-xs text-fg-muted">
-              {t("Not read while Understory is the agent's memory (Settings → Add-ons → Memory). It is kept, and read again once Understory is switched off.")}
+              {t("Not read while {by} is the agent's memory. It is kept, and read again once {by} is switched off.", { by: setup.by ?? "" })}
             </p>
           )}
           {file.link ? (

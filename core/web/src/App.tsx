@@ -39,7 +39,6 @@ const ProjectsPage = lazyComponent(() => import("./components/ProjectsPage"), "P
 const AgentPage = lazyComponent(() => import("./components/AgentPage"), "AgentPage");
 const RoutinesPage = lazyComponent(() => import("./components/RoutinesPage"), "RoutinesPage");
 const AuditPage = lazyComponent(() => import("./components/AuditPanel"), "AuditPage");
-const MemoryPage = lazyComponent(() => import("./components/MemoryPage"), "MemoryPage");
 const ExtensionPage = lazyComponent(() => import("./components/ExtensionPage"), "ExtensionPage");
 const ConfigModal = lazyComponent(() => import("./components/ConfigModal"), "ConfigModal");
 const SetupAssistant = lazyComponent(() => import("./components/SetupAssistant"), "SetupAssistant");
@@ -133,7 +132,6 @@ export default function App() {
       {/* Where the page was while there was one agent: old links and bookmarks. */}
       <Route path="/agent" element={<Navigate to={{ pathname: "/agents", search: window.location.search }} replace />} />
       <Route path="/routines" element={<Shell view="routines" />} />
-      <Route path="/memory" element={<Shell view="memory" />} />
       <Route path="/audit" element={<Shell view="audit" />} />
       {/* A page an extension brought: /x/<extension>/<page id>, and an extension's name may have a slash in it. */}
       <Route path="/x/*" element={<Shell view="extension" />} />
@@ -159,7 +157,7 @@ function Shell({
   view = "chat",
 }: {
   settings?: boolean;
-  view?: "chat" | "sessions" | "projects" | "agents" | "routines" | "memory" | "audit" | "extension";
+  view?: "chat" | "sessions" | "projects" | "agents" | "routines" | "audit" | "extension";
 }) {
   // What follows /x/ in the address: `<extension>/<page id>` of a page an extension brought, or `<extension>` of its page in Settings.
   const { sessionId, tab, "*": extensionPart = "" } = useParams<{ sessionId?: string; tab?: string; "*"?: string }>();
@@ -214,19 +212,6 @@ function Shell({
   // them, and without this those links landed on the empty state.
   const [other, setOther] = useState<Session | null>(null);
   const [executor, setExecutor] = useState("host");
-  // Whether Understory is the agent's memory, which is when its page is in the sidebar.
-  const [hasMemory, setHasMemory] = useState(false);
-  useEffect(() => {
-    const ask = () =>
-      api
-        .featureFlags()
-        .then((f) => setHasMemory(f.understory?.enabled === true))
-        .catch(() => {});
-    ask();
-    // Said by Settings when it switches Understory (Add-ons), so the sidebar follows at once.
-    window.addEventListener("features-changed", ask);
-    return () => window.removeEventListener("features-changed", ask);
-  }, []);
   const [events, setEvents] = useState<PortalEvent[]>([]);
   /** The versions of the chat's messages, as its stream says: see messageVersions on the server. */
   const [versions, setVersions] = useState<Record<number, number[]>>({});
@@ -701,7 +686,6 @@ function Shell({
         executor={executor}
         activeId={sessionId ?? null}
         view={view === "extension" ? `x/${extensionPart}` : view}
-        hasMemory={hasMemory}
         places={places}
         onNavigate={onNavigate}
         onOpenFolder={onOpenFolder}
@@ -761,8 +745,6 @@ function Shell({
           <AgentPage onSelect={(id) => navigate(`/s/${id}`)} onNewChat={startChat} reloadPlaces={reloadPlaces} />
         ) : view === "routines" ? (
           <RoutinesPage onOpenSession={(id) => navigate(`/s/${id}`)} />
-        ) : view === "memory" ? (
-          <MemoryPage />
         ) : view === "audit" ? (
           <AuditPage />
         ) : view === "extension" ? (

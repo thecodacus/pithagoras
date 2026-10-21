@@ -86,8 +86,8 @@ function AuditPanel({ onError }: { onError: (e: string | null) => void }) {
   const [failed, setFailed] = useState<string | null>(null);
   const had = useRef(false);
   const [clearing, setClearing] = useState(false);
-  // Shown by the button, as MemoryPage's log does, so a poll that works does
-  // not take it off the page banner before it is read.
+  // Shown by the button, so a poll that works does not take it off the page
+  // banner before it is read.
   const [clearFailed, setClearFailed] = useState<string | null>(null);
   // Counts clears: an answer asked for before one must not bring the cleared
   // entries back when it arrives after it. Only clears, not every poll — on a

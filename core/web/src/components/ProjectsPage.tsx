@@ -363,13 +363,13 @@ function NewProject({
   root: string;
   agents: AgentOption[];
   onClose: () => void;
-  onCreate: (name: string, instructions: string, toolsOff?: string[], link?: { agent?: string; understory?: boolean }) => Promise<void>;
+  onCreate: (name: string, instructions: string, toolsOff?: string[], link?: { agent?: string; memory?: boolean }) => Promise<void>;
 }) {
   const [name, setName] = useState("");
   const [instructions, setInstructions] = useState("");
   /** The agent it works with: "" for a blank slate, which is what a project was before there was a choice. */
   const [agent, setAgent] = useState("");
-  const [understory, setUnderstory] = useState(true);
+  const [memory, setMemory] = useState(true);
   const features = useCached("feature-flags", api.featureFlags, { freshMs: 30_000 });
   /** The tools wanted off, once somebody has switched any; untouched, the project says nothing about tools. */
   const [toolsOff, setToolsOff] = useState<string[] | undefined>(undefined);
@@ -382,8 +382,8 @@ function NewProject({
     setBusy(true);
     setError(null);
     try {
-      // Only what was chosen: a project made with the defaults says nothing of an agent or of Understory.
-      await onCreate(name.trim(), instructions, toolsOff, { ...(agent ? { agent } : {}), ...(understory ? {} : { understory: false }) });
+      // Only what was chosen: a project made with the defaults says nothing of an agent or of its memory.
+      await onCreate(name.trim(), instructions, toolsOff, { ...(agent ? { agent } : {}), ...(memory ? {} : { memory: false }) });
     } catch (e) {
       setError((e as Error).message);
       setBusy(false);
@@ -395,7 +395,7 @@ function NewProject({
       title={t("New project")}
       subtitle={t("A folder of its own, with instructions the agent follows in it")}
       onClose={onClose}
-      unsaved={!busy && (!!name.trim() || !!instructions.trim() || toolsOff !== undefined || !!agent || !understory)}
+      unsaved={!busy && (!!name.trim() || !!instructions.trim() || toolsOff !== undefined || !!agent || !memory)}
       footer={
         <div className="flex items-center justify-end gap-2">
           {error && <p role="alert" className="mr-auto text-xs text-danger">{error}</p>}
@@ -443,9 +443,9 @@ function NewProject({
           agents={agents}
           agent={agent}
           onAgent={setAgent}
-          understory={understory}
-          onUnderstory={setUnderstory}
-          understoryAvailable={!!features.value?.understory.enabled}
+          memory={memory}
+          onMemory={setMemory}
+          holder={features.value?.memory.by ?? null}
         />
       </div>
       {/* Shut, like the sections of the voice settings: most projects start with
@@ -470,25 +470,27 @@ type AgentOption = { id: string; name: string };
 /**
  * Who a project's chats are with: an agent, whose soul, user and memory go into
  * them beside the project's own instructions, or nobody, a blank slate with
- * only the instructions. And, where the portal has Understory, whether it is the
- * project's memory: without it the agent's MEMORY.md is read instead.
+ * only the instructions. And, where an extension holds the agent's memory,
+ * whether it is the project's memory: without it the agent's MEMORY.md is read
+ * instead.
  */
 function AgentChoice({
   agents,
   agent,
   onAgent,
-  understory,
-  onUnderstory,
-  understoryAvailable,
+  memory,
+  onMemory,
+  holder,
   disabled,
 }: {
   agents: AgentOption[];
   /** The agent's id, "" for none. */
   agent: string;
   onAgent: (id: string) => void;
-  understory: boolean;
-  onUnderstory: (on: boolean) => void;
-  understoryAvailable: boolean;
+  memory: boolean;
+  onMemory: (on: boolean) => void;
+  /** What holds the agent's memory, by its label; null where nothing does. */
+  holder: string | null;
   disabled?: boolean;
 }) {
   return (
@@ -509,13 +511,13 @@ function AgentChoice({
           options={[{ value: "", label: t("None — a blank slate") }, ...agents.map((a) => ({ value: a.id, label: a.name, text: a.name }))]}
         />
       </Field>
-      {/* A blank slate has no agent whose memory it would be: it never has Understory, so there is nothing to switch. */}
-      {understoryAvailable && agent && (
+      {/* A blank slate has no agent whose memory it would be: it never has the holder's, so there is nothing to switch. */}
+      {holder && agent && (
         <SwitchRow
-          title={t("Understory as memory")}
-          detail={t("Off: the chats do not get Understory's memory instructions, and the agent's MEMORY.md is read instead.")}
-          on={understory}
-          onChange={onUnderstory}
+          title={t("{by} as memory", { by: holder })}
+          detail={t("Off: the chats do not get the memory instructions of {by}, and the agent's MEMORY.md is read instead.", { by: holder })}
+          on={memory}
+          onChange={onMemory}
           disabled={disabled}
         />
       )}
@@ -633,6 +635,8 @@ function Instructions({
  */
 function ProjectAgentChoice({ project, agents, onClose }: { project: Project; agents: AgentOption[]; onClose: () => void }) {
   const [now, setNow] = useState<ProjectAgent | null>(null);
+  // What holds the agent's memory is named by its label.
+  const features = useCached("feature-flags", api.featureFlags, { freshMs: 30_000 });
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -646,7 +650,7 @@ function ProjectAgentChoice({ project, agents, onClose }: { project: Project; ag
     };
   }, [project.name]);
 
-  const change = async (what: { agent?: string | null; understory?: boolean }) => {
+  const change = async (what: { agent?: string | null; memory?: boolean }) => {
     setError(null);
     try {
       setNow(await api.setProjectAgent(project.name, what));
@@ -670,9 +674,9 @@ function ProjectAgentChoice({ project, agents, onClose }: { project: Project; ag
             agents={agents}
             agent={now.agent ?? ""}
             onAgent={(id) => void change({ agent: id || null })}
-            understory={now.understory}
-            onUnderstory={(on) => void change({ understory: on })}
-            understoryAvailable={now.understoryAvailable}
+            memory={now.memory}
+            onMemory={(on) => void change({ memory: on })}
+            holder={now.memoryAvailable ? (features.value?.memory.by ?? null) : null}
           />
           <p className="mt-3 text-[11px] text-fg-subtle">
             {tx("Chats started after this pick it up. One already open does after {command}.", { command: <code>/reload</code> })}
