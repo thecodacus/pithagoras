@@ -799,6 +799,12 @@ async function stopWithDependents(ext: Running): Promise<void> {
 
 /** What was last asked to run: what a crash brings the halves in line with again (see crashed). */
 let asked: ServerHalf[] = [];
+/**
+ * Where the halves stand, as the last bringing in line left them: of each asked to run, whether it runs, and why not.
+ * Each change of that is made by one, whoever asked for it (an install, a switch, a crash: see crashed), a hold lifted
+ * included, and is in this as it ends.
+ */
+let standing = "";
 let queue: Promise<void> = Promise.resolve();
 /**
  * Bring what is running in line with `halves`: the installed packages that are
@@ -844,9 +850,16 @@ export function syncServerHalves(halves: ServerHalf[]): Promise<void> {
       if (!stale) break;
       await stopWithDependents(stale);
     }
+    standing = JSON.stringify(halves.map((half) => [half.name, running.has(half.name), failures.get(half.name) ?? null]));
   };
   return (queue = queue.then(run, run));
 }
+
+/**
+ * Where the server halves stand, as the last bringing in line left them (see standing). What every page follows of
+ * what is installed is said with it (extensionsRevision in api/extensions.ts): a crash reaches every open page so.
+ */
+export const serverHalvesStanding = (): string => standing;
 
 /** What was last asked for is done: every half that should run is running, or has said why not. Never rejects. */
 export const serversSettled = (): Promise<void> => queue.catch(() => {});

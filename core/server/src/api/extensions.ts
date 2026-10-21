@@ -12,7 +12,7 @@ import { clientHalf, packageKinds, requiresOf, staticImports, packageThemes, ser
 import { sendCompressed } from "../compressed-file.js";
 import { bundledPath } from "../bundled.js";
 import { SUBAGENT_PACKAGE } from "../features.js";
-import { isServing, serverFailure, serverHalfStatus, serversSettled, syncServerHalves } from "../extension-host.js";
+import { isServing, serverFailure, serverHalfStatus, serverHalvesStanding, serversSettled, syncServerHalves } from "../extension-host.js";
 import { logFileLine } from "../logs.js";
 import { planInstall, type InstalledExtension } from "../install-plan.js";
 
@@ -357,14 +357,21 @@ async function installedExtensions(): Promise<InstalledExtension[]> {
   return out;
 }
 
+const digest = (of: unknown): string => createHash("sha256").update(JSON.stringify(of)).digest("base64url").slice(0, 16);
+
 /**
- * What is installed, as the last sync found it: the packages pi's settings list, with what is switched on of each; the
- * halves and themes of them the pages load; and where each server half stands, as a digest. Every page asks for it
- * with the list of chats (`GET /api/sessions`) and goes through what is installed again when it changes, so that an
- * install made anywhere else (another tab, the API, an agent) reaches it, Settings → Extensions included.
+ * What is installed, as the last sync found it: the packages pi's settings list, with what is switched on of each, and
+ * the halves and themes of them the pages load, as a digest. None until the portal has gone through it once.
  */
-let revision = "";
-export const extensionsRevision = (): string => revision;
+let installed = "";
+
+/**
+ * What is installed, and where each server half stands, as a digest. Every page asks for it with the list of chats
+ * (`GET /api/sessions`) and goes through what is installed again when it changes, so that an install made anywhere
+ * else (another tab, the API, an agent) reaches it, Settings → Extensions included; and so does a server half's crash,
+ * though nothing was installed (see serverHalvesStanding).
+ */
+export const extensionsRevision = (): string => installed && digest([installed, serverHalvesStanding()]);
 
 /**
  * Bring the server halves that run in line with what is installed and switched
@@ -374,9 +381,8 @@ export const extensionsRevision = (): string => revision;
 export async function syncExtensionServers(): Promise<void> {
   const found = await halves();
   await syncServerHalves(found.servers);
-  const standing = found.servers.map((half) => [isServing(half.name), serverFailure(half.name) ?? null]);
   // The packages too: one with nothing for the pages (a pi half, skills, prompts) is still listed in Settings.
-  revision = createHash("sha256").update(JSON.stringify([readPiSettings().packages ?? null, found, standing])).digest("base64url").slice(0, 16);
+  installed = digest([readPiSettings().packages ?? null, found]);
 }
 
 /**

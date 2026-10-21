@@ -187,6 +187,10 @@ chmodSync(path.join(bin, "pi"), 0o755);
 writeFileSync(path.join(pkg, "package.json"), JSON.stringify({ name: "crashy", version: "1.0.0", type: "module", pi: {}, pithagoras: { server: "./server.js" } }));
 const SERVER = (revision, execute) => `export default function (portal) {
   portal.router.get("/revision", (req, res) => res.json({ revision: ${revision} }));
+  portal.router.post("/crash", (req, res) => {
+    setTimeout(() => { throw new Error("thrown after a request"); }, 10);
+    res.json({ ok: true });
+  });
   portal.chats.extend((pi) => pi.registerTool({
     name: "crash_now", label: "crash_now", description: "Crashes its server half.", parameters: { type: "object", properties: {} },
     async execute() { ${execute} },
@@ -217,6 +221,53 @@ async function turn(chatId, message) {
   return typeof answer.content === "string" ? answer.content : answer.content.map((part) => part.text).join("");
 }
 const crashyUi = async () => (await json("/api/extension-ui")).extensions.find((ext) => ext.name === "crashy");
+/** What is installed, as every page is told it with the chats. */
+const revision = async () => (await json("/api/sessions")).extensions;
+/** What is installed once it is no longer `was`. */
+async function revisionAfter(was) {
+  let now = await revision();
+  for (let i = 0; i < 100 && now === was; i++) {
+    await new Promise((r) => setTimeout(r, 50));
+    now = await revision();
+  }
+  return now;
+}
+
+test("a crash changes what every page is told is installed, and the list then has it; a switch off and on lifts the hold, and changes it again", async (t) => {
+  const server = await startServer(serverEnv(home, await freePort(), { PATH: `${bin}${path.delimiter}${process.env.PATH}` }));
+  base = server.base;
+  t.after(async () => {
+    server.child.kill();
+    await once(server.child, "exit");
+  });
+  // Once the portal has gone through what is installed, as it starts.
+  const before = await revisionAfter("");
+  assert.ok(before);
+  assert.deepEqual(await json("/api/x/crashy/revision"), { revision: 1 });
+
+  // Nothing was installed: the crash alone is the change.
+  await json("/api/x/crashy/crash", "POST");
+  const crashed = await revisionAfter(before);
+  assert.notEqual(crashed, before);
+  const list = await json("/api/extension-ui");
+  assert.equal(list.revision, crashed);
+  const ui = list.extensions.find((ext) => ext.name === "crashy");
+  assert.equal(ui.crash.error, "Error: thrown after a request");
+  assert.equal(HELD.exec(ui.serverError)?.[1], "Error: thrown after a request");
+  assert.equal(ui.server, undefined);
+  assert.equal(await revision(), crashed, "said once");
+
+  await json("/api/extensions/enabled", "PUT", { spec: pkg, enabled: false });
+  const off = await revision();
+  assert.notEqual(off, crashed);
+  await json("/api/extensions/enabled", "PUT", { spec: pkg, enabled: true });
+  const on = await revision();
+  assert.notEqual(on, off);
+  const again = await crashyUi();
+  assert.equal(again.crash, undefined);
+  assert.equal(again.serverError, undefined);
+  assert.ok(again.server);
+});
 
 test("a real chat: the tool's call that crashes its half comes back as the call's error in the same turn, the chat goes on, and another revision starts it again", async (t) => {
   const server = await startServer(serverEnv(home, await freePort(), { PATH: `${bin}${path.delimiter}${process.env.PATH}` }));
