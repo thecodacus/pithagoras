@@ -233,7 +233,7 @@ Voice mode listens and speaks at these while the service is chosen and runs. The
 | Speech recognition | Whisper: `http://127.0.0.1:8188/inference`. Qwen3-ASR: `http://127.0.0.1:7862/v1/audio/transcriptions` on the GPU, `http://127.0.0.1:7863/v1/audio/transcriptions` on the CPU |
 | Speech recognition model | Whisper: none. Qwen3-ASR: `qwen3-asr` |
 
-While it is installing, coming up or stopped, voice mode says that the extension it listens and speaks through is not running, rather than listen elsewhere.
+While it is installing, coming up or stopped, voice mode says that the extension it listens and speaks through is not running, rather than listen elsewhere. Once its services have answered, a health check that is slow once, as a service busy speaking may be, does not change that: the service is voice mode's until it is found stopped, removed or being set up again.
 
 Check readiness from inside the portal container. Each port answers where its service is part of the choice (`8188` Whisper, `7862` the GPU process, `7863` the CPU process for Kokoro or Qwen3-ASR on the CPU); for the default, both `8188` and `7862`:
 
@@ -283,7 +283,7 @@ Every voice session holds a lease, and the service is told when voice mode begin
 - The portal checks for expired connections every **30 seconds**.
 - audio.cpp also has a **90-second** idle-unload setting.
 
- Do not expect a crashed tab to release memory instantly. With lazy loading off, the service asks every 30 seconds that the model stay loaded, and switched on again it lets go of a model it kept while voice mode is not in use. Ending one tab does not release a model still used by another active tab.
+ Do not expect a crashed tab to release memory instantly. While voice mode uses it, and always with lazy loading off, the service asks every 30 seconds that the model stay loaded, so that audio.cpp's idle unload does not let it go in a pause of a conversation. Switched on again, lazy loading lets go of a model kept while voice mode is not in use. Ending one tab does not release a model still used by another active tab.
 
 ::: warning After a reboot or service exit
 The voice container has **no automatic Docker restart policy**. After a host reboot or service exit, use **Start voice** or **Retry setup**. Activating the microphone loads a model in a running service; it does not install or restart a stopped service.

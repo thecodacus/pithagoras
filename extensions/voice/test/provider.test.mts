@@ -11,7 +11,7 @@ import { serveVoice } from "./portal.mts";
 
 inProcessHome("pithagoras-voice-provider-");
 const { machine, at, api, db, host, halves } = await serveVoice();
-const { provider, maintain } = await import("../src/server/provider.ts");
+const { where, maintain } = await import("../src/server/provider.ts");
 const { putSettings, setting } = await import("../src/server/store.ts");
 
 const json = { "content-type": "application/json" };
@@ -37,7 +37,7 @@ const reset = async () => {
 test("where it listens and speaks follows the engines its container was built for, while it runs, and nothing otherwise", async () => {
   await reset();
   const offered = async () => (await voice()).providers;
-  for (const [recipe, where, runtime] of [
+  for (const [recipe, at, runtime] of [
     ["breeze+whisper:base", { listen: { url: "http://127.0.0.1:8188/inference" }, speak: { url: "http://127.0.0.1:7862/v1/audio/speech", runtime: "audio-cpp" } }, "audio-cpp"],
     ["chatterbox+qwen3-asr:1.7b", { listen: { url: "http://127.0.0.1:7862/v1/audio/transcriptions", model: "qwen3-asr" }, speak: { url: "http://127.0.0.1:7862/v1/audio/speech", runtime: "chatterbox" } }, "chatterbox"],
     ["kokoro@cpu+qwen3-asr:0.6b", { listen: { url: "http://127.0.0.1:7863/v1/audio/transcriptions", model: "qwen3-asr" }, speak: { url: "http://127.0.0.1:7863/v1/audio/speech", runtime: "kokoro" } }, "kokoro"],
@@ -45,20 +45,27 @@ test("where it listens and speaks follows the engines its container was built fo
   ] as const) {
     running(recipe);
     assert.equal((await state()).state, "running", recipe);
-    assert.deepEqual(provider().where(), where, recipe);
+    assert.deepEqual(where(), at, recipe);
     assert.deepEqual(await offered(), [{ name: "pithagoras-voice", label: "Voice service", ready: true, runtime }], recipe);
   }
-  // Coming up, stopped, or gone: nothing to listen and speak at, which voice mode then says.
+  // A health check that is slow once, as an engine busy speaking may be, leaves it where it was found answering.
   machine.voiceProcesses.unhealthy = [":8188"];
   assert.equal((await state()).state, "starting");
-  assert.equal(provider().where(), undefined);
+  assert.deepEqual(where(), { listen: { url: "http://127.0.0.1:8188/inference" } });
   machine.voiceProcesses.unhealthy = [];
+  // Stopped, coming up again, or gone: nothing to listen and speak at, which voice mode then says.
   machine.voice()!.State = "exited";
   assert.equal((await state()).state, "stopped");
+  assert.equal(where(), undefined);
   assert.deepEqual(await offered(), [{ name: "pithagoras-voice", label: "Voice service", ready: false }]);
+  machine.voice()!.State = "running";
+  machine.voiceProcesses.unhealthy = [":8188"];
+  assert.equal((await state()).state, "starting");
+  assert.equal(where(), undefined);
+  machine.voiceProcesses.unhealthy = [];
   machine.dropVoice();
   assert.equal((await state()).state, "absent");
-  assert.equal(provider().where(), undefined);
+  assert.equal(where(), undefined);
 });
 
 test("Use for voice mode makes it the source once it runs, and voice mode on; the person's own addresses stay as they are", async () => {
@@ -110,8 +117,11 @@ test("its speech model is loaded as voice mode begins to use it, and let go of a
   await state();
   await saveVoice({ provider: "pithagoras-voice" });
   assert.equal((await lease("a", true)).status, 200);
+  // Loaded again by the half while voice mode uses it: the engines let go of a model after 90 seconds without use.
+  await maintain();
   assert.equal((await lease("a", false)).status, 200);
-  assert.deepEqual(models(), ["7862/v1/models/load breeze", "7862/v1/models/unload breeze"]);
+  await maintain();
+  assert.deepEqual(models(), ["7862/v1/models/load breeze", "7862/v1/models/load breeze", "7862/v1/models/unload breeze"]);
   // Lazy loading off: kept loaded after voice mode, and loaded again by the half while it is off.
   const off = await fetch(`${at}/lazy-load`, { method: "PUT", headers: json, body: JSON.stringify({ on: false }) });
   assert.deepEqual([off.status, await off.json()], [200, { lazyLoad: false }]);
@@ -154,8 +164,24 @@ test("a half started anew while voice mode is in use is told so again, and loads
   await state();
   machine.voiceProcesses.models.length = 0;
   assert.equal((await lease("f", true)).status, 200);
-  assert.deepEqual(models(), ["7862/v1/models/load breeze"]);
+  // Loaded, and loaded again where the new half's first look came after voice mode told it.
+  assert.deepEqual([...new Set(models())], ["7862/v1/models/load breeze"]);
   await lease("f", false);
+});
+
+test("a half started after voice mode stopped using the one before, which nobody could tell, does not keep its model loaded", async () => {
+  await reset();
+  running("breeze+whisper:base");
+  await state();
+  await saveVoice({ provider: "pithagoras-voice" });
+  await lease("g", true);
+  await host.stopServerHalves();
+  await lease("g", false);
+  await host.syncServerHalves([halves.docker, halves.voice]);
+  await state();
+  machine.voiceProcesses.models.length = 0;
+  await maintain();
+  assert.deepEqual(models(), []);
 });
 
 test("voice mode at the service while it does not run says so, and does not listen elsewhere", async () => {

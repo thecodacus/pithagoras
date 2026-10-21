@@ -915,7 +915,10 @@ pictures and clips of its page and the copies made of them
 (`extensions/media/src/server/handoff.ts` reads it). [Browser](/guide/browser)
 takes `browser`, which schema 8 left: the browser's settings, its password among
 them, and the profile of the machine's own Chrome
-(`extensions/browser/src/server/handoff.ts`).
+(`extensions/browser/src/server/handoff.ts`). [Voice](/guide/voice-service)
+takes `voice`, which schema 9 left: the GPU chosen on its page, a setup still
+to come up, and whether its speech model is let go of once voice mode no longer
+uses it (`extensions/voice/src/server/handoff.ts`).
 
 ### A chat's folder
 
@@ -1721,6 +1724,9 @@ portal.voice.provide({
 });
 ```
 
+- **`label`** names it under **Listen and speak through**, in the person's
+  language from the extension's own texts (`portal.locale.add`), as a Settings
+  page's title is.
 - **`where()`** is asked at each request while it is the source, and as
   Settings lists the sources: keep it quick. `listen` is an address that takes
   a WAV as Whisper.cpp's `/inference` or an OpenAI transcription endpoint

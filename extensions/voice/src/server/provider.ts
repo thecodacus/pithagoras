@@ -14,28 +14,37 @@ let used = false;
 /** The speech model was loaded here, and has not been let go of since. */
 let loaded = false;
 
-/** The service's speech model loaded or let go of, in the audio.cpp process it is in: nothing where the service speaks with none. */
+/** The speech model of the engines voice mode is offered, loaded or let go of, in the audio.cpp process it is in: nothing where they speak with none. */
 async function speechModel(action: "load" | "unload"): Promise<void> {
-  const choice = service.lastSeen()?.choice;
+  const choice = service.serving();
   if (!choice || choice.tts === "none") return;
   await service.modelAction(action, choice.tts, ttsDevice(choice) === "cpu" ? CPU_PORT : SPEECH_PORT);
   loaded = action === "load";
 }
 
-/** What voice mode is offered, anew for each start of the half: voice mode tells one started anew that it is in use again. */
-export const provider = (): VoiceProvider => ({
-  label: "Voice service",
-  // While the service was last found running, at the addresses of the engines its container was built for.
-  where() {
-    const seen = service.lastSeen();
-    return seen?.state === "running" && seen.choice ? endpoints(seen.choice) : undefined;
-  },
-  async use(inUse) {
-    used = inUse;
-    if (inUse) await speechModel("load");
-    else if (setting("lazyLoad") !== false) await speechModel("unload");
-  },
-});
+/** Where it listens and speaks: at the addresses of the engines its container was built for, while they serve (`service.serving`). */
+export function where() {
+  const choice = service.serving();
+  return choice && endpoints(choice);
+}
+
+/**
+ * What voice mode is offered, anew for each start of the half: voice mode tells one started anew that it is in use again.
+ * A half that stopped while voice mode used it was not told when that ended, so what it was told is not taken over.
+ */
+export function provider(): VoiceProvider {
+  used = false;
+  loaded = false;
+  return {
+    label: "Voice service",
+    where,
+    async use(inUse) {
+      used = inUse;
+      if (inUse) await speechModel("load");
+      else if (setting("lazyLoad") !== false) await speechModel("unload");
+    },
+  };
+}
 
 /**
  * A setup that was started from the page and has finished is made voice mode's source, once: what the page's Install
@@ -50,13 +59,13 @@ export function chooseFinished(now: service.ServiceStatus): void {
 /**
  * What the service needs while nobody looks at its page, as the half starts and every 30 seconds: a running container
  * rejoins the portal's loopback after the portal's own container was made again (`status`), a setup that finished is
- * chosen, and the speech model is kept loaded where lazy loading is off, or let go of where it was kept and voice mode
- * does not use it.
+ * chosen, and the speech model is kept loaded while voice mode uses it, as the engines let go of a model after 90
+ * seconds without use, and where lazy loading is off; or let go of where it was kept and is not used.
  */
 export async function maintain(): Promise<void> {
   const now = await service.status();
   chooseFinished(now);
   if (now.state !== "running") return;
-  if (setting("lazyLoad") === false) await speechModel("load");
-  else if (loaded && !used) await speechModel("unload");
+  if (used || setting("lazyLoad") === false) await speechModel("load");
+  else if (loaded) await speechModel("unload");
 }

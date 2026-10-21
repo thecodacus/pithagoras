@@ -1787,7 +1787,7 @@ const de: Locale = {
     "Listen and speak through": "Zuhören und sprechen über",
     "Your own addresses": "Deine eigenen Adressen",
     "Not running": "Läuft nicht",
-    "Not running: voice mode cannot listen or speak through it until it is started. Meanwhile you can choose your own addresses.": "Läuft nicht: Der Sprachmodus kann erst darüber zuhören und sprechen, wenn es gestartet ist. Bis dahin kannst du deine eigenen Adressen wählen.",
+    "Not running: voice mode cannot listen or speak through it until it is installed in Settings → Extensions and started. Meanwhile you can choose your own addresses.": "Läuft nicht: Der Sprachmodus kann erst darüber zuhören und sprechen, wenn es unter Einstellungen → Erweiterungen installiert und gestartet ist. Bis dahin kannst du deine eigenen Adressen wählen.",
     "This installation has no speech synthesis: replies are not spoken and voice mode is off. Dictation, which only listens, works.": "Diese Installation hat keine Sprachsynthese: Antworten werden nicht vorgelesen, und der Sprachmodus ist aus. Diktieren, das nur zuhört, funktioniert.",
     "Dictation only": "Nur Diktieren",
     "Built-in voices": "Eingebaute Stimmen",

@@ -50,11 +50,30 @@ test('install progress, ready, use for voice mode, and stop', async ({ page }) =
   state = 'running';
   await expect(badge(page, 'Ready')).toBeVisible({ timeout: 8000 });
   // Voice mode listens and speaks through it once the setup is done, which the server half sees to; and at once, when asked.
+  const now = page.getByRole('status').filter({ hasText: 'Voice mode listens and speaks through the voice service now.' });
+  await expect(now).toHaveCount(0);
   await page.getByRole('button', { name: 'Use for voice mode' }).click();
   await expect.poll(() => actions).toEqual(['install', 'connect']);
+  await expect(now).toBeVisible();
   await page.getByRole('button', { name: 'Stop · release VRAM' }).click();
   await expect(page.getByRole('button', { name: 'Start voice', exact: true })).toBeEnabled();
   expect(actions).toEqual(['install', 'connect', 'stop']);
+  await expect(now).toHaveCount(0);
+});
+
+test.describe('in a browser set to German', () => {
+  test.use({ locale: 'de-DE' });
+
+  test("the page says a setup under way in its own words, and voice mode names the service as Voice does", async ({ page }) => {
+    await page.route(SERVICE, r => r.fulfill({ json: { available: true, state: 'installing', busy: true, progress: 'Preparing voice setup', error: '', lazyLoad: true } }));
+    await page.goto('/settings/x/pithagoras-voice');
+    await expect(page.getByRole('dialog', { name: 'Einstellungen' }).getByText('wird installiert', { exact: true })).toBeVisible();
+    // Voice mode's source in Settings → Add-ons → Voice: Voice's label, in Voice's German.
+    await page.route('**/api/voice/presets', r => r.fulfill({ json: [] }));
+    await page.route('**/api/voice', r => r.fulfill({ json: { enabled: true, whisperUrl: 'http://127.0.0.1:8178/inference', breezeUrl: 'http://127.0.0.1:7860/v1/audio/speech', instruction: 'Clear speech', voice: 'design', runtime: 'breeze', language: 'auto', cfgScale: 4, provider: 'pithagoras-voice', providers: [{ name: 'pithagoras-voice', label: 'Voice service', ready: true, runtime: 'audio-cpp' }] } }));
+    await page.goto('/settings/add-ons');
+    await expect(page.getByRole('combobox', { name: 'Zuhören und sprechen über' })).toContainText('Sprachdienst');
+  });
 });
 
 // A service as the server half says it, and what the page asked of it.

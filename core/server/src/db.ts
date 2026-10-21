@@ -748,9 +748,11 @@ function voiceServiceUrl(value: unknown): boolean {
  * Where voice mode listened or spoke at the service's addresses, the extension is made its source, where none was chosen
  * already, and the person's own addresses are put back as uninstalling the service did: what connecting it overwrote,
  * kept in `voice_before_managed`, or, where nothing was kept of a side, the addresses of a portal with nothing set up.
- * A dictation address of the service's goes as well. Whether voice mode is on stays as it is. The container and its
- * volume stay where they are: the extension takes them over by their names. The database was backed up before this ran
- * (db-upgrade.ts); docs/guide/upgrading.md says how to go back.
+ * A dictation address of the service's goes as well. Whether voice mode is on stays as it is. This is done as the database
+ * is brought to schema 9, or at a later start where a try that failed kept the settings: on a portal past it, addresses the
+ * person gave voice mode are theirs, the service's among them. The container and its volume stay where they are: the
+ * extension takes them over by their names. The database was backed up before this ran (db-upgrade.ts);
+ * docs/guide/upgrading.md says how to go back.
  */
 function handOffVoice(d: Database.Database): void {
   let voice: Record<string, unknown> | undefined;
@@ -761,9 +763,10 @@ function handOffVoice(d: Database.Database): void {
   }
   const gpu = settingIn(d, "voice_gpu");
   const pending = settingIn(d, "voice_setup_pending");
+  const remembered = settingIn(d, "voice_before_managed");
   let kept: Record<string, any> = {};
   try {
-    kept = JSON.parse(settingIn(d, "voice_before_managed") ?? "{}") ?? {};
+    kept = JSON.parse(remembered ?? "{}") ?? {};
   } catch {
     // Not JSON: nothing was kept that can be put back.
   }
@@ -771,7 +774,11 @@ function handOffVoice(d: Database.Database): void {
   // No speech address and the runtime none is the service's where a connect saved it. Where nothing says (a service connected by an older portal), it is when the recognition is.
   const speaking = voiceServiceUrl(voice?.breezeUrl) || (voice?.runtime === "none" && !voice.breezeUrl && (typeof kept.noSpeech === "boolean" ? kept.noSpeech : listening));
   const dictation = voiceServiceUrl(voice?.dictationUrl);
-  if (gpu === undefined && pending === undefined && !(voice && "lazyLoad" in voice) && !listening && !speaking && !dictation) return;
+  // What only a portal of version 8 wrote, which a try that failed keeps. Without it, and past the upgrade, the service's
+  // addresses in voice mode's settings are ones the person gave it, and stay as they are.
+  const leftover = gpu !== undefined || pending !== undefined || remembered !== undefined || (voice && "lazyLoad" in voice);
+  const upgrading = (d.pragma("user_version", { simple: true }) as number) < 9;
+  if (!leftover && !(upgrading && (listening || speaking || dictation))) return;
   try {
     leaveHandoff("voice", (dir) => {
       // Written last, and anew on each try, from the settings as they are.
