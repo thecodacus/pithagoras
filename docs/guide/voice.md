@@ -482,8 +482,9 @@ latest user message begins with `[Audio mode]`. The portal adds that prefix to
 microphone submissions and typed requests sent in voice mode. The rule is part
 of the prompt pi builds, so it stays when tools come and go.
 
-While voice is switched on with a speech engine (not recognition alone), the rule
-is in the system prompt of every conversation, spoken in or not. A local model
+While voice is switched on with a speech engine where it listens and speaks now
+(not recognition alone, and not an extension that is not running), the rule is
+in the system prompt of every conversation, spoken in or not. A local model
 keeps a cache of the prompt it has already read, and that cache starts at the
 system prompt: with the rule there from the start, the first spoken message in a
 typed conversation leaves the prompt as it was, and nothing is read again before
@@ -652,8 +653,10 @@ voice options for that; dictation goes there as well, unless you set a
 either way.
 
 Your own addresses are never changed for an extension. Choose **Your own
-addresses** again and they are used as they were; uninstalling the extension
-does the same where it was chosen.
+addresses** again and they are used as they were. An extension's own page may
+hand voice mode back to them, as its uninstall there can. Removing the
+extension leaves it chosen, and voice mode says it is not running until you
+choose again.
 
 An extension that is chosen and not running, or not ready, is said under the
 choice. Voice mode does not fall back to your own addresses meanwhile: dictation

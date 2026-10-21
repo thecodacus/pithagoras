@@ -1609,9 +1609,13 @@ portal.voice.provide({
   75 runs out. The provider chosen is told `true` at the first lease and
   `false` once the last has ended or run out, not at each lease; `true` again
   where the person chose it while voice mode was in use, or its server half
-  was started anew. `true` is awaited as voice mode begins: what it throws is
-  said on the page, and voice mode does not start. What it throws for `false`
-  is logged.
+  was started anew. Where another source is chosen while voice mode is in use,
+  another extension or the person's own addresses, it is told `false` at the
+  next renewal. `true` is awaited as voice mode begins: what it throws is said
+  on the page, and voice mode does not start. What it throws for `false` is
+  logged. Each call has 120 seconds, as long as a speech model may take to
+  load; one that has not settled by then counts as failed, so that it holds
+  up no voice session.
 - **`choose(true)`** makes the extension voice mode's source and switches voice
   mode on; **`choose(false)`** gives the source back to the person's own
   addresses, where this extension is the source. Neither changes those
