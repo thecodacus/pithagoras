@@ -91,8 +91,9 @@ While you work on it:
 | The pi extension | Install the folder again by its path, or `/reload` in one chat |
 
 pi installs a folder by reference, so installing it again copies nothing: it
-starts the server half again where its module changed, and reloads the open
-chats, a chat that is working at its next step (see
+starts the server half again where its module changed, swaps the browser half
+into every open page where its module or its stylesheet changed, and reloads
+the open chats, a chat that is working at its next step (see
 [a chat that is working](/guide/extensions#a-chat-that-is-working)). What a
 chat could not load, such as a factory of `chats.extend` that throws, is said
 in that chat.
