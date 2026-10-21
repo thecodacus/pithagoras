@@ -6,6 +6,7 @@ import { isSwitchedOff, sourceOf } from "./extension-switch.js";
 import { realPath } from "./within.js";
 import { piAgentDir, readPiSettings } from "./pi-settings.js";
 import { mcpServer, type McpFile } from "./api/mcp.js";
+import { holdMemory } from "./memory-holder.js";
 
 /**
  * Optional capabilities the portal ships and leaves off: a subagent tool, and
@@ -179,3 +180,6 @@ export const UNDERSTORY_RULE =
   "Your long-term memory is Understory, reached through the understory_memory_* tools, not a MEMORY.md file. " +
   "Before relying on what you think you know about the person, their work or earlier decisions, look it up with understory_memory_query. " +
   "When you learn something worth having next week — a decision and why, a preference you were corrected on, how something is set up — record it with understory_memory_add, or understory_memory_update where it is already there.";
+
+// The portal's own Understory holds the agent's memory as an extension would (portal.memory.hold), through the same function.
+holdMemory("the portal", { label: "Understory", rule: UNDERSTORY_RULE, on: understoryOn });

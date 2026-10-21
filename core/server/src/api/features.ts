@@ -20,6 +20,7 @@ import { sessions } from "../session-manager.js";
 import { followPackages, switchPackage } from "./extensions.js";
 import { mcpAdapter, mcpServer, readMcpFile } from "./mcp.js";
 import { setMcpServer } from "../mcp-entry.js";
+import { memoryHolder } from "../memory-holder.js";
 import * as service from "../extensions/understory-service.js";
 import { modelProviders } from "../models.js";
 import { pi } from "./packages.js";
@@ -149,7 +150,13 @@ export function featuresRouter(): Router {
    */
   router.get("/features/flags", (_req, res) => {
     try {
-      res.json({ subagent: { enabled: subagentState().enabled }, understory: { enabled: understoryOn() } });
+      const holder = memoryHolder();
+      res.json({
+        subagent: { enabled: subagentState().enabled },
+        understory: { enabled: understoryOn() },
+        // What holds the agent's memory, where something does: its label.
+        memory: { held: holder !== undefined, by: holder?.label ?? null },
+      });
     } catch (e) {
       res.status(500).json({ error: (e as Error).message });
     }

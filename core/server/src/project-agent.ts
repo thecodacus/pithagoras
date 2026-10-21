@@ -1,10 +1,11 @@
 import { agentOf, defaultAgent, getAgent, type Agent } from "./agents.js";
 import { projectAgent } from "./db.js";
-import { understoryOn } from "./features.js";
+import { memoryHolder, type MemoryHolder } from "./memory-holder.js";
 import { projectOf } from "./workspaces.js";
 
 /**
- * Which agent a project works with, and whether Understory is its memory.
+ * Which agent a project works with, and whether what holds the agent's memory
+ * holds it there.
  *
  * Agents and projects are separate: a chat in a project is not in an agent's
  * home, so it gets the project's AGENTS.md and nothing of the agent's own. A
@@ -51,15 +52,20 @@ export function agentFor(workspace: string | null | undefined): Agent {
 }
 
 /**
- * Whether Understory is the memory of a chat working here. It is the
- * portal's, switched on in Settings. A blank-slate project has no agent and so
- * no memory of the person: it does not get it. A project linked to an agent
- * does unless it says it does not want it, and then its chats neither get the
- * rule for Understory's tools nor leave the agent's MEMORY.md aside.
+ * What holds the memory of a chat working here, where something holds the
+ * agent's memory (see memory-holder.ts). A blank-slate project has no agent
+ * and so no memory of the person: it does not get it. A project linked
+ * to an agent does unless it says it does not want it (stored as
+ * `understoryOff`), and then its chats neither get the holder's rule nor leave
+ * the agent's MEMORY.md aside.
  */
-export function understoryAt(workspace: string | null | undefined): boolean {
-  if (!understoryOn()) return false;
+export function memoryHeldAt(workspace: string | null | undefined): MemoryHolder | undefined {
+  const holder = memoryHolder();
+  if (!holder) return undefined;
   const project = !workspace || agentOf(workspace) ? undefined : projectOf(workspace);
-  if (!project) return true;
-  return !!linkedAgent(project) && !projectAgent(project).understoryOff;
+  if (!project) return holder;
+  return linkedAgent(project) && !projectAgent(project).understoryOff ? holder : undefined;
 }
+
+/** Whether something holds the memory of a chat working here, under the name the project's switch still has. */
+export const understoryAt = (workspace: string | null | undefined): boolean => memoryHeldAt(workspace) !== undefined;

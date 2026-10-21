@@ -2,7 +2,7 @@ import { closeSync, constants, existsSync, fstatSync, lstatSync, openSync, readF
 import path from "node:path";
 import { agentHome } from "./agent-home.js";
 import { writeFileAtomic } from "./atomic-write.js";
-import { understoryOn } from "./features.js";
+import { memoryHolder } from "./memory-holder.js";
 import { WATCH_FILE } from "./pi/context-files.js";
 import { CHANGED, FileError, baseDir, writeText } from "./workspace-files.js";
 
@@ -68,11 +68,13 @@ export function readAgentFile(name: string, home = agentHome()): string {
 }
 
 export function agentFileStatus(home = agentHome()) {
+  const holder = memoryHolder();
   return {
     home,
     initialised: isInitialised(home),
-    // Where the agent's memory is kept: while Understory holds it, MEMORY.md is not read.
-    memory: understoryOn() ? ("understory" as const) : ("file" as const),
+    // Where the agent's memory is kept: while something holds it (`by` names it), MEMORY.md is not read.
+    memory: holder ? ("extension" as const) : ("file" as const),
+    ...(holder ? { by: holder.label } : {}),
     files: EDITABLE_FILES.map((name) => {
       const read = readPlain(name, home);
       // `mtime` is what a save sends back as `expected`: the agent writes these files too.

@@ -1,0 +1,141 @@
+import assert from "node:assert/strict";
+import { mkdirSync, statSync, writeFileSync } from "node:fs";
+import path from "node:path";
+import test from "node:test";
+import { inProcessHome } from "./server-harness.mjs";
+
+/**
+ * An extension that holds the agent's memory (`portal.memory.hold`): while it does, a chat with the person does not
+ * read MEMORY.md and is told the extension's rule in its place; a project linked to an agent can do without it; the
+ * agent's setup and the portal's flags say which holds it. The first that asks holds it.
+ */
+const home = inProcessHome("extension-memory-");
+const said = [];
+const log = console.log;
+console.log = (...args) => {
+  said.push(args.join(" "));
+  log(...args);
+};
+test.after(() => (console.log = log));
+
+// The portal's own Understory says it holds the memory as its module loads. Something that asked before it has it,
+// and the portal's is refused; let go, there is room for the stand-ins below.
+const { holdMemory, memoryHolder } = await import("../dist/memory-holder.js");
+const before = holdMemory("the test", { label: "Before", rule: "-", on: () => true });
+await import("../dist/features.js");
+assert.ok(said.some((line) => line === "[portal] the portal cannot hold the agent's memory: the test holds it already, as Before"), said.join("\n"));
+before();
+
+const host = await import("../dist/extension-host.js");
+const { extraContextFiles, memoryRule } = await import("../dist/pi/sdk-client.js");
+const { memoryHeldAt } = await import("../dist/project-agent.js");
+const { agentFileStatus } = await import("../dist/agent-setup.js");
+const { createAgent } = await import("../dist/agents.js");
+const { setProjectAgent } = await import("../dist/db.js");
+const { featuresRouter } = await import("../dist/api/features.js");
+const { default: express } = await import("express");
+test.after(() => host.stopServerHalves());
+
+const app = express().use("/api", featuresRouter());
+const listener = app.listen(0, "127.0.0.1");
+await new Promise((resolve) => listener.once("listening", resolve));
+test.after(() => listener.close());
+const flags = async () => (await fetch(`http://127.0.0.1:${listener.address().port}/api/features/flags`)).json();
+
+let revs = 0;
+/** A server half that says it holds the memory while `globalThis.holding[name]` is true. */
+function keeper(name, label) {
+  const dir = path.join(home, "packages", name);
+  mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, `server-${++revs}.js`);
+  writeFileSync(file, `export default function (portal) {\nportal.memory.hold({ label: ${JSON.stringify(label)}, rule: "Your memory is ${label}'s, not MEMORY.md.", on: () => globalThis.holding[${JSON.stringify(name)}] });\nglobalThis.portals[${JSON.stringify(name)}] = portal;\n}\n`);
+  return { name, version: "1.0.0", file, rev: `${statSync(file).size.toString(36)}-${revs}` };
+}
+globalThis.holding = {};
+globalThis.portals = {};
+
+const nova = createAgent({ name: "Nova" });
+for (const f of ["SOUL.md", "PrimaryUser.md", "MEMORY.md"]) writeFileSync(path.join(nova.home, f), `# ${f} of Nova`);
+const names = (cwd, role) => extraContextFiles(cwd, role).map((f) => path.basename(f.path)).sort();
+const project = (name, link) => {
+  const dir = path.join(process.env.WORKSPACE_ROOT, name);
+  mkdirSync(dir, { recursive: true });
+  setProjectAgent(name, link);
+  return dir;
+};
+
+test("while an extension holds the memory, MEMORY.md is not read and its rule is said in its place; while it does not, the file is the memory", async () => {
+  await host.syncServerHalves([keeper("keeper", "Keeper")]);
+  assert.deepEqual(names(nova.home), ["MEMORY.md", "PrimaryUser.md", "SOUL.md"]);
+  assert.deepEqual(memoryRule(nova.home), []);
+  assert.equal(agentFileStatus(nova.home).memory, "file");
+  assert.equal("by" in agentFileStatus(nova.home), false);
+  assert.deepEqual((await flags()).memory, { held: false, by: null });
+
+  globalThis.holding.keeper = true;
+  assert.deepEqual(names(nova.home), ["PrimaryUser.md", "SOUL.md"]);
+  assert.deepEqual(names(nova.home, "primary"), ["PrimaryUser.md", "SOUL.md"]);
+  assert.deepEqual(memoryRule(nova.home), ["Your memory is Keeper's, not MEMORY.md."]);
+  // Someone who is not the person never read MEMORY.md, and is not told of a memory that replaces it.
+  assert.deepEqual(memoryRule(nova.home, "guest"), []);
+  assert.deepEqual({ memory: agentFileStatus(nova.home).memory, by: agentFileStatus(nova.home).by }, { memory: "extension", by: "Keeper" });
+  const shown = await flags();
+  assert.deepEqual(shown.memory, { held: true, by: "Keeper" });
+  assert.deepEqual(shown.understory, { enabled: false }, "the portal's own Understory is not on");
+
+  globalThis.holding.keeper = false;
+  assert.deepEqual(names(nova.home), ["MEMORY.md", "PrimaryUser.md", "SOUL.md"]);
+});
+
+test("a project linked to an agent has the memory unless it does without it; a blank project never has it", async () => {
+  globalThis.holding.keeper = true;
+  const linked = project("linked", { agent: nova.id, understoryOff: false });
+  assert.equal(memoryHeldAt(linked)?.label, "Keeper");
+  assert.deepEqual(names(linked), ["PrimaryUser.md", "SOUL.md"]);
+  assert.equal(memoryRule(linked).length, 1);
+
+  const without = project("without", { agent: nova.id, understoryOff: true });
+  assert.equal(memoryHeldAt(without), undefined);
+  assert.deepEqual(names(without), ["MEMORY.md", "PrimaryUser.md", "SOUL.md"]);
+  assert.deepEqual(memoryRule(without), []);
+  // Only that project: the agent's home still has it.
+  assert.equal(memoryHeldAt(nova.home)?.label, "Keeper");
+
+  const blank = project("blank", { agent: "", understoryOff: false });
+  assert.equal(memoryHeldAt(blank), undefined);
+  assert.deepEqual(memoryRule(blank), []);
+  globalThis.holding.keeper = false;
+});
+
+test("the first extension that asks holds the memory: one that asks while it does is refused, and it is let go when its half stops", async () => {
+  globalThis.holding = { keeper: true, rival: true };
+  said.length = 0;
+  const [first, second] = [keeper("keeper", "Keeper"), keeper("rival", "Rival")];
+  await host.syncServerHalves([first, second]);
+  assert.ok(said.includes("[portal] rival cannot hold the agent's memory: keeper holds it already, as Keeper"), said.join("\n"));
+  assert.equal(memoryHolder()?.label, "Keeper");
+
+  // The first stopped: nothing holds it. The one refused holds nothing, until it starts again and asks again.
+  await host.syncServerHalves([second]);
+  assert.equal(memoryHolder(), undefined);
+  assert.deepEqual(names(nova.home), ["MEMORY.md", "PrimaryUser.md", "SOUL.md"]);
+  await host.syncServerHalves([]);
+  await host.syncServerHalves([second]);
+  assert.equal(memoryHolder()?.label, "Rival");
+  await host.syncServerHalves([]);
+  assert.equal(memoryHolder(), undefined);
+});
+
+test("what an extension says of itself is its own: one whose answer fails holds nothing, and a hold without a label, a rule and `on` throws", async () => {
+  const dir = path.join(home, "packages", "odd");
+  mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, "server.js");
+  writeFileSync(file, `export default function (portal) {\nglobalThis.portals.odd = portal;\nportal.memory.hold({ label: "Odd", rule: "Odd's rule.", on: () => { throw new Error("no idea"); } });\n}\n`);
+  await host.syncServerHalves([{ name: "odd", version: "1.0.0", file, rev: statSync(file).size.toString(36) }]);
+  assert.equal(memoryHolder(), undefined);
+  assert.deepEqual(names(nova.home), ["MEMORY.md", "PrimaryUser.md", "SOUL.md"]);
+  for (const holder of [undefined, { label: "", rule: "r", on: () => true }, { label: "l", rule: 3, on: () => true }, { label: "l", rule: "r", on: true }]) {
+    assert.throws(() => globalThis.portals.odd.memory.hold(holder), /hold takes \{ label, rule, on \}/);
+  }
+  await host.syncServerHalves([]);
+});

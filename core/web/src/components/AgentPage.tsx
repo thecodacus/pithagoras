@@ -785,8 +785,8 @@ function AgentFiles({ agent, setup, onSaved }: { agent: string; setup: Setup; on
   const [error, setError] = useState<string | null>(null);
 
   const file = setup.files.find((f) => f.name === open);
-  // Understory holds the memory: the file stays, and is not read.
-  const unread = (name: string) => name === "MEMORY.md" && setup.memory === "understory";
+  // Something holds the memory: the file stays, and is not read.
+  const unread = (name: string) => name === "MEMORY.md" && setup.memory === "extension";
 
   const show = (f: Setup["files"][number]) => {
     setOpen(f.name);

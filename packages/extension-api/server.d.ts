@@ -246,6 +246,16 @@ export interface ModelProvider {
 /** One server of pi's mcp.json, in the shape pi-mcp-adapter reads: `url`, `command` or `socket`, and what else the adapter takes. */
 export type McpEntry = Record<string, unknown>;
 
+/** What holds the agent's memory in place of MEMORY.md: see `memory.hold`. */
+export interface MemoryHolder {
+  /** What the portal calls it where it says what holds the memory. */
+  label: string;
+  /** Said to the agent in a chat with the person, in place of MEMORY.md: how to reach the memory, and when. */
+  rule: string;
+  /** Whether it holds the memory now. Asked each time a chat's prompt is built: keep it quick, and give a boolean, not a promise. */
+  on(): boolean;
+}
+
 export interface ServerPortal {
   /** Of this interface: raised when something an extension relies on changes. */
   version: 1;
@@ -370,6 +380,15 @@ export interface ServerPortal {
      * Settings → MCP, and for a name or a server the adapter would not take.
      */
     set(name: string, entry: McpEntry | undefined, options?: { trusted?: boolean }): Promise<void>;
+  };
+  memory: {
+    /**
+     * Says that this extension holds the agent's memory, while its server half runs and `on()` says so: a chat with
+     * the person then does not read the agent's MEMORY.md, and is told `rule` in its place. A project linked to an
+     * agent can do without it, and a blank one never has it. One extension holds it: the first that asks. One that
+     * asks while another does is refused, with a line in the log.
+     */
+    hold(holder: MemoryHolder): void;
   };
   /**
    * The package's own routes, at /api/x/<package>/…, behind the portal's

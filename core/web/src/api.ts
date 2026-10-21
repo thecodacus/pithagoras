@@ -117,8 +117,9 @@ export interface AgentSetup {
   initialised: boolean;
   /** `mtime`: when the file last changed, 0 where there is none. A save sends it back, so the agent's own writes are not lost. `link`: it is a link, which is left alone: not shown, not written. */
   files: { name: string; exists: boolean; content: string; mtime: number; link?: boolean }[];
-  /** Where the agent's memory is kept: while it is Understory, MEMORY.md is not read. */
-  memory?: "file" | "understory";
+  /** Where the agent's memory is kept: while something holds it (`by` names it), MEMORY.md is not read. */
+  memory?: "file" | "extension";
+  by?: string;
 }
 
 /** An agent: a home of its own, with its own SOUL.md, PrimaryUser.md and memory. */

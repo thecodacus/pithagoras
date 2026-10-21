@@ -4,7 +4,7 @@ import { sandboxTools } from "../sandbox/tools.js";
 import { sandboxOn } from "../sandbox/policy.js";
 import { projectSkillPaths, withoutFolderMcp } from "../sandbox/project-trust.js";
 import { agentSkillsDir, skillsLine } from "../agent-skills.js";
-import { agentFilesAt, agentFor, understoryAt } from "../project-agent.js";
+import { agentFilesAt, agentFor, memoryHeldAt } from "../project-agent.js";
 import { crossModelThinkingExtension } from "./cross-model-thinking.js";
 import { BROWSER_READING_RULE, BROWSER_SCREENSHOT_RULE } from "./browser-mcp-rules.js";
 import { bundledPath } from "../bundled.js";
@@ -34,7 +34,6 @@ import { hostExtensions } from "../extension-host.js";
 import { adapterTool, contextWindowFor, getSkipThinkingProviders, getVoiceInstructions, getVoiceModel, questionWaitMs, voiceSpeaks } from "../db.js";
 import { configStamp, isLlamaProvider } from "../providers.js";
 import { rereadConfig } from "./model-runtime.js";
-import { UNDERSTORY_RULE } from "../features.js";
 import { browserServers } from "../api/mcp.js";
 
 /** A message on its way into pi: see SdkPiClient.prompt(). */
@@ -53,13 +52,19 @@ function asArray(v: any): any[] {
 }
 
 /**
- * While Understory holds the agent's memory, MEMORY.md is not read: two
- * memories would drift apart, and the file would be the stale one. It stays
- * where it is, and is read again once Understory is switched off. Asked for
- * the place the chat works in, since a project can do without Understory.
+ * While something holds the agent's memory (memory-holder.ts), MEMORY.md is
+ * not read: two memories would drift apart, and the file would be the stale
+ * one. It stays where it is, and is read again once that lets it go. Asked for
+ * the place the chat works in, since a project can do without it.
  */
 const filesFor = (cwd: string, role?: string) =>
-  !role || role === "primary" ? (understoryAt(cwd) ? CONTEXT_FILES.filter((f) => f !== "MEMORY.md") : CONTEXT_FILES) : SHARED_FILES;
+  !role || role === "primary" ? (memoryHeldAt(cwd) ? CONTEXT_FILES.filter((f) => f !== "MEMORY.md") : CONTEXT_FILES) : SHARED_FILES;
+
+/** Said in place of MEMORY.md, to a chat with the person, while something holds the agent's memory: the holder's rule. */
+export function memoryRule(cwd: string, role?: string): string[] {
+  const holder = !role || role === "primary" ? memoryHeldAt(cwd) : undefined;
+  return holder ? [holder.rule] : [];
+}
 
 /**
  * Where the agent's own files are read from for a chat working in `cwd`: the
@@ -222,8 +227,8 @@ function framing(): string[] {
   // The rule for spoken replies is not here: the resource loader adds it, to
   // the conversations that have had voice (see PortalLoader and AudioRule).
   // Nor the line naming the agent's own files: which there are can change
-  // under an open chat (Understory switched on takes MEMORY.md away), so it is
-  // asked for each time the prompt is built — see ownFiles.
+  // under an open chat (MEMORY.md is not read while something holds the
+  // memory), so it is asked for each time the prompt is built — see ownFiles.
   // These are a Playwright MCP's rules, so they are said only where such a server is attached: a package's
   // browser tools carry their own as promptGuidelines, which pi includes only while they are active.
   const lines: string[] = hasPlaywrightBrowser() ? [BROWSER_READING_RULE, BROWSER_SCREENSHOT_RULE] : [];
@@ -612,14 +617,14 @@ export class SdkPiClient extends EventEmitter implements PiClient {
         // MEMORY.md correctly while insisting it was Pi, made by Baidu. This
         // says what the files are for.
         appendSystemPrompt: framing(),
-        // Where MEMORY.md would have been, while Understory holds the memory:
+        // Where MEMORY.md would have been, while something holds the memory:
         // asked each time the prompt is built, so a switch reaches a reloaded chat.
         // A conversation with anyone else had no memory to replace.
       }, audioRule, () => [
         ...ownFiles(opts.cwd, opts.role, opts.sessionId),
         // Where its own skills go: only for the person it works for; a look or a colleague does not write them.
         ...(skillsOf && (!opts.role || opts.role === "primary") && !opts.heartbeatAgent ? [skillsLine(skillsOf)] : []),
-        ...((!opts.role || opts.role === "primary") && understoryAt(opts.cwd) ? [UNDERSTORY_RULE] : []),
+        ...memoryRule(opts.cwd, opts.role),
         ...outsideLines(),
       ],
       // What the installed extensions' server halves add to the chat's pi, each under its package's name, as they are

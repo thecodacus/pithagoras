@@ -23,6 +23,7 @@ import { folderAllowed, folderLabel, listFolders } from "./agent-folders.js";
 import { handoffDone, takeHandoff } from "./handoff.js";
 import { modelEndpoint, modelOf, modelProviders, type LiveModel } from "./models.js";
 import { mcpServer } from "./api/mcp.js";
+import { holdMemory } from "./memory-holder.js";
 import type { Chat, ChatLife as Life, Ran, ServerPortal, Upgrade } from "@pithagoras/extension-api/server";
 
 /**
@@ -356,6 +357,16 @@ function portalFor(ext: Running): ServerPortal {
         const { setMcpServer } = await import("./mcp-entry.js");
         await setMcpServer(server, entry, { trusted: options.trusted === true });
         await reloadChats();
+      },
+    },
+    memory: {
+      hold(holder) {
+        const { label, rule } = holder ?? {};
+        if (typeof label !== "string" || !label.trim() || typeof rule !== "string" || !rule.trim() || typeof holder.on !== "function") {
+          throw new TypeError("hold takes { label, rule, on }: two texts, and a function that says whether it holds the memory now");
+        }
+        // Let go when the half stops. What it says of itself is the extension's: one that fails, or does not answer true, holds nothing.
+        ext.stops.push(holdMemory(name, { label, rule, on: () => guarded(name, "saying whether it holds the agent's memory", () => holder.on()) === true }));
       },
     },
     router: ext.router,
