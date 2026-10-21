@@ -64,6 +64,12 @@ export type PromptTaken =
   | { outcome: "started" }
   | { outcome: "handled" };
 
+/** Where a load failed, the file or the inline extension (`<inline:name>`), and why. */
+export interface LoadError {
+  path: string;
+  error: string;
+}
+
 export interface PiCommand {
   name: string;
   description?: string;
@@ -87,6 +93,12 @@ export interface PiClient extends EventEmitter {
    * Cleared by a reload.
    */
   reloadDue?: boolean;
+  /**
+   * What the chat's last load could not load, or loaded only in part: an
+   * extension that threw, a tool of a name another had first. Optional: only
+   * the in-process client sees them.
+   */
+  loadErrors?(): LoadError[];
   /**
    * Speak to a subagent an extension announced over the subagent protocol
    * (see subagent-protocol.ts). False when this executor cannot reach the

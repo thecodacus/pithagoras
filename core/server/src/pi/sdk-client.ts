@@ -14,7 +14,7 @@ import { EventEmitter } from "node:events";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import type { DraftStore, PiClient, PiCommand, PiState, PiStats, PiTool, PromptTaken } from "./types.js";
+import type { DraftStore, LoadError, PiClient, PiCommand, PiState, PiStats, PiTool, PromptTaken } from "./types.js";
 import type { ImageContent } from "../prompt-images.js";
 import { routineTools } from "./routine-tools.js";
 import { reportTool, reportToFor } from "./report-tool.js";
@@ -45,6 +45,9 @@ interface Handoff {
   /** Its words as pi queued them, once it has. */
   queued?: string;
 }
+
+/** One failure of a load, told from another: the same failure at the next load is not new. */
+const failureKey = (failure: LoadError) => `${failure.path}\n${failure.error}`;
 
 function asArray(v: any): any[] {
   const resolved = typeof v === "function" ? v() : v;
@@ -812,12 +815,16 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     }
 
     client.applyLimitQuietly();
+    // After binding, as the switches below: what an extension registers as it starts is in it.
+    const failed = client.noteLoad();
     // After binding, not before: a tool an extension registers does not exist
     // until then, and switching it off ahead of time switches off nothing.
     // Also with nothing switched off: the gateway is registered active, and is only wanted while a tool is lazy.
     client.applyToolsOff();
     // Now that every tool is registered, the gateway can carry the rules of the lazy ones.
     client.gateway?.refresh();
+    // Said once the portal listens, which it does as soon as it has the client.
+    if (failed.length) setImmediate(() => client.sayLoadErrors(failed));
     return client;
   }
 
@@ -1873,8 +1880,33 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     // And has pi switch every extension tool back on — which is every MCP tool,
     // the browser's among them. The switches are the portal's to keep.
     for (const name of this.unseenOff()) this.switchedOff.add(name);
+    const failed = this.noteLoad();
     this.applyToolsOff();
     this.sayAudioRuleAgain();
+    this.sayLoadErrors(failed);
+  }
+
+  /** What the last load could not load, as noteLoad found it. */
+  private failedToLoad: LoadError[] = [];
+
+  loadErrors(): LoadError[] {
+    return this.failedToLoad.map((failure) => ({ ...failure }));
+  }
+
+  /**
+   * What the load that just ended left: pi's errors, an extension that threw as it loaded or a tool of a name another
+   * had first. Kept for loadErrors; those that were not there at the load before are returned, to be said.
+   */
+  private noteLoad(): LoadError[] {
+    const failed: LoadError[] = asArray(this.session.resourceLoader?.getExtensions?.()?.errors).map((e) => ({ path: String(e?.path ?? ""), error: String(e?.error ?? e) }));
+    const before = new Set(this.failedToLoad.map(failureKey));
+    this.failedToLoad = failed;
+    return failed.filter((failure) => !before.has(failureKey(failure)));
+  }
+
+  /** Each as an extension's failure is said in the chat: see extension_error in the session manager. */
+  private sayLoadErrors(failed: LoadError[]): void {
+    for (const failure of failed) this.emit("event", { type: "extension_error", extensionPath: failure.path, error: failure.error });
   }
 
   /**

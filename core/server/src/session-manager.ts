@@ -214,7 +214,8 @@ const IMAGE_ROOT = path.resolve(process.env.DATA_DIR || "./data", "images");
 export function extensionFailure(where: unknown, error: unknown): string {
   const path = String(where ?? "");
   const command = /^command:(.+)$/.exec(path)?.[1];
-  const who = command ? `/${command}` : (/node_modules\/((?:@[^/]+\/)?[^/]+)/.exec(path)?.[1] ?? extensionName(path) ?? "An extension");
+  // An inline extension, the portal's own or what a server half adds to a chat's pi, is named by pi as <inline:name>.
+  const who = command ? `/${command}` : (/node_modules\/((?:@[^/]+\/)?[^/]+)/.exec(path)?.[1] ?? /^<inline:(.+)>$/.exec(path)?.[1] ?? extensionName(path) ?? "An extension");
   return `${who} failed: ${String(error ?? "no reason given").trim()}`;
 }
 

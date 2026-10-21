@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fakeModel, resultsIn } from "./fake-model.mjs";
 import { inProcessHome } from "./server-harness.mjs";
@@ -9,7 +9,7 @@ import { inProcessHome } from "./server-harness.mjs";
  * A chat that is working when the open chats are reloaded (a package installed, switched, a server half's
  * `chats.reload`) takes the change at its next step: between two requests of its run, so a tool installed by one
  * call can be called by the next. Not while a subagent works in the background or an extension holds the chat:
- * then once the run is over.
+ * then once the run is over. And what a load could not load is kept, and said in the chat once.
  */
 const home = inProcessHome("pithagoras-reload-step-");
 mkdirSync(process.env.PI_CODING_AGENT_DIR, { recursive: true });
@@ -19,8 +19,9 @@ writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR, "models.json"), JSON.st
 writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR, "settings.json"), JSON.stringify({ defaultProvider: "fake", defaultModel: "m" }));
 
 const host = await import("../dist/extension-host.js");
-const { createSession, getSession, getSettings, setSettings } = await import("../dist/db.js");
+const { createSession, eventsSince, getSession, getSettings, setSettings } = await import("../dist/db.js");
 const { sessions } = await import("../dist/session-manager.js");
+const { SdkPiClient } = await import("../dist/pi/sdk-client.js");
 setSettings({ ...getSettings(), provider: "fake", model: "m" });
 test.after(() => host.stopServerHalves());
 
@@ -140,4 +141,57 @@ test("not while a subagent works in the background: due until a step can take it
   assert.ok(!offered(again).includes("diary_add"));
   assert.ok(offered(next).includes("diary_add"), "at the next step of the next run");
   assert.equal(client.reloadDue, false);
+});
+
+test("what a load could not load is kept, said once, and said again when it comes back", async () => {
+  const broken = (fixed) => half("broken-tools", fixed ? "export default function (portal) { portal.chats.extend(() => {}); }" : `export default function (portal) {
+  portal.chats.extend(() => { throw new Error("the schema is wrong"); });
+}
+`);
+  await host.syncServerHalves([broken(false)]);
+  // A pi extension of the agent's own that throws as it loads.
+  const own = path.join(process.env.PI_CODING_AGENT_DIR, "extensions", "throws.ts");
+  mkdirSync(path.dirname(own), { recursive: true });
+  writeFileSync(own, 'export default function () { throw new Error("not today"); }\n');
+  const work = mkdtempSync(path.join(process.env.WORKSPACE_ROOT, "errors-"));
+  createSession({ id: "errors", title: "errors", workspace: work, executor: "host" });
+  const client = await SdkPiClient.create({ cwd: work, sessionDir: mkdtempSync(path.join(home, "pi-")), provider: "fake", modelId: "m", sessionId: "errors" });
+  const said = [];
+  client.on("event", (event) => { if (event.type === "extension_error") said.push(`${event.extensionPath}: ${event.error}`); });
+  try {
+    const expected = ["<inline:broken-tools>: the schema is wrong", `${own}: Failed to load extension: not today`];
+    const kept = () => client.loadErrors().map((e) => `${e.path}: ${e.error}`).sort();
+    assert.deepEqual(kept(), [...expected].sort());
+    await until(() => said.length === 2, "the errors to be said");
+    assert.deepEqual([...said].sort(), [...expected].sort());
+
+    await client.reload();
+    assert.deepEqual(kept(), [...expected].sort(), "kept at the next load");
+    assert.equal(said.length, 2, "and not said again");
+
+    rmSync(own);
+    await host.syncServerHalves([broken(true)]);
+    await client.reload();
+    assert.deepEqual(client.loadErrors(), []);
+
+    await host.syncServerHalves([broken(false)]);
+    await client.reload();
+    assert.deepEqual(said.slice(2), ["<inline:broken-tools>: the schema is wrong"], "broken again, it is said again");
+  } finally {
+    client.dispose();
+    rmSync(own, { force: true });
+    await host.syncServerHalves([]);
+  }
+});
+
+test("the chat is told, naming the package", async () => {
+  await host.syncServerHalves([half("broken-tools", 'export default function (portal) { portal.chats.extend(() => { throw new Error("the schema is wrong"); }); }')]);
+  try {
+    await chat("told");
+    const notices = () => eventsSince("told", 0).filter((row) => row.type === "portal_notice").map((row) => JSON.parse(row.payload).text);
+    await until(() => notices().length > 0, "the notice");
+    assert.deepEqual(notices(), ["broken-tools failed: the schema is wrong"]);
+  } finally {
+    await host.syncServerHalves([]);
+  }
 });

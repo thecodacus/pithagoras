@@ -152,6 +152,9 @@ test("a failure is named by its package, not its path", () => {
   assert.equal(extensionFailure("/proj/.pi/extensions/x.js", "x"), "x failed: x");
   assert.equal(extensionFailure("/proj/.pi/extensions/tidy/index.ts", "x"), "tidy failed: x");
   assert.equal(extensionFailure("/src/tidy/dist/index.js", "x"), "tidy failed: x");
+  // What a package's server half adds to a chat's pi, and the portal's own, by the name pi gives them.
+  assert.equal(extensionFailure("<inline:@codacus/notes>", "x"), "@codacus/notes failed: x");
+  assert.equal(extensionFailure("<inline:sandbox>", "x"), "sandbox failed: x");
   assert.equal(extensionFailure(undefined, undefined), "An extension failed: no reason given");
 });
 
