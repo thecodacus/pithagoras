@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import http from "node:http";
 import path from "node:path";
-import { inProcessHome } from "../../../tests/helpers.mts";
+import { freePort, inProcessHome } from "../../../tests/helpers.mts";
 import { CONTAINER, VOLUME, envOf, startUnderstory } from "./portal.mts";
 
 /**
@@ -171,6 +171,25 @@ test("one whose token was not taken up from what the portal kept is left as it i
   assert.deepEqual(machine.made(), []);
   assert.equal(store.setting("token"), undefined, "no token is made in its place");
   store.putSettings({ token: TOKEN, config });
+});
+
+test("a running one made for the chat's model is made again as it starts where UNDERSTORY_LLM_PORT says another port since", async () => {
+  machine.reset();
+  store.putSettings({ token: TOKEN, config: { llm: { source: "auto" }, dreamInterval: "", dreamAt: "" } });
+  await service.install();
+  const was = process.env.UNDERSTORY_LLM_PORT;
+  process.env.UNDERSTORY_LLM_PORT = String(await freePort());
+  try {
+    await restart();
+    assert.equal(machine.made().length, 2);
+    const env = envOf(machine.understory()!);
+    assert.deepEqual([env.LLM_API_BASE_URL, env.AUTH_TOKEN], [`http://127.0.0.1:${process.env.UNDERSTORY_LLM_PORT}/v1`, TOKEN]);
+    assert.equal(machine.understory()!.State, "running");
+    assert.equal(await modelServerAnswers(), true, "where the model server listens now");
+  } finally {
+    process.env.UNDERSTORY_LLM_PORT = was;
+    await restart();
+  }
 });
 
 test("none there is nothing to take over; one that is not Understory's, or another extension's, is not its to take, which is said", async () => {

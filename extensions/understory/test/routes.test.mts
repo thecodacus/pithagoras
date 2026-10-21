@@ -1,6 +1,8 @@
-import { test } from "node:test";
+import { mock, test } from "node:test";
 import assert from "node:assert/strict";
+import { once } from "node:events";
 import { writeFileSync } from "node:fs";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { inProcessHome } from "../../../tests/helpers.mts";
@@ -13,7 +15,7 @@ import { IMAGE, VOLUME, envOf, serveUnderstory } from "./portal.mts";
  */
 
 inProcessHome("pithagoras-understory-routes-");
-const { at, api, docker, machine, scripts, db, adapterOn, servers, putServers, agentDir } = await serveUnderstory();
+const { at, api, docker, machine, scripts, db, adapterOn, servers, putServers, agentDir, host, halves } = await serveUnderstory();
 const service = await import("../src/server/service.ts");
 const store = await import("../src/server/store.ts");
 const { understoryEntry } = await import("../src/server/entry.ts");
@@ -270,4 +272,42 @@ test("while what the portal kept has not been taken up, its container keeps the 
     store.putSettings(had);
     putServers({});
   }
+});
+
+test("where the model server could not take its port, the chat's model is not offered, and an Understory made for it is stopped and not started: what it sends would go to whatever holds the port", async () => {
+  machine.reset();
+  await call("PUT", "/config", { llm: { source: "auto" } });
+  assert.equal((await call("POST", "/install")).status, 200);
+  const port = Number(process.env.UNDERSTORY_LLM_PORT);
+  const both = [halves.docker, halves.understory];
+  await host.stopServerHalves();
+  const other = net.createServer().listen(port, "127.0.0.1");
+  await once(other, "listening");
+  const lines = mock.method(console, "log", () => {});
+  try {
+    await host.syncServerHalves(both);
+    // What the half does with the container as it starts, done: one more look through the same queue ends after it.
+    await service.settleKept();
+    const said = lines.mock.calls.map((c) => String(c.arguments[0])).join("\n");
+    assert.match(said, new RegExp(`the model server for Understory could not listen on 127\\.0\\.0\\.1:${port}`));
+    assert.match(said, /pithagoras-understory is stopped, as what it sends the chat's model would go to whatever holds that port: .*UNDERSTORY_LLM_PORT/);
+    assert.equal(machine.understory()!.State, "exited");
+    assert.equal((await state()).managed.autoPossible, false);
+
+    const config = store.setting("config");
+    const auto = await call("PUT", "/config", { llm: { source: "auto" }, dreamInterval: "6h", dreamAt: "" });
+    assert.equal(auto.status, 400);
+    assert.match(auto.body.error, /could not listen on 127\.0\.0\.1:\d+; set UNDERSTORY_LLM_PORT to a port that is free/);
+    assert.deepEqual(store.setting("config"), config, "nothing saved");
+    const started = await call("POST", "/start");
+    assert.match(started.body.error, /UNDERSTORY_LLM_PORT/);
+    assert.equal(machine.understory()!.State, "exited", "not started");
+  } finally {
+    lines.mock.restore();
+    other.close();
+    await host.stopServerHalves();
+    await host.syncServerHalves(both);
+    await service.settleKept();
+  }
+  assert.equal((await call("POST", "/start")).status, 200, "started once the model server listens");
 });

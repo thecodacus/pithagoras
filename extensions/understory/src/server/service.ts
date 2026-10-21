@@ -140,13 +140,21 @@ export async function heldToken(): Promise<string> {
 /** The key Understory calls the model server with, in "the chat's" mode; made once. */
 export const llmToken = (): string => secret("llmToken");
 
+/** Where Understory reaches the model server of this half: on the loopback it shares with the portal. */
+const modelServerUrl = (): string => `http://127.0.0.1:${modelServer().port}/v1`;
+
+/** Why Understory cannot reach the chat's model now, where it cannot: the model server could not take its port. */
+function modelServerMissing(): string | undefined {
+  const { listening, port: at } = modelServer();
+  return listening ? undefined : `Understory's model server could not listen on 127.0.0.1:${at}; set UNDERSTORY_LLM_PORT to a port that is free, or give Understory a model of its own`;
+}
+
 /** What Understory is told about its model: the provider's address and key, looked up when the container is made. */
 export async function llmEnv(llm: LlmChoice): Promise<{ baseUrl: string; apiKey: string; model: string; format: LlmFormat }> {
   if (llm.source === "auto") {
-    // Where Understory reaches the model server of this half: on the loopback it shares with the portal.
-    const { listening, port: at } = modelServer();
-    if (!listening) throw new Error(`Understory's model server could not listen on 127.0.0.1:${at}; set UNDERSTORY_LLM_PORT to a port that is free, or give Understory a model of its own`);
-    return { baseUrl: `http://127.0.0.1:${at}/v1`, apiKey: llmToken(), model: "auto", format: "openai" };
+    const missing = modelServerMissing();
+    if (missing) throw new Error(missing);
+    return { baseUrl: modelServerUrl(), apiKey: llmToken(), model: "auto", format: "openai" };
   }
   if (llm.source === "custom") return { baseUrl: llm.baseUrl, apiKey: llm.apiKey || "none", model: llm.model, format: llm.format };
   const { models } = portal();
@@ -277,6 +285,8 @@ async function installNow(start = true): Promise<void> {
 }
 
 async function startNow(): Promise<void> {
+  const unheard = mustNotRun();
+  if (unheard) throw new Error(unheard);
   await ours();
   await docker().containers.start(CONTAINER);
 }
@@ -306,14 +316,33 @@ async function forgetNow(): Promise<void> {
 type Inspected = { Config?: { Env?: string[] | null }; HostConfig?: { NetworkMode?: string } };
 
 /**
- * Whether the container was made for what is there no more: the portal's own model route of before Understory was an
- * extension (`/understory-llm/v1`), or the network of a portal container that has been made again since.
+ * Whether the container was made for what is there no more: in "the chat's" mode, for another address of the model
+ * server than its own now — the portal's own model route of before Understory was an extension (`/understory-llm/v1`),
+ * or a port `UNDERSTORY_LLM_PORT` no longer says — or for the network of a portal container that has been made again
+ * since.
  */
 async function stale(): Promise<boolean> {
   const made = (await docker().containers.inspect(CONTAINER)) as Inspected | undefined;
   if (!made) return false;
   const base = made.Config?.Env?.find((line) => line.startsWith("LLM_API_BASE_URL="));
-  return Boolean(base?.endsWith("/understory-llm/v1")) || made.HostConfig?.NetworkMode !== (await docker().sharedNetwork());
+  return (config().llm.source === "auto" && base !== `LLM_API_BASE_URL=${modelServerUrl()}`) || made.HostConfig?.NetworkMode !== (await docker().sharedNetwork());
+}
+
+/**
+ * Why Understory must not run now, where it must not: it thinks with the chat's model, and the model server could not
+ * take its port, so what it sends there — the conversation, and its key — would go to whatever holds that port. Not
+ * said of the portal's own container from before Understory was an extension while what the portal kept has not been
+ * taken up (`heldToken`): which model that one was made with is not known here until then.
+ */
+function mustNotRun(): string | undefined {
+  if (setting("token") === undefined || config().llm.source !== "auto") return undefined;
+  return modelServerMissing();
+}
+
+/** The container stopped where it must not run (`mustNotRun`), which the log says. */
+async function halt(why: string): Promise<void> {
+  await docker().containers.stop(CONTAINER);
+  portal().log(`${CONTAINER} is stopped, as what it sends the chat's model would go to whatever holds that port: ${why}`);
 }
 
 /**
@@ -329,10 +358,10 @@ async function remake(running: boolean): Promise<void> {
 
 /**
  * Takes over the volume and the container the portal made before Understory was an extension, by their names, as the
- * half starts: the first in the queue, so no change runs before it. Then, where the container runs, ends what of the
- * portal's still runs in it (a run left going when the portal or this half last stopped), and makes it again once
- * where it was made for what is there no more (`stale`). One that is not there is not taken over, and one that is
- * another's is not Understory's to take, which the portal's log says.
+ * half starts: the first in the queue, so no change runs before it. Then, where the container runs, stops it where it
+ * must not run (`mustNotRun`), or else ends what of the portal's still runs in it (a run left going when the portal or
+ * this half last stopped), and makes it again once where it was made for what is there no more (`stale`). One that is
+ * not there is not taken over, and one that is another's is not Understory's to take, which the portal's log says.
  */
 export function settleKept(): Promise<void> {
   return exclusive(async () => {
@@ -348,14 +377,17 @@ export function settleKept(): Promise<void> {
     });
     if (!found) return;
     const running = found.state === "running";
+    const unheard = mustNotRun();
+    if (running && unheard) return halt(unheard);
     if (running) await endRuns();
     if (await stale()) await remake(running);
   });
 }
 
 /**
- * Made again where the portal's own container was made again since, while it runs: asked every half minute, and not
- * again while one asked is still waiting its turn (a pass of the model holds the queue for as long as it takes).
+ * Made again where the portal's own container was made again since, while it runs, and stopped where it must not run,
+ * however it was started: asked every half minute, and not again while one asked is still waiting its turn (a pass of
+ * the model holds the queue for as long as it takes).
  */
 let looking = false;
 export function lookAfter(): void {
@@ -365,6 +397,8 @@ export function lookAfter(): void {
     const d = docker();
     if (!(await d.available()) || kindOf(await d.containers.get(CONTAINER)) !== "running") return;
     await ours();
+    const unheard = mustNotRun();
+    if (unheard) return halt(unheard);
     if (await stale()) await remake(true);
   })
     .catch((e) => portal().log(`could not look after ${CONTAINER}: ${(e as Error).message}`))
