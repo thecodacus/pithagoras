@@ -771,13 +771,13 @@ const FRIDAY_VOICE = {
   enabled: true, whisperUrl: SERVICE.whisper, breezeUrl: SERVICE.speech, instruction: "A warm voice.",
 };
 
-/** A data folder as version 8 left it, with the settings given (null for none) and nothing else of voice. */
-function voiceOfV8(dir, settings) {
+/** A data folder as version 8 (or `version`) left it, with the settings given (null for none) and nothing else of voice. */
+function voiceOfV8(dir, settings, version = 8) {
   const file = path.join(dir, "portal.db");
   getDb().exec(`VACUUM INTO '${file}'`);
   const d = new Database(file);
-  d.pragma("user_version = 8");
-  assert.equal(schemaFingerprint(d), PINNED.fingerprint, "the schema of version 8 is the one pinned");
+  d.pragma(`user_version = ${version}`);
+  assert.equal(schemaFingerprint(d), PINNED.fingerprint, `the schema of version ${version} is the one pinned`);
   const put = d.prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value");
   for (const [key, value] of Object.entries(settings)) if (value !== null) put.run(key, typeof value === "string" ? value : JSON.stringify(value));
   d.close();
@@ -908,4 +908,32 @@ test("what the voice service kept that cannot be left is kept for the next start
   assert.equal(existsSync(path.join(left, "settings.json")), false);
   const after = voiceIn(rolled);
   assert.deepEqual([after.value("voice_gpu"), after.voice.provider], [undefined, "pithagoras-voice"]);
+});
+
+test("past the upgrade, the service's addresses that the person gave voice mode are theirs: a start leaves them as they are, and leaves nothing for the extension", async () => {
+  const { lazyLoad: _lazyLoad, ...mine } = FRIDAY_VOICE;
+  for (const [name, voice] of [
+    // Recognition at the service, and dictation with Qwen3-ASR at its CPU process.
+    ["voice-mine", { ...mine, provider: "", whisperUrl: SERVICE.whisper, dictationUrl: "http://127.0.0.1:7863/v1/audio/transcriptions", dictationModel: "qwen3-asr" }],
+    // Speech at the service, recognition elsewhere.
+    ["voice-mine-speech", { ...mine, provider: "", whisperUrl: "http://stt.example.test:9000/inference" }],
+    // Recognition alone, with no speech address.
+    ["voice-mine-alone", { ...mine, provider: "", runtime: "none", breezeUrl: "" }],
+  ]) {
+    const dir = path.join(home, name);
+    mkdirSync(dir, { recursive: true });
+    voiceOfV8(dir, { voice }, SCHEMA_VERSION);
+    const settings = () => {
+      const d = new Database(path.join(dir, "portal.db"), { readonly: true });
+      try {
+        return d.prepare("SELECT key, value FROM settings ORDER BY key").all();
+      } finally {
+        d.close();
+      }
+    };
+    const before = settings();
+    await upgraded(dir);
+    assert.deepEqual(settings(), before, name);
+    assert.equal(existsSync(path.join(dir, "handoff")), false, name);
+  }
 });
