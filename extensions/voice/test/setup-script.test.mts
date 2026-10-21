@@ -3,14 +3,14 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { ASR_MODELS, DEFAULT_CHOICE, asrDevice, asrDevices, cpuServerConfig, parseChoice, serverConfig, ttsDevice, ttsDevices, usesGpu, type Device, type VoiceChoice } from '../core/server/src/voice-engines.js';
-import { containerSpec } from '../core/server/src/extensions/voice-service.js';
-import { scratch } from "./helpers.mts";
+import { ASR_MODELS, DEFAULT_CHOICE, asrDevice, asrDevices, cpuServerConfig, parseChoice, serverConfig, ttsDevice, ttsDevices, usesGpu, type Device, type VoiceChoice } from '../src/engines.ts';
+import { containerSpec } from '../src/server/service.ts';
+import { scratch } from "../../../tests/helpers.mts";
 
 // The setup script run for real, with every command that would build, download or
 // install something replaced by a stub that writes down what it was asked to do.
 // Nothing is downloaded, built or installed, and no GPU is needed.
-const script = readFileSync('deploy/voice/setup.sh', 'utf8');
+const script = readFileSync(new URL('../setup.sh', import.meta.url), 'utf8');
 const root = scratch('voice-setup-');
 const calls = path.join(root, 'calls.log');
 const stubs = path.join(root, 'stubs.sh');

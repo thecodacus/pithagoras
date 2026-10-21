@@ -3,11 +3,11 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import os from 'node:os';
 import {
-  CPU_PORT, ASR_MODELS, speechCpuSeconds, speechSlow, ttsDevices, DEFAULT_CHOICE, LEAN_CHOICE, TTS_ENGINES, asrDevice, asrDevices, choiceFromKey, choiceKey, choiceLabel, cpuRealtime, cpuServerConfig, cpuSlow, cpuThreads, endpoints, fitOn, fitRam, healthUrls, isManagedUrl, parseChoice, pickGpu,
+  CPU_PORT, ASR_MODELS, speechCpuSeconds, speechSlow, ttsDevices, DEFAULT_CHOICE, LEAN_CHOICE, TTS_ENGINES, asrDevice, asrDevices, choiceFromKey, choiceKey, choiceLabel, cpuRealtime, cpuServerConfig, cpuSlow, cpuThreads, endpoints, fitOn, fitRam, healthUrls, parseChoice, pickGpu,
   ramNeeded, sameChoice, serverConfig, suggestChoice, suggestCpuChoice, ttsModel, usesGpu, vramNeeded,
   type Gpu, type Host, type VoiceChoice,
-} from '../core/server/src/voice-engines.js';
-import { DRIVER_TOO_OLD_MESSAGE, NO_GPU_FOR_SPEECH, NO_GPU_FOR_SPEECH_UNUSABLE, NO_GPU_MESSAGE, NoGpu, decide, detectGpus, explain, isNoGpu, parseGpus, readHost, type Probe } from '../core/server/src/voice-gpu.js';
+} from '../src/engines.ts';
+import { DRIVER_TOO_OLD_MESSAGE, NO_GPU_FOR_SPEECH, NO_GPU_FOR_SPEECH_UNUSABLE, NO_GPU_MESSAGE, NoGpu, decide, detectGpus, explain, isNoGpu, parseGpus, readHost, type Probe } from '../src/server/gpu.ts';
 
 // Neutral cards: only the sizes matter.
 const card = (totalMiB: number | null, freeMiB: number | null = totalMiB, index = 0): Gpu => ({ index, name: `Test GPU ${index}`, totalMiB, freeMiB });
@@ -148,10 +148,10 @@ test('a choice is checked and keyed so a container label names it exactly', () =
 });
 
 test('the original combination makes the server config the setup script has always written', () => {
-  const script = readFileSync('deploy/voice/setup.sh', 'utf8');
+  const script = readFileSync(new URL('../setup.sh', import.meta.url), 'utf8');
   const legacy = /<<'JSON'\n(.*)\nJSON\n/.exec(script)![1];
   assert.equal(JSON.stringify(serverConfig(DEFAULT_CHOICE)), legacy);
-  assert.deepEqual(endpoints(DEFAULT_CHOICE), { runtime: 'audio-cpp', breezeUrl: 'http://127.0.0.1:7862/v1/audio/speech', whisperUrl: 'http://127.0.0.1:8188/inference', sttModel: '' });
+  assert.deepEqual(endpoints(DEFAULT_CHOICE), { listen: { url: 'http://127.0.0.1:8188/inference' }, speak: { url: 'http://127.0.0.1:7862/v1/audio/speech', runtime: 'audio-cpp' } });
   assert.deepEqual(healthUrls(DEFAULT_CHOICE), ['http://127.0.0.1:8188/health', 'http://127.0.0.1:7862/health']);
 });
 
@@ -165,9 +165,7 @@ test('Chatterbox and Qwen3-ASR run in the one audio.cpp process, loaded together
   assert.equal(serverConfig({ tts: 'breeze', asr: 'qwen3-asr', asrModel: '1.7b' })!.models[1].path, '/voice/models/qwen3-asr-1.7b-q8_0.gguf');
   // A choice with Whisper has one audio.cpp model, so one is loaded at a time, as before.
   assert.equal(serverConfig({ tts: 'chatterbox', asr: 'whisper', asrModel: 'small' })!.max_loaded_models, 1);
-  assert.deepEqual(endpoints({ tts: 'chatterbox', asr: 'qwen3-asr', asrModel: '1.7b' }), {
-    runtime: 'chatterbox', breezeUrl: 'http://127.0.0.1:7862/v1/audio/speech', whisperUrl: 'http://127.0.0.1:7862/v1/audio/transcriptions', sttModel: 'qwen3-asr',
-  });
+  assert.deepEqual(endpoints({ tts: 'chatterbox', asr: 'qwen3-asr', asrModel: '1.7b' }), { listen: { url: 'http://127.0.0.1:7862/v1/audio/transcriptions', model: 'qwen3-asr' }, speak: { url: 'http://127.0.0.1:7862/v1/audio/speech', runtime: 'chatterbox' } });
   assert.deepEqual(healthUrls({ tts: 'breeze', asr: 'qwen3-asr', asrModel: '0.6b' }), ['http://127.0.0.1:7862/health']);
   // The load request and the server config describe a model the same way.
   assert.deepEqual(ttsModel('chatterbox'), config.models[0]);
@@ -177,9 +175,7 @@ test('Kokoro is a speech model of its own, spoken to at its own runtime, and the
   const config = serverConfig({ tts: 'kokoro', asr: 'qwen3-asr', asrModel: '0.6b' })!;
   assert.deepEqual(config.models[0], { id: 'kokoro', family: 'kokoro_tts', path: '/voice/models/kokoro-82m-q8_0.gguf', task: 'tts', mode: 'offline' });
   assert.deepEqual(ttsModel('kokoro'), config.models[0]);
-  assert.deepEqual(endpoints({ tts: 'kokoro', asr: 'whisper', asrModel: 'base' }), {
-    runtime: 'kokoro', breezeUrl: 'http://127.0.0.1:7862/v1/audio/speech', whisperUrl: 'http://127.0.0.1:8188/inference', sttModel: '',
-  });
+  assert.deepEqual(endpoints({ tts: 'kokoro', asr: 'whisper', asrModel: 'base' }), { listen: { url: 'http://127.0.0.1:8188/inference' }, speak: { url: 'http://127.0.0.1:7862/v1/audio/speech', runtime: 'kokoro' } });
   assert.equal(choiceKey({ tts: 'kokoro', asr: 'whisper', asrModel: 'base' }), 'kokoro+whisper:base');
   assert.deepEqual(LEAN_CHOICE, { tts: 'kokoro', asr: 'whisper', asrModel: 'base' });
 });
@@ -203,7 +199,7 @@ test('Kokoro can be put on the CPU: it then shares the CPU process with recognit
   assert.equal('ui_management' in cpuServerConfig({ tts: 'none', asr: 'qwen3-asr', asrModel: '0.6b' })!, false, 'recognition alone is never loaded by the portal');
   assert.deepEqual(config.models.map(m => m.id), ['kokoro', 'qwen3-asr']);
   assert.deepEqual(cpuServerConfig({ tts: 'kokoro', ttsDevice: 'cpu', asr: 'whisper', asrModel: 'base' })!.models.map(m => m.id), ['kokoro']);
-  assert.deepEqual(endpoints(cpu), { runtime: 'kokoro', breezeUrl: 'http://127.0.0.1:7863/v1/audio/speech', whisperUrl: 'http://127.0.0.1:7863/v1/audio/transcriptions', sttModel: 'qwen3-asr' });
+  assert.deepEqual(endpoints(cpu), { listen: { url: 'http://127.0.0.1:7863/v1/audio/transcriptions', model: 'qwen3-asr' }, speak: { url: 'http://127.0.0.1:7863/v1/audio/speech', runtime: 'kokoro' } });
   assert.deepEqual(healthUrls({ tts: 'kokoro', ttsDevice: 'cpu', asr: 'whisper', asrModel: 'base' }), ['http://127.0.0.1:8188/health', 'http://127.0.0.1:7863/health']);
   // Its memory is the host's, not the card's.
   assert.deepEqual([vramNeeded(cpu), ramNeeded(cpu)], [0, TTS_ENGINES.kokoro.ramMiB! + 1600]);
@@ -348,9 +344,9 @@ test('the processes of a choice: a GPU server for the speech engine, a CPU one f
   assert.equal(cpuServerConfig({ tts: 'breeze', asr: 'qwen3-asr', asrModel: '0.6b' }), undefined);
   assert.equal(cpuServerConfig(DEFAULT_CHOICE), undefined);
   // Where the portal looks.
-  assert.deepEqual(endpoints(onCpu), { runtime: 'audio-cpp', breezeUrl: 'http://127.0.0.1:7862/v1/audio/speech', whisperUrl: 'http://127.0.0.1:7863/v1/audio/transcriptions', sttModel: 'qwen3-asr' });
-  assert.deepEqual(endpoints(NONE('whisper', 'small')), { runtime: 'none', breezeUrl: '', whisperUrl: 'http://127.0.0.1:8188/inference', sttModel: '' });
-  assert.deepEqual(endpoints(NONE('qwen3-asr', '0.6b')), { runtime: 'none', breezeUrl: '', whisperUrl: 'http://127.0.0.1:7863/v1/audio/transcriptions', sttModel: 'qwen3-asr' });
+  assert.deepEqual(endpoints(onCpu), { listen: { url: 'http://127.0.0.1:7863/v1/audio/transcriptions', model: 'qwen3-asr' }, speak: { url: 'http://127.0.0.1:7862/v1/audio/speech', runtime: 'audio-cpp' } });
+  assert.deepEqual(endpoints(NONE('whisper', 'small')), { listen: { url: 'http://127.0.0.1:8188/inference' } });
+  assert.deepEqual(endpoints(NONE('qwen3-asr', '0.6b')), { listen: { url: 'http://127.0.0.1:7863/v1/audio/transcriptions', model: 'qwen3-asr' } });
   // What has to answer: only what the choice runs.
   assert.deepEqual(healthUrls(onCpu), ['http://127.0.0.1:7862/health', 'http://127.0.0.1:7863/health']);
   assert.deepEqual(healthUrls(NONE('qwen3-asr', '0.6b')), ['http://127.0.0.1:7863/health']);
@@ -402,15 +398,5 @@ test('the host is read as it is: the memory and the CPUs of the machine, not the
   assert.ok(host.freeMiB! >= 0 && host.freeMiB! <= host.totalMiB!, JSON.stringify(host));
   assert.equal(host.threads, os.cpus().length);
   assert.ok(Number.isInteger(host.threads) && host.threads >= 1);
-  assert.equal(readFileSync('core/server/src/voice-gpu.ts', 'utf8').includes('/sys/fs/cgroup'), false, 'no cgroup of the portal is read');
-});
-
-test('an address is the managed service\'s when it leads to a port the managed container listens on, however it is written', () => {
-  // Every address the managed choices save.
-  const onCpu: VoiceChoice[] = ASR_MODELS.map(o => ({ tts: 'kokoro', ttsDevice: 'cpu', asr: o.asr, asrModel: o.model }));
-  for (const c of [...combos, ...onCpu]) for (const url of [endpoints(c).whisperUrl, endpoints(c).breezeUrl].filter(Boolean)) assert.equal(isManagedUrl(url), true, url);
-  for (const url of ['http://localhost:8188/inference', 'http://127.0.0.1:8188/inference/', ' http://127.0.0.1:7862/v1/audio/speech ', 'http://localhost:7863/v1/audio/transcriptions', 'http://127.0.0.1:7863/v1/audio/speech']) assert.equal(isManagedUrl(url), true, url);
-  // The Compose overlay's services, another host on the same port, another path and nothing at all are not.
-  for (const url of ['http://127.0.0.1:8178/inference', 'http://127.0.0.1:7860/v1/audio/speech', 'http://stt.example.test:8188/inference', 'http://127.0.0.1:8188/other', 'https://127.0.0.1:8188/inference', 'http://127.0.0.1/inference', 'not a url', '']) assert.equal(isManagedUrl(url), false, url);
-  assert.equal(isManagedUrl(undefined), false);
+  assert.equal(readFileSync(new URL('../src/server/gpu.ts', import.meta.url), 'utf8').includes('/sys/fs/cgroup'), false, 'no cgroup of the portal is read');
 });

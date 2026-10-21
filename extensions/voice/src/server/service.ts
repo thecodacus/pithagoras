@@ -21,8 +21,8 @@ export const imageFor = (choice: VoiceChoice) => usesGpu(choice) ? IMAGE : BASE_
 const VOLUME = 'pithagoras_voice-models';
 /** The short-lived container the GPU check runs nvidia-smi in: shown in Settings → Docker while it runs. */
 const PROBE = 'pithagoras-voice-probe';
-/** The setup script, which the package ships beside its server half as it is built (server.js). */
-const SETUP = new URL('./setup.sh', import.meta.url);
+/** The setup script, which the package ships beside its server half as it is built (server.js). Replaceable, so that the half can be run from its source. */
+export const setupScript = { url: new URL('./setup.sh', import.meta.url) };
 /** A container by the voice container's name that is not the voice service's: it is left alone. */
 class NotVoices extends Error {
   constructor() { super('The pithagoras-voice container is not the voice service\'s, so it is left alone. Rename it before installing.'); }
@@ -271,7 +271,7 @@ export async function install(requested?: VoiceChoice) {
   try {
     if (!(await docker().available())) throw new Error('Docker is unavailable');
     // Read before returning so a packaging error is reported immediately.
-    script = await readFile(SETUP, 'utf8');
+    script = await readFile(setupScript.url, 'utf8');
   }
   catch (e) { pending = false; throw e; }
   void (async () => {

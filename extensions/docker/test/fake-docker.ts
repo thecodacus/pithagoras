@@ -61,17 +61,22 @@ export async function fakeDocker() {
   /** Images by id, with their labels: the ones a build made. */
   const built: { Id: string; Labels: Record<string, string> }[] = [];
   /**
-   * What a container does when it is started, for a test that says: it runs, and has exited when this returns. What
-   * becomes of a container once a command is made in it, before the command starts. And what a command run in one
-   * writes, and the code it ends with: nothing, and 0, unless a test says.
+   * What a container does when it is started, for a test that says: it runs, and has exited when this returns. Docker's
+   * own words for a start it refuses, which leaves the container as it was (one that asks for a GPU Docker has no
+   * runtime for). What a container that is stopped leaves behind (the memory it held). What becomes of a container
+   * once a command is made in it, before the command starts. And what a command run in one writes, and the code it
+   * ends with: nothing, and 0, unless a test says.
    */
   const runs: {
     onStart?: (c: FakeContainer) => void | Promise<void>;
+    refuseStart?: (c: FakeContainer) => string | undefined;
+    onStop?: (c: FakeContainer) => void;
     onExecCreate?: (c: FakeContainer) => void;
     onExec?: (e: FakeExec) => { out?: string; err?: string; code?: number };
   } = {};
   const execs: FakeExec[] = [];
-  /** The containers started, by name, in the order they were. */
+  /** The containers made, and those started (by name), in the order they were. */
+  const created: FakeContainer[] = [];
   const starts: string[] = [];
   const pulls: string[] = [];
   /** A download that fails, by image, with Docker's own words. */
@@ -140,6 +145,7 @@ export async function fakeDocker() {
         if (find(name)) return send(409, { message: `Conflict. The container name "/${name}" is already in use` });
         const made: FakeContainer = { Id: `id${++ids}`.padEnd(12, "0"), Name: name, Image: body.Image, State: "created", Labels: body.Labels ?? {}, Tty: Boolean(body.Tty), out: "", err: "", made: body };
         containers.push(made);
+        created.push(made);
         return send(201, { Id: made.Id });
       }
       if ((m = /^\/containers\/([^/]+)\/json$/.exec(p))) {
@@ -193,7 +199,10 @@ export async function fakeDocker() {
         if (!c) return send(404, { message: `No such container: ${m[1]}` });
         const want = m[2] === "start" ? "running" : "exited";
         if (c.State === want) return send(304);
+        const refused = want === "running" ? runs.refuseStart?.(c) : undefined;
+        if (refused) return send(500, { message: refused });
         c.State = want;
+        if (want === "exited") runs.onStop?.(c);
         if (want === "running") starts.push(c.Name);
         if (want === "running" && runs.onStart) {
           void Promise.resolve(runs.onStart(c)).then(() => (c.State = "exited"));
@@ -261,5 +270,5 @@ export async function fakeDocker() {
     });
   });
   await new Promise<void>((resolve) => server.listen(socket, resolve));
-  return { socket, dir, images, containers, volumes, networks, built, runs, execs, starts, pulls, failing, hold, close: () => new Promise<void>((resolve) => server.close(() => resolve())) };
+  return { socket, dir, images, containers, volumes, networks, built, runs, execs, created, starts, pulls, failing, hold, close: () => new Promise<void>((resolve) => server.close(() => resolve())) };
 }

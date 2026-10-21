@@ -4,9 +4,8 @@ import path from 'node:path';
 import { fakeDocker } from "./fake-docker.mts";
 import { inProcessHome } from "./helpers.mts";
 
-// How Understory and the voice service start, stop and remove their containers and download their images, against a
-// fake Docker daemon: one set of rules for both, since each of them used to carry its own (the browser's are Browser's,
-// through Docker's extension, now). Nothing of this machine's Docker is touched.
+// How Understory starts, stops and removes its container and downloads its image, against a fake Docker daemon (the
+// browser's and the voice service's are their extensions', through Docker's, now). Nothing of this machine's Docker is touched.
 const dir = inProcessHome('docker-lifecycle-');
 process.env.DOCKER_SOCKET = path.join(dir, 'docker.sock');
 process.env.PORTAL_CONTAINER_NAME = 'portal-test';
@@ -60,57 +59,42 @@ const docker = await fakeDocker(process.env.DOCKER_SOCKET!, async ({ method, url
   return undefined;
 });
 const understory = await import('../core/server/src/extensions/understory-service.js');
-const voice = await import('../core/server/src/extensions/voice-service.js');
 const { getDb } = await import('../core/server/src/db.js');
 after(() => getDb().close());
 
 const reset = () => { boxes = new Map(); images = new Set(); docker.reset(); refuse = {}; pullGate = null; pullError = null; };
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 const until = async (done: () => boolean | Promise<boolean>) => { for (let n = 0; n < 300 && !(await done()); n++) await sleep(10); };
-// A container as each add-on makes it: the labels they check for, and the voice service's own network, so that it is as it wants it.
-const LABELS: Record<string, Record<string, string>> = { 'pithagoras-understory': { 'pithagoras.addon': 'understory' }, 'pithagoras-voice': { 'pithagoras.addon': 'voice', 'pithagoras.voice-network': 'shared-v1' } };
-const seed = (name: string, running: boolean) => boxes.set(name, { running, labels: LABELS[name] });
+// A container as Understory makes it: the label it checks for.
+const seed = (name: string, running: boolean) => boxes.set(name, { running, labels: { 'pithagoras.addon': 'understory' } });
 const gate = () => { let open!: () => void; pullGate = new Promise<void>(r => (open = r)); return open; };
 
-// The two, by the same name for what they have the same of: the add-ons that are driven by calls.
-const UNDERSTORY = understory.CONTAINER, VOICE = voice.CONTAINER;
-const stoppers: [string, string, () => Promise<void>][] = [
-  ['understory', UNDERSTORY, () => understory.stop()],
-  ['voice', VOICE, () => voice.stop()],
-];
-test('stopping a container that was removed by hand is as good as stopped, in both', async () => {
-  for (const [what, name, stop] of stoppers) {
-    reset();
-    await stop();
-    assert.deepEqual(docker.asked().filter(c => c.startsWith('POST')), [`POST /containers/${name}/stop?t=10`], `${what}: asked once, and not an error`);
-  }
+const UNDERSTORY = understory.CONTAINER;
+test('stopping a container that was removed by hand is as good as stopped', async () => {
+  reset();
+  await understory.stop();
+  assert.deepEqual(docker.asked().filter(c => c.startsWith('POST')), [`POST /containers/${UNDERSTORY}/stop?t=10`], 'asked once, and not an error');
 });
 
-test('stopping one that is stopped already, and starting one that is running already, is as asked in both', async () => {
-  for (const [what, name, stop] of stoppers) {
-    reset(); seed(name, false);
-    await stop();
-    assert.equal(boxes.get(name)!.running, false, `${what}: stopped one stays stopped`);
-  }
+test('stopping one that is stopped already, and starting one that is running already, is as asked', async () => {
+  reset(); seed(UNDERSTORY, false);
+  await understory.stop();
+  assert.equal(boxes.get(UNDERSTORY)!.running, false, 'stopped one stays stopped');
   reset(); seed(UNDERSTORY, true);
   await understory.start();
   assert.equal(boxes.get(UNDERSTORY)!.running, true);
 });
 
-test('a running container is stopped, then it is as stopped, in both', async () => {
-  for (const [what, name, stop] of stoppers) {
-    reset(); seed(name, true);
-    await stop();
-    assert.equal(boxes.get(name)!.running, false, what);
-  }
+test('a running container is stopped, then it is as stopped', async () => {
+  reset(); seed(UNDERSTORY, true);
+  await understory.stop();
+  assert.equal(boxes.get(UNDERSTORY)!.running, false);
 });
 
-test('what Docker refuses is an error in its own words, or in the verb\'s where it has none, in both', async () => {
-  for (const [what, name, stop] of stoppers) {
-    reset(); seed(name, true);
-    refuse = { stop: { status: 500, message: 'the daemon is busy' } };
-    await assert.rejects(stop(), /the daemon is busy/, what);
-  }
+test('what Docker refuses is an error in its own words, or in the verb\'s where it has none', async () => {
+  reset(); seed(UNDERSTORY, true);
+  refuse = { stop: { status: 500, message: 'the daemon is busy' } };
+  await assert.rejects(understory.stop(), /the daemon is busy/);
   reset(); seed(UNDERSTORY, true); refuse = { stop: { status: 500 } };
   await assert.rejects(understory.stop(), /Stop failed \(500\)/);
   reset(); seed(UNDERSTORY, false); refuse = { start: { status: 500 } };
@@ -137,10 +121,6 @@ test('removing a container: a running one is stopped first, one that is stopped 
     await remove();
     assert.equal(boxes.size, 0, `${what}: gone`);
   }
-  // The same removal under the voice service, which also asks whether the container is its own first.
-  reset(); seed(VOICE, true);
-  await voice.uninstall();
-  assert.deepEqual(docker.asked().filter(c => c.startsWith('POST') || c.startsWith('DELETE')), [`POST /containers/${VOICE}/stop?t=10`, `DELETE /containers/${VOICE}?force=true`]);
   // Docker answering "no such container" to the removal, because it went in the meantime, is a removal.
   reset(); seed(UNDERSTORY, true);
   wentMeanwhile = UNDERSTORY;
@@ -174,30 +154,4 @@ test('a download that fails is said, and the install does not go on, by Understo
   await assert.rejects(understory.install(), /pull access denied/);
   assert.deepEqual((await understory.status()).pulling, { active: false, line: '', error: 'pull access denied' });
   assert.equal(boxes.size, 0);
-});
-
-test('the voice service shows what the daemon says of an image on its way, and starts the container once it is there', async () => {
-  reset();
-  // Made by an older install, with the image gone: a start downloads it again, and keeps what the container has.
-  seed(VOICE, false);
-  const open = gate();
-  try {
-    await voice.install();
-    await until(async () => (await voice.status()).progress === 'Pulling fs layer');
-    const shown = await voice.status();
-    assert.deepEqual([shown.busy, shown.progress], [true, 'Pulling fs layer']);
-  } finally { open(); }
-  await until(async () => !(await voice.status()).busy);
-  assert.equal((await voice.status()).error, '');
-  assert.equal(boxes.get(VOICE)?.running, true);
-});
-
-test('a download that fails ends the voice setup with what Docker said', async () => {
-  reset(); seed(VOICE, false);
-  pullError = 'toomanyrequests: rate limit';
-  const open = gate(); open();
-  await voice.install();
-  await until(async () => !(await voice.status()).busy);
-  assert.match((await voice.status()).error, /rate limit/);
-  assert.equal(boxes.get(VOICE)?.running, false);
 });
