@@ -18,7 +18,8 @@ import { putSettings, setting, type Settings } from "./store";
  *
  * Docker runs the container (`pithagoras-docker`, which Browser requires), and what Browser may do with it is what
  * Docker lets any extension do with its own. The container and the profile volume the portal made before Browser was
- * an extension carry no extension's name, and are taken over by their names (`adoptKept`), never made again.
+ * an extension carry no extension's name, and are taken over by their names (`adoptKept`, and again before Browser acts
+ * on them), never made again.
  */
 
 export const IMAGE = "lscr.io/linuxserver/chromium:latest";

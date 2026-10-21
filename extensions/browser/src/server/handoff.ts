@@ -14,13 +14,14 @@ import { putSettings, setting, type Settings } from "./store";
  *                   browser_cursor ("0" was off) and browser_tools ("1" connected, "0" not)
  *   profile/        the local Chrome's profile, where it had one
  *
- * The profile is moved in where Browser has none yet, and kept beside Browser's own where it has one, and each setting
- * kept where Browser's own store has none: one said here since, while the hand-off waited, is the person's latest word. Only then is the hand-off done with, so a
- * start that stopped half way takes it up again, harmlessly. What cannot be taken up stays where it is, for the next
- * start: Browser starts without it, and says why in the portal's log.
+ * The profile is moved in where Browser has none yet, and beside Browser's own where it has one, and each setting is
+ * kept where Browser's own store has none: one said here since, while the hand-off waited, is the person's latest
+ * word. Only then is the hand-off done with, so a start that stopped half way takes it up again, harmlessly. What
+ * cannot be taken up stays where it is, for the next start: Browser starts without it, and says why in the portal's
+ * log.
  *
  * The browser's container and its profile volume are not in it: they are taken over by their names, as the half
- * starts (service.ts, adoptKept).
+ * starts and before Browser acts on them (service.ts).
  */
 
 /** The settings that are text, by the portal's key and the store's. */
