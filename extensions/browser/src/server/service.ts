@@ -103,7 +103,6 @@ export async function uiState(): Promise<{ exposed: boolean; outdated: boolean }
 
 /** Progress of a pull in flight, so a multi-gigabyte download is not silence. */
 let pulling: PullState = { active: false, line: "" };
-export const pullState = () => pulling;
 
 /**
  * Which of the two ways this deployment can run a browser.
@@ -266,31 +265,42 @@ async function installNow(): Promise<void> {
   await d.containers.start(CONTAINER);
 }
 
+/**
+ * Docker's containers, with the browser's taken over first, as an install does: one made before Browser was an
+ * extension is taken over as the half starts, but not where Docker could not be reached then and can now.
+ */
+async function containers() {
+  const d = docker();
+  await d.containers.adopt(CONTAINER).catch(absent);
+  return d.containers;
+}
+
 export async function start(): Promise<void> {
   managedHere();
   if (!(await docker().available())) return local.start();
-  await docker().containers.start(CONTAINER);
+  await (await containers()).start(CONTAINER);
 }
 
 export async function stop(): Promise<void> {
   managedHere();
   if (!(await docker().available())) return local.stop();
-  await docker().containers.stop(CONTAINER);
+  await (await containers()).stop(CONTAINER);
 }
 
 /** Removes the container. The profile volume is left alone — that is the logins. */
 export async function remove(): Promise<void> {
   managedHere();
   if (!(await docker().available())) return local.stop();
-  await docker().containers.remove(CONTAINER);
+  await (await containers()).remove(CONTAINER);
 }
 
 /** Forgets the logins as well. Separate on purpose, and not undoable. A local Chrome's profile is kept: this is the container's. */
 export async function forgetProfile(): Promise<void> {
   managedHere();
   if (!(await docker().available())) return local.stop();
-  await docker().containers.remove(CONTAINER);
-  // One that is gone already is gone.
+  await (await containers()).remove(CONTAINER);
+  // Taken over first, as the container is; one that is gone already is gone.
+  await docker().volumes.adopt(VOLUME).catch(absent);
   await docker().volumes.remove(VOLUME);
 }
 

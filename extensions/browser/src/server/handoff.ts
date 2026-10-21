@@ -14,8 +14,8 @@ import { putSettings, setting, type Settings } from "./store";
  *                   browser_cursor ("0" was off) and browser_tools ("1" connected, "0" not)
  *   profile/        the local Chrome's profile, where it had one
  *
- * The profile is moved in where Browser has none yet, and each setting kept where Browser's own store has none: one
- * said here since, while the hand-off waited, is the person's latest word. Only then is the hand-off done with, so a
+ * The profile is moved in where Browser has none yet, and kept beside Browser's own where it has one, and each setting
+ * kept where Browser's own store has none: one said here since, while the hand-off waited, is the person's latest word. Only then is the hand-off done with, so a
  * start that stopped half way takes it up again, harmlessly. What cannot be taken up stays where it is, for the next
  * start: Browser starts without it, and says why in the portal's log.
  *
@@ -37,11 +37,13 @@ export function takeHandoff(): void {
     const dir = portal().handoffs.take("browser");
     if (!dir) return;
     const read = (name: string) => JSON.parse(readFileSync(path.join(dir, name), "utf8"));
-    const { format } = read("handoff.json");
+    const { format, made } = read("handoff.json");
     if (format !== 1) throw new Error(`it is in a format this version of Browser does not read (${format})`);
-    const profile = path.join(portal().dataDir(), "profile");
-    const moved = existsSync(path.join(dir, "profile")) && !existsSync(profile);
-    if (moved) renameSync(path.join(dir, "profile"), profile);
+    const handed = path.join(dir, "profile");
+    // Where Browser has a profile of its own already, that one stays the browser's, and the one handed over, which may
+    // hold logins too, is kept beside it rather than going with the hand-off.
+    const into = !existsSync(handed) ? undefined : existsSync(path.join(portal().dataDir(), "profile")) ? `profile-handed-over-${String(made).replace(/:/g, "-")}` : "profile";
+    if (into) renameSync(handed, path.join(portal().dataDir(), into));
     const kept: Record<string, unknown> = read("settings.json");
     const said = (key: string) => (typeof kept[key] === "string" ? (kept[key] as string) : undefined);
     const taken: Settings = {};
@@ -56,7 +58,10 @@ export function takeHandoff(): void {
     const settings = Object.keys(taken);
     if (settings.length) putSettings(taken);
     portal().handoffs.done("browser");
-    const what = [...(settings.length ? [`the settings ${settings.join(", ")}`] : []), ...(moved ? ["the local Chrome's profile"] : [])];
+    const what = [
+      ...(settings.length ? [`the settings ${settings.join(", ")}`] : []),
+      ...(into ? [into === "profile" ? "the local Chrome's profile" : `the local Chrome's profile, kept as ${into} beside the one Browser had`] : []),
+    ];
     portal().log(`took up what the portal kept of the browser${what.length ? `: ${what.join(" and ")}` : ""}`);
   } catch (e) {
     // Nothing of it is lost: it stays where it is, for the next start to take up.

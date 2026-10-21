@@ -161,3 +161,20 @@ test("a container that is another extension's is not Browser's to replace, and s
     docker.containers.length = 0;
   }
 });
+
+test("a container and a profile the half could not take over as it started, Docker coming up after it, are taken over as they are acted on", async () => {
+  // As the portal made them before Browser was an extension: no extension's name on either, and nothing kept of them.
+  const OLD = { Id: "825eb3e279a0".padEnd(64, "0"), Name: "pithagoras-browser", Image: "lscr.io/linuxserver/chromium:latest", State: "running", Labels: {}, Tty: false, out: "", err: "" };
+  // The install refused just before made Browser a volume of its own.
+  docker.volumes.length = 0;
+  docker.containers.push({ ...OLD });
+  docker.volumes.push({ Name: "pithagoras_browser-profile", Labels: null });
+  assert.deepEqual(adopted(), { containers: {}, volumes: {} });
+  assert.deepEqual(await call("POST", "/stop"), { status: 200, body: { ok: true } });
+  assert.deepEqual(adopted().containers, { [OLD.Id]: "pithagoras-browser" });
+  assert.deepEqual(docker.containers.map(({ Id, State }) => ({ Id, State })), [{ Id: OLD.Id, State: "exited" }], "the same container, stopped");
+  assert.deepEqual(await call("POST", "/start"), { status: 200, body: { ok: true } });
+  assert.equal(docker.containers[0].State, "running");
+  assert.deepEqual(await call("DELETE", "/install?profile=forget"), { status: 200, body: { ok: true } });
+  assert.deepEqual([docker.containers, docker.volumes], [[], []]);
+});

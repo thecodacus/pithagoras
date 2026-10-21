@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { takeHandoff } from "../src/server/handoff.ts";
 import { setPortal } from "../src/server/host.ts";
@@ -71,17 +71,29 @@ test("tools that were switched off stay off, and a cursor that was on is on", ()
   assert.deepEqual(stored(), { password: "kept-secret", httpsPort: "4443", cursor: true, connected: false });
 });
 
-test("a profile Browser has already is kept, and nothing at all is a hand-off with nothing to take", () => {
+test("a profile Browser has already stays the browser's, and the one handed over is kept beside it", () => {
   const { data, handoff, logged } = browser();
   mkdirSync(path.join(data, "profile"));
   writeFileSync(path.join(data, "profile", "mine"), "since");
-  leave(handoff, { ...SETTINGS, browser_password: null, browser_https_port: null, browser_cursor: null, browser_tools: null }, { profile: { old: "before" } });
+  leave(handoff, { ...SETTINGS, browser_password: null, browser_https_port: null, browser_cursor: null, browser_tools: null }, { profile: { "Default/Cookies": "logins" } });
+  const { made } = JSON.parse(readFileSync(path.join(handoff, "handoff.json"), "utf8"));
   takeHandoff();
-  assert.equal(readFileSync(path.join(data, "profile", "mine"), "utf8"), "since");
+  assert.deepEqual(readdirSync(path.join(data, "profile")), ["mine"]);
+  const beside = `profile-handed-over-${made.replace(/:/g, "-")}`;
+  assert.equal(readFileSync(path.join(data, beside, "Default", "Cookies"), "utf8"), "logins", "not lost with the hand-off");
+  assert.equal(existsSync(handoff), false);
   assert.equal(existsSync(path.join(data, "settings.json")), false, "nothing to keep, so nothing written");
+  assert.match(logged.join("\n"), new RegExp(`took up what the portal kept of the browser: the local Chrome's profile, kept as ${beside.replace(/\./g, "\\.")} beside the one Browser had$`, "m"));
+});
+
+test("nothing at all is a hand-off with nothing to take, and no hand-off says nothing", () => {
+  const { data, handoff, logged } = browser();
+  leave(handoff, { ...SETTINGS, browser_password: null, browser_https_port: null, browser_cursor: null, browser_tools: null });
+  takeHandoff();
+  assert.equal(existsSync(path.join(data, "settings.json")), false, "nothing to keep, so nothing written");
+  assert.deepEqual(readdirSync(data).filter((name) => name.startsWith("profile")), []);
   assert.match(logged.join("\n"), /took up what the portal kept of the browser$/m);
 
-  // No hand-off: nothing is said.
   logged.length = 0;
   takeHandoff();
   assert.deepEqual(logged, []);
