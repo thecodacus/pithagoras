@@ -89,3 +89,15 @@ sharp runs on libvips (https://github.com/libvips/libvips), which comes prebuilt
 - the source code of libvips: https://github.com/libvips/libvips, and of the build: https://github.com/lovell/sharp-libvips
 
 libvips is used unchanged and is linked dynamically: it can be replaced by another build of the library, either by installing another `@img/sharp-libvips-<platform>` package of the same major version or by pointing sharp at a libvips of the system (see https://sharp.pixelplumbing.com/install#custom-libvips).
+
+## The browser driver of the Browser extension (playwright-core)
+
+The Browser extension (`extensions/browser`), which comes with the portal, drives the agent's browser over its debugging port with the npm package `playwright-core` 1.63.0 (https://github.com/microsoft/playwright), which is licensed under the Apache License 2.0 (https://www.apache.org/licenses/LICENSE-2.0). It does not ship in the web app's `voice-assets/`; it is installed with the extension, from the extension's own lock file, and so it is in the Docker image. Its NOTICE file says:
+
+    Playwright
+    Copyright (c) Microsoft Corporation
+
+    This software contains code derived from the Puppeteer project (https://github.com/puppeteer/puppeteer),
+    available under the Apache 2.0 license (https://github.com/puppeteer/puppeteer/blob/master/LICENSE).
+
+The package bundles other npm packages into files under its `lib/`. Their licences are in the package itself, which is used unchanged: `ThirdPartyNotices.txt`, and a `<file>.js.LICENSE` beside each bundled file with the full text of each licence.

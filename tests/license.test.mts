@@ -67,6 +67,17 @@ test('the notices name sharp at the version the Media extension installs, and li
   assert.ok(notices.includes('https://www.gnu.org/licenses/lgpl-3.0.txt'), 'the LGPL text is linked');
 });
 
+// The Browser extension's own: installed in its folder, from its own lock, when it is built.
+test('the notices name playwright-core at the version the Browser extension installs, with its NOTICE', () => {
+  const notices = read('THIRD_PARTY_NOTICES.md');
+  const from = createRequire(path.join(root, 'extensions/browser/package.json'));
+  const { version, license } = installed('playwright-core', from);
+  assert.equal(license, 'Apache-2.0', 'playwright-core changed its licence: the notices have to be read again');
+  assert.ok(notices.includes(`\`playwright-core\` ${version}`), `playwright-core ${version} is the version the notices describe`);
+  const notice = readFileSync(path.join(path.dirname(from.resolve('playwright-core/package.json')), 'NOTICE'), 'utf8');
+  for (const line of notice.split('\n').filter(Boolean)) assert.ok(notices.includes(`    ${line}`), `its NOTICE says "${line}", as the notices do`);
+});
+
 test('the web build puts the notices next to the voice files', () => {
   const out = path.join(root, 'core/web/public/voice-assets/THIRD_PARTY_NOTICES.md');
   rmSync(out, { force: true });
