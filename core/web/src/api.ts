@@ -316,7 +316,8 @@ export interface PortalEvent {
 /**
  * Fired when what is installed changed (a package installed, removed, updated
  * or switched), so the page loads or drops an extension's interface at once:
- * see extensions/loader.ts.
+ * see extensions/loader.ts. By this page's own changes as they are made, and by
+ * the list of chats when it says that what is installed changed elsewhere.
  */
 export const EXTENSIONS_CHANGED = "pithagoras:extensions-changed";
 const changesExtensions = <T>(request: Promise<T>): Promise<T> =>
@@ -514,7 +515,8 @@ export const api = {
       body: JSON.stringify({ current, settings, only }),
     }),
   workspaces: () => json<{ root: string; workspaces: Workspace[] }>("/api/workspaces"),
-  sessions: () => json<{ sessions: Session[]; executor: string }>("/api/sessions"),
+  /** With what is installed, as a revision that changes whenever it does: see EXTENSIONS_CHANGED. */
+  sessions: () => json<{ sessions: Session[]; executor: string; extensions: string }>("/api/sessions"),
   /** Without a workspace the chat starts in the home of the agent New is set to. */
   createSession: (workspace?: string, title?: string) =>
     json<Session>("/api/sessions", {

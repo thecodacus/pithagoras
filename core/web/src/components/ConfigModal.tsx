@@ -29,7 +29,7 @@ import {
   LuTriangleAlert,
   LuUsers,
 } from "react-icons/lu";
-import { api, SIGNED_OUT, type AvailableModel, type ExtensionInfo, type GlobalSettings, type ReportTarget, type ReportTo } from "../api";
+import { api, EXTENSIONS_CHANGED, SIGNED_OUT, type AvailableModel, type ExtensionInfo, type GlobalSettings, type ReportTarget, type ReportTo } from "../api";
 import { ChannelsPanel } from "./ChannelsPanel";
 import { SkillsPanel } from "./SkillsPanel";
 import { McpPanel } from "./McpPanel";
@@ -189,6 +189,12 @@ export const ConfigModal = memo(function ConfigModal({
   const settingsPath = exts.value?.settingsPath ?? "";
   const loadingExts = !exts.value && !exts.failed;
   const loadExtensions = async () => (await exts.reload())?.extensions ?? [];
+  // What is installed changed, here or elsewhere (another tab, the API, an agent): the list follows without being opened again.
+  useEffect(() => {
+    const again = () => void exts.reload();
+    window.addEventListener(EXTENSIONS_CHANGED, again);
+    return () => window.removeEventListener(EXTENSIONS_CHANGED, again);
+  }, [exts.reload]);
 
   useEffect(() => prefetchSettings(), []);
   // What changed in voice mode's settings here, its source chosen on an extension's page among it, reaches the voice controls open as Settings closes.

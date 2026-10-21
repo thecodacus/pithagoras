@@ -3,7 +3,7 @@ import { appendLiveEvents, resetLiveEvents } from "./live-events";
 import { fillFrom } from "./editor-fills";
 import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
-import { api, ApiError, SIGNED_OUT, type PortalEvent, type Session, type SessionStatus, type SingleSignOn } from "./api";
+import { api, ApiError, EXTENSIONS_CHANGED, SIGNED_OUT, type PortalEvent, type Session, type SessionStatus, type SingleSignOn } from "./api";
 import { DialogFailed, ErrorBoundary } from "./components/ErrorBoundary";
 import { Sidebar } from "./components/Sidebar";
 import { Chat } from "./components/Chat";
@@ -256,9 +256,15 @@ function Shell({
    */
   const [sessionsAsked, setSessionsAsked] = useState(false);
   const { places, reload: reloadPlaces } = usePlaces(sessions, sessionsAsked);
+  /** What is installed, as the last list of chats said it: see EXTENSIONS_CHANGED. */
+  const installed = useRef<string | undefined>(undefined);
 
   const refreshSessions = useCallback(async () => {
     const r = await api.sessions();
+    // What is installed changed since the last list, wherever it was changed (another tab, the API, an agent): the
+    // page goes through it again. Not on the first: the page loads what is installed as it starts.
+    if (installed.current !== undefined && r.extensions !== installed.current) window.dispatchEvent(new Event(EXTENSIONS_CHANGED));
+    installed.current = r.extensions;
     // Kept as it was when it says the same: a list asked for every few seconds is
     // mostly unchanged, and a new array is a draw of the portal for nothing.
     setSessions((prev) => reconcile(prev, r.sessions));
