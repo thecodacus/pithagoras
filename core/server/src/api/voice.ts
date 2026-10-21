@@ -208,10 +208,19 @@ export function pcmWav(pcm: Buffer): Buffer {
 class SourceAbsent extends Error {
   constructor() { super("Voice mode listens and speaks through an extension that is not running: install or start it, or choose your own addresses in Settings → Add-ons → Voice"); }
 }
-/** Where a provider listens and speaks now; nothing where it cannot say, which is its own failure. */
+const SPEECH_RUNTIMES = ["audio-cpp", "kokoro", "chatterbox", "breeze"];
+/**
+ * Where a provider listens and speaks now; nothing where it cannot say, which is its own failure, as is an answer that is
+ * not one: no address to listen at, or one to speak at without a runtime voice mode speaks.
+ */
 function whereOf(name: string, provider: VoiceProvider): VoiceWhere | undefined {
   try {
-    return provider.where();
+    const where = provider.where();
+    if (!where) return undefined;
+    const { listen, speak } = where;
+    if (typeof listen?.url !== "string" || (listen.model !== undefined && typeof listen.model !== "string") || (speak !== undefined && (typeof speak?.url !== "string" || !SPEECH_RUNTIMES.includes(speak.runtime))))
+      throw new TypeError(`where answered ${JSON.stringify(where)}: { listen: { url, model? }, speak?: { url, runtime } }, or nothing, is an answer`);
+    return where;
   } catch (e) {
     console.error(`[extension ${name}] saying where voice mode listens and speaks failed:`, e);
     return undefined;

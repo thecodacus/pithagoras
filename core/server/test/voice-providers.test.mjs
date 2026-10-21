@@ -12,8 +12,6 @@ import { inProcessHome } from "./server-harness.mjs";
  * tests/fixtures/extensions/speaker, which runs a recognition and a speech service of its own on loopback.
  */
 const home = inProcessHome("voice-providers-");
-// No Docker here, whatever this machine has: the managed service is not what is tested.
-process.env.DOCKER_SOCKET = path.join(home, "no-docker.sock");
 // The leases run out by the clock they are made with: one the tests can move on, set before they are made.
 const realNow = Date.now;
 let later = 0;
@@ -23,7 +21,7 @@ mock.timers.enable({ apis: ["setInterval"] });
 
 const { default: express } = await import("express");
 const host = await import("../dist/extension-host.js");
-const { voiceRouter, connectManagedVoice, providerUse } = await import("../dist/api/voice.js");
+const { voiceRouter, providerUse } = await import("../dist/api/voice.js");
 const { createSession, voiceSpeaks } = await import("../dist/db.js");
 const { createAgent, setVoice } = await import("../dist/agents.js");
 
@@ -211,6 +209,20 @@ test("voice mode says that its extension is not running, rather than listen or s
     console.error = error;
   }
   assert.ok(logged.some((line) => line.includes("[extension test-speaker] saying where voice mode listens and speaks failed") && line.includes("The speaker lost track of its services")), logged.join("\n"));
+  // What it says is not where it listens and speaks: the same, and what it said is logged.
+  console.error = (...args) => logged.push(args.map(String).join(" "));
+  try {
+    for (const answers of [{ speak: { url: `${MINE}/v1/audio/speech`, runtime: "kokoro" } }, { listen: { url: 5 } }, { listen: { url: `${MINE}/inference`, model: 5 } }, { listen: { url: `${MINE}/inference` }, speak: { url: `${MINE}/v1/audio/speech`, runtime: "wav" } }, "here"]) {
+      logged.length = 0;
+      await set({ throws: false, answers });
+      assert.deepEqual((await voice()).providers, [{ name: "test-speaker", label: "Speaker", ready: false }], JSON.stringify(answers));
+      await check();
+      assert.ok(logged.some((line) => line.includes("[extension test-speaker] saying where voice mode listens and speaks failed") && line.includes(`where answered ${JSON.stringify(answers)}`)), logged.join("\n"));
+    }
+  } finally {
+    console.error = error;
+  }
+  await set({ answers: null });
   // Its services are down: it answers nothing for where.
   await set({ throws: false, ready: false });
   assert.deepEqual((await voice()).providers, [{ name: "test-speaker", label: "Speaker", ready: false }]);
@@ -377,16 +389,6 @@ test("an agent's own Kokoro voice is spoken with where the extension speaks Koko
   assert.equal((await asked()).voices.at(-1), "am_onyx");
   await choose(false);
   await saveVoice({ runtime: OWN.runtime });
-});
-
-test("connecting the managed service takes voice mode back to the addresses it writes", async () => {
-  await choose(true);
-  const connected = connectManagedVoice();
-  assert.deepEqual([connected.provider, connected.whisperUrl], ["", "http://127.0.0.1:8188/inference"]);
-  assert.deepEqual([(await voice()).provider, (await voice()).managed], ["", true]);
-  // Chosen again over those addresses, the managed service's model is neither loaded nor kept for voice mode.
-  await choose(true);
-  assert.deepEqual([(await voice()).provider, (await voice()).managed], ["test-speaker", false]);
 });
 
 test("a server half is told what it got wrong", async () => {

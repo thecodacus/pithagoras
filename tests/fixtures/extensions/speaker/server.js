@@ -7,10 +7,11 @@
  *   GET  /api/x/test-speaker/state      { uses, heard, spoken, voices }: each `use` it was told, the model each
  *                                       recognition named (null for none), and the model and the voice (null for
  *                                       none) each phrase was asked with
- *   PUT  /api/x/test-speaker/settings   { ready?, speaks?, model?, fails?, hangs?, throws? }: whether `where`
- *                                       answers, how it speaks ("kokoro", "chatterbox", or "none" for recognition
- *                                       alone), the recognition model it names (empty for none), whether `use(true)`
- *                                       fails or never settles, and whether `where` throws
+ *   PUT  /api/x/test-speaker/settings   { ready?, speaks?, model?, fails?, hangs?, throws?, answers? }: whether
+ *                                       `where` answers, how it speaks ("kokoro", "chatterbox", or "none" for
+ *                                       recognition alone), the recognition model it names (empty for none), whether
+ *                                       `use(true)` fails or never settles, whether `where` throws, and what it answers
+ *                                       in place of its own addresses (null for its own)
  *   POST /api/x/test-speaker/choose     { chosen }: `portal.voice.choose`
  *
  * Each `use` it was told is also kept in `globalThis.speakerTold`, as "<package>#<instance> <inUse>", where the
@@ -42,7 +43,7 @@ export default async function (portal) {
   const instance = (globalThis.speakerInstances = (globalThis.speakerInstances ?? 0) + 1);
   const told = (globalThis.speakerTold ??= []);
   const asked = { uses: [], heard: [], spoken: [], voices: [] };
-  const settings = { ready: true, speaks: "kokoro", model: "speaker-asr", fails: false, hangs: false, throws: false };
+  const settings = { ready: true, speaks: "kokoro", model: "speaker-asr", fails: false, hangs: false, throws: false, answers: null };
   const service = createServer((req, res) => {
     const chunks = [];
     req.on("data", (chunk) => chunks.push(chunk));
@@ -71,6 +72,7 @@ export default async function (portal) {
     label: "Speaker",
     where() {
       if (settings.throws) throw new Error("The speaker lost track of its services");
+      if (settings.answers) return settings.answers;
       return settings.ready
         ? {
             listen: { url: `${at}/v1/audio/transcriptions`, ...(settings.model ? { model: settings.model } : {}) },
