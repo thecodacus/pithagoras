@@ -1,5 +1,6 @@
 import type { ServerPortal } from "@pithagoras/extension-api/server";
 import { UNDERSTORY, UNDERSTORY_RULE } from "./server/entry";
+import { takeHandoff } from "./server/handoff";
 import { setPortal } from "./server/host";
 import { forgetAsking, forgetChat, noteEvent, serveModels } from "./server/llm";
 import { memoryRoutes } from "./server/memory";
@@ -17,11 +18,13 @@ import { openStore } from "./server/store";
  * before this one, and this one is started again whenever Docker is. So it starts without waiting on Docker, and stops
  * without touching the container: a start or a stop of it is not one of Understory's.
  *
- * Its settings are in its own folder (`portal.dataDir()`, server/store.ts).
+ * Its settings are in its own folder (`portal.dataDir()`, server/store.ts). What the portal kept of Understory from
+ * before Understory was an extension is taken up first (server/handoff.ts).
  */
 export default async function understory(portal: ServerPortal) {
   setPortal(portal);
   openStore(portal.dataDir());
+  takeHandoff();
   // While its server is the chats' (switched on, and pi-mcp-adapter on): MEMORY.md is left aside for it.
   portal.memory.hold({ label: "Understory", rule: UNDERSTORY_RULE, on: () => portal.mcp.get(UNDERSTORY)?.on === true });
   understoryRoutes(portal.router);
