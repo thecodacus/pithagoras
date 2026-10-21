@@ -715,6 +715,94 @@ function browserGrantsToSwitches(d: Database.Database): void {
 }
 
 /**
+ * Where the voice service listened and spoke when it was the portal's, on the portal's loopback: the addresses connecting
+ * it saved into voice mode's settings. Written out here, as an upgrade step does not change with the code after it.
+ */
+const VOICE_SERVICE_URLS = [
+  "http://127.0.0.1:7862/v1/audio/speech",
+  "http://127.0.0.1:7863/v1/audio/speech",
+  "http://127.0.0.1:8188/inference",
+  "http://127.0.0.1:7862/v1/audio/transcriptions",
+  "http://127.0.0.1:7863/v1/audio/transcriptions",
+];
+/** An address of the voice service, as the portal told one: `localhost` is the same loopback, and a slash at the end is the same path. */
+function voiceServiceUrl(value: unknown): boolean {
+  if (typeof value !== "string") return false;
+  try {
+    const url = new URL(value.trim());
+    if (url.protocol !== "http:" || !["127.0.0.1", "localhost"].includes(url.hostname)) return false;
+    return VOICE_SERVICE_URLS.includes(`http://127.0.0.1:${url.port}${url.pathname.replace(/\/+$/, "")}`);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The voice service is an extension's now (extensions/voice), with settings of its own, and voice mode listens and speaks
+ * through it as through any extension that offers to (`provider` in the voice settings), never at addresses written over
+ * the person's own. What the portal kept for the service is left for it in the data folder (see handoff.ts), and the
+ * extension takes it up when it starts, which may be long after this, or never: the GPU chosen on its page, a setup
+ * that had not come up yet, and whether its speech model was let go of once voice mode no longer used it (`lazyLoad` in
+ * the voice settings). The settings go once it is left, and a try that fails keeps them for the next start.
+ *
+ * Where voice mode listened or spoke at the service's addresses, the extension is made its source, where none was chosen
+ * already, and the person's own addresses are put back as uninstalling the service did: what connecting it overwrote,
+ * kept in `voice_before_managed`, or, where nothing was kept of a side, the addresses of a portal with nothing set up.
+ * A dictation address of the service's goes as well. Whether voice mode is on stays as it is. The container and its
+ * volume stay where they are: the extension takes them over by their names. The database was backed up before this ran
+ * (db-upgrade.ts); docs/guide/upgrading.md says how to go back.
+ */
+function handOffVoice(d: Database.Database): void {
+  let voice: Record<string, unknown> | undefined;
+  try {
+    voice = JSON.parse(settingIn(d, "voice") ?? "null") ?? undefined;
+  } catch {
+    // Not JSON: voice mode cannot read it either, and it stays as it is.
+  }
+  const gpu = settingIn(d, "voice_gpu");
+  const pending = settingIn(d, "voice_setup_pending");
+  let kept: Record<string, any> = {};
+  try {
+    kept = JSON.parse(settingIn(d, "voice_before_managed") ?? "{}") ?? {};
+  } catch {
+    // Not JSON: nothing was kept that can be put back.
+  }
+  const listening = voiceServiceUrl(voice?.whisperUrl);
+  // No speech address and the runtime none is the service's where a connect saved it. Where nothing says (a service connected by an older portal), it is when the recognition is.
+  const speaking = voiceServiceUrl(voice?.breezeUrl) || (voice?.runtime === "none" && !voice.breezeUrl && (typeof kept.noSpeech === "boolean" ? kept.noSpeech : listening));
+  const dictation = voiceServiceUrl(voice?.dictationUrl);
+  if (gpu === undefined && pending === undefined && !(voice && "lazyLoad" in voice) && !listening && !speaking && !dictation) return;
+  try {
+    leaveHandoff("voice", (dir) => {
+      // Written last, and anew on each try, from the settings as they are.
+      writeFileAtomic(path.join(dir, "settings.json"), JSON.stringify({ gpu: gpu ?? null, setupPending: pending ?? null, lazyLoad: typeof voice?.lazyLoad === "boolean" ? voice.lazyLoad : null }), 0o600);
+      writeFileAtomic(path.join(dir, "handoff.json"), JSON.stringify({ format: 1, name: "voice", schema: 9, made: new Date().toISOString() }), 0o600);
+    });
+  } catch (e) {
+    console.warn(`[portal] what the voice service kept could not be left for its extension, and is kept for the next start: ${(e as Error).message}`);
+    return;
+  }
+  if (voice) {
+    const { lazyLoad: _lazyLoad, ...rest } = voice;
+    const text = (value: unknown) => (typeof value === "string" ? value : undefined);
+    // What was kept of each side: the recognition address with its models, the speech address with its runtime.
+    const heard = text(kept.listening?.whisperUrl) === undefined ? undefined : kept.listening;
+    const spoken = text(kept.speaking?.breezeUrl) === undefined || text(kept.speaking?.runtime) === undefined ? undefined : kept.speaking;
+    // A dictation address of the person's own stays with the model beside it.
+    const ownDictation = !!text(voice.dictationUrl)?.trim() && !dictation;
+    const back = {
+      ...(listening ? { whisperUrl: heard?.whisperUrl ?? "http://127.0.0.1:8178/inference", sttModel: text(heard?.sttModel) ?? "" } : {}),
+      ...(listening && !ownDictation ? { dictationModel: text(heard?.dictationModel) ?? "", dictationUrl: text(heard?.dictationUrl) ?? "" } : {}),
+      ...(!listening && dictation ? { dictationModel: "", dictationUrl: "" } : {}),
+      ...(speaking ? { breezeUrl: spoken?.breezeUrl ?? "http://127.0.0.1:7860/v1/audio/speech", runtime: spoken?.runtime ?? "breeze" } : {}),
+      ...(listening || speaking ? { provider: text(voice.provider) || "pithagoras-voice" } : {}),
+    };
+    d.prepare("UPDATE settings SET value = ? WHERE key = 'voice'").run(JSON.stringify({ ...rest, ...back }));
+  }
+  d.prepare("DELETE FROM settings WHERE key IN ('voice_gpu', 'voice_setup_pending', 'voice_before_managed')").run();
+}
+
+/**
  * A set of the portal's own tools that are an extension's now, whose are filed
  * under its package's name: a lazy mark on the set, and a name somebody gave
  * its box, go with them.
@@ -854,6 +942,7 @@ function migrate(d: Database.Database): void {
   writeOutCanvases(d);
   handOffMedia(d);
   handOffBrowser(d);
+  handOffVoice(d);
   if ((d.pragma("user_version", { simple: true }) as number) < 6) filesOnOldCalls(d);
   const agentCols = (d.prepare("PRAGMA table_info(agents)").all() as { name: string }[]).map((c) => c.name);
   for (const col of ["voice", "quiet_start", "quiet_end", "last_heartbeat", "heartbeat_status"]) {

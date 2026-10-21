@@ -17,7 +17,7 @@ import { freePort, inProcessHome } from "./server-harness.mjs";
 // src/schema-version.ts (once for the release, not once for each change),
 // pin the new version and fingerprint here, and have an upgrade test for what
 // changed (below) that starts from a database made before it.
-const PINNED = { version: 8, fingerprint: "409b5243d409e83047250a4c34dea217699b16f8e7ab13e861396938f3bf78ee" };
+const PINNED = { version: 9, fingerprint: "409b5243d409e83047250a4c34dea217699b16f8e7ab13e861396938f3bf78ee" };
 
 const home = inProcessHome("pithagoras-schema-");
 
@@ -757,4 +757,155 @@ test("what the browser kept that cannot be left is kept for the next start, whic
   const after = browserIn(rolled);
   assert.equal(after.value("browser_password"), undefined);
   assert.equal(JSON.parse(after.value("tools_seen")).find((tool) => tool.name === "browser_navigate").source, "pithagoras-browser");
+});
+
+// The voice service is an extension's from version 9 (extensions/voice), with settings of its own, and voice mode listens
+// and speaks through it as a provider. A database of version 8 is the schema pinned now: made here from a fresh one, with
+// what the portal kept of its voice service.
+const SERVICE = { whisper: "http://127.0.0.1:8188/inference", speech: "http://127.0.0.1:7862/v1/audio/speech", qwen: "http://127.0.0.1:7862/v1/audio/transcriptions" };
+const OWN_DEFAULTS = { whisperUrl: "http://127.0.0.1:8178/inference", breezeUrl: "http://127.0.0.1:7860/v1/audio/speech" };
+/** Voice mode's settings as friday has them: on, at the service's addresses, with what is not the service's around them. */
+const FRIDAY_VOICE = {
+  voice: "voice-aria", language: "en", cfgScale: 4, vad: { positiveSpeechThreshold: 0.65, negativeSpeechThreshold: 0.35, minSpeechMs: 256, preSpeechPadMs: 320, redemptionMs: 1000 },
+  lazyLoad: true, runtime: "audio-cpp", sttModel: "", exaggeration: 0.5, kokoroVoice: "af_heart", speed: 1, responseInstructions: "",
+  enabled: true, whisperUrl: SERVICE.whisper, breezeUrl: SERVICE.speech, instruction: "A warm voice.",
+};
+
+/** A data folder as version 8 left it, with the settings given (null for none) and nothing else of voice. */
+function voiceOfV8(dir, settings) {
+  const file = path.join(dir, "portal.db");
+  getDb().exec(`VACUUM INTO '${file}'`);
+  const d = new Database(file);
+  d.pragma("user_version = 8");
+  assert.equal(schemaFingerprint(d), PINNED.fingerprint, "the schema of version 8 is the one pinned");
+  const put = d.prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value");
+  for (const [key, value] of Object.entries(settings)) if (value !== null) put.run(key, typeof value === "string" ? value : JSON.stringify(value));
+  d.close();
+}
+
+/** What the upgraded database holds of voice: its settings, `voice` read. */
+function voiceIn(dir) {
+  const d = new Database(path.join(dir, "portal.db"), { readonly: true });
+  try {
+    const settings = Object.fromEntries(d.prepare("SELECT key, value FROM settings").all().map((row) => [row.key, row.value]));
+    const value = (key) => settings[key];
+    return { version: d.pragma("user_version", { simple: true }), fingerprint: schemaFingerprint(d), value, voice: JSON.parse(value("voice") ?? "null") };
+  } finally {
+    d.close();
+  }
+}
+const voiceLeft = (dir, file) => JSON.parse(readFileSync(path.join(dir, "handoff", "voice", file), "utf8"));
+
+test("what the portal kept of its voice service is left for its extension, and voice mode at the service's addresses listens and speaks through it, with nothing remembered put back as a portal with nothing set up", async () => {
+  // Friday's shape: the service connected over a portal with nothing set up, so that nothing of the person's own was remembered.
+  const dir = path.join(home, "voice-friday");
+  mkdirSync(dir, { recursive: true });
+  voiceOfV8(dir, { voice: FRIDAY_VOICE, voice_gpu: "GPU-648bf6c5-346e-81f5-f155-dc8061172da3", voice_before_managed: { noSpeech: false } });
+  assert.deepEqual(upgradeCheck(path.join(dir, "portal.db")), { needed: true, from: 8 });
+  assert.match(await upgraded(dir), new RegExp(`upgrading the database from version 8 to ${SCHEMA_VERSION}`));
+  assert.match(path.basename(backupsIn(path.join(dir, "backups"))[0]), /^portal-v8-\d{8}-\d{6}\.db$/);
+
+  const now = voiceIn(dir);
+  assert.equal(now.version, SCHEMA_VERSION);
+  assert.equal(now.fingerprint, PINNED.fingerprint, "no table or column goes");
+  for (const key of ["voice_gpu", "voice_setup_pending", "voice_before_managed"]) assert.equal(now.value(key), undefined, key);
+  // The extension is the source; the person's own addresses are a portal's with nothing set up; voice mode stays on; lazyLoad is the extension's.
+  const { lazyLoad: _lazyLoad, ...rest } = FRIDAY_VOICE;
+  assert.deepEqual(now.voice, { ...rest, ...OWN_DEFAULTS, runtime: "breeze", sttModel: "", dictationModel: "", dictationUrl: "", provider: "pithagoras-voice" });
+
+  // Left whole, closed to all but the portal: the three settings as they were stored.
+  const left = path.join(dir, "handoff", "voice");
+  assert.deepEqual(readdirSync(path.join(dir, "handoff")), ["voice"], "nothing half done beside it");
+  assert.equal(modeOf(left), 0o700);
+  assert.deepEqual(readdirSync(left).sort(), ["handoff.json", "settings.json"]);
+  for (const json of ["handoff.json", "settings.json"]) assert.equal(modeOf(path.join(left, json)), 0o600, json);
+  const { made, ...about } = voiceLeft(dir, "handoff.json");
+  assert.deepEqual(about, { format: 1, name: "voice", schema: 9 });
+  assert.ok(Number.isFinite(Date.parse(made)));
+  assert.deepEqual(voiceLeft(dir, "settings.json"), { gpu: "GPU-648bf6c5-346e-81f5-f155-dc8061172da3", setupPending: null, lazyLoad: true });
+});
+
+test("the person's own voice addresses that connecting the service overwrote come back, each side as it was kept, and a setup still to come up is left with the rest", async () => {
+  const dir = path.join(home, "voice-kept");
+  mkdirSync(dir, { recursive: true });
+  const kept = {
+    listening: { whisperUrl: "http://stt.example.test:9000/inference", sttModel: "my-model", dictationModel: "my-dictation", dictationUrl: "http://dictate.example.test:9002/inference", enabled: true },
+    speaking: { breezeUrl: "http://tts.example.test:9001/v1/audio/speech", runtime: "chatterbox", enabled: true },
+    noSpeech: false,
+  };
+  // Qwen3-ASR and Chatterbox, Lazy load off, and voice switched off since.
+  const voice = { ...FRIDAY_VOICE, enabled: false, lazyLoad: false, runtime: "chatterbox", whisperUrl: SERVICE.qwen, sttModel: "qwen3-asr", breezeUrl: ` ${SERVICE.speech.replace("127.0.0.1", "localhost")}/ ` };
+  voiceOfV8(dir, { voice, voice_setup_pending: "1", voice_before_managed: kept });
+  await upgraded(dir);
+  const now = voiceIn(dir);
+  assert.deepEqual(
+    [now.voice.provider, now.voice.whisperUrl, now.voice.sttModel, now.voice.dictationUrl, now.voice.dictationModel, now.voice.breezeUrl, now.voice.runtime, now.voice.enabled, "lazyLoad" in now.voice],
+    ["pithagoras-voice", kept.listening.whisperUrl, "my-model", kept.listening.dictationUrl, "my-dictation", kept.speaking.breezeUrl, "chatterbox", false, false],
+  );
+  assert.deepEqual(voiceLeft(dir, "settings.json"), { gpu: null, setupPending: "1", lazyLoad: false });
+  assert.equal(now.value("voice_setup_pending"), undefined);
+  assert.equal(now.value("voice_before_managed"), undefined);
+
+  // Recognition alone, with no speech address: the service's where a connect saved it so, and a dictation address of the
+  // person's own stays. An extension chosen since stays the source.
+  const alone = path.join(home, "voice-alone");
+  mkdirSync(alone, { recursive: true });
+  const own = { dictationUrl: "http://big.example.test:9100/v1/audio/transcriptions", dictationModel: "big-asr" };
+  voiceOfV8(alone, { voice: { ...FRIDAY_VOICE, runtime: "none", breezeUrl: "", ...own, provider: "test-speaker" }, voice_before_managed: { noSpeech: true } });
+  await upgraded(alone);
+  const after = voiceIn(alone).voice;
+  assert.deepEqual([after.provider, after.whisperUrl, after.breezeUrl, after.runtime, after.dictationUrl, after.dictationModel], ["test-speaker", OWN_DEFAULTS.whisperUrl, OWN_DEFAULTS.breezeUrl, "breeze", own.dictationUrl, own.dictationModel]);
+});
+
+test("voice mode at the person's own addresses stays as it is: the service's settings are left for the extension, and its dictation address goes", async () => {
+  const dir = path.join(home, "voice-own");
+  mkdirSync(dir, { recursive: true });
+  const own = { ...FRIDAY_VOICE, whisperUrl: "http://stt.example.test:9000/inference", breezeUrl: "http://tts.example.test:9001/v1/audio/speech", runtime: "breeze", dictationUrl: `${SERVICE.whisper}`, dictationModel: "asr-x" };
+  voiceOfV8(dir, { voice: own, voice_gpu: "GPU-1", voice_before_managed: { noSpeech: false } });
+  await upgraded(dir);
+  const now = voiceIn(dir);
+  const { lazyLoad: _lazyLoad, ...rest } = own;
+  assert.deepEqual(now.voice, { ...rest, dictationUrl: "", dictationModel: "" }, "no provider, and only the service's dictation address goes");
+  assert.deepEqual(voiceLeft(dir, "settings.json"), { gpu: "GPU-1", setupPending: null, lazyLoad: true });
+  assert.equal(now.value("voice_before_managed"), undefined);
+
+  // Nothing of the service: nothing is left, and voice mode's settings are not written.
+  const none = path.join(home, "voice-none");
+  mkdirSync(none, { recursive: true });
+  const plain = JSON.stringify({ ...rest, dictationUrl: "", dictationModel: "" });
+  voiceOfV8(none, { voice: plain });
+  await upgraded(none);
+  assert.equal(voiceIn(none).value("voice"), plain);
+  assert.equal(existsSync(path.join(none, "handoff")), false);
+});
+
+test("what the voice service kept that cannot be left is kept for the next start, which leaves it; one left before the database rolled back is not left again", async () => {
+  const dir = path.join(home, "voice-later");
+  mkdirSync(dir, { recursive: true });
+  voiceOfV8(dir, { voice: FRIDAY_VOICE, voice_gpu: "GPU-1", voice_before_managed: { noSpeech: false } });
+  writeFileSync(path.join(dir, "handoff"), "not a folder");
+  assert.match(await upgraded(dir), /what the voice service kept could not be left for its extension, and is kept for the next start/);
+  let now = voiceIn(dir);
+  assert.equal(now.version, SCHEMA_VERSION, "upgraded all the same");
+  assert.deepEqual([now.value("voice_gpu"), now.voice], ["GPU-1", FRIDAY_VOICE], "with all of it kept");
+  // Out of the way: the next start, which is no upgrade, leaves it.
+  rmSync(path.join(dir, "handoff"));
+  await upgraded(dir);
+  now = voiceIn(dir);
+  assert.deepEqual([now.value("voice_gpu"), now.voice.provider, now.voice.whisperUrl], [undefined, "pithagoras-voice", OWN_DEFAULTS.whisperUrl]);
+  assert.equal(voiceLeft(dir, "settings.json").gpu, "GPU-1");
+
+  // A try that left it whole, and whose database rolled back: not filled again, and the settings go.
+  const rolled = path.join(home, "voice-left");
+  mkdirSync(rolled, { recursive: true });
+  voiceOfV8(rolled, { voice: FRIDAY_VOICE, voice_gpu: "GPU-2" });
+  const left = path.join(rolled, "handoff", "voice");
+  mkdirSync(left, { recursive: true });
+  const about = JSON.stringify({ format: 1, name: "voice", schema: 9, made: "2026-10-22T08:00:00.000Z" });
+  writeFileSync(path.join(left, "handoff.json"), about);
+  await upgraded(rolled);
+  assert.equal(readFileSync(path.join(left, "handoff.json"), "utf8"), about);
+  assert.equal(existsSync(path.join(left, "settings.json")), false);
+  const after = voiceIn(rolled);
+  assert.deepEqual([after.value("voice_gpu"), after.voice.provider], [undefined, "pithagoras-voice"]);
 });
