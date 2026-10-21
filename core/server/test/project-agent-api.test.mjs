@@ -37,40 +37,40 @@ beforeEach(() => {
   db.getDb().exec("DELETE FROM project_agent");
 });
 
-test("a project that said nothing is a blank slate: no agent, and so no Understory as its memory", async () => {
-  assert.deepEqual(await json("/api/projects/research/agent"), { agent: null, understory: false, understoryAvailable: false });
+test("a project that said nothing is a blank slate: no agent, and so none of the memory an extension holds", async () => {
+  assert.deepEqual(await json("/api/projects/research/agent"), { agent: null, memory: false, memoryAvailable: false });
 });
 
-test("the agent a project works with and its Understory switch are stored by the project and read back", async () => {
+test("the agent a project works with and its memory switch are stored by the project and read back", async () => {
   const nova = await newAgent("Nova");
   const saved = await json("/api/projects/research/agent", "PUT", { agent: nova });
-  assert.deepEqual(saved, { agent: nova, understory: true, understoryAvailable: false });
-  assert.deepEqual(db.projectAgent("research"), { agent: nova, understoryOff: false });
+  assert.deepEqual(saved, { agent: nova, memory: true, memoryAvailable: false });
+  assert.deepEqual(db.projectAgent("research"), { agent: nova, memoryOff: false });
 
   // What is left out stays: the switch changes, the agent is still Nova's.
-  const off = await json("/api/projects/research/agent", "PUT", { understory: false });
-  assert.deepEqual(off, { agent: nova, understory: false, understoryAvailable: false });
+  const off = await json("/api/projects/research/agent", "PUT", { memory: false });
+  assert.deepEqual(off, { agent: nova, memory: false, memoryAvailable: false });
   assert.deepEqual(await json("/api/projects/research/agent"), off);
-  assert.deepEqual(db.projectAgent("research"), { agent: nova, understoryOff: true });
+  assert.deepEqual(db.projectAgent("research"), { agent: nova, memoryOff: true });
 
   // And the other way round: a blank slate again, the switch as it was.
   const blank = await json("/api/projects/research/agent", "PUT", { agent: null });
-  assert.deepEqual(blank, { agent: null, understory: false, understoryAvailable: false });
+  assert.deepEqual(blank, { agent: null, memory: false, memoryAvailable: false });
 
   // Another project has what it had.
-  assert.deepEqual(await json("/api/projects/dev/agent"), { agent: null, understory: false, understoryAvailable: false });
+  assert.deepEqual(await json("/api/projects/dev/agent"), { agent: null, memory: false, memoryAvailable: false });
 });
 
 test("the project list says which agent each project works with, and the chat list's places do too", async () => {
   const nova = await newAgent("Nova");
-  await json("/api/projects/research/agent", "PUT", { agent: nova, understory: false });
+  await json("/api/projects/research/agent", "PUT", { agent: nova, memory: false });
   const full = await json("/api/projects");
   const research = full.projects.find((p) => p.name === "research");
   assert.equal(research.agent, nova);
-  assert.equal(research.understoryOff, true);
+  assert.equal(research.memoryOff, true);
   const dev = full.projects.find((p) => p.name === "dev");
   assert.equal("agent" in dev, false);
-  assert.equal("understoryOff" in dev, false);
+  assert.equal("memoryOff" in dev, false);
 
   const places = await json("/api/projects?bare=1");
   assert.equal(places.projects.find((p) => p.name === "research").agent, nova);
@@ -86,18 +86,18 @@ test("a request that names no agent, no project or something that is not a choic
   };
   await refused("/api/projects/research/agent", "PUT", { agent: "nobody" }, 404);
   await refused("/api/projects/research/agent", "PUT", { agent: 7 }, 400);
-  await refused("/api/projects/research/agent", "PUT", { understory: "no" }, 400);
+  await refused("/api/projects/research/agent", "PUT", { memory: "no" }, 400);
   await refused("/api/projects/research/agent", "PUT", {}, 400);
   await refused("/api/projects/missing/agent", "PUT", { agent: nova }, 404);
   await refused("/api/projects/missing/agent", "GET", undefined, 404);
-  assert.deepEqual(db.projectAgent("research"), { agent: nova, understoryOff: false });
+  assert.deepEqual(db.projectAgent("research"), { agent: nova, memoryOff: false });
 });
 
-test("a new project can be made with an agent and without Understory, and a bad choice leaves no folder", async () => {
+test("a new project can be made with an agent and without the memory an extension holds, and a bad choice leaves no folder", async () => {
   const nova = await newAgent("Nova");
-  const made = await json("/api/projects", "POST", { name: "linked-new", instructions: "Be brief.", agent: nova, understory: false });
+  const made = await json("/api/projects", "POST", { name: "linked-new", instructions: "Be brief.", agent: nova, memory: false });
   assert.equal(made.name, "linked-new");
-  assert.deepEqual(db.projectAgent("linked-new"), { agent: nova, understoryOff: true });
+  assert.deepEqual(db.projectAgent("linked-new"), { agent: nova, memoryOff: true });
 
   const bad = await send("/api/projects", "POST", { name: "never-made", agent: "nobody" });
   assert.equal(bad.status, 404);
@@ -105,14 +105,14 @@ test("a new project can be made with an agent and without Understory, and a bad 
 
   // Saying nothing is a blank slate, the way it was before there was a choice.
   await json("/api/projects", "POST", { name: "blank-new" });
-  assert.deepEqual(db.projectAgent("blank-new"), { agent: "", understoryOff: false });
+  assert.deepEqual(db.projectAgent("blank-new"), { agent: "", memoryOff: false });
 });
 
 test("a folder of the same name left behind by an earlier project does not give its agent to a new one", async () => {
   const nova = await newAgent("Nova");
-  db.setProjectAgent("left-behind", { agent: nova, understoryOff: true });
+  db.setProjectAgent("left-behind", { agent: nova, memoryOff: true });
   await json("/api/projects", "POST", { name: "left-behind" });
-  assert.deepEqual(db.projectAgent("left-behind"), { agent: "", understoryOff: false });
+  assert.deepEqual(db.projectAgent("left-behind"), { agent: "", memoryOff: false });
 });
 
 test("deleting the project forgets its agent; deleting the agent makes its projects blank slates", async () => {
@@ -122,12 +122,12 @@ test("deleting the project forgets its agent; deleting the agent makes its proje
   assert.equal(db.projectAgents().has("short-lived"), false);
 
   await json("/api/projects/research/agent", "PUT", { agent: nova });
-  await json("/api/projects/dev/agent", "PUT", { agent: nova, understory: false });
+  await json("/api/projects/dev/agent", "PUT", { agent: nova, memory: false });
   await json(`/api/agents/${nova}`, "DELETE");
   assert.equal((await agentIds()).includes(nova), false);
-  assert.deepEqual(await json("/api/projects/research/agent"), { agent: null, understory: false, understoryAvailable: false });
-  // What it said about Understory is the project's own, and stays.
-  assert.deepEqual(await json("/api/projects/dev/agent"), { agent: null, understory: false, understoryAvailable: false });
+  assert.deepEqual(await json("/api/projects/research/agent"), { agent: null, memory: false, memoryAvailable: false });
+  // What it said about the memory is the project's own, and stays.
+  assert.deepEqual(await json("/api/projects/dev/agent"), { agent: null, memory: false, memoryAvailable: false });
   assert.equal("agent" in (await json("/api/projects")).projects.find((p) => p.name === "dev"), false);
 });
 

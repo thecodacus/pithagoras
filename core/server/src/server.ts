@@ -458,7 +458,7 @@ app.get("/api/projects", (req, res) => {
       return {
         ...p,
         ...linkOf(p.name),
-        ...(links.get(p.name)?.understoryOff ? { understoryOff: true } : {}),
+        ...(links.get(p.name)?.memoryOff ? { memoryOff: true } : {}),
         hasTools: withTools.has(p.name),
         sessions: chats.length,
         lastActive: chats.reduce((latest, s) => (s.updated_at > latest ? s.updated_at : latest), "") || null,
@@ -516,8 +516,8 @@ app.post("/api/projects", (req, res) => {
     }
     // The same for the agent: a folder of this name left behind by an earlier project does not give its link to this one.
     clearProjectAgent(project.name);
-    if (wanted.agent !== undefined || wanted.understory !== undefined) {
-      setProjectAgent(project.name, { agent: wanted.agent ?? "", understoryOff: wanted.understory === false });
+    if (wanted.agent !== undefined || wanted.memory !== undefined) {
+      setProjectAgent(project.name, { agent: wanted.agent ?? "", memoryOff: wanted.memory === false });
     }
     res.json(project);
   } catch (e) {
@@ -527,29 +527,29 @@ app.post("/api/projects", (req, res) => {
 
 /**
  * What a request says about the agent a project works with: `agent`, an
- * agent's id or null (or "") for none, and `understory`, whether Understory is
- * the project's memory. Either may be left out. An agent that does not exist
- * is refused rather than stored: the project would be a blank slate and the
- * page would not know why.
+ * agent's id or null (or "") for none, and `memory`, whether the project has
+ * the agent's memory where an extension holds it. Either may be left out. An
+ * agent that does not exist is refused rather than stored: the project would
+ * be a blank slate and the page would not know why.
  */
-function agentLinkOf(body: unknown): { agent?: string; understory?: boolean } | { error: string; status: number } {
-  const { agent, understory } = (body ?? {}) as { agent?: unknown; understory?: unknown };
+function agentLinkOf(body: unknown): { agent?: string; memory?: boolean } | { error: string; status: number } {
+  const { agent, memory } = (body ?? {}) as { agent?: unknown; memory?: unknown };
   if (agent !== undefined && agent !== null && typeof agent !== "string") return { error: "agent must be an agent's id, or null", status: 400 };
-  if (understory !== undefined && typeof understory !== "boolean") return { error: "understory must be true or false", status: 400 };
+  if (memory !== undefined && typeof memory !== "boolean") return { error: "memory must be true or false", status: 400 };
   if (agent && !getAgent(agent)) return { error: "No such agent", status: 404 };
-  return { ...(agent !== undefined ? { agent: agent ?? "" } : {}), ...(understory !== undefined ? { understory } : {}) };
+  return { ...(agent !== undefined ? { agent: agent ?? "" } : {}), ...(memory !== undefined ? { memory } : {}) };
 }
 
-/** The agent a project works with and whether Understory is its memory, as its page shows them. */
+/** The agent a project works with and whether it has the agent's memory, as its page shows them. */
 function agentOfProject(name: string) {
   const link = projectAgent(name);
   const agent = linkedAgent(name)?.id ?? null;
   return {
     agent,
-    // What the chats get (see understoryAt): a blank slate has no agent whose memory it would be, whatever the stored switch says.
-    understory: !!agent && !link.understoryOff,
+    // What the chats get (see memoryHeldAt): a blank slate has no agent whose memory it would be, whatever the stored switch says.
+    memory: !!agent && !link.memoryOff,
     // Whether something holds the agent's memory at all: without it there is nothing for the project to do without.
-    understoryAvailable: memoryHolder() !== undefined,
+    memoryAvailable: memoryHolder() !== undefined,
   };
 }
 
@@ -568,20 +568,20 @@ app.get("/api/projects/:name/agent", (req, res) => {
 });
 
 /**
- * Change the agent a project works with, or whether Understory is its memory;
+ * Change the agent a project works with, or whether it has the agent's memory;
  * what is left out stays. Chats already open pick it up after /reload, like
  * the project's instructions.
  */
 app.put("/api/projects/:name/agent", (req, res) => {
   const wanted = agentLinkOf(req.body);
   if ("error" in wanted) return res.status(wanted.status).json({ error: wanted.error });
-  if (wanted.agent === undefined && wanted.understory === undefined) return res.status(400).json({ error: "agent or understory required" });
+  if (wanted.agent === undefined && wanted.memory === undefined) return res.status(400).json({ error: "agent or memory required" });
   try {
     const project = getProject(WORKSPACE_ROOT, req.params.name);
     const held = projectAgent(project.name);
     setProjectAgent(project.name, {
       agent: wanted.agent ?? held.agent,
-      understoryOff: wanted.understory === undefined ? held.understoryOff : !wanted.understory,
+      memoryOff: wanted.memory === undefined ? held.memoryOff : !wanted.memory,
     });
     res.json(agentOfProject(project.name));
   } catch (e) {

@@ -353,7 +353,8 @@ function schema(db: Database.Database): void {
       tools_on TEXT NOT NULL DEFAULT ''
     );
 
-    -- Which agent a project works with, and whether Understory is its memory.
+    -- Which agent a project works with, and whether it does without the
+    -- agent's memory where an extension holds it (memory_off).
     -- No row, or an empty agent, is a blank slate: the chats get the project's
     -- AGENTS.md and nothing else. Kept here and not as a file in the folder for
     -- the reason project_tools is: the agent works in the folder and can write
@@ -362,7 +363,7 @@ function schema(db: Database.Database): void {
     CREATE TABLE IF NOT EXISTS project_agent (
       project TEXT PRIMARY KEY,
       agent TEXT NOT NULL DEFAULT '',
-      understory_off INTEGER NOT NULL DEFAULT 0
+      memory_off INTEGER NOT NULL DEFAULT 0
     );
 
     -- An agent's exceptions to the portal-wide tool default, for every chat in
@@ -801,6 +802,46 @@ function handOffVoice(d: Database.Database): void {
   d.prepare("DELETE FROM settings WHERE key IN ('voice_gpu', 'voice_setup_pending', 'voice_before_managed')").run();
 }
 
+/** Understory's settings, when the portal ran it itself. Written out here, as an upgrade step does not change with the code after it. */
+const UNDERSTORY_SETTINGS = ["understory_config", "understory_token", "understory_llm_token", "understory_last_dream"];
+
+/**
+ * The agent's memory in Understory is an extension's now (extensions/understory), with settings of its own. What the
+ * portal kept for it is left for it in the data folder (see handoff.ts), and the extension takes it up when it starts,
+ * which may be long after this, or never: its four settings as they were stored, among them the token its container
+ * was made with, which the agent's MCP entry carries, and any key of the person's it was given. The settings go once
+ * they are left, and a try that fails keeps them for the next start.
+ *
+ * The guard counted what Understory's server said as the person's own words while the person had not said which
+ * servers are: from schema 10 it counts only those said. Where the person had said none, and Understory was in use (its
+ * settings are there, or its server is in pi's mcp.json), it is said for them, once, as the database is brought to
+ * schema 10, whatever comes of the rest.
+ *
+ * The MCP entry stays in pi's mcp.json, with its token, and its tools keep their names, switches and sets: they are
+ * still the server `understory`'s. The container and its volume stay where they are: the extension takes them over by
+ * their names. The database was backed up before this ran (db-upgrade.ts); docs/guide/upgrading.md says how to go back.
+ */
+function handOffUnderstory(d: Database.Database): void {
+  const settings = Object.fromEntries(UNDERSTORY_SETTINGS.map((key) => [key, settingIn(d, key) ?? null]));
+  const kept = Object.values(settings).some((value) => value !== null);
+  const before10 = (d.pragma("user_version", { simple: true }) as number) < 10;
+  if (before10 && settingIn(d, "guard_trusted_mcp_servers") === undefined && (kept || readMcpFile().config.mcpServers?.understory !== undefined)) {
+    d.prepare("INSERT INTO settings (key, value) VALUES ('guard_trusted_mcp_servers', ?)").run(JSON.stringify(["understory"]));
+  }
+  if (!kept) return;
+  try {
+    leaveHandoff("understory", (dir) => {
+      // Written last, and anew on each try, from the settings as they are.
+      writeFileAtomic(path.join(dir, "settings.json"), JSON.stringify(settings), 0o600);
+      writeFileAtomic(path.join(dir, "handoff.json"), JSON.stringify({ format: 1, name: "understory", schema: 10, made: new Date().toISOString() }), 0o600);
+    });
+  } catch (e) {
+    console.warn(`[portal] what Understory kept could not be left for its extension, and is kept for the next start: ${(e as Error).message}`);
+    return;
+  }
+  d.prepare(`DELETE FROM settings WHERE key IN (${UNDERSTORY_SETTINGS.map(() => "?").join(", ")})`).run(...UNDERSTORY_SETTINGS);
+}
+
 /**
  * A set of the portal's own tools that are an extension's now, whose are filed
  * under its package's name: a lazy mark on the set, and a name somebody gave
@@ -942,6 +983,11 @@ function migrate(d: Database.Database): void {
   handOffMedia(d);
   handOffBrowser(d);
   handOffVoice(d);
+  handOffUnderstory(d);
+  // Whether a project does without the agent's memory was named for what held it, Understory, until schema 10:
+  // anything may hold it now (portal.memory.hold).
+  const agentLinkCols = (d.prepare("PRAGMA table_info(project_agent)").all() as { name: string }[]).map((c) => c.name);
+  if (agentLinkCols.includes("understory_off")) d.exec("ALTER TABLE project_agent RENAME COLUMN understory_off TO memory_off");
   if ((d.pragma("user_version", { simple: true }) as number) < 6) filesOnOldCalls(d);
   const agentCols = (d.prepare("PRAGMA table_info(agents)").all() as { name: string }[]).map((c) => c.name);
   for (const col of ["voice", "quiet_start", "quiet_end", "last_heartbeat", "heartbeat_status"]) {
@@ -2369,27 +2415,27 @@ export function projectsWithTools(): Set<string> {
 export interface ProjectAgent {
   /** The agent's id; "" for none. */
   agent: string;
-  /** Whether Understory is not this project's memory, though it is the portal's. */
-  understoryOff: boolean;
+  /** Whether this project does without the agent's memory, where an extension holds it (memory-holder.ts). */
+  memoryOff: boolean;
 }
 
 export function projectAgent(project: string): ProjectAgent {
-  const row = getDb().prepare("SELECT agent, understory_off FROM project_agent WHERE project = ?").get(project) as
-    | { agent: string; understory_off: number }
+  const row = getDb().prepare("SELECT agent, memory_off FROM project_agent WHERE project = ?").get(project) as
+    | { agent: string; memory_off: number }
     | undefined;
-  return { agent: row?.agent ?? "", understoryOff: !!row?.understory_off };
+  return { agent: row?.agent ?? "", memoryOff: !!row?.memory_off };
 }
 
 export function setProjectAgent(project: string, say: ProjectAgent): ProjectAgent {
-  if (!say.agent && !say.understoryOff) clearProjectAgent(project);
+  if (!say.agent && !say.memoryOff) clearProjectAgent(project);
   else
     getDb()
       .prepare(
-        `INSERT INTO project_agent (project, agent, understory_off) VALUES (?, ?, ?)
-         ON CONFLICT(project) DO UPDATE SET agent = excluded.agent, understory_off = excluded.understory_off`
+        `INSERT INTO project_agent (project, agent, memory_off) VALUES (?, ?, ?)
+         ON CONFLICT(project) DO UPDATE SET agent = excluded.agent, memory_off = excluded.memory_off`
       )
-      .run(project, say.agent, say.understoryOff ? 1 : 0);
-  return { agent: say.agent, understoryOff: say.understoryOff };
+      .run(project, say.agent, say.memoryOff ? 1 : 0);
+  return { agent: say.agent, memoryOff: say.memoryOff };
 }
 
 /** Forgets what a project said about its agent, as when it is deleted or made again. */
@@ -2399,23 +2445,23 @@ export function clearProjectAgent(project: string): void {
 
 /**
  * Lets go of an agent that is deleted: the projects that worked with it are
- * blank slates again, and keep what they said about Understory.
+ * blank slates again, and keep what they said about the agent's memory.
  */
 export function releaseProjectsOf(agent: string): void {
   getDb().transaction(() => {
     getDb().prepare("UPDATE project_agent SET agent = '' WHERE agent = ?").run(agent);
-    getDb().prepare("DELETE FROM project_agent WHERE agent = '' AND understory_off = 0").run();
+    getDb().prepare("DELETE FROM project_agent WHERE agent = '' AND memory_off = 0").run();
   })();
 }
 
 /** What every project that says something about its agent says, by name. */
 export function projectAgents(): Map<string, ProjectAgent> {
-  const rows = getDb().prepare("SELECT project, agent, understory_off FROM project_agent").all() as {
+  const rows = getDb().prepare("SELECT project, agent, memory_off FROM project_agent").all() as {
     project: string;
     agent: string;
-    understory_off: number;
+    memory_off: number;
   }[];
-  return new Map(rows.map((r) => [r.project, { agent: r.agent, understoryOff: !!r.understory_off }]));
+  return new Map(rows.map((r) => [r.project, { agent: r.agent, memoryOff: !!r.memory_off }]));
 }
 
 /**

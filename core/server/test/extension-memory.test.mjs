@@ -89,19 +89,19 @@ test("while an extension holds the memory, MEMORY.md is not read and its rule is
 
 test("a project linked to an agent has the memory unless it does without it; a blank project never has it", async () => {
   globalThis.holding.keeper = true;
-  const linked = project("linked", { agent: nova.id, understoryOff: false });
+  const linked = project("linked", { agent: nova.id, memoryOff: false });
   assert.equal(memoryHeldAt(linked)?.label, "Keeper");
   assert.deepEqual(names(linked), ["PrimaryUser.md", "SOUL.md"]);
   assert.equal(memoryRule(linked).length, 1);
 
-  const without = project("without", { agent: nova.id, understoryOff: true });
+  const without = project("without", { agent: nova.id, memoryOff: true });
   assert.equal(memoryHeldAt(without), undefined);
   assert.deepEqual(names(without), ["MEMORY.md", "PrimaryUser.md", "SOUL.md"]);
   assert.deepEqual(memoryRule(without), []);
   // Only that project: the agent's home still has it.
   assert.equal(memoryHeldAt(nova.home)?.label, "Keeper");
 
-  const blank = project("blank", { agent: "", understoryOff: false });
+  const blank = project("blank", { agent: "", memoryOff: false });
   assert.equal(memoryHeldAt(blank), undefined);
   assert.deepEqual(memoryRule(blank), []);
   globalThis.holding.keeper = false;

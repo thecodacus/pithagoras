@@ -17,12 +17,22 @@ import { freePort, inProcessHome } from "./server-harness.mjs";
 // src/schema-version.ts (once for the release, not once for each change),
 // pin the new version and fingerprint here, and have an upgrade test for what
 // changed (below) that starts from a database made before it.
-const PINNED = { version: 9, fingerprint: "409b5243d409e83047250a4c34dea217699b16f8e7ab13e861396938f3bf78ee" };
+const PINNED = { version: 10, fingerprint: "982a767a077e0eab322a70464b8197f9ba0ad8dd57d8f83f989ed0994fde2e0a" };
+/** The schema of versions 7 to 9, the one pinned before: a project's switch for the agent's memory named for Understory. */
+const V9_FINGERPRINT = "409b5243d409e83047250a4c34dea217699b16f8e7ab13e861396938f3bf78ee";
 
 const home = inProcessHome("pithagoras-schema-");
 
 const { SCHEMA_VERSION } = await import("../dist/schema-version.js");
 const { getDb } = await import("../dist/db.js");
+
+/** A fresh database copied to `file` as the schema stood before version 10, which named the project's switch for the agent's memory for Understory. */
+function freshBefore10(file) {
+  getDb().exec(`VACUUM INTO '${file}'`);
+  const d = new Database(file);
+  d.exec("ALTER TABLE project_agent RENAME COLUMN memory_off TO understory_off");
+  return d;
+}
 const { upgradeCheck } = await import("../dist/db-upgrade.js");
 const { backupsIn } = await import("../dist/db-upgrade-steps.js");
 
@@ -192,7 +202,7 @@ function startToolsUpgrade(dataDir, port) {
       project: db.projectTools("research"),
       defaults: db.toolDefaultsOff(),
       agentTools: db.getDb().prepare("SELECT COUNT(*) AS n FROM agent_tools").get().n,
-      // The agent a project works with (#127): a project of v0.1.0 has none, and keeps Understory.
+      // The agent a project works with (#127): a project of v0.1.0 has none, and keeps the agent's memory.
       projectAgent: db.projectAgent("research"),
       projectAgents: db.getDb().prepare("SELECT COUNT(*) AS n FROM project_agent").get().n,
     }));`;
@@ -234,7 +244,7 @@ test("a database of v0.1.0 is brought to the pinned schema, and each routine kee
   // And code mode, which an upgrade switches off by default beside what the operator had.
   assert.deepEqual(result.defaults, ["codemode", "web_search"]);
   assert.equal(result.agentTools, 0, "no agent says anything yet");
-  assert.deepEqual(result.projectAgent, { agent: "", understoryOff: false }, "a project of v0.1.0 is a blank slate, as it was");
+  assert.deepEqual(result.projectAgent, { agent: "", memoryOff: false }, "a project of v0.1.0 is a blank slate, as it was");
   assert.equal(result.projectAgents, 0);
 });
 
@@ -283,8 +293,8 @@ test("the canvases a portal stored are written out as Markdown in their chat's f
 });
 
 // Pictures and videos are an extension's from version 7 (extensions/media), with a store of its own. A database of version 6
-// is the schema pinned now with the two tables of the Media page: made here from a fresh one, and checked to be that by
-// the fingerprint version 6 was pinned with.
+// is the schema of before version 10 with the two tables of the Media page: made here from a fresh one, and checked to be
+// that by the fingerprint version 6 was pinned with.
 const V6_FINGERPRINT = "06e47b6fe66c1c572ae81987761da0aad10656b2f72825fdff93f74f342ed6cc";
 const V6_MEDIA = `
   CREATE TABLE images (id TEXT PRIMARY KEY, origin TEXT NOT NULL, session_id TEXT, folder TEXT, path TEXT NOT NULL, kind TEXT NOT NULL, prompt TEXT NOT NULL DEFAULT '', params TEXT NOT NULL DEFAULT '{}', source_id TEXT, bytes INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL);
@@ -322,8 +332,7 @@ function mediaOfV6(dir) {
   const site = path.join(dir, "ws", "site");
   mkdirSync(site, { recursive: true });
   const file = path.join(dir, "portal.db");
-  getDb().exec(`VACUUM INTO '${file}'`);
-  const d = new Database(file);
+  const d = freshBefore10(file);
   d.exec(V6_MEDIA);
   d.pragma("user_version = 6");
   assert.equal(schemaFingerprint(d), V6_FINGERPRINT, "the schema of version 6");
@@ -543,7 +552,7 @@ test("what the Media page kept that cannot be left is kept for the next start, w
 });
 
 // The agent's browser is an extension's from version 8 (extensions/browser), with settings of its own. A database of
-// version 7 is the schema pinned now: made here from a fresh one, with what the portal kept of its browser.
+// version 7 is made here from a fresh one, as the schema stood then, with what the portal kept of its browser.
 const BROWSER_PASSWORD = "the-container-was-made-with-it";
 /** The browser's tools as a chat of version 7 reported them, all but two that came later, an MCP server's, and another. */
 const BROWSER_SEEN = [
@@ -560,10 +569,9 @@ const BROWSER_SEEN = [
  */
 function browserOfV7(dir, adopted = "carry") {
   const file = path.join(dir, "portal.db");
-  getDb().exec(`VACUUM INTO '${file}'`);
-  const d = new Database(file);
+  const d = freshBefore10(file);
   d.pragma("user_version = 7");
-  assert.equal(schemaFingerprint(d), PINNED.fingerprint, "the schema of version 7 is the one pinned");
+  assert.equal(schemaFingerprint(d), V9_FINGERPRINT, "the schema of version 7");
   const setting = d.prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value");
   for (const [key, value] of [
     ["browser_password", BROWSER_PASSWORD],
@@ -760,8 +768,8 @@ test("what the browser kept that cannot be left is kept for the next start, whic
 });
 
 // The voice service is an extension's from version 9 (extensions/voice), with settings of its own, and voice mode listens
-// and speaks through it as a provider. A database of version 8 is the schema pinned now: made here from a fresh one, with
-// what the portal kept of its voice service.
+// and speaks through it as a provider. A database of version 8 is made here from a fresh one, as the schema stood then,
+// with what the portal kept of its voice service.
 const SERVICE = { whisper: "http://127.0.0.1:8188/inference", speech: "http://127.0.0.1:7862/v1/audio/speech", qwen: "http://127.0.0.1:7862/v1/audio/transcriptions" };
 const OWN_DEFAULTS = { whisperUrl: "http://127.0.0.1:8178/inference", breezeUrl: "http://127.0.0.1:7860/v1/audio/speech" };
 /** Voice mode's settings as friday has them: on, at the service's addresses, with what is not the service's around them. */
@@ -774,10 +782,9 @@ const FRIDAY_VOICE = {
 /** A data folder as version 8 left it, with the settings given (null for none) and nothing else of voice. */
 function voiceOfV8(dir, settings) {
   const file = path.join(dir, "portal.db");
-  getDb().exec(`VACUUM INTO '${file}'`);
-  const d = new Database(file);
+  const d = freshBefore10(file);
   d.pragma("user_version = 8");
-  assert.equal(schemaFingerprint(d), PINNED.fingerprint, "the schema of version 8 is the one pinned");
+  assert.equal(schemaFingerprint(d), V9_FINGERPRINT, "the schema of version 8");
   const put = d.prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value");
   for (const [key, value] of Object.entries(settings)) if (value !== null) put.run(key, typeof value === "string" ? value : JSON.stringify(value));
   d.close();
@@ -908,4 +915,144 @@ test("what the voice service kept that cannot be left is kept for the next start
   assert.equal(existsSync(path.join(left, "settings.json")), false);
   const after = voiceIn(rolled);
   assert.deepEqual([after.value("voice_gpu"), after.voice.provider], [undefined, "pithagoras-voice"]);
+});
+
+// The agent's memory in Understory is an extension's from version 10 (extensions/understory), with settings of its own,
+// and a project's switch for the agent's memory is named for no extension. A database of version 9 is made here from a
+// fresh one, as the schema stood then, with what the portal kept of Understory.
+const UNDERSTORY_KEPT = {
+  understory_config: JSON.stringify({ llm: { source: "custom", baseUrl: "http://gpu:8080/v1", model: "qwen", format: "openai", apiKey: "sk-own" }, dreamInterval: "", dreamAt: "03:00" }),
+  understory_token: "t".repeat(48),
+  understory_llm_token: "l".repeat(48),
+  understory_last_dream: JSON.stringify({ at: "2026-10-22T21:30:00.000Z", ok: true, ran: false, said: "Nothing to do" }),
+};
+/** The agent's MCP entry for the Understory the portal ran, as it wrote it: its token in it. */
+const UNDERSTORY_ENTRY = { understory: { url: "http://127.0.0.1:3800/mcp", lifecycle: "lazy", directTools: true, auth: "bearer", bearerToken: "t".repeat(48) } };
+
+/** A data folder as version 9 left it, with the settings given (null for none) and projects that said something about the agent's memory. */
+function understoryOfV9(dir, settings) {
+  const d = freshBefore10(path.join(dir, "portal.db"));
+  d.pragma("user_version = 9");
+  assert.equal(schemaFingerprint(d), V9_FINGERPRINT, "the schema of version 9");
+  const put = d.prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value");
+  for (const [key, value] of Object.entries(settings)) if (value !== null) put.run(key, value);
+  const link = d.prepare("INSERT INTO project_agent (project, agent, understory_off) VALUES (?, ?, ?)");
+  link.run("research", "home", 1);
+  link.run("site", "home", 0);
+  d.close();
+}
+
+/** What the upgraded database holds: its settings, and what each project says. */
+function understoryIn(dir) {
+  const d = new Database(path.join(dir, "portal.db"), { readonly: true });
+  try {
+    const settings = Object.fromEntries(d.prepare("SELECT key, value FROM settings").all().map((row) => [row.key, row.value]));
+    return {
+      version: d.pragma("user_version", { simple: true }),
+      fingerprint: schemaFingerprint(d),
+      value: (key) => settings[key],
+      projects: d.prepare("SELECT project, agent, memory_off FROM project_agent ORDER BY project").all(),
+    };
+  } finally {
+    d.close();
+  }
+}
+const understoryLeft = (dir, file) => JSON.parse(readFileSync(path.join(dir, "handoff", "understory", file), "utf8"));
+
+/** The portal started on the data folder with pi's mcp.json holding `servers` (none: no file), as an upgrade does. */
+async function upgradedWith(dir, servers) {
+  const mcp = path.join(process.env.PI_CODING_AGENT_DIR, "mcp.json");
+  mkdirSync(path.dirname(mcp), { recursive: true });
+  if (servers) writeFileSync(mcp, JSON.stringify({ mcpServers: servers }));
+  try {
+    return await upgraded(dir);
+  } finally {
+    rmSync(mcp, { force: true });
+  }
+}
+
+test("what the portal kept of Understory is left for its extension, the guard trusts its server where the person had said nothing, and each project's switch is kept under its new name", async () => {
+  const dir = path.join(home, "understory-out");
+  mkdirSync(dir, { recursive: true });
+  understoryOfV9(dir, UNDERSTORY_KEPT);
+  assert.deepEqual(upgradeCheck(path.join(dir, "portal.db")), { needed: true, from: 9 });
+  const mcp = path.join(process.env.PI_CODING_AGENT_DIR, "mcp.json");
+  mkdirSync(path.dirname(mcp), { recursive: true });
+  writeFileSync(mcp, JSON.stringify({ mcpServers: UNDERSTORY_ENTRY }));
+  try {
+    assert.match(await upgraded(dir), new RegExp(`upgrading the database from version 9 to ${SCHEMA_VERSION}`));
+    assert.deepEqual(JSON.parse(readFileSync(mcp, "utf8")), { mcpServers: UNDERSTORY_ENTRY }, "the agent's MCP entry is pi's, and stays as it was");
+  } finally {
+    rmSync(mcp);
+  }
+  assert.match(path.basename(backupsIn(path.join(dir, "backups"))[0]), /^portal-v9-\d{8}-\d{6}\.db$/);
+
+  const now = understoryIn(dir);
+  assert.deepEqual([now.version, now.fingerprint], [SCHEMA_VERSION, PINNED.fingerprint]);
+  for (const key of Object.keys(UNDERSTORY_KEPT)) assert.equal(now.value(key), undefined, key);
+  assert.equal(now.value("guard_trusted_mcp_servers"), JSON.stringify(["understory"]), "trusted as it was, now in the person's list, where they can take it out");
+  assert.deepEqual(now.projects, [{ project: "research", agent: "home", memory_off: 1 }, { project: "site", agent: "home", memory_off: 0 }]);
+
+  // Left whole, closed to all but the portal: the four settings as they were stored.
+  const left = path.join(dir, "handoff", "understory");
+  assert.deepEqual(readdirSync(path.join(dir, "handoff")), ["understory"], "nothing half done beside it");
+  assert.equal(modeOf(left), 0o700);
+  assert.deepEqual(readdirSync(left).sort(), ["handoff.json", "settings.json"]);
+  for (const json of ["handoff.json", "settings.json"]) assert.equal(modeOf(path.join(left, json)), 0o600, json);
+  const { made, ...about } = understoryLeft(dir, "handoff.json");
+  assert.deepEqual(about, { format: 1, name: "understory", schema: 10 });
+  assert.ok(Number.isFinite(Date.parse(made)));
+  assert.deepEqual(understoryLeft(dir, "settings.json"), UNDERSTORY_KEPT);
+
+  // Once: the person takes the trust back, and a start at version 10 does not give it again.
+  const d = new Database(path.join(dir, "portal.db"));
+  d.prepare("UPDATE settings SET value = '[]' WHERE key = 'guard_trusted_mcp_servers'").run();
+  d.close();
+  await upgradedWith(dir, UNDERSTORY_ENTRY);
+  assert.equal(understoryIn(dir).value("guard_trusted_mcp_servers"), "[]");
+});
+
+test("the servers the person said are theirs stay as they said; an Understory of their own in mcp.json is trusted as it was; one never used leaves nothing", async () => {
+  const said = path.join(home, "understory-said");
+  mkdirSync(said, { recursive: true });
+  understoryOfV9(said, { understory_token: "t".repeat(48), guard_trusted_mcp_servers: JSON.stringify(["jira"]) });
+  await upgradedWith(said, UNDERSTORY_ENTRY);
+  assert.equal(understoryIn(said).value("guard_trusted_mcp_servers"), JSON.stringify(["jira"]));
+  assert.deepEqual(understoryLeft(said, "settings.json"), { understory_config: null, understory_token: "t".repeat(48), understory_llm_token: null, understory_last_dream: null });
+
+  // Run elsewhere, never by the portal: no settings to leave, and its server trusted as it was.
+  const own = path.join(home, "understory-own");
+  mkdirSync(own, { recursive: true });
+  understoryOfV9(own, {});
+  await upgradedWith(own, { understory: { url: "http://understory.example.test:3800/mcp", lifecycle: "lazy", directTools: true } });
+  assert.equal(understoryIn(own).value("guard_trusted_mcp_servers"), JSON.stringify(["understory"]));
+  assert.equal(existsSync(path.join(own, "handoff")), false);
+
+  // Never used: nothing trusted, nothing left, and the projects' switches renamed all the same.
+  const none = path.join(home, "understory-none");
+  mkdirSync(none, { recursive: true });
+  understoryOfV9(none, {});
+  await upgradedWith(none, { jira: { command: "j" } });
+  const now = understoryIn(none);
+  assert.equal(now.value("guard_trusted_mcp_servers"), undefined);
+  assert.equal(existsSync(path.join(none, "handoff")), false);
+  assert.deepEqual(now.projects.map((p) => p.memory_off), [1, 0]);
+});
+
+test("what Understory kept that cannot be left is kept for the next start, which leaves it; the trust it had is written at the upgrade all the same", async () => {
+  const dir = path.join(home, "understory-later");
+  mkdirSync(dir, { recursive: true });
+  understoryOfV9(dir, UNDERSTORY_KEPT);
+  writeFileSync(path.join(dir, "handoff"), "not a folder");
+  assert.match(await upgradedWith(dir), /what Understory kept could not be left for its extension, and is kept for the next start/);
+  let now = understoryIn(dir);
+  assert.equal(now.version, SCHEMA_VERSION, "upgraded all the same");
+  for (const [key, value] of Object.entries(UNDERSTORY_KEPT)) assert.equal(now.value(key), value, key);
+  assert.equal(now.value("guard_trusted_mcp_servers"), JSON.stringify(["understory"]));
+  // Out of the way: the next start, which is no upgrade, leaves it.
+  rmSync(path.join(dir, "handoff"));
+  await upgradedWith(dir);
+  now = understoryIn(dir);
+  for (const key of Object.keys(UNDERSTORY_KEPT)) assert.equal(now.value(key), undefined, key);
+  assert.deepEqual(understoryLeft(dir, "settings.json"), UNDERSTORY_KEPT);
 });

@@ -5,23 +5,23 @@ import test from 'node:test';
 import { inProcessHome } from './server-harness.mjs';
 
 // What a project that works with an agent carries into its chats, and when: the agent's soul, its primary
-// user and its memory, read from the agent's home, with Understory as the memory taking MEMORY.md's place
+// user and its memory, read from the agent's home, with the memory an extension holds taking MEMORY.md's place
 // unless the project does without it. In-process, so the files are those a chat would be handed.
 inProcessHome('project-agent-');
 const { extraContextFiles } = await import('../dist/pi/sdk-client.js');
-const { agentFor, agentLinkedAt, linkedAgent, understoryAt } = await import('../dist/project-agent.js');
+const { agentFor, agentLinkedAt, linkedAgent, memoryHeldAt } = await import('../dist/project-agent.js');
+const { holdMemory } = await import('../dist/memory-holder.js');
 const { createAgent, deleteAgent, defaultAgent } = await import('../dist/agents.js');
 const { projectAgent, projectAgents, releaseProjectsOf, setProjectAgent, clearProjectAgent } = await import('../dist/db.js');
 
 const root = process.env.WORKSPACE_ROOT;
-const agentDir = process.env.PI_CODING_AGENT_DIR;
-mkdirSync(agentDir, { recursive: true });
 
-/** Understory as the portal has it when it is set up: its MCP server, reached through the adapter. */
-function understory(on) {
-  writeFileSync(path.join(agentDir, 'mcp.json'), JSON.stringify({ mcpServers: on ? { understory: { url: 'http://127.0.0.1:1/mcp' } } : {} }));
-  writeFileSync(path.join(agentDir, 'settings.json'), JSON.stringify({ packages: ['npm:pi-mcp-adapter'] }));
-}
+/** An extension that holds the agent's memory (`portal.memory.hold`), while `held` says it does. */
+let held = false;
+holdMemory('keeper', { label: 'Keeper', rule: "Your memory is Keeper's.", on: () => held });
+const holding = (on) => (held = on);
+/** Whether the extension holds the memory of a chat working there. */
+const heldAt = (dir) => memoryHeldAt(dir) !== undefined;
 
 const names = (files) => files.map((f) => path.basename(f.path)).sort();
 const nova = createAgent({ name: 'Nova' });
@@ -34,7 +34,7 @@ const project = (name) => {
 };
 const reset = (...projects) => {
   for (const p of projects) clearProjectAgent(p);
-  understory(false);
+  holding(false);
 };
 
 test('a project linked to an agent gets its soul, user and memory from the agent home, not from the project folder', () => {
@@ -42,7 +42,7 @@ test('a project linked to an agent gets its soul, user and memory from the agent
   const dir = project('linked');
   // The folder is the agent's to write; what it puts there is not the agent's soul.
   writeFileSync(path.join(dir, 'SOUL.md'), '# planted in the project folder');
-  setProjectAgent('linked', { agent: nova.id, understoryOff: false });
+  setProjectAgent('linked', { agent: nova.id, memoryOff: false });
 
   const files = extraContextFiles(dir, 'primary');
   assert.deepEqual(names(files), ['MEMORY.md', 'PrimaryUser.md', 'SOUL.md']);
@@ -67,8 +67,8 @@ test('a project that works with no agent has only its AGENTS.md: nothing of an a
   for (const where of [dir, path.join(dir, 'src')]) {
     for (const role of [undefined, 'primary', 'colleague', 'guest']) assert.deepEqual(extraContextFiles(where, role), [], `${role} in ${where}`);
   }
-  // Saying nothing for Understory, or switching it off, changes nothing for the files: MEMORY.md is not read either.
-  setProjectAgent('blank', { agent: '', understoryOff: true });
+  // Saying nothing for the memory, or switching it off, changes nothing for the files: MEMORY.md is not read either.
+  setProjectAgent('blank', { agent: '', memoryOff: true });
   assert.deepEqual(extraContextFiles(dir, 'primary'), []);
 });
 
@@ -77,7 +77,7 @@ test('the chat is not told that files in a blank project are its own, and is of 
   const blank = project('blank-own');
   writeFileSync(path.join(blank, 'SOUL.md'), '# planted');
   const linked = project('linked-own');
-  setProjectAgent('linked-own', { agent: nova.id, understoryOff: false });
+  setProjectAgent('linked-own', { agent: nova.id, memoryOff: false });
   const { ownFiles } = await import('../dist/pi/sdk-client.js');
   assert.deepEqual(ownFiles(blank, 'primary'), []);
   const said = ownFiles(linked, 'primary');
@@ -85,59 +85,59 @@ test('the chat is not told that files in a blank project are its own, and is of 
   assert.match(said[0], /^SOUL\.md, PrimaryUser\.md, MEMORY\.md of the agent this project works with are yours/);
 });
 
-test('while Understory is the memory of the project, MEMORY.md is left aside; with the project doing without it, it is read', () => {
+test('while an extension holds the memory of the project, MEMORY.md is left aside; with the project doing without it, it is read', () => {
   reset('memory');
   const dir = project('memory');
-  setProjectAgent('memory', { agent: nova.id, understoryOff: false });
+  setProjectAgent('memory', { agent: nova.id, memoryOff: false });
 
-  // Understory not set up at all: the file is the memory.
-  assert.equal(understoryAt(dir), false);
+  // Nothing holds the memory: the file is the memory.
+  assert.equal(heldAt(dir), false);
   assert.deepEqual(names(extraContextFiles(dir)), ['MEMORY.md', 'PrimaryUser.md', 'SOUL.md']);
 
-  understory(true);
-  assert.equal(understoryAt(dir), true);
+  holding(true);
+  assert.equal(heldAt(dir), true);
   assert.deepEqual(names(extraContextFiles(dir)), ['PrimaryUser.md', 'SOUL.md']);
 
-  // The project's own word: no Understory here, so the agent's MEMORY.md is what it remembers.
-  setProjectAgent('memory', { agent: nova.id, understoryOff: true });
-  assert.equal(understoryAt(dir), false);
+  // The project's own word: not the extension's memory here, so the agent's MEMORY.md is what it remembers.
+  setProjectAgent('memory', { agent: nova.id, memoryOff: true });
+  assert.equal(heldAt(dir), false);
   assert.deepEqual(names(extraContextFiles(dir)), ['MEMORY.md', 'PrimaryUser.md', 'SOUL.md']);
 
-  // It is the project that said so: another linked project, and the agent's home, still have Understory.
-  setProjectAgent('other', { agent: nova.id, understoryOff: false });
-  assert.equal(understoryAt(project('other')), true);
-  assert.equal(understoryAt(nova.home), true);
+  // It is the project that said so: another linked project, and the agent's home, still have the extension's.
+  setProjectAgent('other', { agent: nova.id, memoryOff: false });
+  assert.equal(heldAt(project('other')), true);
+  assert.equal(heldAt(nova.home), true);
   assert.deepEqual(names(extraContextFiles(nova.home)), ['PrimaryUser.md', 'SOUL.md']);
 });
 
-test('a blank project has no Understory: it has no agent whose memory it would be', () => {
+test("a blank project has none of the extension's memory: it has no agent whose memory it would be", () => {
   reset('blank-memory', 'other');
   const dir = project('blank-memory');
-  understory(true);
+  holding(true);
   // Not by default, and not for a project that never said anything about it.
-  assert.equal(understoryAt(dir), false);
-  setProjectAgent('blank-memory', { agent: '', understoryOff: false });
-  assert.equal(understoryAt(dir), false);
-  setProjectAgent('blank-memory', { agent: '', understoryOff: true });
-  assert.equal(understoryAt(dir), false);
+  assert.equal(heldAt(dir), false);
+  setProjectAgent('blank-memory', { agent: '', memoryOff: false });
+  assert.equal(heldAt(dir), false);
+  setProjectAgent('blank-memory', { agent: '', memoryOff: true });
+  assert.equal(heldAt(dir), false);
   // The agent's home and a plain workspace are not projects.
-  assert.equal(understoryAt(nova.home), true);
-  assert.equal(understoryAt(undefined), true);
+  assert.equal(heldAt(nova.home), true);
+  assert.equal(heldAt(undefined), true);
   // Linked, it is on by default, and the project's own switch turns it off.
-  setProjectAgent('blank-memory', { agent: nova.id, understoryOff: false });
-  assert.equal(understoryAt(dir), true);
-  setProjectAgent('blank-memory', { agent: nova.id, understoryOff: true });
-  assert.equal(understoryAt(dir), false);
-  // Nothing to set a project's Understory on that the portal does not have.
-  understory(false);
-  setProjectAgent('blank-memory', { agent: nova.id, understoryOff: false });
-  assert.equal(understoryAt(dir), false);
+  setProjectAgent('blank-memory', { agent: nova.id, memoryOff: false });
+  assert.equal(heldAt(dir), true);
+  setProjectAgent('blank-memory', { agent: nova.id, memoryOff: true });
+  assert.equal(heldAt(dir), false);
+  // Nothing to set a project's memory on while nothing holds it.
+  holding(false);
+  setProjectAgent('blank-memory', { agent: nova.id, memoryOff: false });
+  assert.equal(heldAt(dir), false);
 });
 
 test('someone who is not the primary user never gets the private half, in a project either', () => {
   reset('guests');
   const dir = project('guests');
-  setProjectAgent('guests', { agent: nova.id, understoryOff: false });
+  setProjectAgent('guests', { agent: nova.id, memoryOff: false });
   assert.deepEqual(names(extraContextFiles(dir, 'guest')), ['SOUL.md', 'TEAM.md']);
 });
 
@@ -145,7 +145,7 @@ test('skills, voice and avatar follow the link: the agent a chat is with', () =>
   reset('with-nova', 'without');
   const dir = project('with-nova');
   const plain = project('without');
-  setProjectAgent('with-nova', { agent: nova.id, understoryOff: false });
+  setProjectAgent('with-nova', { agent: nova.id, memoryOff: false });
   assert.equal(agentFor(dir).id, nova.id);
   // As before: a chat in a project that works with no one is the first agent's, and a chat at home is its agent's.
   assert.equal(agentFor(plain).id, defaultAgent().id);
@@ -155,25 +155,25 @@ test('skills, voice and avatar follow the link: the agent a chat is with', () =>
 
 test('the choice is stored by the project, read back, and forgotten as the project is', () => {
   reset('stored');
-  assert.deepEqual(projectAgent('stored'), { agent: '', understoryOff: false });
-  setProjectAgent('stored', { agent: nova.id, understoryOff: true });
-  assert.deepEqual(projectAgent('stored'), { agent: nova.id, understoryOff: true });
-  assert.deepEqual(projectAgents().get('stored'), { agent: nova.id, understoryOff: true });
+  assert.deepEqual(projectAgent('stored'), { agent: '', memoryOff: false });
+  setProjectAgent('stored', { agent: nova.id, memoryOff: true });
+  assert.deepEqual(projectAgent('stored'), { agent: nova.id, memoryOff: true });
+  assert.deepEqual(projectAgents().get('stored'), { agent: nova.id, memoryOff: true });
   // Saying nothing is no row: the project is as it was before it was asked.
-  setProjectAgent('stored', { agent: '', understoryOff: false });
+  setProjectAgent('stored', { agent: '', memoryOff: false });
   assert.equal(projectAgents().has('stored'), false);
-  setProjectAgent('stored', { agent: nova.id, understoryOff: false });
+  setProjectAgent('stored', { agent: nova.id, memoryOff: false });
   clearProjectAgent('stored');
-  assert.deepEqual(projectAgent('stored'), { agent: '', understoryOff: false });
+  assert.deepEqual(projectAgent('stored'), { agent: '', memoryOff: false });
 });
 
-test('a project whose agent is deleted is a blank slate again, and keeps what it said about Understory', () => {
+test("a project whose agent is deleted is a blank slate again, and keeps what it said about the agent's memory", () => {
   reset('orphan', 'orphan-memory');
   const dir = project('orphan');
   const gone = createAgent({ name: 'Gone' });
   writeFileSync(path.join(gone.home, 'SOUL.md'), '# Gone');
-  setProjectAgent('orphan', { agent: gone.id, understoryOff: false });
-  setProjectAgent('orphan-memory', { agent: gone.id, understoryOff: true });
+  setProjectAgent('orphan', { agent: gone.id, memoryOff: false });
+  setProjectAgent('orphan-memory', { agent: gone.id, memoryOff: true });
   assert.deepEqual(names(extraContextFiles(dir)), ['SOUL.md']);
 
   deleteAgent(gone.id, { deleteFolder: false });
@@ -182,5 +182,5 @@ test('a project whose agent is deleted is a blank slate again, and keeps what it
   assert.deepEqual(extraContextFiles(dir), []);
   releaseProjectsOf(gone.id);
   assert.equal(projectAgents().has('orphan'), false);
-  assert.deepEqual(projectAgent('orphan-memory'), { agent: '', understoryOff: true });
+  assert.deepEqual(projectAgent('orphan-memory'), { agent: '', memoryOff: true });
 });
