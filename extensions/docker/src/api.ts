@@ -12,6 +12,16 @@
  * what each runs; it does not make one safe that is not.
  */
 
+/**
+ * How a call fails where Docker said no, or was not reached: an Error with `status`. That is Docker's own HTTP status
+ * where it gave one (403 and 404 among them, for a container that is not the extension's or that there is none of), and
+ * 0 where Docker was not reached or gave no HTTP status: there is no socket, it did not answer in time, the name is not
+ * one Docker takes, or a download failed partway.
+ */
+export interface DockerError extends Error {
+  status: number;
+}
+
 /** A container as Docker has it now. */
 export interface ContainerInfo {
   /** Its name, as Docker knows it (no leading slash). */
