@@ -57,18 +57,16 @@ async function inspected(): Promise<Inspected | undefined> {
   return (await d.containers.inspect(CONTAINER)) as Inspected | undefined;
 }
 export interface ServiceStatus { available: boolean; state: string; busy: boolean; progress: string; error: string; /** The engines the container is built for, once there is one. */ choice?: VoiceChoice }
-/** What `status` last found: where voice mode listens and speaks is asked at each of its requests, and has to be answered at once. */
-let seen: ServiceStatus | undefined;
-export const lastSeen = () => seen;
 /**
  * The engines of the running container, from when they were first found answering until the container is found stopped,
- * gone or being made again. A health check that is slow once, as an engine busy speaking may be, or a Docker slow to
- * answer, does not take them away from voice mode in the middle of a conversation.
+ * gone or being made again, as `status` last found: where voice mode listens and speaks is asked at each of its requests,
+ * and has to be answered at once. A health check that is slow once, as an engine busy speaking may be, or a Docker slow
+ * to answer, does not take them away from voice mode in the middle of a conversation.
  */
 let served: VoiceChoice | undefined;
 export const serving = () => served;
 export async function status(): Promise<ServiceStatus> {
-  seen = await statusNow();
+  const seen = await statusNow();
   if (seen.state === 'running') served = seen.choice;
   else if (seen.state !== 'starting' && seen.state !== 'unavailable') served = undefined;
   return seen;

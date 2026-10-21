@@ -14,9 +14,9 @@ let used = false;
 /** The speech model was loaded here, and has not been let go of since. */
 let loaded = false;
 
-/** The service's speech model loaded or let go of, in the audio.cpp process it is in: nothing where the service speaks with none. */
+/** The speech model of the engines voice mode is offered, loaded or let go of, in the audio.cpp process it is in: nothing where they speak with none. */
 async function speechModel(action: "load" | "unload"): Promise<void> {
-  const choice = service.lastSeen()?.choice;
+  const choice = service.serving();
   if (!choice || choice.tts === "none") return;
   await service.modelAction(action, choice.tts, ttsDevice(choice) === "cpu" ? CPU_PORT : SPEECH_PORT);
   loaded = action === "load";
