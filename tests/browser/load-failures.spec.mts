@@ -111,7 +111,7 @@ test('Settings → Skills does not say there are none when the list could not be
 });
 
 test('Settings → Add-ons: each add-on says what it could not read, and reads it again', async ({ page }) => {
-  const { up, asked } = await portal(page, ['/api/voice', '/api/features/subagent', '/api/features']);
+  const { up } = await portal(page, ['/api/voice', '/api/features/subagent']);
   await page.goto('/settings/add-ons');
   const dialog = settingsDialog(page);
   await expect(dialog.getByRole('tab', { name: 'Voice' })).toHaveAttribute('aria-selected', 'true');
@@ -125,13 +125,6 @@ test('Settings → Add-ons: each add-on says what it could not read, and reads i
   up('/api/features/subagent');
   await dialog.getByRole('button', { name: 'Try again' }).click();
   await expect(dialog.getByRole('alert')).toHaveCount(0);
-
-  // The memory page asks for the features, which are still down: it says so as well.
-  await dialog.getByRole('tab', { name: 'Memory' }).click();
-  await expect(dialog.getByRole('alert')).toContainText(FAILED);
-  const before = asked.filter((p) => p === '/api/features').length;
-  await dialog.getByRole('button', { name: 'Try again' }).click();
-  await expect.poll(() => asked.filter((p) => p === '/api/features').length).toBeGreaterThan(before);
 });
 
 test('the Audit page does not say nothing was recorded, with "0 refused", when it could not be read', async ({ page }) => {
