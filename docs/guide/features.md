@@ -5,7 +5,7 @@ in **Settings**: a **subagent tool** and **Understory** as the agent's memory
 under **Add-ons**, and **image generation and editing** and **video generation** under
 **Extension settings → Media**. A fresh
 install has none of them. (The Add-ons page also holds the Docker-based
-[Browser and Voice](/guide/add-ons).) Switching on
+[Voice](/guide/add-ons); the agent's [browser](/guide/browser) is an extension.) Switching on
 the first two writes them into pi's own configuration — a package, an MCP
 server — so they can also be seen, and undone, from Settings → Extensions and
 Settings → MCP. Switching one off removes it. Image and video generation are

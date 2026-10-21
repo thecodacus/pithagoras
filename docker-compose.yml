@@ -16,7 +16,8 @@ services:
       # Workspaces pi works in. Read-write: the whole point is that it edits code,
       # so there is no default: a path nobody chose would be made and mounted empty.
       - ${WORKSPACES_DIR:?Set WORKSPACES_DIR to the folder on this host that holds your repositories}:/workspaces
-      # Required for managed Browser/Voice add-ons and EXECUTOR=container.
+      # Required for the managed Voice add-on, the Docker extension (which runs
+      # the Browser extension's container) and EXECUTOR=container.
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
       # Must match container_name: managed voice shares this network namespace,
@@ -82,10 +83,11 @@ services:
       # something else. Left empty, the card with the most room is used.
       VOICE_GPU: ${VOICE_GPU:-}
       VOICE_VRAM_RESERVE_MIB: ${VOICE_VRAM_RESERVE_MIB:-}
-      # The address the Browser add-on's own web page (ports 3010 and 3011) listens on.
-      # Left empty it is 127.0.0.1, so the page is reached through the portal's
-      # /browser-ui; 0.0.0.0 opens it to every machine that can reach this one.
-      # Read when the browser is installed. See docs/guide/browser.md.
+      # The address the Browser extension's own web page (ports 3010 and 3011)
+      # listens on. Left empty it is 127.0.0.1, so the page is reached through the
+      # portal, at /api/x/pithagoras-browser/ui/; 0.0.0.0 opens it to every machine
+      # that can reach this one. Read when the browser is installed. See
+      # docs/guide/browser.md.
       BROWSER_BIND: ${BROWSER_BIND:-}
       # How long, in ms, the portal waits on Understory's model before giving up and saying so —
       # see docs/reference/configuration.md. Left empty, its 30-minute defaults stand.

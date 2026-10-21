@@ -1,7 +1,9 @@
 # Docker for extensions
 
 **Docker** (`extensions/docker`, the package `pithagoras-docker`) lets other
-extensions run containers: a browser, a speech model, a database. It gives each
+extensions run containers: a browser, a speech model, a database. The agent's
+[browser](/guide/browser), the `pithagoras-browser` extension, is the first that
+comes with the portal and builds on it. It gives each
 extension that
 [builds on it](/guide/extension-ui#building-on-another-extension) a way to
 download images and to make, start, stop and remove containers and volumes,
@@ -14,7 +16,8 @@ Discover, where the extensions that come with the portal are listed, when an
 extension you want needs it: one that requires it does not start without it,
 and says so in Settings → Extensions. Installing that extension from Settings →
 Extensions installs Docker with it, first
-([Installing what it requires](/guide/extension-ui#installing-what-it-requires)).
+([Installing what it requires](/guide/extension-ui#installing-what-it-requires)),
+as installing Browser does.
 
 ## Giving the portal Docker
 
@@ -165,7 +168,7 @@ What it gives (`extensions/docker/src/api.ts`, with its types):
 | `containers.list()`, `containers.get(name)` | Your containers; a container by name, with `owner` saying whose it is and `labels` the labels it was made with |
 | `containers.create(name, spec)` | Makes one, not started, from Docker's own create body (`Image`, `Env`, `Cmd`, `HostConfig`, …). One of yours by that name is removed first |
 | `containers.start`, `stop`, `remove`, `logs(name, { tail })` | Your container's life, and the end of what it wrote |
-| `containers.adopt(name)` | Takes over a container that carries no extension's name: one made before your app was an extension, so that what it kept is kept |
+| `containers.adopt(name)` | Takes over a container that carries no extension's name: one made before your app was an extension, so that what it kept is kept. Browser takes over the `pithagoras-browser` container and its profile volume this way each time it starts |
 | `volumes.list`, `create`, `remove`, `adopt` | The same for volumes |
 
 Each extension has its own. What it makes carries its name (the label

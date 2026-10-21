@@ -1,47 +1,160 @@
 # The agent's browser
 
-::: tip Docker installation
-See [Docker add-ons](/guide/add-ons) for installation, controls and profile cleanup.
-:::
+**Browser** (`extensions/browser`, the package `pithagoras-browser`) is a real
+browser for the agent, with a profile that stays signed in. You log into it
+once by hand; every run after that finds the accounts already there.
+**No password ever passes through the model.** It gives the agent its browser
+tools, a page to watch and set up the browser, the browser beside a chat and in
+voice mode, and runs the browser in a container through
+[Docker for extensions](/guide/docker), which it requires.
 
-Optional. Nothing here is installed, pulled or shown unless you ask for it.
-
-A real browser, in its own container, with a profile that stays signed in. You
-log into it once by hand; every run after that finds the accounts already there.
-**No password ever passes through the model.**
+Optional. Nothing here is installed, pulled or shown unless you ask for it:
+neither Browser nor Docker is installed by default. Like any other extension,
+Browser is switched off or removed in Settings → Extensions (see
+[Removing Browser](#removing-browser)). A portal that had the browser before it
+was an extension handed what it kept over to it: see
+[Upgrading](/guide/upgrading#browser-is-an-extension).
 
 ## Installing it
 
-**Settings → Add-ons → Browser → Install.** Nothing to edit, nothing to
-redeploy. It is not in `docker-compose.yml` and never was for you: a deployment
-that never installs it has no image, no container, and no Browser page.
+1. **Settings → Extensions → Discover → Comes with Pithagoras → Browser →
+   Install.** It requires Docker, and the question before the install says so:
+   on yes Docker is installed first, then Browser
+   ([Installing what it requires](/guide/extension-ui#installing-what-it-requires)).
+   Docker is needed even where the portal cannot reach a Docker socket: Browser
+   does not start without it, and then runs the machine's own Chrome.
+2. **Settings → Extension settings → Browser** (`/settings/x/pithagoras-browser`)
+   → **Install**. Nothing to edit, nothing to redeploy. Set a password when
+   asked — this holds live sessions for the agent's accounts, and **Suggest
+   one** makes one.
 
-Set a password when asked — this holds live sessions for the agent's accounts,
-and there is a button to generate one.
-
-Two ways it can run, chosen for you rather than configured:
+Three ways it can run, chosen for you rather than configured, each time it is
+asked:
 
 | | When | What you get |
 | --- | --- | --- |
-| **Container** | the portal can reach the Docker socket | Its own container, pulled on install. Costs nothing until you install it. |
-| **Local Chrome** | it cannot | The browser already on the machine, same profile directory. Nothing downloaded. |
+| **Container** | Docker reaches its socket (see [Giving the portal Docker](/guide/docker#giving-the-portal-docker)) | Its own container, pulled on install. Costs nothing until you install it. |
+| **Local Chrome** | it cannot | The Chrome or Chromium already on the machine, with a profile in Browser's folder. Nothing downloaded. |
+| **External** | `BROWSER_EXTERNAL=true` | A browser you run yourself. The portal only looks at it and drives it; it is started, stopped and removed where it runs. |
 
 The local path is mostly the portal run from source. It goes headless when there
 is no display, and says so — sign-in pages refuse headless browsers often
 enough to matter.
 
-Install is the same on **Settings → Add-ons** and on the Browser page, and the
-button waits while it runs, so a second click cannot start a second download. The
-image is 4.6 GB; its progress is shown on both pages, and what went wrong if the
-download fails. Once it is installed the agent is connected to it, and when it is
-removed the agent is disconnected, whichever page you used.
+Install is the same on Browser's page in Settings and on the Browser page, and
+the button waits while it runs, so a second click cannot start a second download.
+The image is a few GB; its progress is shown on both pages, and what went wrong
+if the download fails. Once it is installed the agent is connected to it, and
+when it is removed the agent is disconnected, whichever page you used.
 
 **Remove** takes the container away and keeps the profile, so installing again
 finds the logins still there.
 
-The Browser page only says the browser is not answering when its container is up
-and does not answer. A browser you stopped, one that is not installed, and the
-machine's own Chrome are not broken.
+### The Browser page
+
+**Browser** is in the sidebar's **Extensions** group, at
+`/x/pithagoras-browser/browser`, while a browser runs, while the agent has its
+tools, or while a routine's runs are given them otherwise than the default. It
+says whether the browser answers and which tabs are open, opens the browser in
+the page, has the cursor's switch, says where the browser may go and who may
+drive it, and warns about what needs doing: a browser nobody can drive, tools
+for a browser that is not running, a browser without a password, and one
+installed before its own port was kept to this machine.
+
+The page only says the browser is not answering when its container is up and
+does not answer: stop it and start it again, and what it wrote is in
+Settings → Docker. A browser you stopped, one that is not installed, and the
+machine's own Chrome are not broken. One run elsewhere (`BROWSER_EXTERNAL=true`)
+that does not answer is said to be started where it runs.
+
+### The container, its storage and ports
+
+| Item | Value |
+| --- | --- |
+| Image | `lscr.io/linuxserver/chromium:latest` |
+| Container | `pithagoras-browser` |
+| Profile volume | `pithagoras_browser-profile` (override: `BROWSER_VOLUME`) |
+| Network | Host |
+| Shared memory | 1 GiB |
+| Chromium security option | `seccomp=unconfined` |
+| HTTP / HTTPS | `3010` / `3011`, on `127.0.0.1` only (`BROWSER_BIND`) |
+| Debugging port | `9222`, on `127.0.0.1` only |
+
+Both are Browser's in Docker: made with its name on them, and listed under
+`pithagoras-browser` in Settings → Docker, where the container can be stopped,
+started and removed, and the volume deleted. A
+container or a profile volume of those names made by an earlier version of the
+portal is taken over by Browser each time it starts, and never made anew: the
+container goes on as it is. The container uses Docker's `unless-stopped` restart
+policy, so it comes back after a reboot.
+
+Avoid port conflicts. The web page of the browser is reached through the portal,
+or from the host itself; see [the browser's own port](#the-browser-s-own-port)
+for other machines.
+
+Environment variables on the portal adjust it; a value Browser keeps (the
+password set on its page in Settings, or one sent to its `/config`) wins over
+the variable:
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `BROWSER_USER` / `BROWSER_PASSWORD` | `agent` / — | Login for the browser web UI |
+| `BROWSER_PORT` / `BROWSER_HTTPS_PORT` | `3010` / `3011` | Its HTTP and HTTPS ports |
+| `BROWSER_BIND` | `127.0.0.1` | The IPv4 address those ports listen on; the portal reaches them on `127.0.0.1` whatever it is. `0.0.0.0` opens them to every machine that can reach this one. The shipped Compose files and the Portainer stack pass it on from `.env`. Applies when the browser is installed, so remove and install it again after changing it |
+| `BROWSER_STREAM_PORT` | `8082` | The port the embedded live view reads frames from |
+| `BROWSER_HOST` | `127.0.0.1` | Where the portal reaches the browser |
+| `BROWSER_CDP_URL` | `http://127.0.0.1:9222` | The debugging endpoint the agent's browser tools use |
+| `BROWSER_VOLUME` | `pithagoras_browser-profile` | The profile volume |
+| `BROWSER_EXTERNAL` | — | `true` for a browser you run yourself |
+| `BROWSER_BINARY` | — | Without a Docker socket — typically the portal run from source — Browser starts a Chrome or Chromium already on the machine, and this names its binary; the profile is kept in Browser's folder, `extension-data/pithagoras-browser/profile` in the data folder |
+
+### Its controls
+
+| Action | Result |
+| --- | --- |
+| **Stop** | Stops the browser container; keeps its profile and logins. |
+| **Start it** | Starts the installed container with that profile. |
+| **Remove** | Deletes the container; keeps the profile volume. |
+| **Install** after removal | Makes the container again and reuses a retained profile. |
+
+With `BROWSER_EXTERNAL=true` these belong to your own deployment: Browser refuses
+to install, start, stop or remove it.
+
+### A newer image
+
+Installing reuses an image that is already there. To fetch a newer one, pull it,
+then **Remove** and **Install** on Browser's page in Settings:
+
+```sh
+docker pull lscr.io/linuxserver/chromium:latest
+```
+
+### Deleting the profile
+
+::: danger Delete saved logins permanently
+**Remove** keeps the profile. To erase the browser's logins, remove the browser
+first, then delete the volume under `pithagoras-browser` in **Settings → Docker**,
+or on the Docker host (with your `BROWSER_VOLUME` if it is another):
+
+```sh
+# Destructive: deletes the browser profile and saved logins.
+docker volume rm pithagoras_browser-profile
+```
+:::
+
+`DELETE /api/x/pithagoras-browser/install?profile=forget` removes the container
+and the volume in one go; the pages offer no button for it.
+
+### Removing Browser
+
+Switched off or removed in Settings → Extensions, Browser's page, its page in
+Settings, the browser beside a chat and in voice mode, and the agent's browser
+tools go. The browser itself does not: its container keeps running (`unless-stopped`),
+signed in, with its debugging port on this machine's loopback, and stays
+listed under `pithagoras-browser` in **Settings → Docker**, where it can be
+stopped or removed. Browser's folder in the data folder (`extension-data/pithagoras-browser`:
+its settings, the password among them, and a local Chrome's profile) stays
+for when it is back.
 
 ## Logging in
 
@@ -51,15 +164,15 @@ its own volume and survives restarts.
 
 ### Embedded, or in a tab
 
-The portal proxies the browser's UI at `/browser-ui`, so **Open browser** shows
-it inline with a fullscreen button, using the portal's own certificate and
-credential. No second password, no second certificate. The page and its
-websocket sit behind the portal's login like everything else: without the login
-they answer 401, and a websocket opened from another site is refused. Behind a reverse
-proxy that rewrites the `Host` header, have it send the host the visitor asked for
-as `X-Forwarded-Host`: the page's origin is compared with that as well. The frame switches on like
-a screen when it opens, unless [the animations](/guide/interface#animations) are
-off.
+Browser serves the browser's UI through the portal at
+`/api/x/pithagoras-browser/ui/`, so **Open browser** shows it inline with a
+fullscreen button, using the portal's own certificate and credential. No second
+password, no second certificate. The page and its websocket sit behind the
+portal's login like everything else: without the login they answer 401, and a
+websocket opened from another site is refused. Behind a reverse proxy that
+rewrites the `Host` header, have it send the host the visitor asked for as
+`X-Forwarded-Host`: the page's origin is compared with that as well. The frame
+switches on like a screen when it opens, unless the system asks for less motion.
 
 That needs the portal itself on HTTPS. The VNC client gates on
 `isSecureContext`, and a frame only counts as secure when **every page above it**
@@ -92,8 +205,8 @@ The browser's web page is also served by its container, on ports `3010` (HTTP) a
 **this machine only** (`127.0.0.1`): the container shares the host's network, so
 anything it listens on is the host's own address, and the one password in front of
 it should not be what stands between a browser holding the agent's logins and
-everyone on the network. The portal's `/browser-ui` above is the way in from other
-machines, behind the portal's login.
+everyone on the network. The portal's `/api/x/pithagoras-browser/ui/` above is the
+way in from other machines, behind the portal's login.
 
 From the host itself, `https://127.0.0.1:3011` with `BROWSER_USER` and
 `BROWSER_PASSWORD` works. From another machine, forward the port over SSH and open
@@ -106,7 +219,7 @@ ssh -L 3011:127.0.0.1:3011 <host>
 
 If the portal is on plain HTTP it cannot embed the browser, and there is no direct
 link from its page either; give it a certificate as above, or open the port yourself
-by setting `BROWSER_BIND` on the portal (see [Docker add-ons](/guide/add-ons)) to
+by setting `BROWSER_BIND` on the portal (see [above](#the-container-its-storage-and-ports)) to
 `0.0.0.0`, or to the one address of this machine that you want it on; the portal
 itself keeps reaching it on `127.0.0.1` either way. Then the page links to
 `https://<host>:3011` again. That is every machine that can reach the address, and
@@ -122,11 +235,29 @@ Give the agent **its own accounts** rather than sharing yours. That is what
 makes it a teammate rather than a proxy, and it keeps a colleague's request from
 reaching your personal mail.
 
+## Beside a chat and in voice mode
+
+While the browser's container runs, and the portal is on HTTPS, a chat's header
+has a **Browser** button: the browser in a panel beside the conversation, black
+from edge to edge, with **Fullscreen** in its head. It docks, floats and is
+resized as every panel is (see [Files](/guide/files#panels)), and other pages
+open it by its name, `browser`.
+
+In [voice mode](/guide/voice) the browser is a window in the middle of the
+stage. It opens each time the agent drives a browser, Browser's tools or a
+Playwright MCP's, and says when there is no browser to show or it cannot be
+reached. It can fill the stage (**Maximize**, and Escape, also from inside the
+page in it, gives the stage back), and it stays loaded while it is minimized.
+<kbd>B</kbd> shows and hides it, and can be changed under Settings → Shortcuts.
+A browser call's card says what the agent is doing ("Opening a page" and the
+site, "Clicking in the browser" and what it clicked), and a tap on it opens the
+window.
+
 ## Letting the agent drive it
 
-**Browser → Connect the agent** gives every chat the portal's browser tools,
-which drive this browser over its debugging port. Disconnecting takes them away
-again.
+**Browser → Connect the agent** gives every chat Browser's tools, which drive this
+browser over its debugging port. Installing the browser connects them, and
+removing it disconnects them.
 
 A local model reads every token a tool returns before it can answer, so the
 tools never hand it a whole page. A page is what is **on screen**: the viewport
@@ -159,16 +290,24 @@ What a view shows:
 An action that moves to a new page, opens a new tab, or changes too much to be
 told as a diff answers with a view instead. A ref whose element has gone is
 refused, with a request to look again, rather than clicked on whatever is there
-now. Page content is someone else's words: every browser result is marked as
-such, and the session is limited as for mail (see
-[Prompt injection](/guide/security)).
+now. Page content is someone else's words: the tools declare that what they
+return is outside content, so every result is marked as such, and the session is
+limited as for mail (see [Prompt injection](/guide/security)). They run one at a
+time, also when the model calls several in one message.
 
 What the tools have in common is told to the model once, as rules in its
 instructions, and not again in each tool's description: what an action answers
-with, that a ref is never guessed and a gone one is refused, and that a page is
-data and never instructions. Each tool that concerns a rule carries it, so a rule
-is said while any of those tools is on. Switching one tool off, `browser_snapshot`
-included, takes none of them away.
+with, and that a ref is never guessed and a gone one is refused. That a page is
+data and never instructions is the portal's rule for every tool that returns
+outside content, said once while any of them is on. Each tool that concerns a
+rule carries it, so a rule is said while any of those tools is on. Switching one
+tool off, `browser_snapshot` included, takes none of them away.
+
+A chat goes on in the tab it last worked in, also after it was let go for being
+idle; its first call takes the newest tab. A chat that is deleted, and a routine
+run in a session of its own that is over, are forgotten, and their tabs stay open
+in the browser as they were. Browser started again (with Docker, after an update)
+forgets them all, and each chat goes on in the newest tab.
 
 ### The agent's cursor
 
@@ -198,16 +337,17 @@ it off, use the **Browser → Show the agent's cursor** switch; the actions then
 
 ### Upgrading from the Playwright MCP
 
-Before these tools, the portal attached the browser as a Playwright MCP server.
-The first start after the update replaces the entry it wrote with these tools,
-once, and carries every switch on it — the default, each project's, each chat's
-— so the same chats have the browser. Other MCP servers are not touched.
+Before these tools, the portal attached the browser as a Playwright MCP server,
+and replaced the entry it wrote with its own tools on the first start of a
+version that had them. A portal upgraded straight from before that keeps the
+entry: it is then a Playwright MCP server like one added by hand (below).
+Remove it in [Settings → MCP](/guide/mcp) to have Browser's tools in its place.
 
 ### With a Playwright MCP instead
 
 A Playwright MCP server added by hand in [Settings → MCP](/guide/mcp) still
-works, and the portal leaves it alone; disconnect the built-in tools first, or
-the agent holds two sets:
+works, and the portal leaves it alone; switch Browser's tools off first (in
+Settings → Tools), or the agent holds two sets:
 
 ```json
 {
@@ -225,54 +365,45 @@ this page, its own browser, no profile, no allowlist.
 
 The portal gives the agent two rules for driving a Playwright browser (take a screenshot
 before reading the page's text, and leave out `filename` so a screenshot comes back as an
-image). They are in a chat's instructions only while the built-in tools are not connected
-and a Playwright MCP server is attached to this browser: one whose `--cdp-endpoint` is its
-address, or one called `browser`. A server that launches a Chromium of its own gets none,
-and with no server at all nothing about a browser is added.
+image). They are in a chat's instructions only while a Playwright MCP server is attached
+to a running browser: one with a `--cdp-endpoint`, at whatever address, or one called
+`browser`. A server that launches a Chromium of its own gets none, and with no server at
+all nothing about a browser is added.
 
 ## Who may drive it
 
-The browser reaches the agent as the portal's own tools, a group named `browser`
-in the tools list, so it is switched where every other tool is: the tools icon
-beside the composer for one conversation, **Settings → Tools** for all of them,
-and **Projects → Tools** for the chats of one project. Having its tools is having
-the browser — a conversation with them all off is not offered them and does not
-reach the container. A routine has its own **Browser** switch on its own page,
-off by default.
+The browser reaches the agent as Browser's tools, a group named
+`pithagoras-browser` in the tools list, so it is switched where every other tool
+is: the tools icon beside the composer for one conversation, **Settings → Tools**
+for all of them, **Projects → Tools** for the chats of one project, and a
+routine's **Tools** on its own page for its runs. Having its tools is having the
+browser — a conversation with them all off is not offered them and does not
+reach the browser.
 
 **Browser → Who may drive it** says what the default is, and lists the
 conversations that have it otherwise, each marked **on** or **off**, and the
-routines whose own switch or tools give their runs the browser, which a
-routine's runs do not have until it does, whatever the default is.
+routines whose own tools give their runs another answer than the default.
 
-With a Playwright MCP server added by hand instead, which server is the browser
-comes from where it connects, not from what it is called: the one whose
-`--cdp-endpoint` points at this browser. The same switches then apply to its
-tools.
+With a Playwright MCP server added by hand instead, its tools are that server's
+group, and the same switches apply to them.
 
-Like any other tool, they are **on** unless something says otherwise.
-An installation that had the old per-session switch keeps what it had: the
-browser's tools are written into the defaults as off and the conversations that
-had been granted it are given it back. So an existing portal wakes up the way it
-went to sleep, and a new one starts like any other server.
-
-That happens when the first conversation after the upgrade lists its tools, not
-when the portal starts — which of them are the browser's is only known once a
-session has registered them. Until then the old switch is what answers, so there
-is no moment in between where every conversation has the browser.
+Like any other tool, they are **on** unless something says otherwise. A portal
+that had the browser before it was an extension keeps who could drive it: the
+upgrade wrote it into the tools' switches (see
+[Upgrading](/guide/upgrading#browser-is-an-extension)).
 
 ::: tip Turning it off everywhere
-**Settings → Tools → browser → all off**. That is the one switch; there is no
-second one to keep in step with it.
+**Settings → Tools → pithagoras-browser → all off**. That is the one switch; there
+is no second one to keep in step with it.
 :::
 
 ::: tip Not in the prompt until it is wanted
 The browser's tools are a large set, and while they are on they sit in the prompt of every chat. They
 are not lazy unless you make them so: mark the group **lazy** in **Settings → Tools** and no chat is
-offered them one by one. The agent is told it has browser tools, and finds and calls them through the
+offered them one by one. The agent is told it has these tools, and finds and calls them through the
 `tools` tool, so a chat that never opens a page carries none of their schemas. A lazy tool is still on
 like any other: a call is held to the allowlist and the other rules exactly as a direct one, and a
-switch that turns the browser off for a chat turns it off here too. This is for the portal's own browser tools;
+switch that turns the browser off for a chat turns it off here too. This is for Browser's tools;
 a browser attached as an MCP server is lazy or not by that server's own "Register tools directly". See [Lazy tools](/guide/extensions#lazy-tools).
 :::
 
@@ -282,25 +413,26 @@ that is visibility: every page it opens is recorded in [Audit](/guide/sessions#a
 
 ::: warning With `EXECUTOR=container`
 pi runs inside the container and never tells the portal what it registered, so
-there is no tool list to switch and the tools popover says so. The browser is
-granted per session over the API there (`PUT /api/sessions/:id/browser`), which
-is what the old switch wrote.
+there is no tool list to switch and the tools popover says so. Browser's tools
+are given only to a chat whose pi runs in the portal's own process, so with
+`EXECUTOR=container` no chat has them, and the guard, which runs in the portal's
+process, holds nothing there.
 :::
 
 ## Where it may go
 
 **Settings → Guard → Sites the agent's tools may reach** takes one domain per
 line, `*.example.com` for subdomains. An empty list means any site. It is one
-list for every tool that says where it goes (the portal's own browser tools say
-their `url` is) and for the browser tools an MCP server brings, such as a
-Playwright MCP server's. **Browser → Where it may go** says so, and links to it.
+list for every tool that says where it goes (Browser's tools say their `url` is)
+and for the browser tools an MCP server brings, such as a Playwright MCP server's.
+**Browser → Where it may go** says so, and links to it.
 
 ::: danger Read this one together with the section above
 That default was written when the browser was off until somebody turned it on,
-so an empty list blocked nothing that was not already blocked. It is on by
-default now. An empty allowlist and an untouched tools list means **every
-conversation can point the agent's signed-in browser anywhere** — so on a
-portal whose browser holds real logins, fill this in, or switch the browser's
+so an empty list blocked nothing that was not already blocked. Browser's tools
+are on by default now. An empty allowlist and an untouched tools list means
+**every conversation can point the agent's signed-in browser anywhere** — so on
+a portal whose browser holds real logins, fill this in, or switch the browser's
 tools off by default and turn them on where you want them.
 :::
 
@@ -319,7 +451,7 @@ reaches it owns every account the browser is signed into.
 Host networking is what keeps it to the box: Chromium binds that port to the
 loopback address only. Never publish it, never put it behind a reverse proxy, and
 treat the profile volume as the secret it is. The browser's web page on `3010` and
-`3011` is held to the loopback address as well, by the portal (see
+`3011` is held to the loopback address as well, by Browser (see
 [above](#the-browser-s-own-port)).
 
 ### Playwright MCP screenshots
@@ -334,3 +466,21 @@ Its snapshot output uses compact notation: `[eN]` or `[fNeN]` is the exact eleme
 reference, an omitted role means `generic`, and `[pointer]` means a pointer
 cursor. The tree retains its nodes, text, URLs and state; this formatting does
 not impose a depth limit or truncate content.
+
+## Its routes
+
+Browser's page and its page in Settings talk to its server half, under
+`/api/x/pithagoras-browser`, behind the portal's login: see
+[Browser](/reference/api#browser) in the API reference.
+
+## Troubleshooting
+
+```sh
+docker ps -a --filter name=pithagoras-browser
+docker logs --tail 100 pithagoras-browser
+docker volume inspect pithagoras_browser-profile
+```
+
+What the container wrote is also under `pithagoras-browser` in
+**Settings → Docker** (**Logs**). Port already allocated: check for an older browser container, or
+anything else on `3010`, `3011` or `9222`, and stop it before installing again.

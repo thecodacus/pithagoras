@@ -59,7 +59,7 @@ the avatar of the agent the chat is with, the first agent's for a chat in a
 project.
 
 Browser tool calls bring the live browser into a floating window and dock the
-orb. Terminal calls show the agent’s actual command and streamed output on the
+orb, with the [Browser](/guide/browser) extension installed. Terminal calls show the agent’s actual command and streamed output on the
 right, moving the orb left. With both open, the browser is larger and the terminal
 sits beside it; narrow screens stack them. When the agent reads or changes a file
 in the chat's folder, [Files](/guide/files) opens the same way and shows it. Minimize

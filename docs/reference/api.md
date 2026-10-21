@@ -109,7 +109,7 @@ these routes answers `{ error, code }`.
 | `GET /api/tools` | `{ tools, off, names, lazy, questionWaitMinutes }` — every tool the portal has seen, which are off by default, how long the agent's questions wait (see `PUT /api/ask-question`), and what is marked [lazy](/guide/extensions#lazy-tools): tool sets and single tools (`<tool>name`). A lazy tool carries `lazy: true`: it is on like any other but is reached through the `tools` tool instead of being offered one by one. An MCP server's tool carries `lazy: true` when its server leaves it to the adapter's `mcp` tool (no `directTools`; that is the default), and `mcp`: the server, whose setting says so (see `PUT /api/mcp/servers/:name/direct`). A tool that cannot be lazy, one of pi's own or the adapter's `mcp`, carries `noLazy: true`. Nothing else is lazy until marked. With `EXECUTOR=container` this and the other tool routes answer 400 with `code: "tools-unsupported"` |
 | `PUT /api/ask-question` | `{ waitMinutes }` — how long a question from the agent's `ask_question` waits for an answer: `0` (until it is answered, the default), `5`, `15`, `30` or `60`; anything else is a 400. The tool is offered wherever a person answers in the web UI (a chat, a conversation on the Agent page), not in a routine, a heartbeat or a chat reached through a channel. Read when a question is asked, so it applies to the next one |
 | `PUT /api/tools` | `{ off: string[] }` — the default for every conversation; applied to the running ones too. A [project](#projects) can bend it with `PUT /api/projects/:name/tools`, and a conversation then holds its exceptions against that |
-| `PUT /api/tools/lazy` | `{ lazy: string[] }` — the lazy marks: tool sets, named as the tools list names its boxes (a package, such as `pithagoras-media` for Media's picture and video tools, or the browser), and single tools as `<tool>name`. Answers `{ lazy, applied }`. Marking switches nothing: the tools stay on or off as they are, and a running conversation stops offering the lazy ones that are on one by one. A mark that names an MCP server's tools (they are lazy by their server's setting) or pi's built-in tools (the `built in` group) is refused with 400 and `code: "lazy-refused"`, and nothing is stored |
+| `PUT /api/tools/lazy` | `{ lazy: string[] }` — the lazy marks: tool sets, named as the tools list names its boxes (a package, such as `pithagoras-media` for Media's picture and video tools, or `pithagoras-browser` for the browser's), and single tools as `<tool>name`. Answers `{ lazy, applied }`. Marking switches nothing: the tools stay on or off as they are, and a running conversation stops offering the lazy ones that are on one by one. A mark that names an MCP server's tools (they are lazy by their server's setting) or pi's built-in tools (the `built in` group) is refused with 400 and `code: "lazy-refused"`, and nothing is stored |
 | `GET /api/sessions/:id/tools` | `{ tools, live, off }` — every tool the conversation could use and whether it is on. `live` is false when pi is not running to be asked. A [lazy](/guide/extensions#lazy-tools) tool (not offered one by one, reached through the `tools` tool) carries `lazy: true` whether it is on or off here; off, it is not reachable. The project and routine tool lists mark it the same |
 | `PUT /api/sessions/:id/tools` | `{ off: string[] }` — switch tools off by name; everything not named is on |
 | `GET /api/tool-names` | What each package is called here; everything unnamed keeps its own name |
@@ -263,18 +263,23 @@ inside the folder, by its path relative to it.
 
 See [Models and providers](/guide/models).
 
-## Browser add-on
+## Browser
+
+The [Browser](/guide/browser) extension's routes (`extensions/browser`), while it
+is installed, under `/api/x/pithagoras-browser`. A refusal is `{ error }` with the
+status given.
 
 | | |
 | --- | --- |
-| `GET /api/browser` | State, connection and settings |
-| `POST /api/browser/install` · `/start` · `/stop` | Lifecycle of the managed container. A second install while one is running is refused with 409. Installing wires the agent to the browser and removing unwires it |
-| `DELETE /api/browser/install` | Remove it; `?profile=forget` drops the logins too |
-| `POST /api/browser/connect` · `DELETE /api/browser/connect` | Give the agent the browser's tools, or take them away |
-| `PUT /api/browser/config` · `GET /api/browser/suggest-password` | The login of the browser view; a suggestion |
-| `PUT /api/sessions/:id/browser` | Whether this chat may use it |
-
-See [The agent's browser](/guide/browser).
+| `GET /api/x/pithagoras-browser/state` | `{ running, unprotected, version, pages, uiPort, uiExposed, uiOutdated, cursor, connected, install, config, byDefault, chats, routines }`. `running` is that the browser answers on its debugging port (`BROWSER_CDP_URL`), with its `version` and the open tabs (`pages`, `{ title, url }`); `unprotected` that it runs with no password. `uiPort` is its own HTTPS port, `uiExposed` whether that answers other machines, `uiOutdated` a container made before the port was kept to one address. `cursor`: the agent's cursor is shown; `connected`: the chats have the browser's tools. `install` is `{ available, mode, image, container, pulling }`: `mode` `docker`, `local` (with `binary` and `headless`) or `external`, `container` `absent`, `stopped`, `running` or `unavailable`, and `pulling` `{ active, line, error? }`, how the download of the image goes. `config` is `{ user, hasPassword }`, never the password. `byDefault`, `chats` (`{ id, title, kind, allowed }`) and `routines` (`{ slug, name, allowed }`) say who has the browser's tools otherwise than the default (`portal.tools.exceptions`) |
+| `POST …/install` | Pulls the image, takes over the profile volume and a container of the portal's from before, makes and starts the container (or starts the machine's Chrome), and connects the chats. 409 while an install runs; 400 without a password, with `BROWSER_EXTERNAL=true`, and with what failed |
+| `DELETE …/install` | Removes the container (or stops the machine's Chrome) and disconnects the chats; `?profile=forget` deletes the profile volume too |
+| `POST …/start` · `…/stop` | Starts or stops the container, or the machine's Chrome. 400 with `BROWSER_EXTERNAL=true` |
+| `PUT …/config` | `{ user?, password?, port?, httpsPort? }` — for the container Install makes next; empty values are left as they were. The view uses a new password at once. Answers `{ user, hasPassword }` |
+| `GET …/suggest-password` | `{ password }`: 24 random hex characters |
+| `POST …/connect` · `DELETE …/connect` | Give the chats the browser's tools, or take them away. Idle chats are loaded again. Answers `{ connected }` |
+| `PUT …/cursor` | `{ on }` — whether the tools show their cursor, from the next action. Answers `{ cursor }`; 400 when `on` is not a boolean |
+| `…/ui/…` | The browser's own web UI, every method, and its websockets: proxied to its HTTPS port with its login added, the visitor's cookie and `Authorization` left out, and `frame-ancestors 'self'` added to its content security policy. 502 when the browser does not answer |
 
 ## Voice
 

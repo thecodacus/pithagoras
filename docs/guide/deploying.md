@@ -230,7 +230,7 @@ user of the realm can sign in, so use a realm that holds your people only.
 ## HTTPS
 
 Browsers offer notifications and installing the portal as an app only over
-HTTPS or on `localhost`, and the embedded browser needs it. Either put a proxy
+HTTPS or on `localhost`, and the [Browser](/guide/browser) extension's embedded browser needs it. Either put a proxy
 in front (`tailscale serve` is the shortest), or give the portal the
 certificate itself: mount the folder with `PORTAL_TLS_DIR` (it appears at
 `/certs`) and set `PORTAL_TLS_CERT` and `PORTAL_TLS_KEY` to the files in it.
@@ -248,12 +248,14 @@ mounted at `/workspaces`, and has to be set. Keep the portal's
 
 ## Installing add-ons
 
-To install Browser or Voice from Settings:
+To install Voice from Settings, or the agent's browser through the Browser and
+Docker extensions:
 
 - Keep the **Docker socket mount** and **host networking**.
 - For Voice, configure **NVIDIA Container Toolkit** on the host.
 
-Follow [Docker add-ons](/guide/add-ons) for installation, controls, storage and cleanup.
+Follow [Docker add-ons](/guide/add-ons) for Voice's installation, controls,
+storage and cleanup, and [The agent's browser](/guide/browser) for the browser's.
 
 ## The runner image
 
@@ -360,7 +362,7 @@ into place by hand without them is sent as it is.
 | --- | --- |
 | `/data` | Everything stateful — see below |
 | `/workspaces` | The directories pi works in, mounted from `WORKSPACES_DIR` |
-| `/var/run/docker.sock` | Managed Browser/Voice add-ons and `EXECUTOR=container` |
+| `/var/run/docker.sock` | The managed Voice add-on, the [Docker](/guide/docker) extension (which runs the [Browser](/guide/browser) extension's container) and `EXECUTOR=container` |
 
 The portal closes `/data` to every account but the one it runs as (mode `0700`)
 each time it starts, a folder made by hand or by an older version too:
@@ -373,7 +375,7 @@ Inside `/data`:
 | --- | --- |
 | `/data/portal.db` | Sessions, event log, channels, agents, routines, settings |
 | `/data/portal.sock` | Held while the portal runs, so a second one cannot start on this data |
-| `/data/backups` | The copies of the database made before an [upgrade](/guide/upgrading), and Media's store where it was set aside to go back to a version before Media was an extension (see [Upgrading](/guide/upgrading#going-back-to-a-version-before-it)) |
+| `/data/backups` | The copies of the database made before an [upgrade](/guide/upgrading), and Media's and Browser's folders where they were set aside to go back to a version before each was an extension (see [Upgrading](/guide/upgrading#going-back)) |
 | `/data/sessions/<id>` | Per-session working area, and pi's file of the chat's conversation: it is what the agent remembers. Do not clear it |
 | `/data/home` | `HOME` for pi — `~/.pi/agent`, its settings, skills and packages |
 | `/data/channels` | Installed third-party channel packages |
@@ -383,7 +385,8 @@ Inside `/data`:
 | `/data/images` | The pictures sent with each chat's messages, in a folder per chat. What the agent makes is in the chat's folder, under `generated-images`, and what the [Media page](/guide/media) makes is in Media's folder (below) |
 | `/data/extension-data/<package>` | What an extension keeps for itself, out of the agents' reach (see [where it keeps things](/guide/extension-ui#where-it-keeps-things)) |
 | `/data/extension-data/pithagoras-media` | [Media](/guide/media)'s: `media.db`, its galleries' lists and the settings of its endpoints, keys included; `images` and `videos`, the pictures and videos the Media page made itself, kept until you delete them; `image-thumbs` and `video-posters`, the small copies of pictures and the first-frame pictures of videos (those only when there is an `ffmpeg`), which can be deleted at any time and are made again; `video-copies`, the playable WebM copies made on request, with an `ffmpeg`, of clips a browser cannot play (see [Media](/guide/media#clips-a-browser-cannot-play)), each of which can be deleted at any time |
-| `/data/handoff` | What an upgrade left for an extension to take up, such as `handoff/media` until Media has taken it up (see [Upgrading](/guide/upgrading#media-is-an-extension)) |
+| `/data/extension-data/pithagoras-browser` | [Browser](/guide/browser)'s: `settings.json`, its settings with the password of the browser's web UI; `profile`, the profile of the machine's own Chrome where Browser runs one (the container's is the volume `pithagoras_browser-profile`) |
+| `/data/handoff` | What an upgrade left for an extension to take up, such as `handoff/media` until Media has taken it up and `handoff/browser` until Browser has (see [Upgrading](/guide/upgrading#media-is-an-extension)) |
 | `/data/bin` | CLIs you add yourself — on `PATH`, survives rebuilds |
 
 `HOME` deliberately points at the volume. Otherwise every image rebuild would

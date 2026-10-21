@@ -13,7 +13,7 @@ an attempt visible instead of silent.
 
 Output from a source carrying other people's words — a mail client, `curl`,
 `wget`, `ssh`, `git clone`, a package install, any MCP tool, and every page the
-agent's own [browser](/guide/browser) reads — is wrapped before the model sees it:
+agent's [browser](/guide/browser) reads — is wrapped before the model sees it:
 
 ```
 <<<untrusted:9f3ac1d20e4b7a61>>>
@@ -32,8 +32,8 @@ reaches the model to be reasoned about.
 
 A tool that declares that what it returns is outside content carries a shorter
 envelope: the same random closing id, with the warning above said once in the
-agent's instructions instead of on every result. The browser's tools declare it,
-as they read a page after nearly every click. The portal says the warning while
+agent's instructions instead of on every result. The [Browser](/guide/browser)
+extension's tools declare it, as they read a page after nearly every click. The portal says the warning while
 any such tool is on, whichever of the others are switched off, and through the
 `tools` tool while they are lazy.
 
@@ -51,8 +51,9 @@ server's tools declare nothing: what they return is wrapped unless the server
 is counted as your own. A tool named like a browser's (`browser_navigate`,
 `playwright_browser_click`) is held to the browser's rules by its name, whoever
 registered it and whether or not it declares anything: what it returns is
-wrapped, and a call is held to the conversation's switches for the browser, the
-list of sites for its `url`, and Audit.
+wrapped, and a call is held to the list of sites for its `url`, and Audit.
+Whether a conversation may drive a browser at all is its tools' switches, as for
+any tool.
 
 What is wrapped: mail and the web read through a command (`curl`, `wget`, `ssh`,
 `git clone` and the like), the tools of an MCP server, the browser, and a tool
@@ -204,12 +205,14 @@ label is refused there.
 
 ## The agent's browser is behind the login
 
-The portal proxies the agent's [browser](/guide/browser#embedded-or-in-a-tab) at
-`/browser-ui`, and what the browser holds (its logins, its open pages, whatever the
-agent is doing in it) is shown there live. The page and its websocket therefore sit
-behind the portal's login like every other route: without it they answer 401, and a
-websocket opened from another site is refused. The portal does not hand its own
-login cookie, or the visitor's `Authorization` header, on to the browser.
+The [Browser](/guide/browser#embedded-or-in-a-tab) extension serves the agent's
+browser through the portal at `/api/x/pithagoras-browser/ui/`, and what the browser
+holds (its logins, its open pages, whatever the agent is doing in it) is shown there
+live. The page and its websocket therefore sit behind the portal's login like every
+extension's route: without it they answer 401, and a websocket opened from another
+site is refused, which the portal checks before the extension is asked. Browser does
+not hand the portal's login cookie, or the visitor's `Authorization` header, on to
+the browser.
 
 The browser's own ports (`3010` and `3011`) are not the way in: they listen on the
 loopback address only, so that the one password in front of them is not all that

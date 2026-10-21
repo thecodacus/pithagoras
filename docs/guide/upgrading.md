@@ -271,6 +271,167 @@ The pictures and clips made on Media's page then are listed by neither: their
 files are kept, but no row names them. Settings changed on Media's page then
 give way to the older version's.
 
+## Browser is an extension
+
+The agent's browser is the `pithagoras-browser` extension now
+([The agent's browser](/guide/browser)), which runs its container through
+[Docker for extensions](/guide/docker), `pithagoras-docker`. Neither is
+installed by an upgrade, nor by a new portal: **a portal that used the browser
+keeps it by installing Browser** from Settings → Extensions → Discover → Comes
+with Pithagoras. The question before the install lists Docker, which Browser
+requires, and on yes installs it first. Until Browser is installed the agent has
+no browser tools and there is no Browser page; the browser itself goes on
+running, and nothing it kept is lost (see below).
+
+Once it is installed, what the portal did does the same, under new names and
+addresses:
+
+- **The page** is at `/x/pithagoras-browser/browser`, in the sidebar's
+  **Extensions** group, listed while a browser runs, while the agent has its
+  tools, or while a routine's runs have them otherwise than the default.
+  `/browser` is gone; a link to it needs the new address.
+- **Installing, starting, stopping and removing** the browser, and its password,
+  are Browser's page in Settings, under **Extension settings**, at
+  `/settings/x/pithagoras-browser`, where the Browser tab of **Settings →
+  Add-ons** was.
+- **The tools** keep their names, `browser_navigate` and the rest. They are the
+  extension's, in its group, `pithagoras-browser`, in the tool lists, where the
+  `browser` group was. A lazy mark on the group, or a name given to it, moves to
+  the new group; a tool switched on or off by its name, for a chat, a project,
+  an agent or a routine, stays as it was.
+- **Who may drive it** is the tools' switches alone. What a routine's own
+  **Browser** switch said, and the grant of each chat the portal had not yet
+  carried into the switches, is written into the tools' switches by the upgrade,
+  once (see below). A routine's `browser` field is gone, and so is
+  `PUT /api/sessions/:id/browser`.
+- **The allowlist** stays where it was, Settings → Guard → Sites the agent's
+  tools may reach.
+- **The routes moved:** what was `/api/browser…` is now under
+  `/api/x/pithagoras-browser/…` (`/state`, `/install`, `/start`, `/stop`,
+  `/config`, `/suggest-password`, `/connect` and `/cursor`, see
+  [Browser's routes](/reference/api#browser)), and the browser's own web UI,
+  which was at `/browser-ui/`, is at `/api/x/pithagoras-browser/ui/`. A script or
+  a bookmark that used the old addresses needs the new ones.
+- **Once:** a key chosen for "Show or hide the browser" under Settings →
+  Shortcuts is <kbd>B</kbd> again, and where the browser's panel beside a chat
+  had a place or a size set by hand, it starts at the place the panels have by
+  default, and keeps what it is given from then on.
+
+**The container and its profile** stay where they are. `pithagoras-browser` and
+its volume `pithagoras_browser-profile` stay through the upgrade, the container
+running (it was made `unless-stopped`) with its debugging port on this machine's
+loopback, and the logins in the volume. Browser takes them over by their names
+each time it starts, and never makes them anew: they are then listed under
+`pithagoras-browser` in Settings → Docker, and its page works as it did. Until it
+is installed they belong to no extension, and Settings → Docker does not show
+them. A container installed before its own port was kept to this machine still
+listens on every interface until it is removed and installed again, which the
+Browser page says.
+
+**What the portal kept of the browser is handed over**, not lost. The first start
+after the upgrade, which raises the schema to 8, moves it out of the portal into
+`handoff/browser` in the data folder, a folder only the portal can read:
+
+- the browser's six settings as they were stored (`settings.json`): its user, its
+  password (the one the container was made with, which the view still signs in
+  with), its two ports, whether the cursor is shown, and whether the agent was
+  connected;
+- the profile of the machine's own Chrome, `browser-profile/`, where the portal
+  ran one (from source, without Docker), moved by renaming it (`profile/`).
+
+It then deletes the six settings from its database. `browser_allowlist` stays,
+and so does every chat's, project's, agent's and routine's tool switch. A start on
+which the hand-off cannot be finished keeps the settings and the profile, says so
+in the log, and goes on with it on the next start.
+
+Browser takes it up when it starts: `extension-data/pithagoras-browser/` then
+holds `settings.json`, with each setting it did not have of its own, and
+`profile/`. The log says what it took up. With Browser not installed the
+hand-off waits, nothing of it lost, until it is.
+
+**Who may drive the browser** was a switch of its own beside the tools' switches
+on older portals: a routine's **Browser** switch, off unless switched on, and a
+grant for each chat that the portal carried into the tools' switches as the
+browser's tools were first seen. The upgrade writes both into the tools' switches,
+once:
+
+- each routine: the browser's tools its own tools do not name are switched on in
+  them where its **Browser** switch was on, and off where it was off, so its runs
+  have the browser they had;
+- the chats, where the portal was still waiting to carry the grants (it had chats,
+  and the browser's tools had not been seen since): the browser's tools are
+  switched off by default and on in each chat that had the grant, as that carrying
+  would have done. Where it had carried some, the rest are; where it had carried
+  them all, nothing is written.
+
+A Playwright MCP server's tools are not part of this: from this version they
+follow their switches as any tool does.
+
+From a checkout, `npm run build` installs Browser's own package, `playwright-core`,
+in `extensions/browser` the first time; it is no longer one of the server's.
+
+### Going back to a version before Browser was an extension
+
+The backup the upgrade made in `backups/` (`portal-v7-….db` from the version
+before) has the browser's settings and switches as they were. Put it back as
+under [Going back](#going-back). Before you stop the portal, remove Browser
+under Settings → Extensions: the older version has no such extension (Docker
+stays). The container and its volume need nothing: the older version runs them
+by their names, whoever took them over.
+
+Where the portal ran the machine's own Chrome, its profile goes back to where the
+older version looks for it. Then take what is left of the hand-off, and Browser's
+folder, out of the way of a later upgrade. In the data folder, with the portal
+stopped:
+
+```sh
+cd /path/to/data
+for from in extension-data/pithagoras-browser/profile \
+  extension-data/pithagoras-browser/handoff-browser/profile \
+  handoff/browser/profile handoff/.browser.*/profile handoff/.browser.*/.profile.partial; do
+  [ -d "$from" ] || continue
+  mkdir -p browser-profile
+  find "$from" -mindepth 1 -maxdepth 1 -exec mv {} browser-profile/ \;
+done
+rm -rf handoff/browser handoff/.browser.*
+mv extension-data/pithagoras-browser "backups/pithagoras-browser-$(date +%Y%m%d-%H%M%S)"
+```
+
+In a container, run the same with the portal container's own mounts:
+
+```sh
+docker stop pithagoras
+
+docker run --rm --volumes-from pithagoras alpine sh -c '
+cd /data
+for from in extension-data/pithagoras-browser/profile \
+  extension-data/pithagoras-browser/handoff-browser/profile \
+  handoff/browser/profile handoff/.browser.*/profile handoff/.browser.*/.profile.partial; do
+  [ -d "$from" ] || continue
+  mkdir -p browser-profile
+  find "$from" -mindepth 1 -maxdepth 1 -exec mv {} browser-profile/ \;
+done
+rm -rf handoff/browser handoff/.browser.*
+mv extension-data/pithagoras-browser "backups/pithagoras-browser-$(date +%Y%m%d-%H%M%S)"'
+```
+
+The profile is taken from wherever it is by then: from Browser's folder once
+Browser has taken the hand-off up, and from the hand-off in it,
+`handoff-browser`, while Browser has not finished reading it; from
+`handoff/browser` where Browser was never installed; and from the hidden folders
+beside it that a start which stopped half way leaves. Where there was no local
+Chrome, there is nothing to move, and where Browser was never installed, the
+last `mv` says there is no such file, which does no harm.
+
+What is left of the hand-off is removed: the backup has the settings. Left in
+place, `handoff/browser` would be taken by the next upgrade for one it had left
+already, and Browser would take up the old settings in place of what the older
+version has by then. Browser's folder is set aside in `backups/`, as
+`pithagoras-browser-<date>-<time>`, where nothing reads it; delete it once you are
+sure you do not want it. Left in place, Browser would start on it again after a
+later upgrade, and keep its own settings over the ones changed in the older
+version.
+
 ## Upgrading from the first release
 
 What the first start after an install of version 0.1.0, or of any build made before this one, shows and needs:
@@ -312,5 +473,6 @@ Run a release rather than `latest`, so that going back is changing one value. Ea
    - Built from source: `docker tag pithagoras-portal:previous pithagoras-portal:latest`, then `docker compose up -d --no-build portal`.
 
 Going back to a version from before Media was an extension also needs Media's files moved back, and what is left of its hand-off and its store out of the way, before step 3: see [Media is an extension](#going-back-to-a-version-before-it).
+Going back to a version from before Browser was an extension needs Browser removed first, and a local Chrome's profile moved back, and what is left of its hand-off and its folder out of the way, before step 3: see [Browser is an extension](#going-back-to-a-version-before-browser-was-an-extension).
 
 From this version on, an older version does not start on a newer database: it stops at the page described above, because a newer version may have renamed or dropped columns, not only added them. Versions before this one open it anyway and run against it, so put the backup back before you start one of them. The backup from `backups/` is the database as it was before the newer version changed it, which is why going back means putting it back.

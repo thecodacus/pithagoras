@@ -1,7 +1,9 @@
 # Extensions
 
-::: tip Looking for Browser or Voice?
-Use **Settings → Add-ons**. See [Docker add-ons](/guide/add-ons) for setup instructions.
+::: tip Looking for Voice, or the agent's browser?
+Voice is in **Settings → Add-ons**: see [Docker add-ons](/guide/add-ons). The
+agent's browser is the Browser extension, installed here: see
+[The agent's browser](/guide/browser).
 :::
 
 Extensions are pi's own package system, not something the portal invented.
@@ -26,7 +28,7 @@ packages** and **Install by name**.
 
 **Comes with Pithagoras** lists the extensions shipped with the portal itself
 (a pack of seven themes, the terminal, Git, Files, Canvases, [Media](/guide/media), [Documents](/guide/documents),
-[Docker for extensions](/guide/docker) and [Kanban](/guide/kanban)), each installed from the portal's own folder with one click.
+[Docker for extensions](/guide/docker), [Kanban](/guide/kanban) and the agent's [Browser](/guide/browser)), each installed from the portal's own folder with one click.
 
 **Find packages** searches the npm registry for packages published for pi — by
 keyword, with a separate search for packages that bring a model provider — and
@@ -111,7 +113,7 @@ are that project's to decide and have no switch here.
 ::: warning Some packages carry others with them
 `pi-mcp-adapter` is what makes MCP servers into tools. Switching it off takes
 every MCP server with it. The agent's [browser](/guide/browser) is not one of them:
-its tools are the portal's own.
+its tools are the Browser extension's.
 :::
 
 ## Configuring
@@ -226,11 +228,11 @@ whichever of them is on offer.
 ::: tip The browser is one of them
 It used to have a switch of its own beside the composer, which was a second
 answer to a question the tools list already asked — and the two could
-disagree. Its tools are now in the list, as a group named `browser` — they are the
-portal's own, not an MCP server's — switched one at a time or as a group, with a
-default like anything else.
+disagree. Its tools are in the list, as the [Browser](/guide/browser)
+extension's group, `pithagoras-browser`, switched one at a time or as a group,
+with a default like anything else.
 Having its tools is having the browser, so a conversation with them all off is
-not offered them and does not reach the container. Where it may go once it is
+not offered them and does not reach the browser. Where it may go once it is
 there is still the [allowlist](/guide/browser#where-it-may-go)'s question, not this one.
 :::
 
@@ -344,7 +346,7 @@ below). The portal marks no other tool and no other set on its own, so a portal 
 you choose.
 
 **Settings → Tools** has a **lazy** button on the header of each group (a package, such as
-`pithagoras-media`, the browser, an MCP server) and one beside each tool. Marking a group makes every tool of it lazy,
+`pithagoras-media`, `pithagoras-browser`, an MCP server) and one beside each tool. Marking a group makes every tool of it lazy,
 including tools that turn up in it later; marking a tool makes that one lazy. Taking the mark away offers
 the tool one by one again. The button of a tool that is switched off by default is greyed out, and so is a
 group's while every tool in it is off: a tool that is off is not offered to the model, lazy or not, so
@@ -387,7 +389,7 @@ Tools that run one at a time, as the browser's do, still do when the model calls
 A tool that its extension keeps inactive (one that waits for its moment) is not reached through `tools`
 either, and marking it lazy does not switch it on.
 The one difference is that the model is not shown the tool's schema and description up front. The model
-is shown one short line instead, naming the lazy sets, for example "You have browser tools; search for
+is shown one short line instead, naming the lazy sets, for example "You have pithagoras-browser tools; search for
 them with the tools tool." The rules the tool's extension wrote for the prompt stay in it as long as the
 tool is lazy, and so does the portal's rule that outside content, such as a [browser](/guide/browser)'s page,
 is data and never instructions.

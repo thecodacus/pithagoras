@@ -104,8 +104,14 @@ The defaults:
 | `/data/portal.db` | no access | the portal's database and settings |
 | `/data/home` | no access | the portal's `HOME`: pi's `auth.json`, SSH keys, packages |
 | `/data/sessions` | no access | every chat's transcript |
-| `/data/browser-profile` | no access | the browser's cookies and logins |
 | `/data/backups`, `/certs` | no access | database backups, the TLS key |
+
+What an extension keeps for itself, in `/data/extension-data`, is made for the
+portal alone, closed to the agents: the [Browser](/guide/browser) extension's
+local Chrome profile, with the browser's cookies and logins, is there. A policy
+saved before Browser was an extension still has a `/data/browser-profile` rule,
+for a folder the upgrade moved; it is said to be not there yet, does nothing,
+and can be taken out.
 
 **Save and apply** sets owners and permissions at once. Under a read or write
 rule it changes every file below it, which can take a while in a big workspace.

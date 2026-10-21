@@ -83,7 +83,6 @@ default**:
   a drop-down list does the same.
 - **Settings.** The side navigation comes in line by line, the page you pick
   slides in, and a switch's knob bounces.
-- **The Browser page.** Its screen switches on like an old tube.
 - **Voice mode.** The orb comes up out of a swell of light, and the windows that
   open on its stage overshoot into place.
 - **Pictures being made.** While the agent has a picture made or changed, a soft
@@ -97,6 +96,10 @@ will be. Nothing moves on a keystroke or as the agent's words stream in.
 **Settings → This browser → Animations** switches all of this off. It is kept in
 this browser, like the theme, so a phone and a laptop can differ. Off, the portal
 is as it was before the flourishes were added.
+
+An extension's own animations are its own: the [Browser](/guide/browser)
+extension's screen, which switches on like an old tube, plays whatever this
+switch says, unless the system asks for less motion.
 
 If your system asks for **reduced motion** (the *prefers-reduced-motion* setting),
 the flourishes do not play, whatever the switch says, and the portal's own

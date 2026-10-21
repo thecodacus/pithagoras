@@ -1,6 +1,6 @@
 # Docker add-ons
 
-Pithagoras can install and manage **Browser** and **Voice** from **Settings → Add-ons**. Each runs in its own container on the same Docker host as Pithagoras.
+Pithagoras can install and manage **Voice** from **Settings → Add-ons**. It runs in its own container on the same Docker host as Pithagoras. The agent's browser is the [Browser](/guide/browser) extension, which runs its container through the [Docker](/guide/docker) extension and needs the Docker access below as well.
 
 The portal talks directly to the host Docker API; no Docker CLI inside the portal and no Docker-in-Docker daemon are required.
 
@@ -10,7 +10,7 @@ The **Subagents** and **Memory** tabs beside them switch on the [opt-in features
 
 ## Choose your next step
 
-- **First installation:** [Docker access](#docker-access) → [GPU access](#gpu-access-for-voice) → install [Browser](#install-browser) or [Voice](#install-voice).
+- **First installation:** [Docker access](#docker-access) → [GPU access](#gpu-access-for-voice) → install [Voice](#install-voice), or the [browser](/guide/browser#installing-it).
 - **Already installed:** jump to [controls](#voice-controls-and-memory), [troubleshooting](#troubleshooting), or [updates and removal](#updates-and-removal).
 
 ## Docker access
@@ -79,7 +79,7 @@ The socket grants control of the Docker host, including creating containers and 
 
 ## GPU access for Voice
 
-**Browser users can skip this section.** **Speech synthesis** (spoken replies) requires:
+**The agent's browser needs none of this.** **Speech synthesis** (spoken replies) requires:
 
 - A compatible NVIDIA GPU and working host driver.
 - NVIDIA Container Toolkit configured for Docker.
@@ -119,59 +119,6 @@ In a VM or LXC, GPU access must already work inside the environment running Dock
 :::
 
 The first installation needs internet access for container registries, Ubuntu packages, GitHub sources, and Hugging Face models. No Hugging Face token field is needed for the public models used by this installer.
-
-## Install Browser
-
-1. Open **Settings → Add-ons → Browser**.
-2. Enter a password for the browser web UI, or use the password generator. This is separate from the portal login password.
-3. Click **Install** and wait for the image download and container startup.
-4. Open the **Browser** page and verify the live browser appears. Log into sites there when needed; its profile persists.
-5. Ask a session to use the browser.
-
-::: details Browser container, storage and ports
-| Item | Value |
-| --- | --- |
-| Image | `lscr.io/linuxserver/chromium:latest` |
-| Container | `pithagoras-browser` |
-| Profile volume | `pithagoras_browser-profile` (override: `BROWSER_VOLUME`) |
-| Network | Host |
-| Shared memory | 1 GiB |
-| Chromium security option | `seccomp=unconfined` |
-| HTTP / HTTPS | `3010` / `3011`, on `127.0.0.1` only (`BROWSER_BIND`) |
-| Debugging port | `9222`, on `127.0.0.1` only |
-
-Avoid port conflicts. The web page of the browser is reached through the portal's
-`/browser-ui`, or from the host itself; see [the browser's own port](/guide/browser#the-browser-s-own-port)
-for other machines.
-:::
-
-Environment variables on the portal adjust it; a value saved in Settings wins over
-the variable:
-
-| Variable | Default | Meaning |
-| --- | --- | --- |
-| `BROWSER_USER` / `BROWSER_PASSWORD` | `agent` / — | Login for the browser web UI |
-| `BROWSER_PORT` / `BROWSER_HTTPS_PORT` | `3010` / `3011` | Its HTTP and HTTPS ports |
-| `BROWSER_BIND` | `127.0.0.1` | The IPv4 address those ports listen on; the portal reaches them on `127.0.0.1` whatever it is. `0.0.0.0` opens them to every machine that can reach this one. The shipped Compose files and the Portainer stack pass it on from `.env`. Applies when the browser is installed, so remove and install it again after changing it |
-| `BROWSER_STREAM_PORT` | `8082` | The port the embedded live view reads frames from |
-| `BROWSER_HOST` | `127.0.0.1` | Where the portal reaches the browser |
-| `BROWSER_CDP_URL` | `http://127.0.0.1:9222` | The debugging endpoint the agent's browser tools use |
-| `BROWSER_VOLUME` | `pithagoras_browser-profile` | The profile volume |
-| `BROWSER_EXTERNAL` | — | `true` for a browser you run yourself (see below) |
-| `BROWSER_BINARY` | — | Without a Docker socket — typically the portal run from source — the portal starts a Chrome or Chromium already on the machine, and this names its binary; the profile is kept in `$DATA_DIR/browser-profile` |
-
-For embedded browser access, serve Pithagoras over HTTPS and follow the certificate setup in the [browser guide](/guide/browser). Voice microphone access also requires HTTPS, except on localhost.
-
-### Browser controls
-
-| Action | Result |
-| --- | --- |
-| **Stop** | Stops the browser container; keeps its profile and logins. |
-| **Start** | Starts the installed container with that profile. |
-| **Remove** | Deletes the container; keeps the profile volume. |
-| **Install** after removal | Recreates the container and reuses a retained profile. |
-
-Browser uses Docker's `unless-stopped` restart policy. If `BROWSER_EXTERNAL=true`, lifecycle management belongs to your external deployment; portal install/start/stop/remove actions are disabled by the server.
 
 ## Install Voice
 
@@ -283,7 +230,7 @@ Voice works with either bridge or host networking for the portal. Set
 `PORTAL_CONTAINER_NAME` to its Docker container name if you use a custom
 hostname; the supplied Compose files set this explicitly. The add-on shares
 that container’s network namespace, so `127.0.0.1` reaches the same services in
-both containers. The browser add-on has its own networking requirements.
+both containers. The browser's container has its own networking requirements (see [The agent's browser](/guide/browser#the-container-its-storage-and-ports)).
 
 After upgrading, a running managed voice container migrates automatically at
 portal startup or within 30 seconds. This replaces only the managed voice
@@ -363,10 +310,9 @@ Add-on containers are managed separately; follow the recreate steps below.
 
 ```sh
 docker ps -a --filter name=pithagoras
-docker logs --tail 100 pithagoras-browser
 docker logs --tail 100 pithagoras-voice
 nvidia-smi
-docker volume inspect pithagoras_browser-profile pithagoras_voice-models
+docker volume inspect pithagoras_voice-models
 ```
 
 Do not run the old Python Breeze/Whisper Compose overlay or systemd units alongside the managed installer unless you deliberately maintain separate endpoints and enough resources. They are alternative deployments, not prerequisites; duplicate services can consume VRAM even after you stop the managed add-on.
@@ -374,14 +320,6 @@ Do not run the old Python Breeze/Whisper Compose overlay or systemd units alongs
 ## Updates and removal
 
 Rebuilding the portal does not recreate its sibling add-on containers.
-
-### Update Browser
-
-Browser installation reuses an existing local image; to fetch a newer image, pull it explicitly, then **Remove → Install** in Settings:
-
-```sh
-docker pull lscr.io/linuxserver/chromium:latest
-```
 
 ### Recreate Voice after a portal update
 
@@ -403,19 +341,6 @@ Afterwards the page shows **Not installed**, as on a portal that never installed
 ::: tip By hand
 Without the button, `docker rm -f pithagoras-voice` removes the container, and `docker volume rm pithagoras_voice-models` the downloads, **only after the container is removed**. The settings are then yours to put right.
 :::
-
-### Delete the browser profile
-
-::: danger Delete saved logins permanently
-To erase browser logins, first click **Remove** in Settings, then delete the profile volume on the Docker host (substitute your configured `BROWSER_VOLUME` if different):
-
-```sh
-# Destructive: deletes the browser profile and saved logins.
-docker volume rm pithagoras_browser-profile
-```
-:::
-
-The current Settings UI offers **Remove**, which preserves the profile; it does not expose the separate profile-deletion API as a button.
 
 ### Data that remains
 

@@ -68,7 +68,7 @@ an empty field inherits, and clearing one hands the setting back.
 | `PORTAL_FETCH_HEADERS_TIMEOUT_MS` | `1800000` | A ceiling of quiet, not of work: how long, in ms, any fetch the portal's process makes — pi's MCP tool calls among them — may wait for an answer's first byte before it is cut off; Node's own fetch cuts one off after five quiet minutes. The default outlasts Understory's own model wait, so a run allowed to think half an hour is not cut off mid-thought by the client waiting on it. `0` sets no wait. |
 | `PORTAL_FETCH_BODY_TIMEOUT_MS` | `1800000` | How long, in ms, a streaming answer to such a fetch may go quiet between its bytes before it is cut off; an answer that keeps moving is never cut by these waits. `0` turns the wait off. |
 | `NPM_REGISTRY_URL` | `https://registry.npmjs.org` | Registry the package catalogue in Settings → Extensions searches. |
-| `DOCKER_SOCKET` | `/var/run/docker.sock` | The Docker socket the managed add-ons use. |
+| `DOCKER_SOCKET` | `/var/run/docker.sock` | The Docker socket the managed add-ons and the [Docker](/guide/docker) extension use; Docker runs the [Browser](/guide/browser) extension's container. |
 | `PORTAL_CONTAINER_NAME` | — (Compose: `pithagoras`) | The portal's own container name; managed voice joins its network, the container executor finds its mounts through it, and the database repair steps shown by the upgrade page use it. |
 | `PORTAL_TLS_CERT` / `PORTAL_TLS_KEY` | — | Serve over HTTPS when both name a file. |
 | `PORTAL_UPDATE_CHECK` | — | `off` stops the portal from fetching `origin/main` by itself, at the start and every six hours, to see whether there are new commits; the Update button in Settings → About still asks when it is pressed. |
@@ -83,7 +83,7 @@ an empty field inherits, and clearing one hands the setting back.
 | `VOICE_VRAM_RESERVE_MIB` | — | GPU memory in MiB the voice installer keeps free on its card for something else. |
 | `NVIDIA_SMI` | `nvidia-smi` | The binary the voice installer reads the GPUs with, for a native portal where it is not on `PATH`. |
 
-The Browser add-on's `BROWSER_*` variables are in [Docker add-ons](/guide/add-ons), and the `VOICE_*` ones in [Voice control](/guide/voice).
+The `BROWSER_*` variables are read by the Browser extension, and are in [The agent's browser](/guide/browser#the-container-its-storage-and-ports); the `VOICE_*` ones are in [Voice control](/guide/voice).
 
 Settings that are kept in the browser rather than on the server — theme, language,
 notifications, confirmations, shortcuts — are in [The interface](/guide/interface).

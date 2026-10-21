@@ -488,9 +488,9 @@ behaves beside the portal's own windows:
   `useAutoOpen`, for a card `opensFor` says it is for, and for a shortcut.
 - `opensFor(call, chat)`: whether the card of a call in voice mode opens this
   window when it is tapped. It is asked for the calls the portal's own windows
-  are not for: a page's card opens the browser, and a file's or a shell call's,
-  which have none of the portal's, the window that says it is for them (Files',
-  the terminal's). `chat.workspace` tells a path in the chat's folder from one
+  are not for: a file's, a shell call's or a page's, which have none of the
+  portal's, open the window that says it is for them (Files', the terminal's,
+  Browser's). `chat.workspace` tells a path in the chat's folder from one
   elsewhere.
 - `describe(call, chat)`: what the card of such a call says, `{ label, detail? }`,
   in place of the portal's words for a tool it does not know ("Using canvas
@@ -899,7 +899,10 @@ it. A name is small letters, digits, dots, dashes and underscores, from a
 letter or a digit, at most 64. [Media](/guide/media) takes `media`, which
 schema 7 left when Media became an extension: its rows, its settings, the
 pictures and clips of its page and the copies made of them
-(`extensions/media/src/server/handoff.ts` reads it).
+(`extensions/media/src/server/handoff.ts` reads it). [Browser](/guide/browser)
+takes `browser`, which schema 8 left: the browser's settings, its password among
+them, and the profile of the machine's own Chrome
+(`extensions/browser/src/server/handoff.ts`).
 
 ### A chat's folder
 
@@ -1333,10 +1336,9 @@ unless its server is counted as your own in **Settings → Guard**. A tool named
 like a browser's (`browser` at the start or after `_` or `.`, and followed by
 `_` or `.`: `browser_navigate`, `playwright_browser_click`) is held to the
 browser's rules by its name, a server's or an extension's, declared or not:
-what it returns is outside content, and a call is held to the conversation's
-switches for the browser, the list of sites for its `url`, and Audit. The
-portal's own browser tools declare `outside` and `reaches: ["url"]`, and have
-such names too.
+what it returns is outside content, and a call is held to the list of sites for
+its `url`, and Audit. The [Browser](/guide/browser) extension's tools declare
+`outside` and `reaches: ["url"]`, and have such names too.
 
 #### Tools that follow the settings
 
@@ -1375,10 +1377,9 @@ first, each `{ id, title, kind }` and each the opposite of `byDefault`; and
 `routines`, those whose own switches give their runs another answer than a
 routine that sets nothing would have in the same place, by name, each
 `{ slug, name, allowed }` with the answer its runs have. A routine that sets
-nothing has the browser's tools off until its **Browser** switch is on, and
-every other tool as a chat in its place has it. The switches
-themselves stay in Settings → Tools, beside each chat's composer and on each
-routine's page.
+nothing has each tool as a chat in its place has it. The switches themselves
+stay in Settings → Tools, beside each chat's composer and on each routine's
+page. Browser's page says who may drive the browser this way.
 
 ```js
 portal.router.get("/who", (_req, res) => res.json(portal.tools.exceptions(["page_open", "page_read"])));
@@ -1574,13 +1575,13 @@ list of installed extensions. The portal's own are:
 | Name | `open` takes |
 | --- | --- |
 | `agents` | `{ id }`: a subagent to show |
-| `browser` | |
 
 Extensions a fresh portal installs go by names too. Files is `files` and takes
 `{ path }`, a file in the chat's folder to show. The terminal is `terminal`
 and takes `{ callId }`, a command of the agent's to bring into view, or
 `{ job }`, a background job to follow. Git is `git`, and Canvases `canvas`;
-neither takes anything.
+neither takes anything. [Browser](/guide/browser), which comes with the portal
+and is installed by hand, is `browser`, and takes nothing.
 
 The `title` of a panel, a voice window or a page is drawn in the page's
 language as your own `t` would say it: give its German in `locale.add`, and
@@ -1823,10 +1824,10 @@ portal can be removed without a spec of the portal's failing.
 
 ## What the portal's own apps use
 
-The terminal, Git, Files, Canvases and Media are extensions
+The terminal, Git, Files, Canvases, Media and Browser are extensions
 (`extensions/terminal`, `extensions/git`, `extensions/files`,
-`extensions/canvas`, `extensions/media`). This is what each of them takes from
-the portal, and what gives the same to an extension:
+`extensions/canvas`, `extensions/media`, `extensions/browser`). This is what
+each of them takes from the portal, and what gives the same to an extension:
 
 | The portal's app uses | An extension has |
 | --- | --- |
@@ -1872,6 +1873,12 @@ the portal, and what gives the same to an extension:
 | Its page in Settings with its own name and mark, groups that fold, a question before what was typed is lost, and links to it from its page | `title` and `icon` on its `settings.page`, `ui.DetailsGroup`, `ui.useUnsavedDraft`, `portal.navigate("/settings/x/<package>")` |
 | A window in voice mode that can fill the stage, with a page in it that is not loaded again each time | `maximizable`, `keepLoaded` and `restore()` on its `voice.window` |
 | A page in the sidebar only once its service is set up | `useShown` on its `nav.page` |
+| A container of its own, and the one the portal made before it was an extension taken over by its name | `requires` with `pithagoras-docker`, `extensions.use`, `containers.adopt` and `volumes.adopt` |
+| Another program's web page through the portal, behind its login, with its websockets | `portal.router`, `http.upgrade` |
+| Another program's screen beside a chat, black from edge to edge, with a Fullscreen in its head | `bleed`, `actions` and `panel.fullscreen()` on its `chat.panel` |
+| A button in voice mode only while there is something to see | `useButton` on its `voice.window` |
+| Who may use its tools, on its own page | `tools.exceptions(names)` |
+| Letting go of what it kept for a chat when a routine's run is over | `chats.on("finished")` |
 | A slash command | `pi.registerCommand` in the pi extension, and the channel for what it does in the page |
 | The colours of everything | [A theme](#themes) |
 

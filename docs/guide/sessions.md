@@ -320,11 +320,12 @@ A status that names one of the chat's slash commands runs it when clicked.
 ## Sidebar and the sessions page
 
 The sidebar opens with New, then the places — Sessions, Projects, Agents,
-Routines and [Audit](#audit), with Browser and Memory added while the
-[browser](/guide/browser) is installed or [Understory](/guide/features#memory-understory)
-holds the agent's memory, and the pages of extensions in a group of their own,
-**Extensions**, before Audit ([Media](/guide/media)'s while an image endpoint or a
-video endpoint is set up) — then **Pinned**, then **Recents**. The button at its
+Routines and [Audit](#audit), with Memory added while
+[Understory](/guide/features#memory-understory) holds the agent's memory, and the
+pages of extensions in a group of their own, **Extensions**, before Audit
+([Media](/guide/media)'s while an image endpoint or a video endpoint is set up,
+[Browser](/guide/browser)'s while there is a browser) — then **Pinned**, then
+**Recents**. The button at its
 top edge folds it to a rail of icons. A chat's full path is not drawn in the list: the folders (below) name where it works, and the Files panel shows the path on request. Recents is capped at twelve; anything past that is reachable from
 the Sessions page, which lists everything with a search of its own.
 

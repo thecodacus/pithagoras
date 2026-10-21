@@ -89,6 +89,11 @@ saved as it is made.
 switches the agent's procedures, see [Skills](/guide/skills). **MCP** manages MCP servers, see
 [MCP servers](/guide/mcp).
 
+**Browser**, under **Extension settings** while the [Browser](/guide/browser)
+extension is installed, installs, starts, stops and removes the agent's browser,
+with the password of its web UI and how the download of its image goes; see
+[Installing it](/guide/browser#installing-it).
+
 **Media**, under **Extension settings**, is the page of the [Media](/guide/media)
 extension. It has two sections, **Image model** and **Video model**. Each has its **switches** at the top, always in view,
 and under them a heading with a line under it, which opens and closes the section with a click; what opens is directly
@@ -244,9 +249,10 @@ and the settings, after asking. Wrong passwords here are counted like those of
 
 ## Add-ons
 
-Installs the optional parts of the portal itself: Browser, Voice, Subagents and
-Memory, see [Docker add-ons](/guide/add-ons) and
-[Opt-in features](/guide/features).
+Installs the optional parts of the portal itself: Voice, Subagents and Memory,
+see [Docker add-ons](/guide/add-ons) and [Opt-in features](/guide/features). The
+agent's browser is an extension, with its own page under **Extension settings**:
+see [The agent's browser](/guide/browser).
 
 ## Logs
 

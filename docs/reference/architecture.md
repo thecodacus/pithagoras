@@ -82,13 +82,13 @@ stray file would attach the wrong conversation.
 | `agents` | Each agent's name, home, avatar, voice and heartbeat schedule |
 | `activity` | The notes an agent's heartbeat left, and whether they have been read |
 | `channels` | Configured channels and their credentials, and the agent each talks as |
-| `routines` | Scheduled instructions: schedule or one-off time, where they run and report, the guard and browser switches |
+| `routines` | Scheduled instructions: schedule or one-off time, where they run and report, the guard switch and their own tool switches |
 | `people` | Who the agent has met, and their role |
 | `questions`, `grants` | A colleague's requests for approval, and the single-use permissions approving one gives |
 | `notes` | What a person told the agent about a conversation, until it is delivered |
 | `tool_rules` | The standing permissions of [Allowed anyway](/people/rules) |
 | `audit` | The guard's decisions, trimmed to the latest 2,000 |
-| `settings` | Portal-wide overrides, and the small things the portal remembers (the tools it has seen, the browser switch, the model's context windows) |
+| `settings` | Portal-wide overrides, and the small things the portal remembers (the tools it has seen, the model's context windows) |
 | `project_tools` | A project's tool switches |
 | `open_subagents` | The subagents still running in a session |
 | `voice_presets` | The saved voices |
@@ -103,18 +103,18 @@ transaction, showing an Upgrading page meanwhile. See
 
 ## Beside the run
 
-Not everything goes through pi. The agent's own browser tools (`browser/tools.ts`)
-drive the Chromium over its debugging port from inside the portal, not as an MCP
-server, and an extension's server half registers its tools the same way, in the
-portal's process, as [Media](/guide/media)'s does its picture tools
-(`generate_image`, `edit_image`, `show_image`) and video tools
-(`generate_video`, `show_video`).
+Not everything goes through pi. An extension's server half registers its tools
+in the portal's process, not as an MCP server: [Media](/guide/media)'s picture
+tools (`generate_image`, `edit_image`, `show_image`) and video tools
+(`generate_video`, `show_video`), and the [Browser](/guide/browser) extension's
+tools, which drive a Chromium over its debugging port.
 Files, Git and the terminal are extensions too, whose server halves work in the
 session's folder through what the portal gives every extension
 ([Building an extension](/guide/extension-ui)): `portal.files`
 (`core/server/src/workspace-files.ts`) and `portal.git` (`git.ts`); the
-terminal runs a pty for each terminal itself. Managed add-ons — Browser, Voice, Understory — are Docker containers
-the portal starts through the socket; voice shares the portal's network
+terminal runs a pty for each terminal itself. Managed add-ons — Voice, Understory — are Docker containers
+the portal starts through the socket, and Browser's container is run through the
+[Docker](/guide/docker) extension, which every extension that runs containers builds on; voice shares the portal's network
 namespace so its services need no published ports. Opt-in pi extensions the
 portal ships (`extensions/`, the subagent tool) are installed as local pi
 packages only when switched on. The server holds one socket in its data
