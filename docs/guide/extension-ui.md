@@ -1515,8 +1515,9 @@ The key is the person's: send it to that model's own address and nowhere else.
 Where the provider's key is a command pi runs (`!…`), `keyFromCommand` is true:
 `key` is what the command gave this time, fit for a request now
 and not for keeping where it outlives the request, such as a container's
-environment. The portal's own Understory asks `of` and `endpoint` in "the
-chat's" mode, and does not write a command's key into its container.
+environment. [Understory](/guide/features#memory-understory) asks `of` and
+`endpoint` in "the chat's" mode, and does not write a command's key into its
+container.
 
 ### MCP servers
 
@@ -1564,8 +1565,8 @@ await portal.mcp.set("notes", undefined);
   digits, dots, dashes and underscores, and for an entry the adapter would not
   take: one with none, or more than one, of `url`, `command` and `socket`.
 
-The portal's own Understory writes its server through the same function when
-it is switched on in Settings → Add-ons → Memory.
+Understory (`extensions/understory`) writes its server so, trusted, when it is
+switched on from its page in Settings.
 
 ### The agent's memory
 
@@ -1602,9 +1603,8 @@ portal.memory.hold({
   `memory: { held, by }`, and an agent's setup (`GET /api/agents/:id/setup`)
   `memory: "extension"` with `by`.
 
-The portal's own Understory holds the memory through the same function, and
-asks first, as the portal starts: for now an extension that asks is refused,
-and the log says so.
+Understory (`extensions/understory`) holds the memory so, while its server is
+on.
 
 ### Building on another extension
 

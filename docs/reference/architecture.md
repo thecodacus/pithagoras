@@ -112,10 +112,10 @@ Files, Git and the terminal are extensions too, whose server halves work in the
 session's folder through what the portal gives every extension
 ([Building an extension](/guide/extension-ui)): `portal.files`
 (`core/server/src/workspace-files.ts`) and `portal.git` (`git.ts`); the
-terminal runs a pty for each terminal itself. Understory, a managed add-on, is a Docker container
-the portal starts through the socket, and the containers of Browser and of the voice service (Voice) are run through the
-[Docker](/guide/docker) extension, which every extension that runs containers builds on; the voice container shares the portal's network
-namespace so its services need no published ports. Opt-in pi extensions the
+terminal runs a pty for each terminal itself. The containers of Browser, of the voice service (Voice) and of
+Understory, the agent's memory, are run through the
+[Docker](/guide/docker) extension, which every extension that runs containers builds on; the voice and Understory containers share the
+portal's network namespace so their services need no published ports. Opt-in pi extensions the
 portal ships (`extensions/`, the subagent tool) are installed as local pi
 packages only when switched on. The server holds one socket in its data
 directory so only one portal runs on it.

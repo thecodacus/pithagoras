@@ -16,12 +16,13 @@ services:
       # Workspaces pi works in. Read-write: the whole point is that it edits code,
       # so there is no default: a path nobody chose would be made and mounted empty.
       - ${WORKSPACES_DIR:?Set WORKSPACES_DIR to the folder on this host that holds your repositories}:/workspaces
-      # Required for the Docker extension (which runs the containers of the Browser
-      # and Voice extensions), Understory and EXECUTOR=container.
+      # Required for the Docker extension (which runs the containers of the Browser,
+      # Voice and Understory extensions) and EXECUTOR=container.
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
-      # Must match container_name: the voice service and Understory share this network
-      # namespace, and the container executor translates its mounts to host paths through it.
+      # Must match container_name: the containers of the Voice and Understory extensions
+      # share this network namespace, and the container executor translates its mounts
+      # to host paths through it.
       PORTAL_CONTAINER_NAME: pithagoras
       # With host networking the portal binds PORT directly on the host.
       PORT: ${PORT:-4100}
@@ -89,8 +90,11 @@ services:
       # that can reach this one. Read when the browser is installed. See
       # docs/guide/browser.md.
       BROWSER_BIND: ${BROWSER_BIND:-}
-      # How long, in ms, the portal waits on Understory's model before giving up and saying so —
-      # see docs/reference/configuration.md. Left empty, its 30-minute defaults stand.
+      # The Understory extension: the loopback port its model server listens on for
+      # Understory in the chat's model mode (left empty, 3801), and how long, in ms, it
+      # waits on Understory's model before giving up and saying so — see
+      # docs/reference/configuration.md. Left empty, its 30-minute defaults stand.
+      UNDERSTORY_LLM_PORT: ${UNDERSTORY_LLM_PORT:-}
       UNDERSTORY_LLM_HEADERS_TIMEOUT_MS: ${UNDERSTORY_LLM_HEADERS_TIMEOUT_MS:-}
       UNDERSTORY_LLM_BODY_TIMEOUT_MS: ${UNDERSTORY_LLM_BODY_TIMEOUT_MS:-}
 

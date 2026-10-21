@@ -259,7 +259,7 @@ inside the folder, by its path relative to it.
 | `DELETE /api/providers/:id` | Remove one |
 | `GET /api/models` | Every model pi can use now — the ones with a key |
 | `GET /api/packages/catalog?q=&topic=` | Packages published for pi; `topic=provider` narrows to provider packages |
-| `GET /api/features/flags` | Only which opt-in features are on — for the sidebar and menus: `{ subagent: { enabled }, understory: { enabled }, memory: { held, by } }`. `memory` says whether something holds the agent's memory in place of MEMORY.md, and `by` its name (`null` while nothing does): an extension ([`portal.memory.hold`](/guide/extension-ui#the-agent-s-memory)), or the portal's own Understory |
+| `GET /api/features/flags` | Only which opt-in features are on — for the menus and the Projects page: `{ subagent: { enabled }, memory: { held, by } }`. `memory` says whether an extension holds the agent's memory in place of MEMORY.md ([`portal.memory.hold`](/guide/extension-ui#the-agent-s-memory)), and `by` its name (`null` while none does) |
 
 See [Models and providers](/guide/models).
 
@@ -377,33 +377,51 @@ overrides; `defaults` is what an unset field falls back to. An empty string in
 
 | | |
 | --- | --- |
-| `GET /api/features` | `{ subagent: { available, installed, enabled, source, mode, maxParallel }, understory: { enabled, url, tokenSet, adapterInstalled, reachable, managed: { available, image, container, pulling, url, config, providers } } }` — `config` never holds a key |
-| `GET /api/features/subagent` | `{ subagent }` — the subagent tool's state alone |
+| `GET /api/features/subagent` | `{ subagent: { available, installed, enabled, source, mode, maxParallel } }` — the subagent tool's state |
 | `PUT /api/features/subagent` | `{ enabled?, mode?: "interrupt" \| "background", maxParallel?: 1–16, model?: "auto" \| "provider/model" }` — installs or removes the bundled subagent tool, writes `subagentMode`, `subagentMaxParallel` and `subagentModel`; reloads idle open sessions |
 | `GET /api/sessions/:id/subagent-model` | `{ model, default }` — what this chat's subagents run on: its own choice (`null` follows `default`) |
 | `PUT /api/sessions/:id/subagent-model` | `{ model: null \| "auto" \| "provider/model" }` |
-| `PUT /api/features/understory` | `{ enabled, url? }` — writes or removes the `understory` MCP server (installing `pi-mcp-adapter` if needed); reloads idle open sessions |
-| `PUT /api/features/understory/config` | `{ llm: { source: "auto" } \| { source: "provider", provider, model } \| { source: "custom", baseUrl, model, format, apiKey? }, dreamInterval, dreamAt }` — `auto` (the default) thinks with the model of the chat asking — `dreamAt` ("03:00") tidies up once a day at that time and wins over `dreamInterval` — the model and tidying up of the portal's own Understory; a running one is made again with them. `apiKey` left out keeps the saved one |
-| `POST /api/features/understory/install` | Pull, create and start the portal's own Understory, and make it the agent's memory |
-| `POST /api/features/understory/start` · `/stop` | Its container |
-| `POST /api/features/understory/dream` | Tidy the memory up now; answers when the pass is done, with what it did |
-| `DELETE /api/features/understory/install` | Remove it (the memory stays in its volume; `?memory=forget` deletes it too), and switch it off as the memory |
-| `GET /api/memory/tree` | Understory's memory bundle as a tree of folders and notes — read through the portal while Understory is on (409 when it is not) |
-| `GET /api/memory/concept?path=` | One note: `{ path, frontmatter, body }`; 404 when it is not there |
-| `GET /api/memory/search?q=` | Notes matching, best first |
-| `GET /api/memory/log` | What changed, newest first |
-| `GET /api/memory/graph` | `{ nodes: [{ path, title, type, links }], edges: [{ source, target }] }` |
-| `GET /api/memory/traces` | The paths Understory's own queries and changes took |
-| `GET /api/memory/trace?id=` | One of those runs with its steps: `{ id, kind, input, notation, outcome, steps: [{ seq, tool, summary, paths, write }] }`, `paths` being the full paths of the notes a step read, wrote or found; 404 when it is not there |
-| `GET /api/memory/validate` | `{ conformant, conceptCount, directoryCount, issues }` |
-| `GET /api/memory/health` | `{ writable, health? }` — whether notes can be changed here (the portal's own Understory, running), and what its checks find: `{ healthy, orphans, brokenLinks, issues }` |
-| `PUT /api/memory/concept` | `{ path, frontmatter, body }` — write a note through Understory's own write path (its index and log follow); `frontmatter` needs `type` and `title`. Answers `{ concept, health }`; 409 unless writable |
-| `DELETE /api/memory/concept?path=` | Delete a note the same way; answers `{ health }` |
-| `POST /api/memory/reindex` | Every folder's index.md written anew and empty folders removed, no model; answers `{ pruned, reindexed, health }` |
-| `POST /api/memory/repair` | The model mends links to nothing and wires in orphans, only when there are any; answers `{ ran, reason?, summary?, filesChanged?, health }` |
-| `POST /api/memory/clear-log` | log.md back to its heading and the query paths removed; the notes stay |
-| `POST /api/memory/wipe` | Every note and folder deleted, the root index and log as new, Understory started again |
-| `GET /understory-llm/v1/models` · `POST /understory-llm/v1/chat/completions` | Not under `/api`, and not for browsers: an OpenAI-compatible model server for the portal's own Understory, which signs in with its own bearer token rather than a portal login. A request goes to the model of the chat whose memory tool is running |
+
+## Understory
+
+The [Understory](/guide/features#memory-understory) extension's routes
+(`extensions/understory`), while it is installed, under
+`/api/x/pithagoras-understory`. A refusal is `{ error }` with the status given.
+A change answers `{ understory }`, the state after it, and where it wrote or
+removed the agent's MCP entry also `reloaded` and `waiting`: the idle chats
+loaded again to have it, and the busy ones that have it after `/reload`.
+
+| | |
+| --- | --- |
+| `GET /api/x/pithagoras-understory/state` | `{ enabled, url, tokenSet, reachable, managed }`: whether Understory is the agent's memory now (its `understory` server in `mcp.json`, not switched off, and `pi-mcp-adapter` on), the address the chats reach it at, whether a token is sent, and whether anything answers there. `managed` is the Understory run here: `{ available, image, container, pulling, url, config, autoPossible, providers, dreaming, lastDream, nextDream, timeZone }` — `container` is `absent`, `stopped`, `running` or `foreign` (one by its name that is not Understory's), `pulling` `{ active, line, error? }`, `config` never holds a key (`hasKey` instead), `autoPossible` whether its model server listens (`UNDERSTORY_LLM_PORT`), so that the chat's model can be chosen |
+| `PUT …/use` | `{ enabled, url? }` — writes or removes the `understory` MCP server (installing `pi-mcp-adapter` if needed), and adds it to the trusted servers in Settings → Guard, or takes it out. 409 while `mcp.json` cannot be read |
+| `PUT …/config` | `{ llm: { source: "auto" } \| { source: "provider", provider, model } \| { source: "custom", baseUrl, model, format, apiKey? }, dreamInterval, dreamAt }` — `auto` (the default) thinks with the model of the chat asking — `dreamAt` ("03:00") tidies up once a day at that time and wins over `dreamInterval` — the model and tidying up of the Understory run here; an installed one is made again with them, started where it was running. `apiKey` left out keeps the saved one |
+| `POST …/install` | Pull, create and start the Understory run here, and make it the agent's memory. 409 for a container by its name that is not Understory's |
+| `DELETE …/install` | Remove it (the memory stays in its volume; `?memory=forget` deletes it too), and switch it off as the memory where it was |
+| `POST …/start` · `…/stop` | Its container |
+| `POST …/dream` | Tidy the memory up now; answers when the pass is done, with what it did (`run`). 502 for a pass that failed, 409 while one runs |
+| `GET …/tree` | Understory's memory bundle as a tree of folders and notes — read while Understory is the agent's memory (409 when it is not) |
+| `GET …/concept?path=` | One note: `{ path, frontmatter, body }`; 404 when it is not there |
+| `GET …/search?q=` | Notes matching, best first |
+| `GET …/log` | What changed, newest first |
+| `GET …/graph` | `{ nodes: [{ path, title, type, links }], edges: [{ source, target }] }` |
+| `GET …/traces` | The paths Understory's own queries and changes took |
+| `GET …/trace?id=` | One of those runs with its steps: `{ id, kind, input, notation, outcome, steps: [{ seq, tool, summary, paths, write }] }`, `paths` being the full paths of the notes a step read, wrote or found; 404 when it is not there |
+| `GET …/validate` | `{ conformant, conceptCount, directoryCount, issues }` |
+| `GET …/health` | `{ writable, health? }` — whether notes can be changed here (the Understory run here, running and the memory), and what its checks find: `{ healthy, orphans, brokenLinks, issues }` |
+| `PUT …/concept` | `{ path, frontmatter, body }` — write a note through Understory's own write path (its index and log follow); `frontmatter` needs `type` and `title`. Answers `{ concept, health }`; 409 unless writable, or while a pass of the model holds Understory |
+| `DELETE …/concept?path=` | Delete a note the same way; answers `{ health }` |
+| `POST …/reindex` | Every folder's index.md written anew and empty folders removed, no model; answers `{ pruned, reindexed, health }` |
+| `POST …/repair` | The model mends links to nothing and wires in orphans, only when there are any; answers `{ ran, reason?, summary?, filesChanged?, health }` |
+| `POST …/clear-log` | log.md back to its heading and the query paths removed; the notes stay |
+| `POST …/wipe` | Every note and folder deleted, the root index and log as new, Understory stopped and started again; answers once it answers again |
+| `POST …/chat` | `{ messages }` — a conversation with the librarian, Understory's own agent (at most 200 messages, ending with the person's). Answers Understory's stream of UI message chunks as it comes; one cut off midway ends in an `error` chunk. 409 unless writable, and while the librarian still works on the last question |
+
+The model server Understory thinks with in the chat's model mode is not one of
+these routes: the extension serves it itself, on `127.0.0.1` at
+`UNDERSTORY_LLM_PORT` (3801), as `GET /v1/models` and
+`POST /v1/chat/completions`, for Understory alone, with a bearer token of its
+own. A request goes to the model of the chat whose memory tool is running.
 
 ## Media
 

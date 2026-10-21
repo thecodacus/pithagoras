@@ -1,14 +1,16 @@
 # Opt-in features
 
 Four capabilities ship with Pithagoras and are **off** until you switch them on
-in **Settings**: a **subagent tool** and **Understory** as the agent's memory
-under **Add-ons**, and **image generation and editing** and **video generation** under
-**Extension settings → Media**. A fresh
+in **Settings**: a **subagent tool** under **Add-ons**, **Understory** as the
+agent's memory under **Extension settings → Memory**, and **image generation and
+editing** and **video generation** under **Extension settings → Media**. A fresh
 install has none of them. (The Add-ons page also holds [voice mode](/guide/voice)'s settings;
 the [voice service](/guide/voice-service) and the agent's [browser](/guide/browser) are extensions.) Switching on
 the first two writes them into pi's own configuration — a package, an MCP
 server — so they can also be seen, and undone, from Settings → Extensions and
-Settings → MCP. Switching one off removes it. Image and video generation are
+Settings → MCP. Switching one off removes it. Understory is the
+`pithagoras-understory` extension, which you install first (see
+[Memory: Understory](#memory-understory)). Image and video generation are
 the tools of the [Media](/guide/media) extension, which a portal installs when
 it first starts, and keep their settings in its own store.
 
@@ -472,11 +474,22 @@ always costs minutes of its model.
 
 ## Memory: Understory
 
-**Settings → Add-ons → Memory.** [Understory](https://github.com/thecodacus/understory)
-is a memory that grows: plain markdown on disk, cross-linked and maintained,
-which the agent looks things up in and adds to through its tools
+**Understory** (`extensions/understory`, the package `pithagoras-understory`)
+gives the agent [Understory](https://github.com/thecodacus/understory) as its
+memory: a memory that grows, plain markdown on disk, cross-linked and
+maintained, which the agent looks things up in and adds to through its tools
 (`understory_memory_query`, `…_add`, `…_update`, `…_status`, `…_maintain`).
 The bundle is human-readable and git-diffable.
+
+Neither Understory nor [Docker](/guide/docker), which it requires, is installed
+by default: install them from **Settings → Extensions → Discover → Comes with
+Pithagoras → Understory**, which installs Docker first
+([Installing what it requires](/guide/extension-ui#installing-what-it-requires)).
+Its page is **Settings → Extension settings → Memory**
+(`/settings/x/pithagoras-understory`), and its **Memory** page is in the
+sidebar's **Extensions** group. A portal that ran Understory before it was an
+extension handed what it kept over to it: see
+[Upgrading](/guide/upgrading#understory-is-an-extension).
 
 A [project](/guide/projects#an-agent-for-a-project) can do without it: its **Understory
 as memory** switch is off, and its chats are neither told about Understory nor have it
@@ -484,29 +497,33 @@ instead of the agent's `MEMORY.md`. Home keeps it, and so does a project with an
 
 ### Running it here
 
-With Docker access (see [Giving the portal Docker](/guide/docker#giving-the-portal-docker)), the
-portal runs Understory itself, in a container of its own (`pithagoras-understory`)
-with its memory in a volume (`pithagoras_understory-memory`). In Settings → Add-ons → Memory:
+With Docker access (see [Giving the portal Docker](/guide/docker#giving-the-portal-docker)),
+Understory runs in a container of its own (`pithagoras-understory`), made
+through Docker, with its memory in a volume (`pithagoras_understory-memory`). On
+its page, **Run it here**:
 
 - **The model that keeps the memory.** Understory uses a model to file, link
   and tidy notes. By default **the chat's model**: the one the chat calling its
   tool is on, already loaded, so writing with one model does not load another
-  for the memory. Understory is pointed at the portal as its model server, with
-  a key of its own, and the portal passes each request on to that chat's model,
-  with its address and key. With no chat asking — tidying up at night — the one
-  that asked last, and before any has, the default model for new chats. It
-  takes a model with an OpenAI-compatible API (local servers, OpenRouter); for
-  another, and when the portal serves its own TLS, give Understory one of its
-  own: *a provider set up here* — one and one of its models, its address and
-  key taken from the provider each time Understory starts — or *an address of
-  its own*: the API address, a key (none needed for a local server), a model
-  and the format (OpenAI-compatible or Anthropic). A saved key is never shown
-  again; leave the field empty to keep it.
+  for the memory. Understory is pointed at a model server the extension runs
+  on the portal's own loopback (`127.0.0.1:3801`, `UNDERSTORY_LLM_PORT`), with
+  a key of its own, and the extension passes each request on to that chat's
+  model, with its address and key. With no chat asking — tidying up at night —
+  the one that asked last, and before any has, the default model for new
+  chats. It takes a model with an OpenAI-compatible API (local servers,
+  OpenRouter). Where that port is taken by something else, the chat's model is
+  not offered, and the page says so: set `UNDERSTORY_LLM_PORT` to a free one.
+  For another API, give Understory a model of its own: *a provider set up
+  here* — one and one of its models, its address and key taken from the
+  provider each time Understory starts — or *an address of its own*: the API
+  address, a key (none needed for a local server), a model and the format
+  (OpenAI-compatible or Anthropic). A saved key is never shown again; leave the
+  field empty to keep it.
 - **Tidying up.** How often Understory goes over the whole memory on its own —
   merging duplicates, linking orphans, splitting notes grown too long (its
   "dreaming"). One of three: **never** (the default); **at a time of day** —
   every day at, say, 03:00 when nobody is using the model, in the portal's
-  time zone, started by the portal while Understory runs, with Understory's
+  time zone, started by the extension while Understory runs, with Understory's
   own timer left off; or **on an interval** — every hour, 6, 12 or 24 hours
   or week, Understory's own timer, which counts from when it starts, so
   saving begins the count anew. Never both. Each pass costs tokens, and does
@@ -520,16 +537,27 @@ with its memory in a volume (`pithagoras_understory-memory`). In Settings → Ad
 Understory reads its model and interval only when it starts, so **Save and
 restart Understory** makes its container again with the new ones; the memory
 is untouched. Understory has no way to be asked for a pass, so at a set time
-the portal runs the very pass its timer runs, inside its container with its
-own settings (`docker exec`). It runs on the host network, like the browser, so a model server
-the portal reaches on `localhost` is reached the same way. It is given a token
-of its own (`AUTH_TOKEN`), which the portal writes into the agent's MCP entry
-and uses for the Memory page; nothing else can read the memory through it.
+the extension runs the very pass its timer runs, inside its container with its
+own settings (Docker's `containers.exec`). It runs on the portal's own network
+(Docker's [`sharedNetwork()`](/guide/docker#a-container-on-the-portal-s-network)),
+so a model server the portal reaches on `localhost` is reached the same way.
+When the portal's container is made again, as a Compose update does, the
+extension makes Understory's again on the new one within half a minute, with its
+memory and its token. It is given a token of its own (`AUTH_TOKEN`), which the
+extension writes into the agent's MCP entry and uses for the Memory page; nothing
+else can read the memory through it.
+
+Removing or switching off the extension in Settings → Extensions leaves the
+container as it is: it is made to restart with Docker (`unless-stopped`), and
+stays listed under `pithagoras-understory` in **Settings → Docker**, where it can
+be stopped or removed. Remove it on its page in Settings first to have it
+go. The agent's MCP entry stays in `mcp.json` too, until it is switched off.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `UNDERSTORY_PORT` | `3800` | The port the portal's Understory listens on. |
+| `UNDERSTORY_PORT` | `3800` | The port the Understory run here listens on. |
 | `UNDERSTORY_VOLUME` | `pithagoras_understory-memory` | The volume that holds its memory. |
+| `UNDERSTORY_LLM_PORT` | `3801` | The port on the portal's loopback (`127.0.0.1`) where the extension's model server listens for Understory, in the chat's model mode. Understory's container is told it when it is made: after a change, **Save and restart Understory**. |
 | `UNDERSTORY_LLM_HEADERS_TIMEOUT_MS` | `1800000` | How long, in ms, to wait for the model's answer — until its headers arrive — before it is given up on and said so as a timeout; an answer that does not stream (what Understory gets today) sends no byte until it is done, so this covers the whole of it there. `0` sets no wait. |
 | `UNDERSTORY_LLM_BODY_TIMEOUT_MS` | `1800000` | How long, in ms, a streaming answer may go quiet between its bytes before it is cut off. `0` turns the wait off. |
 | `PORTAL_FETCH_HEADERS_TIMEOUT_MS` | `1800000` | A ceiling of quiet, not of work: how long, in ms, any fetch the portal's process makes — pi's MCP tool calls among them — may wait for an answer's first byte before it is cut off; Node's own fetch cuts one off after five quiet minutes. The default outlasts Understory's own model wait, so a run allowed to think half an hour is not cut off mid-thought by the client waiting on it. `0` sets no wait. |
@@ -540,8 +568,8 @@ Without Docker access, or to keep running your own, see
 
 ### Reading the memory
 
-While Understory is on, **Memory** appears in the sidebar. Its page is laid out
-as Understory's own:
+While Understory is on, **Memory** appears in the sidebar's **Extensions** group.
+Its page is laid out as Understory's own:
 
 - down the side, the memory's folders and notes, each with its type, and
   Understory's own `index.md` and `log.md` set apart; a search; and whether the
@@ -553,8 +581,10 @@ as Understory's own:
   Understory's own runs took (lit in the graph when you point at one), and zoom,
   drag and click to open.
 
-What is open is in the address (`/memory?note=…`, `?view=log`,
-`?view=graph`), so it can be linked to. Understory's chat is not there.
+What is open is in the address (`/x/pithagoras-understory/memory?note=…`,
+`?view=log`, `?view=graph`, `?view=chat`), so it can be linked to. The page and
+its [librarian](/guide/memory#memory) are described under
+[Memory and audit](/guide/memory).
 
 ### Changing a note by hand
 
@@ -585,8 +615,8 @@ paths Understory's queries took; the notes stay. **Clear the memory** (the bin
 beside the heading) starts the memory from nothing: every note and folder
 deleted, the index and log as a new memory has them, and Understory started
 again so it holds nothing of what was there. Both ask first, and cannot be
-undone. (**Remove and forget the memory** in the add-on removes Understory as
-well.)
+undone. (**Remove and forget the memory** on its page in Settings removes
+Understory as well.)
 
 The portal asks Understory for all of it, at the address in `mcp.json` and
 with its token, so the page works wherever the portal does: over HTTPS, from a
@@ -603,12 +633,16 @@ Switching it on:
 1. installs `pi-mcp-adapter` if it is not installed yet, which makes MCP servers
    into tools;
 2. writes an `understory` server into `mcp.json`, with its tools directly in the
-   agent's tool list — the portal's own Understory with its token, or the
+   agent's tool list — the Understory run here with its token, or the
    address given;
-3. stops reading `MEMORY.md`.
+3. counts what its server says as your own words, so the guard neither marks
+   nor checks it: it is added to the trusted MCP servers in **Settings → Guard**,
+   where you can take it out (see [Prompt injection](/guide/security#marking-untrusted-output));
+4. stops reading `MEMORY.md`.
 
-Switching it off removes the server, and `MEMORY.md` is read again. Removing
-the portal's own Understory switches it off too.
+Switching it off removes the server, takes it out of the trusted servers again,
+and `MEMORY.md` is read again. Removing the Understory run here switches it off
+too.
 
 ### MEMORY.md while it is on
 
@@ -627,7 +661,8 @@ conversation cannot use the memory tools unless a rule allows it (see
 
 Understory can also run anywhere the portal reaches, set up by you; the portal
 then only points the agent at its MCP address (*Or use one you run yourself*
-in the Memory add-on). Its model and tidying up are then set in its own
+on Understory's page in Settings, which needs the extension installed all the
+same). Its model and tidying up are then set in its own
 environment — `LLM_*` and `DREAM_INTERVAL`, which the portal cannot change.
 
 ```yaml
@@ -651,9 +686,9 @@ volumes:
 
 The address is what the **portal** reaches: `http://localhost:3800/mcp` with
 the shipped compose file's host networking, or `http://understory:3800/mcp` on
-a shared Docker network. It can be changed in the Memory add-on.
+a shared Docker network. It can be changed on Understory's page in Settings.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `MEMORY_UNDERSTORY_URL` | `http://localhost:3800/mcp` | The address the Memory add-on starts from. |
+| `MEMORY_UNDERSTORY_URL` | `http://localhost:3800/mcp` | The address Understory's page in Settings starts from. |
 | `MEMORY_UNDERSTORY_AUTH_TOKEN` | — | Sent as `Authorization: Bearer …` when Understory has an `AUTH_TOKEN`. Named in `mcp.json` (`bearerTokenEnv`), never copied into it. |

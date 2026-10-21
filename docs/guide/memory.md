@@ -5,9 +5,10 @@ allowed to do.
 
 ## Memory
 
-**Memory** appears in the sidebar while the [Understory memory add-on](/guide/features#memory-understory)
-is on. It is the web view of the agent's memory: a bundle of markdown notes,
-kept in folders and linked to each other.
+**Memory** appears in the sidebar's **Extensions** group while
+[Understory](/guide/features#memory-understory) (the `pithagoras-understory`
+extension) is the agent's memory. It is the web view of the agent's memory: a
+bundle of markdown notes, kept in folders and linked to each other.
 
 **Notes.** Down the side, the folders and notes with their types, and a search
 (*Search the memory*). Above them, the count of notes and folders and whether the
@@ -111,8 +112,8 @@ question"); reopen the page afterwards to see the notes. It is offered in the Un
 like editing; the model that answers is the one that tidies the memory (see
 [Opt-in features](/guide/features#memory-understory)).
 
-What is open is in the address (`/memory?note=…`, `?view=log`, `?view=graph`,
-`?view=chat`), so it can be linked to.
+What is open is in the address (`/x/pithagoras-understory/memory?note=…`,
+`?view=log`, `?view=graph`, `?view=chat`), so it can be linked to.
 
 ### Editing
 
@@ -143,7 +144,8 @@ memory does. Both ask first and cannot be undone. A memory run elsewhere is read
 only here, and has no librarian chat.
 
 Setting Understory up — installing it, choosing the model that tidies it, the
-nightly pass — is in [Opt-in features](/guide/features#memory-understory).
+nightly pass — is on its page in **Settings → Extension settings → Memory**,
+described in [Opt-in features](/guide/features#memory-understory).
 
 ## Audit
 

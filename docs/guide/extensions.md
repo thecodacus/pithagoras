@@ -29,7 +29,7 @@ packages** and **Install by name**.
 
 **Comes with Pithagoras** lists the extensions shipped with the portal itself
 (a pack of seven themes, the terminal, Git, Files, Canvases, [Media](/guide/media), [Documents](/guide/documents),
-[Docker for extensions](/guide/docker), [Kanban](/guide/kanban), the agent's [Browser](/guide/browser) and the [voice service](/guide/voice-service)), each installed from the portal's own folder with one click.
+[Docker for extensions](/guide/docker), [Kanban](/guide/kanban), the agent's [Browser](/guide/browser), the [voice service](/guide/voice-service) and [Understory](/guide/features#memory-understory), the agent's memory), each installed from the portal's own folder with one click.
 
 **Find packages** searches the npm registry for packages published for pi — by
 keyword, with a separate search for packages that bring a model provider — and
@@ -372,8 +372,8 @@ directly** in [Settings → MCP](/guide/mcp), turned off: the adapter then leave
 which the model uses to search for them, describe them and call them. So there is one switch, and the
 lazy button of an MCP server in Settings → Tools is that setting (a tool of the server cannot differ from it;
 a list of tools in `directTools` is shown as it is). **MCP servers are lazy unless they register their
-tools directly**, as the adapter does by default; the add-ons the portal sets up itself, Understory for one,
-stay as they were, registered directly. A change reaches the chats that start after it. The portal's own
+tools directly**, as the adapter does by default; a server an extension writes with its tools registered
+directly, Understory's for one, stays so. A change reaches the chats that start after it. The portal's own
 `tools` tool has no part in this, and a mark that names an MCP server is refused. The [guard](/guide/security)
 reads a call through `mcp` by the tool it reaches and what it is given, as it reads that tool called
 directly: the rules after a result that looks like a prompt injection, and what is kept from somebody who is

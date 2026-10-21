@@ -2,9 +2,10 @@
 
 **Docker** (`extensions/docker`, the package `pithagoras-docker`) lets other
 extensions run containers: a browser, a speech model, a database. The agent's
-[browser](/guide/browser) (the `pithagoras-browser` extension) and the
-[voice service](/guide/voice-service) (`pithagoras-voice`) come with the portal
-and build on it. It gives each
+[browser](/guide/browser) (the `pithagoras-browser` extension), the
+[voice service](/guide/voice-service) (`pithagoras-voice`) and
+[Understory](/guide/features#memory-understory), the agent's memory
+(`pithagoras-understory`), come with the portal and build on it. It gives each
 extension that
 [builds on it](/guide/extension-ui#building-on-another-extension) a way to
 download images and to make, start, stop and remove containers and volumes,
@@ -18,7 +19,7 @@ extension you want needs it: one that requires it does not start without it,
 and says so in Settings → Extensions. Installing that extension from Settings →
 Extensions installs Docker with it, first
 ([Installing what it requires](/guide/extension-ui#installing-what-it-requires)),
-as installing Browser or Voice does.
+as installing Browser, Voice or Understory does.
 
 ## Giving the portal Docker
 
@@ -172,7 +173,7 @@ What it gives (`extensions/docker/src/api.ts`, with its types):
 | `containers.inspect(name)` | How your container was made and how it stands: Docker's own inspect body (`Config`, `HostConfig`, `State`, …), as `create` takes Docker's own create body. Nothing where there is none |
 | `containers.exec(name, cmd, options?)` | Runs a command in your running container, and gives what it wrote and how it ended ([below](#running-a-command-in-a-container)) |
 | `containers.start`, `stop`, `remove`, `logs(name, { tail })` | Your container's life, and the end of what it wrote |
-| `containers.adopt(name)` | Takes over a container that carries no extension's name: one made before your app was an extension, so that what it kept is kept. Browser takes over the `pithagoras-browser` container and its profile volume this way each time it starts, and Voice the `pithagoras-voice` container (where it is labelled as the voice service) and its models volume |
+| `containers.adopt(name)` | Takes over a container that carries no extension's name: one made before your app was an extension, so that what it kept is kept. Browser takes over the `pithagoras-browser` container and its profile volume this way each time it starts, Voice the `pithagoras-voice` container (where it is labelled as the voice service) and its models volume, and Understory the `pithagoras-understory` container (where it is labelled as the portal's Understory) and its memory volume |
 | `volumes.list`, `create`, `remove`, `adopt` | The same for volumes |
 
 `sharedNetwork`, `containers.inspect` and `containers.exec` came with Docker
@@ -228,7 +229,8 @@ made again, as an update with Compose does, a container made with the old id
 has lost its network: compare `HostConfig.NetworkMode` from `containers.inspect`
 with `sharedNetwork()`, and make the container again where they differ. The
 voice service does this as it starts and every 30 seconds for a running
-container, keeping its engines and the GPU it was given.
+container, keeping its engines and the GPU it was given, and Understory the
+same, keeping its memory and its token.
 
 ### When a call fails
 

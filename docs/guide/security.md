@@ -64,11 +64,14 @@ the `tools` tool where they are lazy. An issue comment or a mail body a server
 hands back is whoever wrote it, and so is what a server from a config other than
 the portal's hands back, or one whose tools are named without the server. A
 server you run yourself can be counted as your own, and its output is then
-neither wrapped nor checked; the portal's own memory server, Understory, is
-counted so until you say otherwise, as what it holds are the agent's own notes.
-An extension you switch on from its own page can count its server as your own
-in the same way. It is listed in Settings → Guard, where you can take it out,
-and it is no longer counted once the extension removes its server.
+neither wrapped nor checked. No server is counted so until you say it is. An
+extension you switch on from its own page can count its server as your own in
+the same way: [Understory](/guide/features#memory-understory) does, as what it
+holds are the agent's own notes. It is listed in Settings → Guard, where you can
+take it out, and it is no longer counted once the extension removes its server.
+A portal that ran Understory before it was an extension, where you had not said
+which servers are your own, has it in that list from the upgrade (see
+[Upgrading](/guide/upgrading#understory-is-an-extension)).
 The browser is always outside content, whoever runs it. The agent's own tools, a subagent's answer and
 a routine's are not wrapped.
 

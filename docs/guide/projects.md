@@ -116,9 +116,10 @@ no agent reads none of them, from its folder or anywhere: it has only its AGENTS
 no [Understory](/guide/features#memory-understory) either, since there is no agent whose
 memory it would be.
 
-**Understory as memory** is one more switch in the same place, shown where the portal has
-[Understory](/guide/features#memory-understory) and the project has an agent: a blank slate has
-none, and no Understory. While it is on, Understory is the
+**Understory as memory** is one more switch in the same place, shown where
+[Understory](/guide/features#memory-understory) holds the agent's memory and the project has an
+agent: a blank slate has none, and no Understory. (An extension other than Understory that holds
+the agent's memory is named in its place.) While it is on, Understory is the
 project's memory, as it is in Home: the agent is told how to use it and `MEMORY.md`
 is left out. Off, the chats in this project do not get those instructions, and a project
 with an agent has the agent's `MEMORY.md` instead. It decides what the chats are told
@@ -128,8 +129,9 @@ off in the project's [Tools](#tools). Home keeps Understory, and so does a proje
 The choice is kept in the portal's database by the project's name, not as a file in the
 folder, for the reason the tool switches are (see [Tools](#tools)), and goes when the
 project is deleted. Over the API, `GET` and `PUT /api/projects/:name/agent` read and
-change `{ agent, understory }`, and `POST /api/projects` takes the same two fields and
-checks them before any folder is made.
+change `{ agent, memory }`, with `memoryAvailable` saying whether anything holds the agent's
+memory now, and `POST /api/projects` takes the same two fields and checks them before any
+folder is made.
 
 The agent's heartbeat and its conversations on the Agents page stay in its home and are
 not changed by this.

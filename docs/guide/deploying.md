@@ -362,7 +362,7 @@ into place by hand without them is sent as it is.
 | --- | --- |
 | `/data` | Everything stateful — see below |
 | `/workspaces` | The directories pi works in, mounted from `WORKSPACES_DIR` |
-| `/var/run/docker.sock` | The [Docker](/guide/docker) extension (which runs the containers of the [Browser](/guide/browser) and [Voice](/guide/voice-service) extensions), Understory and `EXECUTOR=container` |
+| `/var/run/docker.sock` | The [Docker](/guide/docker) extension (which runs the containers of the [Browser](/guide/browser), [Voice](/guide/voice-service) and [Understory](/guide/features#memory-understory) extensions) and `EXECUTOR=container` |
 
 The portal closes `/data` to every account but the one it runs as (mode `0700`)
 each time it starts, a folder made by hand or by an older version too:
@@ -407,7 +407,7 @@ your work:
   file declares (`<project>_portal-data`, and `<stack>_pithagoras-data` in
   Portainer: Docker puts the project's or the stack's name in front). The
   database, the chats' files, pi's settings and packages, the agents, the pictures.
-- **The memory of the Understory the portal runs**, if you use it: the volume
+- **The memory of the Understory run here**, if you use it: the volume
   `pithagoras_understory-memory` (`UNDERSTORY_VOLUME`), plain markdown files.
 - **The browser's logins**, if you want to keep them: the volume
   `pithagoras_browser-profile`. The voice models are downloads and can be fetched again.
@@ -440,8 +440,8 @@ folder, but take the database from `portal-backup.db` and leave `portal.db`,
 `portal-backup.db` afterwards: it is as large as the database.
 
 The memory of Understory is files, so it can be archived like any volume. Stop
-Understory first (**Settings → Add-ons → Memory → Stop**) if you want to be sure no
-tidy-up pass is writing:
+Understory first (**Settings → Extension settings → Memory → Stop**) if you want to
+be sure no tidy-up pass is writing:
 
 ```sh
 docker run --rm -v pithagoras_understory-memory:/memory:ro -v "$PWD:/backup" alpine tar czf /backup/understory-memory.tgz -C /memory .
@@ -504,10 +504,10 @@ Everything here is optional except, with the Compose files, `WORKSPACES_DIR`.
 | `WORKSPACES_DIR` | — (required) | Compose only: the host folder mounted at `/workspaces`. |
 | `PORTAL_DATA_DIR` | `portal-data` volume (`pithagoras-data` in the Portainer stack) | Compose only: an absolute host path to mount at `/data` instead of the volume. |
 | `PORTAL_TLS_CERT` / `PORTAL_TLS_KEY` | — | Serve over HTTPS when both name a file; both Compose files mount `PORTAL_TLS_DIR` at `/certs`, so name the files there (`/certs/portal.crt`). |
-| `PORTAL_CONTAINER_NAME` | `pithagoras` (Compose) | The portal's own container name, for the containers that share its network (the voice service, Understory) and container mounts. Unset natively. |
+| `PORTAL_CONTAINER_NAME` | `pithagoras` (Compose) | The portal's own container name, for the containers extensions run on its network (the voice service's, Understory's) and container mounts. Unset natively. |
 | `PI_IMAGE` | `pithagoras-runner:latest` | Container executor's image. |
 | `TASK_MEMORY_MB` / `TASK_CPUS` / `TASK_PIDS_LIMIT` | `2048` / `2` / `512` | Container executor limits. |
-| `DOCKER_SOCKET` | `/var/run/docker.sock` | The Docker socket the [Docker](/guide/docker) extension, Understory and the container executor talk to. |
+| `DOCKER_SOCKET` | `/var/run/docker.sock` | The Docker socket the [Docker](/guide/docker) extension and the container executor talk to. The portal also reads its own container's restart policy through it, for Settings → About → Restart. |
 | `VOICE_GPU` / `VOICE_VRAM_RESERVE_MIB` | — | The voice service: the GPU it uses where none is chosen on its page, and memory in MiB to keep free on it. Read by the Voice extension; both Compose files pass them from `.env`; see [The voice service](/guide/voice-service#engines-devices-and-memory). |
 | `NPM_REGISTRY_URL` | `https://registry.npmjs.org` | Registry the package catalogue searches. |
 | `CHANNELS_DIR` | `/data/channels` (from source: `$DATA_DIR/channels`) | Where third-party channel packages install. |
