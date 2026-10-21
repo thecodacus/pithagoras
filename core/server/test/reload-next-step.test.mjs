@@ -53,6 +53,7 @@ const board = withTool("board", "board_add");
 const diary = withTool("diary", "diary_add");
 const ledger = withTool("ledger", "ledger_add");
 const atlas = withTool("atlas", "atlas_find");
+const almanac = withTool("almanac", "almanac_read");
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const offered = (request) => (request.tools ?? []).map((t) => t.function.name);
@@ -169,6 +170,23 @@ test("not while a subagent works in the background: due until it is done, then b
   script = () => "Done.";
   const [again] = await run("background", "Go on");
   assert.ok(offered(again).includes("diary_add"), "in the first request of the next run");
+  assert.equal(client.reloadDue, false);
+});
+
+test("so is a message a channel, a routine or a look sends: through ask", async () => {
+  const client = await chat("asked");
+  let subagents = 1;
+  client.subagentsRunning = () => subagents;
+  await host.syncServerHalves([keeper, almanac]);
+  await sessions.reloadIdle();
+  assert.equal(client.reloadDue, true);
+
+  subagents = 0;
+  script = () => "Done.";
+  const first = model.requests.length;
+  await sessions.ask("asked", "Read it");
+  const [request] = model.requests.slice(first);
+  assert.ok(offered(request).includes("almanac_read"), "in the first request of its run");
   assert.equal(client.reloadDue, false);
 });
 
