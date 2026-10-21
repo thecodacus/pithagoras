@@ -618,3 +618,16 @@ test('a download that fails ends the setup with what Docker said', async () => {
   assert.match((await voice.status()).error, /rate limit/);
   assert.equal(v.voice()!.State, 'exited');
 });
+
+test('a container removed while it is looked at, as a setup that makes it again removes it, is shown without its log, not as a failure', async () => {
+  reset(); v.hostGpus(GPU(0, 12288, 11000));
+  earlier({ 'pithagoras.voice-network': 'shared-v1' }, { NetworkMode: 'container:portal-one' });
+  const logs = v.docker.containers.logs;
+  // Gone between the look at how it stands and the read of what it wrote: Docker says there is no such container.
+  v.docker.containers.logs = async () => { v.dropVoice(); throw Object.assign(new Error('There is no container pithagoras-voice'), { status: 404 }); };
+  try {
+    const now = await voice.status();
+    assert.deepEqual([now.state, now.progress], ['stopped', '']);
+  } finally { v.docker.containers.logs = logs; }
+  assert.equal((await voice.status()).state, 'absent');
+});

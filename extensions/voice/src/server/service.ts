@@ -77,8 +77,10 @@ async function statusNow(): Promise<ServiceStatus> {
       return {available:true, state:'installing', busy:true, progress:'Updating managed voice networking; keeping downloaded models', error:''};
     }
   }
-  // Tty=true in the container spec makes logs plain text, without Docker multiplex frames.
-  const logs = detail ? (await d.containers.logs(CONTAINER, { tail: 25 })).replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').slice(-6000) : '';
+  // Tty=true in the container spec makes logs plain text, without Docker multiplex frames. One removed since it was
+  // looked at, as a setup that makes it again does, has none.
+  const written = detail ? await d.containers.logs(CONTAINER, { tail: 25 }).catch((e) => { absent(e); return ''; }) : '';
+  const logs = written.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').slice(-6000);
   // A container made before engines could be chosen has no recipe label, and is the original combination.
   const choice = detail ? choiceFromKey(detail.Config?.Labels?.['pithagoras.voice-recipe']) : undefined;
   const ready = running && (await Promise.all(healthUrls(choice ?? DEFAULT_CHOICE).map(healthy))).every(Boolean);
