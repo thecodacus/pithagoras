@@ -12,7 +12,7 @@ const agent = process.env.PI_CODING_AGENT_DIR;
 writeFileSync(path.join(agent, "settings.json"), JSON.stringify({ packages: ["npm:pi-mcp-adapter@2.18.0"] }));
 writeFileSync(
   path.join(agent, "mcp.json"),
-  JSON.stringify({ mcpServers: { jira: { command: "j" }, understory: { url: "http://localhost:3800/mcp" }, browser: { command: "npx", args: ["@playwright/mcp"] } } }),
+  JSON.stringify({ mcpServers: { jira: { command: "j" }, notes: { url: "http://localhost:3900/mcp" }, browser: { command: "npx", args: ["@playwright/mcp"] } } }),
 );
 
 const { default: express } = await import("express");
@@ -67,7 +67,7 @@ test("a routine is exempt from the rules switched off for it, one at a time, rea
   assert.match(h.tool_call({ toolName: "bash", input: { command: "git push" } })?.reason ?? "", /\(publish\)/, "a change holds at the next call");
 });
 
-test("the guard's state for the page, and the MCP servers counted as the person's own: the portal's memory until said otherwise, never the browser", async () => {
+test("the guard's state for the page, and the MCP servers counted as the person's own: none until said, never the browser", async () => {
   await withApi(async (call) => {
     const seen = await call("GET", "/guard");
     assert.equal(seen.status, 200);
@@ -77,12 +77,13 @@ test("the guard's state for the page, and the MCP servers counted as the person'
     assert.deepEqual(seen.body.servers, [
       { name: "browser", trusted: false, browser: true },
       { name: "jira", trusted: false, browser: false },
-      { name: "understory", trusted: true, browser: false },
+      { name: "notes", trusted: false, browser: false },
     ]);
+    assert.deepEqual((await call("PUT", "/guard/servers/notes", { trusted: true })).body, { name: "notes", trusted: true });
     assert.deepEqual((await call("PUT", "/guard/servers/jira", { trusted: true })).body, { name: "jira", trusted: true });
     const after = (await call("GET", "/guard")).body.servers;
-    assert.deepEqual(after.filter((server) => server.trusted).map((server) => server.name), ["jira", "understory"], "the memory stays trusted when another is");
-    await call("PUT", "/guard/servers/understory", { trusted: false });
+    assert.deepEqual(after.filter((server) => server.trusted).map((server) => server.name), ["jira", "notes"], "one stays trusted when another is");
+    await call("PUT", "/guard/servers/notes", { trusted: false });
     assert.deepEqual((await call("GET", "/guard")).body.servers.filter((server) => server.trusted).map((server) => server.name), ["jira"]);
     assert.equal((await call("PUT", "/guard/servers/browser", { trusted: true })).status, 400);
     assert.equal((await call("PUT", "/guard/servers/nowhere", { trusted: true })).status, 404);

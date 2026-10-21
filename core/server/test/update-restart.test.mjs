@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { EventEmitter } from "node:events";
+import { EventEmitter, once } from "node:events";
+import http from "node:http";
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { scratch } from "./server-harness.mjs";
@@ -10,7 +11,7 @@ import { scratch } from "./server-harness.mjs";
  * Starting the portal again after an update: what is run and when the old one is stopped, with a spawn and a stop of
  * the test's own; and the wait itself, with a real shell and a stand-in for the old portal.
  */
-const { RESTART_EXIT, ownService, requestedExit, restartPlan, restartPortal, restartProblem, serviceOf } = await import("../dist/restart.js");
+const { RESTART_EXIT, containerRestartPolicy, ownService, requestedExit, restartPlan, restartPortal, restartProblem, serviceOf } = await import("../dist/restart.js");
 
 const launch = { execPath: "/usr/bin/node", execArgv: ["--import", "tsx"], script: "/srv/pithagoras/server/dist/index.js", args: ["--flag"], cwd: "/srv/pithagoras" };
 
@@ -226,4 +227,36 @@ test("the replacement waits for the old portal to be gone, and runs the command 
   assert.equal(ran.arg, "two words");
   assert.equal(ran.cwd, realpathSync(dir));
   assert.equal(ran.env, "kept");
+});
+
+test("the container's restart policy is asked of Docker over its socket, by the container's name, and is nothing where Docker cannot say", async () => {
+  const dir = scratch("pithagoras-restart-policy-");
+  const socket = path.join(dir, "docker.sock");
+  // Docker, answering for the containers it has; one that is held never answers.
+  const policies = { "portal-up": "unless-stopped", "portal-no": "no" };
+  const asked = [];
+  const docker = http.createServer((req, res) => {
+    asked.push(req.url);
+    if (req.url === "/containers/portal-held/json") return;
+    const name = /^\/containers\/([^/]+)\/json$/.exec(req.url)?.[1];
+    if (!(name in policies)) return res.writeHead(404, { "content-type": "application/json" }).end(JSON.stringify({ message: `No such container: ${name}` }));
+    res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ Id: "x", HostConfig: { RestartPolicy: { Name: policies[name], MaximumRetryCount: 0 } } }));
+  });
+  docker.listen(socket);
+  await once(docker, "listening");
+  try {
+    const policy = (name, at = socket) => containerRestartPolicy({ PORTAL_CONTAINER_NAME: name, DOCKER_SOCKET: at });
+    assert.equal(await policy("portal-up"), "unless-stopped");
+    assert.equal(await policy("portal-no"), "no");
+    assert.deepEqual(asked, ["/containers/portal-up/json", "/containers/portal-no/json"]);
+    assert.equal(await policy("someone-else"), undefined, "another name");
+    assert.equal(await containerRestartPolicy({ HOSTNAME: "portal-up", DOCKER_SOCKET: socket }), "unless-stopped", "by its host name where it is not told its name");
+    assert.equal(await policy("portal-up", path.join(dir, "no-docker.sock")), undefined, "no socket");
+    const began = Date.now();
+    assert.equal(await policy("portal-held"), undefined, "Docker that does not answer");
+    assert.ok(Date.now() - began < 5000, `given up on in ${Date.now() - began} ms`);
+  } finally {
+    docker.closeAllConnections();
+    docker.close();
+  }
 });

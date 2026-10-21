@@ -159,7 +159,7 @@ test("a server that was removed has its tools off in a chat still running with i
   let told = 0;
   const stop = onMcpWritten(() => told++);
   writeMcpFile({ mcpServers: { jira: { command: "j" }, notes: { command: "n" } } });
-  // As Features does when Understory is switched off: the file written without the panel's routes.
+  // As an extension does when it switches its server off (portal.mcp.set): the file written without the panel's routes.
   writeMcpFile({ mcpServers: { jira: { command: "j" } } });
   assert.equal(told, 2, "the running chats are told after every write");
   assert.deepEqual(withdrawnMcpTools(named("notes_read", "jira_search", "mcp", "bash")), ["notes_read"]);

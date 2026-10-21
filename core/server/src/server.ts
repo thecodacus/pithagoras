@@ -73,7 +73,7 @@ import { AgentError, agentsRoot, chatsOf, defaultAgent, deletable, deleteAgent, 
 import { sweepRemoved } from "./folder-removal.js";
 import { agentsRouter } from "./api/agents.js";
 import { agentFor, linkedAgent } from "./project-agent.js";
-import { understoryOn } from "./features.js";
+import { memoryHolder } from "./memory-holder.js";
 import { heartbeat } from "./heartbeat.js";
 import { deleteNotesOf } from "./activity.js";
 import { EXECUTOR_KIND } from "./executor-kind.js";
@@ -96,8 +96,6 @@ import { filesRouter } from "./api/files.js";
 import { holdsWork, unsavedRefusal, unsavedWork } from "./git.js";
 import { skillsRouter } from "./api/skills.js";
 import { featuresRouter } from "./api/features.js";
-import { memoryRouter } from "./api/memory.js";
-import { memoryLlmRouter } from "./memory-llm.js";
 import { modelLevels, modelRuntime, providersRouter } from "./api/providers.js";
 import { peopleRouter } from "./api/people.js";
 import { voiceRouter } from "./api/voice.js";
@@ -115,7 +113,6 @@ import { startUpdateChecks, updateRouter } from "./api/update.js";
 import { requestedExit } from "./restart.js";
 import { LOG_BOOT } from "./logs.js";
 import { closeConnections } from "./close-connections.js";
-import { scheduleDreams } from "./extensions/understory-service.js";
 import { routineSupervisor } from "./routines/supervisor.js";
 import { channelSupervisor } from "./channels/supervisor.js";
 import {
@@ -162,9 +159,8 @@ const promptJson = express.json({ limit: `${Math.ceil((MAX_IMAGES * MAX_IMAGE_BY
 const UPLOAD_ROUTE = /^\/api\/sessions\/[^/]+\/upload$/;
 const smallJson = express.json({ limit: "2mb" });
 app.use((req, res, next) => {
-  // Understory's requests for a model carry whole conversations: its route reads its own.
-  // An extension's routes read their own as well, each as it needs: see extension-host.ts.
-  if (UPLOAD_ROUTE.test(req.path) || PROMPT_ROUTE.test(req.path) || req.path.startsWith("/understory-llm/") || req.path.startsWith("/api/x/")) return next();
+  // An extension's routes read their own, each as it needs: see extension-host.ts.
+  if (UPLOAD_ROUTE.test(req.path) || PROMPT_ROUTE.test(req.path) || req.path.startsWith("/api/x/")) return next();
   smallJson(req, res, next);
 });
 app.use(cookieParser());
@@ -293,8 +289,6 @@ app.put("/api/auth/sso", requireAuth, loginThrottle(), async (req, res) => {
   res.json({ settings: shownForm(config), only: config.only, ...(config.endSession && !provider.endSessionEndpoint ? { noEndSession: true } : {}) });
 });
 
-// Understory's model server, in "the chat's" mode: its own token, not a portal login.
-app.use(memoryLlmRouter((id) => sessions.currentModel(id)));
 app.use("/api", requireAuth);
 
 // --- global settings (defaults for every new session) ---
@@ -464,7 +458,7 @@ app.get("/api/projects", (req, res) => {
       return {
         ...p,
         ...linkOf(p.name),
-        ...(links.get(p.name)?.understoryOff ? { understoryOff: true } : {}),
+        ...(links.get(p.name)?.memoryOff ? { memoryOff: true } : {}),
         hasTools: withTools.has(p.name),
         sessions: chats.length,
         lastActive: chats.reduce((latest, s) => (s.updated_at > latest ? s.updated_at : latest), "") || null,
@@ -522,8 +516,8 @@ app.post("/api/projects", (req, res) => {
     }
     // The same for the agent: a folder of this name left behind by an earlier project does not give its link to this one.
     clearProjectAgent(project.name);
-    if (wanted.agent !== undefined || wanted.understory !== undefined) {
-      setProjectAgent(project.name, { agent: wanted.agent ?? "", understoryOff: wanted.understory === false });
+    if (wanted.agent !== undefined || wanted.memory !== undefined) {
+      setProjectAgent(project.name, { agent: wanted.agent ?? "", memoryOff: wanted.memory === false });
     }
     res.json(project);
   } catch (e) {
@@ -533,29 +527,29 @@ app.post("/api/projects", (req, res) => {
 
 /**
  * What a request says about the agent a project works with: `agent`, an
- * agent's id or null (or "") for none, and `understory`, whether Understory is
- * the project's memory. Either may be left out. An agent that does not exist
- * is refused rather than stored: the project would be a blank slate and the
- * page would not know why.
+ * agent's id or null (or "") for none, and `memory`, whether the project has
+ * the agent's memory where an extension holds it. Either may be left out. An
+ * agent that does not exist is refused rather than stored: the project would
+ * be a blank slate and the page would not know why.
  */
-function agentLinkOf(body: unknown): { agent?: string; understory?: boolean } | { error: string; status: number } {
-  const { agent, understory } = (body ?? {}) as { agent?: unknown; understory?: unknown };
+function agentLinkOf(body: unknown): { agent?: string; memory?: boolean } | { error: string; status: number } {
+  const { agent, memory } = (body ?? {}) as { agent?: unknown; memory?: unknown };
   if (agent !== undefined && agent !== null && typeof agent !== "string") return { error: "agent must be an agent's id, or null", status: 400 };
-  if (understory !== undefined && typeof understory !== "boolean") return { error: "understory must be true or false", status: 400 };
+  if (memory !== undefined && typeof memory !== "boolean") return { error: "memory must be true or false", status: 400 };
   if (agent && !getAgent(agent)) return { error: "No such agent", status: 404 };
-  return { ...(agent !== undefined ? { agent: agent ?? "" } : {}), ...(understory !== undefined ? { understory } : {}) };
+  return { ...(agent !== undefined ? { agent: agent ?? "" } : {}), ...(memory !== undefined ? { memory } : {}) };
 }
 
-/** The agent a project works with and whether Understory is its memory, as its page shows them. */
+/** The agent a project works with and whether it has the agent's memory, as its page shows them. */
 function agentOfProject(name: string) {
   const link = projectAgent(name);
   const agent = linkedAgent(name)?.id ?? null;
   return {
     agent,
-    // What the chats get (see understoryAt): a blank slate has no agent whose memory it would be, whatever the stored switch says.
-    understory: !!agent && !link.understoryOff,
-    // Whether the portal has Understory at all: without it there is nothing for the project to do without.
-    understoryAvailable: understoryOn(),
+    // What the chats get (see memoryHeldAt): a blank slate has no agent whose memory it would be, whatever the stored switch says.
+    memory: !!agent && !link.memoryOff,
+    // Whether something holds the agent's memory at all: without it there is nothing for the project to do without.
+    memoryAvailable: memoryHolder() !== undefined,
   };
 }
 
@@ -574,20 +568,20 @@ app.get("/api/projects/:name/agent", (req, res) => {
 });
 
 /**
- * Change the agent a project works with, or whether Understory is its memory;
+ * Change the agent a project works with, or whether it has the agent's memory;
  * what is left out stays. Chats already open pick it up after /reload, like
  * the project's instructions.
  */
 app.put("/api/projects/:name/agent", (req, res) => {
   const wanted = agentLinkOf(req.body);
   if ("error" in wanted) return res.status(wanted.status).json({ error: wanted.error });
-  if (wanted.agent === undefined && wanted.understory === undefined) return res.status(400).json({ error: "agent or understory required" });
+  if (wanted.agent === undefined && wanted.memory === undefined) return res.status(400).json({ error: "agent or memory required" });
   try {
     const project = getProject(WORKSPACE_ROOT, req.params.name);
     const held = projectAgent(project.name);
     setProjectAgent(project.name, {
       agent: wanted.agent ?? held.agent,
-      understoryOff: wanted.understory === undefined ? held.understoryOff : !wanted.understory,
+      memoryOff: wanted.memory === undefined ? held.memoryOff : !wanted.memory,
     });
     res.json(agentOfProject(project.name));
   } catch (e) {
@@ -1732,7 +1726,6 @@ app.get("/api/sessions/:id/commands", async (req, res) => {
 app.use("/api", packagesRouter());
 app.use("/api", extensionsRouter());
 app.use("/api", featuresRouter());
-app.use("/api", memoryRouter());
 app.use("/api", channelsRouter());
 app.use("/api", agentsRouter());
 app.use("/api", routinesRouter());
@@ -1900,8 +1893,6 @@ const startingWith = installDefaultExtensions()
 void applyOnStart(sandboxPolicy(), sandboxSupport()).then((r) => {
   if (sandboxPolicy().enabled) console.log(`[sandbox] ${r.ok ? "on" : "not applied"}${r.warnings.length ? `: ${r.warnings.join("; ")}` : ""}`);
 });
-// The memory tidied up at its set time, when the portal runs Understory.
-scheduleDreams();
 
 /**
  * The stop is one, however many signals ask for it: a second Ctrl-C does, and so

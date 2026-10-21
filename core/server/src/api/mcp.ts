@@ -202,9 +202,9 @@ export function serversAndBrowsers(): { servers: string[]; browsers: string[] } 
 }
 
 /**
- * The file holds the keys of the MCP servers and the portal's own token for
- * Understory, so it is for its owner alone, and put in place whole: one cut
- * off by a full disk would take every MCP server with it.
+ * The file holds the keys and tokens of the MCP servers, so it is for its
+ * owner alone, and put in place whole: one cut off by a full disk would take
+ * every MCP server with it.
  */
 export function writeMcpText(text: string): void {
   const file = mcpConfigPath();

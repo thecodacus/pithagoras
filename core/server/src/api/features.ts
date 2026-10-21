@@ -1,159 +1,30 @@
 import express, { type Router } from "express";
 import { getSession, packageRemoved, sessionSubagentModel, setSessionSubagentModel } from "../db.js";
-import {
-  SUBAGENT_MAX_PARALLEL,
-  UNDERSTORY,
-  UNDERSTORY_TOKEN_ENV,
-  bundledSubagentDir,
-  isModelChoice,
-  piPackageArg,
-  subagentModelOf,
-  subagentState,
-  understoryDefaultUrl,
-  understoryEntry,
-  understoryIn,
-  understoryOn,
-  understoryTokenOf,
-} from "../features.js";
+import { SUBAGENT_MAX_PARALLEL, bundledSubagentDir, isModelChoice, piPackageArg, subagentModelOf, subagentState } from "../features.js";
 import { readPiSettings, updatePiSettings } from "../pi-settings.js";
 import { sessions } from "../session-manager.js";
 import { followPackages, switchPackage } from "./extensions.js";
-import { mcpAdapter, mcpServer, readMcpFile } from "./mcp.js";
-import { setMcpServer } from "../mcp-entry.js";
 import { memoryHolder } from "../memory-holder.js";
-import * as service from "../extensions/understory-service.js";
-import { modelProviders } from "../models.js";
 import { pi } from "./packages.js";
-import { serverTimeZone } from "../time-zone.js";
-
-const adapterEntry = () => mcpAdapter();
-
-/** Whether anything answers at the server's address: its web UI lives at the root. */
-async function reachable(url: string): Promise<boolean> {
-  try {
-    await fetch(new URL(url).origin, { signal: AbortSignal.timeout(2500) });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/** What the page is told of the saved settings: never the key itself. */
-function shownConfig() {
-  const { llm, dreamInterval, dreamAt } = service.config();
-  if (llm?.source !== "custom") return { llm, dreamInterval, dreamAt };
-  const { apiKey, ...rest } = llm;
-  return { llm: { ...rest, hasKey: Boolean(apiKey) }, dreamInterval, dreamAt };
-}
-
-/** Providers set up here that have an address Understory can be pointed at, with their models. */
-function providersForUnderstory() {
-  return modelProviders()
-    .filter((p) => p.baseUrl !== undefined)
-    .map(({ provider, models }) => ({ id: provider, models }));
-}
-
-async function understoryState() {
-  const { config, error } = readMcpFile();
-  const entry = config.mcpServers?.[UNDERSTORY] as Record<string, unknown> | undefined;
-  const url = typeof entry?.url === "string" && entry.url ? entry.url : understoryDefaultUrl();
-  const adapter = adapterEntry();
-  const [reached, runtime] = await Promise.all([reachable(url), service.status()]);
-  return {
-    // As the chats see it: on only with the adapter its tools come through.
-    enabled: !error && understoryIn(config) && adapter?.enabled === true,
-    url,
-    tokenSet: Boolean(understoryTokenOf(entry) ?? process.env[UNDERSTORY_TOKEN_ENV]),
-    adapterInstalled: adapter?.enabled === true,
-    reachable: reached,
-    // The Understory the portal runs itself, if it does or can.
-    managed: {
-      ...runtime,
-      url: service.managedUrl(),
-      config: shownConfig(),
-      // Whether "the chat's" can be offered: not over the portal's own TLS.
-      autoPossible: service.portalLlmBase() !== undefined,
-      providers: providersForUnderstory(),
-      dreaming: service.isDreaming(),
-      lastDream: service.lastDream(),
-      nextDream: service.nextDreamAt()?.toISOString() ?? null,
-      // What "03:00" means: the portal's clock.
-      timeZone: serverTimeZone(),
-    },
-    ...(error ? { configError: error } : {}),
-  };
-}
 
 /**
- * Understory in the agent's MCP servers, or out of them. The portal's own
- * Understory, where it runs one, is the one written, with its token;
- * otherwise the address given, or the one there before.
- */
-async function switchUnderstory(enabled: boolean, url?: string): Promise<void> {
-  if (!enabled) return setMcpServer(UNDERSTORY, undefined);
-  // Kept: whatever else somebody put in the entry by hand, except how it signs in, which is said anew.
-  const { disabled: _off, auth: _a, bearerToken: _t, bearerTokenEnv: _e, ...had } = mcpServer(UNDERSTORY)?.entry ?? {};
-  // An address given is the one meant; without one, the portal's own Understory where it runs one.
-  await setMcpServer(
-    UNDERSTORY,
-    url === undefined && (await service.installed())
-      ? { ...had, ...understoryEntry(service.managedUrl(), { token: service.token() }) }
-      : {
-          ...had,
-          ...understoryEntry(url ?? (typeof had.url === "string" && had.url ? had.url : understoryDefaultUrl()), {
-            ...(process.env[UNDERSTORY_TOKEN_ENV] ? { tokenEnv: UNDERSTORY_TOKEN_ENV } : {}),
-          }),
-        },
-  );
-}
-
-/** The model a request names, checked; undefined when it names none that can be used. */
-function llmFrom(body: any): service.LlmChoice | undefined {
-  if (body?.source === "auto") return { source: "auto" };
-  const model = typeof body?.model === "string" ? body.model.trim() : "";
-  if (!model) return undefined;
-  if (body.source === "provider") {
-    const known = providersForUnderstory().some((p) => p.id === body.provider);
-    return known ? { source: "provider", provider: body.provider, model } : undefined;
-  }
-  if (body.source === "custom") {
-    const baseUrl = httpUrl(body.baseUrl);
-    const format = body.format === "anthropic" ? "anthropic" : body.format === "openai" ? "openai" : undefined;
-    if (!baseUrl || !format) return undefined;
-    if (body.apiKey !== undefined && typeof body.apiKey !== "string") return undefined;
-    return { source: "custom", baseUrl, model, format, ...(body.apiKey !== undefined ? { apiKey: body.apiKey.trim() } : {}) };
-  }
-  return undefined;
-}
-
-const httpUrl = (value: unknown): string | undefined => {
-  if (typeof value !== "string") return undefined;
-  try {
-    const url = new URL(value.trim());
-    return url.protocol === "http:" || url.protocol === "https:" ? url.toString() : undefined;
-  } catch {
-    return undefined;
-  }
-};
-
-/**
- * The opt-in features: what is on, and switching each. A switch reloads the
- * idle conversations, as switching a package does, so it is there without a
- * restart; a running one keeps what it had until it is reloaded.
+ * The opt-in subagent tool: whether it is on, and switching it. A switch reloads
+ * the idle conversations, as switching a package does, so it is there without a
+ * restart; a running one keeps what it had until it is reloaded. And what holds
+ * the agent's memory, where an extension does (`portal.memory.hold`).
  */
 export function featuresRouter(): Router {
   const router = express.Router();
 
   /**
    * Only whether each is on: for the sidebar and every chat's menus, which
-   * need no more. Reads two small files; nothing is asked of Understory or Docker.
+   * need no more. Reads pi's settings, and asks what holds the memory.
    */
   router.get("/features/flags", (_req, res) => {
     try {
       const holder = memoryHolder();
       res.json({
         subagent: { enabled: subagentState().enabled },
-        understory: { enabled: understoryOn() },
         // What holds the agent's memory, where something does: its label.
         memory: { held: holder !== undefined, by: holder?.label ?? null },
       });
@@ -162,18 +33,9 @@ export function featuresRouter(): Router {
     }
   });
 
-  /** The subagent tool alone: its tab needs nothing of Understory or Docker. */
   router.get("/features/subagent", (_req, res) => {
     try {
       res.json({ subagent: subagentState() });
-    } catch (e) {
-      res.status(500).json({ error: (e as Error).message });
-    }
-  });
-
-  router.get("/features", async (_req, res) => {
-    try {
-      res.json({ subagent: subagentState(), understory: await understoryState() });
     } catch (e) {
       res.status(500).json({ error: (e as Error).message });
     }
@@ -237,113 +99,6 @@ export function featuresRouter(): Router {
     // Asked when a subagent starts: nothing to reload.
     setSessionSubagentModel(req.params.id, model);
     res.json({ model, default: subagentModelOf(readPiSettings()) });
-  });
-
-  router.put("/features/understory", async (req, res) => {
-    const { enabled } = req.body ?? {};
-    if (typeof enabled !== "boolean") return res.status(400).json({ error: "enabled must be true or false" });
-    const url = req.body?.url === undefined ? undefined : httpUrl(req.body.url);
-    if (req.body?.url !== undefined && !url) return res.status(400).json({ error: "The address must be an http or https URL" });
-    try {
-      await switchUnderstory(enabled, url);
-      // Which memory a chat reads is settled when it starts.
-      const { reloaded, waiting } = await sessions.reloadIdle();
-      res.json({ understory: await understoryState(), reloaded, waiting });
-    } catch (e) {
-      res.status((e as { status?: number }).status ?? 500).json({ error: (e as Error).message });
-    }
-  });
-
-  /**
-   * The model that keeps the memory and how often it tidies up, for the
-   * Understory the portal runs. Understory reads both only when it starts,
-   * so a running one is made again with them; its memory stays.
-   */
-  router.put("/features/understory/config", async (req, res) => {
-    const llm = llmFrom(req.body?.llm);
-    if (llm === undefined) return res.status(400).json({ error: "Choose the chat's model, a provider and model, or an http(s) address, a model and a format" });
-    const dreamInterval = typeof req.body?.dreamInterval === "string" ? req.body.dreamInterval.trim() : "";
-    if (!service.validInterval(dreamInterval)) return res.status(400).json({ error: "Tidying up takes an interval like 30m, 6h or 1d, of at least 5 minutes" });
-    const dreamAt = typeof req.body?.dreamAt === "string" ? req.body.dreamAt.trim() : "";
-    if (!service.validTime(dreamAt)) return res.status(400).json({ error: "Tidying up at a time takes one like 03:00" });
-    // What Understory would be started with, worked out first: a choice it
-    // could not be started with is refused, not saved.
-    try {
-      service.spec({ ...service.config(), llm: service.withSavedKey(llm), dreamInterval, dreamAt }, "check");
-    } catch (e) {
-      return res.status(400).json({ error: (e as Error).message });
-    }
-    const before = service.config();
-    const wasInstalled = await service.installed();
-    // Made anew as it was: one stopped stays stopped, and runs no pass meanwhile.
-    const wasRunning = wasInstalled && (await service.status()).container === "running";
-    try {
-      service.saveConfig({ llm, dreamInterval, dreamAt });
-      if (wasInstalled) await service.install({ start: wasRunning });
-      res.json({ understory: await understoryState() });
-    } catch (e) {
-      service.restoreConfig(before);
-      // Made anew is removed first: one that could not be made with the new
-      // settings is made again with the old, rather than left gone.
-      if (wasInstalled && !(await service.installed().catch(() => true))) {
-        await service.install({ start: wasRunning }).catch((again) => console.error(`[portal] Understory could not be made again: ${(again as Error).message}`));
-      }
-      res.status((e as { status?: number }).status ?? 500).json({ error: (e as Error).message });
-    }
-  });
-
-  /** Tidies the memory up now, with Understory's own pass; answers once it is done. */
-  router.post("/features/understory/dream", async (_req, res) => {
-    try {
-      const run = await service.dreamNow();
-      // A pass that failed says why, where the page looks for it.
-      res.status(run.ok ? 200 : 502).json({ ...(run.ok ? {} : { error: run.said }), run, understory: await understoryState() });
-    } catch (e) {
-      res.status(409).json({ error: (e as Error).message });
-    }
-  });
-
-  /** Runs Understory here, and makes it the agent's memory. */
-  router.post("/features/understory/install", async (_req, res) => {
-    try {
-      await service.install();
-      await switchUnderstory(true);
-      const { reloaded, waiting } = await sessions.reloadIdle();
-      res.json({ understory: await understoryState(), reloaded, waiting });
-    } catch (e) {
-      res.status((e as { status?: number }).status ?? 500).json({ error: (e as Error).message });
-    }
-  });
-
-  for (const action of ["start", "stop"] as const) {
-    router.post(`/features/understory/${action}`, async (_req, res) => {
-      try {
-        await service[action]();
-        res.json({ understory: await understoryState() });
-      } catch (e) {
-        res.status(500).json({ error: (e as Error).message });
-      }
-    });
-  }
-
-  /**
-   * Stops running it here. The memory stays in its volume unless
-   * `?memory=forget`. An agent pointed at it is pointed at nothing now, so
-   * Understory is switched off as its memory, and MEMORY.md comes back.
-   */
-  router.delete("/features/understory/install", async (req, res) => {
-    try {
-      // Removed first: switched off as the memory only once it is gone, so a
-      // removal that fails — busy with a pass, Docker refusing — leaves both as they were.
-      await (req.query.memory === "forget" ? service.forgetMemory() : service.remove());
-      const { config } = readMcpFile();
-      const entry = config.mcpServers?.[UNDERSTORY] as { url?: unknown } | undefined;
-      if (entry?.url === service.managedUrl()) await switchUnderstory(false);
-      const { reloaded, waiting } = await sessions.reloadIdle();
-      res.json({ understory: await understoryState(), reloaded, waiting });
-    } catch (e) {
-      res.status((e as { status?: number }).status ?? 500).json({ error: (e as Error).message });
-    }
   });
 
   return router;

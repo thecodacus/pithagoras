@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import { LiveEvents } from "./live-events.js";
 import type { Timings } from "./llama-progress.js";
-import { forgetChat, noteToolCall, subagentGone } from "./memory-llm.js";
 import { toolCallEnded, toolCallsCutOff, toolCallStarted } from "./tool-debug.js";
 import { ModelErrors, plainFailure } from "./model-errors.js";
 import { EventEmitter } from "node:events";
@@ -976,17 +975,14 @@ class SessionManager extends EventEmitter {
   private noteCall(sessionId: string, msg: any): void {
     const sub = msg.type === "portal_subagent" && msg.op === "event" ? msg.event ?? {} : undefined;
     const event = sub ?? msg;
-    // Which chat Understory is thinking for, when its model is the chat's.
     // By call, a subagent's under its own name: one ended mid-call takes its calls with it.
     if (event.type === "tool_execution_start" || event.type === "tool_execution_end") {
       const call = `${sub ? `${msg.id}:` : ""}${String(event.toolCallId ?? "")}`;
-      noteToolCall(sessionId, call, event.toolName, event.type === "tool_execution_start" ? "start" : "end");
       const subagent = sub ? String(msg.id) : undefined;
       if (event.type === "tool_execution_start") toolCallStarted(sessionId, call, event.toolName, subagent, event.args);
       else toolCallEnded(sessionId, call, event.toolName, Boolean(event.isError), subagent);
     }
     if (msg.type === "portal_subagent" && msg.op === "end") {
-      subagentGone(sessionId, String(msg.id));
       toolCallsCutOff(sessionId, `${msg.id}:`);
     }
     const id = `${sub ? `${msg.id}:` : ""}${String(event.toolCallId ?? "")}`;
@@ -3033,8 +3029,6 @@ class SessionManager extends EventEmitter {
     chatLife("stopped", sessionId);
     this.activity.delete(sessionId);
     this.dropCommands(sessionId);
-    // No memory tool of its is running any more, whatever it last said.
-    forgetChat(sessionId);
     // Nor a subagent in the background: it ran in this pi. Stopped, the
     // bridge has said so already; crashed, nothing has — written here, once,
     // for whichever is still open.

@@ -1545,7 +1545,9 @@ await portal.mcp.set("notes", undefined);
   token. Writing an entry installs pi-mcp-adapter, in the version the portal
   pins, where it is not installed, and switches it on where it is off.
   `set(name, undefined)` removes the server. Either way the idle chats are
-  loaded again, as `chats.reload` does, to have the change. Installing the
+  loaded again, as `chats.reload` does, to have the change, and `set` answers
+  what that does: `{ reloaded, waiting }`, for a page that says how many chats
+  have it once they are reloaded. Installing the
   adapter waits for the server halves to follow what is installed, this one's
   start among them: call `set` when the person switches the server on, not
   while the half starts.

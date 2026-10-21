@@ -3,8 +3,9 @@
  * into its own stylesheet from the portal's preset, and its server half (src/server.ts) into server.js. The portal's
  * own `npm run build` runs this, so a checkout and the image build it the same way; what it makes is not kept in git.
  *
- * What it is built with (the icons) is this package's own (devDependencies), installed here first when it is not there
- * yet, or not at the version its lock file names. esbuild, tailwindcss and postcss are the repository's.
+ * What it is built and runs with (the icons, and undici for the model server's waits) is this package's own, installed
+ * here first when it is not there yet, or not at the version its lock file names. esbuild, tailwindcss and postcss are
+ * the repository's.
  */
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";

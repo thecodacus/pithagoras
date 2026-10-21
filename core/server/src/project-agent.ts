@@ -56,7 +56,7 @@ export function agentFor(workspace: string | null | undefined): Agent {
  * agent's memory (see memory-holder.ts). A blank-slate project has no agent
  * and so no memory of the person: it does not get it. A project linked
  * to an agent does unless it says it does not want it (stored as
- * `understoryOff`), and then its chats neither get the holder's rule nor leave
+ * `memoryOff`), and then its chats neither get the holder's rule nor leave
  * the agent's MEMORY.md aside.
  */
 export function memoryHeldAt(workspace: string | null | undefined): MemoryHolder | undefined {
@@ -64,8 +64,5 @@ export function memoryHeldAt(workspace: string | null | undefined): MemoryHolder
   if (!holder) return undefined;
   const project = !workspace || agentOf(workspace) ? undefined : projectOf(workspace);
   if (!project) return holder;
-  return linkedAgent(project) && !projectAgent(project).understoryOff ? holder : undefined;
+  return linkedAgent(project) && !projectAgent(project).memoryOff ? holder : undefined;
 }
-
-/** Whether something holds the memory of a chat working here, under the name the project's switch still has. */
-export const understoryAt = (workspace: string | null | undefined): boolean => memoryHeldAt(workspace) !== undefined;

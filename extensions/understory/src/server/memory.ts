@@ -1,17 +1,19 @@
-import express, { type Router } from "express";
-import { UNDERSTORY, understoryIn, understoryTokenOf } from "../features.js";
-import { readMcpFile } from "./mcp.js";
-import * as service from "../extensions/understory-service.js";
+import type { RequestHandler, Request, Router } from "express";
+import { UNDERSTORY, understoryTokenOf } from "./entry";
+import { portal } from "./host";
+import { statusOf } from "./routes";
+import * as service from "./service";
 
 /**
  * The agent's memory, to look through: Understory's own read API, handed on.
  *
  * Understory's web UI reads a small JSON API at its root — the tree of the
  * bundle, one concept, a search, the log of changes, the graph of links, the
- * paths its queries took, whether the bundle is well-formed. Asked from here rather
- * than from the page: the address in mcp.json is where the portal reaches it,
- * which the browser may not (localhost, a Docker network, plain HTTP behind
- * an HTTPS portal), and the token stays on the server. Only these reads are
+ * paths its queries took, whether the bundle is well-formed. Asked from here
+ * (/api/x/pithagoras-understory/…) rather than from the page: the address in
+ * mcp.json is where the portal reaches it, which the browser may not
+ * (localhost, a Docker network, plain HTTP behind an HTTPS portal), and the
+ * token stays on the server. Only these reads are
  * handed on; the few changes below go through Understory's own write path in
  * the container the portal runs, never through its HTTP API, which has none.
  * The one thing beyond the reads is the librarian chat, handed on in the same
@@ -32,11 +34,13 @@ const READS = {
   validate: { path: "/api/validate", params: [] },
 } as const;
 
-/** Where Understory answers, and with what token, while it is the agent's memory. */
+/**
+ * Where Understory answers, and with what token, while it is the agent's memory: its server in mcp.json, not switched
+ * off there, whether or not pi-mcp-adapter is on to give the chats its tools.
+ */
 export function understoryAt(): { origin: string; token?: string } | undefined {
-  const { config, error } = readMcpFile();
-  if (error || !understoryIn(config)) return undefined;
-  const entry = config.mcpServers[UNDERSTORY] as Record<string, unknown>;
+  const entry = portal().mcp.get(UNDERSTORY)?.entry;
+  if (!entry || entry.disabled === true) return undefined;
   try {
     return typeof entry.url === "string" ? { origin: new URL(entry.url).origin, token: understoryTokenOf(entry) } : undefined;
   } catch {
@@ -62,7 +66,7 @@ export function notePath(value: unknown): string | undefined {
   return name === "index.md" || name === "log.md" ? undefined : value;
 }
 
-/** The most messages of a conversation passed on: the page keeps its history under this (HISTORY_MESSAGES in web/src/memory-chat.ts), this is a ceiling. */
+/** The most messages of a conversation passed on: the page keeps its history under this (HISTORY_MESSAGES in memory-chat.ts), this is a ceiling. */
 const MAX_CHAT_MESSAGES = 200;
 
 /**
@@ -79,13 +83,17 @@ export function chatMessages(value: unknown): { id: string; role: "user" | "assi
   return messages.at(-1)!.role === "user" ? messages : undefined;
 }
 
-export function memoryRouter(): Router {
-  const router = express.Router();
+/**
+ * The Memory page's routes, beside the Settings page's (routes.ts). A route that takes JSON reads it, up to 2 MB: a
+ * conversation with the librarian, or a note of about 95 kB once it is escaped.
+ */
+export function memoryRoutes(router: Router): void {
+  const json = portal().http.json({ limit: "2mb" });
   // Whether Understory's librarian is in the middle of a turn that this portal started. See the chat route.
   let librarianRunning = false;
 
   /** Whether notes can be changed here, and what the bundle's links look like. */
-  router.get("/memory/health", async (_req, res) => {
+  router.get("/health", async (_req, res) => {
     try {
       if (!(await writable())) return res.json({ writable: false });
       // Writable whatever the checks say, or whether they answered at all.
@@ -96,7 +104,7 @@ export function memoryRouter(): Router {
   });
 
   const changing =
-    (fn: (req: express.Request) => Promise<unknown>): express.RequestHandler =>
+    (fn: (req: Request) => Promise<unknown>): RequestHandler =>
     async (req, res) => {
       if (!(await writable().catch(() => false))) {
         return res.status(409).json({ error: "Notes can be changed here only in the Understory the portal runs, while it is running and the agent's memory." });
@@ -104,15 +112,15 @@ export function memoryRouter(): Router {
       try {
         res.json(await fn(req));
       } catch (e) {
-        const status = (e as { status?: number }).status ?? 502;
-        res.status(status).json({ error: (e as Error).message });
+        res.status(statusOf(e, 502)).json({ error: (e as Error).message });
       }
     };
   const refuse = (message: string) => Object.assign(new Error(message), { status: 400 });
 
   /** A note written by hand: its text and what its frontmatter says. Understory keeps the index and log. */
   router.put(
-    "/memory/concept",
+    "/concept",
+    json,
     changing(async (req) => {
       const path = notePath(req.body?.path);
       if (!path) throw refuse("A note's path is absolute, ends in .md, and is not an index.md or log.md");
@@ -130,7 +138,7 @@ export function memoryRouter(): Router {
   );
 
   router.delete(
-    "/memory/concept",
+    "/concept",
     changing(async (req) => {
       const path = notePath(req.query.path);
       if (!path) throw refuse("A note's path is absolute, ends in .md, and is not an index.md or log.md");
@@ -139,16 +147,16 @@ export function memoryRouter(): Router {
   );
 
   /** Every index.md written anew and empty folders removed; no model involved. */
-  router.post("/memory/reindex", changing(() => service.reindex()));
+  router.post("/reindex", changing(() => service.reindex()));
 
   /** The model mends links to nothing and wires in orphans — only when there are any. */
-  router.post("/memory/repair", changing(() => service.repair()));
+  router.post("/repair", changing(() => service.repair()));
 
   /** The log of changes and the paths of Understory's queries started over; the notes stay. */
-  router.post("/memory/clear-log", changing(() => service.clearLog()));
+  router.post("/clear-log", changing(() => service.clearLog()));
 
   /** Everything gone: an empty index and log, as a new memory has. */
-  router.post("/memory/wipe", changing(() => service.wipe()));
+  router.post("/wipe", changing(() => service.wipe()));
 
   /**
    * The librarian: Understory's own agent, which Understory's web UI chats with.
@@ -157,7 +165,7 @@ export function memoryRouter(): Router {
    * keeps the conversation and sends it whole each time; the answer is
    * Understory's stream of UI message chunks, passed on as it comes.
    */
-  router.post("/memory/chat", async (req, res) => {
+  router.post("/chat", json, async (req, res) => {
     if (!(await writable().catch(() => false))) {
       return res.status(409).json({ error: "The librarian can be asked only in the Understory the portal runs, while it is running and the agent's memory." });
     }
@@ -217,9 +225,9 @@ export function memoryRouter(): Router {
   });
 
   for (const [name, read] of Object.entries(READS)) {
-    router.get(`/memory/${name}`, async (req, res) => {
+    router.get(`/${name}`, async (req, res) => {
       const at = understoryAt();
-      if (!at) return res.status(409).json({ error: "Understory is not the agent's memory. Switch it on in Settings → Add-ons → Memory." });
+      if (!at) return res.status(409).json({ error: "Understory is not the agent's memory. Switch it on in Settings → Memory." });
       const query = new URLSearchParams();
       for (const key of read.params) {
         const value = req.query[key];
@@ -251,6 +259,4 @@ export function memoryRouter(): Router {
       }
     });
   }
-
-  return router;
 }

@@ -52,7 +52,7 @@ const linkedProject = (name, agent) => {
   const dir = path.join(process.env.WORKSPACE_ROOT, name);
   mkdirSync(dir, { recursive: true });
   writeFileSync(path.join(dir, "AGENTS.md"), "Answer in German.\n");
-  setProjectAgent(name, { agent: agent.id, understoryOff: false });
+  setProjectAgent(name, { agent: agent.id, memoryOff: false });
   return dir;
 };
 /** Where the agent's access is told on a folder's descriptor, named as /proc/self/fd/<n>: Linux. */
