@@ -61,10 +61,15 @@ export async function fakeDocker() {
   /** Images by id, with their labels: the ones a build made. */
   const built: { Id: string; Labels: Record<string, string> }[] = [];
   /**
-   * What a container does when it is started, for a test that says: it runs, and has exited when this returns. And what
-   * a command run in one writes, and the code it ends with: nothing, and 0, unless a test says.
+   * What a container does when it is started, for a test that says: it runs, and has exited when this returns. What
+   * becomes of a container once a command is made in it, before the command starts. And what a command run in one
+   * writes, and the code it ends with: nothing, and 0, unless a test says.
    */
-  const runs: { onStart?: (c: FakeContainer) => void | Promise<void>; onExec?: (e: FakeExec) => { out?: string; err?: string; code?: number } } = {};
+  const runs: {
+    onStart?: (c: FakeContainer) => void | Promise<void>;
+    onExecCreate?: (c: FakeContainer) => void;
+    onExec?: (e: FakeExec) => { out?: string; err?: string; code?: number };
+  } = {};
   const execs: FakeExec[] = [];
   /** The containers started, by name, in the order they were. */
   const starts: string[] = [];
@@ -158,25 +163,30 @@ export async function fakeDocker() {
         if (c.State !== "running") return send(409, { message: `container ${c.Id} is not running` });
         const e: FakeExec = { Id: `exec${++ids}`, ContainerID: c.Id, Cmd: body.Cmd, Env: body.Env ?? [], WorkingDir: body.WorkingDir, Tty: Boolean(body.Tty), Running: false, ExitCode: null };
         execs.push(e);
+        runs.onExecCreate?.(c);
         return send(201, { Id: e.Id });
       }
       if ((m = /^\/exec\/([^/]+)\/start$/.exec(p)) && req.method === "POST") {
         const e = execs.find((x) => x.Id === m![1]);
         if (!e) return send(404, { message: `No such exec instance: ${m[1]}` });
+        if (find(e.ContainerID)?.State !== "running") return send(409, { message: `container ${e.ContainerID} is not running` });
         const { out = "", err = "", code = 0 } = runs.onExec?.(e) ?? {};
         e.Running = true;
-        res.writeHead(200, { "content-type": e.Tty ? "application/vnd.docker.raw-stream" : "application/vnd.docker.multiplexed-stream" });
-        res.write(e.Tty ? Buffer.from(out + err) : Buffer.concat([frame(1, out), frame(2, err)]));
+        // Docker takes the connection over: a status line and a type, with no length and no chunks, then the output
+        // until it closes its side of the connection.
+        const socket = req.socket;
+        socket.write("HTTP/1.1 200 OK\r\nContent-Type: application/vnd.docker.raw-stream\r\n\r\n");
+        socket.write(e.Tty ? Buffer.from(out + err) : Buffer.concat([frame(1, out), frame(2, err)]));
         // Its code is there before its output ends, as Docker has it.
         void Promise.resolve(hold.exec).then(() => {
           Object.assign(e, { Running: false, ExitCode: code });
-          res.end();
+          socket.end();
         });
         return;
       }
       if ((m = /^\/exec\/([^/]+)\/json$/.exec(p))) {
         const e = execs.find((x) => x.Id === m![1]);
-        return e ? send(200, { ID: e.Id, ContainerID: e.ContainerID, Running: e.Running, ExitCode: e.ExitCode, ProcessConfig: { entrypoint: e.Cmd[0], arguments: e.Cmd.slice(1), tty: e.Tty } }) : send(404, { message: `No such exec instance: ${m[1]}` });
+        return e ? send(200, { Running: e.Running, ExitCode: e.ExitCode }) : send(404, { message: `No such exec instance: ${m[1]}` });
       }
       if ((m = /^\/containers\/([^/]+)\/(start|stop)$/.exec(p))) {
         const c = find(m[1]);

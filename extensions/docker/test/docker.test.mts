@@ -141,7 +141,7 @@ test("an extension reads how its own containers were made and how they stand, an
 test("an extension runs a command in its own running container, with the environment, folder and terminal asked for, and reads what it wrote and its exit code; not in another's, nor in one that is not running", async () => {
   const { forExtension } = dockerFor(dataDir());
   const own = forExtension("pithagoras-understory"), other = forExtension("someone-else");
-  await own.containers.create("dk-exec", { Image: "understory:1" });
+  const made = await own.containers.create("dk-exec", { Image: "understory:1" });
   docker.runs.onExec = (e) => ({ out: `ran ${e.Cmd.join(" ")}\n`, err: "a warning\n", code: 3 });
   try {
     await assert.rejects(own.containers.exec("dk-exec", ["true"]), { status: 409, message: /is not running/ });
@@ -149,7 +149,7 @@ test("an extension runs a command in its own running container, with the environ
     const ran = await own.containers.exec("dk-exec", ["node", "-e", "write()"], { env: { PORTAL_INPUT: "e30=" }, workingDir: "/app/server" });
     assert.deepEqual(ran, { output: "ran node -e write()\na warning\n", exitCode: 3, timedOut: false });
     const asked = docker.execs.at(-1)!;
-    assert.deepEqual([asked.Env, asked.WorkingDir, asked.Tty], [["PORTAL_INPUT=e30="], "/app/server", false]);
+    assert.deepEqual([asked.ContainerID, asked.Env, asked.WorkingDir, asked.Tty], [made.id, ["PORTAL_INPUT=e30="], "/app/server", false]);
     // With a terminal: as it was written.
     docker.runs.onExec = () => ({ out: "\x1b[32mok\x1b[0m\n" });
     assert.deepEqual(await own.containers.exec("dk-exec", ["ls"], { tty: true }), { output: "\x1b[32mok\x1b[0m\n", exitCode: 0, timedOut: false });
@@ -158,7 +158,11 @@ test("an extension runs a command in its own running container, with the environ
     await assert.rejects(other.containers.exec("dk-exec", ["true"]), { status: 403, message: /dk-exec is pithagoras-understory's container, not someone-else's/ });
     await assert.rejects(own.containers.exec("dk-none", ["true"]), { status: 404, message: /There is no container dk-none/ });
     assert.equal(docker.execs.length, asks, "nothing is run where it is refused");
+    // Stopped after the command was made, before it started: Docker refuses it at the start.
+    docker.runs.onExecCreate = (c) => (c.State = "exited");
+    await assert.rejects(own.containers.exec("dk-exec", ["true"]), { status: 409, message: /is not running/ });
   } finally {
+    docker.runs.onExecCreate = undefined;
     docker.runs.onExec = undefined;
     await own.containers.remove("dk-exec");
   }
