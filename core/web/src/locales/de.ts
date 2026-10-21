@@ -1206,7 +1206,6 @@ const de: Locale = {
     "Install {name}": "{name} installieren",
     "Fewer": "Weniger",
     "{n} more": "{n} weitere",
-    "Chats started from now on have it. Open ones pick it up with /reload.": "Chats, die ab jetzt starten, haben es. Offene bekommen es mit /reload.",
     // components/PeoplePanel.tsx
     "Tool": "Tool",
     "Primary": "Hauptnutzer",
