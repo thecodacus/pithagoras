@@ -1,13 +1,13 @@
 # Voice control
 
-::: tip Install Voice with Docker
-Open **Settings → Add-ons → Voice → Install voice**.
+::: tip Install the voice service with Docker
+Install **Voice** from **Settings → Extensions → Discover**, then **Install voice** on its page, **Settings → Extension settings → Voice service**. Voice mode then listens and speaks through it.
 
-The [Docker add-ons guide](/guide/add-ons) covers GPU prerequisites, automatic Q8 setup, service controls and cleanup.
+[The voice service](/guide/voice-service) covers GPU prerequisites, automatic Q8 setup, service controls and cleanup.
 :::
 
 ::: info Already installed?
-Start with the controls below. A manual Compose setup and a native audio.cpp unit are alternative deployments; do not run them alongside the managed installer.
+Start with the controls below. A manual Compose setup and a native audio.cpp unit are alternative deployments; do not run them alongside the voice service.
 :::
 
 Enable **Voice** under **Settings → Add-ons** to talk to any open session.
@@ -262,8 +262,8 @@ see the [model card](https://huggingface.co/BreezeBlue/Breeze-TTS-2).
 
 ## Other languages: Chatterbox and Qwen3-ASR
 
-Breeze speaks English and Chinese, and the managed installer pairs it with
-Whisper. For another language, run [audio.cpp](https://github.com/0xShug0/audio.cpp)
+Breeze speaks English and Chinese, and the voice service pairs it with
+Whisper by default. For another language, run [audio.cpp](https://github.com/0xShug0/audio.cpp)
 with **Chatterbox Multilingual** for speech and **Qwen3-ASR** for recognition.
 One process serves both, on one GPU, so the session model can keep the other.
 
@@ -272,12 +272,12 @@ Hindi, Italian, Korean, Malay, Norwegian, Polish, Portuguese, Spanish, Swahili,
 Swedish and Turkish. Qwen3-ASR covers those and more. Both are MIT/Apache-2.0
 licensed, unlike Breeze's research-only weights.
 
-The managed **Install voice** button in Settings builds this combination for
+The [voice service](/guide/voice-service)'s **Install voice** builds this combination for
 you: pick **Chatterbox** and **Qwen3-ASR** under **Speech engines** (see
-[Docker add-ons](/guide/add-ons#engines-devices-and-memory)), and the installer
-downloads both models, sets up the one audio.cpp process and points the settings
-at it. The rest of this section is the alternative: running audio.cpp yourself,
-as a separate deployment. It does not replace Breeze or the managed installer,
+[The voice service](/guide/voice-service#engines-devices-and-memory)), and the installer
+downloads both models, sets up the one audio.cpp process, and voice mode listens
+and speaks through it. The rest of this section is the alternative: running audio.cpp yourself,
+as a separate deployment. It does not replace Breeze or the voice service,
 and both keep working unchanged.
 
 ### Download the models
@@ -373,9 +373,9 @@ Recognition uses the OpenAI transcription API, which needs the model name that
 leaving **Speech recognition model** empty keeps the existing Whisper setup
 byte for byte.
 
-Do not run this deployment and the managed service on the same GPU unless it has
-the memory for both: the Settings page shows what each combination needs, and the
-managed installer reads the GPU before it installs.
+Do not run this deployment and the voice service on the same GPU unless it has
+the memory for both: the service's page shows what each combination needs, and its
+installer reads the GPU before it installs.
 
 ### Behind llama-swap
 
@@ -618,14 +618,14 @@ each runtime has its own address:
 | Runtime | For | Notes |
 | --- | --- | --- |
 | `breeze` | A Python Breeze-TTS-2 service | Designed or cloned voices |
-| `audio-cpp` | Breeze on audio.cpp, streaming — what the managed container runs | Whisper on CPU |
+| `audio-cpp` | Breeze on audio.cpp, streaming — what the voice service runs for Breeze | Whisper on CPU |
 | `chatterbox` | Speech in another language, on audio.cpp | Needs an input language (not auto-detect) and a reference clone — a voice with a recording; see above |
 | `kokoro` | Kokoro 82M on audio.cpp: small, fast, eight languages | Speaks with one of its own voices, chosen in **Speaking voice**; see [Kokoro's voices](#kokoro-s-voices) |
 
 Recognition is Whisper by default. **Speech recognition model** takes another
 model id (letters, digits, `.`, `:`, `-`, `_`), such as `qwen3-asr` behind
-llama-swap. **Lazy load** and the speech-detection thresholds are saved with the
-rest by **Save voice settings**.
+llama-swap. The speech-detection thresholds are saved with the rest by **Save
+voice settings**.
 
 **Dictation model** and **Dictation endpoint** name the model and the address
 the microphone button of the message box transcribes with, where they should
@@ -634,10 +634,8 @@ you dictate can wait for a more accurate one, perhaps on another service. Set
 only the model and both use the same **Speech recognition URL**, so that service
 has to serve both models (llama-swap loads the one that is asked for). Left
 empty, dictation uses **Speech recognition model** and **Speech recognition
-URL**, like voice mode. Installing the managed voice service over a recognition
-address of your own empties both, and uninstalling it brings back what was there
-before. What you set up afterwards stays, also when you press **Start voice**;
-an address of the managed service itself is cleared with the uninstall.
+URL**, like voice mode. With an extension chosen to listen and speak through,
+dictation goes there too, unless you set a **Dictation endpoint** of your own.
 
 ## Listening and speaking through an extension
 
@@ -685,7 +683,7 @@ Select **Settings → Add-ons → Voice → Input language** and save. Choosing 
 spoken language sends an explicit language hint to Whisper on every turn, avoiding
 automatic language guessing on short clips. Auto-detect remains available when
 switching languages. Use a multilingual Whisper model for languages other than
-English; the managed installer runs multilingual `base` on the CPU by default. A larger model can
+English; the voice service runs multilingual `base` on the CPU by default. A larger model can
 improve recognition but adds processing time, so benchmark before switching.
 Language selection does not translate speech or change Breeze’s supported output
 languages.
@@ -774,78 +772,31 @@ The permanent audio rule and persisted user-message markers keep the prefix
 stable across voice/text switches. A newly installed rule requires one initial
 prefill; subsequent turns can reuse it. No custom chat template is needed.
 
-## Automatic setup from Settings
+## The voice service
 
-On a Linux NVIDIA host with Docker and NVIDIA Container Toolkit, open
-**Settings → Add-ons → Voice → Install voice**. Pithagoras creates a separate
-`pithagoras-voice` container and displays the setup log. Under **Speech engines**
-you choose the speech synthesis engine (Breeze, Chatterbox or Kokoro) and the speech
+On a Linux host with Docker, the [voice service](/guide/voice-service) (the
+Voice extension) builds and runs speech recognition and speech synthesis in a
+container of its own, `pithagoras-voice`, and voice mode listens and speaks
+through it once it is up: under **Speech engines** on its page you choose the
+speech synthesis engine (Breeze, Chatterbox or Kokoro) and the speech
 recognition model (Whisper base or small, Qwen3-ASR 0.6B or 1.7B), or leave the
 choice to the installer, which reads the GPU and its free memory and picks the
-best combination that fits; [Docker add-ons](/guide/add-ons#engines-devices-and-memory)
-lists what each needs and what happens when a choice does not fit. The default is
-the original combination: Breeze with Whisper base.
+best combination that fits. Without a GPU it puts Kokoro and recognition on the
+CPU, or recognition alone. Its guide says what each needs, how it is installed,
+started, stopped and removed, and where it listens and speaks.
 
-For that default, it builds pinned audio.cpp and Whisper.cpp revisions, downloads
-the full-precision Breeze-TTS-2 GGUF package, quantizes that package locally to
-Q8_0, and downloads multilingual Whisper base. The GGUF source is the audio.cpp
-repack of BreezeBlue/Breeze-TTS-2. No Python TTS runtime is installed. Whisper runs
-on CPU; Breeze uses the GPU. Chatterbox and Qwen3-ASR are downloaded as Q8_0 GGUF
-files from a pinned revision of the same repository and verified by checksum;
-audio.cpp serves them from one process, with Qwen3-ASR's recognition on
-`/v1/audio/transcriptions` of the same port, and no Whisper then runs.
+It is chosen in **Listen and speak through** like any extension that offers
+voice mode a place to listen and speak (see
+[Listening and speaking through an extension](#listening-and-speaking-through-an-extension)),
+and chooses itself there when you install or start it from its page. Your own
+addresses are never changed for it. Each voice session's lease tells it when
+voice mode begins and stops being used: it loads its speech model for the first
+session and, with **Lazy load** on (on its page), lets it go after the last.
+Existing voice choices and saved voices are preserved. A reference clone still
+needs a voice with a recording, as described above.
 
-Allow about 30 GB free disk space during setup. First installation can take several
-minutes or longer depending on compilation and download speeds. Source downloads
-resume, completed models and builds are reused, and the quantized model is moved
-into place only after the converter inspects it successfully. The full-precision
-file is then removed. Models persist in `pithagoras_voice-models`. Choosing other
-engines later recreates the container and builds or downloads only what is new;
-an installation made before the choice existed is the default combination, and
-keeps working unchanged.
-
-**Without a GPU** the installer puts everything on the CPU, in the small base image rather than the
-CUDA one: Kokoro for speech, which takes about a quarter of a second for each second of speech on 8
-threads, and Whisper, or Qwen3-ASR in a CPU-only audio.cpp build, for recognition. A host with too
-little memory or too few threads for Kokoro gets recognition alone: dictation works, and the
-voice-conversation control is not offered, because it speaks its replies. Breeze and Chatterbox
-take several seconds of CPU time per second of speech and need a GPU. On a GPU host Kokoro and
-Qwen3-ASR can be put on the CPU too, to spare the card. See
-[Docker add-ons](/guide/add-ons#no-gpu).
-
-Once the health checks of what was installed pass, Settings connects the installed services automatically.
-Existing voice choices and saved voices are preserved. A reference clone
-still needs a voice with a recording, as described above.
-
-**Stop · release VRAM** stops both managed services without deleting models.
-**Start voice** reuses the installed files. The managed container does not start
-automatically after a host reboot; start it in Settings when needed. Setup failures
-remain visible in the log and can be retried. Whisper listens on loopback port 8188
-and Breeze on 7862, inside the portal's own network namespace: the voice container
-joins the portal container's network (or the host's, for a native portal) and
-publishes no host ports. These differ from a manually managed setup, the Compose overlay or a native unit,
-which the installer does not modify. Stop such TTS services before using the managed
-service to avoid loading two copies into VRAM. A managed container made by an
-earlier version is migrated automatically; see
-[Docker add-ons](/guide/add-ons#service-addresses-and-health-checks).
-
-### Lazy GPU loading
-
-**Lazy load** is on by default for the managed service. Starting the service leaves
-Breeze on disk. Activating a voice session requests a model connection before the
-microphone begins listening. Each tab refreshes its connection every 25 seconds;
-ending the last active session unloads the model. Mute retains the connection,
-since the session can still speak. Disconnected tabs expire after 75 seconds.
-Load/unload requests are serialized and the native runtime waits for active
-inference before unloading. A 90-second native idle timeout also releases the
-model if the portal disappears.
-
-Turn Lazy load off and save to keep Breeze warm while the portal and managed service run.
-Whisper remains on CPU in either mode. The first connection in lazy mode incurs
-model-loading latency; subsequent speech in the same active session reuses the
-loaded model. These lifecycle controls apply to the managed container; custom
-endpoints keep their own loading policy.
-
+Stop TTS services you set up by hand before using the voice service, to avoid
+loading two copies into VRAM.
 
 ### Add your own voices
 

@@ -39,8 +39,8 @@ Anthropic, …); you can also set a key in `.env`.
 
 The container uses host networking, so pi and its extensions reach services on the box at
 `127.0.0.1` — a llama.cpp server on `:8080`, for example — exactly as they would outside a
-container. It needs the Docker socket mount for the Voice add-on and for the Docker extension,
-which runs the agent's browser.
+container. It needs the Docker socket mount for the Docker extension, which runs the agent's
+browser and the voice service, and for Understory.
 Running from source, the Portainer stack and the full variable list are in
 [Deploying](https://thecodacus.github.io/pithagoras/guide/deploying).
 
@@ -58,8 +58,8 @@ Browsers install the portal as an app (PWA) only over HTTPS or on `localhost`.
 - **Models and extensions** — set up providers from Settings, per-model context windows, pi
   packages from a catalogue, MCP servers, skills, and a switch to turn a package off without
   removing it.
-- **Voice mode** — local speech-to-text and text-to-speech in a managed container, pictures
-  both ways, push-to-talk.
+- **Voice mode** — local speech-to-text and text-to-speech, from the voice service (the Voice
+  extension, with Docker) or services of your own, pictures both ways, push-to-talk.
 - **Add-ons** — the agent's own browser (the Browser extension, with Docker, both installed from
   Settings → Extensions), and opt-in features: a subagent tool, Understory
   memory with a Memory page, and, from the Media extension the portal installs, image generation

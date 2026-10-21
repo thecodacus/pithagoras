@@ -46,7 +46,7 @@ export default defineConfig({
           { text: "Sandbox", link: "/guide/sandbox" },
           { text: "MCP servers", link: "/guide/mcp" },
           { text: "The agent's browser", link: "/guide/browser" },
-          { text: "Docker add-ons", link: "/guide/add-ons" },
+          { text: "The voice service", link: "/guide/voice-service" },
           { text: "Docker for extensions", link: "/guide/docker" },
           { text: "Opt-in features", link: "/guide/features" },
           { text: "Voice control", link: "/guide/voice" },

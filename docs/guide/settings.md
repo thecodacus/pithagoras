@@ -250,10 +250,11 @@ and the settings, after asking. Wrong passwords here are counted like those of
 
 ## Add-ons
 
-Installs the optional parts of the portal itself: Voice, Subagents and Memory,
-see [Docker add-ons](/guide/add-ons) and [Opt-in features](/guide/features). The
-agent's browser is an extension, with its own page under **Extension settings**:
-see [The agent's browser](/guide/browser).
+The optional parts of the portal itself: voice mode's settings (Voice), and
+Subagents and Memory, see [Voice control](/guide/voice) and
+[Opt-in features](/guide/features). The voice service and the agent's browser
+are extensions, each with its own page under **Extension settings**: see
+[The voice service](/guide/voice-service) and [The agent's browser](/guide/browser).
 
 ## Logs
 

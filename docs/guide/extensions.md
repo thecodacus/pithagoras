@@ -1,9 +1,10 @@
 # Extensions
 
 ::: tip Looking for Voice, or the agent's browser?
-Voice is in **Settings → Add-ons**: see [Docker add-ons](/guide/add-ons). The
-agent's browser is the Browser extension, installed here: see
-[The agent's browser](/guide/browser).
+Voice mode is in **Settings → Add-ons**: see [Voice control](/guide/voice). The
+voice service it can listen and speak through is the Voice extension, and the
+agent's browser the Browser extension, both installed here: see
+[The voice service](/guide/voice-service) and [The agent's browser](/guide/browser).
 :::
 
 Extensions are pi's own package system, not something the portal invented.
@@ -28,7 +29,7 @@ packages** and **Install by name**.
 
 **Comes with Pithagoras** lists the extensions shipped with the portal itself
 (a pack of seven themes, the terminal, Git, Files, Canvases, [Media](/guide/media), [Documents](/guide/documents),
-[Docker for extensions](/guide/docker), [Kanban](/guide/kanban) and the agent's [Browser](/guide/browser)), each installed from the portal's own folder with one click.
+[Docker for extensions](/guide/docker), [Kanban](/guide/kanban), the agent's [Browser](/guide/browser) and the [voice service](/guide/voice-service)), each installed from the portal's own folder with one click.
 
 **Find packages** searches the npm registry for packages published for pi — by
 keyword, with a separate search for packages that bring a model provider — and

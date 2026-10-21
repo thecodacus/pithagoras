@@ -1,16 +1,27 @@
-# Docker add-ons
+# The voice service
 
-Pithagoras can install and manage **Voice** from **Settings → Add-ons**. It runs in its own container on the same Docker host as Pithagoras. The agent's browser is the [Browser](/guide/browser) extension, which runs its container through the [Docker](/guide/docker) extension and needs the Docker access below as well.
+**Voice** (`extensions/voice`, the package `pithagoras-voice`) builds and runs
+speech recognition and speech synthesis for [voice mode](/guide/voice) in a
+container of their own, `pithagoras-voice`, on the same Docker host as
+Pithagoras, through [Docker for extensions](/guide/docker), which it requires.
+Once it is up, voice mode listens and speaks through it: it is one of the
+places **Settings → Add-ons → Voice → Listen and speak through** can choose, and
+it chooses itself there when you install or start it from its page.
+
+Optional. Neither Voice nor Docker is installed by default: install them from
+**Settings → Extensions → Discover → Comes with Pithagoras → Voice**, which
+installs Docker first ([Installing what it requires](/guide/extension-ui#installing-what-it-requires)).
+Its page is **Settings → Extension settings → Voice service**
+(`/settings/x/pithagoras-voice`). Voice mode itself, with your voice, its
+language and your own addresses, stays the portal's, in **Settings → Add-ons →
+Voice**. A portal that ran the voice service before it was an extension handed
+what it kept over to it: see [Upgrading](/guide/upgrading#voice-s-service-is-an-extension).
 
 The portal talks directly to the host Docker API; no Docker CLI inside the portal and no Docker-in-Docker daemon are required.
 
-This guide covers the managed Linux Docker installation. Add-ons are separate from [pi extensions](/guide/extensions) and [channel packages](/channels/index).
-
-The **Subagents** and **Memory** tabs beside them switch on the [opt-in features](/guide/features) — a subagent tool and Understory as the agent's memory. The portal can run Understory itself with the same Docker access; pointed at one you run, it needs none. Image generation and editing, which need no Docker at all, are set up under [Settings → Extension settings → Media](/guide/features#image-generation), the page of the Media extension.
-
 ## Choose your next step
 
-- **First installation:** [Docker access](#docker-access) → [GPU access](#gpu-access-for-voice) → install [Voice](#install-voice), or the [browser](/guide/browser#installing-it).
+- **First installation:** [Docker access](#docker-access) → [GPU access](#gpu-access-for-voice) → [install Voice](#install-voice).
 - **Already installed:** jump to [controls](#voice-controls-and-memory), [troubleshooting](#troubleshooting), or [updates and removal](#updates-and-removal).
 
 ## Docker access
@@ -40,7 +51,7 @@ The socket is required **even with `EXECUTOR=host`**.
 
 The portal needs neither `privileged: true` nor its own GPU reservation. The installer requests a GPU for the separate voice container.
 
-Host networking is part of this setup: the portal connects to add-on services at the Docker host's loopback address. In an ordinary bridge-networked portal container, `127.0.0.1` means the portal container, so those managed endpoints will not work unchanged.
+The voice container shares the portal's network namespace, so its services listen on the portal's own `127.0.0.1` (see [Service addresses](#service-addresses-and-health-checks)).
 
 ### Apply the configuration
 
@@ -124,15 +135,15 @@ The first installation needs internet access for container registries, Ubuntu pa
 
 ### Choose engines, install and wait for Ready
 
-1. Open **Settings → Add-ons → Voice**.
-2. Expand **Voice service**. Under **Speech engines** the page shows the GPU it can read and what fits it. Leave **Choose for me, based on my GPU** on, or turn it off and pick the engines yourself (see [the engines](#engines-devices-and-memory) below).
+1. Install **Voice** from **Settings → Extensions → Discover** (Docker comes with it), and open its page, **Settings → Extension settings → Voice service**.
+2. Under **Speech engines** the page shows the GPU it can read and what fits it. Leave **Choose for me, based on my GPU** on, or turn it off and pick the engines yourself (see [the engines](#engines-devices-and-memory) below).
 3. Click **Install voice** and follow **Setup log** until the service shows **Ready**.
 
 ::: info First setup takes time
 The installer downloads an image, builds the runtimes, and downloads the models of the engines you chose. A running container is not yet a ready service.
 :::
 
-Once the services are healthy, the installer enables voice and saves the endpoints automatically. If you previously used custom endpoints, click **Use installed voice** to reconnect. Before it replaces your saved endpoints, the runtime and the recognition model, and whether voice was on, the portal remembers them, so that [**Uninstall**](#remove-voice) can put them back. Your voice, speech detection and speaking instructions are not touched, and neither is your input language, with one exception: a Chatterbox install changes a language Chatterbox does not speak, such as auto-detect, to English, and uninstalling does not change it back.
+Once the services are healthy, voice mode listens and speaks through the service and is switched on: an install or a start you began on this page chooses it once it is up, whether or not the page is still open. **Use for voice mode** chooses it again, after you chose your own addresses in **Settings → Add-ons → Voice → Listen and speak through**, say. Your own addresses are never changed for it: choose **Your own addresses** there and they are used as they were. Your voice, speech detection and speaking instructions are not touched, and neither is your input language, with one exception: choosing a service that speaks with Chatterbox changes a language Chatterbox does not speak, such as auto-detect, to English.
 
 ### Engines, devices and memory
 
@@ -184,14 +195,14 @@ With several GPUs, **Speech engines** shows a **GPU** menu where the engines you
 | `VOICE_VRAM_RESERVE_MIB` | GPU memory, in MiB, to keep free for something else on the same card, such as a model you run in the container later. Counted against every combination. |
 | `NVIDIA_SMI` | The `nvidia-smi` binary to run, when it is not on the portal's `PATH`. |
 
-To change the engines of an installed service, pick others under **Speech engines** and click **Rebuild with these engines**. The running service is stopped first, so the memory it holds is not counted against the new choice, and started again if the choice is refused. The container is recreated, with the models and builds in the volume kept; only what the new choice needs is built or downloaded, and a runtime already built for an engine is not built again. The CUDA kernels are compiled for the architecture of one card, so a different card, such as another `VOICE_GPU` or another GPU chosen on the page, rebuilds the runtime once. **Use installed voice** then points the settings at the new engines. A Chatterbox choice needs an input language (not auto-detect) and a voice with a recording, as in [voice control](/guide/voice#other-languages-chatterbox-and-qwen3-asr).
+To change the engines of an installed service, pick others under **Speech engines** and click **Rebuild with these engines**. The running service is stopped first, so the memory it holds is not counted against the new choice, and started again if the choice is refused. The container is recreated, with the models and builds in the volume kept; only what the new choice needs is built or downloaded, and a runtime already built for an engine is not built again. The CUDA kernels are compiled for the architecture of one card, so a different card, such as another `VOICE_GPU` or another GPU chosen on the page, rebuilds the runtime once. Voice mode listens and speaks with the new engines as soon as they are up. A Chatterbox choice needs an input language (not auto-detect) and a voice with a recording, as in [voice control](/guide/voice#other-languages-chatterbox-and-qwen3-asr).
 
 ### Choose your voice settings
 
-1. Choose a **Speaking voice** and **Input language**.
+1. In **Settings → Add-ons → Voice**, choose a **Speaking voice** and **Input language**. **Listen and speak through** shows **Voice service**.
 2. Choose **Fast** speech generation to start with. **Expressive** uses more compute and VRAM.
-3. Keep **Lazy load · release GPU memory when voice is idle** enabled, unless you want the model kept warm.
-4. Click **Save voice settings**.
+3. Click **Save voice settings**.
+4. On the service's page, keep **Lazy load · release GPU memory when voice is idle** on, unless you want the model kept warm. It is saved as you switch it.
 
 ### Start talking
 
@@ -202,7 +213,7 @@ Use **Add voice** for your own designed or reference-cloned voice. Installing th
 
 ::: details What the installer downloads and builds
 
-The managed installer:
+The installer:
 
 - Creates `pithagoras-voice` and the named volume `pithagoras_voice-models`, mounted at `/voice`.
 - Builds audio.cpp release v0.9.0 with CUDA, with the families of the engines you chose (Breeze, Chatterbox, Kokoro, Qwen3-ASR), and Whisper.cpp without CUDA when Whisper is chosen. Without any GPU use it builds audio.cpp for the CPU alone instead, in a directory of its own, or none for Whisper alone. A build keeps every family it has been given, so switching engines back and forth compiles once. A build from an earlier pinned revision is built again once, on the first start after an update; the models are not downloaded again.
@@ -213,12 +224,16 @@ The managed installer:
 
 ### Service addresses and health checks
 
-| Setting | Managed value |
+Voice mode listens and speaks at these while the service is chosen and runs. They are the service's, offered to voice mode as it is asked, and not written into your own addresses:
+
+| | Where it listens and speaks |
 | --- | --- |
-| Speech runtime | **Breeze audio.cpp · streaming**, **Chatterbox audio.cpp · multilingual**, **Kokoro audio.cpp · built-in voices**, or **No speech synthesis** (recognition only) |
-| Speech synthesis URL | `http://127.0.0.1:7862/v1/audio/speech`; `http://127.0.0.1:7863/v1/audio/speech` for Kokoro on the CPU; none without speech synthesis |
-| Speech recognition URL | Whisper: `http://127.0.0.1:8188/inference`. Qwen3-ASR: `http://127.0.0.1:7862/v1/audio/transcriptions` on the GPU, `http://127.0.0.1:7863/v1/audio/transcriptions` on the CPU |
-| Speech recognition model | Whisper: empty. Qwen3-ASR: `qwen3-asr` |
+| Speech runtime | **Breeze audio.cpp · streaming**, **Chatterbox audio.cpp · multilingual**, **Kokoro audio.cpp · built-in voices**, or none (recognition only) |
+| Speech synthesis | `http://127.0.0.1:7862/v1/audio/speech`; `http://127.0.0.1:7863/v1/audio/speech` for Kokoro on the CPU; none without speech synthesis |
+| Speech recognition | Whisper: `http://127.0.0.1:8188/inference`. Qwen3-ASR: `http://127.0.0.1:7862/v1/audio/transcriptions` on the GPU, `http://127.0.0.1:7863/v1/audio/transcriptions` on the CPU |
+| Speech recognition model | Whisper: none. Qwen3-ASR: `qwen3-asr` |
+
+While it is installing, coming up or stopped, voice mode says that the extension it listens and speaks through is not running, rather than listen elsewhere.
 
 Check readiness from inside the portal container. Each port answers where its service is part of the choice (`8188` Whisper, `7862` the GPU process, `7863` the CPU process for Kokoro or Qwen3-ASR on the CPU); for the default, both `8188` and `7862`:
 
@@ -228,15 +243,16 @@ docker exec pithagoras node -e 'Promise.all([8188,7862].map(async p => console.l
 
 Voice works with either bridge or host networking for the portal. Set
 `PORTAL_CONTAINER_NAME` to its Docker container name if you use a custom
-hostname; the supplied Compose files set this explicitly. The add-on shares
-that container’s network namespace, so `127.0.0.1` reaches the same services in
-both containers. The browser's container has its own networking requirements (see [The agent's browser](/guide/browser#the-container-its-storage-and-ports)).
+hostname; the supplied Compose files set this explicitly. The voice container
+shares that container’s network namespace ([A container on the portal's network](/guide/docker#a-container-on-the-portal-s-network)),
+so `127.0.0.1` reaches the same services in both containers.
 
-After upgrading, a running managed voice container migrates automatically at
-portal startup or within 30 seconds. This replaces only the managed voice
-container and keeps the model/build volume. A deliberately stopped add-on
-stays stopped; its next **Start voice** performs any required migration.
-Recreating the portal is also detected so voice joins its new network namespace.
+The namespace is the portal container's id, which changes when the portal's
+container is made again, as an update does. A running voice container on
+another network is made again on the portal's as Voice starts, or within 30
+seconds, with its engines and its GPU; this replaces only the voice container
+and keeps the model/build volume. A deliberately stopped one stays stopped;
+its next **Start voice** makes it again.
 
 Native portal installations use host networking and require Linux; on Docker
 Desktop, run the portal itself in Docker.
@@ -251,25 +267,26 @@ The service can be healthy while the TTS model is unloaded. GPU memory is alloca
 | --- | --- |
 | **Mute** in a voice session | Stops listening; keeps the voice session and spoken replies active. |
 | **End** in a voice session | Releases that tab's connection; does not stop an accepted agent task. With lazy loading, the last released connection allows the speech model to unload. |
-| **Start voice** | Starts the existing managed container, reusing its models. |
+| **Start voice** | Starts the existing container, reusing its models; voice mode listens and speaks through it once it is up. |
 | **Retry setup** | Restarts a failed container and its setup script; retained downloads/builds are reused where the script can reuse them. |
 | **Stop · release VRAM** | Stops the voice processes in the container, releasing their GPU allocations. Keeps model files. |
-| **Uninstall** | Asks first, then stops and removes the `pithagoras-voice` container and puts the voice settings back (see [Remove Voice](#remove-voice)). Keeps the downloaded engines and models unless you tick the box in the question. |
+| **Use for voice mode** | Makes the running service voice mode's source, and voice mode on. |
+| **Uninstall** | Asks first, then stops and removes the `pithagoras-voice` container, and voice mode goes back to your own addresses where it listened through the service (see [Remove Voice](#remove-voice)). Keeps the downloaded engines and models unless you tick the box in the question. |
 | **GPU** (shown when the host has more than one GPU and the engines use one) | Runs the speech engines on the chosen GPU, so the session model can keep the other. A running voice service is recreated on it at once and a stopped one on its next start; model files are kept. **Automatic** takes the GPU `VOICE_GPU` names, else the one with the most free memory when installing or rebuilding; a start keeps the GPU the service is on. A GPU that cannot hold the engines installed is refused. |
-| Disable voice controls and save | Hides the session controls; the service stays installed. Use **Uninstall** to remove it. |
+| Disable voice controls in **Settings → Add-ons → Voice** and save | Hides the session controls; the service stays installed. Use **Uninstall** to remove it. |
 
 ### When GPU memory is released
 
-Lazy loading uses per-tab leases.
+Every voice session holds a lease, and the service is told when voice mode begins and stops being used: it loads its speech model for the first session and, with lazy loading on, lets it go after the last.
 
 - Abandoned connections expire after **75 seconds**.
 - The portal checks for expired connections every **30 seconds**.
 - audio.cpp also has a **90-second** idle-unload setting.
 
- Do not expect a crashed tab to release memory instantly. With lazy loading off, the portal periodically requests the model remain loaded. Ending one tab does not release a model still used by another active tab.
+ Do not expect a crashed tab to release memory instantly. With lazy loading off, the service asks every 30 seconds that the model stay loaded, and switched on again it lets go of a model it kept while voice mode is not in use. Ending one tab does not release a model still used by another active tab.
 
 ::: warning After a reboot or service exit
-The managed voice container has **no automatic Docker restart policy**. After a host reboot or service exit, use **Start voice** or **Retry setup**. Activating the microphone loads a model in a running service; it does not install or restart a stopped service.
+The voice container has **no automatic Docker restart policy**. After a host reboot or service exit, use **Start voice** or **Retry setup**. Activating the microphone loads a model in a running service; it does not install or restart a stopped service.
 :::
 
 ## Troubleshooting
@@ -303,7 +320,7 @@ Another synthesis request owns the runtime. End the competing voice session and 
 :::
 
 ::: details Portal rebuild did not update Voice
-Add-on containers are managed separately; follow the recreate steps below.
+The voice container is made separately from the portal; follow the recreate steps below.
 :::
 
 ### Diagnostic commands
@@ -315,35 +332,40 @@ nvidia-smi
 docker volume inspect pithagoras_voice-models
 ```
 
-Do not run the old Python Breeze/Whisper Compose overlay or systemd units alongside the managed installer unless you deliberately maintain separate endpoints and enough resources. They are alternative deployments, not prerequisites; duplicate services can consume VRAM even after you stop the managed add-on.
+Do not run the old Python Breeze/Whisper Compose overlay or systemd units alongside the voice service unless you deliberately maintain separate endpoints and enough resources. They are alternative deployments, not prerequisites; duplicate services can consume VRAM even after you stop the voice service.
 
 ## Updates and removal
 
-Rebuilding the portal does not recreate its sibling add-on containers.
+Rebuilding the portal does not recreate the voice container, except to put a running one on the portal's new network.
 
 ### Recreate Voice after a portal update
 
-Voice's setup script is captured when its container is created. To apply a newer installer after updating the portal, end voice sessions, click **Uninstall** and leave **Also delete the downloaded engines and models** unticked, then click **Install voice** again. The models and builds in `pithagoras_voice-models` are reused; recreating is not a guarantee that every cached binary is rebuilt. The installer pins its runtime revisions rather than tracking upstream automatically.
+Voice's setup script is captured when its container is created. To apply a newer installer after updating Voice, end voice sessions, click **Uninstall** and leave **Also delete the downloaded engines and models** unticked, then click **Install voice** again. The models and builds in `pithagoras_voice-models` are reused; recreating is not a guarantee that every cached binary is rebuilt. The installer pins its runtime revisions rather than tracking upstream automatically.
 
 ### Remove Voice
 
-Click **Uninstall** under **Settings → Add-ons → Voice → Voice service**. It is offered once there is a container, or while the saved settings still point at the managed service after the container is gone (removed by hand, say), and asks first, naming what goes (with **Ask before deleting** turned off under [Settings](/guide/interface#confirmations), the question is skipped and the downloads are kept). Then:
+Click **Uninstall** on the service's page. It is offered once there is a container, and asks first, naming what goes (with **Ask before deleting** turned off under [Settings](/guide/interface#confirmations), the question is skipped and the downloads are kept). Then:
 
-- The `pithagoras-voice` container is stopped and removed. Nothing else of yours is touched: a container of that name that the portal did not make is left alone, and the Docker image the container ran in stays, since other containers may use it.
-- The voice settings go back to what they were before the install: the runtime, the speech recognition and speech synthesis addresses and the recognition model, and whether voice was on, as the portal remembered them when it connected the service. The recognition side (address and model) and the speech side (address and runtime) are remembered each on its own, and again at every connect, so an address you set up after the install and then connected over comes back as that one. Your voice, language, speech detection and speaking instructions are not part of that and stay as they are.
-- An address you set up yourself stays as it is. Only what points at the managed service (the ports in [Service addresses](#service-addresses-and-health-checks)) is changed, so a speech server you saved after the install is not replaced by older settings. A service installed by an older portal, which remembered nothing, has what points at it reset to a portal with nothing set up (the Compose overlay's default addresses, no recognition model, the runtime **Breeze Python**) and voice switched off; your own address beside it is kept.
+- The `pithagoras-voice` container is stopped and removed. Nothing else of yours is touched: a container of that name that is not the voice service's is left alone, and the Docker image the container ran in stays, since other containers may use it.
+- Where voice mode listened and spoke through the service, it goes back to your own addresses, which are as you left them. Where you chose your own addresses or another extension, nothing changes.
 - **Also delete the downloaded engines and models** is off by default. Off, the volume `pithagoras_voice-models` stays and a later **Install voice** is quick. Ticked, the volume is deleted too, and the next install downloads and builds the engines again. This cannot be undone.
-- If Docker refuses to delete the volume (another container has it, say), the container is still removed and the settings are still put back; the page says why the downloads stay, and they can be removed by hand (see below).
+- If Docker refuses to delete the volume (another extension's volume by that name, say), the container is still removed and voice mode is still given back; the page says why the downloads stay, and they can be removed by hand (see below).
 - The GPU chosen on the page is kept: it is a choice about the host, not about the service.
 
-Afterwards the page shows **Not installed**, as on a portal that never installed the service, and **Install voice** works again. Uninstalling something that is not installed changes nothing, and where the settings still point at the service after the container was removed by hand, it puts them right. It waits while a setup is under way. Without access to Docker the page offers no **Uninstall** (it says **Automatic voice setup requires access to Docker.**), and the API answers `Docker is unavailable`, as it does for an install.
+Afterwards the page shows **Not installed**, and **Install voice** works again. Uninstalling something that is not installed changes nothing. It waits while a setup is under way. Without access to Docker the API answers `Docker is unavailable`, as it does for an install.
+
+Switching Voice off or removing it in **Settings → Extensions** does not remove the container: one that runs keeps running, and stays listed under `pithagoras-voice` in **Settings → Docker**, where it can be stopped or removed. Voice mode, where it listened through the service, says the extension is not running until you choose your own addresses or Voice is back. Voice's folder in the data folder (`extension-data/pithagoras-voice`: the GPU chosen, a setup still to come up, and lazy loading) stays for when it is back.
 
 ::: tip By hand
-Without the button, `docker rm -f pithagoras-voice` removes the container, and `docker volume rm pithagoras_voice-models` the downloads, **only after the container is removed**. The settings are then yours to put right.
+Without the button, `docker rm -f pithagoras-voice` removes the container, and `docker volume rm pithagoras_voice-models` the downloads, **only after the container is removed**. Voice mode is then yours to point elsewhere, in **Settings → Add-ons → Voice**.
 :::
 
 ### Data that remains
 
-Portal settings and uploaded voice references live separately in the portal's `/data` volume; do not delete that volume to reset an add-on.
+Voice mode's settings and uploaded voice references live separately in the portal's `/data` volume; do not delete that volume to reset the service.
 
-Named add-on volumes and containers are not part of the portal Compose lifecycle, so `docker compose down` does not stop or remove them.
+The voice container and its volume are not part of the portal Compose lifecycle, so `docker compose down` does not stop or remove them.
+
+## Its routes
+
+The service's page talks to Voice's server half, under `/api/x/pithagoras-voice`, behind the portal's login: see [Voice service](/reference/api#voice-service) in the API reference.

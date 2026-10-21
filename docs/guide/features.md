@@ -4,8 +4,8 @@ Four capabilities ship with Pithagoras and are **off** until you switch them on
 in **Settings**: a **subagent tool** and **Understory** as the agent's memory
 under **Add-ons**, and **image generation and editing** and **video generation** under
 **Extension settings → Media**. A fresh
-install has none of them. (The Add-ons page also holds the Docker-based
-[Voice](/guide/add-ons); the agent's [browser](/guide/browser) is an extension.) Switching on
+install has none of them. (The Add-ons page also holds [voice mode](/guide/voice)'s settings;
+the [voice service](/guide/voice-service) and the agent's [browser](/guide/browser) are extensions.) Switching on
 the first two writes them into pi's own configuration — a package, an MCP
 server — so they can also be seen, and undone, from Settings → Extensions and
 Settings → MCP. Switching one off removes it. Image and video generation are
@@ -484,7 +484,7 @@ instead of the agent's `MEMORY.md`. Home keeps it, and so does a project with an
 
 ### Running it here
 
-With Docker access (see [Docker add-ons](/guide/add-ons#docker-access)), the
+With Docker access (see [Giving the portal Docker](/guide/docker#giving-the-portal-docker)), the
 portal runs Understory itself, in a container of its own (`pithagoras-understory`)
 with its memory in a volume (`pithagoras_understory-memory`). In Settings → Add-ons → Memory:
 

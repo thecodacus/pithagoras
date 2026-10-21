@@ -448,6 +448,126 @@ sure you do not want it. Left in place, Browser would start on it again after a
 later upgrade, and keep its own settings over the ones changed in the older
 version.
 
+## Voice's service is an extension
+
+The voice service, which builds and runs speech recognition and speech synthesis
+in the `pithagoras-voice` container, is the `pithagoras-voice` extension now
+([The voice service](/guide/voice-service)), which runs its container through
+[Docker for extensions](/guide/docker), `pithagoras-docker`. Neither is
+installed by an upgrade, nor by a new portal: **a portal that used the voice
+service keeps it by installing Voice** from Settings → Extensions → Discover →
+Comes with Pithagoras. The question before the install lists Docker, which Voice
+requires, and on yes installs it first. Voice mode itself is the portal's as it
+was, in Settings → Add-ons → Voice, with your voices, its language and your own
+addresses.
+
+Until Voice is installed, voice mode that listened and spoke at the service's
+addresses says *Voice mode listens and speaks through an extension that is not
+running*: the upgrade made the extension its source (see below). Install Voice,
+or choose **Your own addresses** under **Listen and speak through** in the
+meantime. Nothing the service kept is lost.
+
+Once it is installed, what the portal did does the same, under new names and
+addresses:
+
+- **Installing, starting, stopping and removing** the service, its engines, its
+  GPU and **Lazy load** are its page in Settings, under **Extension settings**,
+  at `/settings/x/pithagoras-voice`, where the **Voice service** part of
+  **Settings → Add-ons → Voice** was. **Use installed voice** is **Use for voice
+  mode**.
+- **Voice mode listens and speaks through it** as through any extension that
+  offers it a place to: it is chosen under **Listen and speak through**, and your
+  own addresses are never written over for it. Uninstalling it gives voice mode
+  back to them.
+- **The routes moved:** what was `/api/voice/install`, `/hardware`, `/gpu`,
+  `/start`, `/stop`, `/uninstall` and `/connect` is now under
+  `/api/x/pithagoras-voice/…`, `GET /api/voice/install` being `/state` (see
+  [The voice service's routes](/reference/api#voice-service)). `GET /api/voice`
+  no longer has `managed` or `lazyLoad`. A script that used the old addresses
+  needs the new ones. `/api/voice`, the voices and the session routes stay where
+  they were.
+- `VOICE_GPU`, `VOICE_VRAM_RESERVE_MIB`, `NVIDIA_SMI`, `PORTAL_CONTAINER_NAME`
+  and `DOCKER_SOCKET` keep their names and meaning; Voice reads the first three
+  now.
+
+**The container and its downloads** stay where they are. `pithagoras-voice` and
+its volume `pithagoras_voice-models` stay through the upgrade, and Voice takes
+them over by their names each time it starts: the volume as it is, and the
+container where it carries the voice service's label (`pithagoras.addon=voice`).
+They are then listed under `pithagoras-voice` in Settings → Docker. A container
+made on the portal's old container is on a network that is gone once the
+portal's container is made again, as a Compose update does: Voice makes it again
+once, on the portal's new one, with the engines it was built for and the GPU it
+was given, and the volume is kept, so nothing is downloaded again; the system
+packages the setup installs in the container are installed again, as on every
+remake. Until Voice is installed, they belong to no extension, and Settings →
+Docker does not show them.
+
+**What the portal kept of the service is handed over**, not lost. The first
+start after the upgrade, which raises the schema to 9, moves it out of the
+portal into `handoff/voice` in the data folder, a folder only the portal can
+read: `settings.json`, with the GPU chosen on the service's page, a setup still
+to come up, and whether its speech model was let go of once voice mode no longer
+used it (`lazyLoad`), as they were stored. It then deletes `voice_gpu`,
+`voice_setup_pending` and `voice_before_managed` from its database, and
+`lazyLoad` from the voice settings. Where voice mode listened or spoke at the
+service's addresses:
+
+- the Voice extension is made voice mode's source, where no other extension was
+  chosen;
+- your own addresses are put back as uninstalling the service did: what
+  connecting it kept of them, or, where nothing was kept of a side (a service
+  connected over a portal with nothing set up), the addresses of a portal with
+  nothing set up, the runtime **Breeze Python** and no recognition model;
+- a dictation address of the service's goes; one of your own stays;
+- whether voice mode is on stays as it was.
+
+Your voices, your voice settings otherwise, and each agent's voice stay as they
+were. A start on which the hand-off cannot be finished keeps everything, says so
+in the log, and goes on with it on the next start. Voice takes it up when it
+starts: `extension-data/pithagoras-voice/settings.json` then holds each setting
+it did not have of its own, and the log says what it took up. With Voice not
+installed the hand-off waits, nothing of it lost, until it is.
+
+### Going back to a version before Voice was an extension
+
+The backup the upgrade made in `backups/` (`portal-v8-….db` from the version
+before) has the voice settings as they were, the GPU chosen and what connecting
+the service kept among them. Put it back as under [Going back](#going-back).
+Before you stop the portal, remove Voice under Settings → Extensions: the older
+version has no such extension (Docker stays). The container and its volume need
+nothing: a container Voice made carries the voice service's label as well, and
+the older version manages it by its name; it makes it again on the portal's
+network where it has to. A GPU chosen on the service's page after the upgrade is
+in Voice's folder, not in the backup: choose it again in the older version's
+Settings → Add-ons → Voice.
+
+Then take what is left of the hand-off, and Voice's folder, out of the way of a
+later upgrade. In the data folder, with the portal stopped:
+
+```sh
+cd /path/to/data
+rm -rf handoff/voice handoff/.voice.*
+mv extension-data/pithagoras-voice "backups/pithagoras-voice-$(date +%Y%m%d-%H%M%S)"
+```
+
+In a container, run the same with the portal container's own mounts:
+
+```sh
+docker stop pithagoras
+
+docker run --rm --volumes-from pithagoras alpine sh -c '
+cd /data
+rm -rf handoff/voice handoff/.voice.*
+mv extension-data/pithagoras-voice "backups/pithagoras-voice-$(date +%Y%m%d-%H%M%S)"'
+```
+
+Where Voice was never installed, the last `mv` says there is no such file, which
+does no harm. Left in place, `handoff/voice` would be taken by the next upgrade
+for one it had left already, and Voice's folder would keep its own settings over
+the ones changed in the older version. Delete the folder set aside in `backups/`
+once you are sure you do not want it.
+
 ## Upgrading from the first release
 
 What the first start after an install of version 0.1.0, or of any build made before this one, shows and needs:
