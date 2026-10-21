@@ -51,7 +51,8 @@ async function inspected(): Promise<Inspected | undefined> {
   if (!found) return undefined;
   if (found.owner !== portal().extension) {
     if (found.owner || found.labels['pithagoras.addon'] !== 'voice') throw new NotVoices();
-    await d.containers.adopt(CONTAINER);
+    // One removed since it was looked at, as a setup that makes it again does, is not there to take over; what is there now is read below.
+    await d.containers.adopt(CONTAINER).catch(absent);
   }
   return (await d.containers.inspect(CONTAINER)) as Inspected | undefined;
 }

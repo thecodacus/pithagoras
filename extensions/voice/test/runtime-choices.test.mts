@@ -631,3 +631,14 @@ test('a container removed while it is looked at, as a setup that makes it again 
   } finally { v.docker.containers.logs = logs; }
   assert.equal((await voice.status()).state, 'absent');
 });
+
+test('a container removed before it is taken over, as a setup that makes it again removes it, is no container, not a failure', async () => {
+  reset(); v.hostGpus(GPU(0, 12288, 11000));
+  earlier({ 'pithagoras.voice-network': 'shared-v1' }, { NetworkMode: 'container:portal-one' });
+  const get = v.docker.containers.get;
+  // Gone between the look at whose it is and taking it over: Docker says there is no such container.
+  v.docker.containers.get = async (name) => { const found = await get(name); v.dropVoice(); return found; };
+  try {
+    assert.equal((await voice.status()).state, 'absent');
+  } finally { v.docker.containers.get = get; }
+});
