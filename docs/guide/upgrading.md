@@ -346,26 +346,36 @@ in the log, and goes on with it on the next start.
 
 Browser takes it up when it starts: `extension-data/pithagoras-browser/` then
 holds `settings.json`, with each setting it did not have of its own, and
-`profile/`. The log says what it took up. With Browser not installed the
-hand-off waits, nothing of it lost, until it is.
+`profile/`. Where Browser's folder has a `profile/` of its own already, that one
+stays the browser's, and the one handed over is kept beside it as
+`profile-handed-over-<date>`. The log says what it took up. With Browser not
+installed the hand-off waits, nothing of it lost, until it is.
 
 **Who may drive the browser** was a switch of its own beside the tools' switches
 on older portals: a routine's **Browser** switch, off unless switched on, and a
 grant for each chat that the portal carried into the tools' switches as the
-browser's tools were first seen. The upgrade writes both into the tools' switches,
-once:
+browser's tools were first seen. Both held the portal's own browser tools, and
+the tools a chat had reported of a Playwright MCP server pointed at a browser
+(one started with `--cdp-endpoint`, or called `browser`). The upgrade writes both
+into the tools' switches, once, for all of those tools:
 
 - each routine: the browser's tools its own tools do not name are switched on in
   them where its **Browser** switch was on, and off where it was off, so its runs
   have the browser they had;
+- each run kept after its routine was deleted, which had no browser: the
+  browser's tools it did not switch itself are switched off in it;
 - the chats, where the portal was still waiting to carry the grants (it had chats,
   and the browser's tools had not been seen since): the browser's tools are
   switched off by default and on in each chat that had the grant, as that carrying
   would have done. Where it had carried some, the rest are; where it had carried
   them all, nothing is written.
 
-A Playwright MCP server's tools are not part of this: from this version they
-follow their switches as any tool does.
+From then on the browser's tools follow their switches as any tool does: a
+Playwright MCP server's tools that no chat had reported by the upgrade, or of a
+server added later, and the tools of a routine made after it. **A new routine
+has the browser** as a chat in its place does, where before it started without
+it. To keep that, switch the `pithagoras-browser` group off in Settings → Tools
+and on where it is wanted, or off in each new routine's **Tools**.
 
 From a checkout, `npm run build` installs Browser's own package, `playwright-core`,
 in `extensions/browser` the first time; it is no longer one of the server's.
@@ -377,7 +387,13 @@ before) has the browser's settings and switches as they were. Put it back as
 under [Going back](#going-back). Before you stop the portal, remove Browser
 under Settings → Extensions: the older version has no such extension (Docker
 stays). The container and its volume need nothing: the older version runs them
-by their names, whoever took them over.
+by their names, whoever took them over. One thing the backup cannot have is a
+password set on Browser's page after the upgrade, with the browser installed
+again on it: the container was made with that one, and the older version's view
+signs in with the one in the backup. Set the same password in the older
+version's Settings → Add-ons → Browser (it is in
+`backups/pithagoras-browser-<date>-<time>/settings.json` once the script below
+has run), or remove the browser there and install it again.
 
 Where the portal ran the machine's own Chrome, its profile goes back to where the
 older version looks for it. Then take what is left of the hand-off, and Browser's
