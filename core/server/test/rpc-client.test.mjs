@@ -70,6 +70,15 @@ test("a reload is no longer due once it is asked for: a chat in a container is r
   assert.equal(run.done, true);
 });
 
+test("a reload pi refuses is due still, to be tried again as the next run settles or before the next message", async () => {
+  const pi = fakePi();
+  pi.client.reloadDue = true;
+  const run = watch(pi.client.reload());
+  await pi.say({ id: pi.sent.at(-1).id, type: "response", command: "reload", success: false, error: "not now" });
+  assert.equal(run.error, "not now");
+  assert.equal(pi.client.reloadDue, true);
+});
+
 test("a command that never answers is still given up on: after 30 seconds, and for compact after half an hour", async () => {
   mock.timers.enable({ apis: ["setTimeout"] });
   try {

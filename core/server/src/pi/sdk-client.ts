@@ -1205,7 +1205,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
         try {
           await this.reload();
         } catch (e) {
-          // The run goes on with what it had, as a chat that could not be reloaded while idle does.
+          // The run goes on with what it had, as a chat that could not be reloaded while idle does, and the next step tries again.
           console.error(`[portal] could not reload ${this.portalSessionId ?? "a chat"} between two steps: ${(e as Error).message}`);
         }
       }
@@ -1881,6 +1881,10 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     this.reloading = reloading;
     try {
       await reloading;
+    } catch (e) {
+      // Not reloaded, so due still: see PiClient.reloadDue.
+      this.reloadDue = true;
+      throw e;
     } finally {
       if (this.reloading === reloading) this.reloading = undefined;
     }

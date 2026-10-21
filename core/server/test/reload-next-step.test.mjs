@@ -53,6 +53,7 @@ const board = withTool("board", "board_add");
 const diary = withTool("diary", "diary_add");
 const ledger = withTool("ledger", "ledger_add");
 const atlas = withTool("atlas", "atlas_find");
+const almanac = withTool("almanac", "almanac_read");
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const offered = (request) => (request.tools ?? []).map((t) => t.function.name);
@@ -172,52 +173,96 @@ test("not while a subagent works in the background: due until it is done, then b
   assert.equal(client.reloadDue, false);
 });
 
-test("a reload that fails is tried again before the chat's next message", async () => {
-  const client = await chat("retry");
-  const reload = client.reload.bind(client);
-  let tries = 0;
-  client.reload = async () => {
-    if (++tries === 1) throw new Error("not now");
-    return reload();
-  };
-  await host.syncServerHalves([keeper, atlas]);
+test("so is a message a channel, a routine or a look sends: through ask", async () => {
+  const client = await chat("asked");
+  let subagents = 1;
+  client.subagentsRunning = () => subagents;
+  await host.syncServerHalves([keeper, almanac]);
   await sessions.reloadIdle();
-  assert.equal(tries, 1);
-  assert.equal(client.reloadDue, true, "due again");
+  assert.equal(client.reloadDue, true);
+
+  subagents = 0;
   script = () => "Done.";
-  const [first] = await run("retry", "Find it");
-  assert.equal(tries, 2);
-  assert.ok(offered(first).includes("atlas_find"));
+  const first = model.requests.length;
+  await sessions.ask("asked", "Read it");
+  const [request] = model.requests.slice(first);
+  assert.ok(offered(request).includes("almanac_read"), "in the first request of its run");
+  assert.equal(client.reloadDue, false);
 });
 
-test("a reload that fails between two steps is logged, and the run goes on with what it had", async () => {
-  const work = mkdtempSync(path.join(process.env.WORKSPACE_ROOT, "failing-"));
-  createSession({ id: "failing", title: "failing", workspace: work, executor: "host" });
-  const client = await SdkPiClient.create({ cwd: work, sessionDir: mkdtempSync(path.join(home, "pi-")), provider: "fake", modelId: "m", sessionId: "failing", canReloadNow: () => true });
+/** pi's own reload in `client`, which the chat's reload calls, failing at each try `fails` says. Returns how many there were. */
+function failingReload(client, fails) {
+  const reload = client.session.reload.bind(client.session);
   let tries = 0;
-  client.reload = async () => {
-    tries++;
-    throw new Error("not now");
+  client.session.reload = async (...args) => {
+    if (fails(++tries)) throw new Error("not now");
+    return reload(...args);
   };
+  return () => tries;
+}
+
+/** What `work` logs as an error, kept rather than printed. */
+async function errorsOf(work) {
   const logged = [];
   const error = console.error;
   console.error = (...args) => logged.push(args.join(" "));
   try {
-    script = (request) => {
-      if (resultsIn(request) === 0) {
-        client.reloadDue = true;
-        return { name: "bash", args: { command: "echo working" } };
-      }
-      return "Done.";
-    };
-    const first = model.requests.length;
-    await client.prompt("Go");
-    await until(() => model.requests.length - first === 2 && client.isIdle(), "the run to end");
-    assert.equal(tries, 1);
-    assert.match(toolTexts(model.requests.at(-1)).at(-1), /working/, "the next request has the step's result");
-    assert.ok(logged.some((line) => line.includes("could not reload failing between two steps: not now")));
+    await work();
   } finally {
     console.error = error;
+  }
+  return logged;
+}
+
+test("a reload that fails is tried again before the chat's next message", async () => {
+  const client = await chat("retry");
+  const tries = failingReload(client, (n) => n === 1);
+  await host.syncServerHalves([keeper, atlas]);
+  await sessions.reloadIdle();
+  assert.equal(tries(), 1);
+  assert.equal(client.reloadDue, true, "due again");
+  script = () => "Done.";
+  const [first] = await run("retry", "Find it");
+  assert.equal(tries(), 2);
+  assert.ok(offered(first).includes("atlas_find"));
+});
+
+test("a reload that fails every time is tried once at each point it may be, and no more: before the message, and as its run settles", async () => {
+  const client = await chat("failing-each");
+  const tries = failingReload(client, () => true);
+  // As reloadIdle leaves a chat it could not reload.
+  client.reloadDue = true;
+  script = () => "Done.";
+  const logged = await errorsOf(async () => {
+    await run("failing-each", "Go");
+    await sleep(200);
+  });
+  assert.equal(tries(), 2);
+  assert.deepEqual(logged, ["[portal] could not reload failing-each: not now", "[portal] could not reload failing-each: not now"]);
+  assert.equal(client.reloadDue, true, "due still, for the next");
+  assert.deepEqual(eventsSince("failing-each", 0).filter((row) => row.type === "portal_notice"), [], "and the chat is not told");
+});
+
+test("a reload that fails between two steps is logged, the run goes on with what it had, and the next step tries again", async () => {
+  const work = mkdtempSync(path.join(process.env.WORKSPACE_ROOT, "failing-"));
+  createSession({ id: "failing", title: "failing", workspace: work, executor: "host" });
+  const client = await SdkPiClient.create({ cwd: work, sessionDir: mkdtempSync(path.join(home, "pi-")), provider: "fake", modelId: "m", sessionId: "failing", canReloadNow: () => true });
+  const tries = failingReload(client, () => true);
+  try {
+    script = (request) => {
+      if (resultsIn(request) === 0) client.reloadDue = true;
+      return resultsIn(request) < 2 ? { name: "bash", args: { command: "echo working" } } : "Done.";
+    };
+    const first = model.requests.length;
+    const logged = await errorsOf(async () => {
+      await client.prompt("Go");
+      await until(() => model.requests.length - first === 3 && client.isIdle(), "the run to end");
+    });
+    assert.equal(tries(), 2, "once at each of the two steps");
+    assert.equal(client.reloadDue, true, "and due still once the run is over");
+    assert.match(toolTexts(model.requests.at(-1)).at(-1), /working/, "the next request has the step's result");
+    assert.deepEqual(logged, ["[portal] could not reload failing between two steps: not now", "[portal] could not reload failing between two steps: not now"]);
+  } finally {
     client.dispose();
   }
 });
