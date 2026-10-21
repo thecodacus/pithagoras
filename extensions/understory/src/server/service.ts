@@ -101,8 +101,11 @@ export function saveConfig(next: UnderstoryConfig): UnderstoryConfig {
   return config();
 }
 
-/** Puts back what was saved before, key and all, as it was. */
-export function restoreConfig(before: UnderstoryConfig): void {
+/** What is saved, as it is stored: nothing where nothing was said, to be put back as it was (`restoreConfig`). */
+export const savedConfig = (): unknown => setting("config");
+
+/** Puts back what was saved before (`savedConfig`), key and all, as it was. */
+export function restoreConfig(before: unknown): void {
   putSettings({ config: before });
   scheduleDreams();
 }
@@ -115,8 +118,24 @@ function secret(key: "token" | "llmToken"): string {
   return made;
 }
 
-/** The token the container is given and the portal calls it with; made once. */
+/** The token the container is given and the portal calls it with; made once. Asked through `heldToken`. */
 export const token = (): string => secret("token");
+
+/**
+ * The token for a container about to be made, or for the agent's entry to call it with (`token`) — but not while
+ * the container there is the portal's own from before Understory was an extension, and what the portal kept of it has
+ * not been taken up (handoff.ts): one made then is not the one that container and the agent's entry carry, and the
+ * one kept would not be taken up after it.
+ */
+export async function heldToken(): Promise<string> {
+  if (setting("token") === undefined && (await installed())) {
+    throw refused(
+      "What the portal kept of Understory, with the token its container was made with, has not been taken up yet, and until it is the container is left as it is: Understory takes it up as it starts, and the portal's log says why it could not",
+      409,
+    );
+  }
+  return token();
+}
 
 /** The key Understory calls the model server with, in "the chat's" mode; made once. */
 export const llmToken = (): string => secret("llmToken");
@@ -246,7 +265,7 @@ async function installNow(start = true): Promise<void> {
   const d = docker();
   if (!(await d.available())) throw new Error("The portal cannot reach Docker here, so it cannot run Understory");
   // Worked out first: a choice it cannot be made with leaves the container as it is.
-  const made = await spec(config(), token(), await d.sharedNetwork());
+  const made = await spec(config(), await heldToken(), await d.sharedNetwork());
   await d.images.ensure(IMAGE, (state) => (pulling = state));
   // The volume the portal made before Understory was an extension is taken over; one there is none of is made.
   await d.volumes.adopt(VOLUME).catch(absent);
@@ -299,14 +318,9 @@ async function stale(): Promise<boolean> {
 
 /**
  * The container made again with what is saved, and started if it was running: its memory is in the volume, and its
- * token stays. Not without the token it was made with, which the agent's MCP entry calls it with: until what the
- * portal kept is taken up (handoff.ts), it is left as it is. What it cannot be made with is said in the log.
+ * token stays (`heldToken`). What it cannot be made with is said in the log, and it is left as it is.
  */
 async function remake(running: boolean): Promise<void> {
-  if (setting("token") === undefined) {
-    portal().log(`${CONTAINER} is left as it is: the token it was made with has not been taken up from what the portal kept`);
-    return;
-  }
   await installNow(running).then(
     () => portal().log(`${CONTAINER} was made again with its settings, its memory and its token kept`),
     (e) => portal().log(`${CONTAINER} could not be made again with its settings, and is left as it is: ${(e as Error).message}`),
@@ -618,7 +632,8 @@ async function untilAnswering(): Promise<void> {
   const until = Date.now() + 30_000;
   while (Date.now() < until) {
     try {
-      const r = await fetch(`${origin}/api/validate`, { headers: { authorization: `Bearer ${token()}` }, signal: AbortSignal.timeout(2000) });
+      // The token held, never one made here, which no container would have (`heldToken`).
+      const r = await fetch(`${origin}/api/validate`, { headers: { authorization: `Bearer ${setting("token") ?? ""}` }, signal: AbortSignal.timeout(2000) });
       if (r.ok) return;
     } catch {
       // Not up yet.

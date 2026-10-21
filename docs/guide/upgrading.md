@@ -652,6 +652,10 @@ and goes on with it on the next start. Understory takes the hand-off up when it
 starts: `extension-data/pithagoras-understory/settings.json` then holds each
 setting it did not have of its own, and the log says what it took up. With
 Understory not installed the hand-off waits, nothing of it lost, until it is.
+While a hand-off that could not be taken up waits for the next start, Understory
+leaves the container the portal made as it is, and its page refuses what would
+need the token in the hand-off: saving its settings, which makes the container
+again, and switching it on as the agent's memory.
 
 The same upgrade also:
 

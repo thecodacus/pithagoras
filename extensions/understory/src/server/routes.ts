@@ -93,7 +93,7 @@ async function switchUnderstory(enabled: boolean, url?: string): Promise<{ reloa
   return mcp.set(
     UNDERSTORY,
     url === undefined && (await service.installed())
-      ? { ...had, ...understoryEntry(service.managedUrl(), { token: service.token() }) }
+      ? { ...had, ...understoryEntry(service.managedUrl(), { token: await service.heldToken() }) }
       : {
           ...had,
           ...understoryEntry(url ?? (typeof had.url === "string" && had.url ? had.url : understoryDefaultUrl()), {
@@ -183,7 +183,7 @@ export function understoryRoutes(router: Router): void {
     } catch (e) {
       return res.status(400).json({ error: (e as Error).message });
     }
-    const before = service.config();
+    const before = service.savedConfig();
     const wasInstalled = await service.installed();
     // Made anew as it was: one stopped stays stopped, and runs no pass meanwhile.
     const wasRunning = wasInstalled && (await service.status()).container === "running";

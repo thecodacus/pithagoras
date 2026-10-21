@@ -16,6 +16,7 @@ inProcessHome("pithagoras-understory-routes-");
 const { at, api, docker, machine, scripts, db, adapterOn, servers, putServers, agentDir } = await serveUnderstory();
 const service = await import("../src/server/service.ts");
 const store = await import("../src/server/store.ts");
+const { understoryEntry } = await import("../src/server/entry.ts");
 
 const json = { "content-type": "application/json" };
 const call = async (method: string, route: string, body?: unknown) => {
@@ -238,4 +239,35 @@ test("a download that is under way is shown as it goes, and one that fails is sa
   assert.equal(machine.understory(), undefined);
   docker.failing.clear();
   docker.images.add(IMAGE);
+});
+
+test("while what the portal kept has not been taken up, its container keeps the token it and the agent's entry carry: saving and switching on are refused, and nothing is made, saved or written", async () => {
+  machine.reset();
+  const had = { token: store.setting("token"), config: store.setting("config") };
+  const kept = "b".repeat(48);
+  // As the portal left it: its container made with the token its MCP entry carries, and none of it in Understory's store.
+  store.putSettings({ token: undefined, config: undefined });
+  machine.putUnderstory({ made: { Env: [`AUTH_TOKEN=${kept}`, "LLM_API_BASE_URL=http://127.0.0.1:4100/understory-llm/v1"], HostConfig: { NetworkMode: "container:portal-one" } } });
+  putServers({ understory: understoryEntry(MANAGED, { token: kept }) });
+  const custom = { llm: { source: "custom", baseUrl: "http://gpu:8080/v1", model: "m", format: "openai" } };
+  try {
+    const saved = await call("PUT", "/config", custom);
+    assert.equal(saved.status, 409);
+    assert.match(saved.body.error, /^What the portal kept of Understory, with the token its container was made with, has not been taken up yet/);
+    const on = await call("PUT", "/use", { enabled: true });
+    assert.deepEqual([on.status, on.body.error], [409, saved.body.error]);
+    assert.deepEqual(machine.made(), [], "not made again");
+    assert.deepEqual([store.setting("token"), store.setting("config")], [undefined, undefined], "no token made, and nothing saved: what the portal kept is still to be taken up");
+    assert.equal(servers().understory.bearerToken, kept);
+
+    // Taken up, it is made again with the token it had, which the entry carries.
+    store.putSettings({ token: kept });
+    assert.equal((await call("PUT", "/config", custom)).status, 200);
+    assert.equal(envOf(machine.understory()!).AUTH_TOKEN, kept);
+    assert.equal((await call("PUT", "/use", { enabled: true })).status, 200);
+    assert.equal(servers().understory.bearerToken, kept);
+  } finally {
+    store.putSettings(had);
+    putServers({});
+  }
 });

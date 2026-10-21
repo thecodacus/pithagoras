@@ -162,12 +162,15 @@ test("every half minute, a running one is made again where the portal's containe
 
 test("one whose token was not taken up from what the portal kept is left as it is, which is said", async () => {
   machine.reset();
-  store.putSettings({ token: undefined });
+  // What the portal kept not taken up: none of its settings, the token and the model among them, are here.
+  const config = store.setting("config");
+  store.putSettings({ token: undefined, config: undefined });
   machine.putUnderstory(OLD);
   const said = await logged(restart, (text) => /left as it is/.test(text));
-  assert.match(said, /pithagoras-understory is left as it is: the token it was made with has not been taken up/);
+  assert.match(said, /pithagoras-understory could not be made again with its settings, and is left as it is: What the portal kept of Understory, with the token its container was made with, has not been taken up yet/);
   assert.deepEqual(machine.made(), []);
-  store.putSettings({ token: TOKEN });
+  assert.equal(store.setting("token"), undefined, "no token is made in its place");
+  store.putSettings({ token: TOKEN, config });
 });
 
 test("none there is nothing to take over; one that is not Understory's, or another extension's, is not its to take, which is said", async () => {
