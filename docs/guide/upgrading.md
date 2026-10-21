@@ -687,9 +687,12 @@ token is the same in both, so the agent's MCP entry needs nothing.
 
 The container needs one thing: Understory made it to reach the chat's model at
 its own server, which the older version does not run. Make it again from the
-older version's **Settings → Add-ons → Memory → Save and restart Understory**;
-the memory in its volume is kept. A container Understory made carries the
-portal's label as well, so the older version manages it by its name.
+older version's **Settings → Add-ons → Memory**: **Save and restart
+Understory** shows only once something in the form has changed, so choose the
+model it thinks with once more (its source, as it is chosen, is enough) and
+press it; the memory in its volume is kept. A container Understory made
+carries the portal's label as well, so the older version manages it by its
+name.
 
 Then take what is left of the hand-off, and Understory's folder, out of the way
 of a later upgrade. In the data folder, with the portal stopped:
