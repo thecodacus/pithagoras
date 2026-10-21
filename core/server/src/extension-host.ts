@@ -1,8 +1,10 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { closeSync, mkdirSync, realpathSync } from "node:fs";
-import { join, resolve as resolvePath } from "node:path";
+import { dirname, join, resolve as resolvePath, sep } from "node:path";
 import { pathToFileURL } from "node:url";
+import { inspect } from "node:util";
 import semver from "semver";
 import express, { type NextFunction, type Request, type RequestHandler, type Response, type Router } from "express";
 import { agentOf, defaultAgent, listAgents } from "./agents.js";
@@ -24,6 +26,7 @@ import { handoffDone, takeHandoff } from "./handoff.js";
 import { modelEndpoint, modelOf, modelProviders, type LiveModel } from "./models.js";
 import { mcpServer } from "./api/mcp.js";
 import { holdMemory } from "./memory-holder.js";
+import { logFileLine, onLogLine, scrubSecrets, type LogLine } from "./logs.js";
 import type { Chat, ChatLife as Life, Ran, ServerPortal, Upgrade, VoiceProvider } from "@pithagoras/extension-api/server";
 
 /**
@@ -120,6 +123,43 @@ interface Running {
   stopped?: boolean;
   /** Where it offers voice mode to listen and speak (`voice.provide`). */
   voice?: VoiceProvider;
+  /**
+   * Where its code is: the folder of its module, where it really is (as Node names a module), as a path and as an
+   * address. An error whose stack goes through it is its own, where nothing else says whose it is (see whose).
+   */
+  where: string[];
+  /** How it crashed, once it has (see crashed). */
+  crash?: ServerHalfCrash;
+  /** Rejected once it has crashed, with what a call into it is answered: what waits on it ends then, not when it would have. */
+  ended: Promise<never>;
+  end: (error: Error) => void;
+}
+
+/** How a server half crashed: an error of its code reached the process, or its code called `process.exit()`. */
+export interface ServerHalfCrash {
+  name: string;
+  /** The revision that crashed: another one is started again. */
+  rev: string;
+  at: string;
+  error: string;
+  stack?: string;
+}
+
+/**
+ * The server half whose code runs now. Set around all the portal calls of a half's: its module as it starts, its
+ * routes, its handlers, what it adds to a chat's pi and its tools' calls; and kept, as Node keeps it, by what that code
+ * starts in turn: its timers, promises, callbacks, sockets and processes. An error that reaches the process from there,
+ * and a line printed there, is that half's (see catchExtensionCrashes, and said). The portal's own work it asks for
+ * (a chat told, the chats reloaded) runs outside it.
+ */
+const scope = new AsyncLocalStorage<Running>();
+
+/** A promise to reject once something is over, which nobody has to be waiting on. */
+function endable(): { ended: Promise<never>; end: (error: Error) => void } {
+  let end!: (error: Error) => void;
+  const ended = new Promise<never>((_, reject) => (end = reject));
+  ended.catch(() => {});
+  return { ended, end };
 }
 
 /**
@@ -149,7 +189,7 @@ export function folderRemoved(folder: string): void {
   putSetting(REMOVED, JSON.stringify([...removals, { folder, at }].slice(-KEPT_REMOVED)));
   const told = kept<Record<string, number>>(TOLD, {});
   for (const ext of running.values()) {
-    for (const handler of ext.removed) guarded(ext.half.name, "hearing of a folder that was removed", () => handler(folder));
+    for (const handler of ext.removed) guarded(ext, "hearing of a folder that was removed", () => handler(folder));
     told[ext.half.name] = at;
   }
   putSetting(TOLD, JSON.stringify(told));
@@ -172,7 +212,7 @@ function toldUpTo(name: string): number {
 function tellMissed(ext: Running, since: number): void {
   const missed = kept<Removal[]>(REMOVED, []).filter((removal) => removal.at > since);
   if (!missed.length) return;
-  for (const { folder } of missed) for (const handler of ext.removed) guarded(ext.half.name, "hearing of a folder that was removed", () => handler(folder));
+  for (const { folder } of missed) for (const handler of ext.removed) guarded(ext, "hearing of a folder that was removed", () => handler(folder));
   const told = kept<Record<string, number>>(TOLD, {});
   told[ext.half.name] = missed[missed.length - 1].at;
   putSetting(TOLD, JSON.stringify(told));
@@ -189,7 +229,7 @@ export function offeredTools(): Map<string, OfferedTool[]> {
   const offered = new Map<string, OfferedTool[]>();
   for (const ext of running.values()) {
     if (!ext.offers) continue;
-    const said = guarded(ext.half.name, "saying which tools it offers", () => ext.offers!());
+    const said = guarded(ext, "saying which tools it offers", () => ext.offers!());
     if (Array.isArray(said)) offered.set(ext.half.name, said.filter((t) => typeof t?.name === "string" && t.name !== ""));
   }
   return offered;
@@ -202,8 +242,12 @@ export function voiceProviders(): Map<string, VoiceProvider> {
 }
 
 const running = new Map<string, Running>();
+/** Those running and the one starting: what an error's stack is looked through for (see whose). */
+const live = new Set<Running>();
 /** Why a package's server half is not running, by the package's name. */
 const failures = new Map<string, string>();
+/** The crash a package's server half is held off for, by the package's name: until another revision of it is wanted, or it is switched off and on. */
+const crashes = new Map<string, ServerHalfCrash>();
 /** What server halves tell the pages open on a chat, by chat: `{ extension, data }` as it goes on the wire. Heard by the chat's event stream. */
 export const pagePushes = new EventEmitter();
 pagePushes.setMaxListeners(0);
@@ -214,19 +258,139 @@ const say = (name: string, text: string) => console.log(`[extension ${name}] ${t
  * An extension's handler failing is the extension's: said, and nothing of the
  * portal's stops for it. What comes back never throws and never rejects: a
  * handler that returned a promise is answered with one that settles either way.
+ * It runs as the extension's code (see scope).
  */
-const guarded = (name: string, what: string, fn: () => unknown) => {
-  const failed = (e: unknown) => {
-    console.error(`[extension ${name}] ${what} failed:`, e);
-    return undefined;
-  };
-  try {
-    const result = fn();
-    return result instanceof Promise ? result.catch(failed) : result;
-  } catch (e) {
-    return failed(e);
+const guarded = (ext: Running, what: string, fn: () => unknown) =>
+  scope.run(ext, () => {
+    const failed = (e: unknown) => {
+      console.error(`[extension ${ext.half.name}] ${what} failed:`, e);
+      return undefined;
+    };
+    try {
+      const result = fn();
+      return result instanceof Promise ? result.catch(failed) : result;
+    } catch (e) {
+      return failed(e);
+    }
+  });
+
+/**
+ * What each server half said lately, by its name: its `[extension <name>]` lines, and what was printed while its code
+ * ran. The oldest go once there are more than these. Kept for as long as the portal runs, whatever becomes of the half,
+ * for whoever looks into why it stopped.
+ */
+const SAID_LINES = 200;
+const SAID_CHARS = 100_000;
+const said = new Map<string, { lines: LogLine[]; chars: number }>();
+const OWN_LINE = /^\[extension ([^\]\s]+)\]/;
+// The half whose code printed it first: one cannot write into another's lines by naming it.
+onLogLine((line) => {
+  const name = scope.getStore()?.half.name ?? OWN_LINE.exec(line.text)?.[1];
+  if (!name) return;
+  let kept = said.get(name);
+  if (!kept) said.set(name, (kept = { lines: [], chars: 0 }));
+  kept.lines.push(line);
+  kept.chars += line.text.length;
+  while (kept.lines.length > 1 && (kept.lines.length > SAID_LINES || kept.chars > SAID_CHARS)) kept.chars -= kept.lines.shift()!.text.length;
+});
+
+/** How many of a half's last lines a call that its crash ended is answered with, and at most how long they are together. */
+const LAST_LINES = 20;
+const LAST_CHARS = 8000;
+/** The last lines a half said, as a log file has them, with nothing in them that looks like a secret: they go to the model. */
+function lastLines(name: string): string {
+  const out: string[] = [];
+  let size = 0;
+  for (const line of [...(said.get(name)?.lines ?? [])].reverse()) {
+    const text = scrubSecrets(logFileLine(line));
+    if (out.length === LAST_LINES || (out.length && size + text.length > LAST_CHARS)) break;
+    out.unshift(text.length > LAST_CHARS ? `${text.slice(0, LAST_CHARS)}…` : text);
+    size += text.length;
   }
-};
+  return out.join("\n");
+}
+
+/** What a crash was, said in a line: an error as it says itself, anything else thrown as Node would print it. */
+const describe = (error: unknown) => (error instanceof Error ? String(error) : typeof error === "string" ? error : inspect(error));
+
+/**
+ * The half an error is of: the one whose code it came from (see scope); else, for one that came by a way Node does
+ * not follow (a listener of an emitter the half does not own, a `queueMicrotask`), the one whose folder its stack goes
+ * through. None, for an error of the portal's own.
+ */
+function whose(error: unknown): Running | undefined {
+  const stack = (error as { stack?: unknown } | null | undefined)?.stack;
+  return scope.getStore() ?? (typeof stack === "string" ? [...live].find((ext) => ext.where.some((at) => stack.includes(at))) : undefined);
+}
+
+/**
+ * A half crashed: an error of its code reached the process, or it called `process.exit()`. It is said, with its last
+ * lines kept beside it; the half and those that build on it are stopped, and it is held off until another revision of
+ * it is installed or it is switched off and on (see syncServerHalves); what waits on it, a tool's call or its start,
+ * ends at once. The portal and its chats go on. Code of a half that had been stopped already (a timer it left) is said
+ * and nothing more. What its code does after that is not said again.
+ */
+function crashed(ext: Running, error: unknown): void {
+  if (ext.crash) return;
+  const name = ext.half.name;
+  ext.crash = { name, rev: ext.half.rev, at: new Date().toISOString(), error: describe(error), ...(error instanceof Error && error.stack ? { stack: error.stack } : {}) };
+  const held = ext.stopped ? "" : " It is off until another revision of it is installed, or it is switched off and on.";
+  if (ext.stopped) {
+    console.error(`[extension ${name}] code of its server half that had been stopped failed:`, error);
+  } else {
+    crashes.set(name, ext.crash);
+    console.error(`[extension ${name}] its server half crashed.${held}`, error);
+    // Outside its code: what is stopped and started now is not the crashed half's doing.
+    scope.exit(() => syncServerHalves(asked).catch((e) => console.error(`[extensions] could not stop ${name} and what builds on it after it crashed:`, e)));
+  }
+  const last = lastLines(name);
+  ext.end(new Error(`The server half of ${name} crashed: ${ext.crash.error}. The call was not answered.${held}${last ? `\n\nIts last lines:\n${last}` : ""}`));
+}
+
+/**
+ * Makes an error that reaches the process from a server half's code that half's crash (see crashed), and so is a
+ * call of `process.exit()` from there: the portal goes on. Uncaught exceptions and unhandled rejections both: in Node
+ * 22 an error thrown by a timer, an immediate, a `process.nextTick`, an I/O callback (a file read, a socket, a server's
+ * connection, a child process's exit) and a module's top level as it is imported, and a promise that rejects with
+ * nobody to hear it (an async function's, a `.then`'s, a failed fetch), are known by the half whose code started them;
+ * one thrown by a listener of an emitter something else owns, or by a `queueMicrotask` callback, is known by its stack.
+ * An error that is no half's is given back to Node, which ends the portal as it always has. Called once, as the portal
+ * starts (server.ts).
+ */
+export function catchExtensionCrashes(): void {
+  const exit = process.exit;
+  const giveBack = () => {
+    process.off("uncaughtException", onException);
+    process.off("unhandledRejection", onRejection);
+    process.exit = exit;
+  };
+  function onException(error: unknown) {
+    const ext = whose(error);
+    if (ext) return crashed(ext, error);
+    giveBack();
+    // Thrown again with nobody to catch it: printed, and the portal ended with 1.
+    process.nextTick(() => {
+      throw error;
+    });
+  }
+  function onRejection(reason: unknown) {
+    const ext = whose(reason);
+    if (ext) return crashed(ext, reason);
+    giveBack();
+    // Rejected again with nobody to hear it: Node's own handling, which ends the portal.
+    void Promise.reject(reason);
+  }
+  process.on("uncaughtException", onException);
+  process.on("unhandledRejection", onRejection);
+  process.exit = ((code?: number | string | null) => {
+    const error = new Error(`It called process.exit(${code ?? ""})`);
+    const ext = whose(error);
+    if (!ext) return exit.call(process, code);
+    crashed(ext, error);
+    // Its code goes no further, as it would not have.
+    throw error;
+  }) as typeof process.exit;
+}
 
 /** How long a server half may take to start, and to stop: one that hangs must not hold up every other, or the portal's own stop. */
 let START_MS = 15_000;
@@ -352,7 +516,8 @@ function portalFor(ext: Running): ServerPortal {
         if (typeof provider?.label !== "string" || typeof provider.where !== "function" || (provider.use !== undefined && typeof provider.use !== "function")) {
           throw new TypeError("provide takes { label, where, use? }: what it is called, where it listens and speaks now, and what it is told as voice mode is used");
         }
-        ext.voice = provider;
+        // Asked by voice mode as the extension's code.
+        ext.voice = { ...provider, where: () => scope.run(ext, () => provider.where()), use: async (inUse) => scope.run(ext, () => provider.use?.(inUse)) };
       },
       choose(chosen) {
         if (typeof chosen !== "boolean") throw new TypeError("choose takes true, to be voice mode's source, or false, to give it back");
@@ -367,28 +532,31 @@ function portalFor(ext: Running): ServerPortal {
         const provider = running.get(of);
         // An optional one that is not there, or not in a version this one takes: nothing. A required one is there, or this would not be running.
         if (!ext.uses.has(of) || !provider?.provider) return undefined;
-        if (!ext.apis.has(of)) ext.apis.set(of, provider.provider({ name }));
+        // Made by the one it builds on, as that one's code.
+        if (!ext.apis.has(of)) ext.apis.set(of, scope.run(provider, () => provider.provider!({ name })));
         return ext.apis.get(of) as never;
       },
     },
     models: {
-      of: (chatId) => modelOf(chatId, liveModel),
+      of: (chatId) => scope.exit(() => modelOf(chatId, liveModel)),
       endpoint: (provider, id) => modelEndpoint(provider, id),
       list: () => modelProviders(),
     },
     mcp: {
       get: (server) => mcpServer(server),
-      async set(server, entry, options = {}) {
-        // Imported when first asked: it installs packages through what starts and stops these halves, which imports this module.
-        const { setMcpServer } = await import("./mcp-entry.js");
-        await setMcpServer(server, entry);
-        // Counted as the person's own on the extension's word, and no longer once the server is gone: Settings → Guard
-        // lists only the servers there are, so a name left trusted could not be taken out, and would trust whatever
-        // server is given that name next.
-        if (entry === undefined) untrustMcpServer(server);
-        else if (options.trusted === true) setTrustedMcpServers([...trustedMcpServers(), server]);
-        await reloadChats();
-      },
+      // The portal's own work, which it asks for: not its code (see scope).
+      set: (server, entry, options = {}) =>
+        scope.exit(async () => {
+          // Imported when first asked: it installs packages through what starts and stops these halves, which imports this module.
+          const { setMcpServer } = await import("./mcp-entry.js");
+          await setMcpServer(server, entry);
+          // Counted as the person's own on the extension's word, and no longer once the server is gone: Settings → Guard
+          // lists only the servers there are, so a name left trusted could not be taken out, and would trust whatever
+          // server is given that name next.
+          if (entry === undefined) untrustMcpServer(server);
+          else if (options.trusted === true) setTrustedMcpServers([...trustedMcpServers(), server]);
+          await reloadChats();
+        }),
     },
     memory: {
       hold(holder) {
@@ -402,7 +570,7 @@ function portalFor(ext: Running): ServerPortal {
           return;
         }
         // Let go when the half stops. What it says of itself is the extension's: one that fails, or does not answer true, holds nothing.
-        ext.stops.push(holdMemory(name, { label, rule, on: () => guarded(name, "saying whether it holds the agent's memory", () => holder.on()) === true }));
+        ext.stops.push(holdMemory(name, { label, rule, on: () => guarded(ext, "saying whether it holds the agent's memory", () => holder.on()) === true }));
       },
     },
     router: ext.router,
@@ -451,8 +619,9 @@ function portalFor(ext: Running): ServerPortal {
       onOpen: (handler) => void ext.opens.push(handler),
       on: (event, handler) => void ext.life.on(event, handler),
       onEvent: (handler) => void ext.events.push(handler),
-      tell: (chatId, data) => tellChat(chatId, name, data),
-      reload: () => reloadChats(),
+      // The chat's pi, started and run by the portal: not the extension's code (see scope).
+      tell: (chatId, data) => scope.exit(() => tellChat(chatId, name, data)),
+      reload: () => scope.exit(() => reloadChats()),
       offers: (chatId, tool) => toolOffered(chatId, tool),
       extend: (factory) => void ext.factories.push(factory),
       hold: (chatId) => {
@@ -490,22 +659,32 @@ function portalFor(ext: Running): ServerPortal {
 async function stop(ext: Running): Promise<void> {
   running.delete(ext.half.name);
   ext.stopped = true;
-  for (const fn of ext.stops.reverse()) await guarded(ext.half.name, "stopping", () => within(STOP_MS, Promise.resolve().then(fn), "stopping"));
+  for (const fn of ext.stops.reverse()) await guarded(ext, "stopping", () => within(STOP_MS, Promise.resolve().then(fn), "stopping"));
   ext.life.removeAllListeners();
+  live.delete(ext);
 }
 
 async function start(half: ServerHalf, sig: string, uses: Set<string>): Promise<void> {
-  const ext: Running = { half, router: express.Router(), stops: [], opens: [], life: new EventEmitter(), events: [], factories: [], holds: new Map(), apis: new Map(), uses, sig, removed: [] };
+  const ext: Running = { half, router: express.Router(), stops: [], opens: [], life: new EventEmitter(), events: [], factories: [], holds: new Map(), apis: new Map(), uses, sig, removed: [], where: [], ...endable() };
   // Read before it starts: a folder deleted while it does is one it missed.
   const since = toldUpTo(half.name);
   try {
-    // By its revision: the same file changed is another module, and the one already loaded is not served again.
+    const folder = dirname(realpathSync(half.file));
+    ext.where = [folder + sep, `${pathToFileURL(folder).href}/`];
+    live.add(ext);
+    // By its revision: the same file changed is another module, and the one already loaded is not served again. As its own
+    // code, and given up on at once should it crash meanwhile.
     const stopper = await within(
       START_MS,
-      import(`${pathToFileURL(half.file).href}?v=${half.rev}`).then((module: any) => {
-        if (typeof module.default !== "function") throw new Error("Its module has no default export to call");
-        return module.default(portalFor(ext));
-      }),
+      Promise.race([
+        scope.run(ext, () =>
+          import(`${pathToFileURL(half.file).href}?v=${half.rev}`).then((module: any) => {
+            if (typeof module.default !== "function") throw new Error("Its module has no default export to call");
+            return module.default(portalFor(ext));
+          }),
+        ),
+        ext.ended.catch(() => Promise.reject(new Error(`It crashed as it started: ${ext.crash!.error}`))),
+      ]),
       "starting",
     );
     if (typeof stopper === "function") ext.stops.push(stopper);
@@ -515,7 +694,8 @@ async function start(half: ServerHalf, sig: string, uses: Set<string>): Promise<
     tellMissed(ext, since);
   } catch (e) {
     ext.stopped = true;
-    for (const fn of ext.stops.reverse()) await guarded(half.name, "stopping", () => within(STOP_MS, Promise.resolve().then(fn), "stopping"));
+    for (const fn of ext.stops.reverse()) await guarded(ext, "stopping", () => within(STOP_MS, Promise.resolve().then(fn), "stopping"));
+    live.delete(ext);
     failures.set(half.name, (e as Error)?.message || String(e));
     console.error(`[extension ${half.name}] its server half could not be started:`, e);
   }
@@ -590,22 +770,28 @@ async function stopWithDependents(ext: Running): Promise<void> {
   await stop(ext);
 }
 
+/** What was last asked to run: what a crash brings the halves in line with again (see crashed). */
+let asked: ServerHalf[] = [];
 let queue: Promise<void> = Promise.resolve();
 /**
  * Bring what is running in line with `halves`: the installed packages that are
  * switched on and have a server half. One gone or changed is stopped, one new
  * or changed is started, and so is one that builds on another that was (see
  * signature): those that build on another are stopped before it, and started
- * after it. One at a time: a second ask waits for the first.
+ * after it. One that crashed is stopped, and not started again while it is the
+ * revision that crashed and has not been left out (switched off) since. One at
+ * a time: a second ask waits for the first.
  */
 export function syncServerHalves(halves: ServerHalf[]): Promise<void> {
+  asked = halves;
   const run = async () => {
+    for (const [name, crash] of crashes) if (halves.find((half) => half.name === name)?.rev !== crash.rev) crashes.delete(name);
     const { order, blocked, uses } = plan(halves);
     const wanted = new Map(order.map((half) => [half.name, half]));
-    // What is not wanted any more, or changed, goes, with what builds on it: the latest started first.
+    // What is not wanted any more, or changed, or crashed, goes, with what builds on it: the latest started first.
     for (const ext of [...running.values()].reverse()) {
       const half = wanted.get(ext.half.name);
-      if (!half || ext.sig !== signature(half, uses.get(half.name)!)) await stopWithDependents(ext);
+      if (!half || crashes.has(half.name) || ext.sig !== signature(half, uses.get(half.name)!)) await stopWithDependents(ext);
     }
     for (const name of [...failures.keys()]) if (!halves.some((half) => half.name === name)) failures.delete(name);
     for (const [name, why] of blocked) failures.set(name, why);
@@ -614,6 +800,11 @@ export function syncServerHalves(halves: ServerHalf[]): Promise<void> {
     for (let round = 0; round <= order.length; round++) {
       for (const half of order) {
         if (running.has(half.name)) continue;
+        const crash = crashes.get(half.name);
+        if (crash) {
+          failures.set(half.name, `It crashed at ${crash.at}: ${crash.error}. It stays off until another revision of it is installed, or it is switched off and on.`);
+          continue;
+        }
         // What it requires did not start after all: it is said why, and it waits for the next change.
         const down = Object.keys(half.requires ?? {}).find((dep) => !running.has(dep));
         if (down) {
@@ -645,6 +836,21 @@ export function stopServerHalves(): Promise<void> {
 export const serverFailure = (name: string): string | undefined => failures.get(name);
 
 /**
+ * Where a package's server half stands, for whoever looks into it (the agent that is making the extension, a person in
+ * Settings): whether it runs, why not, the crash it is held off for, and what it said lately: the lines after `since`, a
+ * line's id from an earlier answer (or Settings → Logs), all it keeps without one.
+ */
+export function serverHalfStatus(name: string, since = 0): { running: boolean; failure?: string; crash?: ServerHalfCrash; lines: LogLine[] } {
+  const failure = failures.get(name), crash = crashes.get(name);
+  return {
+    running: running.has(name),
+    ...(failure ? { failure } : {}),
+    ...(crash ? { crash } : {}),
+    lines: (said.get(name)?.lines ?? []).filter((line) => line.id > since),
+  };
+}
+
+/**
  * The extension a path under /api/x belongs to, and the rest of the path. A
  * package's name is one or two parts of the path (`@scope/name`), each read as
  * a browser wrote it. The rest is handed on as it came, not read here: the
@@ -673,12 +879,15 @@ export const extensionRoutes: RequestHandler = (req: Request, res: Response, nex
   if (!found) return next();
   // A route may hold its answer open, as a stream: ended with the login it was asked under, like the portal's own.
   res.once("close", watchStream(() => res.destroy()));
-  // The package's routes are written from its own root, whatever it is called.
+  // The package's routes are written from its own root, whatever it is called. They run as its code; what the portal
+  // does when they hand the request on is not.
   req.url = found.rest + (at === -1 ? "" : was.slice(at));
-  found.ext.router(req, res, (error?: unknown) => {
-    req.url = was;
-    next(error);
-  });
+  scope.run(found.ext, () =>
+    found.ext.router(req, res, (error?: unknown) => {
+      req.url = was;
+      scope.exit(() => next(error));
+    }),
+  );
 };
 
 /** Whether an upgrade is asked of some extension's routes: checked for the login before it is said whether there is one to take it. */
@@ -693,7 +902,7 @@ export function extensionUpgrade(url: string | undefined): Upgrade | undefined {
   if (!found || !handler) return undefined;
   return (req, socket, head) => {
     req.url = found.rest + (at === -1 ? "" : url.slice(at));
-    guarded(found.ext.half.name, "an upgrade", () => handler(req, socket, head));
+    guarded(found.ext, "an upgrade", () => handler(req, socket, head));
   };
 }
 
@@ -702,7 +911,7 @@ export function openingPushes(chatId: string): string[] {
   const out: string[] = [];
   for (const ext of running.values()) {
     for (const handler of ext.opens) {
-      const data = guarded(ext.half.name, "what a page is told first", () => handler(chatId));
+      const data = guarded(ext, "what a page is told first", () => handler(chatId));
       const text = data !== undefined && !(data instanceof Promise) ? wire(ext.half.name, data) : undefined;
       if (text) out.push(text);
     }
@@ -719,14 +928,14 @@ export function openingFor(chatId: string, name: string): unknown[] {
   const ext = running.get(name);
   if (!ext) return [];
   return ext.opens
-    .map((handler) => guarded(name, "what a page is told first", () => handler(chatId)))
+    .map((handler) => guarded(ext, "what a page is told first", () => handler(chatId)))
     .filter((data) => data !== undefined && !(data instanceof Promise) && wire(name, data) !== undefined);
 }
 
 /** A chat's pi started or stopped, the chat was deleted, or the run it was started for is over (finished). */
 export function chatLife(event: Life, chatId: string): void {
   for (const ext of running.values()) {
-    for (const handler of ext.life.listeners(event)) guarded(ext.half.name, `hearing a chat was ${event}`, () => handler(chatId));
+    for (const handler of ext.life.listeners(event)) guarded(ext, `hearing a chat was ${event}`, () => handler(chatId));
     if (event === "deleted") ext.holds.delete(chatId);
   }
 }
@@ -734,7 +943,7 @@ export function chatLife(event: Life, chatId: string): void {
 /** Something a chat's pi said. Called for every event, a token at a time: nothing is done where nobody listens. */
 export function chatEvent(chatId: string, event: Record<string, unknown>): void {
   for (const ext of running.values()) {
-    for (const handler of ext.events) guarded(ext.half.name, "hearing a chat's event", () => handler(chatId, event));
+    for (const handler of ext.events) guarded(ext, "hearing a chat's event", () => handler(chatId, event));
   }
 }
 
@@ -759,7 +968,23 @@ export function hostExtensions(chatId: string): { name: string; factory: (pi: an
       factory: (pi: any) => {
         const row = getSession(chatId);
         if (!row) return;
-        for (const factory of ext.factories) guarded(ext.half.name, "adding to a chat's pi", () => factory(pi, chatOf(row)));
+        // What it registers is its code too: its handlers run as that, and so do its tools' calls, which a crash of it ends at once.
+        const own = Object.create(pi, {
+          registerTool: { value: (tool: any) => pi.registerTool({ ...tool, execute: (...args: unknown[]) => callInto(ext, () => tool.execute(...args)) }) },
+          on: { value: (event: string, handler: (...args: unknown[]) => unknown) => pi.on(event, (...args: unknown[]) => scope.run(ext, () => handler(...args))) },
+        });
+        for (const factory of ext.factories) guarded(ext, "adding to a chat's pi", () => factory(own, chatOf(row)));
       },
     }));
+}
+
+/**
+ * A tool's call into a server half, from a chat: run as the half's code, and answered at once with its crash, and its
+ * last lines, should it crash before the call is done (see crashed). The agent reads that as the call's error, in the
+ * same turn, and the chat goes on. One whose half has crashed already is answered so without being called.
+ */
+function callInto<T>(ext: Running, call: () => T): Promise<Awaited<T>> {
+  if (ext.crash) return ext.ended;
+  // The crash first: where both are over already (it called process.exit), the crash is the answer.
+  return scope.run(ext, () => Promise.race([ext.ended, new Promise<Awaited<T>>((resolve) => resolve(call() as Awaited<T>))]));
 }

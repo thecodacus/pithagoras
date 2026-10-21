@@ -89,7 +89,7 @@ import { sweep } from "./login-streams.js";
 import { packagesRouter } from "./api/packages.js";
 import { extensionsRouter, noteLoadedExtensions, syncExtensionServers } from "./api/extensions.js";
 import { installDefaultExtensions, stopInstallingDefaults } from "./default-extensions.js";
-import { extensionRoutes, folderRemoved, openingFor, stopServerHalves } from "./extension-host.js";
+import { catchExtensionCrashes, extensionRoutes, folderRemoved, openingFor, stopServerHalves } from "./extension-host.js";
 import { channelsRouter } from "./api/channels.js";
 import { removeRoutines, routinesIn, routinesRouter, switchOffRoutines } from "./api/routines.js";
 import { filesRouter } from "./api/files.js";
@@ -1887,7 +1887,9 @@ sessions.startReaper();
 // Folders put aside for removal that a stop cut short: see folder-removal.ts.
 sweepRemoved(WORKSPACE_ROOT);
 sweepRemoved(agentsRoot());
-// The server halves of the installed extensions: see extension-host.ts.
+// The server halves of the installed extensions: see extension-host.ts. One that crashes is stopped and held off, and the
+// portal goes on.
+catchExtensionCrashes();
 void syncExtensionServers().catch((e) => console.error("[extensions] could not start the server halves:", e));
 // What a portal starts with is installed once (extensions/defaults.json), and then loaded like anything installed by
 // hand: an install brings the server halves in line again. What the portal runs with is noted once that is done.

@@ -11,7 +11,8 @@ import { clientHalf, packageKinds, requiresOf, staticImports, packageThemes, ser
 import { sendCompressed } from "../compressed-file.js";
 import { bundledPath } from "../bundled.js";
 import { SUBAGENT_PACKAGE } from "../features.js";
-import { isServing, serverFailure, serversSettled, syncServerHalves } from "../extension-host.js";
+import { isServing, serverFailure, serverHalfStatus, serversSettled, syncServerHalves } from "../extension-host.js";
+import { logFileLine } from "../logs.js";
 import { planInstall, type InstalledExtension } from "../install-plan.js";
 
 const run = promisify(execFile);
@@ -403,6 +404,9 @@ function importUrl(half: ClientHalf, file: string): string | undefined {
 /** What a page asks for ahead with the module of `half`. */
 const preloadOf = (half: ClientHalf): string[] => staticImports(half).map((file) => importUrl(half, file)).filter((url) => url !== undefined);
 
+/** How many of the lines a crashed server half said last are listed with its crash. */
+const CRASH_LINES = 30;
+
 export function extensionsRouter(): Router {
   const router = express.Router();
 
@@ -419,6 +423,8 @@ export function extensionsRouter(): Router {
           const server = servers.find((half) => half.name === name);
           const themes = themed.find((half) => half.name === name);
           const failure = server && serverFailure(name);
+          // The crash its server half is held off for, with what it said last.
+          const status = server && serverHalfStatus(name);
           return {
             name,
             version: (client ?? server ?? themes)!.version,
@@ -432,6 +438,7 @@ export function extensionsRouter(): Router {
             // What its server half cannot start without.
             ...(server?.requires ? { requires: server.requires } : {}),
             ...(failure ? { serverError: failure } : {}),
+            ...(status && status.crash ? { crash: { ...status.crash, lines: status.lines.slice(-CRASH_LINES).map(logFileLine) } } : {}),
           };
         }),
       });
