@@ -370,12 +370,12 @@ into the tools' switches, once, for all of those tools:
   would have done. Where it had carried some, the rest are; where it had carried
   them all, nothing is written.
 
-From then on the browser's tools follow their switches as any tool does: a
-Playwright MCP server's tools that no chat had reported by the upgrade, or of a
-server added later, and the tools of a routine made after it. **A new routine
-has the browser** as a chat in its place does, where before it started without
-it. To keep that, switch the `pithagoras-browser` group off in Settings → Tools
-and on where it is wanted, or off in each new routine's **Tools**.
+From then on the browser's tools follow their switches as any tool does, and so
+do the tools of a Playwright MCP server that no chat had reported by the
+upgrade, or of one added later. **A new routine has the browser** as a chat in
+its place does, where before it started without it. To keep that, switch the
+`pithagoras-browser` group off in Settings → Tools and on where it is wanted, or
+off in each new routine's **Tools**.
 
 From a checkout, `npm run build` installs Browser's own package, `playwright-core`,
 in `extensions/browser` the first time; it is no longer one of the server's.
