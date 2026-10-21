@@ -288,7 +288,7 @@ export const de: Record<string, string | Plural> = {
   // MediaPanel.tsx
   "Which chats' agents get the tools is set in the tool lists (Settings → Agent → Tools), in the {group} group.": "Welche Chats ihrem Agenten die Tools geben, wird in den Tool-Listen festgelegt (Einstellungen → Agent → Tools), in der Gruppe „{group}“.",
   // MediaAddons.tsx
-  "Idle chats have it now; {n} busy chats pick it up once they are idle and reloaded (/reload).": { one: "Chats ohne laufende Aufgabe haben es jetzt; ein beschäftigter Chat bekommt es, sobald er frei ist und neu geladen wird (/reload).", other: "Chats ohne laufende Aufgabe haben es jetzt; {n} beschäftigte Chats bekommen es, sobald sie frei sind und neu geladen werden (/reload)." },
+  "Idle chats have it now; {n} busy chats have it from their next step.": { one: "Chats ohne laufende Aufgabe haben es jetzt; ein beschäftigter Chat hat es ab seinem nächsten Schritt.", other: "Chats ohne laufende Aufgabe haben es jetzt; {n} beschäftigte Chats haben es ab ihrem nächsten Schritt." },
   "Chats have it from now on.": "Chats haben es ab jetzt.",
   "Making and changing pictures, on the Media page and for the agent.": "Bilder erstellen und ändern, auf der Medien-Seite und für den Agenten.",
   "Unsaved changes": "Ungespeicherte Änderungen",

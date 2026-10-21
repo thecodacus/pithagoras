@@ -36,7 +36,7 @@ function useFirstRead<T>(read: () => Promise<T>) {
 /** What a switch did to the chats that are open. */
 function reloadNote(waiting: number): string {
   return waiting
-    ? tp(waiting, "Idle chats have it now; one busy chat picks it up once it is idle and reloaded (/reload).", "Idle chats have it now; {n} busy chats pick it up once they are idle and reloaded (/reload).")
+    ? tp(waiting, "Idle chats have it now; one busy chat has it from its next step.", "Idle chats have it now; {n} busy chats have it from their next step.")
     : t("Chats have it from now on.");
 }
 

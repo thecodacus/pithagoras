@@ -24,8 +24,9 @@ portal:
   the same way.
 
 A switch reloads the idle open chats so they have the change at once. A chat
-that is busy — running, compacting, or with a subagent still working in the
-background — keeps what it had until it is idle and reloaded (`/reload`).
+that is busy has it from its next step, and one with a subagent still working
+in the background once that is done: see
+[a chat that is working](/guide/extensions#a-chat-that-is-working).
 
 ## Subagents
 
@@ -133,7 +134,7 @@ speaks one needs a small adapter in front.
 The address, model, size, time limit and key are read at each call, so changing them needs
 no restart. Switching the tool on or off, though, is decided when a chat loads:
 like the other features, a switch reloads the idle open chats, and a busy one
-has it after it is idle and reloaded (`/reload`). The tool belongs to the
+has it from its next step. The tool belongs to the
 in-process agent (`EXECUTOR=host`), as `show_image` does.
 
 ### What the agent gets
@@ -438,7 +439,7 @@ plain words. Other request and answer shapes are not translated; an endpoint tha
 
 The address, model, size, frames, frame rate, time limit and key are read at each call, so changing them needs no
 restart. Switching the tools on or off, though, is decided when a chat loads: a switch reloads the idle open chats, and a busy
-one has it after it is idle and reloaded (`/reload`). The tools belong to the in-process agent (`EXECUTOR=host`), as
+one has it from its next step. The tools belong to the in-process agent (`EXECUTOR=host`), as
 `show_image` does.
 
 ### The agent's video tools

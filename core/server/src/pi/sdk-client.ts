@@ -14,7 +14,7 @@ import { EventEmitter } from "node:events";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import type { DraftStore, PiClient, PiCommand, PiState, PiStats, PiTool, PromptTaken } from "./types.js";
+import type { DraftStore, LoadError, PiClient, PiCommand, PiState, PiStats, PiTool, PromptTaken } from "./types.js";
 import type { ImageContent } from "../prompt-images.js";
 import { routineTools } from "./routine-tools.js";
 import { reportTool, reportToFor } from "./report-tool.js";
@@ -35,6 +35,7 @@ import { adapterTool, contextWindowFor, getSkipThinkingProviders, getVoiceInstru
 import { configStamp, isLlamaProvider } from "../providers.js";
 import { rereadConfig } from "./model-runtime.js";
 import { browserServers } from "../api/mcp.js";
+import { PI_BUILT_IN_TOOLS } from "../tool-policy.js";
 
 /** A message on its way into pi: see SdkPiClient.prompt(). */
 interface Handoff {
@@ -45,6 +46,12 @@ interface Handoff {
   /** Its words as pi queued them, once it has. */
   queued?: string;
 }
+
+/** The portal's own extension that gives pi's tools again, run as the chat's agent, while the sandbox is on. */
+const SANDBOX = "sandbox";
+
+/** One failure of a load, told from another: the same failure at the next load is not new. */
+const failureKey = (failure: LoadError) => `${failure.path}\n${failure.error}`;
 
 function asArray(v: any): any[] {
   const resolved = typeof v === "function" ? v() : v;
@@ -500,6 +507,8 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     heartbeatAgent?: string;
     /** Told the chat's model when a spoken turn is about to run on another: see useVoiceModel. */
     rememberChatModel?: (provider: string, modelId: string) => void;
+    /** Whether a reload that is due may happen between two requests of a run: see prepareEachTurn. */
+    canReloadNow?: () => boolean;
   }): Promise<SdkPiClient> {
     // Imported lazily so the server still boots (and the container executor
     // still works) if the SDK cannot initialise in this environment.
@@ -559,12 +568,13 @@ export class SdkPiClient extends EventEmitter implements PiClient {
             (name) => filesOf(name),
             (name) => fromAdapter(name),
             (name) => guardOf(name),
+            opts.dialogs !== false,
           ) },
         // Offered only while the conversation has a lazy tool: see applyToolsOff.
         { name: "tools-gateway", factory: gateway.extension },
       ];
       // While the sandbox is on, pi's own tools do what they do to the system as the sandbox user: see sandbox/.
-      factories.push({ name: "sandbox", factory: await sandboxTools(pi, opts.cwd) });
+      factories.push({ name: SANDBOX, factory: await sandboxTools(pi, opts.cwd) });
       if (opts.routineTools)
         factories.push({ name: "routines", factory: routineTools(opts.sessionId) });
       if (opts.questions) factories.push({ name: ASK_QUESTION_SOURCE, factory: askQuestionTool(questionWaitMs) });
@@ -705,6 +715,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     client.portalSessionId = opts.sessionId;
     client.dialogs = opts.dialogs !== false;
     client.rememberChatModel = opts.rememberChatModel;
+    client.canReloadNow = opts.canReloadNow;
     if (eventBus && resourceLoader) {
       client.bus = eventBus;
       client.unbridge = bridgeSubagents(
@@ -721,7 +732,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       client.voiceFirst = voiceFirst;
       client.audioRule = audioRule;
       client.loader = resourceLoader;
-      client.sayAudioRuleEachTurn();
+      client.prepareEachTurn();
     }
     // The tool a call through the gateway called, from its start to its end.
     const lazyCalls = new Map<string, string>();
@@ -809,12 +820,16 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     }
 
     client.applyLimitQuietly();
+    // After binding, as the switches below: what an extension registers as it starts is in it.
+    const failed = client.noteLoad();
     // After binding, not before: a tool an extension registers does not exist
     // until then, and switching it off ahead of time switches off nothing.
     // Also with nothing switched off: the gateway is registered active, and is only wanted while a tool is lazy.
     client.applyToolsOff();
     // Now that every tool is registered, the gateway can carry the rules of the lazy ones.
     client.gateway?.refresh();
+    // Said once the portal listens, which it does as soon as it has the client.
+    if (failed.length) setImmediate(() => client.sayLoadErrors(failed));
     return client;
   }
 
@@ -969,6 +984,8 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     message: string,
     options?: { voice?: boolean; images?: ImageContent[]; steer?: boolean },
   ): Promise<PromptTaken> {
+    // See `reloading`. Failed or not, the chat is what it left.
+    if (this.reloading) await this.reloading.catch(() => {});
     if (options?.voice) {
       this.useVoiceModel();
       this.voiceFirst?.arm(this.isIdle());
@@ -1116,7 +1133,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
    *
    * In before pi takes the message, so a run it starts has the rule from its
    * first turn: pi's prompt is built again at once. Every turn after that is
-   * seen to by sayAudioRuleEachTurn, whoever set its prompt.
+   * seen to by prepareEachTurn, whoever set its prompt.
    */
   private sayAudioRule(spoken: boolean): boolean {
     if (!spoken || !this.audioRule?.set(true)) return false;
@@ -1160,17 +1177,24 @@ export class SdkPiClient extends EventEmitter implements PiClient {
   }
 
   /**
-   * The rule as it should be, in the prompt of every turn after a run's first.
+   * What pi's own preparation of every turn after a run's first is to find.
    *
-   * pi takes that prompt afresh between turns, from the options the run was
-   * started with: what it appends to its own prompt, and the whole text where
-   * an extension forced one for the run (pi-background-tasks sets one for every
-   * run on the test host). Those say what they were given when the run started,
-   * so a message queued into a run that is going would be answered without the
-   * rule, or with an earlier wording of it. So before pi builds each turn's
-   * prompt from them, both are made to say what the rule says now.
+   * A reload that became due while the run went on (see reloadIdle), where
+   * nothing beside the run would be cut off by it (`canReloadNow`): between two
+   * requests no tool is running, and pi's preparation takes the tools again
+   * from what the reload left, so the next request has them. Where it cannot,
+   * the chat is reloaded once the run is over.
+   *
+   * And the rule as it should be, in the prompt. pi takes that prompt afresh
+   * between turns, from the options the run was started with: what it appends
+   * to its own prompt, and the whole text where an extension forced one for
+   * the run (pi-background-tasks sets one for every run on the test host).
+   * Those say what they were given when the run started, so a message queued
+   * into a run that is going would be answered without the rule, or with an
+   * earlier wording of it. So before pi builds each turn's prompt from them,
+   * both are made to say what the rule says now.
    */
-  private sayAudioRuleEachTurn(): void {
+  private prepareEachTurn(): void {
     const session = this.session;
     const agent = session?.agent;
     const rule = this.audioRule;
@@ -1178,6 +1202,14 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     const prepare = agent?.prepareNextTurnWithContext;
     if (!rule || !loader || typeof prepare !== "function") return;
     agent.prepareNextTurnWithContext = async (turn: unknown, signal: unknown) => {
+      if (this.reloadDue && this.canReloadNow?.()) {
+        try {
+          await this.reload();
+        } catch (e) {
+          // The run goes on with what it had, as a chat that could not be reloaded while idle does, and the next step tries again.
+          console.error(`[portal] could not reload ${this.portalSessionId ?? "a chat"} between two steps: ${(e as Error).message}`);
+        }
+      }
       const options = session._runSystemPromptOptions as { appendSystemPrompt?: unknown; forceSystemPrompt?: unknown } | undefined;
       if (options) {
         const after = loader.appendedByPi();
@@ -1391,9 +1423,18 @@ export class SdkPiClient extends EventEmitter implements PiClient {
 
   /**
    * Names this session has switched off. Applied at every start and on change.
-   * Not private: create() fills it before the session is handed over.
+   * Not private: create() fills it before the session is handed over. With
+   * them, the names of pi's own tools another extension took while the
+   * sandbox is on, which are off whatever the switches say: see `taken`.
    */
-  switchedOff = new Set<string>();
+  get switchedOff(): Set<string> {
+    return this.taken.size ? new Set([...this.switches, ...this.taken]) : this.switches;
+  }
+  set switchedOff(names: Set<string>) {
+    this.switches = names;
+  }
+  /** The switches alone. */
+  private switches = new Set<string>();
 
   toolsSeen?: () => ReadonlySet<string>;
 
@@ -1523,6 +1564,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     }
     this.keepSwitchedOffFromScripts(session);
     session._setActiveTools = (names: string[]) => {
+      this.takenLate();
       const held = this.heldBack(session, names, this.fromExtension);
       this.wanted = new Set([...names, ...held]);
       // What was held back and is not kept out now is offered: a lazy tool when an extension's `tools` has taken the
@@ -1821,16 +1863,128 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     await this.session.compact();
   }
 
+  /** See PiClient.reloadDue. */
+  reloadDue = false;
+
+  /** Set by create(): whether a reload that is due may happen between two requests of a run. See prepareEachTurn. */
+  canReloadNow?: () => boolean;
+
+  /**
+   * A reload under way. A message handed over meanwhile waits for it rather than meet the extensions half loaded:
+   * one sent into a run that is being reloaded between two of its steps, or one that started on its way just as a run
+   * was over and its chat was reloaded.
+   */
+  private reloading?: Promise<void>;
+
   async reload(): Promise<void> {
+    this.reloadDue = false;
+    const reloading = this.loadAgain();
+    this.reloading = reloading;
+    try {
+      await reloading;
+    } catch (e) {
+      // Not reloaded, so due still: see PiClient.reloadDue.
+      this.reloadDue = true;
+      throw e;
+    } finally {
+      if (this.reloading === reloading) this.reloading = undefined;
+    }
+  }
+
+  private async loadAgain(): Promise<void> {
+    this.loading = true;
     await this.session.reload();
     // Reloading has extensions register their providers again, which puts the
     // registry's model, with its own window, back on the session.
     this.applyLimitQuietly();
     // And has pi switch every extension tool back on — which is every MCP tool,
     // the browser's among them. The switches are the portal's to keep.
-    for (const name of this.unseenOff()) this.switchedOff.add(name);
+    for (const name of this.unseenOff()) this.switches.add(name);
+    const failed = this.noteLoad();
     this.applyToolsOff();
     this.sayAudioRuleAgain();
+    this.sayLoadErrors(failed);
+  }
+
+  /** What the last load could not load, as noteLoad found it. */
+  private failedToLoad: LoadError[] = [];
+
+  loadErrors(): LoadError[] {
+    return this.failedToLoad.map((failure) => ({ ...failure }));
+  }
+
+  /**
+   * pi's own tool names that came from another extension than the sandbox's, while the sandbox gives them. pi keeps
+   * the first tool of a name, and an installed package loads before the portal's own extensions, so the package's
+   * `bash` would be the chat's, run outside the sandbox. Off in this chat, whatever the switches say.
+   */
+  private taken = new Set<string>();
+
+  /**
+   * Whether the sandbox gave pi's tools at the last load. It decides that as it loads, by whether the sandbox is on,
+   * and switching the sandbox reloads every chat.
+   */
+  private sandboxed = false;
+
+  /** From the start of a load until noteLoad has noted what it left (a load that failed, until the next): see takenLate. */
+  private loading = true;
+
+  /** Each of pi's own tool names that another extension than the sandbox's gives now, with the error that says so. */
+  private takenNow(): { name: string; failure: LoadError }[] {
+    const sandbox = `<inline:${SANDBOX}>`;
+    return asArray(this.session.getAllTools?.())
+      .filter((tool) => PI_BUILT_IN_TOOLS.includes(String(tool?.name)) && tool.sourceInfo?.path !== sandbox)
+      .map((tool) => ({
+        name: String(tool.name),
+        failure: {
+          path: String(tool.sourceInfo?.path ?? ""),
+          error: `${sourceLabel(tool.sourceInfo)} registers "${tool.name}", one of pi's own tools. With the sandbox on, only the sandbox may give a tool that name, so "${tool.name}" is off in this chat.`,
+        },
+      }));
+  }
+
+  /**
+   * What the load that just ended left: pi's errors (an extension that threw as it loaded, a tool of a name another
+   * had first), and where the sandbox is on, one for each of pi's own tool names another extension took. Kept for
+   * loadErrors; those that were not there at the load before are returned, to be said.
+   */
+  private noteLoad(): LoadError[] {
+    const loaded = this.session.resourceLoader?.getExtensions?.() ?? {};
+    const sandbox = `<inline:${SANDBOX}>`;
+    this.sandboxed = asArray(loaded.extensions).some((ext) => ext?.path === sandbox && ext.tools?.size > 0);
+    const taken = this.sandboxed ? this.takenNow() : [];
+    this.taken = new Set(taken.map(({ name }) => name));
+    // pi files a tool of a name another extension had first under the one that loaded later, which for pi's own names
+    // is the sandbox: the error that names the package says it instead.
+    const conflict = (e: LoadError) => e.path === sandbox && [...this.taken].some((name) => e.error.startsWith(`Tool "${name}" conflicts with `));
+    const failed: LoadError[] = asArray(loaded.errors)
+      .map((e) => ({ path: String(e?.path ?? ""), error: String(e?.error ?? e) }))
+      .filter((e) => !conflict(e));
+    failed.push(...taken.map(({ failure }) => failure));
+    this.loading = false;
+    const before = new Set(this.failedToLoad.map(failureKey));
+    this.failedToLoad = failed;
+    return failed.filter((failure) => !before.has(failureKey(failure)));
+  }
+
+  /**
+   * One of pi's own tool names taken by a tool an extension registers after the load (as it starts, as a run starts):
+   * pi keeps the package's, which loaded first, from then on. Off at once, and said, as at a load. Every such
+   * registration comes through guardActiveTools; one in the middle of a load is noteLoad's.
+   */
+  private takenLate(): void {
+    if (this.loading || !this.sandboxed) return;
+    const late = this.takenNow().filter(({ name }) => !this.taken.has(name));
+    if (!late.length) return;
+    for (const { name } of late) this.taken.add(name);
+    const failed = late.map(({ failure }) => failure);
+    this.failedToLoad.push(...failed);
+    this.sayLoadErrors(failed);
+  }
+
+  /** Each as an extension's failure is said in the chat: see extension_error in the session manager. */
+  private sayLoadErrors(failed: LoadError[]): void {
+    for (const failure of failed) this.emit("event", { type: "extension_error", extensionPath: failure.path, error: failure.error });
   }
 
   /**

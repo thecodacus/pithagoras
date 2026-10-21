@@ -553,7 +553,7 @@ and, for a tool, which tool and what it was asked to do:
 | --- | --- |
 | Refused | The agent was stopped from doing something |
 | Allowed by rule | A [standing rule](/people/rules) let it through |
-| Allowed by approval | Somebody [approved it](/people/approvals) |
+| Allowed by approval | Somebody [approved it](/people/approvals), or you said yes in the chat to a call [held after a suspected prompt injection](/guide/security#asked-or-refused) |
 | Turned away | A stranger on a channel was refused |
 | You answered | A question from the agent was answered |
 | Address reached | A tool went to an address: the agent's [browser](/guide/browser) was pointed at a page, or a tool that [declares `reaches`](/guide/extension-ui#what-the-guard-holds-a-tool-to) was given one |

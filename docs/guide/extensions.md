@@ -49,8 +49,11 @@ running commands, so install ones you trust. The registry can be another one
 
 They persist across restarts, because `HOME` points at the data volume. **Update
 all** upgrades the installed packages; pi itself comes with the portal's version,
-so a new pi arrives with an update of the portal. The bin icon removes one. Chats
-started from then on have the package; open ones pick it up with `/reload`.
+so a new pi arrives with an update of the portal. The bin icon removes one.
+Installing, removing or updating reloads the open chats, so each has the change
+without `/reload`: an idle chat at once, and one in the middle of a run at its
+next step (see [a chat that is working](#a-chat-that-is-working)). So does
+saving pi's `settings.json` in Settings → **Advanced**.
 
 An extension that needs others to run (it [requires](/guide/extension-ui#installing-what-it-requires)
 them) says so first: **Install** lists each one that is not there, from the
@@ -107,15 +110,46 @@ kept aside while it is off and given back when it is on again, rather than lost
 to a plain entry.
 
 Conversations that are open and idle are reloaded, so the change is there at
-once; ones in the middle of a run keep what they had until `/reload` or their
-next start, and the page says how many they were. Packages a project brings in
-are that project's to decide and have no switch here.
+once; ones in the middle of a run take it at their next step, and the page says
+how many they were. Packages a project brings in are that project's to decide
+and have no switch here.
 
 ::: warning Some packages carry others with them
 `pi-mcp-adapter` is what makes MCP servers into tools. Switching it off takes
 every MCP server with it. The agent's [browser](/guide/browser) is not one of them:
 its tools are the Browser extension's.
 :::
+
+## A chat that is working
+
+A chat whose agent is in the middle of a run when the open chats are reloaded
+(a package installed, removed, updated or switched, a feature or the sandbox
+switched, an extension asking for it) is loaded again at its next step: after
+the tools of one step have run and before the model is asked again. The
+model's next request has the tools as they are then, so a tool one call
+installed can be called by the next, in the same run. pi tells the model which
+tools came and went.
+
+Not while a subagent works in the background, which a reload would stop, nor
+while an extension holds the chat (`chats.hold`): the chat is then reloaded
+once neither does any more, at a later step, as its run ends, or before the
+next message starts a run. A chat whose pi runs in a container of its own
+(`EXECUTOR=container`) is reloaded once its run is over. A reload keeps the
+conversation and the chat's tool switches; what it loads again is the
+extensions, skills, prompts and pi's settings, and an MCP server the adapter
+keeps connected is started again.
+
+What a chat whose pi runs in the portal's own process could not load (an
+extension that throws as it loads, a tool of a name another extension took
+first) is said in the chat once, as an extension's failure is, and again only
+if it comes back after it was gone.
+
+With the [sandbox](/guide/sandbox) on, pi's own tools (`read`, `bash`, `edit`,
+`write`, `grep`, `find`, `ls`) are the sandbox's, which run them as the chat's
+agent. pi keeps the first tool of a name, and an installed package loads before
+the portal's own extensions, so a package that registers one of these names
+would have its own run in the chat as the portal. That tool is off in every
+chat instead, and the chat says which package took the name.
 
 ## Configuring
 
@@ -475,8 +509,9 @@ draws them the way it draws the main conversation. A child started with
 
 A subagent is over when its tool call is, unless `start` said `detached: true`:
 then it runs on after the call has returned — a subagent in the background —
-until its `end`, or until the chat's pi stops. Open chats with one still
-running are not reloaded when a package is switched.
+until its `end`, or until the chat's pi stops. A chat with one still running is
+not reloaded when a package is switched: it is reloaded later, see
+[a chat that is working](#a-chat-that-is-working).
 
 `extensions/subagent` in this repository is a complete example: a `subagent`
 tool that hands a task to a second pi and can be steered while it works, in

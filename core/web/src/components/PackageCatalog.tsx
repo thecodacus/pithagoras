@@ -182,11 +182,6 @@ export function PackageCatalog({
           {more ? t("Fewer") : t("{n} more", { n: found.length - limit })}
         </button>
       )}
-      {done.size > 0 && (
-        <p role="status" className="mt-2 text-xs text-fg-muted">
-          {t("Chats started from now on have it. Open ones pick it up with /reload.")}
-        </p>
-      )}
     </div>
   );
 }
