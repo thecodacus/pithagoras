@@ -1961,16 +1961,19 @@ switching one takes effect in the server and in every open page, without a
 reload or a restart: at once in the page it was done from, and within five
 seconds in the others, wherever it was done (another tab, the API, an agent).
 Every page asks for the list of chats every five seconds, and is told with it a
-revision of what is installed; when that changes, the page goes through what is
-installed again, and Settings → Extensions lists it again.
+revision of what is installed: of every package, one that brings nothing to the
+page included (a pi half, skills, prompts). When that is not the revision the
+page last went through, the page goes through what is installed again, and
+Settings → Extensions lists it again.
 
-A browser half is loaded by its revision, which changes with its module's file
-and its stylesheet's: installing a package again from its folder after you
-changed either swaps the new one into every page, in place. A file the module
-imports is fetched by its own address, which does not change with it, so a page
-holds the one it had until it is reloaded. [`buildExtension`](#writing-it-in-typescript)
-names the files it splits a module into by what is in them, so a changed one is
-another address.
+A browser half is fetched under its revision, which changes with its module's
+file and its stylesheet's: installing a package again from its folder after you
+changed either swaps the new one into every page, in place. Every file the
+module imports by a relative address is fetched under the same revision, so the
+new one comes with the files of its own revision, not with those the page had.
+A change to such a file alone is not another revision: change the module too,
+or build it again; [`buildExtension`](#writing-it-in-typescript) writes the
+module on every build.
 
 Of two installed packages that go by one name, the first is the one, whole.
 
@@ -2001,17 +2004,24 @@ are there to choose all the while. A component that fails to draw takes down its
 page, and a server half's handler that throws is answered as an error; the
 rest of the portal goes on.
 
-A page tells the portal when a browser half fails there, to load or to draw,
-with the revision that failed (`POST /api/extension-ui/failures`). The portal
-keeps the latest for each package until another revision of it is installed, and
-says it with the package (`clientError` in `GET /api/extension-ui`): Settings →
-Extensions shows it beside the package in every page, not only in the one it
-failed in.
+A page tells the portal when a browser half fails there, with the revision that
+failed and where it failed (`POST /api/extension-ui/failures`): when it fails to
+load or to draw, when a handler of its throws (what its server half or its
+extension in a chat said to it, a shortcut), and when something it runs of its
+own throws and nothing catches it (a timer, a promise, a click handler), told
+apart by the address its files come from. Each failure is told once per page.
+The portal keeps the latest for each package until another revision of it is
+installed, and says it with the package (`clientError` and `clientStack` in
+`GET /api/extension-ui`). Settings → Extensions shows it beside the package in
+the page it failed in at once, and in any other page that goes through what is
+installed after that: one opened or reloaded later, and every open page once
+what is installed next changes.
 
 A browser half that breaks the whole page, or keeps it from answering, can be
 switched off all the same: open the portal with `?extensions=off` on its address
 (`/settings/extensions?extensions=off`). That page loads no browser half, and
-Settings → Extensions lists every package, with its switch and Remove.
+Settings → Extensions lists every package, with its switch and Remove. An
+extension's own page opened that way says so.
 
 ### The extensions a portal starts with
 
