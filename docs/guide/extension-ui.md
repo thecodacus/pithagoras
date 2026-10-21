@@ -1587,7 +1587,9 @@ portal.memory.hold({
   project, which has no agent, never has it.
 - One extension holds the memory: the first that asks. One that asks while
   another holds it is refused, with a line in the portal's log that says which
-  holds it. It is let go when the extension's server half stops.
+  holds it. It is let go when the extension's server half stops; one that asks
+  after that, from a timer it left or a start the portal gave up on, holds
+  nothing.
 - What holds it is said by its `label`: `GET /api/features/flags` answers
   `memory: { held, by }`, and an agent's setup (`GET /api/agents/:id/setup`)
   `memory: "extension"` with `by`.

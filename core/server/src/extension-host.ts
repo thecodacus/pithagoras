@@ -116,6 +116,8 @@ interface Running {
   offers?: () => OfferedTool[];
   /** What it is told when the portal deletes a folder the agents work in (`folders.on("removed")`). */
   removed: ((folder: string) => void)[];
+  /** Its stops have run, or are running: what it registers after that would never be let go. */
+  stopped?: boolean;
 }
 
 /**
@@ -370,6 +372,11 @@ function portalFor(ext: Running): ServerPortal {
         if (typeof label !== "string" || !label.trim() || typeof rule !== "string" || !rule.trim() || typeof holder.on !== "function") {
           throw new TypeError("hold takes { label, rule, on }: two texts, and a function that says whether it holds the memory now");
         }
+        // Its module still running after its half stopped, or failed to start: what it asks now would never be let go.
+        if (ext.stopped) {
+          say(name, "cannot hold the agent's memory: its server half is not running");
+          return;
+        }
         // Let go when the half stops. What it says of itself is the extension's: one that fails, or does not answer true, holds nothing.
         ext.stops.push(holdMemory(name, { label, rule, on: () => guarded(name, "saying whether it holds the agent's memory", () => holder.on()) === true }));
       },
@@ -458,6 +465,7 @@ function portalFor(ext: Running): ServerPortal {
 
 async function stop(ext: Running): Promise<void> {
   running.delete(ext.half.name);
+  ext.stopped = true;
   for (const fn of ext.stops.reverse()) await guarded(ext.half.name, "stopping", () => within(STOP_MS, Promise.resolve().then(fn), "stopping"));
   ext.life.removeAllListeners();
 }
@@ -482,6 +490,7 @@ async function start(half: ServerHalf, sig: string, uses: Set<string>): Promise<
     say(half.name, "server half started");
     tellMissed(ext, since);
   } catch (e) {
+    ext.stopped = true;
     for (const fn of ext.stops.reverse()) await guarded(half.name, "stopping", () => within(STOP_MS, Promise.resolve().then(fn), "stopping"));
     failures.set(half.name, (e as Error)?.message || String(e));
     console.error(`[extension ${half.name}] its server half could not be started:`, e);

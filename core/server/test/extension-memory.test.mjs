@@ -126,16 +126,53 @@ test("the first extension that asks holds the memory: one that asks while it doe
   assert.equal(memoryHolder(), undefined);
 });
 
-test("what an extension says of itself is its own: one whose answer fails holds nothing, and a hold without a label, a rule and `on` throws", async () => {
+test("what an extension says of itself is its own: one whose answer fails, or is anything but true, holds nothing, and a hold without a label, a rule and `on` throws", async () => {
   const dir = path.join(home, "packages", "odd");
   mkdirSync(dir, { recursive: true });
-  const file = path.join(dir, "server.js");
-  writeFileSync(file, `export default function (portal) {\nglobalThis.portals.odd = portal;\nportal.memory.hold({ label: "Odd", rule: "Odd's rule.", on: () => { throw new Error("no idea"); } });\n}\n`);
-  await host.syncServerHalves([{ name: "odd", version: "1.0.0", file, rev: statSync(file).size.toString(36) }]);
-  assert.equal(memoryHolder(), undefined);
-  assert.deepEqual(names(nova.home), ["MEMORY.md", "PrimaryUser.md", "SOUL.md"]);
+  // A promise is no answer, however it settles: it would hold the memory for good.
+  for (const [i, on] of ['() => { throw new Error("no idea"); }', "async () => true", '() => "yes"'].entries()) {
+    const file = path.join(dir, `server-${i}.js`);
+    writeFileSync(file, `export default function (portal) {\nglobalThis.portals.odd = portal;\nportal.memory.hold({ label: "Odd", rule: "Odd's rule.", on: ${on} });\n}\n`);
+    await host.syncServerHalves([{ name: "odd", version: "1.0.0", file, rev: `${statSync(file).size.toString(36)}-${i}` }]);
+    assert.equal(memoryHolder(), undefined, on);
+    assert.deepEqual(names(nova.home), ["MEMORY.md", "PrimaryUser.md", "SOUL.md"], on);
+  }
   for (const holder of [undefined, { label: "", rule: "r", on: () => true }, { label: "l", rule: 3, on: () => true }, { label: "l", rule: "r", on: true }]) {
     assert.throws(() => globalThis.portals.odd.memory.hold(holder), /hold takes \{ label, rule, on \}/);
   }
   await host.syncServerHalves([]);
+});
+
+test("a half that asks once it is no longer running holds nothing: its start gave up, or it was stopped", async () => {
+  said.length = 0;
+  const dir = path.join(home, "packages", "late");
+  mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, "server.js");
+  // Its start goes on after the host gave up on it, and asks then.
+  writeFileSync(file, `export default async function (portal) {\nglobalThis.portals.late = portal;\nawait new Promise((resolve) => setTimeout(resolve, 400));\nportal.memory.hold({ label: "Late", rule: "Late's rule.", on: () => true });\n}\n`);
+  host.setLimits(100, 100);
+  try {
+    await host.syncServerHalves([{ name: "late", version: "1.0.0", file, rev: statSync(file).size.toString(36) }]);
+  } finally {
+    host.setLimits(15_000, 5_000);
+  }
+  assert.equal(host.isServing("late"), false);
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  assert.equal(memoryHolder(), undefined);
+  assert.deepEqual(names(nova.home), ["MEMORY.md", "PrimaryUser.md", "SOUL.md"]);
+  assert.ok(said.includes("[extension late] cannot hold the agent's memory: its server half is not running"), said.join("\n"));
+
+  // Stopped, and asking from a timer it left behind.
+  globalThis.holding.keeper = true;
+  const once = path.join(dir, "once.js");
+  writeFileSync(once, "export default function (portal) {\nglobalThis.portals.once = portal;\n}\n");
+  await host.syncServerHalves([{ name: "once", version: "1.0.0", file: once, rev: statSync(once).size.toString(36) }]);
+  await host.syncServerHalves([]);
+  globalThis.portals.once.memory.hold({ label: "Once", rule: "Once's rule.", on: () => true });
+  assert.equal(memoryHolder(), undefined);
+  // Nothing was left held: one that runs now has it.
+  await host.syncServerHalves([keeper("keeper", "Keeper")]);
+  assert.equal(memoryHolder()?.label, "Keeper");
+  await host.syncServerHalves([]);
+  globalThis.holding.keeper = false;
 });
