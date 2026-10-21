@@ -326,7 +326,7 @@ const changesExtensions = <T>(request: Promise<T>): Promise<T> =>
     return result;
   });
 
-/** An installed extension's browser half: where its module is fetched from, and its stylesheet if it has one. */
+/** How a server half crashed, with the lines it said last, as a log file has them: as GET /api/extension-ui gives it. */
 export interface ServerCrash {
   name: string;
   at: string;
@@ -336,6 +336,7 @@ export interface ServerCrash {
   lines: string[];
 }
 
+/** An installed extension's browser half: where its module is fetched from, and its stylesheet if it has one. */
 export interface ExtensionUi {
   name: string;
   version?: string;
