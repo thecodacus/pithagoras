@@ -49,7 +49,7 @@ const NOTES = { url: "http://127.0.0.1:1/mcp", lifecycle: "lazy" };
 test("a server written for the portal's user alone, with the adapter installed where it is missing, and trusted only when asked", async () => {
   settings([]);
   let mcp = await start();
-  await mcp.set("notes", NOTES);
+  assert.deepEqual(await mcp.set("notes", NOTES), { reloaded: 1, waiting: 0 }, "what the idle chats' reload did");
   assert.deepEqual(piAsked(), ["install npm:pi-mcp-adapter@2.18.0"]);
   assert.equal(statSync(mcpFile()).mode & 0o777, 0o600);
   assert.deepEqual(servers().notes, NOTES);

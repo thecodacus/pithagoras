@@ -387,7 +387,7 @@ function portalFor(ext: Running): ServerPortal {
         // server is given that name next.
         if (entry === undefined) untrustMcpServer(server);
         else if (options.trusted === true) setTrustedMcpServers([...trustedMcpServers(), server]);
-        await reloadChats();
+        return reloadChats();
       },
     },
     memory: {

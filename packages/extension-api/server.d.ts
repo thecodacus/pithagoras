@@ -410,10 +410,10 @@ export interface ServerPortal {
      * half starts. `trusted`: the person counts what its tools return as their own, not outside content; the name
      * is added to Settings → Guard's trusted servers, where they can take it out. Removing the server takes the name
      * out of them again, so a server given that name later is not trusted unasked. Then the idle chats are loaded
-     * again, as `chats.reload` does. Rejects while the file cannot be read, which is the person's to fix in
-     * Settings → MCP, and for a name or a server the adapter would not take.
+     * again, as `chats.reload` does, and what that answers is answered. Rejects while the file cannot be read, which
+     * is the person's to fix in Settings → MCP, and for a name or a server the adapter would not take.
      */
-    set(name: string, entry: McpEntry | undefined, options?: { trusted?: boolean }): Promise<void>;
+    set(name: string, entry: McpEntry | undefined, options?: { trusted?: boolean }): Promise<{ reloaded: number; waiting: number }>;
   };
   memory: {
     /**
