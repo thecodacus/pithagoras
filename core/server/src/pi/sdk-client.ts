@@ -35,6 +35,7 @@ import { adapterTool, contextWindowFor, getSkipThinkingProviders, getVoiceInstru
 import { configStamp, isLlamaProvider } from "../providers.js";
 import { rereadConfig } from "./model-runtime.js";
 import { browserServers } from "../api/mcp.js";
+import { PI_BUILT_IN_TOOLS } from "../tool-policy.js";
 
 /** A message on its way into pi: see SdkPiClient.prompt(). */
 interface Handoff {
@@ -45,6 +46,9 @@ interface Handoff {
   /** Its words as pi queued them, once it has. */
   queued?: string;
 }
+
+/** The portal's own extension that gives pi's tools again, run as the chat's agent, while the sandbox is on. */
+const SANDBOX = "sandbox";
 
 /** One failure of a load, told from another: the same failure at the next load is not new. */
 const failureKey = (failure: LoadError) => `${failure.path}\n${failure.error}`;
@@ -569,7 +573,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
         { name: "tools-gateway", factory: gateway.extension },
       ];
       // While the sandbox is on, pi's own tools do what they do to the system as the sandbox user: see sandbox/.
-      factories.push({ name: "sandbox", factory: await sandboxTools(pi, opts.cwd) });
+      factories.push({ name: SANDBOX, factory: await sandboxTools(pi, opts.cwd) });
       if (opts.routineTools)
         factories.push({ name: "routines", factory: routineTools(opts.sessionId) });
       if (opts.questions) factories.push({ name: ASK_QUESTION_SOURCE, factory: askQuestionTool(questionWaitMs) });
@@ -1418,9 +1422,18 @@ export class SdkPiClient extends EventEmitter implements PiClient {
 
   /**
    * Names this session has switched off. Applied at every start and on change.
-   * Not private: create() fills it before the session is handed over.
+   * Not private: create() fills it before the session is handed over. With
+   * them, the names of pi's own tools another extension took while the
+   * sandbox is on, which are off whatever the switches say: see `taken`.
    */
-  switchedOff = new Set<string>();
+  get switchedOff(): Set<string> {
+    return this.taken.size ? new Set([...this.switches, ...this.taken]) : this.switches;
+  }
+  set switchedOff(names: Set<string>) {
+    this.switches = names;
+  }
+  /** The switches alone. */
+  private switches = new Set<string>();
 
   toolsSeen?: () => ReadonlySet<string>;
 
@@ -1879,7 +1892,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     this.applyLimitQuietly();
     // And has pi switch every extension tool back on — which is every MCP tool,
     // the browser's among them. The switches are the portal's to keep.
-    for (const name of this.unseenOff()) this.switchedOff.add(name);
+    for (const name of this.unseenOff()) this.switches.add(name);
     const failed = this.noteLoad();
     this.applyToolsOff();
     this.sayAudioRuleAgain();
@@ -1894,11 +1907,36 @@ export class SdkPiClient extends EventEmitter implements PiClient {
   }
 
   /**
-   * What the load that just ended left: pi's errors, an extension that threw as it loaded or a tool of a name another
-   * had first. Kept for loadErrors; those that were not there at the load before are returned, to be said.
+   * pi's own tool names that came from another extension than the sandbox's, at the last load with the sandbox on.
+   * pi keeps the first tool of a name, and an installed package loads before the portal's own extensions, so the
+   * package's `bash` would be the chat's, run outside the sandbox. Off in this chat, whatever the switches say.
+   */
+  private taken = new Set<string>();
+
+  /**
+   * What the load that just ended left: pi's errors (an extension that threw as it loaded, a tool of a name another
+   * had first), and where the sandbox is on, one for each of pi's own tool names another extension took. Kept for
+   * loadErrors; those that were not there at the load before are returned, to be said.
+   *
+   * The sandbox was on as the chat loaded where its extension registered tools: it decides that as it loads, and
+   * switching the sandbox reloads every chat.
    */
   private noteLoad(): LoadError[] {
-    const failed: LoadError[] = asArray(this.session.resourceLoader?.getExtensions?.()?.errors).map((e) => ({ path: String(e?.path ?? ""), error: String(e?.error ?? e) }));
+    const loaded = this.session.resourceLoader?.getExtensions?.() ?? {};
+    const failed: LoadError[] = asArray(loaded.errors).map((e) => ({ path: String(e?.path ?? ""), error: String(e?.error ?? e) }));
+    this.taken = new Set();
+    const sandbox = `<inline:${SANDBOX}>`;
+    if (asArray(loaded.extensions).some((ext) => ext?.path === sandbox && ext.tools?.size > 0)) {
+      for (const tool of asArray(this.session.getAllTools?.())) {
+        const name = String(tool?.name);
+        if (!PI_BUILT_IN_TOOLS.includes(name) || tool.sourceInfo?.path === sandbox) continue;
+        this.taken.add(name);
+        failed.push({
+          path: String(tool.sourceInfo?.path ?? ""),
+          error: `${sourceLabel(tool.sourceInfo)} registers "${name}", one of pi's own tools. With the sandbox on, only the sandbox may give a tool that name, so "${name}" is off in this chat.`,
+        });
+      }
+    }
     const before = new Set(this.failedToLoad.map(failureKey));
     this.failedToLoad = failed;
     return failed.filter((failure) => !before.has(failureKey(failure)));
