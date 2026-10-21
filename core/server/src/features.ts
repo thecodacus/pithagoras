@@ -1,11 +1,11 @@
-import { readFileSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { bundledPath } from "./bundled.js";
 import { isSwitchedOff, sourceOf } from "./extension-switch.js";
 import { realPath } from "./within.js";
-import { piAgentDir, piSettingsPath, readPiSettings } from "./pi-settings.js";
-import { mcpAdapter, mcpConfigPath, readMcpFile, type McpFile } from "./api/mcp.js";
+import { piAgentDir, readPiSettings } from "./pi-settings.js";
+import { mcpServer, type McpFile } from "./api/mcp.js";
 
 /**
  * Optional capabilities the portal ships and leaves off: a subagent tool, and
@@ -163,44 +163,15 @@ export function understoryIn(config: McpFile): boolean {
   return !!entry && typeof entry === "object" && entry.disabled !== true;
 }
 
-/** The answer of `understoryOn` for the files as they were last read. */
-let known: { stamp: string; on: boolean } | undefined;
-
-/** When the two files it is read from last changed: asked each time a prompt is built, read only when they did. */
-function filesStamp(): string {
-  return [mcpConfigPath(), piSettingsPath()]
-    .map((f) => {
-      try {
-        const st = statSync(f);
-        return `${st.mtimeMs}:${st.size}`;
-      } catch {
-        return "-";
-      }
-    })
-    .join("|");
-}
-
 /**
- * Whether Understory is the agent's memory now. Asked each time a chat starts
- * and read from mcp.json whenever that file or pi's settings have changed, so
- * the file is the one place it is said, and switching the server off in
- * Settings → MCP brings MEMORY.md back too; so does switching off
- * pi-mcp-adapter, which its tools come through.
+ * Whether Understory is the agent's memory now: its server is in mcp.json, as
+ * the chats see it (see mcpServer). Switching the server off in Settings → MCP
+ * brings MEMORY.md back too; so does switching off pi-mcp-adapter, which its
+ * tools come through: without it, MEMORY.md would be taken away and nothing
+ * given in its place.
  */
 export function understoryOn(): boolean {
-  const stamp = filesStamp();
-  if (known?.stamp === stamp) return known.on;
-  let on = false;
-  try {
-    const { config, error } = readMcpFile();
-    // Its tools are there only through the adapter: without it, MEMORY.md
-    // would be taken away and nothing given in its place.
-    on = !error && understoryIn(config) && mcpAdapter()?.enabled === true;
-  } catch {
-    on = false;
-  }
-  known = { stamp, on };
-  return on;
+  return mcpServer(UNDERSTORY)?.on === true;
 }
 
 /** Said to the agent in place of MEMORY.md, while Understory holds its memory. */

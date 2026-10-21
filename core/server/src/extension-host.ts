@@ -22,6 +22,7 @@ import { gitAt } from "./git.js";
 import { folderAllowed, folderLabel, listFolders } from "./agent-folders.js";
 import { handoffDone, takeHandoff } from "./handoff.js";
 import { modelEndpoint, modelOf, modelProviders, type LiveModel } from "./models.js";
+import { mcpServer } from "./api/mcp.js";
 import type { Chat, ChatLife as Life, Ran, ServerPortal, Upgrade } from "@pithagoras/extension-api/server";
 
 /**
@@ -347,6 +348,15 @@ function portalFor(ext: Running): ServerPortal {
       of: (chatId) => modelOf(chatId, liveModel),
       endpoint: (provider, id) => modelEndpoint(provider, id),
       list: () => modelProviders(),
+    },
+    mcp: {
+      get: (server) => mcpServer(server),
+      async set(server, entry, options = {}) {
+        // Imported when first asked: it installs packages through what starts and stops these halves, which imports this module.
+        const { setMcpServer } = await import("./mcp-entry.js");
+        await setMcpServer(server, entry, { trusted: options.trusted === true });
+        await reloadChats();
+      },
     },
     router: ext.router,
     http: {

@@ -1,9 +1,9 @@
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import express, { type Router } from "express";
 import { writeFileAtomic } from "../atomic-write.js";
 import { isSwitchedOff, sourceOf } from "../extension-switch.js";
-import { piAgentDir, readPiSettings } from "../pi-settings.js";
+import { piAgentDir, piSettingsPath, readPiSettings } from "../pi-settings.js";
 import { BROWSER_MCP } from "../tool-policy.js";
 
 /**
@@ -31,7 +31,7 @@ const ADAPTER = "pi-mcp-adapter";
  */
 export const ADAPTER_SPEC = `npm:${ADAPTER}@2.18.0`;
 
-const NAME_RE = /^[A-Za-z0-9][\w.-]*$/;
+export const NAME_RE = /^[A-Za-z0-9][\w.-]*$/;
 
 export interface McpFile {
   mcpServers: Record<string, Record<string, unknown>>;
@@ -253,6 +253,52 @@ export function mcpAdapter(packages: unknown = readPiSettings().packages): { sou
   return undefined;
 }
 
+/** What `mcpServer` answers from: the servers and the adapter as the files were when last read. */
+let lastRead: { stamp: string; servers?: McpFile["mcpServers"]; adapter: boolean } | undefined;
+
+/** When mcp.json and pi's settings last changed: read again only when they did. */
+function filesStamp(): string {
+  return [mcpConfigPath(), piSettingsPath()]
+    .map((f) => {
+      try {
+        const st = statSync(f);
+        return `${st.mtimeMs}:${st.size}`;
+      } catch {
+        return "-";
+      }
+    })
+    .join("|");
+}
+
+/**
+ * The server of that name, and whether the chats have its tools now (`on`):
+ * there, not switched off, and pi-mcp-adapter, which its tools come through,
+ * installed and on. Asked each time a chat starts, and read from the files
+ * whenever they changed, so mcp.json is the one place it is said: switching
+ * the server or the adapter off in Settings is heard too. Nothing where there
+ * is no such server, or the file cannot be read.
+ */
+export function mcpServer(name: string): { entry: Record<string, unknown>; on: boolean } | undefined {
+  const stamp = filesStamp();
+  if (lastRead?.stamp !== stamp) {
+    let servers: McpFile["mcpServers"] | undefined;
+    let adapter = false;
+    try {
+      const { config, error } = readMcpFile();
+      if (!error) servers = config.mcpServers;
+      adapter = mcpAdapter()?.enabled === true;
+    } catch {
+      // Not readable: no server is there.
+    }
+    lastRead = { stamp, servers, adapter };
+  }
+  const { servers, adapter } = lastRead;
+  const entry = servers && Object.prototype.hasOwnProperty.call(servers, name) ? servers[name] : undefined;
+  if (!entry || typeof entry !== "object") return undefined;
+  // A copy: what the next caller is told is the file's, not what this one made of it.
+  return { entry: structuredClone(entry), on: entry.disabled !== true && adapter };
+}
+
 /** stdio, http and socket are mutually exclusive in the adapter. */
 function transportOf(entry: Record<string, unknown>): "stdio" | "http" | "socket" | "unknown" {
   if (typeof entry.command === "string" && entry.command) return "stdio";
@@ -261,7 +307,7 @@ function transportOf(entry: Record<string, unknown>): "stdio" | "http" | "socket
   return "unknown";
 }
 
-function validateEntry(entry: unknown): string | null {
+export function validateEntry(entry: unknown): string | null {
   if (!entry || typeof entry !== "object" || Array.isArray(entry)) return "Server must be an object";
   const e = entry as Record<string, unknown>;
   const transports = ["command", "url", "socket"].filter(

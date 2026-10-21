@@ -243,6 +243,9 @@ export interface ModelProvider {
   models: string[];
 }
 
+/** One server of pi's mcp.json, in the shape pi-mcp-adapter reads: `url`, `command` or `socket`, and what else the adapter takes. */
+export type McpEntry = Record<string, unknown>;
+
 export interface ServerPortal {
   /** Of this interface: raised when something an extension relies on changes. */
   version: 1;
@@ -345,6 +348,28 @@ export interface ServerPortal {
     endpoint(provider: string, id: string): Promise<ModelEndpoint>;
     /** The providers set up by their address (pi's models.json), with their models. Services pi has built in are not listed. */
     list(): ModelProvider[];
+  };
+  /**
+   * MCP servers, as pi-mcp-adapter makes them the chats' tools: named `<server>_<tool>`, and switched in Settings → MCP
+   * and Settings → Tools as any other server's are.
+   */
+  mcp: {
+    /**
+     * The server of that name in pi's mcp.json, and whether the chats have its tools now (`on`): it is there, not
+     * switched off, and pi-mcp-adapter, which makes its tools, is installed and on. The file is read again only when
+     * it, or pi's settings, changed. Nothing where there is no such server, or the file cannot be read.
+     */
+    get(name: string): { entry: McpEntry; on: boolean } | undefined;
+    /**
+     * Writes the server of that name into pi's mcp.json (a file for the portal's user alone), in place of what was
+     * there under that name, or removes it (`undefined`). Writing one installs pi-mcp-adapter where it is not
+     * installed, and switches it on where it is off, which waits for the server halves to follow: not while this
+     * half starts. `trusted`: the person counts what its tools return as their own, not outside content; the name
+     * is added to Settings → Guard's trusted servers, where they can take it out. Then the idle chats are loaded
+     * again, as `chats.reload` does. Rejects while the file cannot be read, which is the person's to fix in
+     * Settings → MCP, and for a name or a server the adapter would not take.
+     */
+    set(name: string, entry: McpEntry | undefined, options?: { trusted?: boolean }): Promise<void>;
   };
   /**
    * The package's own routes, at /api/x/<package>/…, behind the portal's

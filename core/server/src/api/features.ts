@@ -18,7 +18,8 @@ import {
 import { readPiSettings, updatePiSettings } from "../pi-settings.js";
 import { sessions } from "../session-manager.js";
 import { followPackages, switchPackage } from "./extensions.js";
-import { ADAPTER_SPEC, mcpAdapter, readMcpFile, writeMcpFile } from "./mcp.js";
+import { mcpAdapter, mcpServer, readMcpFile } from "./mcp.js";
+import { setMcpServer } from "../mcp-entry.js";
 import * as service from "../extensions/understory-service.js";
 import { modelProviders } from "../models.js";
 import { pi } from "./packages.js";
@@ -88,29 +89,21 @@ async function understoryState() {
  * otherwise the address given, or the one there before.
  */
 async function switchUnderstory(enabled: boolean, url?: string): Promise<void> {
-  const { config, error } = readMcpFile();
-  if (error) throw Object.assign(new Error(`Fix mcp.json first: ${error}`), { status: 409 });
-  if (enabled) {
-    // The adapter is what makes an MCP server into tools; without it the entry does nothing.
-    const adapter = adapterEntry();
-    if (!adapter) await pi(["install", ADAPTER_SPEC]);
-    else if (!adapter.enabled) await switchPackage(adapter.source, true);
-    await followPackages();
-    // Kept: whatever else somebody put in the entry by hand, except how it signs in, which is said anew.
-    const { disabled: _off, auth: _a, bearerToken: _t, bearerTokenEnv: _e, ...had } = (config.mcpServers[UNDERSTORY] ?? {}) as Record<string, unknown>;
-    // An address given is the one meant; without one, the portal's own Understory where it runs one.
-    config.mcpServers[UNDERSTORY] = url === undefined && (await service.installed())
+  if (!enabled) return setMcpServer(UNDERSTORY, undefined);
+  // Kept: whatever else somebody put in the entry by hand, except how it signs in, which is said anew.
+  const { disabled: _off, auth: _a, bearerToken: _t, bearerTokenEnv: _e, ...had } = mcpServer(UNDERSTORY)?.entry ?? {};
+  // An address given is the one meant; without one, the portal's own Understory where it runs one.
+  await setMcpServer(
+    UNDERSTORY,
+    url === undefined && (await service.installed())
       ? { ...had, ...understoryEntry(service.managedUrl(), { token: service.token() }) }
       : {
           ...had,
           ...understoryEntry(url ?? (typeof had.url === "string" && had.url ? had.url : understoryDefaultUrl()), {
             ...(process.env[UNDERSTORY_TOKEN_ENV] ? { tokenEnv: UNDERSTORY_TOKEN_ENV } : {}),
           }),
-        };
-  } else {
-    delete config.mcpServers[UNDERSTORY];
-  }
-  writeMcpFile(config);
+        },
+  );
 }
 
 /** The model a request names, checked; undefined when it names none that can be used. */
