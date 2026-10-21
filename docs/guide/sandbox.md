@@ -17,6 +17,9 @@ same permissions. It is off until you switch it on in **Settings → Sandbox**.
 - **The shell.** Every command pi's `bash` runs, and whatever that command starts.
 - **pi's file tools.** `read`, `write`, `edit` and `ls` do their reading and
   writing as the agent's user. `grep` and `find` run whole as that user too.
+  An installed extension that registers a tool of one of these names, or
+  `bash`, would have its own run in their place, as the portal: that tool is
+  off in the chat instead, and the chat says which package took the name.
 - **The environment.** Commands get a short list of variables: `PATH`, the
   language and terminal ones, and pi's own `PI_*` session variables. The portal's
   password, its secret and the provider keys are not among them, so `env` shows
