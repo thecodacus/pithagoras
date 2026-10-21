@@ -5,30 +5,37 @@ import { test, expect, mockPortal, DONE } from './portal-mock';
 /**
  * A page follows what is installed, wherever it was installed: the Notes test extension
  * (tests/fixtures/extensions/notes) installed, changed or removed through the API, not from the page, comes into the
- * page, is swapped or goes within one poll of the list of chats, which says what is installed as a revision. And what
- * fails of a browser half in a page (to load, to draw, or in what it runs of its own) is told to the portal, which
- * Settings → Extensions says in the pages that go through what is installed after that.
+ * page, is swapped or goes within one poll of the list of chats, which says what is installed as a revision, and so
+ * does a crash of its server half. And what fails of a browser half in a page (to load, to draw, or in what it runs of
+ * its own) is told to the portal, which Settings → Extensions says in the pages that go through what is installed after
+ * that.
  */
 const NAME = 'pithagoras-notes';
 const web = (file: string) => readFileSync(new URL(`../fixtures/extensions/notes/web/${file}`, import.meta.url), 'utf8');
 const address = (file: string) => `/api/extension-ui/${NAME}/${file}`;
 
+/** How its server half crashed, as the portal lists it. */
+type Crash = { name: string; rev: string; at: string; error: string; lines: string[] };
+
 /**
- * The portal as its server answers, with the Notes extension installed as `state` says, and what a page told it failed
- * (`told`), and where (`stacks`). `state.listed` is called as each list of what the pages load is answered.
+ * The portal as its server answers, with the Notes extension installed as `state` says, its server half crashed where
+ * `state.crash` says, and what a page told it failed (`told`), and where (`stacks`). `state.listed` is called as each
+ * list of what the pages load is answered.
  */
 async function portal(page: Page, module = web('client.js')) {
-  const state = { installed: true, rev: 'r1', module, css: web('client.css'), listed: undefined as (() => void) | undefined };
+  const state = { installed: true, rev: 'r1', module, css: web('client.css'), crash: undefined as Crash | undefined, listed: undefined as (() => void) | undefined };
   const told: { name: string; rev: string; error: string }[] = [];
   const stacks: (string | undefined)[] = [];
-  // What is installed, as the server says it: a revision that changes whenever it does.
-  const revision = () => JSON.stringify([state.installed, state.rev]);
+  // What is installed, and where its server half stands, as the server says it: a revision that changes whenever either does.
+  const revision = () => JSON.stringify([state.installed, state.rev, state.crash?.at ?? null]);
   await mockPortal(page, async ({ path, method, route, json }) => {
     if (path === '/api/sessions' && method === 'GET') return { sessions: [], executor: 'host', extensions: revision() };
     if (path === '/api/extension-ui' && method === 'GET') {
       const failed = told.findLast((failure) => failure.name === NAME);
       const listing = {
-        name: NAME, version: '0.2.0', rev: state.rev, entry: `${address('client.js')}?v=${state.rev}`, style: `${address('client.css')}?v=${state.rev}`, server: `/api/x/${NAME}`,
+        name: NAME, version: '0.2.0', rev: state.rev, entry: `${address('client.js')}?v=${state.rev}`, style: `${address('client.css')}?v=${state.rev}`,
+        // Its routes are gone with a crash, which says why.
+        ...(state.crash ? { serverError: `It crashed at ${state.crash.at}: ${state.crash.error}. It stays off until another revision of it is installed, or it is switched off and on.`, crash: state.crash } : { server: `/api/x/${NAME}` }),
         // Said until another revision is installed.
         ...(failed?.rev === state.rev ? { clientError: failed.error } : {}),
       };
@@ -128,15 +135,42 @@ test('what fails of a browser half, to load or to draw, is told to the portal, a
 });
 
 test('?extensions=off loads no browser half, and Settings still lists it to switch it off', async ({ page }) => {
-  await portal(page, 'export default function () { throw new Error("breaks the page"); }');
+  const { state } = await portal(page, 'export default function () { throw new Error("breaks the page"); }');
   const asked: string[] = [];
   page.on('request', (request) => { if (new URL(request.url()).pathname.startsWith('/api/extension-ui')) asked.push(request.url()); });
+  await page.clock.install();
   await page.goto('/settings/extensions?extensions=off');
   const card = cards(page).filter({ hasText: NAME });
   await expect(card.getByRole('switch', { name: `Switch off ${NAME}` })).toBeVisible();
   await expect(card.getByRole('alert')).toHaveCount(0);
+
+  // Nor when the list of chats says that something changed: its server half crashed, and the list is read again.
+  state.crash = { name: NAME, rev: 's1', at: '2026-10-22T10:00:01.000Z', error: 'Error: boom', lines: [] };
+  const listed = page.waitForRequest((request) => new URL(request.url()).pathname === '/api/extensions');
+  await page.clock.runFor(5500);
+  await listed;
   await expect(stylesheets(page)).toHaveCount(0);
   expect(asked).toEqual([]);
+});
+
+test("a crash of its server half comes into Settings → Extensions within one poll, and reads beside what failed of its browser half", async ({ page }) => {
+  const { state, told } = await portal(page, 'export default function () { void Promise.reject(new Error("rejected later")); }');
+  await page.clock.install();
+  await page.goto('/settings/extensions');
+  const card = cards(page).filter({ hasText: NAME });
+  await expect.poll(() => told).toEqual([{ name: NAME, rev: 'r1', error: 'rejected later' }]);
+  await expect(card.getByRole('alert')).toHaveText('Its interface failed in a page: rejected later');
+
+  // It crashed: nothing was installed, and this page did nothing.
+  state.crash = { name: NAME, rev: 's1', at: '2026-10-22T10:00:01.000Z', error: 'Error: boom', lines: ['2026-10-22T10:00:00.000Z INFO  [extension pithagoras-notes] about to fail'] };
+  await page.clock.runFor(5500);
+  const alerts = card.getByRole('alert');
+  await expect(alerts).toHaveCount(2);
+  await expect(alerts.first()).toHaveText('Its interface failed in a page: rejected later');
+  await expect(alerts.last()).toContainText('Its server half crashed at ');
+  await expect(alerts.last()).toContainText('is off until another version of it is installed, or it is switched off and on: Error: boom');
+  await expect(alerts.last()).not.toContainText('could not be started');
+  await expect(alerts.last().getByText('What it said last')).toBeVisible();
 });
 
 test('an install made between the page asking what to load and its first list of chats is not missed', async ({ page }) => {

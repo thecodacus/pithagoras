@@ -324,7 +324,7 @@ export function loadExtensions(): Promise<void> {
 /**
  * What is installed, as the portal says it with the list of chats (GET /api/sessions): when it is not what the list
  * this page last went through was said with, it was changed since, here or elsewhere (another tab, the API, an agent),
- * and the page goes through it again. Fired once for each change, whatever becomes of that.
+ * or a server half crashed, and the page goes through it again. Fired once for each change, whatever becomes of that.
  */
 export function followInstalled(revision: string): void {
   if (revision === seen) return;

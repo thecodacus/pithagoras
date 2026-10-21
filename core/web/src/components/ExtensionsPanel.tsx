@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { LuCheck, LuCompass, LuDownload, LuPackageCheck, LuPalette, LuPanelsTopLeft, LuPuzzle, LuRefreshCw, LuTrash2 } from "react-icons/lu";
-import { api, EXTENSIONS_CHANGED, type ExtensionInfo, type PackageKind, type ShippedExtension } from "../api";
+import { api, type ExtensionInfo, type PackageKind, type ShippedExtension } from "../api";
 import { displayName } from "../tool-groups";
 import { packageName } from "../package-names";
 import { useExtensions } from "../extensions/loader";
@@ -134,10 +134,7 @@ export function ExtensionsPanel({
   const [step, setStep] = useState<InstallStep | null>(null);
   // Why a package's interface is not in the page, or failed in a page (this one or another), or its server half is not
   // running, where it brings one: see extensions/loader.ts.
-  // Gone through again as the list is shown, and as it is refreshed: a server half can crash at any time, and nothing tells the page.
   const { failures, clientFailures, serverFailures, serverCrashes } = useExtensions();
-  const goThrough = () => void window.dispatchEvent(new Event(EXTENSIONS_CHANGED));
-  useEffect(goThrough, []);
   const ownPages = useSlot("settings.page");
   // The same, readable by a second Enter that comes before the draw.
   const busyRef = useRef(false);
@@ -266,13 +263,7 @@ export function ExtensionsPanel({
                   <LuDownload className="h-4 w-4" />
                   {busy === "update" ? t("Updating…") : t("Update all")}
                 </button>
-                <button
-                  onClick={() => {
-                    goThrough();
-                    void onRefresh();
-                  }}
-                  className={btnCls}
-                >
+                <button onClick={() => onRefresh()} className={btnCls}>
                   <LuRefreshCw className="h-4 w-4" /> {t("Refresh")}
                 </button>
               </div>

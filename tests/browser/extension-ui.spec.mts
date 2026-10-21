@@ -23,8 +23,6 @@ async function portal(page: Page, module = web('client.js'), probe?: string, als
   const model = { id: 'model-a', name: 'Model A', provider: 'llama-swap' };
   const state = {
     installed: true, revision: 1, probeServerError: undefined as string | undefined, probeCrash: undefined as unknown, themed: true, hangs: false, probeListed: true, openingHangs: false, preload: [] as string[],
-    /** How many times the page has read the list. */
-    reads: 0,
     /** What the Notes extension's server half would tell a page opening a chat now. */
     opening: [] as unknown[],
     /** Themes the Notes package names beside its module. */
@@ -39,7 +37,6 @@ async function portal(page: Page, module = web('client.js'), probe?: string, als
   const failed: { name: string; rev: string; error: string }[] = [];
   await mockPortal(page, async ({ path: p, method, route, json }) => {
     if (p === '/api/extension-ui') {
-      state.reads++;
       // Not answered: no extension is in the page, however long it waits.
       if (state.hangs) return HANG;
       const v = `?v=${state.revision}`;
@@ -500,40 +497,22 @@ test("an extension's own page in Settings, and why its server half is not runnin
   await expect(dialog.getByRole('listitem').filter({ hasText: 'probe' }).getByRole('alert')).toHaveText('Its server half could not be started: cannot start here');
 });
 
-test("a server half that crashed is shown in Settings with what it said last, and Refresh reads the list again", async ({ page }) => {
+test("a server half that crashed is shown in Settings with what it said last", async ({ page }) => {
   const { state } = await portal(page, undefined, PROBE);
-  await page.goto('/settings/extensions');
-  const dialog = page.getByRole('dialog', { name: 'Settings' });
-  const row = dialog.getByRole('listitem').filter({ hasText: 'probe' });
-  await expect(row).toBeVisible();
-  await expect(row.getByRole('alert')).toHaveCount(0);
-  // It crashed while the page was open: nothing tells the page of that, and Refresh reads the list again.
   const lines = ['2026-10-22T10:00:00.000Z INFO  [extension probe] about to fail', '2026-10-22T10:00:01.000Z ERROR [extension probe] its server half crashed. Error: boom\n    at Timeout._onTimeout (server.js:3:9)'];
   Object.assign(state, {
     probeServerError: 'It crashed at 2026-10-22T10:00:01.000Z: Error: boom. It stays off until another revision of it is installed, or it is switched off and on.',
     probeCrash: { name: 'probe', rev: 'r1', at: '2026-10-22T10:00:01.000Z', error: 'Error: boom', lines },
   });
-  await dialog.getByRole('button', { name: 'Refresh', exact: true }).click();
+  await page.goto('/settings/extensions');
+  const dialog = page.getByRole('dialog', { name: 'Settings' });
+  const row = dialog.getByRole('listitem').filter({ hasText: 'probe' });
   const alert = row.getByRole('alert');
   await expect(alert).toContainText('Its server half crashed at ');
   await expect(alert).toContainText('is off until another version of it is installed, or it is switched off and on: Error: boom');
   await expect(alert).not.toContainText('could not be started');
   await alert.getByText('What it said last').click();
   await expect(alert.locator('pre')).toHaveText(lines.join('\n'));
-});
-
-test("Settings → Extensions reads the list again as it is opened: a server half may have crashed since the page did", async ({ page }) => {
-  const { state } = await portal(page, undefined, PROBE);
-  await page.goto('/settings/general');
-  const dialog = page.getByRole('dialog', { name: 'Settings' });
-  await expect(dialog).toBeVisible();
-  await expect.poll(() => state.reads).toBeGreaterThan(0);
-  Object.assign(state, {
-    probeServerError: 'It crashed at 2026-10-22T10:00:01.000Z: Error: boom. It stays off until another revision of it is installed, or it is switched off and on.',
-    probeCrash: { name: 'probe', rev: 'r1', at: '2026-10-22T10:00:01.000Z', error: 'Error: boom', lines: [] },
-  });
-  await dialog.getByRole('navigation').getByRole('button', { name: 'Extensions', exact: true }).click();
-  await expect(dialog.getByRole('listitem').filter({ hasText: 'probe' }).getByRole('alert')).toContainText('Its server half crashed at ');
 });
 
 test("Settings' search finds what an extension's own page says is on it, and goes to its heading there", async ({ page }) => {
