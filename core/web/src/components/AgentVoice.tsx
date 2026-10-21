@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { LuPlus } from "react-icons/lu";
-import { api, type VoiceConfig } from "../api";
+import { api, speakingRuntime, type VoiceConfig } from "../api";
 import { Select } from "./Select";
 import { AddVoiceForm, kokoroVoiceOptions, voicePresets, type Preset } from "./VoiceLibrary";
 import { DEFAULT_KOKORO_VOICE, KOKORO_VOICES } from "../../../server/src/kokoro-voices";
@@ -31,7 +31,7 @@ export function VoicePicker({ value, onChange }: { value: string; onChange: (voi
 
   const named = (id: string | undefined) => (!id || id === "design" ? t("Designed voice") : (voices.find((v) => v.id === id)?.name ?? id));
 
-  if (config.runtime === "kokoro") {
+  if (speakingRuntime(config) === "kokoro") {
     const own = config.kokoroVoice ?? DEFAULT_KOKORO_VOICE;
     return (
       <div className="mt-4 text-xs text-fg-muted">

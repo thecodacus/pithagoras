@@ -21,23 +21,31 @@ export class DockerError extends Error {
   }
 }
 
-/** A request, answered with its status and the whole of its body as bytes. Given up after `timeoutMs` in all; 0 waits as long as it takes. */
-function send(method: string, path: string, body?: unknown, timeoutMs = 30_000): Promise<{ status: number; bytes: Buffer }> {
+/**
+ * A request, answered with its status and the whole of its body as bytes. Given up after `timeoutMs` in all (0 waits as
+ * long as it takes): as a failure, or, with `keep`, answered with what had come by then and `timedOut`.
+ */
+function send(method: string, path: string, body?: unknown, timeoutMs = 30_000, keep = false): Promise<{ status: number; bytes: Buffer; timedOut: boolean }> {
   if (!socketThere()) return Promise.reject(new DockerError(`Docker cannot be reached: there is no socket at ${socketPath()}`));
   return new Promise((resolve, reject) => {
     const payload = body === undefined ? undefined : JSON.stringify(body);
+    // Bytes, put together once they are all there: a letter split across two chunks is two halves of one.
+    const chunks: Buffer[] = [];
+    let status = 0;
     const req = http.request(
       { socketPath: socketPath(), path, method, headers: payload ? { "content-type": "application/json", "content-length": Buffer.byteLength(payload) } : {} },
       (res) => {
-        // Bytes, put together once they are all there: a letter split across two chunks is two halves of one.
-        const chunks: Buffer[] = [];
+        status = res.statusCode ?? 0;
         res.on("data", (c: Buffer) => chunks.push(c));
-        res.on("end", () => resolve({ status: res.statusCode ?? 0, bytes: Buffer.concat(chunks) }));
-        res.on("error", reject);
+        res.on("end", () => resolve({ status, bytes: Buffer.concat(chunks), timedOut: false }));
+        res.on("error", (e) => reject(new DockerError(`Docker's answer was cut off: ${e.message}`)));
       },
     );
     if (timeoutMs > 0) {
-      const deadline = setTimeout(() => req.destroy(new DockerError("Docker did not answer in time")), timeoutMs);
+      const deadline = setTimeout(() => {
+        if (keep) resolve({ status, bytes: Buffer.concat(chunks), timedOut: true });
+        req.destroy(new DockerError("Docker did not answer in time"));
+      }, timeoutMs);
       req.on("close", () => clearTimeout(deadline));
     }
     req.on("error", (e) => reject(e instanceof DockerError ? e : new DockerError(`Docker cannot be reached: ${e.message}`)));
@@ -115,7 +123,7 @@ export function pull(image: string, onLine: (line: string) => void): Promise<voi
         }
       });
       res.on("end", () => (failed ? reject(failed) : resolve()));
-      res.on("error", reject);
+      res.on("error", (e) => reject(new DockerError(`Docker's answer was cut off: ${e.message}`)));
     });
     req.on("error", (e) => reject(new DockerError(`Docker cannot be reached: ${e.message}`)));
     req.end();
@@ -138,17 +146,34 @@ export function demux(bytes: Buffer, tty: boolean): string {
   return Buffer.concat(parts).toString("utf8");
 }
 
+/** Docker's no to a request whose answer is read as bytes: in its own words where it gave some. */
+function refusal(status: number, bytes: Buffer): DockerError {
+  let message = "";
+  try {
+    message = JSON.parse(bytes.toString("utf8")).message ?? "";
+  } catch {
+    // No reason given.
+  }
+  return new DockerError(message || `Docker answered ${status}`, status);
+}
+
 /** The end of what a container wrote, as text: its output and its errors, or the one of them asked for. */
 export async function logs(id: string, tail: number | "all", tty: boolean, streams: { stdout: boolean; stderr: boolean } = { stdout: true, stderr: true }): Promise<string> {
   const { status, bytes } = await send("GET", `/containers/${encodeURIComponent(id)}/logs?stdout=${Number(streams.stdout)}&stderr=${Number(streams.stderr)}&tail=${tail}`);
-  if (status >= 400) {
-    let message = "";
-    try {
-      message = JSON.parse(bytes.toString("utf8")).message ?? "";
-    } catch {
-      // No reason given.
-    }
-    throw new DockerError(message || `Docker answered ${status}`, status);
-  }
+  if (status >= 400) throw refusal(status, bytes);
   return demux(bytes, tty);
+}
+
+/**
+ * Runs an exec Docker made (`POST /containers/{id}/exec`) to its end: what it wrote, as text, and its exit code. Given up
+ * on after `timeoutMs` (0 waits as long as it takes), with what it wrote by then and no exit code: Docker has no way to
+ * end an exec, so it may still be running in the container.
+ */
+export async function exec(id: string, tty: boolean, timeoutMs: number): Promise<{ output: string; exitCode: number | null; timedOut: boolean }> {
+  const { status, bytes, timedOut } = await send("POST", `/exec/${encodeURIComponent(id)}/start`, { Detach: false, Tty: tty }, timeoutMs, true);
+  if (status >= 400) throw refusal(status, bytes);
+  const output = demux(bytes, tty);
+  if (timedOut) return { output, exitCode: null, timedOut };
+  const { ExitCode } = await checked<{ ExitCode: number | null }>("GET", `/exec/${encodeURIComponent(id)}/json`);
+  return { output, exitCode: ExitCode, timedOut };
 }

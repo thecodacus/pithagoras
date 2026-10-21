@@ -142,7 +142,7 @@ agent you would let run containers.
 Name it in your package.json, and ask for it in your server half:
 
 ```json
-"pithagoras": { "server": "./server.js", "requires": { "pithagoras-docker": "^1.0.0" } }
+"pithagoras": { "server": "./server.js", "requires": { "pithagoras-docker": "^1.1.0" } }
 ```
 
 ```js
@@ -164,15 +164,76 @@ What it gives (`extensions/docker/src/api.ts`, with its types):
 | | |
 | --- | --- |
 | `available()` | Whether the portal reaches Docker now |
+| `sharedNetwork()` | The network mode for a container on the portal's own network ([below](#a-container-on-the-portal-s-network)) |
 | `images.present(image)`, `images.ensure(image, onProgress?)` | Whether an image is there; downloads it when it is not, telling `onProgress` how it goes. One download of an image at a time, whoever asks |
 | `containers.list()`, `containers.get(name)` | Your containers; a container by name, with `owner` saying whose it is and `labels` the labels it was made with |
 | `containers.create(name, spec)` | Makes one, not started, from Docker's own create body (`Image`, `Env`, `Cmd`, `HostConfig`, …). One of yours by that name is removed first |
+| `containers.inspect(name)` | How your container was made and how it stands: Docker's own inspect body (`Config`, `HostConfig`, `State`, …), as `create` takes Docker's own create body. Nothing where there is none |
+| `containers.exec(name, cmd, options?)` | Runs a command in your running container, and gives what it wrote and how it ended ([below](#running-a-command-in-a-container)) |
 | `containers.start`, `stop`, `remove`, `logs(name, { tail })` | Your container's life, and the end of what it wrote |
 | `containers.adopt(name)` | Takes over a container that carries no extension's name: one made before your app was an extension, so that what it kept is kept. Browser takes over the `pithagoras-browser` container and its profile volume this way each time it starts |
 | `volumes.list`, `create`, `remove`, `adopt` | The same for volumes |
 
+`sharedNetwork`, `containers.inspect` and `containers.exec` came with Docker
+1.1.0: an extension that uses them requires `^1.1.0`.
+
 Each extension has its own. What it makes carries its name (the label
-`pithagoras.extension`), and it may start, stop, remove and read only those,
-and the ones it took over: another extension's, or a container nobody made
-through Docker, is refused until it is taken over. Which ones it took over is
-kept in Docker's own folder in the portal's data folder.
+`pithagoras.extension`), and it may start, stop, remove, read and run commands
+in only those, and the ones it took over: another extension's, or a container
+nobody made through Docker, is refused until it is taken over. Which ones it
+took over is kept in Docker's own folder in the portal's data folder.
+
+### Running a command in a container
+
+`containers.exec(name, cmd, { env, workingDir, tty, timeoutMs })` runs `cmd`
+(`["node", "-e", script]`, say) in one of your containers, which has to be
+running: Docker refuses it in one that is not. `env` is its environment besides
+the container's (`{ INPUT: "…" }`), `workingDir` the folder it runs in, and
+`tty` gives it a terminal, so that what it wrote comes back as it wrote it. It
+gives:
+
+- `output`: what it wrote, its output and its errors, as text;
+- `exitCode`: the code it ended with;
+- `timedOut`: it did not end within `timeoutMs`.
+
+Without `timeoutMs`, or with 0, it waits as long as the command takes. Docker's
+other calls, apart from a download (`images.ensure`), are given up on after 30
+seconds; this one is not. A command given up on is not a failure: `output` is
+what it wrote by then, and `exitCode` is `null`. Docker has no way to end it, so
+it may still be running in the container; ending it is yours, with another
+command that does (`pkill -f …`).
+
+```js
+const run = await docker.containers.exec("my-redis", ["redis-cli", "ping"], { timeoutMs: 10_000 });
+if (run.timedOut) portal.log("redis did not answer in time");
+else if (run.exitCode !== 0) portal.log(run.output);
+```
+
+### A container on the portal's network
+
+A service the portal reaches on `127.0.0.1`, and that reaches the portal there,
+runs on the portal's own network: give its container
+`HostConfig: { NetworkMode: await docker.sharedNetwork() }`. That is:
+
+- `host` where the portal runs on the machine itself. This works on Linux only;
+  elsewhere it is refused, and the portal has to run in Docker;
+- `container:<id>` where the portal runs in a container: the running container
+  named by `PORTAL_CONTAINER_NAME`, which the Compose files set, or else by
+  `HOSTNAME`. Where neither names a running container, it is refused, saying to
+  set `PORTAL_CONTAINER_NAME`.
+
+The id is that of the portal's container now. When the portal's container is
+made again, as an update with Compose does, a container made with the old id
+has lost its network: compare `HostConfig.NetworkMode` from `containers.inspect`
+with `sharedNetwork()`, and make the container again where they differ.
+
+### When a call fails
+
+A call that fails throws an Error with `status`: Docker's own HTTP status where
+it said no (403 for a container or volume that is another extension's, or
+nobody's; 404 where there is none to act on; 409 for `exec` in a container
+that is not running), and 0 where Docker was not reached or gave no HTTP status:
+there is no socket, it did not answer in time, its answer was cut off partway,
+the name is not one Docker takes, or a download failed partway. Where
+`sharedNetwork` does not find the portal's network, its Error has no `status`,
+and says what to set.

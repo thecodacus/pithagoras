@@ -2,7 +2,7 @@ import { VoiceLibrary, kokoroVoiceOptions } from './VoiceLibrary';
 import { VoiceEngines } from './VoiceEngines';
 import { Select } from "./Select";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { DEFAULT_VAD, api, type AvailableModel, type VoiceInstallStatus, type VoiceConfig, type VoiceHardware } from "../api";
+import { DEFAULT_VAD, api, speakingRuntime, type AvailableModel, type VoiceInstallStatus, type VoiceConfig, type VoiceHardware } from "../api";
 import { INPUT_LANGUAGES, CHATTERBOX_LANGUAGES } from "../../../server/src/voice-languages";
 import { sameChoice, type VoiceChoice } from "../../../server/src/voice-engines";
 import { NUMBER_PACK_LANGUAGES } from "../../../server/src/voice-numbers";
@@ -37,7 +37,7 @@ function UninstallQuestion({ removeData }: { removeData: { current: boolean } })
 }
 
 /** What the install and the uninstall write into the settings, apart from what is edited on this page. */
-const managed = (c: VoiceConfig) => ({ enabled: c.enabled, runtime: c.runtime, whisperUrl: c.whisperUrl, breezeUrl: c.breezeUrl, sttModel: c.sttModel, dictationModel: c.dictationModel, dictationUrl: c.dictationUrl });
+const managed = (c: VoiceConfig) => ({ enabled: c.enabled, provider: c.provider, runtime: c.runtime, whisperUrl: c.whisperUrl, breezeUrl: c.breezeUrl, sttModel: c.sttModel, dictationModel: c.dictationModel, dictationUrl: c.dictationUrl });
 
 export function VoiceAddon({ onError }: { onError: (message: string) => void }) {
   const [config, setConfig] = useState<VoiceConfig | null>(null);
@@ -116,18 +116,30 @@ export function VoiceAddon({ onError }: { onError: (message: string) => void }) 
   const toSave = () => instructions.trim() === builtIn.trim() ? { ...config, responseInstructions: "" } : config;
   // Another choice than the installed one, picked for a container that exists: it is a rebuild, not a start. While a first install is still pulling the image there is no container, and nothing to rebuild.
   const rebuild = !!picked && !!install?.choice;
+  // How voice mode speaks: through the extension chosen, or at the person's own addresses.
+  const speaking = speakingRuntime(config);
   // No speech synthesis: the page can listen (dictation), and replies are not spoken.
-  const listening = config.runtime === "none";
-  const chatterbox = config.runtime === "chatterbox";
+  const listening = speaking === "none";
+  const chatterbox = speaking === "chatterbox";
   // Kokoro speaks with voices of its own, not the library's.
-  const kokoro = config.runtime === "kokoro";
+  const kokoro = speaking === "kokoro";
   const languages = chatterbox ? INPUT_LANGUAGES.filter(([code]) => CHATTERBOX_LANGUAGES.includes(code)) : INPUT_LANGUAGES;
-  // Switching runtime must not leave a language the runtime will refuse on save.
-  const setRuntime = (runtime: VoiceConfig["runtime"]) => update(runtime === "chatterbox" && !CHATTERBOX_LANGUAGES.includes(config.language ?? "auto")
-    ? { runtime, language: "en" } : { runtime });
+  // Switching to what speaks with Chatterbox must not leave a language it will refuse.
+  const spokenBy = (runtime: VoiceConfig["runtime"], patch: Partial<VoiceConfig>) => update(runtime === "chatterbox" && !CHATTERBOX_LANGUAGES.includes(config.language ?? "auto")
+    ? { ...patch, language: "en" } : patch);
+  const setRuntime = (runtime: VoiceConfig["runtime"]) => spokenBy(runtime, { runtime });
+  // Where voice mode listens and speaks: the person's own addresses, or an extension that offers it. One chosen that is not running is still shown, as chosen.
+  const providers = config.providers ?? [];
+  const sources = [
+    ...providers.map(p => ({ value: p.name, label: p.label, hint: p.ready ? undefined : t("Not running") })),
+    ...(config.provider && !providers.some(p => p.name === config.provider) ? [{ value: config.provider, label: config.provider, hint: t("Not running") }] : []),
+  ];
+  const setProvider = (provider: string) => spokenBy(provider ? providers.find(p => p.name === provider)?.runtime : config.runtime, { provider });
   return <div className="mt-4 space-y-4">
     <div><p className="text-sm text-fg">{t("Voice")}</p><p className="mt-1 text-xs text-fg-faint">{t("Talk naturally, interrupt anytime, and hear replies in your chosen voice.")}</p></div>
     <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={config.enabled} onChange={e => update({ enabled: e.target.checked })} />{listening ? t("Enable dictation in sessions") : t("Enable voice controls in sessions")}</label>
+    {sources.length > 0 && <div className="block text-xs text-fg-muted">{t("Listen and speak through")}<Select aria-label={t("Listen and speak through")} size="sm" className="mt-1.5 w-full" value={config.provider ?? ""} onChange={setProvider} options={[{ value: "", label: t("Your own addresses"), hint: t("Advanced connection") }, ...sources]} />
+      {config.provider && !providers.some(p => p.name === config.provider && p.ready) && <p role="status" className="mt-1.5 text-xs text-warn">{t("Not running: voice mode cannot listen or speak through it until it is started. Meanwhile you can choose your own addresses.")}</p>}</div>}
     {listening && <p role="status" className="rounded-md border border-warn/40 bg-warn/10 px-3 py-2 text-xs text-warn">{t("This installation has no speech synthesis: replies are not spoken and voice mode is off. Dictation, which only listens, works.")}</p>}
     {!listening && <section className="rounded-xl border border-line bg-surface/50 p-4 space-y-4">
       <div><h3 className="text-sm font-medium">{t("Your voice")}</h3><p className="mt-1 text-xs text-fg-muted">{t("Choose how your assistant sounds.")}</p></div>
@@ -217,8 +229,9 @@ export function VoiceAddon({ onError }: { onError: (message: string) => void }) 
     <details className="rounded-xl border border-line p-4">
       <summary className="cursor-pointer text-sm font-medium">{t("Advanced connection")}<span className="mt-1 block text-xs font-normal text-fg-muted">{t("Custom runtime and service addresses")}</span></summary>
       <div className="mt-4 space-y-4">
+    {config.provider && <p className="text-xs text-fg-faint">{t("These are your own addresses: voice mode uses them when it listens and speaks through your own addresses. A dictation endpoint set here is used for dictation either way.")}</p>}
     <div className="block text-xs text-fg-muted">{t("Speech runtime")}<Select aria-label={t("Speech runtime")} size="sm" className="mt-1.5 w-full" value={config.runtime ?? "breeze"} onChange={v => setRuntime(v as VoiceConfig["runtime"])} options={[{ value: "breeze", label: "Breeze Python" }, { value: "audio-cpp", label: "Breeze audio.cpp", hint: t("Streaming") }, { value: "chatterbox", label: "Chatterbox audio.cpp", hint: t("Multilingual") }, { value: "kokoro", label: "Kokoro audio.cpp", hint: t("Built-in voices") }, { value: "none", label: t("No speech synthesis"), hint: t("Dictation only") }]} /></div>
-    {([['whisperUrl', msg('Speech recognition URL')], ...(listening ? [] : [['breezeUrl', msg('Speech synthesis URL')] as const])] as const).map(([key, label]) => <label key={key} className="block text-xs text-fg-muted">{t(label)}<input className={`mt-1.5 ${inputCls}`} value={config[key]} onChange={e => update({ [key]: e.target.value })} /></label>)}
+    {([['whisperUrl', msg('Speech recognition URL')], ...(config.runtime === "none" ? [] : [['breezeUrl', msg('Speech synthesis URL')] as const])] as const).map(([key, label]) => <label key={key} className="block text-xs text-fg-muted">{t(label)}<input className={`mt-1.5 ${inputCls}`} value={config[key]} onChange={e => update({ [key]: e.target.value })} /></label>)}
     <label className="block text-xs text-fg-muted">{t("Speech recognition model")}<input className={`mt-1.5 ${inputCls}`} placeholder={t("Whisper.cpp needs none; audio.cpp names its model, e.g. qwen3-asr")} value={config.sttModel ?? ""} onChange={e => update({ sttModel: e.target.value })} /></label>
     <label className="block text-xs text-fg-muted">{t("Dictation model")}<input className={`mt-1.5 ${inputCls}`} placeholder={t("Empty uses the speech recognition model above")} value={config.dictationModel ?? ""} onChange={e => update({ dictationModel: e.target.value })} /><span className="mt-1 block text-xs text-fg-faint">{t("The model the microphone button of the message box transcribes with. Voice mode keeps using the one above, so a conversation can have the quick model and dictation the accurate one.")}</span></label>
     <label className="block text-xs text-fg-muted">{t("Dictation endpoint")}<input className={`mt-1.5 ${inputCls}`} placeholder={t("Empty uses the speech recognition URL above")} value={config.dictationUrl ?? ""} onChange={e => update({ dictationUrl: e.target.value })} /><span className="mt-1 block text-xs text-fg-faint">{t("The address the microphone button of the message box sends its recordings to. Voice mode keeps using the one above, so dictation can run on another service.")}</span></label>

@@ -261,6 +261,34 @@ export interface MemoryHolder {
   on(): boolean;
 }
 
+/**
+ * How a speech service is spoken to, as voice mode knows it: `audio-cpp` (Breeze on audio.cpp, streamed), `kokoro` and
+ * `chatterbox` (on audio.cpp, a WAV for each phrase) and `breeze` (Breeze's Python service). See "Speech runtimes" in
+ * the voice guide.
+ */
+export type SpeechRuntime = "audio-cpp" | "kokoro" | "chatterbox" | "breeze";
+
+/** Where a voice provider listens and speaks now: see `voice.provide`. */
+export interface VoiceWhere {
+  /** Speech recognition: an address that takes a WAV as Whisper.cpp's `/inference` or an OpenAI transcription does, and the model it is sent, where it names one. */
+  listen: { url: string; model?: string };
+  /** Speech synthesis, and how it is spoken to. Without it, it recognises speech only: dictation works, and replies are not spoken. */
+  speak?: { url: string; runtime: SpeechRuntime };
+}
+
+/** What an extension offers voice mode: a place to listen and speak. */
+export interface VoiceProvider {
+  /** What Settings → Add-ons → Voice calls it. */
+  label: string;
+  /** Where it listens and speaks now; nothing while it cannot be used. Asked at each request: keep it quick. */
+  where(): VoiceWhere | undefined;
+  /**
+   * Voice mode began (true) or stopped (false) being used anywhere. Awaited when it begins; a throw is the page's error.
+   * Given 120 seconds: one that has not settled by then counts as failed.
+   */
+  use?(inUse: boolean): Promise<void>;
+}
+
 export interface ServerPortal {
   /** Of this interface: raised when something an extension relies on changes. */
   version: 1;
@@ -395,6 +423,24 @@ export interface ServerPortal {
      * asks while another does is refused, with a line in the log.
      */
     hold(holder: MemoryHolder): void;
+  };
+  /**
+   * Voice mode's sources: the person chooses in Settings → Add-ons → Voice whether it listens and speaks at addresses of
+   * their own or through an extension that provides it. Their own addresses are never changed for an extension.
+   */
+  voice: {
+    /**
+     * Offers voice mode a place to listen and speak, which the person can then choose. One for each package, the last
+     * given; it goes when this server half stops. Voice mode asks `where` at each request while it is the source, and
+     * where it answers nothing, voice mode says that the extension is not running rather than use other addresses.
+     */
+    provide(provider: VoiceProvider): void;
+    /**
+     * Makes this extension voice mode's source (and voice mode on), or, with false, hands it back to the person's own
+     * addresses where it is the source now. For what the person asks for on the extension's own page, as installing
+     * it there: the source changes where the person's voice goes.
+     */
+    choose(chosen: boolean): void;
   };
   /**
    * The package's own routes, at /api/x/<package>/…, behind the portal's

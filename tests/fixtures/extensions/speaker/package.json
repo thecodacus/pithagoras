@@ -1,0 +1,10 @@
+{
+  "name": "test-speaker",
+  "version": "0.1.0",
+  "description": "The portal's tests' stand-in for an extension that provides voice mode a place to listen and speak, with a speech recognition and a speech synthesis service of its own on loopback, so that no test of the portal's own needs one the portal ships",
+  "type": "module",
+  "keywords": ["pi-package"],
+  "pi": {},
+  "pithagoras": { "server": "./server.js" },
+  "license": "Apache-2.0"
+}

@@ -3,15 +3,18 @@ import { spokenNumbers } from '../voice-numbers.js';
 import { INPUT_LANGUAGES, CHATTERBOX_LANGUAGES } from '../voice-languages.js';
 import { DEFAULT_CHOICE, cpuSpeechUrl, endpoints, isManagedUrl, parseChoice, speechUrl, type VoiceChoice } from '../voice-engines.js';
 import { DEFAULT_KOKORO_VOICE, KOKORO_SPEEDS, isKokoroVoice } from '../kokoro-voices.js';
-import { VoiceLeases } from '../extensions/voice-leases.js';
+import { VoiceLeases } from '../voice-leases.js';
 import { DEFAULT_SKIP_THINKING_PROVIDERS, DEFAULT_VOICE_INSTRUCTIONS, voiceInstructions, voiceRulesOn } from '../pi/voice-first.js';
 import * as voiceService from '../extensions/voice-service.js';
 import { setTimeout as delay } from "node:timers/promises";
 import { once } from "node:events";
 import { createHash } from "node:crypto";
 import express, { type Router } from "express";
-import { getSession, getSetting, putSetting } from "../db.js";
+import { getSession, getSetting, putSetting, setVoiceSpeaks } from "../db.js";
 import { agentFor } from "../project-agent.js";
+import { setVoiceChooser, voiceProviders, within } from "../extension-host.js";
+import { validName } from "../extension-ui.js";
+import type { VoiceProvider, VoiceWhere } from "@pithagoras/extension-api/server";
 import { errorLineKey, readErrorLine, saveErrorLine, touchErrorLine } from "../voice-error-line.js";
 
 const DEFAULT_VAD = { positiveSpeechThreshold: 0.65, negativeSpeechThreshold: 0.35, minSpeechMs: 256, preSpeechPadMs: 320, redemptionMs: 1000 };
@@ -49,6 +52,8 @@ export interface VoiceConfig {
   skipThinkingProviders?: string[];
   // The model spoken turns run on, "provider/model". Empty or absent means the chat's own.
   voiceModel?: string;
+  // The extension voice mode listens and speaks through, by its package's name (`voice.provide`). Empty or absent: the addresses above.
+  provider?: string;
 }
 /** Long enough for the built-in text several times over; every voice turn carries it. */
 export const MAX_RESPONSE_INSTRUCTIONS = 8000;
@@ -115,7 +120,13 @@ export function validateConfig(value: any): VoiceConfig {
   const voiceModel = typeof value.voiceModel === "string" ? value.voiceModel.trim() : value.voiceModel ?? "";
   if (typeof voiceModel !== "string" || voiceModel.length > 300 || (voiceModel && !/^[^/\s]+\/\S+$/.test(voiceModel)))
     throw new Error("Name the voice model as provider/model, or leave it empty to use the chat's own");
-  if (runtime === "chatterbox") {
+  // Any extension's name: one that is not running now stays chosen, and voice mode says so.
+  const provider = value.provider ?? "";
+  if (provider !== "" && !validName(provider)) throw new Error("provider must be an extension's package name, or empty for your own addresses");
+  // Chatterbox's rules are for what voice mode speaks with: the extension chosen, while it says where, else the runtime saved here.
+  const source = provider ? voiceProviders().get(provider) : undefined;
+  const where = source && whereOf(provider, source);
+  if ((where ? where.speak?.runtime : runtime) === "chatterbox") {
     // Chatterbox is told a language or it refuses; it has no detection mode,
     // and the language also decides how numbers are written out for synthesis.
     if (language === "auto") throw new Error("Chatterbox needs an input language: auto-detect selects no voice");
@@ -129,7 +140,7 @@ export function validateConfig(value: any): VoiceConfig {
     if (typeof vad[key] !== 'number' || !Number.isFinite(vad[key]) || vad[key] < min || vad[key] > max) throw new Error(`Invalid VAD ${key}: expected ${min}–${max}`);
   }
   if (vad.negativeSpeechThreshold >= vad.positiveSpeechThreshold) throw new Error('Speech-end threshold must be lower than speech-start threshold');
-  return { vad, lazyLoad: value.lazyLoad !== false, runtime, voice, language, cfgScale, sttModel, dictationModel, dictationUrl: dictationUrl.trim(), exaggeration, kokoroVoice, speed, responseInstructions: savedInstructions(responseInstructions), skipThinkingProviders, voiceModel, enabled: value.enabled, whisperUrl: value.whisperUrl.trim(), breezeUrl: value.breezeUrl.trim(), instruction: value.instruction.trim() };
+  return { vad, lazyLoad: value.lazyLoad !== false, provider, runtime, voice, language, cfgScale, sttModel, dictationModel, dictationUrl: dictationUrl.trim(), exaggeration, kokoroVoice, speed, responseInstructions: savedInstructions(responseInstructions), skipThinkingProviders, voiceModel, enabled: value.enabled, whisperUrl: value.whisperUrl.trim(), breezeUrl: value.breezeUrl.trim(), instruction: value.instruction.trim() };
 }
 /**
  * The providers as saved: names as the model menu shows them, each once. The
@@ -196,12 +207,100 @@ export function pcmWav(pcm: Buffer): Buffer {
   header.write("data", 36); header.writeUInt32LE(pcm.length, 40);
   return Buffer.concat([header, pcm]);
 }
-// Speech is in the GPU process, or in the CPU one where Kokoro is put on the CPU.
-const managedVoice = () => ['audio-cpp', 'chatterbox', 'kokoro'].includes(config().runtime ?? '') && [speechUrl, cpuSpeechUrl].includes(config().breezeUrl);
+// Speech is in the GPU process, or in the CPU one where Kokoro is put on the CPU. Voice mode speaks to it where no extension is chosen in place of these addresses.
+const managedVoice = () => !config().provider && ['audio-cpp', 'chatterbox', 'kokoro'].includes(config().runtime ?? '') && [speechUrl, cpuSpeechUrl].includes(config().breezeUrl);
 const managedPort = () => Number(new URL(config().breezeUrl).port);
 // The lease loads the speech model the saved runtime speaks with. Recognition loads itself on its first request.
 const managedEngine = () => { const runtime = config().runtime; return runtime === 'chatterbox' || runtime === 'kokoro' ? runtime : 'breeze'; };
-const leases = new VoiceLeases(()=>voiceService.modelAction('load', managedEngine(), managedPort()),()=>voiceService.modelAction('unload', managedEngine(), managedPort()));
+/** Voice mode listens and speaks through an extension that is not running, or cannot be used now: said, rather than other addresses used. */
+class SourceAbsent extends Error {
+  constructor() { super("Voice mode listens and speaks through an extension that is not running: install or start it, or choose your own addresses in Settings → Add-ons → Voice"); }
+}
+/** Where a provider listens and speaks now; nothing where it cannot say, which is its own failure. */
+function whereOf(name: string, provider: VoiceProvider): VoiceWhere | undefined {
+  try {
+    return provider.where();
+  } catch (e) {
+    console.error(`[extension ${name}] saying where voice mode listens and speaks failed:`, e);
+    return undefined;
+  }
+}
+/**
+ * The settings voice mode works with now: the person's own, or, with an extension chosen as its source, where that one listens
+ * and speaks in place of their addresses, recognition model and runtime. Dictation is then the extension's as well: a dictation
+ * address of the person's own is taken before this is asked (see transcribe). Throws SourceAbsent where the extension does not answer.
+ */
+function inUse(own = config()): VoiceConfig {
+  if (!own.provider) return own;
+  const provider = voiceProviders().get(own.provider);
+  const where = provider && whereOf(own.provider, provider);
+  if (!where) throw new SourceAbsent();
+  return { ...own, whisperUrl: where.listen.url, sttModel: where.listen.model ?? "", dictationUrl: "", dictationModel: "", runtime: where.speak?.runtime ?? "none", breezeUrl: where.speak?.url ?? "" };
+}
+/** What `settings` gives, or the 503 where voice mode's source is an extension that is not running: undefined then, with the answer sent. */
+function usable(res: express.Response, settings: () => VoiceConfig): VoiceConfig | undefined {
+  try {
+    return settings();
+  } catch (e) {
+    if (!(e instanceof SourceAbsent)) throw e;
+    res.status(503).json({ error: e.message });
+    return undefined;
+  }
+}
+/**
+ * How long an extension may take over hearing that voice mode is used or not: as long as the managed service may take to
+ * load its model. The leases wait for it, every voice session's.
+ */
+export const providerUse = { limitMs: 120_000 };
+const tell = (provider: VoiceProvider, inUse: boolean) =>
+  within(providerUse.limitMs, Promise.resolve().then(() => provider.use?.(inUse)), inUse ? "getting ready for voice mode" : "hearing that voice mode is no longer used");
+/** The provider voice mode last told it is in use, by its package's name, until it is told it is not. */
+let told: { name: string; provider: VoiceProvider } | undefined;
+/**
+ * Voice mode is no longer used through the extension of that name: told to it as it runs now, which may have been started
+ * anew since it was told it was, while what it got ready (a model loaded in a container of its own) is still there.
+ */
+async function letGo(name: string) {
+  const provider = voiceProviders().get(name);
+  if (!provider) return;
+  try {
+    await tell(provider, false);
+  } catch (e) {
+    console.error(`[extension ${name}] hearing voice mode is no longer used failed:`, e);
+  }
+}
+/**
+ * What a session's lease loads. An extension that is the source is told voice mode is in use: once, and again where the
+ * source changed to another, or the same was started anew; the one it changed from is told it is not. The managed service
+ * loads its speech model at every lease, as it may have let it go meanwhile.
+ */
+async function load() {
+  const name = config().provider;
+  const before = told;
+  if (!name) {
+    // Back at the person's own addresses while voice mode is in use: the extension it was is used no longer.
+    told = undefined;
+    if (before) await letGo(before.name);
+    if (managedVoice()) await voiceService.modelAction('load', managedEngine(), managedPort());
+    return;
+  }
+  const provider = voiceProviders().get(name);
+  if (!provider || !whereOf(name, provider)) throw new SourceAbsent();
+  if (before?.provider === provider) return;
+  await tell(provider, true);
+  told = { name, provider };
+  if (before && before.name !== name) await letGo(before.name);
+}
+/** What the end of the last lease unloads: the provider that was told voice mode is in use, or the managed service's speech model. */
+async function unload() {
+  const was = told;
+  told = undefined;
+  if (was) await letGo(was.name);
+  if (managedVoice()) await voiceService.modelAction('unload', managedEngine(), managedPort());
+}
+const leases = new VoiceLeases(load, unload);
+// Only the managed service keeps its model between sessions (Lazy load off). An extension is told when voice mode is no longer used, and keeps what it will.
+const keepLoaded = () => managedVoice() && config().lazyLoad === false;
 /**
  * A setup that was started here and has finished is connected to, once: what the page's Install did not wait for.
  * Taken up wherever the finished service is first seen, which is the timer or the page asking after it.
@@ -211,13 +310,14 @@ function adoptFinishedInstall(service: Awaited<ReturnType<typeof voiceService.st
   connectManagedVoice(service.choice);
   putSetting('voice_setup_pending', '');
 }
-async function maintainManagedVoice() {
+async function maintainVoice() {
   // Also reconciles running legacy containers after portal updates, without
   // requiring the settings modal to be opened. Stopped add-ons stay stopped.
-  adoptFinishedInstall(await voiceService.status());
-  if (managedVoice()) await leases.sweep(config().lazyLoad !== false);
+  await voiceService.status().then(adoptFinishedInstall).catch(e => console.error('[voice] maintenance:', (e as Error).message));
+  // The leases of sessions that were left run out, whatever voice mode listens and speaks through, and whether or not Docker answered.
+  await leases.sweep(!keepLoaded()).catch(e => console.error('[voice] maintenance:', (e as Error).message));
 }
-const maintain = () => { void maintainManagedVoice().catch(e => console.error('[voice] maintenance:', (e as Error).message)); };
+const maintain = () => void maintainVoice();
 const leaseTimer = setInterval(maintain, 30000);
 leaseTimer.unref();
 // Wait until module initialization finishes before accessing configuration.
@@ -284,7 +384,8 @@ export function connectManagedVoice(choice: VoiceChoice = DEFAULT_CHOICE) {
   // recognition over from the user (what they had is remembered above), or where the dictation address is the service's own.
   // On a service that is connected already (Start voice, a rebuild), what they set up since is theirs.
   const dictation = !listening || isManagedUrl(current.dictationUrl) ? { dictationModel: "", dictationUrl: "" } : {};
-  const saved = { ...current, language, enabled: true, runtime, ...urls, ...dictation };
+  // The service is used at these addresses: an extension chosen in their place gives them back.
+  const saved = { ...current, language, enabled: true, runtime, ...urls, ...dictation, provider: "" };
   saveVoice(saved);
   return {...saved, managed:true};
 }
@@ -317,13 +418,55 @@ export function disconnectManagedVoice() {
   return saved;
 }
 /**
+ * An extension makes itself voice mode's source, and voice mode on (`voice.choose(true)`), or gives the source back to the
+ * person's own addresses where it is the source now (false). Nothing else of the settings changes, but the input language
+ * where the extension speaks with Chatterbox, which is told one and has no detection mode: as a connect of the managed service does.
+ */
+function chooseProvider(name: string, chosen: boolean) {
+  const current = config();
+  if (!chosen) {
+    if (current.provider === name) saveVoice({ ...current, provider: "" });
+    return;
+  }
+  const provider = voiceProviders().get(name);
+  const chatterbox = !!provider && whereOf(name, provider)?.speak?.runtime === "chatterbox" && !CHATTERBOX_LANGUAGES.includes(current.language);
+  saveVoice({ ...current, ...(chatterbox ? { language: "en" } : {}), enabled: true, provider: name });
+}
+setVoiceChooser(chooseProvider);
+// Whether voice mode can speak now, for the rule that is then in every conversation: switched on, and speaking where it listens and speaks.
+setVoiceSpeaks(() => {
+  try {
+    const saved = config();
+    return saved.enabled === true && inUse(saved).runtime !== "none";
+  } catch {
+    // Its extension is not running, or the settings cannot be read: nothing speaks.
+    return false;
+  }
+});
+/**
+ * The settings as the page gets them, from every route that answers with them: what is saved, with the extensions it can
+ * listen and speak through, and what the portal is set to.
+ */
+function shown() {
+  const saved = config();
+  // Each extension that offers voice mode a place to listen and speak: `ready` while it can be used now, with how it speaks then (`none`: recognition alone).
+  const providers = [...voiceProviders()].map(([name, provider]) => {
+    const where = whereOf(name, provider);
+    return { name, label: provider.label, ready: !!where, ...(where ? { runtime: where.speak?.runtime ?? "none" } : {}) };
+  });
+  // Whether replies are spoken, through what is used now: an extension chosen that is not running is not known not to, and voice mode then says why it cannot start.
+  let speech = true;
+  try { speech = inUse(saved).runtime !== "none"; } catch { /* SourceAbsent */ }
+  return {...withInstructions(saved),provider:saved.provider ?? "",providers,managed:managedVoice(),speech,comparison:process.env.VOICE_COMPARISON === "true",statusSpeech:process.env.VOICE_STATUS_SPEECH !== "false",ttsPrefetch:process.env.VOICE_TTS_PREFETCH === "true",sentenceChunks:process.env.VOICE_SENTENCE_CHUNKS === "true",pipelineMode:process.env.VOICE_PIPELINE_MODE === "sequential" ? "sequential" : "parallel"};
+}
+/**
  * The settings a chat speaks with: the voice of the agent the chat is with, where it has one of its own (the agent a project is
  * linked to for a chat in it, else the first agent's, as its avatar is). An agent's voice is one of Kokoro's or one from the
  * library, and is used by the runtime it belongs to.
  */
 function speechSettings(sessionId: string): VoiceConfig {
   const own = agentFor(getSession(sessionId)?.workspace).voice;
-  const saved = config();
+  const saved = inUse();
   return { ...saved, ...(own && saved.runtime === "kokoro" && isKokoroVoice(own) ? { kokoroVoice: own } : own && !isKokoroVoice(own) ? { voice: own } : {}) };
 }
 /** What the speech engine is asked, and `identity`: everything in it that decides how the phrase sounds. */
@@ -507,15 +650,15 @@ export function voiceRouter(): Router {
     try {
       const state = await voiceService.status();
       if (state.state !== 'running') throw new Error('Wait for voice setup to finish before connecting');
-      res.json(withInstructions(connectManagedVoice(state.choice)));
+      connectManagedVoice(state.choice);
+      res.json(shown());
     } catch (e) { res.status(400).json({ error: (e as Error).message }); }
   });
-  router.get("/voice", (_req, res) => res.json({...withInstructions(config()),managed:managedVoice(),speech:config().runtime!=="none",comparison:process.env.VOICE_COMPARISON === "true",statusSpeech:process.env.VOICE_STATUS_SPEECH !== "false",ttsPrefetch:process.env.VOICE_TTS_PREFETCH === "true",sentenceChunks:process.env.VOICE_SENTENCE_CHUNKS === "true",pipelineMode:process.env.VOICE_PIPELINE_MODE === "sequential" ? "sequential" : "parallel"}));
+  router.get("/voice", (_req, res) => res.json(shown()));
   router.put("/voice", (req, res) => {
     try {
-      const saved = validateConfig(req.body);
-      saveVoice(saved);
-      res.json(withInstructions(saved));
+      saveVoice(validateConfig(req.body));
+      res.json(shown());
     } catch (e) { res.status(400).json({ error: (e as Error).message }); }
   });
   router.use("/sessions/:id/voice", (req, res, next) => {
@@ -523,20 +666,24 @@ export function voiceRouter(): Router {
     if (!getSession(req.params.id)) return res.status(404).json({ error: "Session not found" });
     next();
   });
+  // Every voice session holds a lease while it is on, whatever voice mode listens and speaks through: see load and unload.
   router.post('/sessions/:id/voice/connection', async (req,res)=>{
     const {client,active}=req.body??{};
     if(typeof client!=='string'||client.length>100||!client||typeof active!=='boolean')return res.status(400).json({error:'A client ID and active flag are required'});
-    if(!managedVoice())return res.json({managed:false});
     try {
       const key=String(req.params.id)+':'+client;
-      if(active)await leases.acquire(key);else await leases.release(key,config().lazyLoad!==false);
-      res.json({managed:true});
+      if(active)await leases.acquire(key);else await leases.release(key,!keepLoaded());
+      res.json({ok:true});
     } catch(e){res.status(503).json({error:(e as Error).message});}
   });
   router.post("/sessions/:id/voice/transcribe", express.raw({ type: "audio/wav", limit: "12mb" }), async (req, res) => {
     if (!Buffer.isBuffer(req.body) || req.body.length < 44 || req.body.toString("ascii", 0, 4) !== "RIFF")
       return res.status(400).json({ error: "A WAV recording is required" });
-    const settings = config();
+    const own = config();
+    const dictation = req.query.purpose === "dictation";
+    // A dictation address the person set is used for dictation with the model named for it, whatever voice mode listens through.
+    const settings = usable(res, () => (dictation && own.dictationUrl ? own : inUse(own)));
+    if (!settings) return;
     const form = new FormData();
     form.set("file", new Blob([new Uint8Array(req.body)], { type: "audio/wav" }), "recording.wav");
     form.set("response_format", "json");
@@ -544,7 +691,6 @@ export function voiceRouter(): Router {
     // OpenAI-compatible recognition services (audio.cpp, Qwen3-ASR) name the
     // loaded model here; Whisper.cpp has one model and ignores the field.
     // The chat's dictation may name a model and an address of its own; voice mode and "auto" use the general one.
-    const dictation = req.query.purpose === "dictation";
     const model = dictation && settings.dictationModel ? settings.dictationModel : settings.sttModel;
     if (model) form.set("model", model);
     const controller = new AbortController();
@@ -560,14 +706,15 @@ export function voiceRouter(): Router {
     } catch (e) { if (!res.destroyed) res.status(502).json({ error: (e as Error).message }); }
   });
   router.post("/sessions/:id/voice/speech", async (req, res) => {
-    // Recognition alone has nothing to speak with: say so, rather than send the text to an address that is not there.
-    if (config().runtime === "none") return res.status(409).json({ error: "Speech synthesis is not installed: replies are not spoken" });
     const speechStarted=performance.now();
+    const settings = usable(res, () => speechSettings(req.params.id));
+    if (!settings) return;
+    // Recognition alone has nothing to speak with: say so, rather than send the text to an address that is not there.
+    if (settings.runtime === "none") return res.status(409).json({ error: "Speech synthesis is not installed: replies are not spoken" });
     let busyMs=0;
     const text = req.body?.text;
     if (typeof text !== "string" || !text.trim() || text.length > 600)
       return res.status(400).json({ error: "Speech text must contain 1–600 characters" });
-    const settings = speechSettings(req.params.id);
     const controller = new AbortController();
     res.on("close", () => controller.abort());
     try {
@@ -621,11 +768,12 @@ export function voiceRouter(): Router {
    * The page calls it as voice mode starts; at error time only the stored file is read.
    */
   router.post("/sessions/:id/voice/error-line", async (req, res) => {
-    if (config().runtime === "none") return res.status(409).json({ error: "Speech synthesis is not installed: replies are not spoken" });
+    const settings = usable(res, () => speechSettings(req.params.id));
+    if (!settings) return;
+    if (settings.runtime === "none") return res.status(409).json({ error: "Speech synthesis is not installed: replies are not spoken" });
     let text: string;
     try { text = lineText(req.body?.text); } catch (e) { return res.status(400).json({ error: (e as Error).message }); }
     try {
-      const settings = speechSettings(req.params.id);
       const request = await speechRequest(settings, text);
       const key = errorLineKey(request.identity);
       if (storedErrorLine(key)) return res.json({ ready: true, generated: false });
@@ -641,9 +789,11 @@ export function voiceRouter(): Router {
   });
   /** The stored line for the voice the chat speaks with now: 404 where there is none, which is then said in writing only. */
   router.get("/sessions/:id/voice/error-line", async (req, res) => {
+    const settings = usable(res, () => speechSettings(req.params.id));
+    if (!settings) return;
     try {
       const text = lineText(req.query.text);
-      const key = errorLineKey((await speechRequest(speechSettings(req.params.id), text)).identity);
+      const key = errorLineKey((await speechRequest(settings, text)).identity);
       // The line may still be on its way from the start of voice mode (the engine warming up, or on a later try): wait for it,
       // for about as long as the tries take, rather than say it was never made.
       const making = makingLines.get(key);

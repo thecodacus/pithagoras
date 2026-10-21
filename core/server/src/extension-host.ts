@@ -24,7 +24,7 @@ import { handoffDone, takeHandoff } from "./handoff.js";
 import { modelEndpoint, modelOf, modelProviders, type LiveModel } from "./models.js";
 import { mcpServer } from "./api/mcp.js";
 import { holdMemory } from "./memory-holder.js";
-import type { Chat, ChatLife as Life, Ran, ServerPortal, Upgrade } from "@pithagoras/extension-api/server";
+import type { Chat, ChatLife as Life, Ran, ServerPortal, Upgrade, VoiceProvider } from "@pithagoras/extension-api/server";
 
 /**
  * An extension's server half: a module of the package's that the portal loads
@@ -118,6 +118,8 @@ interface Running {
   removed: ((folder: string) => void)[];
   /** Its stops have run, or are running: what it registers after that would never be let go. */
   stopped?: boolean;
+  /** Where it offers voice mode to listen and speak (`voice.provide`). */
+  voice?: VoiceProvider;
 }
 
 /**
@@ -194,6 +196,11 @@ export function offeredTools(): Map<string, OfferedTool[]> {
 }
 setServerHalfOffers(offeredTools);
 
+/** Each running server half that offers voice mode a place to listen and speak (`voice.provide`), by its name. */
+export function voiceProviders(): Map<string, VoiceProvider> {
+  return new Map([...running.values()].flatMap((ext) => (ext.voice ? [[ext.half.name, ext.voice] as const] : [])));
+}
+
 const running = new Map<string, Running>();
 /** Why a package's server half is not running, by the package's name. */
 const failures = new Map<string, string>();
@@ -231,7 +238,7 @@ export function setLimits(start: number, stop: number): void {
 }
 
 /** `work`, or a rejection once it has taken longer than `ms`. */
-function within<T>(ms: number, work: Promise<T>, what: string): Promise<T> {
+export function within<T>(ms: number, work: Promise<T>, what: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout>;
   const late = new Promise<never>((_, reject) => {
     timer = setTimeout(() => reject(new Error(`It had not finished ${what} after ${ms / 1000} seconds`)), ms);
@@ -259,6 +266,11 @@ export function setChatBridge(bridge: { tell: typeof tellChat; offers: typeof to
   toolOffered = bridge.offers;
   reloadChats = bridge.reload;
   liveModel = bridge.model;
+}
+/** How a server half makes itself voice mode's source (`voice.choose`): the voice settings are the voice routes', which import the host. */
+let chooseVoice: (name: string, chosen: boolean) => void = () => {};
+export function setVoiceChooser(choose: typeof chooseVoice): void {
+  chooseVoice = choose;
 }
 
 function whoOf(chatId: string) {
@@ -333,6 +345,18 @@ function portalFor(ext: Running): ServerPortal {
         if (!Array.isArray(names) || !names.every((name) => typeof name === "string")) throw new TypeError("exceptions takes a list of tool names");
         const { byDefault, chats, routines } = toolExceptions(names);
         return { byDefault, chats: chats.map(({ id, title, kind }) => ({ id, title, kind })), routines };
+      },
+    },
+    voice: {
+      provide(provider) {
+        if (typeof provider?.label !== "string" || typeof provider.where !== "function" || (provider.use !== undefined && typeof provider.use !== "function")) {
+          throw new TypeError("provide takes { label, where, use? }: what it is called, where it listens and speaks now, and what it is told as voice mode is used");
+        }
+        ext.voice = provider;
+      },
+      choose(chosen) {
+        if (typeof chosen !== "boolean") throw new TypeError("choose takes true, to be voice mode's source, or false, to give it back");
+        chooseVoice(name, chosen);
       },
     },
     extensions: {

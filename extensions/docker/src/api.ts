@@ -2,15 +2,25 @@
  * What Docker gives an extension that builds on it: name `pithagoras-docker` in `pithagoras.requires` (or `optional`)
  * in its package.json, and ask for it with `portal.extensions.use<Docker>("pithagoras-docker")`.
  *
- * Each extension has its own: the containers and volumes it makes carry its name, and it may start, stop, remove and
- * read only those, and the ones it took over (`adopt`). Another extension's are not its to touch, and neither is a
- * container nobody made through here until one takes it over. The person sees all of them in Settings → Docker, by the
- * extension that runs each, and may stop or remove any.
+ * Each extension has its own: the containers and volumes it makes carry its name, and it may start, stop, remove, read
+ * and run commands in only those, and the ones it took over (`adopt`). Another extension's are not its to touch, and
+ * neither is a container nobody made through here until one takes it over. The person sees all of them in Settings →
+ * Docker, by the extension that runs each, and may stop or remove any.
  *
  * A server half runs with the portal's own rights, and Docker's socket is root on the machine: what a container is made
  * with (`spec`, Docker's own create body) is the extension's to choose. This keeps extensions apart, and shows the person
  * what each runs; it does not make one safe that is not.
  */
+
+/**
+ * How a call fails where Docker said no, or was not reached: an Error with `status`. That is Docker's own HTTP status
+ * where it gave one (403 and 404 among them, for a container that is not the extension's or that there is none of), and
+ * 0 where Docker was not reached or gave no HTTP status: there is no socket, it did not answer in time, its answer was
+ * cut off partway, the name is not one Docker takes, or a download failed partway.
+ */
+export interface DockerError extends Error {
+  status: number;
+}
 
 /** A container as Docker has it now. */
 export interface ContainerInfo {
@@ -40,6 +50,28 @@ export interface VolumeInfo {
  */
 export type ContainerSpec = { Image: string } & Record<string, unknown>;
 
+/** How a command is run in a container (`containers.exec`). */
+export interface ExecOptions {
+  /** Its environment, besides the container's: names and values. */
+  env?: Record<string, string>;
+  /** The folder it runs in; the container's own where none is given. */
+  workingDir?: string;
+  /** With a terminal: its output and its errors come back as it wrote them, colours and all. */
+  tty?: boolean;
+  /** How long to wait for it to end, in milliseconds; none, or 0, waits as long as it takes. */
+  timeoutMs?: number;
+}
+
+/** What a command run in a container came to. */
+export interface ExecResult {
+  /** What it wrote, both its output and its errors, as text; where it was given up on, what it had written by then. */
+  output: string;
+  /** Its exit code: null where it was given up on. */
+  exitCode: number | null;
+  /** It did not end within `timeoutMs`. Docker cannot end it, so it may still be running in the container: ending it is the caller's. */
+  timedOut: boolean;
+}
+
 /** How a download of an image is going: under way, with what Docker last said of it, or ended, with a failure or not. */
 export interface PullState {
   active: boolean;
@@ -50,6 +82,15 @@ export interface PullState {
 export interface Docker {
   /** Whether Docker can be reached now: its socket is there, and answers. */
   available(): Promise<boolean>;
+  /**
+   * The `NetworkMode` (in `spec.HostConfig`) that puts a container on the portal's own loopback, so that each reaches
+   * what the other serves on 127.0.0.1: `host` for a portal on the machine itself (Linux only), else `container:<id>` of
+   * the portal's running container, named by `PORTAL_CONTAINER_NAME`, or else by `HOSTNAME`. The id changes when the
+   * portal's container is made again, and a container made with the old one is then to be made again with the new.
+   * Refused, with an Error that says what to do, on another system than Linux outside a container, or where the
+   * portal's container is not found running.
+   */
+  sharedNetwork(): Promise<string>;
   images: {
     present(image: string): Promise<boolean>;
     /** The image is there, or is downloaded, with how the download goes told as it goes. One download for an image at a time, whoever asks. */
@@ -71,6 +112,17 @@ export interface Docker {
     remove(name: string): Promise<void>;
     /** The end of what it wrote, both its output and its errors, as text. */
     logs(name: string, options?: { tail?: number }): Promise<string>;
+    /**
+     * How one of this extension's containers was made, and how it stands: Docker's own inspect body (`Config`,
+     * `HostConfig`, `State`, …), as `create` takes Docker's own create body. Nothing where there is none; refused as
+     * `start` is for one that is another's, or nobody's.
+     */
+    inspect(name: string): Promise<Record<string, unknown> | undefined>;
+    /**
+     * `cmd` run in one of this extension's containers, which has to be running, to its end or until `timeoutMs`. Given up
+     * on, it is not a failure: `timedOut` says so.
+     */
+    exec(name: string, cmd: string[], options?: ExecOptions): Promise<ExecResult>;
     /**
      * A container made before there was this extension, which carries no extension's name (one of the portal's own,
      * from before its app was an extension), made this extension's from now on. Another extension's is refused.

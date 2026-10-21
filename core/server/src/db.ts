@@ -1692,14 +1692,16 @@ export function getVoiceModel(): { provider: string; modelId: string } | undefin
   }
 }
 
-/** Whether voice mode can speak: the add-on is on, with a speech engine (not recognition alone). */
+/**
+ * Whether voice mode can speak: the add-on is on, with a speech engine where it listens and speaks now (not recognition
+ * alone). Set by the voice routes, which know where that is, an extension's among it, and which this module cannot import.
+ */
+let speaks: () => boolean = () => false;
+export function setVoiceSpeaks(read: typeof speaks): void {
+  speaks = read;
+}
 export function voiceSpeaks(): boolean {
-  try {
-    const voice = JSON.parse(getSetting("voice") ?? "{}");
-    return voice.enabled === true && voice.runtime !== "none";
-  } catch {
-    return false;
-  }
+  return speaks();
 }
 
 /**

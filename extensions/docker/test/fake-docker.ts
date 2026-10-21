@@ -25,8 +25,23 @@ export interface FakeContainer {
   Ports?: { PrivatePort: number; PublicPort?: number; Type: string; IP?: string }[];
   /** What it was made with: Docker's create body. */
   made?: Record<string, unknown>;
-  /** The exit code `wait` answers with. */
+  /** The exit code `wait` answers with, and inspect has. */
   code?: number;
+  /** Why it could not run, as inspect has it. */
+  error?: string;
+}
+
+/** A command run in a container (`exec`), as it was asked for, and how it stands. */
+export interface FakeExec {
+  Id: string;
+  /** The container's id. */
+  ContainerID: string;
+  Cmd: string[];
+  Env: string[];
+  WorkingDir?: string;
+  Tty: boolean;
+  Running: boolean;
+  ExitCode: number | null;
 }
 
 /** What a list's `filters` asks of something's labels: each "key" there, and each "key=value" so. */
@@ -45,15 +60,27 @@ export async function fakeDocker() {
   const networks: { Id: string; Name: string; Labels: Record<string, string> }[] = [];
   /** Images by id, with their labels: the ones a build made. */
   const built: { Id: string; Labels: Record<string, string> }[] = [];
-  /** What a container does when it is started, for a test that says: it runs, and has exited when this returns. */
-  const runs: { onStart?: (c: FakeContainer) => void | Promise<void> } = {};
+  /**
+   * What a container does when it is started, for a test that says: it runs, and has exited when this returns. What
+   * becomes of a container once a command is made in it, before the command starts. And what a command run in one
+   * writes, and the code it ends with: nothing, and 0, unless a test says.
+   */
+  const runs: {
+    onStart?: (c: FakeContainer) => void | Promise<void>;
+    onExecCreate?: (c: FakeContainer) => void;
+    onExec?: (e: FakeExec) => { out?: string; err?: string; code?: number };
+  } = {};
+  const execs: FakeExec[] = [];
   /** The containers started, by name, in the order they were. */
   const starts: string[] = [];
   const pulls: string[] = [];
   /** A download that fails, by image, with Docker's own words. */
   const failing = new Map<string, string>();
-  /** While `pull` is set, a download says its first lines and does not end until it settles: an image on its way. */
-  const hold: { pull?: Promise<void> } = {};
+  /**
+   * While `pull` is set, a download says its first lines and does not end until it settles: an image on its way. While
+   * `exec` is, a command writes what it writes and does not end until it settles.
+   */
+  const hold: { pull?: Promise<void>; exec?: Promise<void> } = {};
   let ids = 0;
 
   const find = (key: string) => containers.find((c) => c.Id === key || c.Name === key);
@@ -117,9 +144,49 @@ export async function fakeDocker() {
       }
       if ((m = /^\/containers\/([^/]+)\/json$/.exec(p))) {
         const c = find(m[1]);
-        return c
-          ? send(200, { Id: c.Id, Name: `/${c.Name}`, Config: { Image: c.Image, Tty: c.Tty, Labels: c.Labels, ...(c.User !== undefined ? { User: c.User } : {}) }, State: { Status: c.State, Running: c.State === "running" }, HostConfig: c.HostConfig ?? {}, Mounts: c.Mounts ?? [], NetworkSettings: { Networks: c.Networks ?? {} } })
-          : send(404, { message: `No such container: ${m[1]}` });
+        if (!c) return send(404, { message: `No such container: ${m[1]}` });
+        // Docker's create body is the container's Config, with its HostConfig and NetworkingConfig apart.
+        const { HostConfig: madeHost, NetworkingConfig: _networking, ...config } = c.made ?? {};
+        return send(200, {
+          Id: c.Id,
+          Name: `/${c.Name}`,
+          Config: { ...config, Image: c.Image, Tty: c.Tty, Labels: c.Labels, ...(c.User !== undefined ? { User: c.User } : {}) },
+          State: { Status: c.State, Running: c.State === "running", ExitCode: c.code ?? 0, Error: c.error ?? "" },
+          HostConfig: c.HostConfig ?? madeHost ?? {},
+          Mounts: c.Mounts ?? [],
+          NetworkSettings: { Networks: c.Networks ?? {} },
+        });
+      }
+      if ((m = /^\/containers\/([^/]+)\/exec$/.exec(p)) && req.method === "POST") {
+        const c = find(m[1]);
+        if (!c) return send(404, { message: `No such container: ${m[1]}` });
+        if (c.State !== "running") return send(409, { message: `container ${c.Id} is not running` });
+        const e: FakeExec = { Id: `exec${++ids}`, ContainerID: c.Id, Cmd: body.Cmd, Env: body.Env ?? [], WorkingDir: body.WorkingDir, Tty: Boolean(body.Tty), Running: false, ExitCode: null };
+        execs.push(e);
+        runs.onExecCreate?.(c);
+        return send(201, { Id: e.Id });
+      }
+      if ((m = /^\/exec\/([^/]+)\/start$/.exec(p)) && req.method === "POST") {
+        const e = execs.find((x) => x.Id === m![1]);
+        if (!e) return send(404, { message: `No such exec instance: ${m[1]}` });
+        if (find(e.ContainerID)?.State !== "running") return send(409, { message: `container ${e.ContainerID} is not running` });
+        const { out = "", err = "", code = 0 } = runs.onExec?.(e) ?? {};
+        e.Running = true;
+        // Docker takes the connection over: a status line and a type, with no length and no chunks, then the output
+        // until it closes its side of the connection.
+        const socket = req.socket;
+        socket.write("HTTP/1.1 200 OK\r\nContent-Type: application/vnd.docker.raw-stream\r\n\r\n");
+        socket.write(e.Tty ? Buffer.from(out + err) : Buffer.concat([frame(1, out), frame(2, err)]));
+        // Its code is there before its output ends, as Docker has it.
+        void Promise.resolve(hold.exec).then(() => {
+          Object.assign(e, { Running: false, ExitCode: code });
+          socket.end();
+        });
+        return;
+      }
+      if ((m = /^\/exec\/([^/]+)\/json$/.exec(p))) {
+        const e = execs.find((x) => x.Id === m![1]);
+        return e ? send(200, { Running: e.Running, ExitCode: e.ExitCode }) : send(404, { message: `No such exec instance: ${m[1]}` });
       }
       if ((m = /^\/containers\/([^/]+)\/(start|stop)$/.exec(p))) {
         const c = find(m[1]);
@@ -194,5 +261,5 @@ export async function fakeDocker() {
     });
   });
   await new Promise<void>((resolve) => server.listen(socket, resolve));
-  return { socket, dir, images, containers, volumes, networks, built, runs, starts, pulls, failing, hold, close: () => new Promise<void>((resolve) => server.close(() => resolve())) };
+  return { socket, dir, images, containers, volumes, networks, built, runs, execs, starts, pulls, failing, hold, close: () => new Promise<void>((resolve) => server.close(() => resolve())) };
 }

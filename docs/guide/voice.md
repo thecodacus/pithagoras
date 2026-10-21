@@ -482,8 +482,9 @@ latest user message begins with `[Audio mode]`. The portal adds that prefix to
 microphone submissions and typed requests sent in voice mode. The rule is part
 of the prompt pi builds, so it stays when tools come and go.
 
-While voice is switched on with a speech engine (not recognition alone), the rule
-is in the system prompt of every conversation, spoken in or not. A local model
+While voice is switched on with a speech engine where it listens and speaks now
+(not recognition alone, and not an extension that is not running), the rule is
+in the system prompt of every conversation, spoken in or not. A local model
 keeps a cache of the prompt it has already read, and that cache starts at the
 system prompt: with the rule there from the start, the first spoken message in a
 typed conversation leaves the prompt as it was, and nothing is read again before
@@ -637,6 +638,40 @@ URL**, like voice mode. Installing the managed voice service over a recognition
 address of your own empties both, and uninstalling it brings back what was there
 before. What you set up afterwards stays, also when you press **Start voice**;
 an address of the managed service itself is cleared with the uninstall.
+
+## Listening and speaking through an extension
+
+An extension can offer voice mode a place to listen and speak: a recognition
+and a speech service it runs itself. Where one does, **Settings → Add-ons →
+Voice → Listen and speak through** chooses between **Your own addresses**, the
+ones under **Advanced connection**, and each such extension. The extension's
+own page may choose itself there too, when you ask it to, after installing it
+for example. Voice mode then listens and speaks at the extension's addresses,
+in the way it speaks (Kokoro with its own voices, say), and the page shows the
+voice options for that; dictation goes there as well, unless you set a
+**Dictation endpoint** of your own, which is used with its **Dictation model**
+either way.
+
+Your own addresses are never changed for an extension. Choose **Your own
+addresses** again and they are used as they were. An extension's own page may
+hand voice mode back to them, as its uninstall there can. Removing the
+extension leaves it chosen, and voice mode says it is not running until you
+choose again.
+
+An extension that is chosen and not running, or not ready, is said under the
+choice. Voice mode does not fall back to your own addresses meanwhile: dictation
+and voice mode answer *Voice mode listens and speaks through an extension that
+is not running: install or start it, or choose your own addresses in Settings →
+Add-ons → Voice*.
+
+Every voice session holds a lease on what voice mode listens and speaks
+through, whichever it is: it is asked for before the microphone begins to
+listen, each tab renews it every 25 seconds, and the extension is told when
+voice mode starts and stops being used anywhere, so that it can load its model
+for the first session and let it go after the last. A choice made in Settings
+reaches the voice controls that are open when Settings closes.
+[Voice providers](/guide/extension-ui#voice-providers) is how an extension
+offers this.
 
 ## Speech speed
 
