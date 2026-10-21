@@ -313,7 +313,7 @@ const de: Locale = {
     "Open approvals": "Offene Freigaben",
     "Save and apply": "Speichern und anwenden",
     "Applying sets owners and permissions on every file under a read or write rule, which can take a while in a big workspace.": "Das Anwenden setzt Besitzer und Berechtigungen für jede Datei unter einer Lese- oder Schreibregel; in einem großen Arbeitsbereich kann das eine Weile dauern.",
-    "Open chats reloaded with the new tools: {reloaded}. Busy, and switched as soon as they finish: {waiting}.": "Offene Chats mit den neuen Werkzeugen neu geladen: {reloaded}. Beschäftigt und umgestellt, sobald sie fertig sind: {waiting}.",
+    "Open chats reloaded with the new tools: {reloaded}. Still working, and switched at their next step: {waiting}.": "Offene Chats mit den neuen Werkzeugen neu geladen: {reloaded}. Arbeiten noch und werden bei ihrem nächsten Schritt umgestellt: {waiting}.",
     "Last applied": "Zuletzt angewendet",
     "What was done": "Was getan wurde",
     "Not covered yet": "Noch nicht abgedeckt",

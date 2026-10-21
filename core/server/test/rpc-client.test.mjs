@@ -59,6 +59,17 @@ test("compact and reload are given half an hour to answer, as pi answers them wh
   }
 });
 
+test("a reload is no longer due once it is asked for: a chat in a container is reloaded once, as its run settles", async () => {
+  const pi = fakePi();
+  pi.client.reloadDue = true;
+  const run = watch(pi.client.reload());
+  const due = pi.client.reloadDue;
+  await pi.say({ id: pi.sent.at(-1).id, type: "response", command: "reload", success: true });
+  assert.equal(pi.sent.at(-1).type, "reload");
+  assert.equal(due, false);
+  assert.equal(run.done, true);
+});
+
 test("a command that never answers is still given up on: after 30 seconds, and for compact after half an hour", async () => {
   mock.timers.enable({ apis: ["setTimeout"] });
   try {

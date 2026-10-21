@@ -139,7 +139,7 @@ export function SandboxSettings({ onError }: { onError: (message: string) => voi
           )}
           {chats && (chats.reloaded > 0 || chats.waiting > 0) && (
             <p className="mb-2 text-xs text-fg-muted">
-              {tx("Open chats reloaded with the new tools: {reloaded}. Busy, and switched as soon as they finish: {waiting}.", { reloaded: chats.reloaded, waiting: chats.waiting })}
+              {tx("Open chats reloaded with the new tools: {reloaded}. Still working, and switched at their next step: {waiting}.", { reloaded: chats.reloaded, waiting: chats.waiting })}
             </p>
           )}
           <details className="text-xs text-fg-muted">

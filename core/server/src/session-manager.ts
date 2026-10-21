@@ -1550,6 +1550,11 @@ class SessionManager extends EventEmitter {
     if (refused) throw new SessionEditError("unsupported", refused);
     // Behind an edit in progress, not through it: see withEdit.
     if (!insideEdit) await this.whenEditable(sessionId);
+    // A reload that came due while something went on that it would have cut off, and that nothing has taken since:
+    // before this message starts a run, so the run's first request has the tools as they are now. Not where a run
+    // is going or a message is on its way to pi: a step of that run takes it.
+    const due = this.live.get(sessionId)?.client;
+    if (!insideEdit && due?.reloadDue && !this.isBusy(sessionId)) await this.reloadSettled(sessionId, due);
     this.prompting.set(sessionId, (this.prompting.get(sessionId) ?? 0) + 1);
     try {
       return await this.promptNow(sessionId, message, options, insideEdit, stopsBefore);
@@ -2869,9 +2874,11 @@ class SessionManager extends EventEmitter {
    * at once. A reload rebinds every extension, which is not something to do in
    * the middle of a request or a compaction — nor under an edit, whose rewrite
    * of pi's file a reload could read half-done or write over. A chat that is
-   * working is marked due instead (PiClient.reloadDue) and counted as waiting:
-   * it is reloaded at its next step, between two requests of its run, or else
-   * once the run is over (reloadSettled).
+   * working, or with something going on that a reload would cut off
+   * (reloadCutsOff), is marked due instead (PiClient.reloadDue) and counted as
+   * waiting: it is reloaded at the next step of a run, between two of its
+   * requests, where nothing would be cut off, or else once the run is over or
+   * before the next message starts one (reloadSettled).
    *
    * Held like an edit while it runs, so a message arriving in the middle — from
    * another tab, a channel — waits for the extensions to be back rather than
@@ -2891,6 +2898,8 @@ class SessionManager extends EventEmitter {
           return true;
         } catch (e) {
           console.error(`[portal] could not reload ${sessionId}: ${(e as Error).message}`);
+          // Tried again at its next step, or before its next message.
+          client.reloadDue = true;
           waiting++;
           return false;
         }
@@ -2918,9 +2927,10 @@ class SessionManager extends EventEmitter {
 
   /**
    * A reload that became due while the chat worked and that no step of its run
-   * could take, now that the run is over. Not where pi has started the next
-   * run already, with a message it took as this one ended (a step of that run
-   * takes it), nor under what a reload would cut off: due until then.
+   * could take: once the run is over, or before a message starts the next.
+   * Not where pi has started the next run already, with a message it took as
+   * this one ended (a step of that run takes it), nor under what a reload
+   * would cut off: due until then.
    */
   private async reloadSettled(sessionId: string, client: PiClient): Promise<void> {
     if (client.isIdle?.() === false || this.reloadCutsOff(sessionId)) return;

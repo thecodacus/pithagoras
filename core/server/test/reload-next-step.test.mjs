@@ -9,7 +9,8 @@ import { inProcessHome } from "./server-harness.mjs";
  * A chat that is working when the open chats are reloaded (a package installed, switched, a server half's
  * `chats.reload`) takes the change at its next step: between two requests of its run, so a tool installed by one
  * call can be called by the next. Not while a subagent works in the background or an extension holds the chat:
- * then once the run is over. And what a load could not load is kept, and said in the chat once.
+ * then once the run is over, or before the next message starts a run. A message that comes while the chat is
+ * reloaded waits for it. And what a load could not load is kept, and said in the chat once.
  */
 const home = inProcessHome("pithagoras-reload-step-");
 mkdirSync(process.env.PI_CODING_AGENT_DIR, { recursive: true });
@@ -50,6 +51,8 @@ const notes = withTool("notes", "notes_add");
 const keeper = withTool("keeper", "keeper_look");
 const board = withTool("board", "board_add");
 const diary = withTool("diary", "diary_add");
+const ledger = withTool("ledger", "ledger_add");
+const atlas = withTool("atlas", "atlas_find");
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const offered = (request) => (request.tools ?? []).map((t) => t.function.name);
@@ -116,7 +119,35 @@ test("not while an extension holds the chat: then once the run is over", async (
   assert.equal(client.reloadDue, false);
 });
 
-test("not while a subagent works in the background: due until a step can take it", async () => {
+test("not as a run settles where pi has started the next already: then before the message after", async () => {
+  await host.syncServerHalves([keeper]);
+  const client = await chat("next");
+  let release;
+  script = async (request) => {
+    if (resultsIn(request) === 0) {
+      release = globalThis.keeper.chats.hold("next");
+      await host.syncServerHalves([keeper, ledger]);
+      await sessions.reloadIdle();
+      return { name: "bash", args: { command: "echo working" } };
+    }
+    release();
+    // As if pi had taken a message as this run ended, and started the next run with it.
+    client.isIdle = () => false;
+    return "Done.";
+  };
+  await run("next", "Look");
+  await sleep(200);
+  assert.equal(client.reloadDue, true, "not reloaded under the next run");
+  assert.equal(await hasTool(client, "ledger_add"), false);
+
+  delete client.isIdle;
+  script = () => "Done.";
+  const [again] = await run("next", "Go on");
+  assert.ok(offered(again).includes("ledger_add"), "reloaded before the next message started a run");
+  assert.equal(client.reloadDue, false);
+});
+
+test("not while a subagent works in the background: due until it is done, then before the next message", async () => {
   const client = await chat("background");
   let subagents = 1;
   client.subagentsRunning = () => subagents;
@@ -135,12 +166,145 @@ test("not while a subagent works in the background: due until a step can take it
   assert.equal(await hasTool(client, "diary_add"), false);
 
   subagents = 0;
-  // The conversation holds the first run's call: this run's first request has one result in it.
-  script = (request) => (resultsIn(request) === 1 ? { name: "bash", args: { command: "echo again" } } : "Done.");
-  const [again, next] = await run("background", "Go on");
-  assert.ok(!offered(again).includes("diary_add"));
-  assert.ok(offered(next).includes("diary_add"), "at the next step of the next run");
+  script = () => "Done.";
+  const [again] = await run("background", "Go on");
+  assert.ok(offered(again).includes("diary_add"), "in the first request of the next run");
   assert.equal(client.reloadDue, false);
+});
+
+test("a reload that fails is tried again before the chat's next message", async () => {
+  const client = await chat("retry");
+  const reload = client.reload.bind(client);
+  let tries = 0;
+  client.reload = async () => {
+    if (++tries === 1) throw new Error("not now");
+    return reload();
+  };
+  await host.syncServerHalves([keeper, atlas]);
+  await sessions.reloadIdle();
+  assert.equal(tries, 1);
+  assert.equal(client.reloadDue, true, "due again");
+  script = () => "Done.";
+  const [first] = await run("retry", "Find it");
+  assert.equal(tries, 2);
+  assert.ok(offered(first).includes("atlas_find"));
+});
+
+test("a reload that fails between two steps is logged, and the run goes on with what it had", async () => {
+  const work = mkdtempSync(path.join(process.env.WORKSPACE_ROOT, "failing-"));
+  createSession({ id: "failing", title: "failing", workspace: work, executor: "host" });
+  const client = await SdkPiClient.create({ cwd: work, sessionDir: mkdtempSync(path.join(home, "pi-")), provider: "fake", modelId: "m", sessionId: "failing", canReloadNow: () => true });
+  let tries = 0;
+  client.reload = async () => {
+    tries++;
+    throw new Error("not now");
+  };
+  const logged = [];
+  const error = console.error;
+  console.error = (...args) => logged.push(args.join(" "));
+  try {
+    script = (request) => {
+      if (resultsIn(request) === 0) {
+        client.reloadDue = true;
+        return { name: "bash", args: { command: "echo working" } };
+      }
+      return "Done.";
+    };
+    const first = model.requests.length;
+    await client.prompt("Go");
+    await until(() => model.requests.length - first === 2 && client.isIdle(), "the run to end");
+    assert.equal(tries, 1);
+    assert.match(toolTexts(model.requests.at(-1)).at(-1), /working/, "the next request has the step's result");
+    assert.ok(logged.some((line) => line.includes("could not reload failing between two steps: not now")));
+  } finally {
+    console.error = error;
+    client.dispose();
+  }
+});
+
+/** A pi extension of the agent's own whose load waits for `open` from its second on, and which reads its context as a message comes in, as an input handler may. */
+function slowExtension() {
+  const file = path.join(process.env.PI_CODING_AGENT_DIR, "extensions", "slow.ts");
+  mkdirSync(path.dirname(file), { recursive: true });
+  writeFileSync(file, `export default async function (pi) {
+  globalThis.slowLoads = (globalThis.slowLoads ?? 0) + 1;
+  if (globalThis.slowLoads > 1) await globalThis.slowGate;
+  pi.on("input", (_event, ctx) => { void ctx.cwd; });
+}
+`);
+  globalThis.slowLoads = 0;
+  let open;
+  globalThis.slowGate = new Promise((resolve) => (open = resolve));
+  return { open, remove: () => (open(), rmSync(file, { force: true })) };
+}
+
+test("a message handed to a chat that is reloaded between two steps waits for the reload", async () => {
+  const slow = slowExtension();
+  const work = mkdtempSync(path.join(process.env.WORKSPACE_ROOT, "steer-"));
+  createSession({ id: "steer", title: "steer", workspace: work, executor: "host" });
+  const client = await SdkPiClient.create({ cwd: work, sessionDir: mkdtempSync(path.join(home, "pi-")), provider: "fake", modelId: "m", sessionId: "steer", canReloadNow: () => true });
+  const failures = [];
+  client.on("event", (event) => event.type === "extension_error" && failures.push(event.error));
+  try {
+    script = (request) => {
+      if (resultsIn(request) === 0) {
+        client.reloadDue = true;
+        return { name: "bash", args: { command: "echo working" } };
+      }
+      return "Done.";
+    };
+    const first = model.requests.length;
+    await client.prompt("Go");
+    await until(() => globalThis.slowLoads === 2, "the reload between the two steps");
+    let taken = false;
+    const steered = client.prompt("And this", { steer: true }).then(() => (taken = true));
+    await sleep(200);
+    assert.equal(taken, false, "the message waits for the reload");
+    assert.equal(model.requests.length - first, 1, "and the model is not asked meanwhile");
+    slow.open();
+    await steered;
+    await until(() => client.isIdle() && model.requests.slice(first).some((r) => JSON.stringify(r.messages).includes("And this")), "the message to be answered");
+    assert.deepEqual(failures, [], "no extension was handed it with what the reload had let go");
+  } finally {
+    slow.remove();
+    client.dispose();
+  }
+});
+
+test("a message sent to a chat that is reloaded as its run settles waits for the reload", async () => {
+  const slow = slowExtension();
+  await host.syncServerHalves([keeper]);
+  try {
+    const client = await chat("settle");
+    const handed = [];
+    const prompt = client.prompt.bind(client);
+    client.prompt = (message, options) => (handed.push(message), prompt(message, options));
+    let release;
+    script = async (request) => {
+      if (resultsIn(request) === 0) {
+        release = globalThis.keeper.chats.hold("settle");
+        // As reloadIdle leaves a chat that is working (which would wait here for the other chats' reloads, held by the gate).
+        client.reloadDue = true;
+        return { name: "bash", args: { command: "echo working" } };
+      }
+      release();
+      return "Done.";
+    };
+    await run("settle", "Look");
+    await until(() => globalThis.slowLoads === 2, "the reload as the run settled");
+    script = () => "Done.";
+    const first = model.requests.length;
+    const sent = sessions.prompt("settle", "Next");
+    await sleep(200);
+    assert.deepEqual(handed, ["Look"], "the message is not handed to pi before the reload is done");
+    slow.open();
+    await sent;
+    await until(() => model.requests.length > first && getSession("settle").status !== "running", "the message to be answered");
+    assert.deepEqual(handed, ["Look", "Next"]);
+    assert.deepEqual(eventsSince("settle", 0).filter((row) => row.type === "portal_notice"), []);
+  } finally {
+    slow.remove();
+  }
 });
 
 test("what a load could not load is kept, said once, and said again when it comes back", async () => {
