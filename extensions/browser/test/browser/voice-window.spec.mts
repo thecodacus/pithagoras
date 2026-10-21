@@ -101,6 +101,14 @@ test('with no browser running there is no button for it, and the agent driving o
   await expect(browser).toHaveClass(/is-open/);
   await expect(browser).toContainText('The browser viewer is unavailable.');
   await expect(browser.locator('iframe')).toHaveCount(0);
+
+  // Started since: opened again, kept loaded as it is, it asks again, and shows it.
+  await page.route(`**${BASE}/state`, (route) => route.fulfill({ json: browserState(RUNNING) }));
+  await page.getByRole('button', { name: 'Minimize Browser' }).click();
+  await expect(browser).not.toHaveClass(/is-open/);
+  await page.getByRole('button', { name: 'Use browser', exact: true }).click();
+  await expect(browser).toHaveClass(/is-open/);
+  await expect(browser.frameLocator('iframe').locator('body')).toHaveText('A browser, in view.');
 });
 
 test('a server half that does not answer when the window opens is said in it', async ({ page }) => {

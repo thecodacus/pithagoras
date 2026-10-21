@@ -248,6 +248,15 @@ ground and text. A stylesheet written with them follows the theme, the
 portal's own or [one an extension brought](#themes). Give your class names a
 prefix of your own: the stylesheet is the page's.
 
+While the portal's [animations](/guide/interface#animations) play (the switch in
+Settings → This browser is on, and the system does not ask for less motion),
+`<html>` has `data-motion="fancy"`, and it has none while they do not. Put a
+flourish of your own under it, and it follows the switch as the portal's do:
+
+```css
+:root[data-motion="fancy"] .my-screen { animation: my-screen-in .6s ease-out backwards; }
+```
+
 `portal.ui` is what the portal's own pages are made of:
 
 | | |

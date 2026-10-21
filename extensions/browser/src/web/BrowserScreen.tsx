@@ -1,7 +1,7 @@
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import type { PanelProps, SlotMap } from "@pithagoras/extension-api";
 import { api } from "./api";
-import { useBrowserState } from "./state";
+import { refresh, useBrowserState } from "./state";
 import { portal, t } from "../portal";
 
 /**
@@ -67,8 +67,14 @@ const editing = (target: EventTarget | null) => !!(target as Element | null)?.cl
  * the page. A field of the viewer's own keeps its Escape, as one on the stage
  * does — but not the field the viewer takes the remote page's keys through,
  * which has focus whenever the page does.
+ *
+ * Kept loaded once opened, it asks how the browser stands each time it is
+ * opened again: the browser may have started since it last said there was none.
  */
-export function BrowserWindow({ maximized, restore }: SlotMap["voice.window"]["props"]) {
+export function BrowserWindow({ opened, maximized, restore }: SlotMap["voice.window"]["props"]) {
+  useEffect(() => {
+    void refresh();
+  }, [opened]);
   const latest = useRef({ maximized, restore });
   latest.current = { maximized, restore };
   const hear = (frame: HTMLIFrameElement) => {

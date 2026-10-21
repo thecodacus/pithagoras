@@ -3,12 +3,10 @@
  * are made after this, see build.mjs).
  */
 
-/* The browser's screen, switched on like an old tube: a line of light that opens into the picture. */
-.browser-power { animation: browser-power-on .75s cubic-bezier(.2, .9, .2, 1) backwards; }
+/* The browser's screen, switched on like an old tube: a line of light that opens into the picture, while the portal's
+   animations play (Settings → This browser, and the system not asking for less motion). */
+:root[data-motion="fancy"] .browser-power { animation: browser-power-on .75s cubic-bezier(.2, .9, .2, 1) backwards; }
 @keyframes browser-power-on { 0% { transform: scale(.4, .006); filter: brightness(4); } 30% { transform: scale(1, .006); filter: brightness(2.4); } 100% { transform: none; filter: none; } }
-@media (prefers-reduced-motion: reduce) {
-  .browser-power { animation: none; }
-}
 
 /* Where the browser is shown, beside a chat and in voice mode: black from edge to edge, as the screen it shows is. */
 .browser-screen { display: flex; flex-direction: column; flex: 1; min-height: 0; background: #0b0b0d; color: #d1d8e3; }

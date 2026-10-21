@@ -172,7 +172,8 @@ portal's login like everything else: without the login they answer 401, and a
 websocket opened from another site is refused. Behind a reverse proxy that
 rewrites the `Host` header, have it send the host the visitor asked for as
 `X-Forwarded-Host`: the page's origin is compared with that as well. The frame
-switches on like a screen when it opens, unless the system asks for less motion.
+switches on like a screen when it opens, while the portal's
+[animations](/guide/interface#animations) play.
 
 That needs the portal itself on HTTPS. The VNC client gates on
 `isSecureContext`, and a frame only counts as secure when **every page above it**

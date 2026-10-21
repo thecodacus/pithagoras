@@ -5,7 +5,8 @@ import { api, type BrowserState } from "./api";
  * How the browser stands, as the server half last said, for the parts that
  * only need to know: the sidebar's entry, the buttons of the panel and of the
  * voice window, and the voice window. Asked again whenever one of them is
- * drawn anew (a chat opened, the page loaded), and taken from the Browser page
+ * drawn anew (a chat opened, the page loaded) and each time the voice window
+ * is opened, which stays drawn once it was, and taken from the Browser page
  * and its page in Settings each time they read it, so that an install, a
  * removal or the agent connected there is followed at once. An answer that
  * does not come keeps the last one, and says it did not come.
@@ -36,7 +37,7 @@ export function publish(state: BrowserState): void {
 }
 
 /** Asks the server half how the browser stands; one question at a time. */
-function ask(): Promise<void> {
+export function refresh(): Promise<void> {
   asking ??= api
     .state()
     .then(publish, () => set({ state: known.state, failed: true }))
@@ -56,7 +57,7 @@ const subscribe = (listener: () => void) => {
 /** A hook: how the browser stands, asked again as the component that uses it is first drawn. */
 export function useBrowserState(): Known {
   useEffect(() => {
-    void ask();
+    void refresh();
   }, []);
   return useSyncExternalStore(subscribe, () => known);
 }

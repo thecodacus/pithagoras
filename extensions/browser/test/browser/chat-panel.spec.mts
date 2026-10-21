@@ -53,3 +53,22 @@ test('with no browser running, or over plain HTTP where its frame would not star
   await expect(page.locator('.chat-header')).toBeVisible();
   await expect(toggle(page)).toHaveCount(0);
 });
+
+test('its screen switches on like an old tube only while the portal\'s animations play', async ({ page }) => {
+  await chat(page, RUNNING);
+  await toggle(page).click();
+  const frame = page.locator('.chat-aside iframe');
+  const html = page.locator('html');
+  // The tests start with the switch off, as Settings would leave it.
+  await expect(html).not.toHaveAttribute('data-motion', /.+/);
+  expect(await frame.evaluate((el) => getComputedStyle(el).animationName)).toBe('none');
+
+  await page.evaluate(() => { localStorage.setItem('animations', 'on'); window.dispatchEvent(new StorageEvent('storage', { key: 'animations' })); });
+  await expect(html).toHaveAttribute('data-motion', 'fancy');
+  expect(await frame.evaluate((el) => getComputedStyle(el).animationName)).toBe('browser-power-on');
+
+  // The system's own wish for less motion wins over the switch.
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await expect(html).not.toHaveAttribute('data-motion', /.+/);
+  expect(await frame.evaluate((el) => getComputedStyle(el).animationName)).toBe('none');
+});
