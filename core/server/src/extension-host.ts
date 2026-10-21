@@ -12,6 +12,7 @@ import { DATA_DIR } from "./data-dir.js";
 import { getSession, getSetting, listSessions, putSetting, sessionsByWorkspace, setServerHalfOffers, setTrustedMcpServers, toolExceptions, trustedMcpServers, untrustMcpServer, type SessionRow } from "./db.js";
 import { EXECUTOR_KIND } from "./executor-kind.js";
 import { takes, type ServerHalf } from "./extension-ui.js";
+import { REVISION, underRevision } from "./half-modules.js";
 import { asAgent, runAsAgent, sandboxEnv } from "./sandbox/exec.js";
 import { identityOf } from "./sandbox/identity.js";
 import { sandboxOn, sandboxSupport } from "./sandbox/policy.js";
@@ -699,12 +700,15 @@ async function start(half: ServerHalf, sig: string, uses: Set<string>): Promise<
     const folder = dirname(realpathSync(half.file));
     ext.where = [folder + sep, `${pathToFileURL(folder).href}/`];
     live.add(ext);
-    // By its revision: the same file changed is another module, and the one already loaded is not served again. As its own
-    // code, and given up on at once should it crash meanwhile.
+    // By its revision, and so is every file of its folder it imports: the same files changed are other modules, and the
+    // ones already loaded are not served again. As its own code, and given up on at once should it crash meanwhile.
+    underRevision(folder);
+    const address = pathToFileURL(half.file);
+    address.searchParams.set(REVISION, half.rev);
     const stopper = await within(
       START_MS,
       callInto(ext, () =>
-        import(`${pathToFileURL(half.file).href}?v=${half.rev}`).then((module: any) => {
+        import(address.href).then((module: any) => {
           if (typeof module.default !== "function") throw new Error("Its module has no default export to call");
           return module.default(portalFor(ext));
         }),
