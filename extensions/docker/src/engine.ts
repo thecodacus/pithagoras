@@ -38,7 +38,7 @@ function send(method: string, path: string, body?: unknown, timeoutMs = 30_000, 
         status = res.statusCode ?? 0;
         res.on("data", (c: Buffer) => chunks.push(c));
         res.on("end", () => resolve({ status, bytes: Buffer.concat(chunks), timedOut: false }));
-        res.on("error", reject);
+        res.on("error", (e) => reject(new DockerError(`Docker's answer was cut off: ${e.message}`)));
       },
     );
     if (timeoutMs > 0) {
@@ -123,7 +123,7 @@ export function pull(image: string, onLine: (line: string) => void): Promise<voi
         }
       });
       res.on("end", () => (failed ? reject(failed) : resolve()));
-      res.on("error", reject);
+      res.on("error", (e) => reject(new DockerError(`Docker's answer was cut off: ${e.message}`)));
     });
     req.on("error", (e) => reject(new DockerError(`Docker cannot be reached: ${e.message}`)));
     req.end();

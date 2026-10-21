@@ -232,6 +232,7 @@ A call that fails throws an Error with `status`: Docker's own HTTP status where
 it said no (403 for a container or volume that is another extension's, or
 nobody's; 404 where there is none to act on; 409 for `exec` in a container
 that is not running), and 0 where Docker was not reached or gave no HTTP status:
-there is no socket, it did not answer in time, the name is not one Docker takes,
-or a download failed partway. Where `sharedNetwork` does not find the portal's
-network, its Error has no `status`, and says what to set.
+there is no socket, it did not answer in time, its answer was cut off partway,
+the name is not one Docker takes, or a download failed partway. Where
+`sharedNetwork` does not find the portal's network, its Error has no `status`,
+and says what to set.

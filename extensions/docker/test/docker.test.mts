@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { once } from "node:events";
-import type { AddressInfo } from "node:net";
+import net, { type AddressInfo } from "node:net";
 import express from "express";
 import { fakeDocker } from "./fake-docker.ts";
 import type { Docker } from "../src/api.ts";
@@ -13,7 +13,7 @@ import type { Docker } from "../src/api.ts";
 const docker = await fakeDocker();
 process.env.DOCKER_SOCKET = docker.socket;
 const { dockerFor, OWNER_LABEL, sharedNetwork } = await import("../src/docker.ts");
-const { demux } = await import("../src/engine.ts");
+const { demux, pull, request } = await import("../src/engine.ts");
 const { default: serverHalf } = await import("../src/server.ts");
 test.after(() => docker.close());
 
@@ -192,6 +192,21 @@ test("a command that does not end in time is given up on with what it wrote by t
     docker.hold.exec = undefined;
     end();
     await own.containers.remove("dk-slow");
+  }
+});
+
+test("a call whose answer is cut off partway fails as one that does not reach Docker does, with status 0", async () => {
+  // A Docker that begins its answer and goes before it ends it.
+  const socket = path.join(mkdtempSync(path.join(os.tmpdir(), "dk-cut-")), "docker.sock");
+  const cut = net.createServer((s) => s.once("data", () => s.end('HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\n\r\n4\r\n{"st\r\n')));
+  await new Promise<void>((resolve) => cut.listen(socket, resolve));
+  process.env.DOCKER_SOCKET = socket;
+  try {
+    await assert.rejects(request("GET", "/containers/dk-x/json"), { status: 0, message: /Docker's answer was cut off/ });
+    await assert.rejects(pull("redis:7", () => {}), { status: 0, message: /Docker's answer was cut off/ });
+  } finally {
+    process.env.DOCKER_SOCKET = docker.socket;
+    await new Promise((resolve) => cut.close(resolve));
   }
 });
 
