@@ -7,7 +7,7 @@ const agent = (id: string, name: string, extra: Record<string, unknown> = {}) =>
 });
 
 /** A portal with the first agent and one more, "ada", whose folder the answers of a new agent made under that name meet. */
-async function portal(page: Page, opts: { kept?: string[]; links?: string[]; deleted?: string[]; newChats?: unknown[]; wizard?: { initialised: boolean; kept: string[] } } = {}) {
+async function portal(page: Page, opts: { kept?: string[]; links?: string[]; deleted?: string[]; newChats?: unknown[]; wizard?: { initialised: boolean; kept: string[] }; setup?: Record<string, unknown> } = {}) {
   let made = false;
   let ran = false;
   // Which agent the New button starts with, as the server keeps it.
@@ -37,7 +37,7 @@ async function portal(page: Page, opts: { kept?: string[]; links?: string[]; del
       if (method === 'POST') ran = true;
       // `links`: files of the folder that are links, which the Files tab does not show.
       const files = (opts.links ?? []).map((name) => ({ name, exists: false, content: '', mtime: 0, link: true }));
-      if (!opts.wizard) return { initialised: true, home: '/a/ada', files };
+      if (!opts.wizard) return { initialised: true, home: '/a/ada', files, ...opts.setup };
       return { initialised: ran && opts.wizard.initialised, home: '/a/ada', files: [], ...(method === 'POST' ? { kept: opts.wizard.kept } : {}) };
     }
   }, { settings: true });
@@ -209,6 +209,22 @@ test('a wizard that is answered and still not done is usable again, and not left
   await expect(main.getByRole('heading', { name: 'Set up the agent' })).toBeVisible();
   await expect(main.getByRole('button', { name: 'Create' })).toBeEnabled();
   await expect(main.getByLabel('Your name')).toBeEnabled();
+});
+
+test('MEMORY.md is said not to be read while something holds the agent\'s memory, and nothing is said while the file is the memory', async ({ page }) => {
+  const memory = { name: 'MEMORY.md', exists: true, content: '# MEMORY.md\n', mtime: 1000 };
+  const note = /Not read while Understory is the agent's memory/;
+  await portal(page, { setup: { memory: 'extension', by: 'Understory', files: [memory] } });
+  await page.goto('/agents?agent=ada&tab=files');
+  const main = page.getByRole('main');
+  await main.getByRole('button', { name: 'MEMORY.md' }).click();
+  await expect(main.getByRole('note').filter({ hasText: note })).toBeVisible();
+
+  await portal(page, { setup: { memory: 'file', files: [memory] } });
+  await page.reload();
+  await main.getByRole('button', { name: 'MEMORY.md' }).click();
+  await expect(main.locator('textarea')).toHaveValue('# MEMORY.md\n');
+  await expect(main.getByRole('note').filter({ hasText: note })).toHaveCount(0);
 });
 
 test('an agent made in a folder of its own says nothing of the kind, and one that kept only its memory does not either', async ({ page }) => {
