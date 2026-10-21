@@ -37,7 +37,8 @@ function fakeSession() {
     resourceLoader: {
       getExtensions: () => ({
         extensions: [{ path: "<inline:sandbox>", tools: new Map(session.sandboxed ? [["read", {}], ["bash", {}]] : []) }],
-        errors: [],
+        // pi's own word on a tool of a name another extension registered first, filed under the later one.
+        errors: session.sandboxed && session.bashFrom !== "<inline:sandbox>" ? [{ path: "<inline:sandbox>", error: `Tool "bash" conflicts with ${session.bashFrom}` }] : [],
       }),
     },
   };
@@ -57,7 +58,7 @@ test("with the sandbox on, a package's tool of one of pi's own names is off in t
   assert.equal((await client.getTools()).find((tool) => tool.name === "bash")?.enabled, false);
   assert.ok(client.switchedOff.has("bash"), "off for the guard and the scripts as well");
   const error = 'shadow registers "bash", one of pi\'s own tools. With the sandbox on, only the sandbox may give a tool that name, so "bash" is off in this chat.';
-  assert.deepEqual(client.loadErrors(), [{ path: "/data/home/.pi/agent/git/shadow/index.js", error }]);
+  assert.deepEqual(client.loadErrors(), [{ path: "/data/home/.pi/agent/git/shadow/index.js", error }], "said by the portal, naming the package, not by pi as the sandbox's");
   assert.deepEqual(said.map((event) => event.error), [error]);
 
   // The chat's own switches do not bring it back.
@@ -72,6 +73,31 @@ test("with the sandbox on, a package's tool of one of pi's own names is off in t
   assert.equal(client.switchedOff.size, 0);
 });
 
+test("one registered after the load is off from then on, and said once", async () => {
+  const session = fakeSession();
+  const client = new SdkPiClient(session, {}, () => {});
+  const said = [];
+  client.on("event", (event) => event.type === "extension_error" && said.push(event.error));
+  await client.reload();
+  assert.ok(session.active.includes("bash"));
+
+  // A package registers `bash` as a run starts: pi keeps it over the sandbox's, which loaded later, and activates its tools again.
+  session.bashFrom = "/data/home/.pi/agent/git/shadow/index.js";
+  session._setActiveTools(session.tools().map((tool) => tool.name));
+  assert.ok(!session.active.includes("bash"));
+  assert.ok(client.switchedOff.has("bash"));
+  const error = 'shadow registers "bash", one of pi\'s own tools. With the sandbox on, only the sandbox may give a tool that name, so "bash" is off in this chat.';
+  assert.deepEqual(said, [error]);
+  assert.deepEqual(client.loadErrors(), [{ path: "/data/home/.pi/agent/git/shadow/index.js", error }]);
+  session._setActiveTools(session.tools().map((tool) => tool.name));
+  assert.equal(said.length, 1, "said once");
+
+  // Nor said again by the load after it, where it is still there.
+  await client.reload();
+  assert.equal(said.length, 1);
+  assert.ok(!session.active.includes("bash"));
+});
+
 test("with the sandbox off, a package's own `bash` is the chat's as before", async () => {
   const session = fakeSession();
   session.sandboxed = false;
@@ -80,4 +106,7 @@ test("with the sandbox off, a package's own `bash` is the chat's as before", asy
   await client.reload();
   assert.ok(session.active.includes("bash"));
   assert.deepEqual(client.loadErrors(), []);
+  // Nor after the load.
+  session._setActiveTools(session.tools().map((tool) => tool.name));
+  assert.ok(session.active.includes("bash"));
 });

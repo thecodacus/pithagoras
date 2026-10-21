@@ -1563,6 +1563,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     }
     this.keepSwitchedOffFromScripts(session);
     session._setActiveTools = (names: string[]) => {
+      this.takenLate();
       const held = this.heldBack(session, names, this.fromExtension);
       this.wanted = new Set([...names, ...held]);
       // What was held back and is not kept out now is offered: a lazy tool when an extension's `tools` has taken the
@@ -1886,6 +1887,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
   }
 
   private async loadAgain(): Promise<void> {
+    this.loading = true;
     await this.session.reload();
     // Reloading has extensions register their providers again, which puts the
     // registry's model, with its own window, back on the session.
@@ -1907,39 +1909,72 @@ export class SdkPiClient extends EventEmitter implements PiClient {
   }
 
   /**
-   * pi's own tool names that came from another extension than the sandbox's, at the last load with the sandbox on.
-   * pi keeps the first tool of a name, and an installed package loads before the portal's own extensions, so the
-   * package's `bash` would be the chat's, run outside the sandbox. Off in this chat, whatever the switches say.
+   * pi's own tool names that came from another extension than the sandbox's, while the sandbox gives them. pi keeps
+   * the first tool of a name, and an installed package loads before the portal's own extensions, so the package's
+   * `bash` would be the chat's, run outside the sandbox. Off in this chat, whatever the switches say.
    */
   private taken = new Set<string>();
+
+  /**
+   * Whether the sandbox gave pi's tools at the last load. It decides that as it loads, by whether the sandbox is on,
+   * and switching the sandbox reloads every chat.
+   */
+  private sandboxed = false;
+
+  /** From the start of a load until noteLoad has noted what it left (a load that failed, until the next): see takenLate. */
+  private loading = true;
+
+  /** Each of pi's own tool names that another extension than the sandbox's gives now, with the error that says so. */
+  private takenNow(): { name: string; failure: LoadError }[] {
+    const sandbox = `<inline:${SANDBOX}>`;
+    return asArray(this.session.getAllTools?.())
+      .filter((tool) => PI_BUILT_IN_TOOLS.includes(String(tool?.name)) && tool.sourceInfo?.path !== sandbox)
+      .map((tool) => ({
+        name: String(tool.name),
+        failure: {
+          path: String(tool.sourceInfo?.path ?? ""),
+          error: `${sourceLabel(tool.sourceInfo)} registers "${tool.name}", one of pi's own tools. With the sandbox on, only the sandbox may give a tool that name, so "${tool.name}" is off in this chat.`,
+        },
+      }));
+  }
 
   /**
    * What the load that just ended left: pi's errors (an extension that threw as it loaded, a tool of a name another
    * had first), and where the sandbox is on, one for each of pi's own tool names another extension took. Kept for
    * loadErrors; those that were not there at the load before are returned, to be said.
-   *
-   * The sandbox was on as the chat loaded where its extension registered tools: it decides that as it loads, and
-   * switching the sandbox reloads every chat.
    */
   private noteLoad(): LoadError[] {
     const loaded = this.session.resourceLoader?.getExtensions?.() ?? {};
-    const failed: LoadError[] = asArray(loaded.errors).map((e) => ({ path: String(e?.path ?? ""), error: String(e?.error ?? e) }));
-    this.taken = new Set();
     const sandbox = `<inline:${SANDBOX}>`;
-    if (asArray(loaded.extensions).some((ext) => ext?.path === sandbox && ext.tools?.size > 0)) {
-      for (const tool of asArray(this.session.getAllTools?.())) {
-        const name = String(tool?.name);
-        if (!PI_BUILT_IN_TOOLS.includes(name) || tool.sourceInfo?.path === sandbox) continue;
-        this.taken.add(name);
-        failed.push({
-          path: String(tool.sourceInfo?.path ?? ""),
-          error: `${sourceLabel(tool.sourceInfo)} registers "${name}", one of pi's own tools. With the sandbox on, only the sandbox may give a tool that name, so "${name}" is off in this chat.`,
-        });
-      }
-    }
+    this.sandboxed = asArray(loaded.extensions).some((ext) => ext?.path === sandbox && ext.tools?.size > 0);
+    const taken = this.sandboxed ? this.takenNow() : [];
+    this.taken = new Set(taken.map(({ name }) => name));
+    // pi files a tool of a name another extension had first under the one that loaded later, which for pi's own names
+    // is the sandbox: the error that names the package says it instead.
+    const conflict = (e: LoadError) => e.path === sandbox && [...this.taken].some((name) => e.error.startsWith(`Tool "${name}" conflicts with `));
+    const failed: LoadError[] = asArray(loaded.errors)
+      .map((e) => ({ path: String(e?.path ?? ""), error: String(e?.error ?? e) }))
+      .filter((e) => !conflict(e));
+    failed.push(...taken.map(({ failure }) => failure));
+    this.loading = false;
     const before = new Set(this.failedToLoad.map(failureKey));
     this.failedToLoad = failed;
     return failed.filter((failure) => !before.has(failureKey(failure)));
+  }
+
+  /**
+   * One of pi's own tool names taken by a tool an extension registers after the load (as it starts, as a run starts):
+   * pi keeps the package's, which loaded first, from then on. Off at once, and said, as at a load. Every such
+   * registration comes through guardActiveTools; one in the middle of a load is noteLoad's.
+   */
+  private takenLate(): void {
+    if (this.loading || !this.sandboxed) return;
+    const late = this.takenNow().filter(({ name }) => !this.taken.has(name));
+    if (!late.length) return;
+    for (const { name } of late) this.taken.add(name);
+    const failed = late.map(({ failure }) => failure);
+    this.failedToLoad.push(...failed);
+    this.sayLoadErrors(failed);
   }
 
   /** Each as an extension's failure is said in the chat: see extension_error in the session manager. */
