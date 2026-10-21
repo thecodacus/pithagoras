@@ -19,6 +19,10 @@ The file holds the servers' keys, and the token the portal made for its own
 memory, so it is readable by the account the portal runs as and no other. It is
 written whole or not at all: a full disk leaves the file as it was.
 
+An extension can write a server of its own into the file as well, when you
+switch it on from the extension's page, and installs the adapter where it is
+missing. The server is listed and switched here like any other.
+
 Changes are read when a session starts. A session already running keeps the
 servers it connected with, so restart it to pick up a new one.
 

@@ -78,7 +78,8 @@ that, a session asking for a local model silently started on pi's fallback.
 
 **Guard**, beside **Sandbox**, is the [guard](/guide/security)'s page: the rules that hold after a suspected
 injection, each routine's exemptions from them (one switch per rule), which MCP servers count as your own and are
-not marked as outside content (the portal's own memory server until you say otherwise; the browser never), the sites
+not marked as outside content (the portal's own memory server until you say otherwise, and a server an extension counts
+so when you switch it on from its page; the browser never), the sites
 the agent's tools may reach (one list, one domain per line, for every tool that says where it goes and for the browser
 tools an MCP server brings; an empty list means any site; saved with its **Save** button), the approvals not yet spent
 and the flagged results you trusted, each of which can be taken back, and what is always on. Each other change is
