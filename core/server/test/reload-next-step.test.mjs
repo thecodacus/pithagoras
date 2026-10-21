@@ -420,7 +420,8 @@ export default function (pi) {
 `);
   const work = mkdtempSync(path.join(process.env.WORKSPACE_ROOT, "tainted-"));
   createSession({ id: "tainted", title: "tainted", workspace: work, executor: "host" });
-  const client = await SdkPiClient.create({ cwd: work, sessionDir: mkdtempSync(path.join(home, "pi-")), provider: "fake", modelId: "m", sessionId: "tainted", canReloadNow: () => true });
+  // Nobody answers a dialog here, as in a routine's run, so the held call is refused (see guard-asks.test.mjs for where it is asked).
+  const client = await SdkPiClient.create({ cwd: work, sessionDir: mkdtempSync(path.join(home, "pi-")), provider: "fake", modelId: "m", sessionId: "tainted", canReloadNow: () => true, dialogs: false });
   let reloads = 0;
   const reload = client.reload.bind(client);
   client.reload = () => (reloads++, reload());
