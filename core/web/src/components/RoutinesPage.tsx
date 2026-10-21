@@ -814,9 +814,8 @@ function RoutineDetail({
         </div>
       </section>
 
-      {/* Saved as each switch is flipped, like a project's: not part of the form's Save. The Browser switch
-          that was here is the browser's group in this list. Drawn again when the routine moves, since the
-          layers under it are those of where it runs. */}
+      {/* Saved as each switch is flipped, like a project's: not part of the form's Save. Drawn again when the
+          routine moves, since the layers under it are those of where it runs. */}
       <section className="mb-6">
         <h3 className="text-xs font-semibold uppercase tracking-wider text-fg-subtle">{t("Tools")}</h3>
         <p className="mt-1 text-[11px] text-fg-faint">

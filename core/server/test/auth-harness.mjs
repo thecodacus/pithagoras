@@ -180,7 +180,6 @@ export const until = async (check, what) => {
   }
   assert.fail(`never: ${what}`);
 };
-export const basic = (user, password) => "Basic " + Buffer.from(`${user}:${password}`).toString("base64");
 
 /**
  * A stream of the stand-in's opened on the portal at `at`, once its server half, which starts after the portal
