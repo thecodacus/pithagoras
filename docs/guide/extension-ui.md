@@ -1721,6 +1721,9 @@ portal.voice.provide({
 });
 ```
 
+- **`label`** names it under **Listen and speak through**, in the person's
+  language from the extension's own texts (`portal.locale.add`), as a Settings
+  page's title is.
 - **`where()`** is asked at each request while it is the source, and as
   Settings lists the sources: keep it quick. `listen` is an address that takes
   a WAV as Whisper.cpp's `/inference` or an OpenAI transcription endpoint

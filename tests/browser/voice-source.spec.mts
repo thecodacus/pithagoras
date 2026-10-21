@@ -67,7 +67,7 @@ test('an extension is chosen in place of the own addresses, which stay as they a
 test('an extension chosen that is not running is shown as chosen, and one that speaks with Chatterbox is given a language it speaks', async ({ page }) => {
   await voicePage(page, { ...OWN, provider: 'gone-speaker', providers: [{ ...SPEAKER, name: 'chatty', label: 'Chatty', runtime: 'chatterbox' }, { name: 'resting', label: 'Resting', ready: false }] });
   await expect(source(page)).toContainText('gone-speaker');
-  await expect(page.getByRole('status').filter({ hasText: 'Not running: voice mode cannot listen or speak through it' })).toBeVisible();
+  await expect(page.getByRole('status').filter({ hasText: 'Not running: voice mode cannot listen or speak through it until it is installed in Settings → Extensions and started.' })).toBeVisible();
   await source(page).click();
   await expect(page.getByRole('option', { name: /gone-speaker/ })).toContainText('Not running');
   await expect(page.getByRole('option', { name: /Resting/ })).toContainText('Not running');

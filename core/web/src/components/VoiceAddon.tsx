@@ -6,6 +6,7 @@ import { INPUT_LANGUAGES, CHATTERBOX_LANGUAGES } from "../../../server/src/voice
 import { NUMBER_PACK_LANGUAGES } from "../../../server/src/voice-numbers";
 import { DEFAULT_KOKORO_VOICE } from "../../../server/src/kokoro-voices";
 import { languageName, msg, t } from "../i18n";
+import { translate } from "../extensions/strings";
 import { LoadFailed, btnCls, inputCls } from "./SettingsUi";
 import { useUnsavedDraft } from "./Modal";
 
@@ -51,7 +52,7 @@ export function VoiceAddon({ onError }: { onError: (message: string) => void }) 
   // Where voice mode listens and speaks: the person's own addresses, or an extension that offers it. One chosen that is not running is still shown, as chosen.
   const providers = config.providers ?? [];
   const sources = [
-    ...providers.map(p => ({ value: p.name, label: p.label, hint: p.ready ? undefined : t("Not running") })),
+    ...providers.map(p => ({ value: p.name, label: translate(p.name, p.label), hint: p.ready ? undefined : t("Not running") })),
     ...(config.provider && !providers.some(p => p.name === config.provider) ? [{ value: config.provider, label: config.provider, hint: t("Not running") }] : []),
   ];
   const setProvider = (provider: string) => spokenBy(provider ? providers.find(p => p.name === provider)?.runtime : config.runtime, { provider });
@@ -59,7 +60,7 @@ export function VoiceAddon({ onError }: { onError: (message: string) => void }) 
     <div><p className="text-sm text-fg">{t("Voice")}</p><p className="mt-1 text-xs text-fg-faint">{t("Talk naturally, interrupt anytime, and hear replies in your chosen voice.")}</p></div>
     <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={config.enabled} onChange={e => update({ enabled: e.target.checked })} />{listening ? t("Enable dictation in sessions") : t("Enable voice controls in sessions")}</label>
     {sources.length > 0 && <div className="block text-xs text-fg-muted">{t("Listen and speak through")}<Select aria-label={t("Listen and speak through")} size="sm" className="mt-1.5 w-full" value={config.provider ?? ""} onChange={setProvider} options={[{ value: "", label: t("Your own addresses"), hint: t("Advanced connection") }, ...sources]} />
-      {config.provider && !providers.some(p => p.name === config.provider && p.ready) && <p role="status" className="mt-1.5 text-xs text-warn">{t("Not running: voice mode cannot listen or speak through it until it is started. Meanwhile you can choose your own addresses.")}</p>}</div>}
+      {config.provider && !providers.some(p => p.name === config.provider && p.ready) && <p role="status" className="mt-1.5 text-xs text-warn">{t("Not running: voice mode cannot listen or speak through it until it is installed in Settings → Extensions and started. Meanwhile you can choose your own addresses.")}</p>}</div>}
     {listening && <p role="status" className="rounded-md border border-warn/40 bg-warn/10 px-3 py-2 text-xs text-warn">{t("This installation has no speech synthesis: replies are not spoken and voice mode is off. Dictation, which only listens, works.")}</p>}
     {!listening && <section className="rounded-xl border border-line bg-surface/50 p-4 space-y-4">
       <div><h3 className="text-sm font-medium">{t("Your voice")}</h3><p className="mt-1 text-xs text-fg-muted">{t("Choose how your assistant sounds.")}</p></div>
