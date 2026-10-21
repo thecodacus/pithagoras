@@ -5,7 +5,7 @@ import { UNDERSTORY } from "./features.js";
 import { GUARD_RULE_NAMES } from "./pi/guard-rule-names.js";
 import { BUILT_IN_SET, PI_BUILT_IN_TOOLS, defaultsFor, lazyToolEntry, mcpServerOf, toolEnabled, toolSetOf } from "./tool-policy.js";
 import { projectOf } from "./workspaces.js";
-import { dropMcpCache, mcpAdapter, mcpCachePath, mcpConfigPath, mcpServerNames, onMcpWritten, readMcpCache, readMcpFile, readableMcpConfig } from "./api/mcp.js";
+import { dropMcpCache, mcpAdapter, mcpCachePath, mcpConfigPath, mcpServerNames, onMcpWritten, readMcpCache, readMcpFile, readableMcpConfig, serversAndBrowsers } from "./api/mcp.js";
 import { mcpCatalogue, mcpDirect, mcpOffer, unlisted, type McpOffer } from "./mcp-offer.js";
 import { existsSync, mkdirSync, statSync } from "node:fs";
 import path from "node:path";
@@ -665,27 +665,46 @@ function handOffBrowser(d: Database.Database): void {
  * switches now, as for any tool: what each routine and chat had is written into its tools, once, as the database is
  * brought to schema 8. The columns stay, unread.
  *
- * A routine's switch answered for each browser tool its lists did not name, on or off: those are named now, as it
- * said. A chat's grant was carried into the tools as they were first seen, which made them off by default and on in
- * the chats that had it: what was still to be carried, where the portal waited for them, is carried now.
+ * The browser's tools were the portal's own and those seen of an MCP server that is a browser (serversAndBrowsers: a
+ * Playwright server pointed at one): the switch and the grant answered for both. A routine's switch answered for each
+ * of them its lists did not name, on or off: those are named now, as it said. The run of a routine that is gone was
+ * refused them: off in it now, where it named none of them itself. A chat's grant was carried into the tools as they
+ * were first seen, which made them off by default and on in the chats that had it: what was still to be carried,
+ * where the portal waited for them, is carried now. An MCP server's tools not seen yet were never counted: they come
+ * as any tool does.
  */
 function browserGrantsToSwitches(d: Database.Database): void {
+  const { servers, browsers } = serversAndBrowsers();
+  const seen = new Set(toolsSeenIn(d).flatMap((tool) => (typeof tool?.name === "string" ? [tool.name] : [])));
+  const ofBrowser = (name: string) => {
+    const server = mcpServerOf(name, servers);
+    return server !== undefined && browsers.includes(server);
+  };
+  const browser = clean([...BROWSER_TOOLS, ...[...seen].filter(ofBrowser)]);
+  const unnamedIn = (lists: { tools_off: string; tools_on: string }) => {
+    const off = parseToolsOff(lists.tools_off);
+    const on = parseToolsOff(lists.tools_on);
+    return { off, on, unnamed: browser.filter((name) => !off.includes(name) && !on.includes(name)) };
+  };
   const routines = d.prepare("SELECT slug, browser, tools_off, tools_on FROM routines").all() as { slug: string; browser: number; tools_off: string; tools_on: string }[];
   const putRoutine = d.prepare("UPDATE routines SET tools_off = ?, tools_on = ? WHERE slug = ?");
   for (const routine of routines) {
-    const off = parseToolsOff(routine.tools_off);
-    const on = parseToolsOff(routine.tools_on);
-    const unnamed = BROWSER_TOOLS.filter((name) => !off.includes(name) && !on.includes(name));
+    const { off, on, unnamed } = unnamedIn(routine);
     if (!unnamed.length) continue;
     (routine.browser === 1 ? on : off).push(...unnamed);
     putRoutine.run(clean(off).join("\n"), clean(on).join("\n"), routine.slug);
+  }
+  const gone = d.prepare("SELECT id, tools_off, tools_on FROM sessions WHERE kind = 'routine' AND routine_slug NOT IN (SELECT slug FROM routines)").all() as { id: string; tools_off: string; tools_on: string }[];
+  const putRun = d.prepare("UPDATE sessions SET tools_off = ? WHERE id = ?");
+  for (const run of gone) {
+    const { off, unnamed } = unnamedIn(run);
+    if (unnamed.length) putRun.run(clean([...off, ...unnamed]).join("\n"), run.id);
   }
   // Unmarked in a database no portal that carried grants has opened: one with no chat had nothing to carry, one with chats waited.
   const adopted = settingIn(d, "browser_tools_adopted") ?? (d.prepare("SELECT 1 FROM sessions LIMIT 1").get() ? "pending" : "1");
   if (adopted === "1") return;
   // Waiting, the grant answered for all of them; carrying, each was carried as it was first seen, and the rest are to be.
-  const seen = new Set(toolsSeenIn(d).map((tool) => tool?.name));
-  const unseen = adopted === "pending" ? BROWSER_TOOLS : BROWSER_TOOLS.filter((name) => !seen.has(name));
+  const unseen = adopted === "pending" ? browser : browser.filter((name) => !seen.has(name));
   if (!unseen.length) return;
   d.prepare("INSERT INTO settings (key, value) VALUES ('tools_off_default', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(
     clean([...parseToolsOff(settingIn(d, "tools_off_default")), ...unseen]).join("\n"),
@@ -2089,9 +2108,7 @@ function toolPolicy(names: string[]): ToolsPolicy {
 /** Whether any of the policy's tools is on for a session; `exceptions` are the conversation's own, where the caller has them already. */
 export function toolsOnWith(session: Pick<SessionRow, "id" | "kind" | "routine_slug" | "workspace">, policy: ToolsPolicy, exceptions?: SessionTools): boolean {
   const routine = routineOf(session);
-  // A routine that is gone gets nothing.
-  if (routine && !getDb().prepare("SELECT 1 FROM routines WHERE slug = ?").get(routine)) return false;
-  // Every layer under the conversation's own: its agent, its project, its routine.
+  // Every layer under the conversation's own: its agent, its project, its routine (none where the routine is gone).
   // By what decides it, not by folder: the chats in one project's subfolders share it.
   const homes = (policy.homes ??= agentHomes());
   const key = `${agentIdOf(session.workspace, homes) ?? ""}\u0000${projectOf(session.workspace) ?? ""}\u0000${routine ?? ""}`;

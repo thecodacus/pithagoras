@@ -138,16 +138,25 @@ The layers, each an exception to the one before it:
 An agent and a project do not both apply to one place: a project is under the
 workspace root, an agent's home is not.
 
+Deleting a routine takes its layer with it. The chats of its runs are kept, and a
+person who goes on with one has what the layers under the routine's leave, and
+what that chat switched itself: a tool the routine had off is on again there
+where those layers have it on.
+
 ### The browser
 
 The [browser](/guide/browser)'s tools, Browser's group (`pithagoras-browser`) in
 that list, are tools like any other here: having them is having the browser,
 which is signed into the agent's own accounts, and a routine's runs have them as
-the layers above say until the routine switches them. A routine had a
-**Browser** switch of its own once, which held them off unless it was on: a
-portal upgraded from then has what each routine's switch said written into its
-tools (see [Upgrading](/guide/upgrading#browser-is-an-extension)). Every page a
-run opens is recorded in [Audit](/guide/sessions#audit).
+the layers above say until the routine switches them. A new routine has them
+wherever a chat in its place would. To keep routines away from the browser
+unless one is switched on for it, switch the group off in Settings → Tools and on
+where it is wanted: in the routines that need it, and in chats, projects or
+agents. A routine had a **Browser** switch of its own once,
+which held them off unless it was on: a portal upgraded from then has what each
+routine's switch said written into its tools (see
+[Upgrading](/guide/upgrading#browser-is-an-extension)). Every page a run opens
+is recorded in [Audit](/guide/sessions#audit).
 
 ## Letting the agent manage them
 

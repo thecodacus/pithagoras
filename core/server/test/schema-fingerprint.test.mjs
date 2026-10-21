@@ -688,6 +688,42 @@ test("a portal still waiting for the browser's tools to carry the grants over ca
   assert.deepEqual(adopted.routines.news, { off: [], on: BROWSER_TOOLS }, "a routine's switch is written all the same");
 });
 
+test("the tools seen of a Playwright server pointed at a browser were the browser's as well, and are written with the portal's; the run of a routine that is gone has them off", async () => {
+  const dir = path.join(home, "browser-mcp");
+  mkdirSync(dir, { recursive: true });
+  browserOfV7(dir, "pending");
+  // A server under a name of its own whose tool a chat reported, and the runs of a routine there is and of one that is gone.
+  const PLAYWRIGHT = "playwright_browser_navigate";
+  const before = new Database(path.join(dir, "portal.db"));
+  before.prepare("UPDATE settings SET value = ? WHERE key = 'tools_seen'").run(JSON.stringify([...BROWSER_SEEN, { name: PLAYWRIGHT, source: "pi-mcp-adapter", package: "npm:pi-mcp-adapter@2.18.0" }]));
+  const run = before.prepare("INSERT INTO sessions (id, title, workspace, kind, routine_slug, tools_on) VALUES (?, ?, ?, 'routine', ?, ?)");
+  run.run("gone-run", "A run", path.join(dir, "ws"), "deleted-one", "browser_navigate");
+  run.run("news-run", "A run", path.join(dir, "ws"), "news", "");
+  before.close();
+  const mcp = path.join(process.env.PI_CODING_AGENT_DIR, "mcp.json");
+  writeFileSync(mcp, JSON.stringify({ mcpServers: { playwright: { command: "npx", args: ["@playwright/mcp", "--cdp-endpoint", "http://127.0.0.1:9222"] } } }));
+  try {
+    await upgraded(dir);
+  } finally {
+    rmSync(mcp);
+  }
+  const now = browserIn(dir);
+  const all = [...BROWSER_TOOLS, PLAYWRIGHT].sort();
+  assert.deepEqual(now.routines, {
+    news: { off: [], on: all },
+    picky: { off: all.filter((name) => name !== "browser_navigate"), on: ["browser_navigate"] },
+    tidy: { off: [...all, "web_fetch"].sort(), on: [] },
+  });
+  assert.equal(now.value("tools_off_default"), [...all, "codemode"].sort().join("\n"));
+  assert.deepEqual(now.chats.granted, [...all, "web_fetch"].sort());
+  // What the run of the gone routine switched on itself stays on; a run of a routine there answers by its routine.
+  const d = new Database(path.join(dir, "portal.db"), { readonly: true });
+  const lists = (id) => d.prepare("SELECT tools_off, tools_on FROM sessions WHERE id = ?").get(id);
+  assert.deepEqual(lists("gone-run"), { tools_off: all.filter((name) => name !== "browser_navigate").join("\n"), tools_on: "browser_navigate" });
+  assert.deepEqual(lists("news-run"), { tools_off: "", tools_on: "" });
+  d.close();
+});
+
 test("what the browser kept that cannot be left is kept for the next start, which leaves it; one left before the database rolled back is not left again", async () => {
   const dir = path.join(home, "browser-later");
   mkdirSync(dir, { recursive: true });

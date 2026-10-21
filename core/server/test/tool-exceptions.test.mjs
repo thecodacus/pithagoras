@@ -101,3 +101,14 @@ test("a server half asks for any tools by name, and is told the chats and routin
   assert.throws(() => portal.tools.exceptions("paint"), /exceptions takes a list of tool names/);
   assert.throws(() => portal.tools.exceptions([1]), /exceptions takes a list of tool names/);
 });
+
+test("the run of a routine that is gone has what the layers under it say, and its own switches: the routine's layer went with it", () => {
+  const run = (id, tools) => {
+    db.createSession({ id, title: `Run ${id}`, workspace: home, executor: "host", kind: "routine", routine_slug: "deleted-one" });
+    db.setSessionTools(id, tools);
+  };
+  // One switched one of the tools off, and has the other; one switched both off.
+  run("gone-one-off", { off: ["browser_click"], on: [] });
+  run("gone-both-off", { off: BROWSER, on: [] });
+  assert.deepEqual(ids(db.toolExceptions(BROWSER).chats), ["browser-off", "gone-both-off", "in-alpha"]);
+});
