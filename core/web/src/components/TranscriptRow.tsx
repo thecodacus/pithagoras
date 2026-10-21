@@ -89,7 +89,7 @@ function FlaggedNotice({ flag, act }: { flag: NonNullable<ToolItem["flagged"]>; 
   return (
     <div role="alert" className="mt-2 rounded-lg border border-warn/40 bg-warn/10 px-3 py-2 text-xs">
       <p className="flex items-center gap-1.5 font-medium text-warn"><LuShieldAlert className="h-3.5 w-3.5 shrink-0" />{t("This result looks like a prompt injection")}</p>
-      <p className="mt-1 text-fg-muted">{t("It {signs}. Until you trust it or remove the turn it came in, this chat will not push, upload, read keys, start subagents or set up anything that runs later.", { signs })}</p>
+      <p className="mt-1 text-fg-muted">{t("It {signs}. Until you trust it or remove the turn it came in, this chat does not push, upload, read keys, start subagents or set up anything that runs later unless you say yes when it asks.", { signs })}</p>
       <div className="mt-2 flex flex-wrap gap-2">
         <button type="button" disabled={busy} className="rounded-lg border border-line px-2.5 py-1 text-xs hover:bg-raised disabled:opacity-50"
           onClick={async () => { setBusy(true); if (await act.trustFlagged(flag.id)) setTrusted(true); setBusy(false); }}>
