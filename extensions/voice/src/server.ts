@@ -1,4 +1,5 @@
 import type { ServerPortal } from "@pithagoras/extension-api/server";
+import { takeHandoff } from "./server/handoff";
 import { setPortal } from "./server/host";
 import { maintain, provider } from "./server/provider";
 import { voiceRoutes } from "./server/routes";
@@ -14,11 +15,13 @@ import { openStore } from "./server/store";
  * before this one, and this one is started again whenever Docker is. So it starts without waiting on Docker, and stops
  * without touching the container: a start or a stop of it is not one of the service's.
  *
- * Its settings are in its own folder (`portal.dataDir()`, server/store.ts).
+ * Its settings are in its own folder (`portal.dataDir()`, server/store.ts). What the portal kept of the service from
+ * before Voice was an extension is taken up first (server/handoff.ts).
  */
 export default function voice(portal: ServerPortal) {
   setPortal(portal);
   openStore(portal.dataDir());
+  takeHandoff();
   portal.voice.provide(provider);
   voiceRoutes(portal.router);
 
