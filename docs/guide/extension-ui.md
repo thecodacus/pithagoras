@@ -794,6 +794,9 @@ restart the portal.
 | `git.at(folder)` | [git and gh in a folder](#git-in-a-chat-s-folder), run as the portal runs its own |
 | `dataDir()` | [A folder of the package's own in the portal's data folder](#where-it-keeps-things), closed to everyone but the portal, by its real path |
 | `handoffs.take(name)`, `handoffs.done(name)` | [What an upgrade left](#what-an-upgrade-left-for-it) when something the portal did itself became an extension's |
+| `models.of(chatId?)`, `models.endpoint(provider, id)`, `models.list()` | [The models the chats use](#models): the one a chat is on, where a model is asked and with which key, and the providers set up by their address |
+| `mcp.get(name)`, `mcp.set(name, entry, options?)` | [An MCP server](#mcp-servers) in pi's mcp.json, and whether the chats have its tools now |
+| `memory.hold({ label, rule, on })` | [Holding the agent's memory](#the-agent-s-memory) in place of its MEMORY.md |
 | `provide(factory)`, `extensions.use(name)` | [Building on another extension](#building-on-another-extension): what it gives the extensions that build on it, and what one it builds on gives it |
 | `log(text)`, `extension`, `executor`, `version` | A line in the portal's log; the package's name; how pi is run here; `1` |
 
@@ -1470,6 +1473,126 @@ installed. `ok` lists exit codes that are answers rather than failures,
 `timeout` and `max` bound a step (20 seconds for reading and three minutes for
 writing; 16 MB of output). What reading turns off is looked up once for each
 handle: make one for each request rather than keeping it.
+
+### Models
+
+A server half that asks a model itself, outside a chat's pi, asks the ones the
+person set up, with their keys, through `portal.models`:
+
+```js
+// The model of the chat that asked; without a chat, the one new chats start on.
+const model = await portal.models.of(chatId);
+const { api, baseUrl, headers } = await portal.models.endpoint(model.provider, model.id);
+if (api === "openai-completions") {
+  const answer = await fetch(`${baseUrl}/chat/completions`, {
+    method: "POST",
+    headers: { ...headers, "content-type": "application/json" },
+    body: JSON.stringify({ model: model.id, messages }),
+  });
+}
+```
+
+- `of(chatId?)` is the model a chat is on now: the one its pi has, where it
+  runs here, else the one stored for it, which is the default where it names
+  none. Without a chat, it is the one new chats start on. Nothing for a chat
+  that is not known, or where no model is chosen.
+- `endpoint(provider, id)` is where a model pi knows is asked: what it speaks
+  (`api`, as pi says it), its address (`baseUrl`, with no slash at the end),
+  and the `headers` a request carries, its provider's own and its key as
+  `authorization: Bearer <key>`. It rejects for a model pi does not know.
+- `list()` is the providers set up by their address in pi's models.json, each
+  `{ provider, api?, baseUrl?, models }` with its models' ids. The services pi
+  has built in, signed in with a key or an account, are not listed;
+  `endpoint` reaches their models all the same.
+
+The key is the person's: send it to that model's own address and nowhere else.
+Where the provider's key is a command pi runs (`!…`), `keyFromCommand` is true:
+the key in `headers` is what the command gave this time, fit for a request now
+and not for keeping where it outlives the request, such as a container's
+environment. The portal's own Understory asks `of` and `endpoint` in "the
+chat's" mode, and does not write a command's key into its container.
+
+### MCP servers
+
+An extension whose tools are an MCP server's (a service of its own that speaks
+MCP, say) writes the server into pi's mcp.json with `portal.mcp.set`.
+pi-mcp-adapter then makes its tools the chats', named `<server>_<tool>`, and
+they are switched in Settings → MCP and Settings → Tools as any server's are.
+
+```js
+// Switched on from the extension's own page.
+await portal.mcp.set("notes", { url: "http://127.0.0.1:3900/mcp", lifecycle: "lazy", directTools: true }, { trusted: true });
+portal.mcp.get("notes");   // { entry: { url: …, lifecycle: "lazy", directTools: true }, on: true }
+// Switched off.
+await portal.mcp.set("notes", undefined);
+```
+
+- `get(name)` is the server of that name, `{ entry, on }`, or nothing where
+  there is none or the file cannot be read. `on` says the chats have its tools
+  now: it is there, not switched off (`disabled`), and pi-mcp-adapter is
+  installed and on. The file is read again only when it, or pi's settings,
+  changed, so `get` can be asked each time a prompt is built. `entry` is a
+  copy.
+- `set(name, entry)` writes the entry in place of what is there under that
+  name; to keep what the person added to it by hand, read it with `get` first.
+  The file is for the portal's user alone (mode 0600), as an entry may hold a
+  token. Writing an entry installs pi-mcp-adapter, in the version the portal
+  pins, where it is not installed, and switches it on where it is off.
+  `set(name, undefined)` removes the server. Either way the idle chats are
+  loaded again, as `chats.reload` does, to have the change. Installing the
+  adapter waits for the server halves to follow what is installed, this one's
+  start among them: call `set` when the person switches the server on, not
+  while the half starts.
+- `trusted: true` says the person counts what its tools return as their own
+  words, which the guard then neither wraps nor checks (see
+  [Prompt injection](/guide/security#marking-untrusted-output)). The name is
+  added to the trusted servers in Settings → Guard, where it is shown and the
+  person can take it out. Say it only for the extension's own service, on the
+  person's word on its page.
+- It rejects while mcp.json cannot be read, which is the person's to fix in
+  Settings → MCP (nothing is written over it), for a name that is not letters,
+  digits, dots, dashes and underscores, and for an entry the adapter would not
+  take: one with none, or more than one, of `url`, `command` and `socket`.
+
+The portal's own Understory writes its server through the same function when
+it is switched on in Settings → Add-ons → Memory.
+
+### The agent's memory
+
+An extension that keeps the agent's memory, notes the agent reads and writes
+through tools of the extension's, says so with `portal.memory.hold`. While it
+holds it, a chat with the person the agent works for does not read the agent's
+MEMORY.md and is told the extension's `rule` in its place: two memories would
+drift apart, and the file would be the stale one. The file stays where it is,
+and is read again once the extension lets the memory go.
+
+```js
+portal.memory.hold({
+  label: "Notes",
+  rule: "Your long-term memory is in the notes_* tools, not a MEMORY.md file. Look things up with notes_search before relying on what you think you know.",
+  on: () => portal.mcp.get("notes")?.on === true,
+});
+```
+
+- `on()` says whether it holds the memory now. It is asked each time a chat's
+  prompt is built: keep it quick, and give a boolean. One that throws, or
+  answers anything but `true`, holds nothing then. A chat that is open has the
+  change once it is loaded again (`chats.reload`).
+- `rule` is said only in a chat with the person: a colleague or a guest never
+  reads MEMORY.md, and is told nothing of a memory in its place.
+- The agent's home and a plain folder have it. A project linked to an agent has
+  it unless the project does without it (its switch in Projects); a blank
+  project, which has no agent, never has it.
+- One extension holds the memory: the first that asks. One that asks while
+  another holds it is refused, with a line in the portal's log that says which
+  holds it. It is let go when the extension's server half stops.
+- What holds it is said by its `label`: `GET /api/features/flags` answers
+  `memory: { held, by }`, and an agent's setup (`GET /api/agents/:id/setup`)
+  `memory: "extension"` with `by`.
+
+The portal's own Understory holds the memory through the same function, and
+asks first, as the portal starts: for now an extension that asks is refused,
+and the log says so.
 
 ### Building on another extension
 
