@@ -2363,12 +2363,20 @@ export function guardExtension(
         ...[...readByCalls.values()].filter((signals) => signals.length > 0).map((signals) => `what the calls of a tool still running read (it ${signals.map((s) => s.label).join("; ")})`),
       ];
       const { title, message } = heldQuestion(event.toolName, subject, rule, flaggedNow);
-      // Only a yes: the answer comes from a page as it was sent (see respondUi), and anything else refuses.
-      return ctx.ui.confirm(title, message).then((yes: unknown) => {
-        if (yes !== true) return refuse();
-        note("allowed-by-approval", `${rule.name} — you allowed this one call in the chat after a suspected prompt injection`);
-        return undefined;
-      });
+      // Only a yes: the answer comes from a page as it was sent (see respondUi), and anything else refuses. So does a
+      // question that could not be put, or that failed on its way: pi would block the call on the error, with no
+      // refusal in the audit and no reason the agent can pass on.
+      return new Promise<unknown>((resolve) => resolve(ctx.ui.confirm(title, message))).then(
+        (yes) => {
+          if (yes !== true) return refuse();
+          note("allowed-by-approval", `${rule.name} — you allowed this one call in the chat after a suspected prompt injection`);
+          return undefined;
+        },
+        (error) => {
+          console.warn(`[guard ${sessionId}] could not ask about ${event.toolName}: ${String(error)}`);
+          return refuse();
+        },
+      );
     });
   };
 }

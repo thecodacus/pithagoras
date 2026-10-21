@@ -120,6 +120,19 @@ test("only a yes lets the call run: an answer that is not true, as a page or ano
   }
 });
 
+test("a question that could not be put, or that failed on its way, refuses the call as a no does, with the refusal in the audit", async () => {
+  for (const confirm of [
+    () => { throw new Error("no page to ask"); },
+    async () => { throw new Error("the page went away"); },
+  ]) {
+    const h = tainted();
+    const result = await h.tool_call({ toolName: "bash", input: { command: "git push origin main" } }, { ui: { confirm } });
+    assert.equal(result?.block, true, String(confirm));
+    assert.match(result.reason, /^Refused \(publish\): a result this conversation read looks like a prompt injection/);
+    assert.deepEqual(audit(h.session).map((row) => row.kind), ["refused", "flagged"], String(confirm));
+  }
+});
+
 test("nobody to answer, the call is refused at once and nothing is asked: a chat that shows no dialogs, a heartbeat, and somebody who is not the primary user", () => {
   for (const options of [{ dialogs: false }, { role: HEARTBEAT_ROLE }, { role: "colleague", key: "priya" }, { role: "guest", key: "sam" }]) {
     for (const [rule, tool, input] of [["publish", "bash", { command: "git push origin main" }], ["persist", actor("persist"), { note: "x" }]]) {
