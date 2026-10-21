@@ -2179,9 +2179,10 @@ would end the portal. They do not: each is that extension's crash.
   `503` and the crash; one whose answer had begun is cut off.
 - Settings → Extensions shows the crash beside the package, with what the
   half said last, in every open page within five seconds, as it shows an
-  install ([What is loaded, and when](#what-is-loaded-and-when)).
-  `GET /api/extension-ui` has it as `crash`, and Settings → Logs has every
-  line.
+  install ([What is loaded, and when](#what-is-loaded-and-when)); a page
+  opened with `?extensions=off` reads nothing of the extensions' halves and
+  does not show it. `GET /api/extension-ui` has it as `crash`, and Settings →
+  Logs has every line.
 
 What the half said is kept for it, the latest 200 lines: what it writes with
 `portal.log`, the portal's own lines about it, and whatever is printed while
