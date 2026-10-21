@@ -7,16 +7,18 @@ import { freePort, serverEnv, startServer, testHome } from "./server-harness.mjs
 
 /**
  * What every page follows of what is installed: the revision `GET /api/sessions` answers with, which changes when an
- * install made through the API changes what the pages load, a stylesheet alone included; and what a page says failed of
- * a browser half, kept until another revision of it is installed. Against the whole server, with the Notes test
- * extension installed by its folder, as an agent or another tab would install it.
+ * install made through the API changes what is installed or what the pages load, a stylesheet alone included, and with
+ * which `GET /api/extension-ui` says what it lists; and what a page says failed of a browser half, kept until another
+ * revision of it is installed. Against the whole server, with the Notes test extension installed by its folder, as an
+ * agent or another tab would install it.
  */
 const home = testHome("extensions-follow-");
 const notes = path.join(home, "packages", "notes");
 cpSync(fileURLToPath(new URL("../../../tests/fixtures/extensions/notes", import.meta.url)), notes, { recursive: true });
 const settings = path.join(home, "agent", "settings.json");
 writeFileSync(settings, JSON.stringify({ packages: [] }));
-// pi, as far as the portal asks it to install, remove and list: what it installs is a folder, listed where it is.
+// pi, as far as the portal asks it to install, remove and list: what it installs is a folder, listed where it is. One
+// switched off is listed in its settings with what it may load, under `source`.
 const bin = path.join(home, "fake-bin");
 mkdirSync(bin, { recursive: true });
 writeFileSync(
@@ -26,10 +28,11 @@ const fs = require("node:fs");
 const [command, spec] = process.argv.slice(2);
 const file = ${JSON.stringify(settings)};
 const all = JSON.parse(fs.readFileSync(file, "utf8"));
+const source = (p) => (typeof p === "string" ? p : p.source);
 if (command === "list") {
-  process.stdout.write("User packages:\\n" + all.packages.map((p) => "  " + p + "\\n    " + p + "\\n").join(""));
-} else if (command === "install" || command === "remove") {
-  all.packages = all.packages.filter((p) => p !== spec).concat(command === "install" ? [spec] : []);
+  process.stdout.write("User packages:\\n" + all.packages.map((p) => "  " + source(p) + "\\n    " + source(p) + "\\n").join(""));
+} else if (command === "remove" || (command === "install" && !all.packages.some((p) => source(p) === spec))) {
+  all.packages = all.packages.filter((p) => source(p) !== spec).concat(command === "install" ? [spec] : []);
   fs.writeFileSync(file, JSON.stringify(all));
 }
 `,
@@ -61,9 +64,11 @@ test("an install made through the API changes what every page is told is install
   const installed = await revision();
   assert.notEqual(installed, before);
   const first = await listed();
-  assert.match(first.entry, new RegExp(`client\\.js\\?v=${first.rev}$`));
+  assert.ok(first.entry.endsWith(`/~${first.rev}/client.js`), first.entry);
   assert.ok(first.server, "its server half runs");
   assert.equal(await revision(), installed, "nothing changed, nothing to follow");
+  // The list of what the pages load is said with the revision it is of.
+  assert.equal((await call("GET", "/api/extension-ui")).body.revision, installed);
 
   // Only the stylesheet changed: installed again by the same folder, the module is another revision for the page.
   appendFileSync(path.join(notes, "web", "client.css"), "\n.pn-page { letter-spacing: 1px; }\n");
@@ -91,11 +96,16 @@ test("what a page says failed of a browser half is said with it, until another r
   assert.equal((await call("POST", "/api/extension-ui/failures", { name: "not-installed", rev, error: "x" })).status, 404);
   assert.equal((await call("POST", "/api/extension-ui/failures", { name: "pithagoras-notes", rev: "old", error: "x" })).status, 404);
 
+  assert.equal((await call("POST", "/api/extension-ui/failures", { name: "pithagoras-notes", rev, error: "x", stack: 1 })).status, 400);
+
   assert.deepEqual((await call("POST", "/api/extension-ui/failures", { name: "pithagoras-notes", rev, error: "notes is not defined" })).body, { ok: true });
   assert.equal((await listed()).clientError, "notes is not defined");
-  // The latest is the one kept.
-  await call("POST", "/api/extension-ui/failures", { name: "pithagoras-notes", rev, error: "drew badly" });
+  assert.equal((await listed()).clientStack, undefined);
+  // The latest is the one kept, with where it failed.
+  const stack = "Error: drew badly\n    at Page (/api/extension-ui/pithagoras-notes/~r/client.js:3:9)\n    in Page";
+  await call("POST", "/api/extension-ui/failures", { name: "pithagoras-notes", rev, error: "drew badly", stack });
   assert.equal((await listed()).clientError, "drew badly");
+  assert.equal((await listed()).clientStack, stack);
 
   // Mended, and installed again: the new revision has not failed.
   const module = path.join(notes, "web", "client.js");
@@ -104,4 +114,35 @@ test("what a page says failed of a browser half is said with it, until another r
   const mended = await listed();
   assert.notEqual(mended.rev, rev);
   assert.equal(mended.clientError, undefined);
+});
+
+test("a package with nothing for the pages, installed, switched or removed, changes what every page is told is installed", async () => {
+  // A pi half and nothing else: Settings → Extensions lists it all the same.
+  const only = path.join(home, "packages", "pi-only");
+  mkdirSync(only, { recursive: true });
+  writeFileSync(path.join(only, "package.json"), JSON.stringify({ name: "pi-only", version: "1.0.0", keywords: ["pi-package"], pi: {} }));
+  const before = await revision();
+  assert.equal((await call("POST", "/api/packages", { spec: only })).status, 200);
+  const installed = await revision();
+  assert.notEqual(installed, before);
+  assert.equal((await call("PUT", "/api/extensions/enabled", { spec: only, enabled: false })).status, 200);
+  assert.notEqual(await revision(), installed);
+  assert.equal((await call("DELETE", "/api/packages", { spec: only })).status, 200);
+  assert.equal(await revision(), before);
+});
+
+test("a server half that starts on a later sync, though nothing it is made of changed, changes what every page is told", async () => {
+  const pkg = path.join(home, "packages", "late");
+  mkdirSync(pkg, { recursive: true });
+  const marker = path.join(home, "late-may-start");
+  writeFileSync(path.join(pkg, "package.json"), JSON.stringify({ name: "late", version: "1.0.0", type: "module", keywords: ["pi-package"], pithagoras: { server: "./server.js" } }));
+  writeFileSync(path.join(pkg, "server.js"), `import { existsSync } from "node:fs";\nexport default function () { if (!existsSync(${JSON.stringify(marker)})) throw new Error("not yet"); }\n`);
+  const ui = async () => (await call("GET", "/api/extension-ui")).body.extensions.find((e) => e.name === "late");
+  assert.equal((await call("POST", "/api/packages", { spec: pkg })).status, 200);
+  const failed = await revision();
+  assert.match((await ui()).serverError ?? "", /not yet/);
+  writeFileSync(marker, "");
+  assert.equal((await call("POST", "/api/packages", { spec: pkg })).status, 200);
+  assert.ok((await ui()).server);
+  assert.notEqual(await revision(), failed);
 });
