@@ -9,14 +9,12 @@ const OWN = { enabled: true, whisperUrl: 'http://127.0.0.1:8178/inference', bree
 const SPEAKER = { name: 'test-speaker', label: 'Speaker', ready: true, runtime: 'kokoro' };
 
 /**
- * Settings → Add-ons → Voice on its own, with the settings `config`, the managed service as `install` says, and what is
- * saved kept in `saved`. Both are read at each request, so a test can change them.
+ * Settings → Add-ons → Voice on its own, with the settings `config`, and what is saved kept in `saved`. The settings are
+ * read at each request, so a test can change them.
  */
-async function voicePage(page: Page, config: Record<string, unknown>, install: Record<string, unknown> = { available: false, state: 'unavailable', busy: false, progress: '', error: '' }) {
+async function voicePage(page: Page, config: Record<string, unknown>) {
   const saved: Record<string, unknown>[] = [];
   await page.route('**/api/voice/presets', (r) => r.fulfill({ json: [] }));
-  await page.route('**/api/voice/install', (r) => r.fulfill({ json: install }));
-  await page.route('**/api/voice/hardware', (r) => r.fulfill({ status: 503, json: { error: 'No Docker' } }));
   await page.route('**/api/voice', (r) => {
     if (r.request().method() === 'PUT') {
       // As the portal answers a save: what it keeps, with the extensions it knows of, and not what the page sent of them.
@@ -87,20 +85,6 @@ test('the own addresses in Advanced connection follow the own runtime, whatever 
   // The person's own runtime speaks: its speech address is there to edit.
   await page.locator('summary').filter({ hasText: 'Advanced connection' }).click();
   await expect(page.getByLabel('Speech synthesis URL')).toHaveValue(OWN.breezeUrl);
-});
-
-test('a managed install connecting while an extension is chosen is taken over by the page, so a save does not choose the extension again', async ({ page }) => {
-  const config: Record<string, unknown> = { ...OWN, provider: SPEAKER.name, providers: [SPEAKER] };
-  const install: Record<string, unknown> = { available: true, state: 'starting', busy: false, progress: 'Setting up', error: '' };
-  const saved = await voicePage(page, config, install);
-  await expect(source(page)).toContainText('Speaker');
-  // The setup finishes, and the portal connects the service: the person's own addresses are voice mode's again.
-  Object.assign(config, { provider: '', runtime: 'audio-cpp', whisperUrl: 'http://127.0.0.1:8188/inference', breezeUrl: 'http://127.0.0.1:7862/v1/audio/speech' });
-  install.state = 'running';
-  await expect(source(page)).toContainText('Your own addresses', { timeout: 10_000 });
-  await page.getByRole('button', { name: 'Save voice settings' }).click();
-  await expect(page.getByRole('button', { name: 'Saved' })).toBeVisible();
-  expect(saved.at(-1)).toMatchObject({ provider: '', breezeUrl: 'http://127.0.0.1:7862/v1/audio/speech' });
 });
 
 test("an agent's voice is picked from the voices of what voice mode speaks with: an extension's Kokoro, over Breeze at the own addresses", async ({ page }) => {

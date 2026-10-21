@@ -3,7 +3,6 @@ import path from 'node:path';
 test('upload a voice reference, select it, save settings, and delete it',async({page})=>{
  let config={enabled:true,voice:'design',whisperUrl:'http://localhost/a',breezeUrl:'http://localhost/b',instruction:'Clear',cfgScale:4};
  let voices:any[]=[];
- await page.route('**/api/voice/install',r=>r.fulfill({json:{available:true,state:'absent',busy:false,progress:'',error:''}}));
  await page.route('**/api/voice',r=>{if(r.request().method()==='PUT')config=r.request().postDataJSON();return r.fulfill({json:config});});
  await page.route('**/api/voice/presets',r=>{
   if(r.request().method()==='POST'){
@@ -31,7 +30,6 @@ test('upload a voice reference, select it, save settings, and delete it',async({
 test('change the description of a saved voice after it was created',async({page})=>{
  let voice={id:'voice-test',name:'Night narrator',kind:'design',instruction:'Warm delivery',transcript:''};
  const patches:any[]=[];let refuse='';
- await page.route('**/api/voice/install',r=>r.fulfill({json:{available:true,state:'absent',busy:false,progress:'',error:''}}));
  await page.route('**/api/voice',r=>r.fulfill({json:{enabled:true,voice:'voice-test',whisperUrl:'http://localhost/a',breezeUrl:'http://localhost/b',instruction:'Clear',cfgScale:4}}));
  await page.route('**/api/voice/presets',r=>r.fulfill({json:[voice]}));
  await page.route('**/api/voice/presets/voice-test',r=>{
@@ -59,7 +57,6 @@ test('change the description of a saved voice after it was created',async({page}
 test('Save voice settings also saves an edited voice description, and does not claim to when it cannot',async({page})=>{
  let voice={id:'voice-test',name:'Night narrator',kind:'design',instruction:'Warm delivery',transcript:''};
  const calls:string[]=[];let refuse='';
- await page.route('**/api/voice/install',r=>r.fulfill({json:{available:true,state:'absent',busy:false,progress:'',error:''}}));
  await page.route('**/api/voice',r=>{
   const config={enabled:true,voice:'voice-test',whisperUrl:'http://localhost/a',breezeUrl:'http://localhost/b',instruction:'Clear',cfgScale:4};
   if(r.request().method()==='PUT'){calls.push('PUT');return r.fulfill({json:r.request().postDataJSON()});}
@@ -98,7 +95,6 @@ test('Save voice settings also saves an edited voice description, and does not c
 test('a description edited on one voice survives looking at another voice',async({page})=>{
  let voices=[{id:'voice-a',name:'Anna',kind:'design',instruction:'Warm delivery',transcript:''},{id:'voice-b',name:'Bruno',kind:'design',instruction:'Dry delivery',transcript:''}];
  const patches:string[]=[];
- await page.route('**/api/voice/install',r=>r.fulfill({json:{available:true,state:'absent',busy:false,progress:'',error:''}}));
  await page.route('**/api/voice',r=>r.fulfill({json:r.request().method()==='PUT'?r.request().postDataJSON():{enabled:true,voice:'voice-a',whisperUrl:'http://localhost/a',breezeUrl:'http://localhost/b',instruction:'Clear',cfgScale:4}}));
  await page.route('**/api/voice/presets',r=>r.fulfill({json:voices}));
  await page.route('**/api/voice/presets/*',r=>{
@@ -120,7 +116,6 @@ test('a description edited on one voice survives looking at another voice',async
 test('an emptied description on another voice does not block saving the settings',async({page})=>{
  const voices=[{id:'voice-a',name:'Anna',kind:'design',instruction:'Warm delivery',transcript:''},{id:'voice-b',name:'Bruno',kind:'design',instruction:'Dry delivery',transcript:''}];
  const calls:string[]=[];
- await page.route('**/api/voice/install',r=>r.fulfill({json:{available:true,state:'absent',busy:false,progress:'',error:''}}));
  await page.route('**/api/voice',r=>{
   if(r.request().method()==='PUT'){const saved=r.request().postDataJSON();calls.push('PUT '+saved.voice);return r.fulfill({json:saved});}
   return r.fulfill({json:{enabled:true,voice:'voice-a',whisperUrl:'http://localhost/a',breezeUrl:'http://localhost/b',instruction:'Clear',cfgScale:4}});
@@ -143,7 +138,6 @@ test('an emptied description on another voice does not block saving the settings
 test('text typed while a description is being saved is kept',async({page})=>{
  let voice={id:'voice-test',name:'Night narrator',kind:'design',instruction:'Warm delivery',transcript:''};
  const patches:string[]=[];let answer!:()=>void;const answered=new Promise<void>(r=>{answer=r;});
- await page.route('**/api/voice/install',r=>r.fulfill({json:{available:true,state:'absent',busy:false,progress:'',error:''}}));
  await page.route('**/api/voice',r=>r.fulfill({json:{enabled:true,voice:'voice-test',whisperUrl:'http://localhost/a',breezeUrl:'http://localhost/b',instruction:'Clear',cfgScale:4}}));
  await page.route('**/api/voice/presets',r=>r.fulfill({json:[voice]}));
  await page.route('**/api/voice/presets/voice-test',async r=>{

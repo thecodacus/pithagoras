@@ -345,9 +345,7 @@ test("Escape over a provider's models that were unticked or given a window asks 
 test("Escape over the voice settings that were changed asks first, and over ones that were saved does not", async ({ page }) => {
   let config: Record<string, unknown> = { enabled: false, whisperUrl: 'http://127.0.0.1:8178/inference', breezeUrl: 'http://127.0.0.1:7860/v1/audio/speech', instruction: 'Clear speech', voice: 'design', runtime: 'breeze', language: 'auto', cfgScale: 4, responseInstructions: 'Be short.', defaultResponseInstructions: 'Be short.' };
   await portal(page, {
-    '/api/voice/install': { available: true, state: 'absent', busy: false, progress: '', error: '' },
     '/api/voice/presets': [],
-    '/api/voice/hardware': { gpus: [], source: 'none', error: '', checked: false, cpuOnly: false, host: { totalMiB: 16384, freeMiB: 12000, threads: 8 }, selected: null, reserveMiB: 0, suggestion: { tts: 'breeze', asr: 'whisper', asrModel: 'base' } },
   }, ({ path, method, json }) => {
     if (path !== '/api/voice') return undefined;
     if (method === 'PUT') config = json();
@@ -379,9 +377,7 @@ async function voiceSettings(page: Page, voices: unknown[], live?: (ask: Ask) =>
   const config = { enabled: true, whisperUrl: 'http://127.0.0.1:8178/inference', breezeUrl: 'http://127.0.0.1:7860/v1/audio/speech', instruction: 'Clear speech', voice: (voices[0] as { id?: string } | undefined)?.id ?? 'design', runtime: 'breeze', language: 'auto', cfgScale: 4, responseInstructions: 'Be short.', defaultResponseInstructions: 'Be short.' };
   await portal(page, {
     '/api/voice': config,
-    '/api/voice/install': { available: true, state: 'absent', busy: false, progress: '', error: '' },
     '/api/voice/presets': voices,
-    '/api/voice/hardware': { gpus: [], source: 'none', error: '', checked: false, cpuOnly: false, host: { totalMiB: 16384, freeMiB: 12000, threads: 8 }, selected: null, reserveMiB: 0, suggestion: { tts: 'breeze', asr: 'whisper', asrModel: 'base' } },
   }, live);
   await page.goto('/settings/add-ons');
   await settings(page).getByRole('tab', { name: 'Voice' }).click();
