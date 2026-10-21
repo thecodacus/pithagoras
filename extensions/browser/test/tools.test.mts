@@ -210,7 +210,8 @@ test("the browser tools, on a real browser", { skip: browser ? false : "no Chrom
       await newest.goto(`${base}/tabs`);
       portal.host.chatLife(life, "chat-1");
       assert.match(await call("browser_snapshot"), kept ? /^Page: Signup/ : /^Page: Tabs/, life);
-      await newest.close();
+      // Not one the chat was given: closed from here, it would be a tab its tools may not have heard is closed yet.
+      if (kept) await newest.close();
     }
   });
 
