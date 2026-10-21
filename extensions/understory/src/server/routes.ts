@@ -7,7 +7,7 @@ import * as service from "./service";
 /**
  * Understory's page in Settings, at /api/x/pithagoras-understory/…, behind the portal's login: whether it is the
  * agent's memory, and the Understory the portal runs. A change answers the state after it (`understory`), and, where
- * it wrote the agent's MCP entry, how many idle chats have it now and how many busy ones once they are reloaded.
+ * it wrote the agent's MCP entry, how many idle chats have it now and how many busy ones from their next step.
  *
  *   GET    /state              whether Understory is the agent's memory, where, and the Understory the portal runs
  *   PUT    /use                {enabled, url?}: Understory as the agent's memory, or not

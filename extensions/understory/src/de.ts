@@ -124,7 +124,7 @@ export const de: Record<string, string | Plural> = {
   "Colour of the brain's outline": "Farbe der Gehirn-Umrisse",
   "Loading the graph": "Der Graph wird geladen",
   // MemorySettings.tsx
-  "Idle chats have it now; {n} busy chats pick it up once they are idle and reloaded (/reload).": { one: "Chats ohne laufende Aufgabe haben es jetzt; ein beschäftigter Chat bekommt es, sobald er frei ist und neu geladen wird (/reload).", other: "Chats ohne laufende Aufgabe haben es jetzt; {n} beschäftigte Chats bekommen es, sobald sie frei sind und neu geladen werden (/reload)." },
+  "Idle chats have it now; {n} busy chats have it from their next step.": { one: "Chats ohne laufende Aufgabe haben es jetzt; ein beschäftigter Chat hat es ab seinem nächsten Schritt.", other: "Chats ohne laufende Aufgabe haben es jetzt; {n} beschäftigte Chats haben es ab ihrem nächsten Schritt." },
   "Chats have it from now on.": "Chats haben es ab jetzt.",
   "Every hour": "Jede Stunde",
   "Every 6 hours": "Alle 6 Stunden",
