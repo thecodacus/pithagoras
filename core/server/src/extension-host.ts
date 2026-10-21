@@ -21,7 +21,7 @@ import { personsEnv } from "./background.js";
 import { gitAt } from "./git.js";
 import { folderAllowed, folderLabel, listFolders } from "./agent-folders.js";
 import { handoffDone, takeHandoff } from "./handoff.js";
-import type { Chat, ChatLife as Life, Ran, ServerPortal, Upgrade } from "@pithagoras/extension-api/server";
+import type { Chat, ChatLife as Life, Ran, ServerPortal, Upgrade, VoiceProvider } from "@pithagoras/extension-api/server";
 
 /**
  * An extension's server half: a module of the package's that the portal loads
@@ -113,6 +113,8 @@ interface Running {
   offers?: () => OfferedTool[];
   /** What it is told when the portal deletes a folder the agents work in (`folders.on("removed")`). */
   removed: ((folder: string) => void)[];
+  /** Where it offers voice mode to listen and speak (`voice.provide`). */
+  voice?: VoiceProvider;
 }
 
 /**
@@ -189,6 +191,11 @@ export function offeredTools(): Map<string, OfferedTool[]> {
 }
 setServerHalfOffers(offeredTools);
 
+/** Each running server half that offers voice mode a place to listen and speak (`voice.provide`), by its name. */
+export function voiceProviders(): Map<string, VoiceProvider> {
+  return new Map([...running.values()].flatMap((ext) => (ext.voice ? [[ext.half.name, ext.voice] as const] : [])));
+}
+
 const running = new Map<string, Running>();
 /** Why a package's server half is not running, by the package's name. */
 const failures = new Map<string, string>();
@@ -252,6 +259,11 @@ export function setChatBridge(bridge: { tell: typeof tellChat; offers: typeof to
   tellChat = bridge.tell;
   toolOffered = bridge.offers;
   reloadChats = bridge.reload;
+}
+/** How a server half makes itself voice mode's source (`voice.choose`): the voice settings are the voice routes', which import the host. */
+let chooseVoice: (name: string, chosen: boolean) => void = () => {};
+export function setVoiceChooser(choose: typeof chooseVoice): void {
+  chooseVoice = choose;
 }
 
 function whoOf(chatId: string) {
@@ -326,6 +338,18 @@ function portalFor(ext: Running): ServerPortal {
         if (!Array.isArray(names) || !names.every((name) => typeof name === "string")) throw new TypeError("exceptions takes a list of tool names");
         const { byDefault, chats, routines } = toolExceptions(names);
         return { byDefault, chats: chats.map(({ id, title, kind }) => ({ id, title, kind })), routines };
+      },
+    },
+    voice: {
+      provide(provider) {
+        if (typeof provider?.label !== "string" || typeof provider.where !== "function" || (provider.use !== undefined && typeof provider.use !== "function")) {
+          throw new TypeError("provide takes { label, where, use? }: what it is called, where it listens and speaks now, and what it is told as voice mode is used");
+        }
+        ext.voice = provider;
+      },
+      choose(chosen) {
+        if (typeof chosen !== "boolean") throw new TypeError("choose takes true, to be voice mode's source, or false, to give it back");
+        chooseVoice(name, chosen);
       },
     },
     extensions: {
