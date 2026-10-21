@@ -8,7 +8,7 @@ import { test, expect, mockPortal, DONE } from './portal-mock';
  * page, is swapped or goes within one poll of the list of chats, which says what is installed as a revision, and so
  * does a crash of its server half. And what fails of a browser half in a page (to load, to draw, or in what it runs of
  * its own) is told to the portal, which Settings → Extensions says in the pages that go through what is installed after
- * that.
+ * that. A page that could not take an old version out cleanly says so, with a Reload.
  */
 const NAME = 'pithagoras-notes';
 const web = (file: string) => readFileSync(new URL(`../fixtures/extensions/notes/web/${file}`, import.meta.url), 'utf8');
@@ -62,6 +62,9 @@ async function portal(page: Page, module = web('client.js')) {
 
 const cards = (page: Page) => page.getByRole('tabpanel', { name: /Installed/ }).getByRole('listitem');
 const stylesheets = (page: Page) => page.locator(`link[rel="stylesheet"][data-extension="${NAME}"]`);
+/** The line that says the page could not take an old version out cleanly. */
+const leftBehind = (page: Page) => page.getByRole('status').filter({ hasText: 'could not take out the old version' });
+const destinations = (page: Page) => page.getByRole('navigation', { name: 'Destinations' });
 
 test('an extension installed elsewhere comes into the page within one poll, and Settings lists it without being opened again', async ({ page }) => {
   const { state } = await portal(page);
@@ -101,6 +104,64 @@ test('a change to its stylesheet alone is another revision, and the page swaps i
   await expect.poll(spacing).toBe('3px');
   await expect(stylesheets(page)).toHaveCount(1);
   await expect(stylesheets(page)).toHaveAttribute('href', /\?v=r2$/);
+  // It went in cleanly: nothing to say.
+  await expect(leftBehind(page)).toHaveCount(0);
+});
+
+test('a file the module imports, changed and installed again, reaches the open page under the new revision', async ({ page }) => {
+  // As the portal serves a browser half: every file under the revision, the one its module imports by a relative address too.
+  const state = { rev: 'r1', part: 'export const said = "First";' };
+  await mockPortal(page, async ({ path, method, route }) => {
+    if (path === '/api/sessions' && method === 'GET') return { sessions: [], executor: 'host', extensions: state.rev };
+    if (path === '/api/extension-ui' && method === 'GET') return { revision: state.rev, extensions: [{ name: NAME, version: '0.2.0', rev: state.rev, entry: `/api/extension-ui/${NAME}/~${state.rev}/client.js` }] };
+    const file = path.startsWith(`/api/extension-ui/${NAME}/~`) ? path.split('/').slice(5).join('/') : undefined;
+    if (file === 'client.js') {
+      await route.fulfill({ contentType: 'text/javascript', body: 'import { said } from "./part.js";\nexport default function (portal) { portal.slots.register("nav.page", { id: "notes", title: said, component: () => said }); }' });
+      return DONE;
+    }
+    if (file === 'part.js') {
+      await route.fulfill({ contentType: 'text/javascript', body: state.part });
+      return DONE;
+    }
+    return undefined;
+  });
+  await page.clock.install();
+  await page.goto('/sessions');
+  await expect(destinations(page).getByRole('button', { name: 'First' })).toBeVisible();
+
+  // Only that file changed, and the portal said another revision of the half.
+  state.part = 'export const said = "Second";';
+  state.rev = 'r2';
+  await page.clock.runFor(5500);
+  await expect(destinations(page).getByRole('button', { name: 'Second' })).toBeVisible();
+  await expect(destinations(page).getByRole('button', { name: 'First' })).toHaveCount(0);
+  await expect(leftBehind(page)).toHaveCount(0);
+});
+
+test('an old version that cannot be taken out cleanly as another comes in says so, once, and Reload loads what is installed', async ({ page }) => {
+  // What its module gave back to be called as it goes throws.
+  const { state } = await portal(page, 'export default function (portal) { portal.slots.register("nav.page", { id: "notes", title: "Notes", component: () => "first" }); return () => { throw new Error("could not stop its timer"); }; }');
+  await page.clock.install();
+  await page.goto('/sessions');
+  await expect(destinations(page).getByRole('button', { name: 'Notes' })).toBeVisible();
+  await expect(leftBehind(page)).toHaveCount(0);
+
+  state.module = 'export default function (portal) { portal.slots.register("nav.page", { id: "notes", title: "Notes again", component: () => "second" }); }';
+  state.rev = 'r2';
+  await page.clock.runFor(5500);
+  // The new one is in all the same, and the page says what it could not do.
+  await expect(destinations(page).getByRole('button', { name: 'Notes again' })).toBeVisible();
+  await expect(leftBehind(page)).toHaveCount(1);
+  await expect(leftBehind(page)).toContainText(`This page could not take out the old version of ${NAME} cleanly. Reload it to run what is installed now.`);
+
+  // Another change that goes in cleanly adds nothing to it.
+  state.rev = 'r3';
+  await page.clock.runFor(5500);
+  await expect(leftBehind(page)).toHaveCount(1);
+
+  await leftBehind(page).getByRole('button', { name: 'Reload' }).click();
+  await expect(destinations(page).getByRole('button', { name: 'Notes again' })).toBeVisible();
+  await expect(leftBehind(page)).toHaveCount(0);
 });
 
 test('what fails of a browser half, to load or to draw, is told to the portal, and Settings says it in every page', async ({ page }) => {

@@ -43,7 +43,8 @@ export type { Portal } from "@pithagoras/extension-api";
  */
 (globalThis as { __pithagoras?: unknown }).__pithagoras = { React, ReactDOM, jsxRuntime };
 
-type Loaded = { stamp: string; leave: () => void };
+/** `leave` takes what of an extension is in the page out again, and says whether all of it went without an error. */
+type Loaded = { stamp: string; leave: () => boolean };
 
 const loaded = new Map<string, Loaded>();
 /**
@@ -62,6 +63,11 @@ let serverFailures: Readonly<Record<string, string>> = {};
 let serverCrashes: Readonly<Record<string, ServerCrash>> = {};
 /** Why an extension's browser half failed in a page, this one or another, to load or to draw, as the portal was told. */
 let clientFailures: Readonly<Record<string, string>> = {};
+/**
+ * The extensions whose old version this page could not take out cleanly as what is installed changed: something it had
+ * put into the page threw as it was undone. What it left may still be at work beside what is installed now, until a reload.
+ */
+let leftBehind: readonly string[] = [];
 /** Whether the list has been gone through once: before that, an entry not there may only not be there yet. */
 let settled = false;
 const watchers = new Set<() => void>();
@@ -84,11 +90,14 @@ function useHere(): { path: string; search: string } {
   return useContext(Here) ?? { path: window.location.pathname, search: window.location.search };
 }
 
-const quietly = (fn: () => void) => {
+/** Runs `fn`, and says whether it went without an error: one it threw is said in the console. */
+const quietly = (fn: () => void): boolean => {
   try {
     fn();
+    return true;
   } catch (e) {
     console.error("[extensions]", e);
+    return false;
   }
 };
 
@@ -140,12 +149,14 @@ async function activate(ext: ExtensionUi, told: Promise<void>[]): Promise<void> 
   };
   const leaveModule = () => {
     gone = true;
-    for (const fn of [...undo].reverse()) quietly(fn);
+    // Every one, whichever throws.
+    const clean = [...undo].reverse().map(quietly).every(Boolean);
     undo.length = 0;
+    return clean;
   };
   const leave = () => {
-    leaveModule();
-    themesOff.forEach(quietly);
+    const clean = leaveModule();
+    return themesOff.map(quietly).every(Boolean) && clean;
   };
   const entry = ext.entry;
   const load = async (entry: string) => {
@@ -289,7 +300,7 @@ async function sync(): Promise<void> {
     // Or it failed last time: it is tried again.
     for (const [name, was] of [...loaded]) {
       if (extensions.some((ext) => ext.name === name && stamp(ext) === was.stamp)) continue;
-      was.leave();
+      if (!was.leave() && !leftBehind.includes(name)) leftBehind = [...leftBehind, name];
       loaded.delete(name);
     }
     failures = {};
@@ -415,7 +426,8 @@ function watch(watcher: () => void) {
 
 /**
  * Whether the installed extensions have been gone through, why any of them is not in the page, why any failed in a
- * page, this one or another, and why its server half is not running.
+ * page, this one or another, why its server half is not running, and those whose old version this page could not take
+ * out cleanly.
  */
 export function useExtensions(): {
   settled: boolean;
@@ -423,6 +435,7 @@ export function useExtensions(): {
   serverFailures: Readonly<Record<string, string>>;
   serverCrashes: Readonly<Record<string, ServerCrash>>;
   clientFailures: Readonly<Record<string, string>>;
+  leftBehind: readonly string[];
 } {
   return {
     settled: useSyncExternalStore(watch, () => settled),
@@ -430,5 +443,6 @@ export function useExtensions(): {
     serverFailures: useSyncExternalStore(watch, () => serverFailures),
     serverCrashes: useSyncExternalStore(watch, () => serverCrashes),
     clientFailures: useSyncExternalStore(watch, () => clientFailures),
+    leftBehind: useSyncExternalStore(watch, () => leftBehind),
   };
 }

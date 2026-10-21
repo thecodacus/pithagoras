@@ -801,6 +801,9 @@ const de: Locale = {
     "This page's extension could not be loaded.": "Die Erweiterung dieser Seite konnte nicht geladen werden.",
     "This page's extension is not installed, or is switched off.": "Die Erweiterung dieser Seite ist nicht installiert oder ausgeschaltet.",
     "This page was opened with ?extensions=off: no extension is loaded into it.": "Diese Seite wurde mit ?extensions=off geöffnet: Es wird keine Erweiterung in sie geladen.",
+    // components/ExtensionsLeftBehind.tsx
+    "This page could not take out the old version of {names} cleanly. Reload it to run what is installed now.": "Diese Seite konnte die alte Version von {names} nicht sauber entfernen. Lade sie neu, damit sie ausführt, was jetzt installiert ist.",
+    "Reload": "Neu laden",
     // components/ExtensionDialog.tsx
     "This question has expired. Your answer was not delivered.": "Diese Frage ist abgelaufen. Deine Antwort wurde nicht zugestellt.",
     "Extension": "Erweiterung",
