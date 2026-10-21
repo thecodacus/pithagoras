@@ -18,14 +18,7 @@ console.log = (...args) => {
 };
 test.after(() => (console.log = log));
 
-// The portal's own Understory says it holds the memory as its module loads. Something that asked before it has it,
-// and the portal's is refused; let go, there is room for the stand-ins below.
-const { holdMemory, memoryHolder } = await import("../dist/memory-holder.js");
-const before = holdMemory("the test", { label: "Before", rule: "-", on: () => true });
-await import("../dist/features.js");
-assert.ok(said.some((line) => line === "[portal] the portal cannot hold the agent's memory: the test holds it already, as Before"), said.join("\n"));
-before();
-
+const { memoryHolder } = await import("../dist/memory-holder.js");
 const host = await import("../dist/extension-host.js");
 const { extraContextFiles, memoryRule } = await import("../dist/pi/sdk-client.js");
 const { memoryHeldAt } = await import("../dist/project-agent.js");
@@ -79,9 +72,7 @@ test("while an extension holds the memory, MEMORY.md is not read and its rule is
   // Someone who is not the person never read MEMORY.md, and is not told of a memory that replaces it.
   assert.deepEqual(memoryRule(nova.home, "guest"), []);
   assert.deepEqual({ memory: agentFileStatus(nova.home).memory, by: agentFileStatus(nova.home).by }, { memory: "extension", by: "Keeper" });
-  const shown = await flags();
-  assert.deepEqual(shown.memory, { held: true, by: "Keeper" });
-  assert.deepEqual(shown.understory, { enabled: false }, "the portal's own Understory is not on");
+  assert.deepEqual(await flags(), { subagent: { enabled: false }, memory: { held: true, by: "Keeper" } });
 
   globalThis.holding.keeper = false;
   assert.deepEqual(names(nova.home), ["MEMORY.md", "PrimaryUser.md", "SOUL.md"]);

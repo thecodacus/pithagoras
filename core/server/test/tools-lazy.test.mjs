@@ -307,16 +307,16 @@ const adapter = (...names) => names.map((name) => ({ name, source: "pi-mcp-adapt
 const mcpFileOf = () => JSON.parse(readFileSync(path.join(process.env.PI_CODING_AGENT_DIR, "mcp.json"), "utf8"));
 
 test("an MCP server's tools are lazy unless the server registers them directly: the setting is the server's, and a mark cannot name it", async () => {
-  const { understoryEntry } = await import("../dist/features.js");
   writeMcp({
     notes: { command: "n" },
-    understory: understoryEntry("http://localhost:3800/mcp"),
+    // As Understory's extension writes it: its tools registered directly.
+    understory: { url: "http://localhost:3800/mcp", lifecycle: "lazy", directTools: true },
     wiki: { command: "w", directTools: ["page"] },
     legacy: { command: "l", directTools: false },
   });
   db.rememberTools(adapter("notes_read", "understory_memory_recall", "wiki_page", "wiki_edit", "legacy_ping"));
   const page = await json("/api/tools");
-  // The adapter's default is the proxy: lazy. Understory, which the portal writes with its tools registered, stays as it was.
+  // The adapter's default is the proxy: lazy. Understory, written with its tools registered, stays as it was.
   assert.deepEqual(lazyOf(page), ["legacy_ping", "notes_read", "wiki_edit"]);
   assert.deepEqual(Object.fromEntries(page.tools.filter((t) => t.mcp).map((t) => [t.name, t.mcp])), {
     notes_read: "notes", understory_memory_recall: "understory", wiki_page: "wiki", wiki_edit: "wiki", legacy_ping: "legacy",

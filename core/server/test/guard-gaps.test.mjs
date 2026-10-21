@@ -13,11 +13,11 @@ const agent = process.env.PI_CODING_AGENT_DIR;
 writeFileSync(path.join(agent, "settings.json"), JSON.stringify({ packages: ["npm:pi-mcp-adapter@2.18.0"] }));
 writeFileSync(
   path.join(agent, "mcp.json"),
-  JSON.stringify({ mcpServers: { jira: { command: "j", directTools: true }, browser: { command: "b", directTools: true }, github: { command: "g" }, "github.public": { command: "p" }, understory: { url: "http://localhost:3800/mcp", directTools: true } } }),
+  JSON.stringify({ mcpServers: { jira: { command: "j", directTools: true }, browser: { command: "b", directTools: true }, github: { command: "g" }, "github.public": { command: "p" }, notes: { url: "http://localhost:3900/mcp", directTools: true } } }),
 );
 writeFileSync(
   path.join(agent, "mcp-cache.json"),
-  JSON.stringify({ version: 1, servers: { jira: { tools: [{ name: "search" }, { name: "get_issue" }] }, browser: { tools: [{ name: "browser_snapshot" }] }, understory: { tools: [{ name: "memory_query" }] } } }),
+  JSON.stringify({ version: 1, servers: { jira: { tools: [{ name: "search" }, { name: "get_issue" }] }, browser: { tools: [{ name: "browser_snapshot" }] }, notes: { tools: [{ name: "search" }] } } }),
 );
 
 const { approvalCannotHelp, guardExtension } = await import("../dist/pi/guard.js");
@@ -47,10 +47,12 @@ const tainted = (options) => {
 };
 
 test("a server's own tools are outside content however they are called, a server the person trusts is not, and the browser always is", () => {
-  // The portal's own memory server is trusted until the person says otherwise.
-  assert.equal(wrapped(read(guardAs(), "understory_memory_query", {}, INJECTION)), false, "the agent's own notes");
+  // A server the person counts as their own (Settings → Guard, or an extension on their word): its words are theirs.
+  assert.equal(wrapped(read(guardAs(), "notes_search")), true, "none is, until the person says so");
+  setTrustedMcpServers(["notes"]);
+  assert.equal(wrapped(read(guardAs(), "notes_search", {}, INJECTION)), false, "the agent's own notes");
   setTrustedMcpServers([]);
-  assert.equal(wrapped(read(guardAs(), "understory_memory_query")), true, "once it is not");
+  assert.equal(wrapped(read(guardAs(), "notes_search")), true, "once it is not");
   try {
     const h = guardAs();
     // Direct, and as a lazy tool the gateway runs under its own name; through the adapter's `mcp` tool, by its full name or its server.
