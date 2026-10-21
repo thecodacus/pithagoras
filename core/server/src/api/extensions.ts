@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { promisify } from "node:util";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
@@ -356,12 +357,23 @@ async function installedExtensions(): Promise<InstalledExtension[]> {
 }
 
 /**
+ * What the pages load, as the last sync found it: the halves and themes of what is installed, and where each server
+ * half stands, as a digest. Every page asks for it with the list of chats (`GET /api/sessions`) and goes through what is
+ * installed again when it changes, so that an install made anywhere else (another tab, the API, an agent) reaches it.
+ */
+let revision = "";
+export const extensionsRevision = (): string => revision;
+
+/**
  * Bring the server halves that run in line with what is installed and switched
  * on: as the portal starts, and whenever a package is installed, removed,
  * updated or switched.
  */
 export async function syncExtensionServers(): Promise<void> {
-  await syncServerHalves((await halves()).servers);
+  const found = await halves();
+  await syncServerHalves(found.servers);
+  const standing = found.servers.map((half) => [isServing(half.name), serverFailure(half.name) ?? null]);
+  revision = createHash("sha256").update(JSON.stringify([found, standing])).digest("base64url").slice(0, 16);
 }
 
 /**

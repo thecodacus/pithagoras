@@ -87,7 +87,7 @@ import { CALLBACK_PATH, OidcConfigError, discover, parseOidcConfig, shownForm } 
 import { removeSso, saveSso, ssoConfig } from "./sso-settings.js";
 import { sweep } from "./login-streams.js";
 import { packagesRouter } from "./api/packages.js";
-import { extensionsRouter, noteLoadedExtensions, syncExtensionServers } from "./api/extensions.js";
+import { extensionsRevision, extensionsRouter, noteLoadedExtensions, syncExtensionServers } from "./api/extensions.js";
 import { installDefaultExtensions, stopInstallingDefaults } from "./default-extensions.js";
 import { extensionRoutes, folderRemoved, openingFor, stopServerHalves } from "./extension-host.js";
 import { channelsRouter } from "./api/channels.js";
@@ -933,7 +933,8 @@ const toApi = (s: ReturnType<typeof getSession> & {}) => ({
 });
 
 app.get("/api/sessions", (_req, res) => {
-  res.json({ sessions: listChatSessions().map(toApi), executor: EXECUTOR_KIND });
+  // With what is installed, for every page to follow a change made elsewhere: see extensionsRevision.
+  res.json({ sessions: listChatSessions().map(toApi), executor: EXECUTOR_KIND, extensions: extensionsRevision() });
 });
 
 /**
