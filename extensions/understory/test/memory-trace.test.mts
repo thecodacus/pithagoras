@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { pathOf } from "../core/web/src/memory-trace.ts";
-import type { MemoryTraceStep } from "../core/web/src/api.ts";
+import { pathOf } from "../src/web/memory-trace.ts";
+import type { MemoryTraceStep } from "../src/web/api.ts";
 
 /** The notes of a graph, by their full paths: two share a file name, one has a space in it. */
 const graph = new Set(["/deployment/branches.md", "/people/owner.md", "/projects/a/setup.md", "/projects/b/setup.md", "/x/my owner.md"]);

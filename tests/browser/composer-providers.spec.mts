@@ -11,7 +11,7 @@ test("the model menu's providers link goes through the router, as any other link
 
 test("with the subagent tool on, the model menu says what this chat's subagents run on, and a choice there is kept", async ({ page }) => {
   const saved: unknown[] = [];
-  await page.route('**/api/features/flags', (route) => route.fulfill({ json: { subagent: { enabled: true }, understory: { enabled: false } } }));
+  await page.route('**/api/features/flags', (route) => route.fulfill({ json: { subagent: { enabled: true }, memory: { held: false, by: null } } }));
   await page.route('**/api/sessions/preview/subagent-model', async (route) => {
     if (route.request().method() === 'PUT') {
       const { model } = route.request().postDataJSON();
@@ -32,7 +32,7 @@ test("with the subagent tool on, the model menu says what this chat's subagents 
 });
 
 test('without the subagent tool, the model menu has nothing about subagents', async ({ page }) => {
-  await page.route('**/api/features/flags', (route) => route.fulfill({ json: { subagent: { enabled: false }, understory: { enabled: false } } }));
+  await page.route('**/api/features/flags', (route) => route.fulfill({ json: { subagent: { enabled: false }, memory: { held: false, by: null } } }));
   await page.goto('/tests/chat.html?phase=model');
   await page.getByTitle('Model A', { exact: true }).click();
   await expect(page.getByRole('button', { name: 'Add or change providers…' })).toBeVisible();
@@ -41,7 +41,7 @@ test('without the subagent tool, the model menu has nothing about subagents', as
 
 test("the subagents' row is asked for with the chat, so the model menu opens with it already there", async ({ page }) => {
   let asked = 0;
-  await page.route('**/api/features/flags', (route) => route.fulfill({ json: { subagent: { enabled: true }, understory: { enabled: false } } }));
+  await page.route('**/api/features/flags', (route) => route.fulfill({ json: { subagent: { enabled: true }, memory: { held: false, by: null } } }));
   await page.route('**/api/sessions/preview/subagent-model', async (route) => {
     asked++;
     await new Promise((r) => setTimeout(r, 300));

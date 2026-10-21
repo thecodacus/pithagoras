@@ -1,6 +1,4 @@
 import { createContext, useContext, useEffect, useId, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { Link, useSearchParams } from "react-router-dom";
-import { Markdown } from "./Markdown";
 import {
   LuBrain,
   LuChevronDown,
@@ -24,7 +22,6 @@ import {
 } from "react-icons/lu";
 import {
   api,
-  ApiError,
   type MemoryChange,
   type MemoryConcept,
   type MemoryGraph,
@@ -34,24 +31,18 @@ import {
   type MemoryTrace,
   type MemoryTraceRun,
   type MemoryValidation,
-} from "../api";
-import { colours } from "../memory-graph";
-import { colourFrom, SKY_THEMES, skyThemeFrom, type SkyTheme } from "../memory-sky";
-import { local } from "../safe-storage";
+} from "./api";
+import { colours } from "./memory-graph";
+import { colourFrom, SKY_THEMES, skyThemeFrom, type SkyTheme } from "./memory-sky";
 import { MemorySky } from "./MemorySky";
-import { pathOf, type TracePath } from "../memory-trace";
-import { Select } from "./Select";
+import { pathOf, type TracePath } from "./memory-trace";
 import { ColourPicker } from "./ColourPicker";
-import { useDismiss } from "../use-dismiss";
-import { applyChunk, eventReader, history, textOf, toolName, usedTools, type ChatMessage, type ToolPart, type Turn } from "../memory-chat";
-import { NOTE_LINK, linkNotes } from "../memory-links";
-import { forgetNoteDraft, forgetNoteDrafts, keepNoteDraft, readNoteDraft, type NoteDraft } from "../note-drafts";
-import { confirmDialog } from "./ConfirmDialog";
-import { Modal } from "./Modal";
-import { codeAreaCls, inputCls, primarySmCls } from "./SettingsUi";
-import { formatDateTime, msg, t, tp, tx } from "../i18n";
-import { SkeletonGroup } from "./Skeleton";
-import { formatTokens } from "../transcript";
+import { useDismiss } from "./use-dismiss";
+import { applyChunk, eventReader, history, textOf, toolName, usedTools, type ChatMessage, type ToolPart, type Turn } from "./memory-chat";
+import { NOTE_LINK, linkNotes } from "./memory-links";
+import { forgetNoteDraft, forgetNoteDrafts, keepNoteDraft, readNoteDraft, type NoteDraft } from "./note-drafts";
+import { formatTokens } from "./helpers";
+import { Link, Markdown, Select, confirmDialog, formatDateTime, isApiError, local, msg, portal, settingsPage, t, tp, tx } from "../portal";
 
 /** What the page shows in place of a note: the log of changes, the graph of links, the librarian chat, or what the health check found. */
 type View = "log" | "graph" | "chat" | "issues";
@@ -80,14 +71,22 @@ const readTree = () => Promise.all([api.memoryTree(), api.memoryValidate().catch
  * The agent's memory in Understory, laid out as Understory's own page lays it
  * out: its folders and notes with a search down the side, and a note, the log
  * of changes or the graph of links beside them. Read only — the agent keeps
- * its memory, through its tools. Everything is asked through the portal (see
- * server/src/api/memory.ts), so it works wherever the portal does.
+ * its memory, through its tools. Everything is asked through the server half
+ * (src/server/memory.ts), so it works wherever the portal does.
  *
  * What is open is in the address: `?note=<path>`, or `?view=log|graph|issues`,
  * so it can be linked to and Back goes back through it.
  */
 export function MemoryPage() {
-  const [params, setParams] = useSearchParams();
+  portal.locale.use();
+  const { ui } = portal;
+  const { path: here, search } = portal.useLocation();
+  const params = useMemo(() => new URLSearchParams(search), [search]);
+  /** The page with this query in its address: a step of its own in the history, so that Back goes back through it. */
+  const setParams = (next: Record<string, string>) => {
+    const query = new URLSearchParams(next).toString();
+    portal.navigate(query ? `${here}?${query}` : here);
+  };
   const note = params.get("note");
   const asView = params.get("view");
   const view: View | null = asView === "log" || asView === "graph" || asView === "chat" || asView === "issues" ? asView : null;
@@ -243,8 +242,8 @@ export function MemoryPage() {
             <button type="button" onClick={load} className="text-accent hover:underline">
               {t("Try again")}
             </button>
-            <Link to="/settings/add-ons" className="text-accent hover:underline">
-              {t("Settings → Add-ons → Memory")}
+            <Link to={settingsPage()} className="text-accent hover:underline">
+              {t("Settings → Memory")}
             </Link>
           </div>
         </div>
@@ -320,9 +319,9 @@ export function MemoryPage() {
             {hits ? (
               <Hits hits={hits} asked={asked} open={note} onOpen={openNote} />
             ) : !tree ? (
-              <SkeletonGroup className="space-y-1.5 px-1" label={t("Loading the memory")}>
+              <ui.SkeletonGroup className="space-y-1.5 px-1" label={t("Loading the memory")}>
                 {[0, 1, 2, 3].map((i) => <div key={i} className="skeleton h-6 w-full" />)}
-              </SkeletonGroup>
+              </ui.SkeletonGroup>
             ) : !tree.children?.length ? (
               <p className="px-2 py-6 text-center text-xs text-fg-subtle">{t("Nothing is in the memory yet. The agent adds to it as it learns.")}</p>
             ) : (
@@ -545,6 +544,8 @@ function Note({
   /** Whether a draft with something changed in it is open: what the page asks about before it leaves. */
   onEditing: (editing: boolean) => void;
 }) {
+  const { ui } = portal;
+  const { input: inputCls, codeArea: codeAreaCls, primarySmall: primarySmCls } = ui.classes;
   const [concept, setConcept] = useState<MemoryConcept | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
   const [draft, setDraft] = useState<NoteDraft | null>(null);
@@ -577,7 +578,7 @@ function Note({
         if (!current) return;
         // Deleted while the page was away from it, and an edit was left on it: the edit is not lost with the
         // note. It is shown as one over a note that was deleted, and "Save mine anyway" writes the note again.
-        const left = e instanceof ApiError && e.status === 404 ? readNoteDraft(path) : null;
+        const left = isApiError(e) && e.status === 404 ? readNoteDraft(path) : null;
         if (!left) return setFailed(e.message);
         missing.current = e.message;
         setConcept(conceptOf(path, left.draft));
@@ -642,7 +643,7 @@ function Note({
           now = await api.memoryConcept(path);
         } catch (e) {
           // Deleted meanwhile: the edit is not lost with it, and "Save mine anyway" writes the note again.
-          if (!(e instanceof ApiError && e.status === 404)) throw e;
+          if (!(isApiError(e) && e.status === 404)) throw e;
           // Given up, the edit goes back to what the read said: the note is not there to be shown.
           missing.current = e.message;
           setGone(true);
@@ -731,10 +732,10 @@ function Note({
           {failed ? (
             <p role="alert" className="text-sm text-warn">{failed}</p>
           ) : !concept ? (
-            <SkeletonGroup className="space-y-2" label={t("Loading the note")}>
+            <ui.SkeletonGroup className="space-y-2" label={t("Loading the note")}>
               <div className="skeleton h-24 w-full" />
               <div className="skeleton h-40 w-full" />
-            </SkeletonGroup>
+            </ui.SkeletonGroup>
           ) : draft ? (
             <form
               aria-label={t("Edit the note")}
@@ -836,6 +837,8 @@ function AfterChange({
   /** The memory changed again: the page reads it anew. */
   onRefresh: () => void;
 }) {
+  const { ui } = portal;
+  const primarySmCls = ui.classes.primarySmall;
   const [health, setHealth] = useState(first);
   const [busy, setBusy] = useState<string | null>(null);
   // What came of it, said in the language shown when it is drawn.
@@ -884,7 +887,7 @@ function AfterChange({
   };
   const problems = health.brokenLinks.length + health.orphans.length + health.issues.length;
   return (
-    <Modal
+    <ui.Modal
       title={what === "deleted" ? t("The note is deleted") : t("The note is saved")}
       subtitle={t("Understory has updated its index and log. Check what the change left behind.")}
       onClose={onClose}
@@ -984,11 +987,12 @@ function AfterChange({
         )}
         {error && <p role="alert" className="text-xs text-danger">{error}</p>}
       </div>
-    </Modal>
+    </ui.Modal>
   );
 }
 
 function LogView({ writable, onOpen, onBack, onCleared }: { writable: boolean; onOpen: (path: string) => void; onBack: () => void; onCleared: () => void }) {
+  const { ui } = portal;
   const [log, setLog] = useState<MemoryChange[] | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -1039,9 +1043,9 @@ function LogView({ writable, onOpen, onBack, onCleared }: { writable: boolean; o
           {failed ? (
             <p role="alert" className="text-sm text-warn">{failed}</p>
           ) : !log ? (
-            <SkeletonGroup className="space-y-2" label={t("Loading the log")}>
+            <ui.SkeletonGroup className="space-y-2" label={t("Loading the log")}>
               {[0, 1, 2].map((i) => <div key={i} className="skeleton h-12 w-full" />)}
-            </SkeletonGroup>
+            </ui.SkeletonGroup>
           ) : recent.length === 0 ? (
             <p className="text-sm text-fg-subtle">{t("Nothing has changed yet.")}</p>
           ) : (
@@ -1158,6 +1162,7 @@ function ToolCall({ part }: { part: ToolPart }) {
 /** The librarian: Understory's own agent, asked about the memory or told what to keep, as in Understory's web UI. */
 function LibrarianView({ chat, onOpen, onBack }: { chat: Librarian; onOpen: (path: string) => void; onBack: () => void }) {
   const { messages, busy, error, send, stop, clear } = chat;
+  const { input: inputCls, primarySmall: primarySmCls } = portal.ui.classes;
   const [draft, setDraft] = useState("");
   const scroller = useRef<HTMLElement>(null);
   // Followed to the newest words, unless the reader has scrolled up to read.

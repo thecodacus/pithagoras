@@ -1,5 +1,10 @@
 import { type Locator, type Page } from '@playwright/test';
-import { test, expect, mockPortal, reply, DONE, HANG } from './portal-mock';
+import { test, expect, mockPortal, reply, DONE, HANG } from '../../../../tests/browser/portal-mock';
+
+test.use({ installed: ['extensions/docker', 'extensions/understory'] });
+
+/** Where Understory's server half answers: its routes, under the address the portal gives the package. */
+const BASE = '/api/x/pithagoras-understory';
 
 const tree = {
   name: '/', path: '/', kind: 'directory', children: [
@@ -60,17 +65,16 @@ async function portal(page: Page, { enabled = true, broken = false, conformant =
   let wiped = false;
   await mockPortal(page, async (ask) => {
     const { path: p, method, url, json } = ask;
-    if (p === '/api/features/flags') return { subagent: { enabled: false }, understory: { enabled } };
-    if (p === '/api/features') return { subagent: {}, understory: { enabled, url: 'http://127.0.0.1:3800/mcp', managed: { available: true, container: 'running', config: { llm: { source: 'auto' }, dreamInterval: '' }, providers: [], pulling: { active: false }, lastDream: { at: '2026-09-28T14:00:00Z', ok: true, ran: true, said: '1 file changed — mended the link' } } } };
-    if (p === '/api/memory/health') return writable ? { writable: true, health: healthy } : { writable: false };
-    if (p === '/api/memory/chat' && method === 'POST') {
+    if (p === `${BASE}/state`) return { enabled, url: 'http://127.0.0.1:3800/mcp', managed: { available: true, container: 'running', config: { llm: { source: 'auto' }, dreamInterval: '' }, providers: [], pulling: { active: false }, lastDream: { at: '2026-09-28T14:00:00Z', ok: true, ran: true, said: '1 file changed — mended the link' } } };
+    if (p === `${BASE}/health`) return writable ? { writable: true, health: healthy } : { writable: false };
+    if (p === `${BASE}/chat` && method === 'POST') {
       chats.push(json().messages);
       const answer = librarian[chats.length - 1];
       if (answer === HANG) return HANG;
       await ask.route.fulfill({ status: 200, contentType: 'text/event-stream', body: answer ?? '' });
       return DONE;
     }
-    if (p === '/api/memory/concept' && method === 'PUT') {
+    if (p === `${BASE}/concept` && method === 'PUT') {
       const sent = json();
       changes.push({ method: 'PUT', path: sent.path, body: sent });
       const stamped = { ...sent.frontmatter, timestamp: '2026-09-28T14:00:00.000Z' };
@@ -78,45 +82,45 @@ async function portal(page: Page, { enabled = true, broken = false, conformant =
       concepts[sent.path] = { path: sent.path, frontmatter: stamped, body: sent.body.endsWith('\n') ? sent.body : `${sent.body}\n` };
       return { concept: { path: sent.path, frontmatter: stamped, body: sent.body }, health: healthy };
     }
-    if (p === '/api/memory/concept' && method === 'DELETE') {
+    if (p === `${BASE}/concept` && method === 'DELETE') {
       changes.push({ method: 'DELETE', path: url.searchParams.get('path')! });
       return { health: afterDelete };
     }
-    if (p === '/api/memory/reindex') {
+    if (p === `${BASE}/reindex`) {
       changes.push({ method: 'POST', path: p });
       return { pruned: ['/empty'], reindexed: 3, health: { ...broken1 } };
     }
-    if (p === '/api/memory/repair') {
+    if (p === `${BASE}/repair`) {
       changes.push({ method: 'POST', path: p });
       return { ran: true, summary: '**Fixed** the link from [branches](/deployment/branches.md).\n\n## What changed\n\n- removed the dangling link', filesChanged: ['/deployment/branches.md'], health: healthy };
     }
-    if (p === '/api/memory/wipe') {
+    if (p === `${BASE}/wipe`) {
       changes.push({ method: 'POST', path: p });
       wiped = true;
       logCleared = true;
       return { health: healthy };
     }
-    if (p === '/api/memory/clear-log') {
+    if (p === `${BASE}/clear-log`) {
       changes.push({ method: 'POST', path: p });
       logCleared = true;
       return { health: healthy };
     }
-    if (p.startsWith('/api/memory/')) {
+    if (p.startsWith(`${BASE}/`)) {
       asked.push(`${p}${url.search}`);
       if (broken) return reply(502, { error: 'Could not reach Understory at http://127.0.0.1:3800: it did not answer in time.' });
-      if (p === '/api/memory/tree') return wiped ? { name: '/', path: '/', kind: 'directory', children: [{ name: 'index.md', path: '/index.md', kind: 'reserved' }, { name: 'log.md', path: '/log.md', kind: 'reserved' }] } : tree;
-      if (p === '/api/memory/validate') return conformant ? { conformant: true, conceptCount: 2, directoryCount: 2, issues: [] } : { conformant: false, conceptCount: 2, directoryCount: 2, issues: [{ path: '/people/owner.md', severity: 'warning', message: 'No description in its frontmatter' }] };
+      if (p === `${BASE}/tree`) return wiped ? { name: '/', path: '/', kind: 'directory', children: [{ name: 'index.md', path: '/index.md', kind: 'reserved' }, { name: 'log.md', path: '/log.md', kind: 'reserved' }] } : tree;
+      if (p === `${BASE}/validate`) return conformant ? { conformant: true, conceptCount: 2, directoryCount: 2, issues: [] } : { conformant: false, conceptCount: 2, directoryCount: 2, issues: [{ path: '/people/owner.md', severity: 'warning', message: 'No description in its frontmatter' }] };
       // Newest first, as Understory keeps it.
-      if (p === '/api/memory/log') return logCleared ? [] : [
+      if (p === `${BASE}/log`) return logCleared ? [] : [
         { date: '2026-09-28', action: 'Update', summary: 'Linked [Branch Deployment on Test Host](/deployment/branches.md) to its owner.' },
         { date: '2026-09-27', action: 'Creation', summary: 'Added [The owner](/people/owner.md).' },
       ];
-      if (p === '/api/memory/graph' && notes) return {
+      if (p === `${BASE}/graph` && notes) return {
         // A long memory: every note linked to the one before, and to one a few places back.
         nodes: Array.from({ length: notes }, (_, i) => ({ path: `/n${i}.md`, title: longNames ? `How the release of branch ${i} goes out to the test host` : `Note ${i}`, type: i % 3 ? 'Person' : 'Deployment Process', links: 2 })),
         edges: Array.from({ length: notes - 1 }, (_, i) => ({ source: `/n${i}.md`, target: `/n${i + 1}.md` })).concat(Array.from({ length: Math.floor(notes / 7) }, (_, i) => ({ source: `/n${i * 7}.md`, target: `/n${(i * 7 + 5) % notes}.md` }))),
       };
-      if (p === '/api/memory/graph') return {
+      if (p === `${BASE}/graph`) return {
         nodes: [
           { path: '/deployment/branches.md', title: 'Branch Deployment on Test Host', type: 'Deployment Process', description: 'The test host deploys branches using deploy-branch.sh.', links: 1 },
           { path: '/people/owner.md', title: 'The owner', type: 'Person', links: 1 },
@@ -125,8 +129,8 @@ async function portal(page: Page, { enabled = true, broken = false, conformant =
         ],
         edges: [{ source: '/deployment/branches.md', target: '/people/owner.md' }],
       };
-      if (p === '/api/memory/traces') return traces;
-      if (p === '/api/memory/trace') {
+      if (p === `${BASE}/traces`) return traces;
+      if (p === `${BASE}/trace`) {
         const id = url.searchParams.get('id')!;
         const run = runs[id];
         if (run === 'hang') return HANG;
@@ -136,8 +140,8 @@ async function portal(page: Page, { enabled = true, broken = false, conformant =
         const outcome = notation.endsWith('⚠ partial') ? 'partial' : notation.endsWith('✗') ? 'failed' : 'success';
         return { ...traces.find((t) => t.id === id), steps: run.map((one, i) => ({ seq: i + 1, ...one })), outcome };
       }
-      if (p === '/api/memory/search') return url.searchParams.get('q') === 'deploy' ? [{ path: '/deployment/branches.md', title: 'Branch Deployment on Test Host', description: 'The test host deploys branches.' }] : [];
-      if (p === '/api/memory/concept') {
+      if (p === `${BASE}/search`) return url.searchParams.get('q') === 'deploy' ? [{ path: '/deployment/branches.md', title: 'Branch Deployment on Test Host', description: 'The test host deploys branches.' }] : [];
+      if (p === `${BASE}/concept`) {
         const c = concepts[url.searchParams.get('path') ?? ''];
         if (!c) return reply(404, { error: 'Concept not found' });
         return c;
@@ -149,18 +153,22 @@ async function portal(page: Page, { enabled = true, broken = false, conformant =
 
 const notes = (page: Page) => page.getByRole('navigation', { name: 'Notes' });
 
+const sidebar = (page: Page) => page.getByRole('complementary', { name: 'Sidebar' });
+
 test('the sidebar has Memory only while Understory is the memory', async ({ page }) => {
+  const stateAsked = page.waitForRequest((r) => new URL(r.url()).pathname === `${BASE}/state`);
   await portal(page, { enabled: false });
   await page.goto('/sessions');
-  await expect(page.getByRole('button', { name: 'Sessions' }).first()).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Memory' })).toHaveCount(0);
+  await stateAsked;
+  await expect(sidebar(page).getByRole('button', { name: 'Sessions' }).first()).toBeVisible();
+  await expect(sidebar(page).getByRole('button', { name: 'Memory' })).toHaveCount(0);
 });
 
-test("Memory in the sidebar opens the tree, with each note's type and Understory's own files set apart", async ({ page }) => {
+test("Memory, among the extensions' pages in the sidebar, opens the tree, with each note's type and Understory's own files set apart", async ({ page }) => {
   const { asked } = await portal(page);
   await page.goto('/sessions');
-  await page.getByRole('button', { name: 'Memory' }).first().click();
-  await expect(page).toHaveURL(/\/memory$/);
+  await sidebar(page).getByRole('group', { name: 'Extensions' }).getByRole('button', { name: 'Memory' }).click();
+  await expect(page).toHaveURL(/\/x\/pithagoras-understory\/memory$/);
   await expect(notes(page).getByRole('button', { name: /Branch Deployment on Test Host/ })).toContainText('Deployment Process');
   await expect(notes(page).getByRole('button', { name: /deployment\// })).toHaveAttribute('aria-expanded', 'true');
   await expect(notes(page).getByRole('button', { name: 'log.md' }).locator('span.italic')).toBeVisible();
@@ -170,12 +178,12 @@ test("Memory in the sidebar opens the tree, with each note's type and Understory
   await notes(page).getByRole('button', { name: /people\// }).click();
   await expect(notes(page).getByRole('button', { name: /The owner/ })).toHaveCount(0);
   // Nothing here writes.
-  expect(asked.every((a) => /^\/api\/memory\/(tree|log|concept|search|graph|traces|validate)/.test(a))).toBe(true);
+  expect(asked.every((a) => /^\/api\/x\/pithagoras-understory\/(tree|log|concept|search|graph|traces|validate)/.test(a))).toBe(true);
 });
 
 test('a note opens with its type, tags and time; its links open other notes, and Back returns', async ({ page }) => {
   await portal(page);
-  await page.goto('/memory');
+  await page.goto('/x/pithagoras-understory/memory');
   await notes(page).getByRole('button', { name: /Branch Deployment on Test Host/ }).click();
   await expect(page).toHaveURL(/note=%2Fdeployment%2Fbranches\.md/);
   const note = page.getByRole('article', { name: 'Branch Deployment on Test Host' });
@@ -194,7 +202,7 @@ test('a note opens with its type, tags and time; its links open other notes, and
 
 test('the log lists the changes newest first, and its links open the notes', async ({ page }) => {
   await portal(page);
-  await page.goto('/memory');
+  await page.goto('/x/pithagoras-understory/memory');
   await page.getByRole('button', { name: 'Log', exact: true }).click();
   await expect(page).toHaveURL(/view=log/);
   const log = page.getByRole('region', { name: 'Changes to the memory' });
@@ -292,7 +300,7 @@ const ringLight = (page: Page, x: number, y: number, r: number) =>
 test('the graph draws the notes and their links, says what the colours are, and a note opens from it', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await portal(page);
-  await page.goto('/memory?view=graph');
+  await page.goto('/x/pithagoras-understory/memory?view=graph');
   // A group and not a picture: its notes are buttons that Tab reaches, which a picture would make presentational.
   const graph = page.getByRole('group', { name: /3 notes, 1 link/ });
   await expect(graph).toBeVisible();
@@ -347,7 +355,7 @@ test('a graph of a long memory opens, and each frame draws each note once, howev
     const raf = window.requestAnimationFrame.bind(window);
     window.requestAnimationFrame = (callback: FrameRequestCallback) => raf((time) => (w.framesRun++, callback(time)));
   });
-  await page.goto('/memory?view=graph');
+  await page.goto('/x/pithagoras-understory/memory?view=graph');
   const graph = page.getByRole('group', { name: /1,?500 notes/ });
   await expect(graph).toBeVisible({ timeout: 30_000 });
   // Every note is on the canvas, and in the list a screen reader and Tab reach.
@@ -417,7 +425,7 @@ test('a note is a glowing point and its name shows only while it is pointed at',
   await countCanvasText(page);
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await portal(page);
-  await page.goto('/memory?view=graph');
+  await page.goto('/x/pithagoras-understory/memory?view=graph');
   const graph = page.getByRole('group', { name: /3 notes, 1 link/ });
   await expect(graph.locator('canvas')).toBeVisible();
   await settled(page);
@@ -463,7 +471,7 @@ test('a note is a glowing point and its name shows only while it is pointed at',
 test('the note last opened is lit and in the middle when the graph is back, until the background is clicked', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await portal(page);
-  await page.goto('/memory?view=graph');
+  await page.goto('/x/pithagoras-understory/memory?view=graph');
   const graph = page.getByRole('group', { name: /3 notes, 1 link/ });
   await expect(graph).toBeVisible();
   await settled(page);
@@ -484,7 +492,7 @@ test('the note last opened is lit and in the middle when the graph is back, unti
 
 test('the type switches filter the graph, and what the search found is marked', async ({ page }) => {
   await portal(page);
-  await page.goto('/memory?view=graph');
+  await page.goto('/x/pithagoras-understory/memory?view=graph');
   await page.getByRole('button', { name: 'Which notes are shown' }).click();
   const legend = page.getByRole('list', { name: 'What the colours are' });
   await legend.getByRole('button', { name: 'Person' }).click();
@@ -517,7 +525,7 @@ async function chooseLook(page: Page, theme: string) {
 
 test("the toolbar's look, colour and filter are the portal's own controls", async ({ page }) => {
   await portal(page);
-  await page.goto('/memory?view=graph');
+  await page.goto('/x/pithagoras-understory/memory?view=graph');
   // The look: the portal's dropdown, not the system's.
   const look = page.getByRole('combobox', { name: 'Look of the 3D view' });
   await expect(look).toHaveClass(/ui-select/);
@@ -556,7 +564,7 @@ for (const [width, height] of [[1280, 800], [390, 800]]) {
     await page.setViewportSize({ width, height });
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await portal(page, { notes: 140, longNames: true });
-    await page.goto('/memory?view=graph');
+    await page.goto('/x/pithagoras-understory/memory?view=graph');
     const graph = page.getByRole('group', { name: /140 notes/ });
     await expect(graph.locator('canvas')).toBeVisible();
     await settled(page);
@@ -590,7 +598,7 @@ for (const [width, height] of [[1280, 800], [390, 800]]) {
 test('the look is kept in this browser, and nothing is written on the graph in any of its looks', async ({ page }) => {
   await countCanvasText(page);
   await portal(page);
-  await page.goto('/memory?view=graph');
+  await page.goto('/x/pithagoras-understory/memory?view=graph');
   const sky = page.locator('.memory-sky');
   await expect(sky.locator('canvas')).toBeVisible();
   // No strip of switches, no line of counts, no labels: only the picture and its zoom buttons.
@@ -627,7 +635,7 @@ test('a view chosen when the graph had two, kept in this browser, falls back to 
     localStorage.setItem('memoryGraph.view', '2d');
   });
   await portal(page);
-  await page.goto('/memory?view=graph');
+  await page.goto('/x/pithagoras-understory/memory?view=graph');
   const graph = page.getByRole('group', { name: /3 notes, 1 link/ });
   await expect(graph.locator('canvas')).toBeVisible();
   await expect(graph).toHaveAttribute('data-theme-3d', 'stellar');
@@ -684,7 +692,7 @@ for (const [theme, egg, gesture] of secrets) {
     test.setTimeout(60_000);
     await countCanvasText(page);
     await portal(page, { notes: 40 });
-    await page.goto('/memory?view=graph');
+    await page.goto('/x/pithagoras-understory/memory?view=graph');
       await chooseLook(page, theme);
     const sky = page.locator('.memory-sky');
     await expect(sky.locator('canvas')).toBeVisible();
@@ -708,7 +716,7 @@ for (const [theme, egg, gesture] of secrets) {
 test('with less motion asked for, the looks hold still and play no secrets', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await portal(page);
-  await page.goto('/memory?view=graph');
+  await page.goto('/x/pithagoras-understory/memory?view=graph');
   const canvas = page.locator('.memory-sky canvas');
   for (const theme of ['stellar', 'galaxy', 'brain', 'fireflies', 'helix']) {
     await chooseLook(page, theme);
@@ -737,7 +745,7 @@ const greenPixels = (page: Page) =>
 test("the brain's outline is drawn in the colour chosen for it, and the colour is kept", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await portal(page);
-  await page.goto('/memory?view=graph');
+  await page.goto('/x/pithagoras-understory/memory?view=graph');
   await expect(page.getByRole('button', { name: "Colour of the brain's outline" })).toHaveCount(0);
   await chooseLook(page, 'brain');
   await page.getByRole('button', { name: "Colour of the brain's outline" }).click();
@@ -771,7 +779,7 @@ for (const [width, height] of [[1280, 800], [390, 800]]) {
   test(`the brain's colour popover stays inside the window, ${width} wide`, async ({ page }) => {
     await page.setViewportSize({ width, height });
     await portal(page);
-    await page.goto('/memory?view=graph');
+    await page.goto('/x/pithagoras-understory/memory?view=graph');
       await chooseLook(page, 'brain');
     await page.getByRole('button', { name: "Colour of the brain's outline" }).click();
     const picker = page.getByRole('dialog', { name: "Colour of the brain's outline" });
@@ -794,7 +802,7 @@ test('a drag turns the view, the wheel zooms, and Show all of it sets it back', 
   // Without the drift, the same view is the same picture.
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await portal(page);
-  await page.goto('/memory?view=graph');
+  await page.goto('/x/pithagoras-understory/memory?view=graph');
   const canvas = page.locator('.memory-sky canvas');
   await expect(canvas).toBeVisible();
   const first = await picture(page);
@@ -831,7 +839,7 @@ test("a browser that cannot keep the graph's choices still draws the graph, and 
       return setItem.call(this, key, value);
     };
   });
-  await page.goto('/memory?view=graph');
+  await page.goto('/x/pithagoras-understory/memory?view=graph');
   await expect(page.getByRole('group', { name: /3 notes/ }).locator('canvas')).toBeVisible();
   await expect(page.getByRole('combobox', { name: 'Look of the 3D view' })).toHaveText('Constellation');
   await chooseLook(page, 'helix');
@@ -844,7 +852,7 @@ test.describe('on a touch screen', () => {
   test('the first tap on a note says what it is and lights it, the second opens it, and a tap on the background lets go', async ({ page }) => {
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await portal(page);
-    await page.goto('/memory?view=graph');
+    await page.goto('/x/pithagoras-understory/memory?view=graph');
     const graph = page.getByRole('group', { name: /3 notes, 1 link/ });
     await expect(graph.locator('canvas')).toBeVisible();
     await settled(page);
@@ -883,7 +891,7 @@ test.describe('on a touch screen', () => {
   test('a note a finger tapped, then filtered away, takes its card and its lighting with it', async ({ page }) => {
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await portal(page);
-    await page.goto('/memory?view=graph');
+    await page.goto('/x/pithagoras-understory/memory?view=graph');
     const graph = page.getByRole('group', { name: /3 notes, 1 link/ });
     await expect(graph.locator('canvas')).toBeVisible();
     await settled(page);
@@ -913,7 +921,7 @@ test.describe('on a touch screen', () => {
   test('two fingers moving apart zoom the graph about the middle of them', async ({ page }) => {
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await portal(page, { notes: 12 });
-    await page.goto('/memory?view=graph');
+    await page.goto('/x/pithagoras-understory/memory?view=graph');
     const canvas = page.locator('.memory-sky canvas');
     await expect(canvas).toBeVisible();
     await settled(page);
@@ -972,7 +980,7 @@ test('Query paths lists the runs of Understory with the path each took, what it 
     ],
     runs: { ...RUNS, t3: [step('list_directory')], t4: [step('read_concept', ['/gone.md'])] },
   });
-  await page.goto('/memory?view=graph');
+  await page.goto('/x/pithagoras-understory/memory?view=graph');
   await expect(page.locator('.memory-sky canvas')).toBeVisible();
   // Closed to begin with, so that the graph has the room.
   await expect(page.getByRole('list', { name: 'Query paths' })).toHaveCount(0);
@@ -1011,7 +1019,7 @@ test('Query paths lists the runs of Understory with the path each took, what it 
 
 test('with no run of Understory on record, no Query paths are offered', async ({ page }) => {
   await portal(page, { traces: [] });
-  await page.goto('/memory?view=graph');
+  await page.goto('/x/pithagoras-understory/memory?view=graph');
   await expect(page.locator('.memory-sky canvas')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Query paths' })).toHaveCount(0);
 });
@@ -1019,7 +1027,7 @@ test('with no run of Understory on record, no Query paths are offered', async ({
 test('pointing at a path lights its notes and the links between them in the graph, a click keeps it, and a second lets it go', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await portal(page);
-  await page.goto('/memory?view=graph');
+  await page.goto('/x/pithagoras-understory/memory?view=graph');
   const graph = page.getByRole('group', { name: /3 notes, 1 link/ });
   await expect(graph.locator('canvas')).toBeVisible();
   await settled(page);
@@ -1089,7 +1097,7 @@ test('a run that lights nothing says why on its shut row, pointed at or kept lit
     ],
     runs: { ...RUNS, t3: [step('list_directory'), step('read_concept', ['/gone.md'])], t4: [step('list_directory')] },
   });
-  await page.goto('/memory?view=graph');
+  await page.goto('/x/pithagoras-understory/memory?view=graph');
   await expect(page.locator('.memory-sky canvas')).toBeVisible();
   await settled(page);
   const found = await stars(page);
@@ -1134,7 +1142,7 @@ for (const width of [390, 1280]) test(`the list of paths is at most half the win
     usage: { inputTokens: 4100 + i, outputTokens: 310 },
   }));
   await portal(page, { traces: many });
-  await page.goto('/memory?view=graph');
+  await page.goto('/x/pithagoras-understory/memory?view=graph');
   await expect(page.locator('.memory-sky canvas')).toBeVisible();
   const list = await openPaths(page);
   await expect(list.getByRole('listitem')).toHaveCount(30);
@@ -1225,7 +1233,7 @@ for (const scheme of ['dark', 'light'] as const) {
         ],
         runs: { ...RUNS, t3: [step('list_directory')], t4: [step('read_concept', ['/gone.md'])] },
       });
-      await page.goto('/memory?view=graph');
+      await page.goto('/x/pithagoras-understory/memory?view=graph');
       await expect(page.locator('html')).toHaveAttribute('data-theme', scheme);
       const graph = page.getByRole('group', { name: /3 notes, 1 link/ });
       await expect(graph.locator('canvas')).toBeVisible();
@@ -1270,7 +1278,7 @@ for (const [width, height] of [[1280, 800], [390, 800]]) {
       await page.setViewportSize({ width, height });
       if (fancy) await page.addInitScript(() => localStorage.setItem('animations', 'on'));
       await portal(page);
-      await page.goto('/memory?view=graph');
+      await page.goto('/x/pithagoras-understory/memory?view=graph');
       await expect(page.locator('.memory-sky canvas')).toBeVisible();
       if (fancy) await expect(page.locator('html')).toHaveAttribute('data-motion', 'fancy');
       else await expect(page.locator('html')).not.toHaveAttribute('data-motion', 'fancy');
@@ -1333,7 +1341,7 @@ test('a step goes by the path Understory gives for it: a file name two notes sha
       d: [{ ...step('search_knowledge', ['/deployment/branches.md']), summary: 'deploy -> prod → stage' }, step('read_concept', ['/deployment/branches.md'])],
     },
   });
-  await page.goto('/memory?view=graph');
+  await page.goto('/x/pithagoras-understory/memory?view=graph');
   const graph = page.getByRole('group', { name: /6 notes, 1 link/ });
   await expect(graph.locator('canvas')).toBeVisible();
   const list = await openPaths(page);
@@ -1374,7 +1382,7 @@ test('the end of a run is told as Understory ends it, and a run is a change by w
       d: [step('list_directory')],
     },
   });
-  await page.goto('/memory?view=graph');
+  await page.goto('/x/pithagoras-understory/memory?view=graph');
   await expect(page.locator('.memory-sky canvas')).toBeVisible();
   const list = await openPaths(page);
   const opened: Locator[] = [];
@@ -1392,7 +1400,7 @@ test('the end of a run is told as Understory ends it, and a run is a change by w
 test('a run whose steps have not come says nothing of its notes, and lights none; one whose steps cannot come is told by its words alone', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await portal(page, { runs: { t1: 'hang', t2: 'fail' } });
-  await page.goto('/memory?view=graph');
+  await page.goto('/x/pithagoras-understory/memory?view=graph');
   const graph = page.getByRole('group', { name: /3 notes, 1 link/ });
   await expect(graph.locator('canvas')).toBeVisible();
   const list = await openPaths(page);
@@ -1424,7 +1432,7 @@ for (const [width, height] of [[1280, 800], [390, 800]]) {
       usage: { inputTokens: 4100 + i, outputTokens: 310 },
     }));
     await portal(page, { traces: ten });
-    await page.goto('/memory?view=graph');
+    await page.goto('/x/pithagoras-understory/memory?view=graph');
     await expect(page.locator('.memory-sky canvas')).toBeVisible();
     const list = await openPaths(page);
     await expect(list.getByRole('listitem')).toHaveCount(10);
@@ -1448,7 +1456,7 @@ for (const [width, height] of [[1280, 800], [390, 800]]) {
 
 test("a run opens and shuts with its toggle, by the mouse and by the keyboard, and the toggle says what it does and to which run", async ({ page }) => {
   await portal(page);
-  await page.goto('/memory?view=graph');
+  await page.goto('/x/pithagoras-understory/memory?view=graph');
   await expect(page.locator('.memory-sky canvas')).toBeVisible();
   const list = await openPaths(page);
   const run = aRun(list, /Who runs the test host/);
@@ -1487,7 +1495,7 @@ test("a run opens and shuts with its toggle, by the mouse and by the keyboard, a
 
 test('a run does not open on pointing alone, nor on being kept lit; its toggle opens it, and it stays as the person left it', async ({ page }) => {
   await portal(page);
-  await page.goto('/memory?view=graph');
+  await page.goto('/x/pithagoras-understory/memory?view=graph');
   await expect(page.locator('.memory-sky canvas')).toBeVisible();
   const list = await openPaths(page);
   const [change, query] = [aRun(list, /Persist the following knowledge/), aRun(list, /Who runs the test host/)];
@@ -1530,7 +1538,7 @@ test('a run does not open on pointing alone, nor on being kept lit; its toggle o
 
 test('a run that is shut lights its notes in the graph all the same, pointed at, reached with Tab, or kept lit', async ({ page }) => {
   await portal(page);
-  await page.goto('/memory?view=graph');
+  await page.goto('/x/pithagoras-understory/memory?view=graph');
   const graph = page.getByRole('group', { name: /3 notes, 1 link/ });
   await expect(graph.locator('canvas')).toBeVisible();
   const list = await openPaths(page);
@@ -1563,7 +1571,7 @@ test('a run that is shut lights its notes in the graph all the same, pointed at,
 
 test('the search lists what matches, and says when nothing does', async ({ page }) => {
   await portal(page);
-  await page.goto('/memory');
+  await page.goto('/x/pithagoras-understory/memory');
   await page.getByLabel('Search the memory').fill('deploy');
   await expect(page.getByRole('list', { name: 'Found in the memory' }).getByRole('button', { name: /Branch Deployment on Test Host/ })).toBeVisible();
   await page.getByLabel('Search the memory').fill('nothing like it');
@@ -1578,13 +1586,13 @@ test('a search that failed is not still said once the next one has started or ha
   let release!: () => void;
   const held = new Promise<void>((resolve) => { release = resolve; });
   // After the portal's own answers, so this one is asked first.
-  await page.route('**/api/memory/search*', async (route) => {
+  await page.route('**/api/x/pithagoras-understory/search*', async (route) => {
     const q = new URL(route.request().url()).searchParams.get('q');
     if (q === 'broken') return route.fulfill({ status: 502, json: { error: 'Understory did not answer' } });
     if (q === 'deploy') await held;
     return route.fallback();
   });
-  await page.goto('/memory');
+  await page.goto('/x/pithagoras-understory/memory');
   const search = page.getByLabel('Search the memory');
   await search.fill('broken');
   await expect(page.getByText('Understory did not answer')).toBeVisible();
@@ -1599,25 +1607,26 @@ test('a search that failed is not still said once the next one has started or ha
 
 test('a bundle with issues says how many, and lists them', async ({ page }) => {
   await portal(page, { conformant: false });
-  await page.goto('/memory');
+  await page.goto('/x/pithagoras-understory/memory');
   await page.getByRole('button', { name: '1 issue' }).click();
   await expect(page.getByText('No description in its frontmatter')).toBeVisible();
   await page.getByRole('button', { name: '/people/owner.md' }).click();
   await expect(page.getByRole('article', { name: 'The owner' })).toBeVisible();
 });
 
-test('Understory not answering is said, with a way to try again', async ({ page }) => {
+test('Understory not answering is said, with a way to try again and its page in Settings', async ({ page }) => {
   await portal(page, { broken: true });
-  await page.goto('/memory');
+  await page.goto('/x/pithagoras-understory/memory');
   await expect(page.getByText('The memory could not be read.')).toBeVisible();
   await expect(page.getByText(/did not answer in time/)).toBeVisible();
   await expect(page.getByRole('button', { name: 'Try again' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Settings → Memory' })).toHaveAttribute('href', '/settings/x/pithagoras-understory');
 });
 
 test('on a phone the notes and what is open take turns', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 800 });
   await portal(page);
-  await page.goto('/memory');
+  await page.goto('/x/pithagoras-understory/memory');
   await notes(page).getByRole('button', { name: /The owner/ }).click();
   await expect(page.getByRole('article', { name: 'The owner' })).toBeVisible();
   await expect(notes(page)).toBeHidden();
@@ -1630,7 +1639,7 @@ test('on a phone the notes and what is open take turns', async ({ page }) => {
 
 test('a note is edited in place: its title, type, tags and text, and saving says the memory is in order', async ({ page }) => {
   const { changes } = await portal(page);
-  await page.goto('/memory?note=%2Fpeople%2Fowner.md');
+  await page.goto('/x/pithagoras-understory/memory?note=%2Fpeople%2Fowner.md');
   await page.getByRole('button', { name: 'Edit the note' }).click();
   const form = page.getByRole('form', { name: 'Edit the note' });
   await expect(form.getByLabel('Title')).toHaveValue('The owner');
@@ -1650,7 +1659,7 @@ test('a note is edited in place: its title, type, tags and text, and saving says
 
 test('a note being edited is not left for another note, the log, the graph or a refresh without asking', async ({ page }) => {
   const { changes } = await portal(page);
-  await page.goto('/memory?note=%2Fpeople%2Fowner.md');
+  await page.goto('/x/pithagoras-understory/memory?note=%2Fpeople%2Fowner.md');
   await page.getByRole('button', { name: 'Edit the note' }).click();
   const form = page.getByRole('form', { name: 'Edit the note' });
   // Opened for editing and not changed: nothing to lose, so the next note opens at once.
@@ -1684,7 +1693,7 @@ test('a note being edited is not left for another note, the log, the graph or a 
 
 test('a note left by Back, Forward or a link to another page gets its edit back, and still asks before it is left', async ({ page }) => {
   const { changes } = await portal(page);
-  await page.goto('/memory?note=%2Fpeople%2Fowner.md');
+  await page.goto('/x/pithagoras-understory/memory?note=%2Fpeople%2Fowner.md');
   await notes(page).getByRole('button', { name: /Branch Deployment/ }).click();
   await expect(page).toHaveURL(/note=%2Fdeployment%2Fbranches.md/);
   await page.getByRole('button', { name: 'Edit the note' }).click();
@@ -1721,7 +1730,7 @@ const rewritten = () => {
 
 test('an edit brought back over a note the agent wrote meanwhile says so, and Save does not go out unasked', async ({ page }) => {
   const { changes } = await portal(page);
-  await page.goto('/memory?note=%2Fpeople%2Fowner.md');
+  await page.goto('/x/pithagoras-understory/memory?note=%2Fpeople%2Fowner.md');
   await notes(page).getByRole('button', { name: /Branch Deployment/ }).click();
   await page.getByRole('button', { name: 'Edit the note' }).click();
   const form = page.getByRole('form', { name: 'Edit the note' });
@@ -1751,7 +1760,7 @@ test('an edit brought back over a note the agent wrote meanwhile says so, and Sa
 
 test('a save over a note the agent wrote since the edit began asks first, and goes out when told to', async ({ page }) => {
   const { changes } = await portal(page);
-  await page.goto('/memory?note=%2Fdeployment%2Fbranches.md');
+  await page.goto('/x/pithagoras-understory/memory?note=%2Fdeployment%2Fbranches.md');
   await page.getByRole('button', { name: 'Edit the note' }).click();
   const form = page.getByRole('form', { name: 'Edit the note' });
   await form.getByLabel('Text, in markdown').fill('Mine.');
@@ -1773,7 +1782,7 @@ test('a note that was saved can be edited and saved again: the note is compared 
   const { changes } = await portal(page);
   const was = concepts[BRANCHES];
   try {
-    await page.goto('/memory?note=%2Fdeployment%2Fbranches.md');
+    await page.goto('/x/pithagoras-understory/memory?note=%2Fdeployment%2Fbranches.md');
     const saved = page.getByRole('dialog', { name: 'The note is saved' });
     for (const text of ['First line.\nAnd a second.', 'First line.\nAnd a second.\nA typo fixed.']) {
       await page.getByRole('button', { name: 'Edit the note' }).click();
@@ -1795,7 +1804,7 @@ test('a note deleted while it is being edited can still be saved, and writes it 
   const { changes } = await portal(page);
   const was = concepts[BRANCHES];
   try {
-    await page.goto('/memory?note=%2Fdeployment%2Fbranches.md');
+    await page.goto('/x/pithagoras-understory/memory?note=%2Fdeployment%2Fbranches.md');
     await page.getByRole('button', { name: 'Edit the note' }).click();
     const form = page.getByRole('form', { name: 'Edit the note' });
     await form.getByLabel('Text, in markdown').fill('Written again.');
@@ -1819,7 +1828,7 @@ test('an edit left on a note that was deleted meanwhile is brought back as one o
   const { changes } = await portal(page);
   const was = concepts[BRANCHES];
   try {
-    await page.goto('/memory?note=%2Fpeople%2Fowner.md');
+    await page.goto('/x/pithagoras-understory/memory?note=%2Fpeople%2Fowner.md');
     await notes(page).getByRole('button', { name: /Branch Deployment/ }).click();
     await page.getByRole('button', { name: 'Edit the note' }).click();
     const form = page.getByRole('form', { name: 'Edit the note' });
@@ -1849,7 +1858,7 @@ test('an edit left on a note that was deleted meanwhile is brought back as one o
     expect(changes).toEqual([]);
 
     // Saved anyway, it is written again as it was typed.
-    await page.goto('/memory?note=%2Fpeople%2Fowner.md');
+    await page.goto('/x/pithagoras-understory/memory?note=%2Fpeople%2Fowner.md');
     await notes(page).getByRole('button', { name: /Branch Deployment/ }).click();
     concepts[BRANCHES] = was;
     await page.getByRole('button', { name: 'Edit the note' }).click();
@@ -1872,7 +1881,7 @@ test('a note reported deleted that the agent writes again says it changed, and o
   const { changes } = await portal(page);
   const was = concepts[BRANCHES];
   try {
-    await page.goto('/memory?note=%2Fdeployment%2Fbranches.md');
+    await page.goto('/x/pithagoras-understory/memory?note=%2Fdeployment%2Fbranches.md');
     await page.getByRole('button', { name: 'Edit the note' }).click();
     const form = page.getByRole('form', { name: 'Edit the note' });
     await form.getByLabel('Text, in markdown').fill('Mine.');
@@ -1899,7 +1908,7 @@ test('a note reported deleted that the agent writes again says it changed, and o
 
 test('an edit that was saved, cancelled or given up is not brought back', async ({ page }) => {
   const { changes } = await portal(page);
-  await page.goto('/memory?note=%2Fpeople%2Fowner.md');
+  await page.goto('/x/pithagoras-understory/memory?note=%2Fpeople%2Fowner.md');
   const form = page.getByRole('form', { name: 'Edit the note' });
   // The other note is shown before the page goes back: going back from a note that was never left is no leaving.
   const shown = () => expect(page.getByRole('article', { name: 'Branch Deployment on Test Host' })).toBeVisible();
@@ -1936,27 +1945,27 @@ test('an edit that was saved, cancelled or given up is not brought back', async 
 
 test('clearing the whole memory takes the edits of its notes with it', async ({ page }) => {
   await portal(page);
-  await page.goto('/memory?note=%2Fpeople%2Fowner.md');
+  await page.goto('/x/pithagoras-understory/memory?note=%2Fpeople%2Fowner.md');
   await page.getByRole('button', { name: 'Edit the note' }).click();
   await page.getByRole('form', { name: 'Edit the note' }).getByLabel('Text, in markdown').fill('Not saved, and then the memory is cleared.');
   await page.getByRole('button', { name: 'Clear the memory' }).click();
   await page.getByRole('alertdialog', { name: 'Clear the whole memory?' }).getByRole('button', { name: 'Clear the memory' }).click();
-  await expect(page).toHaveURL(/\/memory$/);
+  await expect(page).toHaveURL(/\/x\/pithagoras-understory\/memory$/);
   // A note of the same path turns up later, and is opened.
-  await page.evaluate(() => { history.pushState(null, '', '/memory?note=%2Fpeople%2Fowner.md'); window.dispatchEvent(new PopStateEvent('popstate')); });
+  await page.evaluate(() => { history.pushState(null, '', '/x/pithagoras-understory/memory?note=%2Fpeople%2Fowner.md'); window.dispatchEvent(new PopStateEvent('popstate')); });
   await expect(page.getByRole('article', { name: 'The owner' })).toBeVisible();
   await expect(page.getByRole('form', { name: 'Edit the note' })).toHaveCount(0);
 });
 
 test('deleting a note asks first, then shows what it broke and offers to put it right', async ({ page }) => {
   const { changes } = await portal(page);
-  await page.goto('/memory?note=%2Fpeople%2Fowner.md');
+  await page.goto('/x/pithagoras-understory/memory?note=%2Fpeople%2Fowner.md');
   await page.getByRole('button', { name: 'Delete the note' }).click();
   await page.getByRole('button', { name: 'Cancel' }).click();
   expect(changes).toEqual([]);
   await page.getByRole('button', { name: 'Delete the note' }).click();
   await page.getByRole('button', { name: 'Delete', exact: true }).click();
-  await expect(page).toHaveURL(/\/memory$/);
+  await expect(page).toHaveURL(/\/x\/pithagoras-understory\/memory$/);
   const after = page.getByRole('dialog', { name: 'The note is deleted' });
   await expect(after.getByText('The memory has 1 thing to put right.')).toBeVisible();
   await expect(after.getByText('/people/owner.md', { exact: true })).toBeVisible();
@@ -1970,21 +1979,21 @@ test('deleting a note asks first, then shows what it broke and offers to put it 
   await expect(after.getByText('Every link leads somewhere and every note is linked in.')).toBeVisible();
   // Nothing left for it: the model is not asked again.
   await expect(after.getByRole('button', { name: 'Repair with the model' })).toBeDisabled();
-  expect(changes.map((c) => `${c.method} ${c.path}`)).toEqual(['DELETE /people/owner.md', 'POST /api/memory/reindex', 'POST /api/memory/repair']);
+  expect(changes.map((c) => `${c.method} ${c.path}`)).toEqual(['DELETE /people/owner.md', `POST ${BASE}/reindex`, `POST ${BASE}/repair`]);
 });
 
 test("Understory's own index is not edited by hand, nor any note of one run elsewhere", async ({ page }) => {
   await portal(page);
-  await page.goto('/memory?note=%2Findex.md');
+  await page.goto('/x/pithagoras-understory/memory?note=%2Findex.md');
   await expect(page.getByRole('article', { name: 'index.md' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Edit the note' })).toHaveCount(0);
-  await page.goto('/memory?note=%2Fpeople%2Fowner.md');
+  await page.goto('/x/pithagoras-understory/memory?note=%2Fpeople%2Fowner.md');
   await expect(page.getByRole('button', { name: 'Edit the note' })).toBeVisible();
 });
 
 test('one run elsewhere is read only', async ({ page }) => {
   await portal(page, { writable: false });
-  await page.goto('/memory?note=%2Fpeople%2Fowner.md');
+  await page.goto('/x/pithagoras-understory/memory?note=%2Fpeople%2Fowner.md');
   await expect(page.getByRole('article', { name: 'The owner' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Edit the note' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Delete the note' })).toHaveCount(0);
@@ -1992,7 +2001,7 @@ test('one run elsewhere is read only', async ({ page }) => {
 
 test('the log can be cleared, after asking; the notes stay', async ({ page }) => {
   const { changes } = await portal(page);
-  await page.goto('/memory?view=log');
+  await page.goto('/x/pithagoras-understory/memory?view=log');
   const log = page.getByRole('region', { name: 'Changes to the memory' });
   await expect(log.locator('li')).toHaveCount(2);
   await page.getByRole('button', { name: 'Clear the log' }).click();
@@ -2000,36 +2009,36 @@ test('the log can be cleared, after asking; the notes stay', async ({ page }) =>
   await page.getByRole('button', { name: 'Clear it' }).click();
   await expect(log.getByText('Nothing has changed yet.')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Clear the log' })).toHaveCount(0);
-  expect(changes.map((c) => c.path)).toEqual(['/api/memory/clear-log']);
+  expect(changes.map((c) => c.path)).toEqual([`${BASE}/clear-log`]);
   await expect(page.getByRole('navigation', { name: 'Notes' }).getByRole('button', { name: /The owner/ })).toBeVisible();
 });
 
 test('one run elsewhere has no clearing of its log', async ({ page }) => {
   await portal(page, { writable: false });
-  await page.goto('/memory?view=log');
+  await page.goto('/x/pithagoras-understory/memory?view=log');
   await expect(page.getByRole('region', { name: 'Changes to the memory' }).locator('li')).toHaveCount(2);
   await expect(page.getByRole('button', { name: 'Clear the log' })).toHaveCount(0);
 });
 
 test('the whole memory can be cleared, after asking: no notes, an empty index and log', async ({ page }) => {
   const { changes } = await portal(page);
-  await page.goto('/memory?note=%2Fpeople%2Fowner.md');
+  await page.goto('/x/pithagoras-understory/memory?note=%2Fpeople%2Fowner.md');
   await page.getByRole('button', { name: 'Clear the memory' }).click();
   await expect(page.getByText(/The agent forgets everything it kept here/)).toBeVisible();
   await page.getByRole('button', { name: 'Cancel' }).click();
   expect(changes).toEqual([]);
   await page.getByRole('button', { name: 'Clear the memory' }).click();
   await page.getByRole('alertdialog', { name: 'Clear the whole memory?' }).getByRole('button', { name: 'Clear the memory' }).click();
-  await expect(page).toHaveURL(/\/memory$/);
+  await expect(page).toHaveURL(/\/x\/pithagoras-understory\/memory$/);
   const notes = page.getByRole('navigation', { name: 'Notes' });
   await expect(notes.getByRole('button', { name: /The owner/ })).toHaveCount(0);
   await expect(notes.getByRole('button', { name: 'log.md' })).toBeVisible();
-  expect(changes.map((c) => c.path)).toEqual(['/api/memory/wipe']);
+  expect(changes.map((c) => c.path)).toEqual([`${BASE}/wipe`]);
 });
 
 test('one run elsewhere cannot be cleared from here', async ({ page }) => {
   await portal(page, { writable: false });
-  await page.goto('/memory');
+  await page.goto('/x/pithagoras-understory/memory');
   await expect(page.getByRole('navigation', { name: 'Notes' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Clear the memory' })).toHaveCount(0);
 });
@@ -2050,7 +2059,7 @@ test('the librarian answers in a chat of its own, with its tool calls and links 
   const { chats, asked } = await portal(page, {
     librarian: [answering('Branches go out with [the script](/deployment/branches.md).', true), answering('Only the owner.'), answering('Fresh start.')],
   });
-  await page.goto('/memory');
+  await page.goto('/x/pithagoras-understory/memory');
   await page.getByRole('button', { name: 'Librarian' }).click();
   await expect(page).toHaveURL(/view=chat/);
   const log = page.getByRole('log', { name: 'Conversation with the librarian' });
@@ -2063,7 +2072,7 @@ test('the librarian answers in a chat of its own, with its tool calls and links 
   await expect(log.getByText(/Branches go out with/)).toBeVisible();
   expect(chats[0].map((m) => [m.role, m.parts[0].text])).toEqual([['user', 'How are branches deployed?']]);
   // It wrote or read with a tool: the notes beside it are read again.
-  await expect.poll(() => asked.filter((a) => a === '/api/memory/tree').length).toBeGreaterThan(1);
+  await expect.poll(() => asked.filter((a) => a === `${BASE}/tree`).length).toBeGreaterThan(1);
 
   // The conversation stays while a note from its answer is open, and the next question carries it.
   await log.getByRole('link', { name: 'the script' }).click();
@@ -2088,7 +2097,7 @@ test('the librarian answers in a chat of its own, with its tool calls and links 
 
 test('an answer under way can be stopped, and a failure of the librarian is said', async ({ page }) => {
   const { chats } = await portal(page, { librarian: [HANG, events({ type: 'start' }, { type: 'error', errorText: 'The model did not answer' }, '[DONE]')] });
-  await page.goto('/memory?view=chat');
+  await page.goto('/x/pithagoras-understory/memory?view=chat');
   await composer(page).fill('Hello?');
   await composer(page).press('Enter');
   await expect(page.getByText('The librarian is thinking…')).toBeVisible();
@@ -2105,9 +2114,9 @@ test('an answer under way can be stopped, and a failure of the librarian is said
 
 test('one run elsewhere has no librarian', async ({ page }) => {
   await portal(page, { writable: false });
-  await page.goto('/memory');
+  await page.goto('/x/pithagoras-understory/memory');
   await expect(page.getByRole('navigation', { name: 'Notes' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Librarian' })).toHaveCount(0);
-  await page.goto('/memory?view=chat');
+  await page.goto('/x/pithagoras-understory/memory?view=chat');
   await expect(page.getByText('Choose a note, or open the log or the graph.')).toBeVisible();
 });

@@ -44,7 +44,7 @@ export const SETTINGS_INDEX: SettingEntry[] = [
   { tab: "sandbox", title: msg("Sandbox"), words: "sandbox permissions read only secrets keys files isolate restrict trusted commands sudo user berechtigungen schlüssel" },
   { tab: "guard", title: msg("Guard"), words: "guard injection prompt injection taint untrusted security wächter schutz" },
   { tab: "guard", section: msg("Routines"), title: msg("Routine exemptions"), words: "routine exempt exemption rule push upload publish ausnahme" },
-  { tab: "guard", section: msg("Outside content"), title: msg("Trusted MCP servers"), words: "mcp server trust trusted outside content memory understory vertrauen" },
+  { tab: "guard", section: msg("Outside content"), title: msg("Trusted MCP servers"), words: "mcp server trust trusted outside content memory vertrauen" },
   { tab: "guard", section: msg("Sites the agent's tools may reach"), title: msg("Allowlist"), words: "allowlist allow site sites domain domains url address host website reach browser playwright navigate erlaubte domänen seiten adressen" },
   { tab: "guard", section: msg("Allowed once"), title: msg("Open approvals"), words: "approval approve one-off grant revoke freigabe widerrufen" },
   { tab: "guard", section: msg("Trusted results"), title: msg("Trusted results"), words: "trusted flagged result suspected injection untrust vertraut" },

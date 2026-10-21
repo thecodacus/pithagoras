@@ -213,8 +213,8 @@ test('a wizard that is answered and still not done is usable again, and not left
 
 test('MEMORY.md is said not to be read while something holds the agent\'s memory, and nothing is said while the file is the memory', async ({ page }) => {
   const memory = { name: 'MEMORY.md', exists: true, content: '# MEMORY.md\n', mtime: 1000 };
-  const note = /Not read while Understory is the agent's memory/;
-  await portal(page, { setup: { memory: 'extension', by: 'Understory', files: [memory] } });
+  const note = "Not read while Notebook is the agent's memory. It is kept, and read again once Notebook is switched off.";
+  await portal(page, { setup: { memory: 'extension', by: 'Notebook', files: [memory] } });
   await page.goto('/agents?agent=ada&tab=files');
   const main = page.getByRole('main');
   await main.getByRole('button', { name: 'MEMORY.md' }).click();

@@ -1,8 +1,8 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { LuLocateFixed, LuMinus, LuPlus } from "react-icons/lu";
-import { reducedMotion } from "../motion";
-import { layout3dKept, pick, project, Shake, turnAround, type Camera, type Projected, type SkyTheme } from "../memory-sky";
-import { t, tp } from "../i18n";
+import { reducedMotion } from "./helpers";
+import { layout3dKept, pick, project, Shake, turnAround, type Camera, type Projected, type SkyTheme } from "./memory-sky";
+import { t, tp } from "../portal";
 import { LOOKS, rgbOf, type Gesture, type GraphNote, type Scene } from "./sky-looks";
 
 export type { GraphNote } from "./sky-looks";

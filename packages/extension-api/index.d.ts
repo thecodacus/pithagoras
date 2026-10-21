@@ -402,8 +402,12 @@ export interface FollowBottom<T extends HTMLElement> {
  * an extension draws is made of what the portal's pages are made of.
  */
 export interface Ui {
-  /** Markdown as the conversation draws it: code, tables, diagrams, and no picture from another site. */
-  Markdown: ComponentType<{ children: string; animated?: boolean; className?: string }>;
+  /**
+   * Markdown as the conversation draws it: code, tables, diagrams, and no picture from another site. A link is a
+   * button that asks before it opens the address in a new tab; `components.a`, where given, draws the links instead
+   * (one to a page of the extension's own, opened there).
+   */
+  Markdown: ComponentType<{ children: string; animated?: boolean; className?: string; components?: { a?: ComponentType<{ href?: string; children?: ReactNode }> } }>;
   Select<T extends string | number = string>(props: {
     value: T;
     onChange: (value: T) => void;

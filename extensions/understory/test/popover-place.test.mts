@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { placePopover } from "../core/web/src/popover-place.ts";
+import { placePopover } from "../src/web/popover-place.ts";
 
 const view = { width: 390, height: 800 };
 const size = { width: 232, height: 150 };

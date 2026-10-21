@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { insidePath, linkNotes } from "../core/web/src/memory-links.ts";
+import { insidePath, linkNotes } from "../src/web/memory-links.ts";
 
 test("a link inside the memory is read from the note it is in; a folder's is to its index", () => {
   assert.equal(insidePath("../people/owner.md", "/deployment/branches.md"), "/people/owner.md");
@@ -16,12 +16,12 @@ test("a link inside the memory is read from the note it is in; a folder's is to 
 test("links to notes are made links to the Memory page; others are left as they were", () => {
   assert.equal(
     linkNotes('See [the owner](../people/owner.md "who") and [docs](https://x.org) and [deployment](deployment/).', "/deployment/branches.md"),
-    'See [the owner](/memory?note=%2Fpeople%2Fowner.md "who") and [docs](https://x.org) and [deployment](/memory?note=%2Fdeployment%2Fdeployment%2Findex.md).',
+    'See [the owner](/x/pithagoras-understory/memory?note=%2Fpeople%2Fowner.md "who") and [docs](https://x.org) and [deployment](/x/pithagoras-understory/memory?note=%2Fdeployment%2Fdeployment%2Findex.md).',
   );
 });
 
 test("a link with a % that is not an escape is taken as written, and breaks nothing", () => {
   assert.equal(insidePath("stats/100%.md", "/"), "/stats/100%.md");
   assert.equal(insidePath("a%zz.md", "/x/y.md"), "/x/a%zz.md");
-  assert.match(linkNotes("[growth](stats/100%.md)", "/"), /\(\/memory\?note=/);
+  assert.match(linkNotes("[growth](stats/100%.md)", "/"), /\(\/x\/pithagoras-understory\/memory\?note=/);
 });

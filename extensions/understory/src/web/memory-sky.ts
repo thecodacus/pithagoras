@@ -1,7 +1,7 @@
 /**
  * The memory's graph in 3D: where its notes go in space, how a camera that
  * turns around them sees them, and which note is under the pointer. Kept apart
- * from the drawing (components/MemorySky.tsx) so the geometry can be tested
+ * from the drawing (MemorySky.tsx) so the geometry can be tested
  * without a browser.
  *
  * The layout is a force layout in three directions: notes push each other

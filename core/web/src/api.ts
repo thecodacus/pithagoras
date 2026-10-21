@@ -1,7 +1,6 @@
 import { t } from "./i18n";
 import { samplesWav } from "./voice";
 import type { OrbStyle } from "../../server/src/orb-style";
-import type { ChatMessage } from "./memory-chat";
 export type SessionStatus = "idle" | "running" | "error" | "interrupted";
 
 export interface Session {
@@ -204,8 +203,8 @@ export interface Project {
   hasTools?: boolean;
   /** The agent whose soul, user and memory its chats carry: its id. Left out for a blank slate, which has only the instructions. */
   agent?: string;
-  /** Set where the project does without Understory as its memory. */
-  understoryOff?: boolean;
+  /** Set where the project does without the memory an extension holds, and its chats read the agent's MEMORY.md. */
+  memoryOff?: boolean;
   /** How many chats work in it, and when one last moved. */
   sessions: number;
   lastActive: string | null;
@@ -214,8 +213,10 @@ export interface Project {
 /** Who a project's chats are with: see /api/projects/:name/agent. */
 export interface ProjectAgent {
   agent: string | null;
-  understory: boolean;
-  understoryAvailable: boolean;
+  /** The memory an extension holds is the project's (see GET /api/features/flags): not where it is off, nor for a blank slate. */
+  memory: boolean;
+  /** An extension holds the agent's memory now. */
+  memoryAvailable: boolean;
 }
 
 /** What a delete would lose that only the folder holds: nothing else has a copy of these. */
@@ -517,17 +518,17 @@ export const api = {
     ),
   /**
    * `toolsOff`: the tools its chats start with off, as for setProjectTools. `toolsError` says the project was made without them.
-   * `link`: the agent it works with (none is a blank slate) and whether Understory is its memory (the default where the portal has it).
+   * `link`: the agent it works with (none is a blank slate) and whether the memory an extension holds is its memory (the default where one holds it).
    */
-  createProject: (name: string, instructions?: string, toolsOff?: string[], link?: { agent?: string; understory?: boolean }) =>
+  createProject: (name: string, instructions?: string, toolsOff?: string[], link?: { agent?: string; memory?: boolean }) =>
     json<Project & { toolsError?: string }>("/api/projects", {
       method: "POST",
       body: JSON.stringify({ name, instructions, toolsOff, ...link }),
     }),
-  /** The agent a project works with (null: none), whether Understory is its memory, and whether the portal has Understory at all. */
+  /** The agent a project works with (null: none), whether the memory an extension holds is its memory, and whether one holds it at all. */
   projectAgent: (name: string) => json<ProjectAgent>(`/api/projects/${encodeURIComponent(name)}/agent`),
   /** Either may be left out and then stays; `agent: null` makes the project a blank slate. */
-  setProjectAgent: (name: string, change: { agent?: string | null; understory?: boolean }) =>
+  setProjectAgent: (name: string, change: { agent?: string | null; memory?: boolean }) =>
     json<ProjectAgent>(`/api/projects/${encodeURIComponent(name)}/agent`, { method: "PUT", body: JSON.stringify(change) }),
   projectContents: (name: string) => json<ProjectContents>(`/api/projects/${encodeURIComponent(name)}`),
   projectInstructions: (name: string) =>
@@ -742,65 +743,16 @@ export const api = {
     json<{ ok: true }>(`/api/skills/${encodeURIComponent(name)}`, { method: "DELETE" }),
 
   people: () => json<{ people: Person[] }>("/api/people"),
-  features: () => json<Features>("/api/features"),
-  /** The subagent tool alone: nothing of Understory or Docker asked for. */
+  /** The subagent tool. */
   subagentFeature: () => json<{ subagent: SubagentFeature }>("/api/features/subagent"),
-  /** Only whether each is on — cheap, for the sidebar and the chat's menus. */
-  featureFlags: () => json<{ subagent: { enabled: boolean }; understory: { enabled: boolean } }>("/api/features/flags"),
+  /** Only whether the subagent tool is on, and what holds the agent's memory, by its label — cheap, for the chat's menus and the Projects page. */
+  featureFlags: () => json<{ subagent: { enabled: boolean }; memory: { held: boolean; by: string | null } }>("/api/features/flags"),
   /** What a chat's subagents run on: its own choice (null follows `default`). */
   subagentModel: (id: string) => json<{ model: string | null; default: string }>(`/api/sessions/${id}/subagent-model`),
   setSubagentModel: (id: string, model: string | null) =>
     json<{ model: string | null; default: string }>(`/api/sessions/${id}/subagent-model`, { method: "PUT", body: JSON.stringify({ model }) }),
-  memoryTree: () => json<MemoryNode>("/api/memory/tree"),
-  memoryConcept: (path: string) => json<MemoryConcept>(`/api/memory/concept?${new URLSearchParams({ path })}`),
-  memorySearch: (q: string) => json<MemoryHit[]>(`/api/memory/search?${new URLSearchParams({ q })}`),
-  memoryLog: () => json<MemoryChange[]>("/api/memory/log"),
-  memoryGraph: () => json<MemoryGraph>("/api/memory/graph"),
-  memoryTraces: () => json<MemoryTrace[]>("/api/memory/traces"),
-  /** One run with its steps, and the full paths of the notes each touched. */
-  memoryTrace: (id: string) => json<MemoryTraceRun>(`/api/memory/trace?${new URLSearchParams({ id })}`),
-  memoryValidate: () => json<MemoryValidation>("/api/memory/validate"),
-  /** Whether notes can be changed here: only in the Understory the portal runs. */
-  memoryHealth: () => json<{ writable: boolean; health?: MemoryHealth }>("/api/memory/health"),
-  saveMemoryNote: (path: string, frontmatter: Record<string, unknown>, body: string) =>
-    json<{ concept: MemoryConcept; health: MemoryHealth }>("/api/memory/concept", { method: "PUT", body: JSON.stringify({ path, frontmatter, body }) }),
-  deleteMemoryNote: (path: string) =>
-    json<{ health: MemoryHealth }>(`/api/memory/concept?${new URLSearchParams({ path })}`, { method: "DELETE" }),
-  reindexMemory: () => json<{ pruned: string[]; reindexed: number; health: MemoryHealth }>("/api/memory/reindex", { method: "POST" }),
-  /** The model mends links to nothing and wires in orphans; `ran` is false when there were none. */
-  repairMemory: () =>
-    json<{ ran: boolean; reason?: string; summary?: string; filesChanged?: string[]; health: MemoryHealth }>("/api/memory/repair", { method: "POST" }),
-  clearMemoryLog: () => json<{ health: MemoryHealth }>("/api/memory/clear-log", { method: "POST" }),
-  /** Every note gone, the index and log empty: the memory from nothing. */
-  wipeMemory: () => json<{ health: MemoryHealth }>("/api/memory/wipe", { method: "POST" }),
-  /** The librarian's answer to a conversation, as the stream it comes in: the caller reads the body. */
-  askLibrarian: async (messages: ChatMessage[], signal: AbortSignal): Promise<Response> => {
-    const res = await send("/api/memory/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ messages }), signal });
-    if (!res.ok || !res.body) {
-      const body = await res.json().catch(() => ({}));
-      throw new ApiError(body.error || `HTTP ${res.status}`, res.status, body);
-    }
-    return res;
-  },
   setSubagentFeature: (patch: { enabled?: boolean; mode?: SubagentMode; maxParallel?: number; model?: string }) =>
     json<{ subagent: SubagentFeature; reloaded: number; waiting: number }>("/api/features/subagent", {
-      method: "PUT",
-      body: JSON.stringify(patch),
-    }),
-  setUnderstoryConfig: (config: { llm: UnderstoryLlmChoice; dreamInterval: string; dreamAt: string }) =>
-    json<{ understory: UnderstoryFeature }>("/api/features/understory/config", { method: "PUT", body: JSON.stringify(config) }),
-  dreamUnderstory: () => json<{ understory: UnderstoryFeature }>("/api/features/understory/dream", { method: "POST" }),
-  installUnderstory: () =>
-    json<{ understory: UnderstoryFeature; reloaded: number; waiting: number }>("/api/features/understory/install", { method: "POST" }),
-  understoryAction: (action: "start" | "stop") =>
-    json<{ understory: UnderstoryFeature }>(`/api/features/understory/${action}`, { method: "POST" }),
-  removeUnderstory: (forgetMemory = false) =>
-    json<{ understory: UnderstoryFeature; reloaded: number; waiting: number }>(
-      `/api/features/understory/install${forgetMemory ? "?memory=forget" : ""}`,
-      { method: "DELETE" },
-    ),
-  setUnderstoryFeature: (patch: { enabled: boolean; url?: string }) =>
-    json<{ understory: UnderstoryFeature; reloaded: number; waiting: number }>("/api/features/understory", {
       method: "PUT",
       body: JSON.stringify(patch),
     }),
@@ -1526,137 +1478,6 @@ export interface SubagentFeature {
   maxParallelLimit?: number;
   /** What they run on unless a chat says: "auto", the model the chat is on, or "provider/model". */
   model: string;
-}
-
-/** The model that keeps Understory's memory, as the page is told it: never the key. */
-export type UnderstoryLlm =
-  | { source: "auto" }
-  | { source: "provider"; provider: string; model: string }
-  | { source: "custom"; baseUrl: string; model: string; format: "openai" | "anthropic"; hasKey?: boolean };
-
-/** What the page sends for it: a custom key only when it is being changed. */
-export type UnderstoryLlmChoice =
-  | { source: "auto" }
-  | { source: "provider"; provider: string; model: string }
-  | { source: "custom"; baseUrl: string; model: string; format: "openai" | "anthropic"; apiKey?: string };
-
-/** The Understory the portal runs itself, in a container of its own. */
-export interface ManagedUnderstory {
-  /** The portal can reach Docker. */
-  available: boolean;
-  image: boolean;
-  /** "foreign": a container by that name the portal did not make, which it leaves alone. */
-  container: "absent" | "stopped" | "running" | "foreign";
-  pulling: { active: boolean; line: string; error?: string };
-  url: string;
-  /** `dreamAt`: once a day at this time ("03:00"), started by the portal; wins over the interval. */
-  config: { llm: UnderstoryLlm; dreamInterval: string; dreamAt: string };
-  /** "The chat's model" can be offered: not while the portal serves its own TLS. */
-  autoPossible: boolean;
-  /** Providers set up here that Understory can be pointed at. */
-  providers: { id: string; models: string[] }[];
-  /** A pass the portal started is running now. */
-  dreaming: boolean;
-  lastDream: { at: string; ok: boolean; ran?: boolean; said: string } | null;
-  nextDream: string | null;
-  /** The portal's time zone, which a set time is in. */
-  timeZone: string;
-}
-
-/** Understory as the agent's memory, over MCP. */
-export interface UnderstoryFeature {
-  enabled: boolean;
-  url: string;
-  /** MEMORY_UNDERSTORY_AUTH_TOKEN is set for the portal. */
-  tokenSet: boolean;
-  adapterInstalled: boolean;
-  /** Something answers at the address. */
-  reachable: boolean;
-  managed: ManagedUnderstory;
-  configError?: string;
-}
-
-/** A folder or a note in Understory's memory bundle. `reserved` are its own index and log. */
-export interface MemoryNode {
-  name: string;
-  path: string;
-  kind: "directory" | "concept" | "reserved";
-  type?: string;
-  title?: string;
-  description?: string;
-  children?: MemoryNode[];
-}
-
-export interface MemoryConcept {
-  path: string;
-  frontmatter: { type?: string; title?: string; description?: string; tags?: string[]; timestamp?: string; [key: string]: unknown };
-  body: string;
-}
-
-export interface MemoryHit {
-  path: string;
-  type?: string;
-  title?: string;
-  description?: string;
-  snippet?: string;
-}
-
-export interface MemoryChange {
-  date: string;
-  action: string;
-  summary: string;
-}
-
-export interface MemoryGraph {
-  nodes: { path: string; title?: string; type?: string; description?: string; links: number }[];
-  edges: { source: string; target: string }[];
-}
-
-/** A run of Understory's own agent over the memory: a question, a change it was asked for, or a chat. */
-export interface MemoryTrace {
-  id: string;
-  kind: string;
-  input: string;
-  startedAt: string;
-  durationMs?: number;
-  notation?: string;
-  usage?: { inputTokens?: number; outputTokens?: number };
-}
-
-/** One tool the agent used in a run: what it was (`search_knowledge`, `read_concept`, `write_concept`, …), and the full paths of the notes it found, read or wrote. */
-export interface MemoryTraceStep {
-  seq: number;
-  tool: string;
-  summary: string;
-  paths: string[];
-  /** A step that changed the memory. */
-  write?: boolean;
-}
-
-/** A run with its steps, which the list of runs leaves out. */
-export interface MemoryTraceRun extends MemoryTrace {
-  steps: MemoryTraceStep[];
-  outcome?: string;
-}
-
-/** What a change may have left behind in the memory: links to nowhere, notes nothing links to, what the format says. */
-export interface MemoryHealth {
-  healthy: boolean;
-  orphans: { path: string; title?: string }[];
-  brokenLinks: { path: string; target: string }[];
-  issues: { path: string; severity: string; message: string }[];
-}
-
-export interface MemoryValidation {
-  conformant: boolean;
-  conceptCount?: number;
-  directoryCount?: number;
-  issues: { path: string; severity: "error" | "warning"; message: string }[];
-}
-
-export interface Features {
-  subagent: SubagentFeature;
-  understory: UnderstoryFeature;
 }
 
 /** A skill an agent wrote for itself, in its home's skills folder. */

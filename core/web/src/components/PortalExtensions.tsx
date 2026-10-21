@@ -1,7 +1,7 @@
 import { VoiceAddon } from "./VoiceAddon";
-import { MemoryAddon, SubagentAddon } from "./FeatureAddons";
+import { SubagentAddon } from "./FeatureAddons";
 import { useId, useState } from "react";
-import { LuBot, LuBrain, LuMic } from "react-icons/lu";
+import { LuBot, LuMic } from "react-icons/lu";
 import { msg, t } from "../i18n";
 import { tabKeys } from "../tab-keys";
 
@@ -9,7 +9,6 @@ import { tabKeys } from "../tab-keys";
 const addons = [
   { id: 'voice', label: msg('Voice'), Icon: LuMic },
   { id: 'subagents', label: msg('Subagents'), Icon: LuBot },
-  { id: 'memory', label: msg('Memory'), Icon: LuBrain },
 ] as const;
 type Addon = typeof addons[number]['id'];
 
@@ -41,9 +40,7 @@ export function PortalExtensions({ onError }: { onError: (e: string) => void }) 
     </div>
     {addons.map(({ id: addon }) => <div key={addon} role="tabpanel" id={`${id}-${addon}-panel`}
       aria-labelledby={`${id}-${addon}-tab`} hidden={selected !== addon}>
-      {visited.includes(addon) && (addon === 'voice' ? <VoiceAddon onError={onError} />
-        : addon === 'subagents' ? <SubagentAddon onError={onError} />
-        : <MemoryAddon onError={onError} />)}
+      {visited.includes(addon) && (addon === 'voice' ? <VoiceAddon onError={onError} /> : <SubagentAddon onError={onError} />)}
     </div>)}
   </div>;
 }

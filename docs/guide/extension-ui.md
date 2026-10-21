@@ -261,7 +261,7 @@ flourish of your own under it, and it follows the switch as the portal's do:
 
 | | |
 | --- | --- |
-| `Markdown` | Markdown as the conversation draws it |
+| `Markdown` | Markdown as the conversation draws it. A link is a button that asks before it opens the address in a new tab; `components={{ a }}` draws the links instead, with the `href` and `children` of each (one to a page of the extension's own, opened there) |
 | `Select`, `Switch`, `SwitchRow`, `Segments`, `Field` | Controls and their labels |
 | `PageHeader`, `Stat`, `Section`, `CollapsibleSection` | The card at the top of a page, and sections under it |
 | `Empty`, `ErrorBanner`, `WarnBanner`, `LoadFailed` | Nothing to show; something wrong; could not be fetched, with a retry |

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { applyChunk, eventReader, history, textOf, usedTools, type ChatMessage, type Turn } from "../core/web/src/memory-chat.ts";
+import { applyChunk, eventReader, history, textOf, usedTools, type ChatMessage, type Turn } from "../src/web/memory-chat.ts";
 
 const sse = (...chunks: unknown[]) => chunks.map((c) => `data: ${typeof c === "string" ? c : JSON.stringify(c)}\n\n`).join("");
 const run = (stream: string, pieces = 1): Turn => {
