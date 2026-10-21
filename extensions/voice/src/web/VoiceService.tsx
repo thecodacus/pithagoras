@@ -8,6 +8,7 @@ import { msg, portal, t } from "../portal";
 /** What the voice service is doing, as its badge says it. */
 const INSTALL_STATE: Record<string, string> = {
   unavailable: msg("unavailable"),
+  installing: msg("installing"),
   starting: msg("starting"),
   stopped: msg("stopped"),
   failed: msg("failed"),
@@ -73,11 +74,15 @@ export function VoiceService() {
     setActionBusy(true);
     // Whatever the answer, the service may have gone as far as removing the container: what the page shows is read again either way.
     try { await api.uninstall(removeData.current); } catch (e) { setFailure((e as Error).message); }
+    // Gone, it is no longer voice mode's source.
+    setChosen(false);
     try { setInstall(await api.state()); setPicked(null); } catch { /* the next poll shows it */ }
     setActionBusy(false);
   };
   const [connecting, setConnecting] = useState(false);
-  const connect = async () => { setConnecting(true); try { await api.connect(); } catch (e) { setFailure((e as Error).message); } finally { setConnecting(false); } };
+  // Use for voice mode worked: said here, as what voice mode listens and speaks through is shown in Settings → Add-ons → Voice, not on this page.
+  const [chosen, setChosen] = useState(false);
+  const connect = async () => { setConnecting(true); try { await api.connect(); setChosen(true); } catch (e) { setFailure((e as Error).message); } finally { setConnecting(false); } };
   const setLazyLoad = async (on: boolean) => {
     setInstall(current => current && { ...current, lazyLoad: on });
     try { await api.setLazyLoad(on); } catch (e) { setFailure((e as Error).message); void poll(); }
@@ -100,6 +105,7 @@ export function VoiceService() {
       {install?.available && install.state!=='absent' && <button disabled={actionBusy || install.busy} className="rounded-lg border border-line px-3 py-1.5 text-xs text-fg-muted transition hover:bg-danger/10 hover:text-danger disabled:opacity-40" onClick={()=>void uninstall()}>{t("Uninstall")}</button>}
       {install?.state==='running' && <button disabled={connecting} className="rounded-lg bg-accent/12 px-3 py-1.5 text-xs text-accent" onClick={()=>void connect()}>{t("Use for voice mode")}</button>}
     </div>
+    {chosen && install?.state==='running' && <p role="status" className="text-xs text-fg-faint">{t("Voice mode listens and speaks through the voice service now.")}</p>}
     {install?.error && <p role="alert" className="text-xs text-danger">{install.error}</p>}
     {install?.progress && <details open={install.state==='starting'||install.state==='failed'||install.busy}><summary className="text-xs cursor-pointer text-fg-muted">{t("Setup log")}</summary><pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-all text-[10px] text-fg-faint" aria-label={t("Voice setup log")}>{install.progress}</pre></details>}
     <p className="text-xs text-fg-faint">{t("Stopping releases GPU memory and keeps your models.")}</p>
