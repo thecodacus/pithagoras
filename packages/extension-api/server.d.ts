@@ -3,7 +3,12 @@
  * default export is called with, in the portal's own process. The portal
  * implements exactly this, and is checked against it when it is built.
  *
- * See docs/guide/extension-ui.md, "The server half".
+ * An error of its code that nothing catches, a promise of its that rejects with
+ * nobody to hear it, and a call of `process.exit()` from it, are its crash: it is
+ * stopped and held off until another version is installed or it is switched off
+ * and on, and the portal goes on.
+ *
+ * See docs/guide/extension-ui.md, "The server half" and "When the server half crashes".
  */
 import type { IncomingMessage } from "node:http";
 import type { Duplex } from "node:stream";
@@ -296,6 +301,7 @@ export interface ServerPortal {
   extension: string;
   /** How pi is run here: "host" is in the portal's own process, where a chat's pi and this module can reach each other. */
   executor: string;
+  /** A line in the portal's log, kept with the extension's own lines: what Settings → Extensions shows of it should it crash. */
   log(text: string): void;
   /**
    * What this extension gives the extensions that build on it, those that name it in `pithagoras.requires` or
@@ -513,7 +519,9 @@ export interface ServerPortal {
      * pi as it starts, so its tools hold what this module holds. Only where pi
      * runs in the portal's own process. A tool registered with
      * `offByDefault: true` is off in every chat until somebody switches it on,
-     * and one with `guard` is held to what it declares: see ToolGuard.
+     * and one with `guard` is held to what it declares: see ToolGuard. Should
+     * this server half crash while a tool's call is running, the call ends at
+     * once with an error that says so, with the half's last lines.
      */
     extend(factory: (pi: any, chat: Chat) => void): void;
     /**
