@@ -71,6 +71,7 @@ import { modelTraits } from "../model-traits";
 import { languageChoice, languages, msg, setLanguage, t, tp, tx, useLanguage, type LanguageChoice } from "../i18n";
 import { ErrorBoundary, PartFailed } from "./ErrorBoundary";
 import { useSlot, type Registered } from "../extensions/slots";
+import { failedToDraw } from "../extensions/loader";
 import { translate } from "../extensions/strings";
 import { SkeletonGroup } from "./Skeleton";
 import { useFlash } from "../use-flash";
@@ -1253,7 +1254,7 @@ function ExtensionPanel({
       {/* The package's own page, where it brought one, above what the portal found for it. One that fails to draw says so, and the fields stay. */}
       {settingsPages.filter((page) => page.extension === ext.name).map((page) => (
         <div key={page.key} className="mb-5" data-extension={page.extension}>
-          <ErrorBoundary resetKey={page.key} fallback={(error) => <PartFailed error={error} />}>
+          <ErrorBoundary resetKey={page.key} fallback={(error) => <PartFailed error={error} />} onError={failedToDraw(page.extension)}>
             <page.component />
           </ErrorBoundary>
         </div>

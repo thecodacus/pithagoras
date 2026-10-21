@@ -46,10 +46,17 @@ export type { Portal } from "@pithagoras/extension-api";
 type Loaded = { stamp: string; leave: () => void };
 
 const loaded = new Map<string, Loaded>();
+/**
+ * The revision of each extension's browser half in the page, by its name, from before its module is called: what it
+ * draws can fail before that call has returned. What a failure of it is told to the portal under.
+ */
+const revisions = new Map<string, string | undefined>();
 /** Why an extension's browser half is not in the page, by its package's name. */
 let failures: Readonly<Record<string, string>> = {};
 /** Why an extension's server half is not running, as the portal says. */
 let serverFailures: Readonly<Record<string, string>> = {};
+/** Why an extension's browser half failed in a page, this one or another, to load or to draw, as the portal was told. */
+let clientFailures: Readonly<Record<string, string>> = {};
 /** Whether the list has been gone through once: before that, an entry not there may only not be there yet. */
 let settled = false;
 const watchers = new Set<() => void>();
@@ -197,6 +204,7 @@ async function activate(ext: ExtensionUi, told: Promise<void>[]): Promise<void> 
   try {
     // The themes its package.json names need no module: a package may be nothing but themes.
     for (const theme of ext.themes ?? []) themesOff.push(registerTheme(ext.name, theme));
+    revisions.set(ext.name, ext.rev);
     if (entry) await within(LOAD_MS, load(entry), "loading");
     loaded.set(ext.name, { stamp: stamp(ext), leave });
     if (!entry) return;
@@ -208,6 +216,7 @@ async function activate(ext: ExtensionUi, told: Promise<void>[]): Promise<void> 
     leaveModule();
     failures = { ...failures, [ext.name]: (e as Error)?.message || String(e) };
     console.error(`[extensions] ${ext.name} could not be loaded:`, e);
+    tell(ext.name, ext.rev, failures[ext.name]!);
     // Held as failed, under a stamp nothing has: its themes are still there to choose, and it is tried again the next time what is installed is gone through.
     loaded.set(ext.name, { stamp: "", leave });
   }
@@ -278,6 +287,7 @@ async function sync(): Promise<void> {
     }
     failures = {};
     serverFailures = Object.fromEntries(extensions.filter((ext) => ext.serverError).map((ext) => [ext.name, ext.serverError!]));
+    clientFailures = Object.fromEntries(extensions.filter((ext) => ext.clientError).map((ext) => [ext.name, ext.clientError!]));
     onlyWaitFor(extensions.filter((ext) => ext.entry).map((ext) => ext.name));
     rankExtensions(extensions.map((ext) => ext.name));
     // All at once: one that is slow, or has files of its own to fetch, holds up none of the others.
@@ -303,6 +313,33 @@ export function loadExtensions(): Promise<void> {
   return (queue = queue.then(sync));
 }
 
+/**
+ * What this page last told the portal had failed of each extension, by its name: a part that is drawn many times
+ * over (a call's card, in a long conversation) and fails each time is told once.
+ */
+const toldOf = new Map<string, string>();
+
+/**
+ * Tell the portal that the browser half of `name`, at revision `rev`, failed in this page: for Settings →
+ * Extensions in every page, and for whatever else asks the portal how the extension stands.
+ */
+function tell(name: string, rev: string | undefined, error: string): void {
+  if (!rev || toldOf.get(name) === `${rev}\n${error}`) return;
+  toldOf.set(name, `${rev}\n${error}`);
+  api.extensionFailed(name, rev, error).catch((e) => console.error(`[extensions] could not tell the portal that ${name} failed:`, e));
+}
+
+/**
+ * What the error boundary a part of the extension `name` is drawn in does when the part fails to draw: says so
+ * here at once, and tells the portal.
+ */
+export const failedToDraw = (name: string) => (e: Error) => {
+  const error = e?.message || String(e);
+  clientFailures = { ...clientFailures, [name]: error };
+  changed();
+  tell(name, revisions.get(name), error);
+};
+
 let started = false;
 /**
  * Load them, and from then on follow what is installed. Once per page load:
@@ -323,11 +360,20 @@ function watch(watcher: () => void) {
   return () => void watchers.delete(watcher);
 }
 
-/** Whether the installed extensions have been gone through, and why any of them is not in the page. */
-export function useExtensions(): { settled: boolean; failures: Readonly<Record<string, string>>; serverFailures: Readonly<Record<string, string>> } {
+/**
+ * Whether the installed extensions have been gone through, why any of them is not in the page, and why any failed
+ * in a page, this one or another.
+ */
+export function useExtensions(): {
+  settled: boolean;
+  failures: Readonly<Record<string, string>>;
+  serverFailures: Readonly<Record<string, string>>;
+  clientFailures: Readonly<Record<string, string>>;
+} {
   return {
     settled: useSyncExternalStore(watch, () => settled),
     failures: useSyncExternalStore(watch, () => failures),
     serverFailures: useSyncExternalStore(watch, () => serverFailures),
+    clientFailures: useSyncExternalStore(watch, () => clientFailures),
   };
 }

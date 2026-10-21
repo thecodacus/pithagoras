@@ -132,8 +132,9 @@ export function ExtensionsPanel({
   const [busy, setBusy] = useState<string | null>(null);
   // Which package an install of more than one has come to.
   const [step, setStep] = useState<InstallStep | null>(null);
-  // Why a package's interface is not in the page, or its server half not running, where it brings one: see extensions/loader.ts.
-  const { failures, serverFailures } = useExtensions();
+  // Why a package's interface is not in the page, or failed in a page (this one or another), or its server half is not
+  // running, where it brings one: see extensions/loader.ts.
+  const { failures, clientFailures, serverFailures } = useExtensions();
   const ownPages = useSlot("settings.page");
   // The same, readable by a second Enter that comes before the draw.
   const busyRef = useRef(false);
@@ -335,10 +336,16 @@ export function ExtensionsPanel({
                       )}
                       {/* Said where it is not the usual one: a package a project brings has no switch here, and this is why. */}
                       {ext.scope && !/^user/i.test(ext.scope) && <span className={pillCls}>{ext.scope}</span>}
-                      {failures[ext.name] && (
+                      {failures[ext.name] ? (
                         <p role="alert" className="basis-full break-words text-xs text-warn">
                           {t("Its interface could not be loaded: {reason}", { reason: failures[ext.name] })}
                         </p>
+                      ) : (
+                        clientFailures[ext.name] && (
+                          <p role="alert" className="basis-full break-words text-xs text-warn">
+                            {t("Its interface failed in a page: {reason}", { reason: clientFailures[ext.name] })}
+                          </p>
+                        )
                       )}
                       {serverFailures[ext.name] && (
                         <p role="alert" className="basis-full break-words text-xs text-warn">

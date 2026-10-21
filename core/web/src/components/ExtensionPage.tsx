@@ -1,5 +1,5 @@
 import { useSlot } from "../extensions/slots";
-import { useExtensions } from "../extensions/loader";
+import { failedToDraw, useExtensions } from "../extensions/loader";
 import { ErrorBoundary, PartFailed } from "./ErrorBoundary";
 import { t } from "../i18n";
 
@@ -24,7 +24,7 @@ export function ExtensionPage({ entryKey }: { entryKey: string }) {
   return (
     <div className="extension-page min-h-0 flex-1 overflow-y-auto" data-extension={entry.extension}>
       {/* An extension's page failing to draw takes down that page, not the portal. */}
-      <ErrorBoundary resetKey={entry.key} fallback={(error) => <div className="p-6"><PartFailed error={error} /></div>}>
+      <ErrorBoundary resetKey={entry.key} fallback={(error) => <div className="p-6"><PartFailed error={error} /></div>} onError={failedToDraw(entry.extension)}>
         <Page />
       </ErrorBoundary>
     </div>

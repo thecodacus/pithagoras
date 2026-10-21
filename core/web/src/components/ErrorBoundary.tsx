@@ -10,9 +10,9 @@ import { primarySmCls } from "./SettingsUi";
  * blank: the sidebar stays, the other pages still open, and this one can be
  * tried again. `resetKey` changing — another page, another chat — starts over.
  * `fallback` is what is shown instead of the page's own message, for what is not
- * a page.
+ * a page. `onError` is told of each failure as it is caught.
  */
-export class ErrorBoundary extends Component<{ resetKey: string; fallback?: (error: Error) => ReactNode; children: ReactNode }, { error: Error | null; key: string }> {
+export class ErrorBoundary extends Component<{ resetKey: string; fallback?: (error: Error) => ReactNode; onError?: (error: Error) => void; children: ReactNode }, { error: Error | null; key: string }> {
   state = { error: null as Error | null, key: this.props.resetKey };
 
   static getDerivedStateFromError(error: Error) {
@@ -25,6 +25,7 @@ export class ErrorBoundary extends Component<{ resetKey: string; fallback?: (err
 
   componentDidCatch(error: Error) {
     console.error("[portal] a page failed to draw:", error);
+    this.props.onError?.(error);
   }
 
   render() {

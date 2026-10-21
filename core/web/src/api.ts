@@ -332,7 +332,11 @@ export interface ExtensionUi {
   version?: string;
   /** Absent for a package that has only a server half. */
   entry?: string;
+  /** The revision of its browser half, which `entry` and `style` carry: what a failure of it is told to the portal under. */
+  rev?: string;
   style?: string;
+  /** Why its browser half failed in a page, this one or another, to load or to draw, while that revision is the one installed. */
+  clientError?: string;
   /** The files its module imports along with itself, to be asked for at once rather than one level at a time. */
   preload?: string[];
   /** Where its server half's own routes are, when it has one; why it is not running, when it could not be started. */
@@ -1144,6 +1148,9 @@ export const api = {
     changesExtensions(json<{ ok: true; output: string }>("/api/packages/update", { method: "POST" })),
   /** The installed extensions that bring an interface: see extensions/loader.ts. */
   extensionUi: () => json<{ extensions: ExtensionUi[] }>("/api/extension-ui"),
+  /** Tells the portal that an extension's browser half, at revision `rev`, failed in this page: its `clientError` from then on. */
+  extensionFailed: (name: string, rev: string, error: string) =>
+    json<{ ok: true }>("/api/extension-ui/failures", { method: "POST", body: JSON.stringify({ name, rev, error }) }),
   /** What an extension's server half would tell a page that opens the chat now: for a browser half that came into the page later. */
   extensionOpening: (id: string, extension: string) => json<{ pushes: unknown[] }>(`/api/sessions/${id}/extension-ui?extension=${encodeURIComponent(extension)}`),
   /** What an extension's browser half says to its own half in a chat: see extensions/channel.ts. */
