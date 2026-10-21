@@ -6,7 +6,7 @@ import { unwrapCall } from "../tool-activity";
 import { viewerIds } from "./call-pictures";
 import type { Item } from "../transcript";
 import { channelFor } from "./channel";
-import { failedToDraw } from "./loader";
+import { failedIn } from "./loader";
 import { panelsFor } from "./panels";
 import { useSlot, type Chat, type ToolCallView } from "./slots";
 
@@ -22,7 +22,7 @@ export function ToolView({ item, chat, openPicture, children }: { item: ToolItem
   const entry = entries.find((e) => e.tool === call.name);
   if (!entry || !chat) return <>{children}</>;
   return (
-    <ErrorBoundary resetKey={`${entry.key}:${item.id}`} fallback={() => <>{children}</>} onError={failedToDraw(entry.extension)}>
+    <ErrorBoundary resetKey={`${entry.key}:${item.id}`} fallback={() => <>{children}</>} onError={failedIn(entry.extension)}>
       <entry.component chat={chat} channel={channelFor(chat.id, entry.extension)} panels={panelsFor(entry.extension)} call={call} card={children} />
     </ErrorBoundary>
   );
@@ -98,7 +98,7 @@ export function ToolActions({ item, cut, chat }: { item: ToolItem; cut: boolean;
   return (
     <>
       {offered.map((entry) => (
-        <ErrorBoundary key={entry.key} resetKey={`${entry.key}:${item.id}`} fallback={() => null} onError={failedToDraw(entry.extension)}>
+        <ErrorBoundary key={entry.key} resetKey={`${entry.key}:${item.id}`} fallback={() => null} onError={failedIn(entry.extension)}>
           <entry.component call={call} cut={cut} chat={chat} panels={panelsFor(entry.extension)} />
         </ErrorBoundary>
       ))}

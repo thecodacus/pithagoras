@@ -17,7 +17,7 @@ import { LuPuzzle } from "react-icons/lu";
 import { titleOf, useSlot, type ChatProps, type Registered, type VoiceWindowOpened } from "../extensions/slots";
 import { channelFor } from "../extensions/channel";
 import { panelsFor } from "../extensions/panels";
-import { failedToDraw } from "../extensions/loader";
+import { failedIn } from "../extensions/loader";
 import { ResizeHandles, WINDOWS, areaFor, clearSize, openWindows, workspaceOf } from "./ResizeHandles";
 import { IMAGE_TYPES, isImage, type Attachment } from "../attachments";
 import type { ToolCall } from "../tool-activity";
@@ -70,7 +70,7 @@ function BroughtWindow({ entry, main, open, opened, maximized, onClose, onMaximi
           : <button type="button" aria-label={t("Maximize {panel}", { panel: title })} title={t("Maximize")} onClick={maximize}><LuMaximize2 /></button>)}
         <button type="button" aria-label={t("Minimize {panel}", { panel: title })} title={t("Minimize")} onClick={onClose}><LuMinus /></button>
       </div></header>
-      <ErrorBoundary resetKey={`${entry.key}:${props.chat.id}`} fallback={(error) => <div className="p-4"><PartFailed error={error} /></div>} onError={failedToDraw(entry.extension)}>
+      <ErrorBoundary resetKey={`${entry.key}:${props.chat.id}`} fallback={(error) => <div className="p-4"><PartFailed error={error} /></div>} onError={failedIn(entry.extension)}>
         <entry.component key={props.chat.id} {...props} close={close} opened={opened} maximized={maximized} maximize={maximize} restore={restore} />
       </ErrorBoundary>
       <ResizeHandles target={section} />
@@ -201,6 +201,7 @@ export function VoiceStage({ sessionId, folder, workPhase, title, phase, startin
         return entry.opensFor?.(call, chat) === true;
       } catch (e) {
         console.error(`[extensions] ${entry.extension} failed on being asked whether its window is for a call:`, e);
+        failedIn(entry.extension)(e);
         return false;
       }
     });
@@ -460,7 +461,7 @@ export function VoiceStage({ sessionId, folder, workPhase, title, phase, startin
         {pictures.length > 0 && !picturesShown && <button type="button" onClick={openPictures} title={`${t("Show pictures")}${hint("voice.pictures")}`} aria-label={t("Show pictures")}><LuImage /></button>}
         {windowEntries.map((entry) => (
           // Its button is its own to say about (hidden, live): one whose say fails is left out, and the toolbar stays.
-          <ErrorBoundary key={entry.key} resetKey={`${entry.key}:${sessionId}`} fallback={() => null} onError={failedToDraw(entry.extension)}>
+          <ErrorBoundary key={entry.key} resetKey={`${entry.key}:${sessionId}`} fallback={() => null} onError={failedIn(entry.extension)}>
             <WindowButton key={sessionId} entry={entry} chat={chat} channel={channelFor(sessionId, entry.extension)} panels={panelsFor(entry.extension)} open={broughtOpen.includes(entry.key)} onOpen={openByPerson} />
           </ErrorBoundary>
         ))}
@@ -493,7 +494,7 @@ export function VoiceStage({ sessionId, folder, workPhase, title, phase, startin
         onClose={() => { closeBrought(entry.key); end.current?.focus({ preventScroll: true }); }} onMaximize={() => setMaxed(`x:${entry.key}`)} onRestore={() => setMaxed(null)} />
     ))}
     {windowEntries.filter((entry) => entry.useAutoOpen).map((entry) => (
-      <ErrorBoundary key={`${entry.key}:${sessionId}`} resetKey={`${entry.key}:${sessionId}`} fallback={() => null} onError={failedToDraw(entry.extension)}>
+      <ErrorBoundary key={`${entry.key}:${sessionId}`} resetKey={`${entry.key}:${sessionId}`} fallback={() => null} onError={failedIn(entry.extension)}>
         <AutoOpener entry={entry} chat={chat} channel={channelFor(sessionId, entry.extension)} panels={panelsFor(entry.extension)} onGrow={() => openBrought(entry.key, { by: "work" })} />
       </ErrorBoundary>
     ))}
@@ -502,7 +503,7 @@ export function VoiceStage({ sessionId, folder, workPhase, title, phase, startin
       const entry = toolEntries.find((e) => e.tool === view.name);
       if (!entry?.tile) return undefined;
       const Tile = entry.tile;
-      return <ErrorBoundary resetKey={`${entry.key}:${view.callId}`} fallback={() => null} onError={failedToDraw(entry.extension)}><Tile call={view} chat={chat} /></ErrorBoundary>;
+      return <ErrorBoundary resetKey={`${entry.key}:${view.callId}`} fallback={() => null} onError={failedIn(entry.extension)}><Tile call={view} chat={chat} /></ErrorBoundary>;
     }} opens={(view) => { const entry = windowFor(view); return entry && titleOf(entry); }} words={(view) => {
       // The entry of the call's tool says it first, and a window that is for the call where that says nothing.
       for (const entry of [toolEntries.find((e) => e.tool === view.name), windowFor(view)]) {
@@ -511,6 +512,8 @@ export function VoiceStage({ sessionId, folder, workPhase, title, phase, startin
           if (said) return said;
         } catch (e) {
           console.error(`[extensions] ${entry?.extension} failed on describing a call:`, e);
+          // Only an entry there can have thrown.
+          failedIn(entry!.extension)(e);
         }
       }
       return undefined;

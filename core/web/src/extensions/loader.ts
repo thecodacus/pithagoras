@@ -47,10 +47,13 @@ type Loaded = { stamp: string; leave: () => void };
 
 const loaded = new Map<string, Loaded>();
 /**
- * The revision of each extension's browser half in the page, by its name, from before its module is called: what it
- * draws can fail before that call has returned. What a failure of it is told to the portal under.
+ * Each extension's browser half as the page last loaded it, by its name, from before its module is called: what it
+ * draws can fail before that call has returned. A failure of it is told to the portal under its revision, and one
+ * nothing in the page caught is told apart as its own by the folder its files come from.
  */
-const revisions = new Map<string, string | undefined>();
+const inPage = new Map<string, ExtensionUi>();
+/** What is installed, as the portal said it with the list this page last went through: see followInstalled. */
+let seen: string | undefined;
 /** Why an extension's browser half is not in the page, by its package's name. */
 let failures: Readonly<Record<string, string>> = {};
 /** Why an extension's server half is not running, as the portal says. */
@@ -204,7 +207,7 @@ async function activate(ext: ExtensionUi, told: Promise<void>[]): Promise<void> 
   try {
     // The themes its package.json names need no module: a package may be nothing but themes.
     for (const theme of ext.themes ?? []) themesOff.push(registerTheme(ext.name, theme));
-    revisions.set(ext.name, ext.rev);
+    inPage.set(ext.name, ext);
     if (entry) await within(LOAD_MS, load(entry), "loading");
     loaded.set(ext.name, { stamp: stamp(ext), leave });
     if (!entry) return;
@@ -216,7 +219,7 @@ async function activate(ext: ExtensionUi, told: Promise<void>[]): Promise<void> 
     leaveModule();
     failures = { ...failures, [ext.name]: (e as Error)?.message || String(e) };
     console.error(`[extensions] ${ext.name} could not be loaded:`, e);
-    tell(ext.name, ext.rev, failures[ext.name]!);
+    tell(ext.name, ext.rev, failures[ext.name]!, (e as Error)?.stack);
     // Held as failed, under a stamp nothing has: its themes are still there to choose, and it is tried again the next time what is installed is gone through.
     loaded.set(ext.name, { stamp: "", leave });
   }
@@ -245,7 +248,7 @@ async function catchUp(name: string): Promise<void> {
  * signed in being known yet, so it goes out with the question of who that is. Used once, by the first
  * load; an answer that is not a list (not signed in yet, say) is simply asked for again then.
  */
-let early: Promise<{ extensions: ExtensionUi[] } | undefined> | undefined;
+let early: Promise<{ extensions: ExtensionUi[]; revision: string } | undefined> | undefined;
 export function askForExtensions(): void {
   if (extensionsOff()) return;
   early ??= api.extensionUi().catch(() => undefined);
@@ -268,7 +271,7 @@ function hint(href: string, extension: string): void {
   document.head.append(link);
 }
 
-async function list(): Promise<{ extensions: ExtensionUi[] }> {
+async function list(): Promise<{ extensions: ExtensionUi[]; revision: string }> {
   const asked = early;
   early = undefined;
   return (await asked) ?? api.extensionUi();
@@ -277,7 +280,8 @@ async function list(): Promise<{ extensions: ExtensionUi[] }> {
 async function sync(): Promise<void> {
   const told: Promise<void>[] = [];
   try {
-    const { extensions } = await list();
+    const { extensions, revision } = await list();
+    seen = revision;
     // Gone, or its module changed: the address of a module carries its revision.
     // Or its server half came or went, or its themes changed: the module is told where its routes are as it is called.
     // Or it failed last time: it is tried again.
@@ -315,31 +319,58 @@ export function loadExtensions(): Promise<void> {
 }
 
 /**
- * What this page last told the portal had failed of each extension, by its name: a part that is drawn many times
- * over (a call's card, in a long conversation) and fails each time is told once.
+ * What is installed, as the portal says it with the list of chats (GET /api/sessions): when it is not what the list
+ * this page last went through was said with, it was changed since, here or elsewhere (another tab, the API, an agent),
+ * and the page goes through it again. Fired once for each change, whatever becomes of that.
  */
-const toldOf = new Map<string, string>();
-
-/**
- * Tell the portal that the browser half of `name`, at revision `rev`, failed in this page: for Settings →
- * Extensions in every page, and for whatever else asks the portal how the extension stands.
- */
-function tell(name: string, rev: string | undefined, error: string): void {
-  if (!rev || toldOf.get(name) === `${rev}\n${error}`) return;
-  toldOf.set(name, `${rev}\n${error}`);
-  api.extensionFailed(name, rev, error).catch((e) => console.error(`[extensions] could not tell the portal that ${name} failed:`, e));
+export function followInstalled(revision: string): void {
+  if (revision === seen) return;
+  seen = revision;
+  window.dispatchEvent(new Event(EXTENSIONS_CHANGED));
 }
 
 /**
- * What the error boundary a part of the extension `name` is drawn in does when the part fails to draw: says so
- * here at once, and tells the portal.
+ * What this page has told the portal had failed, of which extension and revision: a part that is drawn many times
+ * over (a call's card, in a long conversation) and fails each time is told once.
  */
-export const failedToDraw = (name: string) => (e: Error) => {
-  const error = e?.message || String(e);
+const toldOf = new Set<string>();
+
+/**
+ * Tell the portal that the browser half of `name`, at revision `rev`, failed in this page, and where: for Settings →
+ * Extensions, and for whatever else asks the portal how the extension stands.
+ */
+function tell(name: string, rev: string | undefined, error: string, stack: string | undefined): void {
+  const failure = `${name}\n${rev}\n${error}`;
+  if (!rev || toldOf.has(failure)) return;
+  toldOf.add(failure);
+  api.extensionFailed(name, rev, error, stack).catch((e) => console.error(`[extensions] could not tell the portal that ${name} failed:`, e));
+}
+
+/**
+ * What the portal does when the browser half of `name` fails where the portal called it: to draw (an error boundary,
+ * which gives the components it was drawn in), in a handler of its (what its server half or its channel said, a
+ * shortcut), or in what it runs of its own (see startExtensions). Says so here at once, and tells the portal.
+ */
+export const failedIn = (name: string) => (e: unknown, drawn?: { componentStack?: string | null }) => {
+  const error = (e as Error)?.message || String(e);
   clientFailures = { ...clientFailures, [name]: error };
   changed();
-  tell(name, revisions.get(name), error);
+  tell(name, inPage.get(name)?.rev, error, `${(e as Error)?.stack ?? ""}${drawn?.componentStack ?? ""}` || undefined);
 };
+
+/**
+ * The extension, of those in the page, that an error came from, by the folder its files are fetched from, as `where`
+ * (the file it was thrown in, and its stack) names it: the first named, which is where it was thrown.
+ */
+function thrownBy(where: string): string | undefined {
+  let found: { name: string; at: number } | undefined;
+  for (const [name, ext] of inPage) {
+    if (!ext.entry) continue;
+    const at = where.indexOf(new URL(".", new URL(ext.entry, window.location.href)).href);
+    if (at !== -1 && (!found || at < found.at)) found = { name, at };
+  }
+  return found?.name;
+}
 
 /**
  * `?extensions=off` in the address the page was opened at: no extension's browser half is loaded into it, for a way
@@ -347,7 +378,7 @@ export const failedToDraw = (name: string) => (e: Error) => {
  * is asked (as the page starts, by askForExtensions), before anything in the page changes the address.
  */
 let off: boolean | undefined;
-const extensionsOff = () => (off ??= new URLSearchParams(window.location.search).get("extensions") === "off");
+export const extensionsOff = () => (off ??= new URLSearchParams(window.location.search).get("extensions") === "off");
 
 let started = false;
 /**
@@ -362,6 +393,16 @@ export function startExtensions(): void {
   window.addEventListener(EXTENSIONS_CHANGED, again);
   // An add-on of the portal's can be a package too: the subagents are.
   window.addEventListener("features-changed", again);
+  // What an extension's module runs of its own (a timer, a fetch, a handler of its) and nothing caught: told as its
+  // failure, as one the portal caught is. What came from no extension is left as it is.
+  window.addEventListener("error", (event) => {
+    const name = thrownBy(`${event.filename}\n${event.error?.stack ?? ""}`);
+    if (name) failedIn(name)(event.error ?? event.message);
+  });
+  window.addEventListener("unhandledrejection", (event) => {
+    const name = thrownBy(String(event.reason?.stack ?? ""));
+    if (name) failedIn(name)(event.reason);
+  });
 }
 
 function watch(watcher: () => void) {

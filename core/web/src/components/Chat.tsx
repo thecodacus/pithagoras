@@ -47,7 +47,7 @@ import { forgetChatFeed, publishChat } from "../extensions/chat-feed";
 import { forgetOpenCalls, openCalls } from "../open-calls";
 import { setPanelController, type ChatPanels } from "../extensions/panels";
 import { runCommand, useHasCommand } from "../extensions/commands";
-import { failedToDraw } from "../extensions/loader";
+import { failedIn } from "../extensions/loader";
 import { STEP, arrowSteps } from "../resize-keys";
 
 /** How many messages are drawn at first, and added each time you scroll up to the edge. */
@@ -1581,7 +1581,7 @@ export function Chat({
     return (
       // From edge to edge (`bleed`): black, and what it draws fills it rather than scrolls in it.
       <div className={`flex min-h-0 flex-1 flex-col ${entry.bleed ? "overflow-hidden bg-black" : "overflow-auto bg-surface"}`} data-extension={entry.extension}>
-        <ErrorBoundary resetKey={`${entry.key}:${session.id}`} fallback={(error) => <div className="p-4"><PartFailed error={error} /></div>} onError={failedToDraw(entry.extension)}>
+        <ErrorBoundary resetKey={`${entry.key}:${session.id}`} fallback={(error) => <div className="p-4"><PartFailed error={error} /></div>} onError={failedIn(entry.extension)}>
           <Body key={session.id} {...panelProps(entry)} />
         </ErrorBoundary>
       </div>
@@ -1593,7 +1593,7 @@ export function Chat({
     const Part = entry?.[part];
     if (!entry || !Part) return null;
     return (
-      <ErrorBoundary resetKey={`${entry.key}:${part}:${session.id}`} fallback={() => null} onError={failedToDraw(entry.extension)}>
+      <ErrorBoundary resetKey={`${entry.key}:${part}:${session.id}`} fallback={() => null} onError={failedIn(entry.extension)}>
         <Part key={session.id} {...panelProps(entry)} />
       </ErrorBoundary>
     );
@@ -1601,7 +1601,7 @@ export function Chat({
   /** The parts of the installed extensions that are drawn in the chat itself, each alone in what it does when it fails. */
   const extensionParts = (entries: readonly Registered<"chat.header.action" | "chat.background" | "chat.overlay" | "chat.composer.above">[]) =>
     entries.map((entry) => (
-      <ErrorBoundary key={entry.key} resetKey={`${entry.key}:${session.id}`} fallback={() => null} onError={failedToDraw(entry.extension)}>
+      <ErrorBoundary key={entry.key} resetKey={`${entry.key}:${session.id}`} fallback={() => null} onError={failedIn(entry.extension)}>
         <entry.component key={session.id} chat={chat} channel={channelFor(session.id, entry.extension)} panels={panelsOf(entry.extension)} />
       </ErrorBoundary>
     ));
@@ -1833,7 +1833,7 @@ export function Chat({
           )}
           {panelEntries.map((entry) => (
             // Its button is its own to say about (hidden, live): one whose say fails is left out, and the header stays.
-            <ErrorBoundary key={entry.key} resetKey={`${entry.key}:${session.id}`} fallback={() => null} onError={failedToDraw(entry.extension)}>
+            <ErrorBoundary key={entry.key} resetKey={`${entry.key}:${session.id}`} fallback={() => null} onError={failedIn(entry.extension)}>
               <ExtensionToggle key={session.id} entry={entry} chat={chat} channel={channelFor(session.id, entry.extension)} panels={panelsOf(entry.extension)} open={extensionPanels.includes(entry.key)} onToggle={toggleExtensionPanel} />
             </ErrorBoundary>
           ))}
