@@ -8,14 +8,21 @@ import { test, expect, mockPortal } from './portal-mock';
 const OWN = { enabled: true, whisperUrl: 'http://127.0.0.1:8178/inference', breezeUrl: 'http://127.0.0.1:7860/v1/audio/speech', instruction: 'Clear speech', voice: 'design', runtime: 'breeze', language: 'auto', cfgScale: 4 };
 const SPEAKER = { name: 'test-speaker', label: 'Speaker', ready: true, runtime: 'kokoro' };
 
-/** Settings → Add-ons → Voice on its own, with the settings `config` and what is saved kept in `saved`. */
-async function voicePage(page: Page, config: Record<string, unknown>) {
+/**
+ * Settings → Add-ons → Voice on its own, with the settings `config`, the managed service as `install` says, and what is
+ * saved kept in `saved`. Both are read at each request, so a test can change them.
+ */
+async function voicePage(page: Page, config: Record<string, unknown>, install: Record<string, unknown> = { available: false, state: 'unavailable', busy: false, progress: '', error: '' }) {
   const saved: Record<string, unknown>[] = [];
   await page.route('**/api/voice/presets', (r) => r.fulfill({ json: [] }));
-  await page.route('**/api/voice/install', (r) => r.fulfill({ json: { available: false, state: 'unavailable', busy: false, progress: '', error: '' } }));
+  await page.route('**/api/voice/install', (r) => r.fulfill({ json: install }));
   await page.route('**/api/voice/hardware', (r) => r.fulfill({ status: 503, json: { error: 'No Docker' } }));
   await page.route('**/api/voice', (r) => {
-    if (r.request().method() === 'PUT') saved.push(r.request().postDataJSON());
+    if (r.request().method() === 'PUT') {
+      // As the portal answers a save: what it keeps, with the extensions it knows of, and not what the page sent of them.
+      const { providers: _providers, speech: _speech, ...kept } = r.request().postDataJSON();
+      saved.push(kept);
+    }
     return r.fulfill({ json: { ...config, ...saved.at(-1) } });
   });
   await page.goto('/tests/voice-addon.html');
@@ -46,6 +53,10 @@ test('an extension is chosen in place of the own addresses, which stay as they a
   await page.getByRole('button', { name: 'Save voice settings' }).click();
   await expect(page.getByRole('button', { name: 'Saved' })).toBeVisible();
   expect(saved.at(-1)).toMatchObject({ provider: 'test-speaker', runtime: 'breeze', whisperUrl: OWN.whisperUrl, breezeUrl: OWN.breezeUrl });
+  // The page goes on with what the save answered: still the extension, running, and speaking with Kokoro.
+  await expect(source(page)).toContainText('Speaker');
+  await expect(page.getByText('Not running: voice mode cannot listen or speak through it')).toHaveCount(0);
+  await expect(page.getByRole('combobox', { name: 'Speaking voice' })).toBeVisible();
   // And back.
   await source(page).click();
   await page.getByRole('option', { name: /Your own addresses/ }).click();
@@ -67,6 +78,47 @@ test('an extension chosen that is not running is shown as chosen, and one that s
   // Chatterbox has no detection mode: the language is one it speaks.
   await expect(page.getByRole('combobox', { name: 'Input language' })).toContainText('English');
   await expect(page.getByRole('combobox', { name: 'Speech delivery' })).toBeVisible();
+});
+
+test('the own addresses in Advanced connection follow the own runtime, whatever the extension chosen speaks with', async ({ page }) => {
+  await voicePage(page, { ...OWN, provider: SPEAKER.name, providers: [{ ...SPEAKER, runtime: 'none' }] });
+  // The extension recognises speech alone: nothing is spoken through it.
+  await expect(page.getByText('This installation has no speech synthesis')).toBeVisible();
+  // The person's own runtime speaks: its speech address is there to edit.
+  await page.locator('summary').filter({ hasText: 'Advanced connection' }).click();
+  await expect(page.getByLabel('Speech synthesis URL')).toHaveValue(OWN.breezeUrl);
+});
+
+test('a managed install connecting while an extension is chosen is taken over by the page, so a save does not choose the extension again', async ({ page }) => {
+  const config: Record<string, unknown> = { ...OWN, provider: SPEAKER.name, providers: [SPEAKER] };
+  const install: Record<string, unknown> = { available: true, state: 'starting', busy: false, progress: 'Setting up', error: '' };
+  const saved = await voicePage(page, config, install);
+  await expect(source(page)).toContainText('Speaker');
+  // The setup finishes, and the portal connects the service: the person's own addresses are voice mode's again.
+  Object.assign(config, { provider: '', runtime: 'audio-cpp', whisperUrl: 'http://127.0.0.1:8188/inference', breezeUrl: 'http://127.0.0.1:7862/v1/audio/speech' });
+  install.state = 'running';
+  await expect(source(page)).toContainText('Your own addresses', { timeout: 10_000 });
+  await page.getByRole('button', { name: 'Save voice settings' }).click();
+  await expect(page.getByRole('button', { name: 'Saved' })).toBeVisible();
+  expect(saved.at(-1)).toMatchObject({ provider: '', breezeUrl: 'http://127.0.0.1:7862/v1/audio/speech' });
+});
+
+test("an agent's voice is picked from the voices of what voice mode speaks with: an extension's Kokoro, over Breeze at the own addresses", async ({ page }) => {
+  const orb = { personality: 'balanced', palette: 'aurora', colors: { idle: '#82bcff', input: '#7fe0b4', output: '#c9a2ff', muted: '#8a91a0' }, speed: 1, reactivity: 1, glow: 1, pattern: 'ribbons', finish: 'glossy', eyes: 'none', eyeColor: '#111111', hat: 'none', hatColor: 'auto', prop: 'none', propColor: 'auto' };
+  const answers: Record<string, unknown> = {
+    '/api/agents': { agents: [{ id: 'home', name: 'Home', home: '/a', first: true, initialised: true, chats: 0, channels: [], orb, voice: '', heartbeat: { minutes: 0, quietStart: '', quietEnd: '', timeZone: 'UTC', last: null, status: null, running: false, watching: false, available: true }, unread: 0 }] },
+    '/api/agent/sessions': { sessions: [], agentHome: '/a' },
+    '/api/agents/home/setup': { home: '/a', initialised: true, files: [{ name: 'SOUL.md', exists: true, content: 'Kind.', mtime: 1 }] },
+    '/api/voice/presets': [],
+    '/api/voice': { ...OWN, speech: true, provider: SPEAKER.name, providers: [SPEAKER] },
+  };
+  await mockPortal(page, (ask) => answers[ask.path], { settings: true });
+  await page.goto('/agents?agent=home');
+  await page.getByRole('button', { name: 'Customize the avatar' }).click();
+  const avatar = page.getByRole('dialog', { name: 'Avatar' });
+  await avatar.getByRole('combobox', { name: 'Voice' }).click();
+  await expect(page.getByRole('option', { name: /Onyx/ })).toBeVisible();
+  await expect(page.getByRole('option', { name: 'Add voice' })).toHaveCount(0);
 });
 
 test('a source chosen while Settings is open reaches the chat behind it as Settings closes, without a reload', async ({ page }) => {
