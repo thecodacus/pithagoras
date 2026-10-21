@@ -6,19 +6,25 @@ import { test, expect, mockPortal, DONE } from './portal-mock';
  * A page follows what is installed, wherever it was installed: the Notes test extension
  * (tests/fixtures/extensions/notes) installed, changed or removed through the API, not from the page, comes into the
  * page, is swapped or goes within one poll of the list of chats, which says what is installed as a revision. And what
- * fails of a browser half in a page is told to the portal, which Settings → Extensions says in every page.
+ * fails of a browser half in a page (to load, to draw, or in what it runs of its own) is told to the portal, which
+ * Settings → Extensions says in the pages that go through what is installed after that.
  */
 const NAME = 'pithagoras-notes';
 const web = (file: string) => readFileSync(new URL(`../fixtures/extensions/notes/web/${file}`, import.meta.url), 'utf8');
 const address = (file: string) => `/api/extension-ui/${NAME}/${file}`;
 
-/** The portal as its server answers, with the Notes extension installed as `state` says, and what a page told it failed. */
+/**
+ * The portal as its server answers, with the Notes extension installed as `state` says, and what a page told it failed
+ * (`told`), and where (`stacks`). `state.listed` is called as each list of what the pages load is answered.
+ */
 async function portal(page: Page, module = web('client.js')) {
-  const state = { installed: true, rev: 'r1', module, css: web('client.css') };
+  const state = { installed: true, rev: 'r1', module, css: web('client.css'), listed: undefined as (() => void) | undefined };
   const told: { name: string; rev: string; error: string }[] = [];
+  const stacks: (string | undefined)[] = [];
+  // What is installed, as the server says it: a revision that changes whenever it does.
+  const revision = () => JSON.stringify([state.installed, state.rev]);
   await mockPortal(page, async ({ path, method, route, json }) => {
-    // What is installed, as the server says it with the chats: a revision that changes whenever it does.
-    if (path === '/api/sessions' && method === 'GET') return { sessions: [], executor: 'host', extensions: JSON.stringify([state.installed, state.rev]) };
+    if (path === '/api/sessions' && method === 'GET') return { sessions: [], executor: 'host', extensions: revision() };
     if (path === '/api/extension-ui' && method === 'GET') {
       const failed = told.findLast((failure) => failure.name === NAME);
       const listing = {
@@ -26,10 +32,14 @@ async function portal(page: Page, module = web('client.js')) {
         // Said until another revision is installed.
         ...(failed?.rev === state.rev ? { clientError: failed.error } : {}),
       };
-      return { extensions: state.installed ? [listing] : [] };
+      const answer = { revision: revision(), extensions: state.installed ? [listing] : [] };
+      state.listed?.();
+      return answer;
     }
     if (path === '/api/extension-ui/failures' && method === 'POST') {
-      told.push(json());
+      const { stack, ...failure } = json();
+      told.push(failure);
+      stacks.push(stack);
       return { ok: true };
     }
     if (path === address('client.js')) { await route.fulfill({ contentType: 'text/javascript', body: state.module }); return DONE; }
@@ -40,7 +50,7 @@ async function portal(page: Page, module = web('client.js')) {
     }
     return undefined;
   }, { settings: true });
-  return { state, told };
+  return { state, told, stacks };
 }
 
 const cards = (page: Page) => page.getByRole('tabpanel', { name: /Installed/ }).getByRole('listitem');
@@ -87,11 +97,17 @@ test('a change to its stylesheet alone is another revision, and the page swaps i
 });
 
 test('what fails of a browser half, to load or to draw, is told to the portal, and Settings says it in every page', async ({ page }) => {
-  const { state, told } = await portal(page, 'export default function () { throw new Error("notes is not defined"); }');
+  const { state, told, stacks } = await portal(page, 'export default function () { throw new Error("notes is not defined"); }');
   await page.goto('/settings/extensions');
   const card = cards(page).filter({ hasText: NAME });
   await expect(card.getByRole('alert')).toHaveText('Its interface could not be loaded: notes is not defined');
   await expect.poll(() => told).toEqual([{ name: NAME, rev: 'r1', error: 'notes is not defined' }]);
+  // With where: its module, for whoever looks at it to find the line.
+  expect(stacks[0]).toContain(`${address('client.js')}?v=r1`);
+  // Loaded again, it fails again: said once, as this page's own, not again as what another page said.
+  await page.reload();
+  await expect(card.getByRole('alert')).toHaveText('Its interface could not be loaded: notes is not defined');
+  await expect(card.getByRole('alert')).toHaveCount(1);
 
   // Another revision, which loads and fails to draw its page.
   state.module = 'export default function (portal) { portal.slots.register("nav.page", { id: "notes", title: "Notes", component: () => { throw new Error("drew badly"); } }); }';
@@ -107,7 +123,8 @@ test('what fails of a browser half, to load or to draw, is told to the portal, a
   // A page that loaded it and drew nothing of it says it all the same, as the portal was told; told once, by the page it failed in.
   await page.goto('/settings/extensions');
   await expect(card.getByRole('alert')).toHaveText('Its interface failed in a page: drew badly');
-  expect(told).toHaveLength(2);
+  // The reload told it once more: by another page.
+  expect(told).toHaveLength(3);
 });
 
 test('?extensions=off loads no browser half, and Settings still lists it to switch it off', async ({ page }) => {
@@ -120,4 +137,51 @@ test('?extensions=off loads no browser half, and Settings still lists it to swit
   await expect(card.getByRole('alert')).toHaveCount(0);
   await expect(stylesheets(page)).toHaveCount(0);
   expect(asked).toEqual([]);
+});
+
+test('an install made between the page asking what to load and its first list of chats is not missed', async ({ page }) => {
+  const { state } = await portal(page);
+  state.installed = false;
+  // Installed as soon as the page has its list: the list of chats, asked for later, says so.
+  state.listed = () => { state.installed = true; };
+  // No poll after the first: the first list of chats is the one that says it.
+  await page.clock.install();
+  await page.goto('/sessions');
+  await expect(page.getByRole('navigation', { name: 'Destinations' }).getByRole('button', { name: 'Notes' })).toBeVisible();
+});
+
+test('a part that fails in two places of one page is told once', async ({ page }) => {
+  // Its page's entry in the sidebar asks whether it is shown, and its page is drawn: both fail alike.
+  const { told } = await portal(page, 'export default function (portal) { const bad = () => { throw new Error("drew badly"); }; portal.slots.register("nav.page", { id: "notes", title: "Notes", useShown: bad, component: bad }); }');
+  await page.goto(`/x/${NAME}/notes`);
+  await expect(page.getByRole('alert')).toContainText('drew badly');
+  await expect.poll(() => told).toEqual([{ name: NAME, rev: 'r1', error: 'drew badly' }]);
+  await page.waitForTimeout(500);
+  expect(told).toEqual([{ name: NAME, rev: 'r1', error: 'drew badly' }]);
+});
+
+test("what a browser half runs of its own and nothing caught is told as its failure, and what came from no extension is not", async ({ page }) => {
+  const { state, told, stacks } = await portal(page, 'export default function () { setTimeout(() => { throw new Error("thrown later"); }); }');
+  await page.goto('/settings/extensions');
+  await expect.poll(() => told).toEqual([{ name: NAME, rev: 'r1', error: 'thrown later' }]);
+  expect(stacks[0]).toContain(address('client.js'));
+  await expect(cards(page).filter({ hasText: NAME }).getByRole('alert')).toHaveText('Its interface failed in a page: thrown later');
+
+  state.module = 'export default function () { Promise.reject(new Error("rejected later")); }';
+  state.rev = 'r2';
+  await page.goto('/settings/extensions');
+  await expect.poll(() => told.at(-1)).toEqual({ name: NAME, rev: 'r2', error: 'rejected later' });
+
+  await page.evaluate(() => {
+    setTimeout(() => { throw new Error("the page's own"); });
+    void Promise.reject(new Error("the page's own, rejected"));
+  });
+  await page.waitForTimeout(500);
+  expect(told).toHaveLength(2);
+});
+
+test('?extensions=off on the address of an extension\'s page says that it loads none', async ({ page }) => {
+  await portal(page);
+  await page.goto(`/x/${NAME}/notes?extensions=off`);
+  await expect(page.getByRole('status').filter({ hasText: 'extensions=off' })).toHaveText('This page was opened with ?extensions=off: no extension is loaded into it.');
 });
