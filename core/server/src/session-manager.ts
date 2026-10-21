@@ -1552,9 +1552,10 @@ class SessionManager extends EventEmitter {
     if (!insideEdit) await this.whenEditable(sessionId);
     // A reload that came due while something went on that it would have cut off, and that nothing has taken since:
     // before this message starts a run, so the run's first request has the tools as they are now. Not where a run
-    // is going or a message is on its way to pi: a step of that run takes it.
+    // is going or a message is on its way to pi: a step of that run takes it. Read from the status, which says both,
+    // not from isBusy(): that counts a message ask() is sending, and so this one where ask() sent it.
     const due = this.live.get(sessionId)?.client;
-    if (!insideEdit && due?.reloadDue && !this.isBusy(sessionId)) await this.reloadSettled(sessionId, due);
+    if (!insideEdit && due?.reloadDue && getSession(sessionId)?.status !== "running") await this.reloadSettled(sessionId, due);
     this.prompting.set(sessionId, (this.prompting.get(sessionId) ?? 0) + 1);
     try {
       return await this.promptNow(sessionId, message, options, insideEdit, stopsBefore);
@@ -2897,9 +2898,8 @@ class SessionManager extends EventEmitter {
           await this.withEdit(sessionId, () => client.reload());
           return true;
         } catch (e) {
+          // Due still, as a reload that fails leaves it: see PiClient.reloadDue.
           console.error(`[portal] could not reload ${sessionId}: ${(e as Error).message}`);
-          // Tried again at its next step, or before its next message.
-          client.reloadDue = true;
           waiting++;
           return false;
         }

@@ -1165,8 +1165,7 @@ export const api = {
     })),
   updatePackages: () =>
     changesExtensions(json<{ ok: true; output: string }>("/api/packages/update", { method: "POST" })),
-  /** The installed extensions that bring an interface: see extensions/loader.ts. */
-  /** With what is installed as GET /api/sessions says it (`revision`), as it was when this list was made. */
+  /** The installed extensions that bring an interface (see extensions/loader.ts), with what is installed as GET /api/sessions says it (`revision`), as it was when this list was made. */
   extensionUi: () => json<{ extensions: ExtensionUi[]; revision: string }>("/api/extension-ui"),
   /** Tells the portal that an extension's browser half, at revision `rev`, failed in this page, and where: its `clientError` and `clientStack` from then on. */
   extensionFailed: (name: string, rev: string, error: string, stack?: string) =>

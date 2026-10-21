@@ -160,7 +160,7 @@ export function GuardSettings({ onError, onOpen }: { onError: (message: string) 
 
       <Section
         title={t("After a suspected injection")}
-        hint={t("Once a result the agent read looks like it tries to instruct it, these are refused in that conversation until you trust the result or remove its turn.")}
+        hint={t("Once a result the agent read looks like it tries to instruct it, these are held in that conversation until you trust the result or remove its turn. In a chat where you are there to answer, you are asked about each call, and a yes lets that one call run; everywhere else it is refused.")}
       >
         <ul className="space-y-1.5">
           {state.rules.map((rule) => (

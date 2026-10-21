@@ -52,10 +52,13 @@ const { SdkPiClient } = await import("../dist/pi/sdk-client.js");
 const { guardExtension } = await import("../dist/pi/guard.js");
 
 let n = 0;
-/** One message to a conversation in `cwd`, with the results of the calls it led to, what the session listed and the file it is kept in. */
+/**
+ * One message to a conversation in `cwd`, with the results of the calls it led to, what the session listed and the file it is kept in.
+ * Nobody answers its dialogs, as in a routine's run: what a rule holds after a suspected injection is refused (see guard-asks.test.mjs).
+ */
 async function run(cwd, options = {}) {
   const client = await SdkPiClient.create({
-    cwd, sessionDir: mkdtempSync(path.join(home, "chat-")), provider: "fake", modelId: "m", sessionId: `codemode-${n++}`, ...options,
+    cwd, sessionDir: mkdtempSync(path.join(home, "chat-")), provider: "fake", modelId: "m", sessionId: `codemode-${n++}`, dialogs: false, ...options,
   });
   const results = [];
   const settled = new Promise((resolve) => client.on("event", (e) => {
