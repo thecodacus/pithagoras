@@ -919,6 +919,9 @@ them, and the profile of the machine's own Chrome
 takes `voice`, which schema 9 left: the GPU chosen on its page, a setup still
 to come up, and whether its speech model is let go of once voice mode no longer
 uses it (`extensions/voice/src/server/handoff.ts`).
+[Understory](/guide/features#memory-understory) takes `understory`, which
+schema 10 left: its four settings, the token its container was made with among
+them (`extensions/understory/src/server/handoff.ts`).
 
 ### A chat's folder
 
@@ -2042,11 +2045,11 @@ portal can be removed without a spec of the portal's failing.
 
 ## What the portal's own apps use
 
-The terminal, Git, Files, Canvases, Media, Browser and Voice are extensions
-(`extensions/terminal`, `extensions/git`, `extensions/files`,
+The terminal, Git, Files, Canvases, Media, Browser, Voice and Understory are
+extensions (`extensions/terminal`, `extensions/git`, `extensions/files`,
 `extensions/canvas`, `extensions/media`, `extensions/browser`,
-`extensions/voice`). This is what each of them takes from the portal, and what
-gives the same to an extension:
+`extensions/voice`, `extensions/understory`). This is what each of them takes
+from the portal, and what gives the same to an extension:
 
 | The portal's app uses | An extension has |
 | --- | --- |
@@ -2095,6 +2098,10 @@ gives the same to an extension:
 | A container of its own, and the one the portal made before it was an extension taken over by its name | `requires` with `pithagoras-docker`, `extensions.use`, `containers.adopt` and `volumes.adopt` |
 | A container on the portal's loopback, made again on its network after the portal's container was, on the GPU it was given | `sharedNetwork()`, `containers.inspect`, and `DeviceRequests` in the create body |
 | Being where voice mode listens and speaks, chosen once its service is up, with its model loaded while voice mode is used | `portal.voice.provide` and `voice.choose` |
+| Scripts run in its container, one at a time, and ended where they took too long | `containers.exec`, with `timeoutMs` |
+| The agent's memory: its tools as an MCP server's, counted as the person's own words, and MEMORY.md left aside while it is on | `portal.mcp.set` with `trusted`, `portal.memory.hold` |
+| A model server of its own for its service, passing each request to the model of the chat whose tool is asking | `portal.models.of` and `endpoint`, `chats.onEvent`, `chats.on("stopped")` |
+| Links in Markdown that open a page of its own | `components={{ a }}` on `ui.Markdown` |
 | Another program's web page through the portal, behind its login, with its websockets | `portal.router`, `http.upgrade` |
 | Another program's screen beside a chat, black from edge to edge, with a Fullscreen in its head | `bleed`, `actions` and `panel.fullscreen()` on its `chat.panel` |
 | A button in voice mode only while there is something to see | `useButton` on its `voice.window` |
