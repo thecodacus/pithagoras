@@ -1482,11 +1482,11 @@ person set up, with their keys, through `portal.models`:
 ```js
 // The model of the chat that asked; without a chat, the one new chats start on.
 const model = await portal.models.of(chatId);
-const { api, baseUrl, headers } = await portal.models.endpoint(model.provider, model.id);
+const { api, baseUrl, headers, key } = await portal.models.endpoint(model.provider, model.id);
 if (api === "openai-completions") {
   const answer = await fetch(`${baseUrl}/chat/completions`, {
     method: "POST",
-    headers: { ...headers, "content-type": "application/json" },
+    headers: { ...headers, ...(key ? { authorization: `Bearer ${key}` } : {}), "content-type": "application/json" },
     body: JSON.stringify({ model: model.id, messages }),
   });
 }
@@ -1497,9 +1497,11 @@ if (api === "openai-completions") {
   none. Without a chat, it is the one new chats start on. Nothing for a chat
   that is not known, or where no model is chosen.
 - `endpoint(provider, id)` is where a model pi knows is asked: what it speaks
-  (`api`, as pi says it), its address (`baseUrl`, with no slash at the end),
-  and the `headers` a request carries, its provider's own and its key as
-  `authorization: Bearer <key>`. It rejects for a model pi does not know.
+  (`api`, as pi says it), its address (`baseUrl`, with no slash at the end,
+  or `""` where pi has none), the `headers` its provider adds, and its `key`,
+  where it has one. The key is not in `headers`: a request carries it as its
+  `api` takes a key, as `authorization: Bearer <key>` for
+  `openai-completions`. It rejects for a model pi does not know.
 - `list()` is the providers set up by their address in pi's models.json, each
   `{ provider, api?, baseUrl?, models }` with its models' ids. The services pi
   has built in, signed in with a key or an account, are not listed;
@@ -1507,7 +1509,7 @@ if (api === "openai-completions") {
 
 The key is the person's: send it to that model's own address and nowhere else.
 Where the provider's key is a command pi runs (`!…`), `keyFromCommand` is true:
-the key in `headers` is what the command gave this time, fit for a request now
+`key` is what the command gave this time, fit for a request now
 and not for keeping where it outlives the request, such as a container's
 environment. The portal's own Understory asks `of` and `endpoint` in "the
 chat's" mode, and does not write a command's key into its container.

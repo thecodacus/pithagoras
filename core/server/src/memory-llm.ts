@@ -131,14 +131,17 @@ const timedOut = (e: unknown): boolean => {
 
 /** Where a model's chat completions go, and how to sign in there. */
 async function endpointOf(provider: string, id: string): Promise<{ url: string; headers: Record<string, string> }> {
-  const { api, baseUrl, headers } = await modelEndpoint(provider, id);
+  const { api, baseUrl, headers, key } = await modelEndpoint(provider, id);
   if (api !== "openai-completions") {
     throw new Refused(
       `The chat's model ${provider}/${id} speaks ${api}, not OpenAI chat completions, which is what Understory sends. Give Understory a model of its own in Settings → Add-ons → Memory.`,
     );
   }
   if (!baseUrl) throw new Refused(`The chat's model ${provider}/${id} has no address`);
-  return { url: `${baseUrl}/chat/completions`, headers: { "content-type": "application/json", ...headers } };
+  return {
+    url: `${baseUrl}/chat/completions`,
+    headers: { "content-type": "application/json", ...headers, ...(key ? { authorization: `Bearer ${key}` } : {}) },
+  };
 }
 
 /** Mounted outside /api: Understory signs in with its own token, not a portal session. */

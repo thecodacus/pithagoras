@@ -28,7 +28,10 @@ export async function modelOf(chatId: string | undefined, live: LiveModel): Prom
   return model ? { provider, id: model } : undefined;
 }
 
-/** Where a model pi knows is asked, and the headers that sign a request in there, its key among them. */
+/**
+ * Where a model pi knows is asked, the headers its provider adds, and its key apart from them, as pi keeps it: which
+ * header a key goes in is the API's to say.
+ */
 export async function modelEndpoint(provider: string, id: string): Promise<ModelEndpoint> {
   const rt = await modelRuntime();
   const model = rt.getModel(provider, id);
@@ -37,11 +40,8 @@ export async function modelEndpoint(provider: string, id: string): Promise<Model
   return {
     api: model.api,
     baseUrl: String(auth.baseUrl ?? model.baseUrl ?? "").replace(/\/+$/, ""),
-    headers: {
-      ...(model.headers ?? {}),
-      ...(auth.headers ?? {}),
-      ...(auth.apiKey ? { authorization: `Bearer ${auth.apiKey}` } : {}),
-    },
+    headers: { ...(model.headers ?? {}), ...(auth.headers ?? {}) },
+    ...(auth.apiKey ? { key: auth.apiKey } : {}),
     keyFromCommand: storedKey(provider)?.startsWith("!") === true,
   };
 }

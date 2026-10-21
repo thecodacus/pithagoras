@@ -222,13 +222,18 @@ export interface ModelRef {
 export interface ModelEndpoint {
   /** What it speaks, as pi says it: "openai-completions", "anthropic-messages"… */
   api: string;
-  /** Its address, with no slash at the end: for "openai-completions", where `/chat/completions` is. */
+  /** Its address, with no slash at the end, or "" where pi has none: for "openai-completions", where `/chat/completions` is. */
   baseUrl: string;
-  /** What a request carries: the headers its provider adds, and its key as `authorization: Bearer <key>` where it has one. */
+  /** The headers its provider adds to a request. The key is not among them: see `key`. */
   headers: Record<string, string>;
   /**
-   * The provider's key is a command pi runs (`!…`), whose answer is in `headers`: fit for a request now, not for
-   * keeping where it outlives the request, such as a container's environment.
+   * The provider's key, where it has one. A request carries it as `api` takes a key: for "openai-completions", as
+   * `authorization: Bearer <key>`.
+   */
+  key?: string;
+  /**
+   * The provider's key is a command pi runs (`!…`), whose answer is `key`: fit for a request now, not for keeping
+   * where it outlives the request, such as a container's environment.
    */
   keyFromCommand: boolean;
 }

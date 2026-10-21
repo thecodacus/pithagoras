@@ -61,17 +61,20 @@ test("the model a chat is on: its pi's while it runs, else the one stored for it
   assert.equal(await models.of(), undefined);
 });
 
-test("where a model is asked, with its key; a command's key is said to be one", async () => {
+test("where a model is asked, with its key apart from the headers; a command's key is said to be one", async () => {
   assert.deepEqual(await models.endpoint("local", "small"), {
     api: "openai-completions",
     baseUrl: "http://127.0.0.1:1/v1",
-    headers: { authorization: "Bearer sk-local" },
+    headers: {},
+    key: "sk-local",
     keyFromCommand: false,
   });
+  // Anthropic's API takes a key in a header of its own: which one is the extension's to say, by `api`.
   const ran = await models.endpoint("ran", "big");
   assert.equal(ran.api, "anthropic-messages");
+  assert.equal(ran.key, "ran-key", "the key the command gave");
   assert.equal(ran.keyFromCommand, true);
-  assert.equal(ran.headers.authorization, "Bearer ran-key", "the key the command gave");
+  assert.deepEqual(ran.headers, {});
 });
 
 test("a model pi does not know is refused", async () => {
