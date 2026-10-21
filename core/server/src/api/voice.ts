@@ -3,7 +3,7 @@ import { spokenNumbers } from '../voice-numbers.js';
 import { INPUT_LANGUAGES, CHATTERBOX_LANGUAGES } from '../voice-languages.js';
 import { DEFAULT_CHOICE, cpuSpeechUrl, endpoints, isManagedUrl, parseChoice, speechUrl, type VoiceChoice } from '../voice-engines.js';
 import { DEFAULT_KOKORO_VOICE, KOKORO_SPEEDS, isKokoroVoice } from '../kokoro-voices.js';
-import { VoiceLeases } from '../extensions/voice-leases.js';
+import { VoiceLeases } from '../voice-leases.js';
 import { DEFAULT_SKIP_THINKING_PROVIDERS, DEFAULT_VOICE_INSTRUCTIONS, voiceInstructions, voiceRulesOn } from '../pi/voice-first.js';
 import * as voiceService from '../extensions/voice-service.js';
 import { setTimeout as delay } from "node:timers/promises";
