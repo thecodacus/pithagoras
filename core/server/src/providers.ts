@@ -378,7 +378,7 @@ export function normalizeBaseUrl(raw: string, kind: ProviderKind): string {
 }
 
 /** A stored key as pi would read it: `$NAME` and `${NAME}` are looked up in the environment, anything else is the key as it stands, and a command is not run here. */
-export function resolveKey(key: string | undefined): string | undefined {
+function resolveKey(key: string | undefined): string | undefined {
   if (!key || isPlaceholder(key)) return undefined;
   const env = ENV_REF.exec(key);
   if (env) return process.env[env[1]];

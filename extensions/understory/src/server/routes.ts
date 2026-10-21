@@ -50,7 +50,7 @@ function serverTimeZone(): string {
   return zone === "Etc/Unknown" ? "UTC" : zone;
 }
 
-export async function understoryState() {
+async function understoryState() {
   const server = portal().mcp.get(UNDERSTORY);
   const url = typeof server?.entry.url === "string" && server.entry.url ? server.entry.url : understoryDefaultUrl();
   const [reached, runtime] = await Promise.all([reachable(url), service.status()]);

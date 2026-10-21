@@ -38,7 +38,7 @@ const READS = {
  * Where Understory answers, and with what token, while it is the agent's memory: its server in mcp.json, not switched
  * off there, whether or not pi-mcp-adapter is on to give the chats its tools.
  */
-export function understoryAt(): { origin: string; token?: string } | undefined {
+function understoryAt(): { origin: string; token?: string } | undefined {
   const entry = portal().mcp.get(UNDERSTORY)?.entry;
   if (!entry || entry.disabled === true) return undefined;
   try {

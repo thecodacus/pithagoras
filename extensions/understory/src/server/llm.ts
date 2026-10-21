@@ -36,7 +36,7 @@ const isMemoryTool = (name: unknown) => typeof name === "string" && name.startsW
  * A tool call in a chat, starting or ending — its subagents' included, which
  * are on its behalf, their calls named `<subagent>:<call>`.
  */
-export function noteToolCall(sessionId: string, call: string, toolName: unknown, phase: "start" | "end"): void {
+function noteToolCall(sessionId: string, call: string, toolName: unknown, phase: "start" | "end"): void {
   if (!isMemoryTool(toolName)) return;
   const had = asking.get(sessionId);
   if (phase === "start") {
@@ -51,7 +51,7 @@ export function noteToolCall(sessionId: string, call: string, toolName: unknown,
 }
 
 /** A subagent ended — perhaps killed mid-call: whatever it was asking, it asks no more. */
-export function subagentGone(sessionId: string, subagent: string): void {
+function subagentGone(sessionId: string, subagent: string): void {
   const had = asking.get(sessionId);
   if (!had) return;
   for (const call of [...had.calls]) if (call.startsWith(`${subagent}:`)) had.calls.delete(call);
@@ -96,7 +96,7 @@ export function forgetAsking(): void {
 }
 
 /** The provider and model a request goes to. */
-export async function chosenModel(): Promise<{ provider: string; id: string; chat?: string }> {
+async function chosenModel(): Promise<{ provider: string; id: string; chat?: string }> {
   const { models } = portal();
   const chat = askingChat();
   const asked = chat ? await models.of(chat) : undefined;

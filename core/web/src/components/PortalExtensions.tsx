@@ -13,12 +13,8 @@ const addons = [
 type Addon = typeof addons[number]['id'];
 
 /**
- * Optional pieces of the portal itself, as opposed to pi's packages.
- *
- * This is where an add-on is found before it exists. Its own page appears in
- * the sidebar once installed, which is the right place to live and the wrong
- * place to be discovered from — nothing was visible until it was already
- * running, so there was nowhere to press install.
+ * Optional pieces of the portal itself, as opposed to pi's packages: voice mode
+ * and the subagent tool, each set up in its own tab.
  */
 export function PortalExtensions({ onError }: { onError: (e: string) => void }) {
   const id = useId();
