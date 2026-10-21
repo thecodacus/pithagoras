@@ -763,8 +763,8 @@ module (`"type": "module"` in `package.json`, or a `.mjs` file).
 It has fifteen seconds to start and five to stop; one that takes longer is
 given up on, with the reason beside the package in Settings → Extensions, and
 nothing else waits for it. One that crashes, an error of its code that nothing
-catches or a call of `process.exit()`, is switched off, and the portal and its
-chats go on: see [When the server half crashes](#when-the-server-half-crashes).
+catches or a call of `process.exit()`, is stopped and held off, and the portal
+and its chats go on: see [When the server half crashes](#when-the-server-half-crashes).
 The module itself is read again each time it is
 started. What it imports from its own package is read once for as long as the
 portal runs, as Node reads modules: after an update that changes those files,
@@ -2115,26 +2115,35 @@ would end the portal. They do not: each is that extension's crash.
 - A tool of its that a chat had called, and that had not answered yet, answers
   at once with an error that names the crash and carries the half's last
   lines, so the agent reads what happened in the same turn and the chat goes
-  on. A later call of that tool, in a chat that still has it, answers the same
-  without running its code; a chat that loads after the crash does not have
-  its tools.
+  on; so does one of its handlers in a chat's pi (`pi.on`) that had not
+  returned. A later call of that tool or of its commands, in a chat that still
+  has them, answers the same without running its code, and its handlers are
+  no longer called; a chat that loads after the crash has none of them.
+- A request to its routes that had not been answered is answered with
+  `503` and the crash; one whose answer had begun is cut off.
 - Settings → Extensions shows the crash beside the package, with what the
-  half said last. `GET /api/extension-ui` has it as `crash`, and Settings →
-  Logs has every line.
+  half said last, as it is opened or refreshed. `GET /api/extension-ui` has it
+  as `crash`, and Settings → Logs has every line.
 
 What the half said is kept for it, the latest 200 lines: what it writes with
 `portal.log`, the portal's own lines about it, and whatever is printed while
 its code runs.
 
 The portal knows the code as the extension's while it runs the module as it
-starts, its routes, its handlers (`chats.on`, `chats.onEvent`, `chats.onOpen`,
-upgrades, and the rest it registers), what it adds to a chat's pi and its
-tools' calls; and so it knows what that code starts: its timers, promises,
-callbacks, sockets and processes. An error from a listener it put on something
-it does not own (`process.on(...)`, an emitter of another's), or from a
-`queueMicrotask` callback, is known by its stack, which goes through the
-folder of the server module. An error that is no extension's ends the portal,
-as it always has.
+starts, its routes and what their request, answer and upgraded socket tell it
+later, its handlers (`chats.on`, `chats.onEvent`, `chats.onOpen`, upgrades,
+and the rest it registers), and what it adds to a chat's pi: its tools'
+calls, its handlers and its commands. So it knows what that code starts: its
+timers, promises, callbacks, sockets and processes. What the portal does that
+the half asks for is the portal's own: a chat told or reloaded, a chat's
+model, a request its routes hand on, a turn it asks a chat's pi for
+(`pi.sendMessage`, `pi.sendUserMessage`). An error from a listener it put on
+something it does not own (`process.on(...)`, an emitter of another's), or
+from a `queueMicrotask` callback, is known by its stack, which goes through
+the folder of the server module: any file in that folder counts, a pi
+extension (`pi.extensions`) kept there as well, whose uncaught error is then
+counted as the server half's crash. An error that is no extension's ends the
+portal, as it always has, and so does one of a pi extension kept elsewhere.
 
 What this cannot stop:
 
@@ -2143,10 +2152,10 @@ What this cannot stop:
   portal's own process, and a restart starts the half again. Remove the
   package with `pi remove <spec>` where the portal runs (in its container),
   then restart it.
-- A timer or a process the half left behind goes on until the portal
-  restarts; its errors are not said again.
-- A package's pi extension (`pi.extensions`) runs in each chat's pi, not here,
-  and an error it leaves uncaught is the portal's.
+- A timer or a process the half left behind, as it crashed or as it was
+  stopped, goes on until the portal restarts. Each of its errors is said in
+  the log, and nothing more is done. One known only by its stack is counted
+  as the running half's of that folder, where there is one.
 
 ## The example
 

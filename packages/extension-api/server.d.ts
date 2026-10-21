@@ -520,8 +520,11 @@ export interface ServerPortal {
      * runs in the portal's own process. A tool registered with
      * `offByDefault: true` is off in every chat until somebody switches it on,
      * and one with `guard` is held to what it declares: see ToolGuard. Should
-     * this server half crash while a tool's call is running, the call ends at
-     * once with an error that says so, with the half's last lines.
+     * this server half crash while a tool's call, a handler (`pi.on`) or a
+     * command of it is running, that ends at once with an error that says so,
+     * with the half's last lines; its handlers are not called after that. A
+     * turn it asks the chat's pi for (`pi.sendMessage`, `pi.sendUserMessage`)
+     * is the chat's, not this module's code.
      */
     extend(factory: (pi: any, chat: Chat) => void): void;
     /**
