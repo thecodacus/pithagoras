@@ -282,7 +282,7 @@ test('voice mode takes its lease before listening and gives it back on End, what
  await expect.poll(()=>leases).toEqual([true,false]);
 });
 
-test('ending while the lease is being taken (a model loading) gives it back and never starts listening',async({page})=>{
+test('ending while the lease is being taken (a model loading) gives it back once it is taken, and never starts listening',async({page})=>{
  let finishLoad!:()=>Promise<void>; const leases:boolean[]=[];
  await page.route('**/api/voice',r=>r.fulfill({json:{enabled:true}}));
  await page.route('**/api/sessions/test/voice/connection',async r=>{
@@ -293,8 +293,11 @@ test('ending while the lease is being taken (a model loading) gives it back and 
  await page.goto('/tests/voice.html');await page.getByRole('button',{name:'Turn on hands-free voice'}).click();
  await expect.poll(()=>leases).toEqual([true]);
  await page.getByRole('button',{name:'End voice mode'}).click();
- await expect.poll(()=>leases).toEqual([true,false]);await finishLoad();
  await expect(page.getByRole('button',{name:'Turn on hands-free voice'})).toBeVisible();
+ // The lease's updates go in the order they were made: the release waits for the lease to be answered, and so reaches the server after it.
+ expect(leases).toEqual([true]);
+ await finishLoad();
+ await expect.poll(()=>leases).toEqual([true,false]);
  await expect(page.getByLabel('Voice conversation')).toHaveCount(0);
 });
 

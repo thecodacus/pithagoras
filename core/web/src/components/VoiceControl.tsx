@@ -172,8 +172,13 @@ export function VoiceControl({ sessionId, folder, items, running, work, onSend, 
   const stream = useRef<MediaStream | null>(null);
   const connection = useRef<string | null>(null);
   const heartbeat = useRef<ReturnType<typeof setInterval>>();
-  const connectVoice = async(client:string,active:boolean)=>{
-    await json(`/api/sessions/${sessionId}/voice/connection`,{method:'POST',body:JSON.stringify({client,active}),keepalive:!active});
+  // The lease's updates go one after another, in the order they were made: a heartbeat still on its way when voice mode
+  // stops would otherwise reach the server after the release, and take the lease again.
+  const connectionUpdates = useRef<Promise<unknown>>(Promise.resolve());
+  const connectVoice = (client:string,active:boolean)=>{
+    const update = connectionUpdates.current.then(()=>json(`/api/sessions/${sessionId}/voice/connection`,{method:'POST',body:JSON.stringify({client,active}),keepalive:!active}));
+    connectionUpdates.current = update.catch(()=>{});
+    return update;
   };
   const maxTurn = useRef<ReturnType<typeof setTimeout>>();
 
