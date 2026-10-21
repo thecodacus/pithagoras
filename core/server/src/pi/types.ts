@@ -89,8 +89,10 @@ export interface PiClient extends EventEmitter {
   /**
    * Set where the open chats were reloaded while this one was working (see
    * reloadIdle): it is loaded again at its next step, where the executor can
-   * do that between two requests of a run, or else once the run is over.
-   * Cleared by a reload.
+   * do that between two requests of a run, or else once the run is over or
+   * before the next message starts one. Cleared by a reload, and set again
+   * where that fails, which may have let go of what was loaded: tried again at
+   * the next of those, once at each.
    */
   reloadDue?: boolean;
   /**

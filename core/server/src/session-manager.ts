@@ -2898,9 +2898,8 @@ class SessionManager extends EventEmitter {
           await this.withEdit(sessionId, () => client.reload());
           return true;
         } catch (e) {
+          // Due still, as a reload that fails leaves it: see PiClient.reloadDue.
           console.error(`[portal] could not reload ${sessionId}: ${(e as Error).message}`);
-          // Tried again at its next step, or before its next message.
-          client.reloadDue = true;
           waiting++;
           return false;
         }

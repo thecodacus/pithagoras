@@ -207,7 +207,13 @@ export class PiRpcClient extends EventEmitter implements PiClient {
 
   async reload(): Promise<void> {
     this.reloadDue = false;
-    await this.data("reload", {}, LONG_COMMAND_MS);
+    try {
+      await this.data("reload", {}, LONG_COMMAND_MS);
+    } catch (e) {
+      // Not reloaded, so due still: see PiClient.reloadDue.
+      this.reloadDue = true;
+      throw e;
+    }
   }
 
   async exportSession(): Promise<string> {
