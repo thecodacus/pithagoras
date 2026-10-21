@@ -74,7 +74,7 @@ export function agentFileStatus(home = agentHome()) {
     initialised: isInitialised(home),
     // Where the agent's memory is kept: while something holds it (`by` names it), MEMORY.md is not read.
     memory: holder ? ("extension" as const) : ("file" as const),
-    ...(holder ? { by: holder.label } : {}),
+    by: holder?.label ?? null,
     files: EDITABLE_FILES.map((name) => {
       const read = readPlain(name, home);
       // `mtime` is what a save sends back as `expected`: the agent writes these files too.

@@ -119,7 +119,7 @@ export interface AgentSetup {
   files: { name: string; exists: boolean; content: string; mtime: number; link?: boolean }[];
   /** Where the agent's memory is kept: while something holds it (`by` names it), MEMORY.md is not read. */
   memory?: "file" | "extension";
-  by?: string;
+  by: string | null;
 }
 
 /** An agent: a home of its own, with its own SOUL.md, PrimaryUser.md and memory. */
