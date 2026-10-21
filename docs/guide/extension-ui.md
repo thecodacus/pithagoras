@@ -795,6 +795,7 @@ restart the portal.
 | `dataDir()` | [A folder of the package's own in the portal's data folder](#where-it-keeps-things), closed to everyone but the portal, by its real path |
 | `handoffs.take(name)`, `handoffs.done(name)` | [What an upgrade left](#what-an-upgrade-left-for-it) when something the portal did itself became an extension's |
 | `provide(factory)`, `extensions.use(name)` | [Building on another extension](#building-on-another-extension): what it gives the extensions that build on it, and what one it builds on gives it |
+| `voice.provide(provider)`, `voice.choose(chosen)` | [Voice providers](#voice-providers): a place for voice mode to listen and speak, and making it voice mode's source |
 | `log(text)`, `extension`, `executor`, `version` | A line in the portal's log; the package's name; how pi is run here; `1` |
 
 ### Routes
@@ -1564,6 +1565,73 @@ or a folder of the server's is read only once it is installed: nothing is
 installed with it, and it waits as above until what it requires is there.
 Before anything is installed, Discover says what one that comes with the portal
 requires ("Needs pithagoras-docker").
+
+### Voice providers
+
+An extension can give [voice mode](/guide/voice) a place to listen and speak:
+a speech recognition and a speech synthesis service it runs, in a container of
+its own, say. It offers them with `portal.voice.provide`, and the person
+chooses it in Settings → Add-ons → Voice, under **Listen and speak through**,
+beside their own addresses.
+
+```js
+portal.voice.provide({
+  label: "Voice service",
+  // Where it listens and speaks now; nothing while it cannot be used.
+  where: () =>
+    running
+      ? {
+          listen: { url: "http://127.0.0.1:8188/inference" },
+          speak: { url: "http://127.0.0.1:7862/v1/audio/speech", runtime: "kokoro" },
+        }
+      : undefined,
+  // Voice mode began, or stopped, being used anywhere.
+  async use(inUse) {
+    await (inUse ? loadModel() : unloadModel());
+  },
+});
+```
+
+- **`where()`** is asked at each request while it is the source, and as
+  Settings lists the sources: keep it quick. `listen` is an address that takes
+  a WAV as Whisper.cpp's `/inference` or an OpenAI transcription endpoint
+  does, with the `model` it is sent where it names one. `speak` is the speech
+  service and how it is spoken to: `audio-cpp`, `kokoro`, `chatterbox` or
+  `breeze`, the [speech runtimes](/guide/voice#speech-runtimes) voice mode
+  knows. Without `speak` it recognises speech only: dictation works, and
+  replies are not spoken.
+- **Not running.** While `where()` answers nothing, or the server half is not
+  running, voice mode answers 503, "Voice mode listens and speaks through an
+  extension that is not running: install or start it, or choose your own
+  addresses in Settings → Add-ons → Voice", and uses no other address.
+- **`use(inUse)`**, which may be left out. Every voice session holds a lease
+  while it is on: each tab renews it every 25 seconds, and one not renewed for
+  75 runs out. The provider chosen is told `true` at the first lease and
+  `false` once the last has ended or run out, not at each lease; `true` again
+  where the person chose it while voice mode was in use, or its server half
+  was started anew. `true` is awaited as voice mode begins: what it throws is
+  said on the page, and voice mode does not start. What it throws for `false`
+  is logged.
+- **`choose(true)`** makes the extension voice mode's source and switches voice
+  mode on; **`choose(false)`** gives the source back to the person's own
+  addresses, where this extension is the source. Neither changes those
+  addresses, nor anything else of the settings, but for one thing: a provider
+  that speaks with Chatterbox, which has no detection mode, is given English
+  where the input language is one it does not speak. The source decides where
+  the person's voice goes, so `choose` answers what they ask for on the
+  extension's own page, such as using it once it is installed, or an
+  uninstall; Settings shows which it is.
+- **Dictation** goes to the source as well, unless the person set a dictation
+  endpoint of their own, which is then used with the dictation model they
+  named.
+- **One for each package.** `provide` again replaces the one before, and it
+  goes when the server half stops. A choice of it stays: voice mode says it is
+  not running until it is back, or the person chooses otherwise.
+
+Voice mode asks for the source at each request, so a change is used at once.
+The voice controls that are open read the settings again as Settings closes,
+so they follow a source chosen on the extension's page there (whether its
+replies are spoken, say) without a reload.
 
 ## Panels and commands
 

@@ -638,6 +638,38 @@ address of your own empties both, and uninstalling it brings back what was there
 before. What you set up afterwards stays, also when you press **Start voice**;
 an address of the managed service itself is cleared with the uninstall.
 
+## Listening and speaking through an extension
+
+An extension can offer voice mode a place to listen and speak: a recognition
+and a speech service it runs itself. Where one does, **Settings → Add-ons →
+Voice → Listen and speak through** chooses between **Your own addresses**, the
+ones under **Advanced connection**, and each such extension. The extension's
+own page may choose itself there too, when you ask it to, after installing it
+for example. Voice mode then listens and speaks at the extension's addresses,
+in the way it speaks (Kokoro with its own voices, say), and the page shows the
+voice options for that; dictation goes there as well, unless you set a
+**Dictation endpoint** of your own, which is used with its **Dictation model**
+either way.
+
+Your own addresses are never changed for an extension. Choose **Your own
+addresses** again and they are used as they were; uninstalling the extension
+does the same where it was chosen.
+
+An extension that is chosen and not running, or not ready, is said under the
+choice. Voice mode does not fall back to your own addresses meanwhile: dictation
+and voice mode answer *Voice mode listens and speaks through an extension that
+is not running: install or start it, or choose your own addresses in Settings →
+Add-ons → Voice*.
+
+Every voice session holds a lease on what voice mode listens and speaks
+through, whichever it is: it is asked for before the microphone begins to
+listen, each tab renews it every 25 seconds, and the extension is told when
+voice mode starts and stops being used anywhere, so that it can load its model
+for the first session and let it go after the last. A choice made in Settings
+reaches the voice controls that are open when Settings closes.
+[Voice providers](/guide/extension-ui#voice-providers) is how an extension
+offers this.
+
 ## Speech speed
 
 **Speech generation → Fast** uses CFG 1, avoiding the extra guidance branch.
