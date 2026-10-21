@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { runToEnd, serverEnv, testHome } from "./server-harness.mjs";
-import { PASSWORD, BROWSER_PASSWORD, auth, security, issued, tls, browser, upstreamPort, login, cookieOf, post, statusAt, settingsAt, portalOf, resetPassword, openStream, ends, staysOpen, upgrade, until } from "./auth-harness.mjs";
+import { PASSWORD, auth, security, issued, tls, login, cookieOf, post, statusAt, settingsAt, portalOf, resetPassword, openStream, ends, staysOpen, withStreams, opened } from "./auth-harness.mjs";
 
 /**
  * What a change or a reset of the password ends: the streams open under the old one. A portal that
@@ -48,18 +48,14 @@ test("changing the password ends every event and terminal stream that was open u
   }
 });
 
-test("changing the password ends the agent's browser streams, the changer's too, and a reset ends every stream", async () => {
-  const p = await portalOf({ PORTAL_PASSWORD: PASSWORD, BROWSER_HTTPS_PORT: String(upstreamPort), BROWSER_USER: "agent", BROWSER_PASSWORD });
+test("changing the password ends an extension's streams, the changer's too, and a reset ends every stream", async () => {
+  const at = testHome("pithagoras-auth-own-");
+  const p = await portalOf({ PORTAL_PASSWORD: PASSWORD, ...withStreams(at) }, at);
   const closes = (stream, what) => Promise.race([stream.closed, new Promise((_, no) => setTimeout(() => no(new Error(`${what} is still open`)), 5000))]);
   try {
-    browser.mode = "accept";
     const mine = cookieOf(await login(PASSWORD, p.base));
     const other = cookieOf(await login(PASSWORD, p.base));
-    const open = async (cookie) => {
-      const stream = upgrade({ Cookie: cookie }, "", "/browser-ui/websockify", p.port);
-      await until(() => stream.text().includes("RFB 003.008"), "the stream open");
-      return stream;
-    };
+    const open = (cookie) => opened({ Cookie: cookie }, p.port);
     const theirs = await open(other);
     const own = await open(mine);
     const copied = await open(mine);
@@ -75,7 +71,7 @@ test("changing the password ends the agent's browser streams, the changer's too,
     const later = await open(cookieOf(changed));
     assert.equal((await resetPassword(p.home, "reset\n")).code, 0);
     await ends(events, "the event stream, after the reset");
-    await closes(later, "the browser stream, after the reset");
+    await closes(later, "the extension's stream, after the reset");
   } finally {
     await p.stop();
   }

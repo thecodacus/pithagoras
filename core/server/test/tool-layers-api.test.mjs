@@ -20,8 +20,8 @@ db.rememberTools([
   { name: "web_search", source: "pi-web-access" },
   { name: "web_fetch", source: "pi-web-access" },
   { name: "bash", source: "built in", package: null },
-  // The portal's own browser tool: what a routine's old Browser switch answers for.
-  { name: "browser_navigate", source: "browser", package: null, inline: true },
+  // A package's tool, named as a browser's: switched as any tool is.
+  { name: "browser_navigate", source: "pithagoras-browser", package: null, inline: true },
 ]);
 
 let base;
@@ -97,8 +97,8 @@ test("a routine's switches come after its agent and its project, and a run's cha
   await json("/api/projects/research/tools", "PUT", { off: ["web_fetch", "bash"] });
   const r = await routine("Research digest", "research");
   const page = await json(`/api/routines/${r.id}/tools`);
-  // The project's, with the browser off as a routine's always was.
-  assert.deepEqual(states(page), { bash: false, browser_navigate: false, web_fetch: false, web_search: true });
+  // The project's.
+  assert.deepEqual(states(page), { bash: false, browser_navigate: true, web_fetch: false, web_search: true });
   assert.equal(page.tools.find((t) => t.name === "bash").defaultOn, false, "what the layers under it say");
   assert.equal(page.tools.find((t) => t.name === "browser_navigate").defaultOn, true);
 
@@ -112,40 +112,30 @@ test("a routine's switches come after its agent and its project, and a run's cha
   assert.equal(states(await json(`/api/sessions/${run}/tools`)).web_search, true, "the run's chat switched it on for itself");
 });
 
-test("the browser is a routine's tools now: off unless switched on, and its old switch is kept", async () => {
+test("a routine has a browser's tools as any tool: as a chat in its place has them, unless its own switches say otherwise", async () => {
   const r = await routine("Shop check");
   const run = runOf(r, db.getSession((await json("/api/sessions", "POST", {})).id).workspace);
-  const row = () => db.getSession(run);
-  assert.equal(db.browserAllowed(row()), false, "a new routine has no browser");
-  assert.deepEqual(db.routineTools(r.slug), { off: ["browser_navigate"], on: [] }, "its switch answers for what its lists do not name");
-
-  // Switched on in the tools list: its runs may drive it, and the old switch follows.
-  await json(`/api/routines/${r.id}/tools`, "PUT", { off: ["web_fetch"] });
-  assert.equal(db.browserAllowed(row()), true);
+  assert.deepEqual(db.routineTools(r.slug), { off: [], on: [] }, "nothing said of them");
   assert.equal(states(await json(`/api/sessions/${run}/tools`)).browser_navigate, true);
-  assert.equal(db.getDb().prepare("SELECT browser FROM routines WHERE id = ?").get(r.id).browser === 1, true);
-
-  // The old switch through the API still does what it says, after the page has saved.
-  await json(`/api/routines/${r.id}`, "PATCH", { browser: false });
-  assert.equal(db.browserAllowed(row()), false);
-  await json(`/api/routines/${r.id}`, "PATCH", { browser: true });
-  assert.equal(db.browserAllowed(row()), true);
-
-  // A browser tool that turns up later starts as the old switch says; what the page wrote down stays.
+  await json(`/api/routines/${r.id}/tools`, "PUT", { off: ["web_fetch", "browser_navigate"] });
+  assert.deepEqual(db.routineTools(r.slug), { off: ["browser_navigate"], on: [] });
+  assert.equal(states(await json(`/api/sessions/${run}/tools`)).browser_navigate, false);
+  // Off by default, a routine that switches it on has it.
+  db.setToolDefaultsOff(["web_fetch", "browser_navigate"]);
   await json(`/api/routines/${r.id}/tools`, "PUT", { off: ["web_fetch"] });
-  db.getDb().prepare("UPDATE routines SET browser = 0 WHERE id = ?").run(r.id);
-  db.rememberTools([{ name: "browser_click", source: "browser", package: null, inline: true }]);
-  assert.ok(db.routineTools(r.slug).off.includes("browser_click"));
-  assert.ok(db.routineTools(r.slug).on.includes("browser_navigate"), "what was said stays");
+  assert.deepEqual(db.routineTools(r.slug), { off: [], on: ["browser_navigate"] });
+  assert.equal(states(await json(`/api/sessions/${run}/tools`)).browser_navigate, true);
+  db.setToolDefaultsOff(["web_fetch"]);
 });
 
-test("the Browser page lists the chats an agent's switches give the browser", async () => {
+test("the chats an agent's switches give a tool are the ones that differ from the default", async () => {
   const agent = await json("/api/agents", "POST", { name: "Surfer" });
   db.setToolDefaultsOff(["web_fetch", "browser_navigate", "browser_click"]);
   db.createSession({ id: "surfer-chat", title: "Surfing", workspace: agent.home, executor: "host" });
-  assert.ok(!db.toolsDifferWith(db.browserPolicy()).chats.some((row) => row.id === "surfer-chat"));
+  const differ = () => db.toolExceptions(["browser_navigate", "browser_click"]).chats.some((row) => row.id === "surfer-chat");
+  assert.equal(differ(), false);
   db.setAgentTools(agent.id, { off: [], on: ["browser_navigate"] });
-  assert.ok(db.toolsDifferWith(db.browserPolicy()).chats.some((row) => row.id === "surfer-chat"));
+  assert.equal(differ(), true);
   db.setToolDefaultsOff(["web_fetch"]);
 });
 
@@ -182,14 +172,6 @@ test("a routine's page works out its place as its runs do, and says so when they
   const res = await send(`/api/routines/${r.id}/tools`);
   assert.equal(res.status, 409);
   assert.match((await res.json()).error, /cannot be used/);
-});
-
-test("a browser tool its lists do not name follows a routine's switch, however late it comes to be one", async () => {
-  const r = await routine("Late");
-  db.rememberTools([{ name: "browser_snapshot", source: "browser", package: null, inline: true }]);
-  assert.ok(db.routineTools(r.slug).off.includes("browser_snapshot"));
-  db.setRoutineBrowser(r.slug, true);
-  assert.ok(db.routineTools(r.slug).on.includes("browser_snapshot"));
 });
 
 test("a project's chats follow the project, even where the projects' folder is inside an agent's home", () => {

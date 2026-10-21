@@ -283,9 +283,8 @@ export interface ServerPortal {
      * that has never said anything about them has any of them on; the chats that have them otherwise, by their own
      * switches or by their agent's or project's (newest first), each the opposite of `byDefault`; and the routines
      * whose own switches give their runs another answer than a routine that sets nothing would have in the same place
-     * (by name), each with its runs' answer (`allowed`). A routine that sets nothing has the browser's tools off until
-     * its Browser switch is on, and every other tool as a chat in its place has it. For a page that says who may use
-     * them.
+     * (by name), each with its runs' answer (`allowed`). A routine that sets nothing has each tool as a chat in its
+     * place has it. For a page that says who may use them.
      */
     exceptions(names: string[]): { byDefault: boolean; chats: { id: string; title: string; kind: ChatKind }[]; routines: { slug: string; name: string; allowed: boolean }[] };
   };

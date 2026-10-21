@@ -1,59 +1,44 @@
-import test, { after } from 'node:test';
+import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync, type SpawnSyncReturns } from 'node:child_process';
-import type { AddressInfo } from 'node:net';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import http from 'node:http';
 import path from 'node:path';
-import express from 'express';
-import { fakeDocker } from './fake-docker.mts';
-import { inProcessHome } from './helpers.mts';
+import { inProcessHome } from '../../../tests/helpers.mts';
+import { serveBrowser } from './portal.mts';
 
 // Where the agent's browser answers. Its container shares the host's network, and the web server in the image listens
-// on every interface, so the portal has to keep it to one address itself; the portal's own use (its proxy, the
-// debugging port, the live view) is all on 127.0.0.1. Against a fake Docker daemon: nothing of this machine's Docker
-// is touched.
+// on every interface, so Browser has to keep it to one address itself; the portal's own use (its proxy, the debugging
+// port, the live view) is all on 127.0.0.1. With Docker's half against the tests' own daemon: nothing of this
+// machine's Docker is touched.
 const dir = inProcessHome('browser-bind-');
-process.env.DOCKER_SOCKET = path.join(dir, 'docker.sock');
 process.env.BROWSER_CDP_URL = 'http://127.0.0.1:1';
 delete process.env.BROWSER_BIND;
 delete process.env.BROWSER_EXTERNAL;
+const { docker, at } = await serveBrowser();
+const browser = await import('../src/server/service.ts');
+const { putSettings } = await import('../src/server/store.ts');
 
-// The container as the daemon has it, once it is created: what it was created with, and whether it carries a label.
-let box: { labels: Record<string, string> } | null = null;
-let created: any;
-
-const docker = await fakeDocker(process.env.DOCKER_SOCKET!, ({ method, url, body }) => {
-  if (url.startsWith('/images/')) return { status: 200 };
-  if (url === '/volumes/create') return {};
-  const create = url.match(/^\/containers\/create\?name=(.+)$/);
-  if (create) { created = body; box = { labels: body.Labels ?? {} }; return { status: 201, json: { Id: 'new-one' } }; }
-  if (!url.startsWith('/containers/pithagoras-browser')) return undefined;
-  if (method === 'DELETE') { box = null; return { status: 204, text: '' }; }
-  if (url.endsWith('/start')) return { status: 204, text: '' };
-  if (url.endsWith('/stop?t=10')) return { status: 204, text: '' };
-  if (!box) return { status: 404, text: JSON.stringify({ message: 'No such container: pithagoras-browser' }) };
-  return { json: { Id: 'browser-id', State: { Running: true }, Config: { Labels: box.labels } } };
-});
-const browser = await import('../core/server/src/extensions/browser-service.js');
-const { getDb } = await import('../core/server/src/db.js');
-const { browserRouter } = await import('../core/server/src/api/browser.js');
-after(() => getDb().close());
-
-browser.saveConfig({ password: 'secret' });
-const reset = () => { box = null; created = undefined; docker.reset(); delete process.env.BROWSER_BIND; delete process.env.BROWSER_EXTERNAL; };
+putSettings({ password: 'secret' });
+/** What the container was created with: Docker's create body. */
+const made = () => docker.containers.find((c) => c.Name === 'pithagoras-browser')!.made as any;
+const reset = () => { docker.containers.length = 0; delete process.env.BROWSER_BIND; delete process.env.BROWSER_EXTERNAL; };
 
 test('a new browser is created to listen on this machine only, and says so', async () => {
   reset();
   await browser.install();
+  const created = made();
   assert.ok(created.Env.includes('PITHAGORAS_UI_BIND=127.0.0.1'));
-  assert.deepEqual(created.Labels, { 'pithagoras.browser-bind': '127.0.0.1' });
+  assert.deepEqual(created.Labels, { 'pithagoras.browser-bind': '127.0.0.1', 'pithagoras.extension': 'pithagoras-browser' });
   // The web server is started through the script that holds it to that address, not by the image on its own.
   assert.deepEqual(created.Entrypoint.slice(0, 2), ['/bin/sh', '-c']);
   assert.match(created.Entrypoint[2], /exec \/init$/);
   // What the portal reaches it by is untouched: the host's network, with the ports the proxy and the live view use.
   assert.equal(created.HostConfig.NetworkMode, 'host');
+  assert.deepEqual(created.HostConfig.SecurityOpt, ['seccomp=unconfined']);
+  assert.equal(created.HostConfig.ShmSize, 1024 * 1024 * 1024);
+  assert.deepEqual(created.HostConfig.RestartPolicy, { Name: 'unless-stopped' });
   assert.ok(created.Env.includes('CUSTOM_HTTPS_PORT=3011'));
+  assert.ok(created.Env.includes('CHROME_CLI=--remote-debugging-port=9222'));
 });
 
 test('BROWSER_BIND chooses the address, and anything but an IPv4 address is the safe one', async () => {
@@ -61,7 +46,7 @@ test('BROWSER_BIND chooses the address, and anything but an IPv4 address is the 
     reset();
     if (value !== undefined) process.env.BROWSER_BIND = value;
     await browser.install();
-    return [created.Labels['pithagoras.browser-bind'], created.Env.find((e: string) => e.startsWith('PITHAGORAS_UI_BIND='))];
+    return [made().Labels['pithagoras.browser-bind'], made().Env.find((e: string) => e.startsWith('PITHAGORAS_UI_BIND='))];
   };
   assert.deepEqual(await bound('0.0.0.0'), ['0.0.0.0', 'PITHAGORAS_UI_BIND=0.0.0.0']);
   assert.deepEqual(await bound(' 192.168.1.5 '), ['192.168.1.5', 'PITHAGORAS_UI_BIND=192.168.1.5']);
@@ -93,7 +78,7 @@ server {
  */
 async function started(conf: string, bind: string, starts = 1) {
   await browser.install();
-  const script: string = created.Entrypoint[2];
+  const script: string = made().Entrypoint[2];
   const folder = mkdtempSync(path.join(dir, 'conf-'));
   const file = path.join(folder, 'default.conf');
   writeFileSync(file, conf);
@@ -160,7 +145,8 @@ test('0.0.0.0 leaves the image as it is, and an image that changed is not starte
 test('a container made before this has no label: the portal says its port is open and outdated, and reinstalling closes it', async () => {
   reset();
   assert.deepEqual(await browser.uiState(), { exposed: false, outdated: false }, 'none yet: what it will be made with');
-  box = { labels: { build_version: 'linuxserver' } };
+  // As the portal made it before there was a label for its address, and as Browser takes it over.
+  docker.containers.push({ Id: 'old'.padEnd(64, '0'), Name: 'pithagoras-browser', Image: browser.IMAGE, State: 'running', Labels: { build_version: 'linuxserver' }, Tty: false, out: '', err: '' });
   assert.deepEqual(await browser.uiState(), { exposed: true, outdated: true });
 
   await browser.install();
@@ -176,15 +162,10 @@ test('a container made before this has no label: the portal says its port is ope
 
 test('the Browser page is told, with the port it would link to', async () => {
   reset();
-  const app = express();
-  app.use('/api', browserRouter());
-  const web = await new Promise<http.Server>((r) => { const s = app.listen(0, '127.0.0.1', () => r(s)); });
-  try {
-    const ask = async () => (await fetch(`http://127.0.0.1:${(web.address() as AddressInfo).port}/api/browser`)).json() as Promise<{ uiPort: string; uiExposed: boolean; uiOutdated: boolean }>;
-    box = { labels: {} };
-    assert.deepEqual(pick(await ask()), { uiPort: '3011', uiExposed: true, uiOutdated: true });
-    await browser.install();
-    assert.deepEqual(pick(await ask()), { uiPort: '3011', uiExposed: false, uiOutdated: false });
-  } finally { await new Promise<void>((r) => web.close(() => r())); }
+  const ask = async () => pick(await (await fetch(`${at}/state`)).json() as { uiPort: string; uiExposed: boolean; uiOutdated: boolean });
+  docker.containers.push({ Id: 'old'.padEnd(64, '0'), Name: 'pithagoras-browser', Image: browser.IMAGE, State: 'running', Labels: {}, Tty: false, out: '', err: '' });
+  assert.deepEqual(await ask(), { uiPort: '3011', uiExposed: true, uiOutdated: true });
+  await browser.install();
+  assert.deepEqual(await ask(), { uiPort: '3011', uiExposed: false, uiOutdated: false });
 });
 const pick = ({ uiPort, uiExposed, uiOutdated }: { uiPort: string; uiExposed: boolean; uiOutdated: boolean }) => ({ uiPort, uiExposed, uiOutdated });

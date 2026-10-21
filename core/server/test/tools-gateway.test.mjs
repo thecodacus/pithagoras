@@ -66,6 +66,16 @@ export default function (pi) {
     parameters: { type: "object", properties: {} },
     async execute() { return text("weighed"); },
   });
+  // A tool that reads outside content, and says so, as a browser's tools do: what it returns is someone else's words.
+  pi.registerTool({
+    name: "page_read",
+    label: "Read a page",
+    description: "Read a page.",
+    guard: { outside: true },
+    promptGuidelines: ["PAGE-RULE: read a page before you quote it."],
+    parameters: { type: "object", properties: {} },
+    async execute() { return text("a page"); },
+  });
   // Tools that take a while and note when they start and end: sequential ones, as the browser's are, and ones that are not.
   const log = (globalThis.__gatewayLog ??= []);
   for (const [name, mode] of [["seq_a", "sequential"], ["seq_b", "sequential"], ["seq_c", "sequential"], ["par_a", undefined], ["par_b", undefined]]) {
@@ -534,22 +544,18 @@ test("the rules a lazy tool's extension wrote for the prompt stay in the prompt,
   assert.doesNotMatch(systemOf(none.requests[0]), /RULE-MARKER/);
 });
 
-test("a lazy browser keeps the rule that a page is data and not instructions", async () => {
-  const { setPortalBrowser } = await import("../dist/db.js");
-  const { PORTAL_BROWSER_TOOLS } = await import("../dist/tool-policy.js");
+test("a lazy tool that reads outside content keeps the rule that what it reads is data and not instructions", async () => {
   const { OUTSIDE_CONTENT_GUIDELINE } = await import("../dist/pi/guard.js");
-  setPortalBrowser(true);
-  try {
-    const direct = await run([], { cwd: chat() });
-    assert.ok(names(direct.requests[0]).includes("browser_snapshot"));
-    assert.ok(systemOf(direct.requests[0]).includes(OUTSIDE_CONTENT_GUIDELINE), "offered one by one, the rule is in the prompt");
-    const lazyBrowser = await run([], { toolsLazy: [...PORTAL_BROWSER_TOOLS], lazySets: ["browser"] });
-    assert.deepEqual(names(lazyBrowser.requests[0]).filter((name) => name.startsWith("browser_")), []);
-    assert.ok(systemOf(lazyBrowser.requests[0]).includes(OUTSIDE_CONTENT_GUIDELINE), "lazy, it still is: the guard's short envelope relies on it");
-    assert.match(systemOf(lazyBrowser.requests[0]), /Browser refs come from browser_snapshot or browser_find; never guess one/, "and so are the rules for its refs");
-  } finally {
-    setPortalBrowser(false);
-  }
+  const direct = await run([], { cwd: chat() });
+  assert.ok(names(direct.requests[0]).includes("page_read"));
+  assert.ok(systemOf(direct.requests[0]).includes(OUTSIDE_CONTENT_GUIDELINE), "offered by its name, the rule is in the prompt");
+  const lazy = await run([], { toolsLazy: ["page_read"], lazySets: ["docs"] });
+  assert.ok(!names(lazy.requests[0]).includes("page_read"));
+  assert.ok(systemOf(lazy.requests[0]).includes(OUTSIDE_CONTENT_GUIDELINE), "lazy, it still is: the guard's short envelope relies on it");
+  assert.match(systemOf(lazy.requests[0]), /PAGE-RULE: read a page before you quote it/, "and so is its own rule");
+  // Switched off, nothing on reads outside content, and the rule is not said.
+  const off = await run([], { toolsOff: ["page_read"] });
+  assert.ok(!systemOf(off.requests[0]).includes(OUTSIDE_CONTENT_GUIDELINE));
 });
 
 test("calls of sequential tools in one message run one after another, in order; the other ones run together", async () => {

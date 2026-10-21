@@ -72,7 +72,6 @@ export function defaultRules(): SandboxRule[] {
     { path: path.join(DATA_DIR, "portal.db"), access: "none", note: "The portal's database, with its settings." },
     { path: home, access: "none", note: "The portal's HOME: pi's auth.json, SSH keys, packages." },
     { path: path.resolve(env("SESSION_DIR", path.join(DATA_DIR, "sessions"))), access: "none", note: "Every chat's transcript." },
-    { path: path.join(DATA_DIR, "browser-profile"), access: "none", note: "The browser's cookies and logins." },
     { path: path.join(DATA_DIR, "backups"), access: "none", note: "Database backups." },
     { path: "/certs", access: "none", note: "The portal's TLS key." },
   ];

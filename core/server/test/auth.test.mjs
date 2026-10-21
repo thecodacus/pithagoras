@@ -10,8 +10,7 @@ import { PASSWORD, kept, issued, base, sharedPortal, login, cookieOf, signedIn, 
  * the server runs without a password; this one runs with it. The tests of the
  * password moved from the environment are in auth-environment.test.mjs, those of
  * the streams a login ends and of starting in auth-streams.test.mjs, and those of
- * the throttle and of the agent's browser, which the portal proxies and signs into
- * for whoever it let in, in auth-browser.test.mjs.
+ * the throttle and of the login on an extension's streams in auth-throttle.test.mjs.
  */
 sharedPortal();
 
@@ -20,7 +19,7 @@ sharedPortal();
 test("what is behind the login answers 401 without it, and the 404 for a route that is not there comes after the login", async () => {
   assert.equal((await api(undefined, "/api/settings")).status, 401);
   assert.equal((await api(undefined, "/api/sessions")).status, 401);
-  assert.equal((await api(undefined, "/api/browser")).status, 401);
+  assert.equal((await api(undefined, "/api/x/test-streams/anything")).status, 401);
   assert.equal((await api(undefined, "/api/no-such-route")).status, 401);
   const status = await (await api(undefined, "/api/auth/status")).json();
   assert.deepEqual(status, { authRequired: true, authed: false });

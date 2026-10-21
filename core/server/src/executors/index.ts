@@ -34,8 +34,8 @@ export interface LaunchOptions {
   whoNow?: () => { role: string; key?: string };
   /** The guard's taint rules this session is exempt from, by name, read at each tool call. */
   exemptNow?: () => ReadonlySet<string>;
-  /** Read at each tool call, so a change takes effect without a restart. */
-  browserNow?: () => { allowed: boolean; allowlist: string[] };
+  /** The sites the agent's tools may reach, read at each tool call, so a change takes effect without a restart. */
+  allowlistNow?: () => string[];
   /** Tools this conversation has switched off, by name. */
   toolsOff?: string[];
   /** The tools the portal has seen, for one that says it is off until switched on. */
@@ -104,7 +104,7 @@ export class HostExecutor implements Executor {
       sessionId: opts.sessionId,
       whoNow: opts.whoNow,
       exemptNow: opts.exemptNow,
-      browserNow: opts.browserNow,
+      allowlistNow: opts.allowlistNow,
       toolsOff: opts.toolsOff,
       toolsSeen: opts.toolsSeen,
       toolsLazy: opts.toolsLazy,

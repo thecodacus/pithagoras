@@ -10,7 +10,6 @@ import { inProcessHome } from "./helpers.mts";
 // the measure, as in the review of issue #183), with a little room for a word to be changed.
 inProcessHome("pitha-tool-texts-");
 const { ToolsGateway } = await import("../core/server/src/pi/tools-gateway.ts");
-const { browserTools } = await import("../core/server/src/browser/tools.ts");
 const { askPrimaryTool } = await import("../core/server/src/pi/ask-primary.ts");
 const { askQuestionTool } = await import("../core/server/src/pi/ask-question.ts");
 const { heartbeatTool } = await import("../core/server/src/pi/heartbeat-tool.ts");
@@ -45,7 +44,6 @@ const cost = (tool: Registered) =>
 
 const all: Registered[] = [];
 load(new ToolsGateway(["browser", "media"]).extension, all);
-load(browserTools("s"), all);
 load(askPrimaryTool("s"), all);
 load(askQuestionTool(), all);
 load(heartbeatTool("a", "s"), all);
@@ -63,17 +61,6 @@ load(subagent, subagentBackground);
 const ROOM = 10;
 const AGREED: Record<string, number> = {
   tools: 154,
-  browser_navigate: 90,
-  browser_back: 43,
-  browser_snapshot: 169,
-  browser_click: 99,
-  browser_type: 128,
-  browser_select: 118,
-  browser_key: 82,
-  browser_scroll: 138,
-  browser_find: 109,
-  browser_get_text: 148,
-  browser_screenshot: 105,
   ask_primary: 218,
   ask_question: 393,
   activity_note: 131,
@@ -99,10 +86,11 @@ test("every tool of the portal's own is within the length agreed for it", () => 
 
 test("all of them together stay near the length agreed", () => {
   // The review measured 6,880 tokens for these texts and proposed 4,550, of which the 988 of the picture and video tools are
-  // the Media extension's now; the rules are counted once, as pi prints each once.
+  // the Media extension's now, and the 1,426 of the browser tools and their rules the Browser extension's; the rules are
+  // counted once, as pi prints each once.
   const rules = new Set(all.flatMap((tool) => (tool.promptGuidelines ?? []).map((line) => line.trim())));
   const total = all.reduce((sum, tool) => sum + cost(tool), 0) + [...rules].reduce((sum, line) => sum + tokens(`- ${line}`), 0);
-  assert.ok(total <= 3712, `${total} tokens, where 3,562 were agreed`);
+  assert.ok(total <= 2286, `${total} tokens, where 2,136 were agreed`);
 });
 
 test("a tool's snippet does not begin with its own name again, as pi lists it as `- name: snippet`", () => {
@@ -110,18 +98,6 @@ test("a tool's snippet does not begin with its own name again, as pi lists it as
     if (!tool.promptSnippet) continue;
     assert.doesNotMatch(tool.promptSnippet, new RegExp(`^${tool.name}\\b`), tool.name);
   }
-});
-
-test("what the browser tools share is said once, as a rule, and not in each description", () => {
-  const browser = all.filter((tool) => tool.name.startsWith("browser_"));
-  assert.equal(browser.length, 11);
-  for (const tool of browser) {
-    assert.doesNotMatch(tool.description, /what changed|Nothing on screen changed|no longer|take a fresh browser_snapshot/i, `${tool.name}: the answer of an action and the stale ref are rules`);
-  }
-  // The ref is described the same, briefly, in every schema that takes one.
-  const refs = ["browser_click", "browser_type", "browser_select"].map((name) => browser.find((tool) => tool.name === name)!.parameters.properties.ref.description as string);
-  assert.equal(new Set(refs).size, 1);
-  assert.ok(refs[0].length < 100, refs[0]);
 });
 
 test("a value outside the list of an enum is refused before the tool runs, as it was with a union of constants", async () => {
@@ -133,11 +109,6 @@ test("a value outside the list of an enum is refused before the tool runs, as it
 
   assert.equal(check("tools", { action: "describe", name: "x" }).action, "describe");
   refused("tools", { action: "destroy" });
-  assert.equal(check("browser_snapshot", { mode: "index" }).mode, "index");
-  assert.equal(check("browser_snapshot", {}).mode, undefined, "the mode may be left out");
-  refused("browser_snapshot", { mode: "html" });
-  assert.equal(check("browser_scroll", { direction: "up" }).direction, "up");
-  refused("browser_scroll", { direction: "left" });
   assert.equal(check("ask_question", { questions: [{ question: "Q?", kind: "ranking", options: ["a", "b"] }] }).questions[0].kind, "ranking");
   refused("ask_question", { questions: [{ question: "Q?", kind: "sorting" }] });
 });

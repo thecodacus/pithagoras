@@ -7,8 +7,8 @@ import { inProcessHome } from "./server-harness.mjs";
 
 /**
  * The rules for a Playwright MCP browser someone attached by hand, which the portal says in the system
- * prompt of a chat that has no browser tools of its own (framing in sdk-client.ts). They are about 325
- * tokens in every request, so they are said only where such a server is configured.
+ * prompt (framing in sdk-client.ts). They are about 325 tokens in every request, so they are said only
+ * where such a server is configured. A package's browser tools carry rules of their own.
  */
 const home = inProcessHome("pithagoras-browser-mcp-rules-");
 mkdirSync(path.join(process.env.PI_CODING_AGENT_DIR, "extensions"), { recursive: true });
@@ -24,7 +24,6 @@ const model = await fakeModel(() => "Done.");
 writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR, "models.json"), JSON.stringify(model.models()));
 
 const { SdkPiClient } = await import("../dist/pi/sdk-client.js");
-const { setPortalBrowser } = await import("../dist/db.js");
 const { BROWSER_READING_RULE, BROWSER_SCREENSHOT_RULE } = await import("../dist/pi/browser-mcp-rules.js");
 
 const systemOf = (request) =>
@@ -62,7 +61,7 @@ test("the rules for a Playwright browser are sent only where there is one", asyn
     return { reading: system.includes(BROWSER_READING_RULE), screenshot: system.includes(BROWSER_SCREENSHOT_RULE) };
   };
   try {
-    // A fresh install: no browser server, the portal's own browser not on.
+    // A fresh install: no browser server.
     assert.deepEqual(await said(), { reading: false, screenshot: false }, "no browser server");
     // Another server is no browser.
     writeFileSync(mcp, JSON.stringify({ mcpServers: { files: { command: "npx", args: ["-y", "some-other-server"] } } }));
@@ -70,16 +69,14 @@ test("the rules for a Playwright browser are sent only where there is one", asyn
     // A Playwright server that starts a Chromium of its own is not the agent's browser either.
     writeFileSync(mcp, JSON.stringify({ mcpServers: { playwright: { command: "npx", args: ["-y", "@playwright/mcp@0.0.79"] } } }));
     assert.deepEqual(await said(), { reading: false, screenshot: false }, "a Playwright server with a browser of its own");
-    // A Playwright server pointed at the browser, whatever it is called.
+    // A Playwright server pointed at a running browser, whatever it is called, and wherever that browser is.
     writeFileSync(mcp, JSON.stringify({ mcpServers: { chrome: playwright } }));
     assert.deepEqual(await said(), { reading: true, screenshot: true }, "a server attached to the browser");
     writeFileSync(mcp, JSON.stringify({ mcpServers: { browser: playwright } }));
-    assert.deepEqual(await said(), { reading: true, screenshot: true }, "a browser server, the portal's own off");
-    // The portal's own tools have rules of their own.
-    setPortalBrowser(true);
-    assert.deepEqual(await said(), { reading: false, screenshot: false }, "the portal's own browser is on");
+    assert.deepEqual(await said(), { reading: true, screenshot: true }, "a browser server");
+    writeFileSync(mcp, JSON.stringify({ mcpServers: { remote: { ...playwright, args: ["-y", "@playwright/mcp@0.0.79", "--cdp-endpoint", "http://10.0.0.5:9333"] } } }));
+    assert.deepEqual(await said(), { reading: true, screenshot: true }, "a server attached to a browser elsewhere");
   } finally {
-    setPortalBrowser(false);
     rmSync(mcp, { force: true });
   }
 });

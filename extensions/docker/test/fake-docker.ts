@@ -52,6 +52,8 @@ export async function fakeDocker() {
   const pulls: string[] = [];
   /** A download that fails, by image, with Docker's own words. */
   const failing = new Map<string, string>();
+  /** While `pull` is set, a download says its first lines and does not end until it settles: an image on its way. */
+  const hold: { pull?: Promise<void> } = {};
   let ids = 0;
 
   const find = (key: string) => containers.find((c) => c.Id === key || c.Name === key);
@@ -91,12 +93,14 @@ export async function fakeDocker() {
         res.write(line.slice(0, 10));
         setTimeout(() => {
           res.write(`${line.slice(10)}\n`);
-          const failure = failing.get(image);
-          if (failure) res.end(`${JSON.stringify({ error: failure })}\n`);
-          else {
-            images.add(image);
-            res.end(`${JSON.stringify({ status: "Downloaded newer image" })}\n`);
-          }
+          void Promise.resolve(hold.pull).then(() => {
+            const failure = failing.get(image);
+            if (failure) res.end(`${JSON.stringify({ error: failure })}\n`);
+            else {
+              images.add(image);
+              res.end(`${JSON.stringify({ status: "Downloaded newer image" })}\n`);
+            }
+          });
         }, 20);
         return;
       }
@@ -190,5 +194,5 @@ export async function fakeDocker() {
     });
   });
   await new Promise<void>((resolve) => server.listen(socket, resolve));
-  return { socket, dir, images, containers, volumes, networks, built, runs, starts, pulls, failing, close: () => new Promise<void>((resolve) => server.close(() => resolve())) };
+  return { socket, dir, images, containers, volumes, networks, built, runs, starts, pulls, failing, hold, close: () => new Promise<void>((resolve) => server.close(() => resolve())) };
 }

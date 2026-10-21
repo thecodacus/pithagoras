@@ -162,21 +162,22 @@ test("a routine run in a project gets the project's tools", () => {
   assert.deepEqual(sessions.offFor(id), ["web_search"]);
 });
 
-test("the browser follows the project: its tools off there take the browser with them", () => {
+test("a server's tool switched off in a project is off for its chats, which differ from the default through it", () => {
   reset();
+  const TOOL = "browser_browser_click";
   const inAlpha = db.getSession(chat(path.join(ws, "alpha")));
   const inBeta = db.getSession(chat(path.join(ws, "beta")));
-  assert.equal(db.browserAllowed(inAlpha), true);
-  db.setProjectTools("alpha", { off: ["browser_browser_click"], on: [] });
-  assert.equal(db.browserAllowed(inAlpha), false);
-  assert.equal(db.browserAllowed(inBeta), true);
+  assert.ok(!sessions.offFor(inAlpha.id).includes(TOOL));
+  db.setProjectTools("alpha", { off: [TOOL], on: [] });
+  assert.ok(sessions.offFor(inAlpha.id).includes(TOOL));
+  assert.ok(!sessions.offFor(inBeta.id).includes(TOOL));
   // Listed with the conversations that differ from the default, though it never said anything itself.
-  const differ = db.toolsDifferWith(db.browserPolicy()).chats.map((s) => s.id);
+  const differ = db.toolExceptions([TOOL]).chats.map((s) => s.id);
   assert.ok(differ.includes(inAlpha.id));
   assert.ok(!differ.includes(inBeta.id));
   // A chat that switched it back on is the exception to its project.
-  db.setSessionTools(inAlpha.id, { off: [], on: ["browser_browser_click"] });
-  assert.equal(db.browserAllowed(inAlpha), true);
+  db.setSessionTools(inAlpha.id, { off: [], on: [TOOL] });
+  assert.ok(!sessions.offFor(inAlpha.id).includes(TOOL));
 });
 
 test("a change to a project reaches the chats running in it, and only those", async () => {

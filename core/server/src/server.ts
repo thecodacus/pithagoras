@@ -43,8 +43,6 @@ import {
   clearAgentTools,
   routineTools,
   setRoutineTools,
-  setRoutineBrowserSwitch,
-  seenBrowserTools,
   toolDefaultsFor,
   setContextLimit,
   setDefaultContextLimit,
@@ -103,11 +101,8 @@ import { memoryLlmRouter } from "./memory-llm.js";
 import { modelLevels, modelRuntime, providersRouter } from "./api/providers.js";
 import { peopleRouter } from "./api/people.js";
 import { voiceRouter } from "./api/voice.js";
-import { adoptPortalBrowser, browserRouter, pinConnection } from "./api/browser.js";
 import { BACKGROUND_SUPPORTED, MARKER, clearFinished, listJobs, readOutput, stopJob, stopJobsIn } from "./background.js";
-import { BROWSER_UI, browserUpgrade, mountBrowserProxy } from "./browser-proxy.js";
 import { attachUpgrades } from "./upgrades.js";
-import { watchBrowserFrames } from "./extensions/browser-frames.js";
 import { startLlamaProxy } from "./llama-progress.js";
 import { applyOnStart } from "./sandbox/apply.js";
 import { trustFlagged } from "./pi/guard.js";
@@ -766,19 +761,7 @@ app.put("/api/routines/:id/tools", async (req, res) => {
   if ("error" in routine) return res.status(409).json({ error: routine.error });
   try {
     const below = toolDefaultsFor(routine.folder, null, "routine");
-    const browser = seenBrowserTools();
-    const wanted = layerExceptions(routine.folder, below, routineTools(routine.slug, browser), off);
-    // The browser's tools its lists do not name follow its old switch (routineTools). So what the page said of each
-    // is written down, even where the layers under it agree: left out, a browser switched on here would go back to
-    // what the switch says.
-    const shown = new Set(shownTools(routine.folder).map((t) => t.name));
-    for (const name of browser) {
-      if (!shown.has(name) || wanted.off.includes(name) || wanted.on.includes(name)) continue;
-      (off.includes(name) ? wanted.off : wanted.on).push(name);
-    }
-    const stored = setRoutineTools(routine.slug, wanted);
-    // And the switch says what a browser tool that turns up later starts with: what the browser has here now.
-    if (browser.length) setRoutineBrowserSwitch(routine.slug, browser.some((name) => toolEnabled(name, below, stored)));
+    const stored = setRoutineTools(routine.slug, layerExceptions(routine.folder, below, routineTools(routine.slug), off));
     const applied = await sessions.applyToolDefaults({ routine: routine.slug });
     res.json({ off: defaultsFor(below, stored), applied });
   } catch (e) {
@@ -1752,12 +1735,7 @@ app.use("/api", featuresRouter());
 app.use("/api", memoryRouter());
 app.use("/api", channelsRouter());
 app.use("/api", agentsRouter());
-app.use(
-  "/api",
-  routinesRouter((routine) => {
-    sessions.applyToolDefaults({ routine }).catch((e) => console.error(`[portal] could not apply a routine's tools to its runs: ${(e as Error).message}`));
-  })
-);
+app.use("/api", routinesRouter());
 app.use("/api", skillsRouter());
 app.use("/api", filesRouter());
 // What the configuration offers is what a running chat may use: told at once, as a default is.
@@ -1767,7 +1745,6 @@ onMcpWritten(() => {
 app.use("/api", mcpRouter());
 app.use("/api", providersRouter());
 app.use("/api", peopleRouter());
-app.use("/api", browserRouter());
 app.use("/api", sandboxRouter(sessions));
 app.use("/api", guardRouter());
 app.use("/api", logsRouter());
@@ -1776,8 +1753,6 @@ app.use("/api", restartRouter());
 app.use("/api", voiceRouter());
 // The routes of the installed extensions' server halves, each under its package's name.
 app.use("/api/x", extensionRoutes);
-// Before the SPA fallback, which answers everything that is not /api.
-mountBrowserProxy(app);
 
 // --- event stream ---
 
@@ -1834,8 +1809,9 @@ mkdirSync(BIN_DIR, { recursive: true });
  * TLS when a certificate is supplied, plain HTTP otherwise.
  *
  * Optional because most deployments sit on a LAN or a tailnet and do not want
- * to think about certificates. Needed for the embedded browser, which refuses
- * to run unless every page above it is a secure context.
+ * to think about certificates. Needed for a page that needs a secure context,
+ * such as a remote browser's client in a frame, which refuses to run unless
+ * every page above it is one.
  */
 const tlsAt = tlsFiles();
 const tls =
@@ -1898,10 +1874,8 @@ const cannotListen = (e: Error) => {
 };
 server.once("error", cannotListen);
 server.once("listening", () => server.off("error", cannotListen));
-// Every WebSocket upgrade: an extension's under its routes, and the portal's own browser view under /browser-ui.
-attachUpgrades(server, { [BROWSER_UI]: browserUpgrade });
-// Keeps the agent's browser rendering when nobody has the panel open.
-watchBrowserFrames();
+// Every WebSocket upgrade, each an extension's under its routes.
+attachUpgrades(server);
 // Reports how far llama.cpp has got through a prompt, which is otherwise a
 // silent minute or two before the first token.
 startLlamaProxy(
@@ -1922,8 +1896,6 @@ void syncExtensionServers().catch((e) => console.error("[extensions] could not s
 const startingWith = installDefaultExtensions()
   .catch((e) => console.error("[extensions] could not install what a portal starts with:", e))
   .finally(() => void noteLoadedExtensions());
-pinConnection();
-adoptPortalBrowser();
 // The sandbox's sudo rules live outside the data volume, so a new container needs them put back.
 void applyOnStart(sandboxPolicy(), sandboxSupport()).then((r) => {
   if (sandboxPolicy().enabled) console.log(`[sandbox] ${r.ok ? "on" : "not applied"}${r.warnings.length ? `: ${r.warnings.join("; ")}` : ""}`);

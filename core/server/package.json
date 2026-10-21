@@ -18,7 +18,6 @@
     "express": "^5.0.1",
     "jose": "^6.2.12",
     "nanoid": "^5.0.9",
-    "playwright-core": "1.63.0",
     "semver": "^7.8.5",
     "typebox": "^1.1.38",
     "undici": "^8.11.2"

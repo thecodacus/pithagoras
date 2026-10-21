@@ -179,8 +179,7 @@ test("a tool that declares its files is approved for them as pi runs it: a rule 
 
 test("what a tool declares holds as pi runs it: its pages are outside content, where it goes is held to the allowlist, and what it acts as is held after a suspected injection", async () => {
   const systemOf = (request) => request.messages.filter((m) => m.role === "system" || m.role === "developer").map((m) => JSON.stringify(m.content)).join("\n");
-  // The browser's own switch is not this tool's: only the allowlist is.
-  const listed = { browserNow: () => ({ allowed: false, allowlist: ["*.example.com"] }) };
+  const listed = { allowlistNow: () => ["*.example.com"] };
   script = [{ name: "page_open", args: { url: "https://www.example.com/" } }];
   model.requests.length = 0;
   let { results } = await run(chat(), listed);

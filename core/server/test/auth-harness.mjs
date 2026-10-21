@@ -1,8 +1,7 @@
 import { before, after } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
-import { mkdirSync, readFileSync } from "node:fs";
-import https from "node:https";
+import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -17,7 +16,6 @@ import { freePort, inProcessHome, serverEnv, startServer, testHome } from "./ser
 export const PASSWORD = "correct horse battery";
 export const SECRET = "a-fixed-secret-for-the-tests";
 export const home = testHome("pithagoras-auth-");
-export const BROWSER_PASSWORD = "the-browsers-own-password";
 
 // The same login in this process, on the server's own database, to make the cookies a server would not
 // hand out: one that has run out. The password is moved in from the environment, as a server does it.
@@ -35,7 +33,7 @@ export function issued({ secure = false } = {}) {
   return cookie;
 }
 
-// --- the browser, stood in for: an https server of its own, as the container is ---
+// --- a certificate, for a portal that speaks TLS itself ---
 
 export const tls = path.join(home, "tls");
 mkdirSync(tls);
@@ -43,29 +41,42 @@ execFileSync("openssl", [
   "req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1", "-nodes", "-subj", "/CN=127.0.0.1",
   "-days", "1", "-keyout", path.join(tls, "key.pem"), "-out", path.join(tls, "cert.pem"),
 ], { stdio: "ignore" });
-const cert = { key: readFileSync(path.join(tls, "key.pem")), cert: readFileSync(path.join(tls, "cert.pem")) };
 
-/** What the stand-in browser was asked, and what it does with an upgrade. */
-export const browser = { requests: [], upgrades: [], received: "", mode: "accept", release: undefined, socketClosed: undefined };
-export const upstream = https.createServer(cert, (req, res) => {
-  browser.requests.push({ url: req.url, headers: req.headers });
-  res.writeHead(200, { "content-type": "text/plain" });
-  res.end("the desktop");
-});
-upstream.on("upgrade", async (req, socket, head) => {
-  browser.upgrades.push({ url: req.url, headers: req.headers });
-  socket.on("error", () => {});
-  browser.socketClosed = new Promise((resolve) => socket.on("close", resolve));
-  if (browser.mode === "refuse") return void socket.end("HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n");
-  if (browser.mode === "slow") await new Promise((resolve) => { browser.release = resolve; });
-  browser.received = head.toString();
-  socket.on("data", (d) => { browser.received += d; });
-  // The greeting follows the headers at once, as a VNC server's does.
-  socket.write("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\nRFB 003.008\n");
-});
-export const upstreamPort = await freePort();
-upstream.listen(upstreamPort, "127.0.0.1");
-after(() => upstream.close());
+// --- an extension's streams, stood in for: what the login holds every stream to ---
+
+/** Where the stand-in takes streams, under its routes: what `upgrade` asks for unless told another. */
+export const STREAM = "/api/x/test-streams/stream";
+
+/**
+ * An extension installed in `at` whose server half takes streams under its routes (`portal.http.upgrade`), greets each
+ * at once, as a VNC server does, and sends back what it is sent: the portal asks for the login and checks the page a
+ * stream comes from before any extension is asked, and ends a stream with the login it was opened under. pi, as far
+ * as the portal asks it which packages there are, lists it. Returns what the portal is started with, to find that pi.
+ */
+export function withStreams(at) {
+  const pkg = path.join(at, "packages", "streams");
+  mkdirSync(pkg, { recursive: true });
+  writeFileSync(path.join(pkg, "package.json"), JSON.stringify({ name: "test-streams", version: "1.0.0", pi: {}, pithagoras: { server: "./server.js" } }));
+  writeFileSync(
+    path.join(pkg, "server.js"),
+    `export default function (portal) {
+  portal.http.upgrade((req, socket) => {
+    socket.on("error", () => {});
+    if (req.url !== "/stream") return void socket.end("HTTP/1.1 404 Not Found\\r\\nContent-Length: 0\\r\\n\\r\\n");
+    socket.write("HTTP/1.1 101 Switching Protocols\\r\\nUpgrade: websocket\\r\\nConnection: Upgrade\\r\\n\\r\\nRFB 003.008\\n");
+    socket.on("data", (d) => socket.write(d));
+  });
+}
+`,
+  );
+  const bin = path.join(at, "fake-bin");
+  mkdirSync(bin, { recursive: true });
+  writeFileSync(path.join(bin, "pi"), `#!/bin/bash\n[ "$1" = list ] || exit 0\nprintf 'User packages:\\n  npm:test-streams\\n    ${pkg}\\n'\n`);
+  chmodSync(path.join(bin, "pi"), 0o755);
+  mkdirSync(path.join(at, "agent"), { recursive: true });
+  writeFileSync(path.join(at, "agent", "settings.json"), JSON.stringify({ packages: ["npm:test-streams"] }));
+  return { PATH: `${bin}${path.delimiter}${process.env.PATH}` };
+}
 
 /**
  * The portal the file's tests share, started before the first of them: `base`, `port` and `server` are set once it
@@ -77,8 +88,7 @@ export let server;
 export function sharedPortal() {
   before(async () => {
     ({ base, child: server, port } = await startServer(serverEnv(home, await freePort(), {
-      PORTAL_PASSWORD: PASSWORD, PORTAL_ALLOW_NO_PASSWORD: "", PORTAL_SECRET: SECRET,
-      BROWSER_HTTPS_PORT: String(upstreamPort), BROWSER_USER: "agent", BROWSER_PASSWORD,
+      PORTAL_PASSWORD: PASSWORD, PORTAL_ALLOW_NO_PASSWORD: "", PORTAL_SECRET: SECRET, ...withStreams(home),
     })));
   });
 }
@@ -144,10 +154,10 @@ export const staysOpen = async (stream, what) => {
   assert.equal(stream.ended, false, what);
 };
 
-// --- the agent's browser ---
+// --- streams ---
 
 /** A request for the upgrade to a stream, as a browser makes it, with `after` as the bytes the page sends first. */
-export function upgrade(headers = {}, after = "", url = "/browser-ui/websockify", at = port) {
+export function upgrade(headers = {}, after = "", url = STREAM, at = port) {
   const socket = net.connect(at, "127.0.0.1");
   let text = "";
   socket.on("data", (d) => { text += d; });
@@ -171,3 +181,21 @@ export const until = async (check, what) => {
   assert.fail(`never: ${what}`);
 };
 export const basic = (user, password) => "Basic " + Buffer.from(`${user}:${password}`).toString("base64");
+
+/**
+ * A stream of the stand-in's opened on the portal at `at`, once its server half, which starts after the portal
+ * listens, takes it: asked again until it is.
+ */
+export async function opened(headers, at = port) {
+  for (let i = 0; i < 100; i++) {
+    const stream = upgrade(headers, "", STREAM, at);
+    await until(() => stream.text().includes("\r\n\r\n"), "an answer");
+    if (/^HTTP\/1\.1 101 /.test(stream.text())) {
+      await until(() => stream.text().includes("RFB 003.008"), "the greeting");
+      return stream;
+    }
+    stream.socket.destroy();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  assert.fail("the stand-in's server half never took a stream");
+}

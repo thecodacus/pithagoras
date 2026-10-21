@@ -97,7 +97,6 @@ const adapter = (name) => ({ name, source: "pi-mcp-adapter", package: "npm:pi-mc
 test("a chat that still has the removed server loaded does not bring its tools back", async () => {
   seed();
   assert.equal((await del("jira")).status, 200);
-  const { PORTAL_BROWSER_TOOLS } = await import("../dist/tool-policy.js");
   // What the chat's registry reports when its tool switches are opened.
   db.rememberTools([
     adapter("jira_search"),
@@ -105,11 +104,13 @@ test("a chat that still has the removed server loaded does not bring its tools b
     adapter("mcp"),
     adapter("mcpScript"),
     { name: "jira_other", source: "pi-web-access", package: "npm:pi-web-access" },
-    ...PORTAL_BROWSER_TOOLS.map((name) => ({ name, source: "browser", package: null })),
+    // A server half's own tools, registered inline under its package, one named as the removed server's would be.
+    { name: "jira_board", source: "pithagoras-boards", package: null, inline: true },
+    { name: "page_open", source: "pithagoras-pages", package: null, inline: true },
   ]);
   const seen = names();
   assert.ok(!seen.includes("jira_search"), "the removed server's tool is not remembered again");
-  for (const kept of ["notes_read", "mcp", "mcpScript", "jira_other", ...PORTAL_BROWSER_TOOLS]) assert.ok(seen.includes(kept), kept);
+  for (const kept of ["notes_read", "mcp", "mcpScript", "jira_other", "jira_board", "page_open"]) assert.ok(seen.includes(kept), kept);
 });
 
 test("with an mcp.json that cannot be read nothing is taken for a removed server", () => {

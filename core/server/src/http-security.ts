@@ -78,7 +78,7 @@ export function loginThrottle(now = Date.now): RequestHandler {
 }
 
 /**
- * Apply only to the portal UI, not the separately proxied browser desktop.
+ * Apply only to the portal UI, not to an extension's routes (/api/x), such as a page one proxies.
  *
  * Pictures come from the portal itself: the browser fetches whatever an `<img>`
  * names the moment it is drawn, so any other host there would be a way for a

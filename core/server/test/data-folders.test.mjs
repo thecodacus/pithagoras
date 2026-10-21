@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, rmSync } from "node:fs";
+import { existsSync, realpathSync, rmSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { freePort, runToEnd, serverEnv, startServer, testHome } from "./server-harness.mjs";
@@ -21,7 +21,7 @@ test("with only DATA_DIR given, the bin folder, the agent's home and the channel
   for (const name of ["bin", "agent-home", "channels"]) assert.ok(existsSync(path.join(home, name)), `${name} is in the data directory`);
 });
 
-test("the folders it names itself are where it says, and the local browser's profile is in the data directory", async () => {
+test("the folders it names itself are where it says", async () => {
   process.env.DATA_DIR = own;
   process.env.AGENT_HOME = path.join(own, "elsewhere");
   const { agentHomePath } = await import("../dist/agent-home.js");
@@ -33,16 +33,16 @@ test("the folders it names itself are where it says, and the local browser's pro
   assert.equal(dataFolder("BIN_DIR", "bin"), "/somewhere/else");
   delete process.env.BIN_DIR;
   assert.equal(dataFolder("BIN_DIR", "bin"), path.join(own, "bin"));
-  const local = await import("../dist/extensions/browser-local.js");
-  assert.equal(local.status().profile, path.join(own, "browser-profile"));
 });
 
-test("with no DATA_DIR at all, the local browser's profile is in ./data, not in /data", async () => {
+test("with no DATA_DIR at all, a folder of the data directory is in ./data, not in /data", async () => {
   const cwd = testHome("pithagoras-data-folders-cwd-");
   const env = { ...process.env };
   delete env.DATA_DIR;
-  const module = fileURLToPath(new URL("../dist/extensions/browser-local.js", import.meta.url));
-  const { code, out, err } = await runToEnd(["--input-type=module", "-e", `const { status } = await import(${JSON.stringify(module)}); console.log(status().profile);`], env, { cwd });
+  delete env.BIN_DIR;
+  const module = fileURLToPath(new URL("../dist/data-dir.js", import.meta.url));
+  const { code, out, err } = await runToEnd(["--input-type=module", "-e", `const { dataFolder } = await import(${JSON.stringify(module)}); console.log(dataFolder("BIN_DIR", "bin"));`], env, { cwd });
   assert.equal(code, 0, err);
-  assert.equal(out.trim(), path.join(cwd, "data", "browser-profile"));
+  // As the process has its folder: where a temporary one is behind a link, the folder the link leads to.
+  assert.equal(out.trim(), path.join(realpathSync(cwd), "data", "bin"));
 });

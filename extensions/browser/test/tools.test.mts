@@ -2,12 +2,15 @@ import test, { after } from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { chromium } from "playwright-core";
-import { freePort, inProcessHome } from "./server-harness.mjs";
+import { freePort, inProcessHome } from "../../../tests/helpers.mts";
+import { serveBrowser } from "./portal.mts";
 
 /**
- * The portal's browser tools against a real Chromium over its debugging port,
- * as they run beside the browser container: what the model is shown after
- * each call, a stale ref, a scroll past a sticky sidebar, reading and finding.
+ * Browser's tools against a real Chromium over its debugging port, as they
+ * run beside the browser container, given to a chat by the server half as the
+ * portal gives them: what the model is shown after each call, a stale ref, a
+ * scroll past a sticky sidebar, reading and finding, and the tab each chat
+ * works in, which the half keeps and lets go of.
  */
 
 inProcessHome("browser-tools-");
@@ -44,6 +47,7 @@ const site = createServer((req, res) => {
 let browser;
 let tools = {};
 let base = "";
+let portal;
 
 after(async () => {
   site.close();
@@ -69,8 +73,10 @@ async function setUp() {
   await new Promise((r) => site.listen(0, "127.0.0.1", r));
   base = `http://127.0.0.1:${site.address().port}`;
   process.env.BROWSER_CDP_URL = `http://127.0.0.1:${cdpPort}`;
-  const { browserTools } = await import("../dist/browser/tools.js");
-  browserTools("chat-1")({ registerTool: (t) => (tools[t.name] = t) });
+  portal = await serveBrowser({ built: true });
+  assert.equal((await fetch(`${portal.at}/connect`, { method: "POST" })).status, 200);
+  portal.chat("chat-1");
+  tools = portal.tools("chat-1");
 }
 
 const call = async (name, params = {}) => {
@@ -171,8 +177,8 @@ test("the browser tools, on a real browser", { skip: browser ? false : "no Chrom
       }
 
       // Switched off on the Browser page, it does not move and the click does not wait for it.
-      const { setBrowserCursor } = await import("../dist/db.js");
-      setBrowserCursor(false);
+      const off = await fetch(`${portal.at}/cursor`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ on: false }) });
+      assert.equal(off.status, 200);
       try {
         const page4 = pageAt(`${base}/cursor/4`);
         const before = await page4.evaluate(() => window.__agentCursor.where());
@@ -181,7 +187,7 @@ test("the browser tools, on a real browser", { skip: browser ? false : "no Chrom
         assert.deepEqual(await page4.evaluate(() => window.__clickedAt), before, "it stayed where it was");
         assert.ok(Date.now() - started < 2500, "and the click did not wait for a glide");
       } finally {
-        setBrowserCursor(true);
+        await fetch(`${portal.at}/cursor`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ on: true }) });
       }
     } finally {
       // Not close(): on a browser reached over CDP that can end the browser itself, which the next test needs.
@@ -195,13 +201,17 @@ test("the browser tools, on a real browser", { skip: browser ? false : "no Chrom
     assert.equal(shot.content[0].mimeType, "image/jpeg");
   });
 
-  await t.test("a chat that is gone does not keep its tab and what it was shown", async () => {
-    const { forgetBrowserSession } = await import("../dist/browser/tools.js");
-    assert.equal(forgetBrowserSession("chat-1"), true, "it was holding them");
-    assert.equal(forgetBrowserSession("chat-1"), false, "and does not any more");
-    assert.equal(forgetBrowserSession("never-used-the-browser"), false);
-    // Used again, it is simply given a tab.
-    assert.match(await call("browser_snapshot"), /^Page: /);
+  await t.test("a chat that is gone, or whose run is over, does not keep its tab; one stopped for being idle goes on in it", async () => {
+    const observer = await chromium.connectOverCDP(`http://127.0.0.1:${cdpPort}`);
+    for (const [life, kept] of [["stopped", true], ["finished", false], ["deleted", false]]) {
+      await call("browser_navigate", { url: `${base}/form` });
+      // Another tab, newer than the chat's: what a chat that kept no tab is given.
+      const newest = await observer.contexts()[0].newPage();
+      await newest.goto(`${base}/tabs`);
+      portal.host.chatLife(life, "chat-1");
+      assert.match(await call("browser_snapshot"), kept ? /^Page: Signup/ : /^Page: Tabs/, life);
+      await newest.close();
+    }
   });
 
   await t.test("an action does not wait for a tab that never opens", async () => {
@@ -225,5 +235,17 @@ test("the browser tools, on a real browser", { skip: browser ? false : "no Chrom
       assert.match(opened, /it opened a new tab, which is where you are now/, name);
       assert.match(opened, /Page: Long/, name);
     }
+  });
+
+  await t.test("the half stops without closing the agent's tabs, and the tools go on in them once it starts again", async () => {
+    await call("browser_navigate", { url: `${base}/form` });
+    const tabs = async () => (await (await fetch(`http://127.0.0.1:${cdpPort}/json/list`)).json()).filter((tab) => tab.type === "page").map((tab) => tab.url);
+    const before = await tabs();
+    assert.ok(before.includes(`${base}/form`));
+    await portal.host.stopServerHalves();
+    assert.deepEqual((await tabs()).sort(), [...before].sort(), "every tab is open still");
+    await portal.host.syncServerHalves([portal.halves.docker, portal.halves.browser]);
+    tools = portal.tools("chat-1");
+    assert.match(await call("browser_snapshot"), /^Page: /);
   });
 });

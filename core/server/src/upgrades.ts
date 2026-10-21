@@ -1,6 +1,5 @@
 import type http from "node:http";
 import type { Duplex } from "node:stream";
-import type { Upgrade } from "@pithagoras/extension-api/server";
 import { isAuthedUpgrade } from "./auth.js";
 import { extensionUpgrade, isExtensionUrl } from "./extension-host.js";
 import { watchStream } from "./login-streams.js";
@@ -12,44 +11,26 @@ import { watchStream } from "./login-streams.js";
  *
  * So the login is asked here, and where the page that opens the stream comes
  * from, once for every stream; then it is handed to what takes it: an
- * extension's server half under its own routes (/api/x/<package>/…), or one of
- * the portal's own, by the path it is under (`own`). Anything else is answered
- * and closed.
+ * extension's server half under its own routes (/api/x/<package>/…). Anything
+ * else is answered and closed.
  */
-export function attachUpgrades(server: http.Server, own: Record<string, Upgrade> = {}): void {
+export function attachUpgrades(server: http.Server): void {
   server.on("upgrade", (req: http.IncomingMessage, socket: Duplex, head: Buffer) => {
     // With a listener here Node leaves every upgrade to it — no parser, no
     // timeout, no answer — so one that nothing takes is answered too, and a
     // client that resets the connection is not an error nobody listens to.
     socket.on("error", () => {});
-    // The same login as requireAuth asks. And a page of another site may not
+    // An extension's server half may take upgrades under its own routes, once the same login as requireAuth asks
+    // is there: without it, nothing is said of which extensions there are. And a page of another site may not
     // open the stream with the visitor's cookie — a browser names where the page came from.
-    const allowed = () => {
-      if (!isAuthedUpgrade(req)) return refuse(socket, 401, "Unauthorized"), false;
-      if (req.headers.origin && !fromHere(req.headers.origin, req.headers)) return refuse(socket, 403, "Forbidden"), false;
-      // The stream is checked only as it opens: it ends when the password it was opened under goes.
-      socket.once("close", watchStream(() => socket.destroy()));
-      return true;
-    };
-    // An extension's server half may take upgrades under its own routes: checked the same way, then its to
-    // answer. The login is asked first: without it, nothing is said of which extensions there are.
-    if (isExtensionUrl(req.url)) {
-      if (!allowed()) return;
-      const extension = extensionUpgrade(req.url);
-      return extension ? extension(req, socket, head) : refuse(socket, 404, "Not Found");
-    }
-    const prefix = Object.keys(own).find((path) => under(req.url, path));
-    if (prefix === undefined) return refuse(socket, 404, "Not Found");
-    if (!allowed()) return;
-    own[prefix](req, socket, head);
+    if (!isExtensionUrl(req.url)) return refuse(socket, 404, "Not Found");
+    if (!isAuthedUpgrade(req)) return refuse(socket, 401, "Unauthorized");
+    if (req.headers.origin && !fromHere(req.headers.origin, req.headers)) return refuse(socket, 403, "Forbidden");
+    // The stream is checked only as it opens: it ends when the password it was opened under goes.
+    socket.once("close", watchStream(() => socket.destroy()));
+    const extension = extensionUpgrade(req.url);
+    return extension ? extension(req, socket, head) : refuse(socket, 404, "Not Found");
   });
-}
-
-/** Is `url` under `prefix`, however the prefix is cased — as Express matches a route? */
-function under(url: string | undefined, prefix: string): boolean {
-  if (url === undefined || url.slice(0, prefix.length).toLowerCase() !== prefix.toLowerCase()) return false;
-  const next = url[prefix.length];
-  return next === undefined || next === "/" || next === "?";
 }
 
 /**
@@ -57,7 +38,7 @@ function under(url: string | undefined, prefix: string): boolean {
  * Not left open for the client to close: one that never does would hold the
  * portal's end, and a descriptor, for as long as the portal runs.
  */
-export function refuse(socket: Duplex, status: number, message: string): void {
+function refuse(socket: Duplex, status: number, message: string): void {
   socket.end(`HTTP/1.1 ${status} ${message}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
   const giveUp = setTimeout(() => socket.destroy(), 5_000);
   giveUp.unref();
