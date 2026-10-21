@@ -9,6 +9,7 @@ const { SdkPiClient } = await import('../dist/pi/sdk-client.js');
 async function labels(infos) {
   const client = Object.create(SdkPiClient.prototype);
   client.wanted = new Set();
+  client.taken = new Set();
   client.switchedOff = new Set();
   client.session = { getAllTools: () => infos.map((sourceInfo, i) => ({ name: `t${i}`, sourceInfo })), getToolDefinition: (name) => ({ name }) };
   return (await client.getTools()).map((t) => t.source);
