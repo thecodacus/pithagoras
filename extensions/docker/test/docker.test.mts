@@ -138,6 +138,63 @@ test("an extension reads how its own containers were made and how they stand, an
   await voice.containers.remove("dk-inspect");
 });
 
+test("an extension runs a command in its own running container, with the environment, folder and terminal asked for, and reads what it wrote and its exit code; not in another's, nor in one that is not running", async () => {
+  const { forExtension } = dockerFor(dataDir());
+  const own = forExtension("pithagoras-understory"), other = forExtension("someone-else");
+  await own.containers.create("dk-exec", { Image: "understory:1" });
+  docker.runs.onExec = (e) => ({ out: `ran ${e.Cmd.join(" ")}\n`, err: "a warning\n", code: 3 });
+  try {
+    await assert.rejects(own.containers.exec("dk-exec", ["true"]), { status: 409, message: /is not running/ });
+    await own.containers.start("dk-exec");
+    const ran = await own.containers.exec("dk-exec", ["node", "-e", "write()"], { env: { PORTAL_INPUT: "e30=" }, workingDir: "/app/server" });
+    assert.deepEqual(ran, { output: "ran node -e write()\na warning\n", exitCode: 3, timedOut: false });
+    const asked = docker.execs.at(-1)!;
+    assert.deepEqual([asked.Env, asked.WorkingDir, asked.Tty], [["PORTAL_INPUT=e30="], "/app/server", false]);
+    // With a terminal: as it was written.
+    docker.runs.onExec = () => ({ out: "\x1b[32mok\x1b[0m\n" });
+    assert.deepEqual(await own.containers.exec("dk-exec", ["ls"], { tty: true }), { output: "\x1b[32mok\x1b[0m\n", exitCode: 0, timedOut: false });
+    assert.equal(docker.execs.at(-1)!.Tty, true);
+    const asks = docker.execs.length;
+    await assert.rejects(other.containers.exec("dk-exec", ["true"]), { status: 403, message: /dk-exec is pithagoras-understory's container, not someone-else's/ });
+    await assert.rejects(own.containers.exec("dk-none", ["true"]), { status: 404, message: /There is no container dk-none/ });
+    assert.equal(docker.execs.length, asks, "nothing is run where it is refused");
+  } finally {
+    docker.runs.onExec = undefined;
+    await own.containers.remove("dk-exec");
+  }
+});
+
+test("a command that does not end in time is given up on with what it wrote by then, not as a failure; with no limit it waits past the 30 s a request is given", async (t) => {
+  const { forExtension } = dockerFor(dataDir());
+  const own = forExtension("a");
+  await own.containers.create("dk-slow", { Image: "x" });
+  await own.containers.start("dk-slow");
+  docker.runs.onExec = () => ({ out: "working\n" });
+  let end!: () => void;
+  docker.hold.exec = new Promise((resolve) => (end = resolve));
+  try {
+    assert.deepEqual(await own.containers.exec("dk-slow", ["dream"], { timeoutMs: 100 }), { output: "working\n", exitCode: null, timedOut: true });
+    assert.equal(docker.execs.at(-1)!.Running, true, "it may still be running in the container");
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const asks = docker.execs.length;
+    let settled = false;
+    const going = own.containers.exec("dk-slow", ["dream"]);
+    void going.finally(() => (settled = true)).catch(() => {});
+    while (!(docker.execs.length > asks && docker.execs.at(-1)!.Running)) await new Promise((resolve) => setImmediate(resolve));
+    t.mock.timers.tick(60_000);
+    for (let i = 0; i < 10; i++) await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(settled, false, "still waited on a minute later");
+    end();
+    assert.deepEqual(await going, { output: "working\n", exitCode: 0, timedOut: false });
+  } finally {
+    t.mock.timers.reset();
+    docker.runs.onExec = undefined;
+    docker.hold.exec = undefined;
+    end();
+    await own.containers.remove("dk-slow");
+  }
+});
+
 test("an extension's volumes are its own as its containers are", async () => {
   const { forExtension } = dockerFor(dataDir());
   const browser = forExtension("pithagoras-browser"), voice = forExtension("pithagoras-voice");

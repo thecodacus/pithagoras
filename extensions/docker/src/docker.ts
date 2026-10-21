@@ -1,7 +1,7 @@
 import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import type { ContainerInfo, ContainerSpec, Docker, PullState, VolumeInfo } from "./api";
-import { checked, DockerError, logs, ping, pull, request, socketThere } from "./engine";
+import { checked, DockerError, exec, logs, ping, pull, request, socketThere } from "./engine";
 
 /**
  * Docker as each extension is given it (api.ts), and as the person sees it all (`overview`). What is whose is the label
@@ -197,6 +197,21 @@ export function dockerFor(dataDir: string) {
         },
         // Docker's whole answer: how it was made, and how it stands.
         inspect: (name) => own(who, name),
+        async exec(name, cmd, options = {}) {
+          const found = await own(who, name);
+          if (!found) throw new DockerError(`There is no container ${name}`, 404);
+          const tty = Boolean(options.tty);
+          // Docker refuses one in a container that is not running.
+          const made = await checked<{ Id: string }>("POST", `/containers/${encodeURIComponent(found.Id)}/exec`, {
+            Cmd: cmd,
+            Env: Object.entries(options.env ?? {}).map(([key, value]) => `${key}=${value}`),
+            WorkingDir: options.workingDir,
+            AttachStdout: true,
+            AttachStderr: true,
+            Tty: tty,
+          });
+          return exec(made.Id, tty, options.timeoutMs ?? 0);
+        },
         async adopt(name) {
           const found = await inspect(name);
           if (!found) throw new DockerError(`There is no container ${name}`, 404);

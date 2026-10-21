@@ -40,6 +40,28 @@ export interface VolumeInfo {
  */
 export type ContainerSpec = { Image: string } & Record<string, unknown>;
 
+/** How a command is run in a container (`containers.exec`). */
+export interface ExecOptions {
+  /** Its environment, besides the container's: names and values. */
+  env?: Record<string, string>;
+  /** The folder it runs in; the container's own where none is given. */
+  workingDir?: string;
+  /** With a terminal: its output and its errors come back as it wrote them, colours and all. */
+  tty?: boolean;
+  /** How long to wait for it to end, in milliseconds; none, or 0, waits as long as it takes. Not Docker's 30 s for a request. */
+  timeoutMs?: number;
+}
+
+/** What a command run in a container came to. */
+export interface ExecResult {
+  /** What it wrote, both its output and its errors, as text; where it was given up on, what it had written by then. */
+  output: string;
+  /** Its exit code: null where it was given up on. */
+  exitCode: number | null;
+  /** It did not end within `timeoutMs`. Docker cannot end it, so it may still be running in the container: ending it is the caller's. */
+  timedOut: boolean;
+}
+
 /** How a download of an image is going: under way, with what Docker last said of it, or ended, with a failure or not. */
 export interface PullState {
   active: boolean;
@@ -77,6 +99,11 @@ export interface Docker {
      * `start` is for one that is another's, or nobody's.
      */
     inspect(name: string): Promise<Record<string, unknown> | undefined>;
+    /**
+     * `cmd` run in one of this extension's containers, which has to be running, to its end or until `timeoutMs`. Given up
+     * on, it is not a failure: `timedOut` says so.
+     */
+    exec(name: string, cmd: string[], options?: ExecOptions): Promise<ExecResult>;
     /**
      * A container made before there was this extension, which carries no extension's name (one of the portal's own,
      * from before its app was an extension), made this extension's from now on. Another extension's is refused.
