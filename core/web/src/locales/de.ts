@@ -1436,7 +1436,7 @@ const de: Locale = {
     "Fresh session each run": "Jeder Lauf mit neuer Sitzung",
     "Off: one session it keeps, so a run can see what the last one did. On: a clean start every time.": "Aus: eine Sitzung, die sie behält, damit ein Lauf sieht, was der letzte getan hat. An: jedes Mal ein sauberer Start.",
     "Injection guard": "Schutz vor Injection",
-    "What every run starts with, against what its agent and project leave. The browser's tools are off for a routine unless switched on here; every page a run opens is recorded in Audit. Saved as each switch is flipped.": "Womit jeder Lauf beginnt, gegenüber dem, was sein Agent und sein Projekt vorgeben. Die Browser-Tools sind für eine Routine aus, solange sie hier nicht eingeschaltet werden; jede Seite, die ein Lauf öffnet, wird im Audit festgehalten. Wird mit jedem Umschalten gespeichert.",
+    "What every run starts with, against what its agent and project leave. Every page a run opens is recorded in Audit. Saved as each switch is flipped.": "Womit jeder Lauf beginnt, gegenüber dem, was sein Agent und sein Projekt vorgeben. Jede Seite, die ein Lauf öffnet, wird im Audit festgehalten. Wird mit jedem Umschalten gespeichert.",
     "Report to": "Bericht an",
     "Default — {target}": "Standard — {target}",
     "Default — none set": "Standard — keins gesetzt",

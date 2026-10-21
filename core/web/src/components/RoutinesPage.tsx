@@ -820,7 +820,7 @@ function RoutineDetail({
       <section className="mb-6">
         <h3 className="text-xs font-semibold uppercase tracking-wider text-fg-subtle">{t("Tools")}</h3>
         <p className="mt-1 text-[11px] text-fg-faint">
-          {t("What every run starts with, against what its agent and project leave. The browser's tools are off for a routine unless switched on here; every page a run opens is recorded in Audit. Saved as each switch is flipped.")}
+          {t("What every run starts with, against what its agent and project leave. Every page a run opens is recorded in Audit. Saved as each switch is flipped.")}
         </p>
         <div className="mt-2 rounded-xl border border-line bg-raised/40">
           <ToolSwitches key={`${r.id}\u0000${r.workspace ?? ""}`} routine={r.id} />

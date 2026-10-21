@@ -7,7 +7,7 @@ async function portal(page: Page, opts: { routine?: Record<string, unknown>; ren
   const other = { ...session, id: 's2', title: 'Other chat', workspace: '/w/notes' };
   const routine = {
     id: 'r1', slug: 'build', name: 'Nightly build', enabled: true, schedule: '0 2 * * *', runAt: null, mode: 'repeats', done: false,
-    instructions: 'Build it', freshSession: false, guard: true, exempt: [], browser: false, workspace: null, reportChannel: null, reportTarget: null,
+    instructions: 'Build it', freshSession: false, guard: true, exempt: [], workspace: null, reportChannel: null, reportTarget: null,
     lastReportAt: null, lastRun: null, lastStatus: null, lastOutput: null, lastMs: null, nextRun: null, createdAt: '', updatedAt: '1',
     workspaceProblem: null, ...opts.routine,
   };
@@ -26,7 +26,7 @@ async function portal(page: Page, opts: { routine?: Record<string, unknown>; ren
     if (p === '/api/routines/r1' && method === 'PATCH' && opts.refuses) return reply(400, { error: opts.refuses });
     if (p === '/api/routines/r1' && method === 'PATCH') { Object.assign(routine, body, { updatedAt: opts.stamps?.shift() ?? String(Date.now()) }); return routine; }
     if (p === '/api/routines/r1/sessions') return { sessions: [] };
-    // The routine's own tools, the browser's among them: off for a routine unless switched on.
+    // The routine's own tools, one of them switched off for it.
     if (p === '/api/routines/r1/tools' && method === 'GET') {
       return { tools: [{ name: 'browser_navigate', source: 'browser', enabled: false, defaultOn: true }, { name: 'bash', source: 'built in', enabled: true, defaultOn: true }], live: false, off: ['browser_navigate'], names: {} };
     }

@@ -19,7 +19,7 @@ const skill = { name: 'review', description: 'Reviews', path: '/s/review', scope
 const person = (key: string, name: string, role: string) => ({ key, name, role, notes: '', first_seen: '', last_seen: null, announced_at: null, renamed: 0 });
 const mcp = { path: '/a/mcp.json', exists: true, adapterInstalled: true, adapterSpec: 'npm:pi-mcp-adapter', settings: {}, raw: '{}', parseError: null, servers: [{ name: 'notes', entry: { command: 'notes-mcp' }, transport: 'stdio', disabled: false }] };
 const extension = { spec: 'npm:ext', name: 'Ext', version: '1', description: '', enabled: true, settings: [{ key: 'apiKey', value: '', configured: false }], skills: [], tools: [] };
-const routine = { id: 'r1', slug: 'morning', name: 'Morning', enabled: true, schedule: '0 9 * * *', runAt: null, mode: 'repeats', done: false, instructions: 'Say hello', freshSession: true, guard: true, exempt: [], browser: false, workspace: null, reportChannel: null, reportTarget: null, lastReportAt: null, lastRun: null, lastStatus: null, lastOutput: null, lastMs: null, nextRun: null, createdAt: '' };
+const routine = { id: 'r1', slug: 'morning', name: 'Morning', enabled: true, schedule: '0 9 * * *', runAt: null, mode: 'repeats', done: false, instructions: 'Say hello', freshSession: true, guard: true, exempt: [], workspace: null, reportChannel: null, reportTarget: null, lastReportAt: null, lastRun: null, lastStatus: null, lastOutput: null, lastMs: null, nextRun: null, createdAt: '' };
 
 async function portal(page: Page) {
   await mockPortal(page, ({ path: p, method }) => {

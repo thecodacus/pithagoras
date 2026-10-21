@@ -93,8 +93,6 @@ export interface Routine {
   guard: boolean;
   /** The guard's rules its runs are exempt from, by name: set in Settings → Guard. */
   exempt: string[];
-  /** True lets this routine's runs drive the agent's browser. */
-  browser: boolean;
   /** Where its runs happen: null for Home, else a project's directory. */
   workspace: string | null;
   /** Why that place cannot be used now, such as a project that was deleted; null when it can. */
@@ -899,7 +897,6 @@ export const api = {
       enabled?: boolean;
       freshSession?: boolean;
       guard?: boolean;
-      browser?: boolean;
       reportChannel?: string | null;
       reportTarget?: string | null;
       workspace?: string | null;
