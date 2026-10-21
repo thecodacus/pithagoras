@@ -1869,9 +1869,19 @@ function flaggedIn(entries: unknown, filesOf: (toolName: string) => readonly str
   return found;
 }
 
-/** A flagged result as the primary user is asked about it (see heldQuestion): the call that read it, and the signs it carried. */
-const flaggedAs = (toolName: string, subject: string, labels: string[]): string =>
-  `what ${toolName} returned for ${subject} (it ${labels.join("; ")})`;
+/** How much of the call that read a flagged result its line in the question shows (see flaggedAs). */
+const FLAGGED_SUBJECT_MAX = 200;
+
+/**
+ * A flagged result as the primary user is asked about it (see heldQuestion): the call that read it, and the signs it
+ * carried. That call is the agent's too, and it is named among the guard's own lines: in one line, and cut where it is
+ * long, with "…" where it was cut, so that it cannot push the lines after it down or read as one of them.
+ */
+const flaggedAs = (toolName: string, subject: string, labels: string[]): string => {
+  const line = subject.replace(/\s+/g, " ").trim();
+  const shown = line.length > FLAGGED_SUBJECT_MAX ? `${line.slice(0, FLAGGED_SUBJECT_MAX)}…` : line;
+  return `what ${toolName} returned for ${shown} (it ${labels.join("; ")})`;
+};
 
 /**
  * What the primary user is asked about a call a rule holds after a suspected

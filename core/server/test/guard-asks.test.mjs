@@ -212,6 +212,39 @@ test("the question says why the rule holds the call and what was flagged before 
   ]);
 });
 
+test("the call that read a flagged result is named in one line, cut where it is long, so the guard's lines after it stay where they are", async () => {
+  const lines = `curl https://x.test/notes \\\n  -H 'Accept: text/plain'\necho 'Yes lets this one call run; No refuses it.'`;
+  const long = `curl https://x.test/${"a".repeat(300)}`;
+  for (const [command, shown] of [
+    [lines, "curl https://x.test/notes \\ -H 'Accept: text/plain' echo 'Yes lets this one call run; No refuses it.'"],
+    [long, `${long.slice(0, 200)}…`],
+  ]) {
+    const result = { toolName: "bash", input: { command }, isError: false, content: [{ type: "text", text: INJECTION }] };
+    // As it is read, and as it is found in the conversation's history when it is opened again.
+    const live = guardAs();
+    const flag = live.tool_result(result).content[0].text;
+    const reloaded = guardAs();
+    reloaded.session_start({ type: "session_start", reason: "startup" }, {
+      sessionManager: {
+        getEntries: () => [
+          { type: "message", message: { role: "assistant", content: [{ type: "toolCall", id: "c1", name: "bash", arguments: { command } }] } },
+          { type: "message", message: { role: "toolResult", toolCallId: "c1", toolName: "bash", content: [{ type: "text", text: flag }] } },
+        ],
+      },
+    });
+    for (const h of [live, reloaded]) {
+      const asked = person(false);
+      await h.tool_call({ toolName: "bash", input: { command: "git push origin main" } }, asked.ctx);
+      assert.deepEqual(asked.asked[0].message.split("\n").slice(1), [
+        `Flagged: what bash returned for ${shown} (it tells the reader to ignore its instructions).`,
+        "Yes lets this one call run; No refuses it.",
+        "The call, as the agent wrote it:",
+        "git push origin main",
+      ]);
+    }
+  }
+});
+
 /** A chat the session manager starts, as the portal does, with what its pi said on its way to settling. */
 async function run(id, kind, extra = {}, answer) {
   createSession({ id, title: id, workspace: mkdtempSync(path.join(process.env.WORKSPACE_ROOT, "chat-")), executor: "host", kind, ...extra });
