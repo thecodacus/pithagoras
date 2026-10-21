@@ -22,8 +22,8 @@ portal:
   the same way.
 
 A switch reloads the idle open chats so they have the change at once. A chat
-that is busy has it from its next step, or once its run is over where a
-subagent still works in the background: see
+that is busy has it from its next step, and one with a subagent still working
+in the background once that is done: see
 [a chat that is working](/guide/extensions#a-chat-that-is-working).
 
 ## Subagents

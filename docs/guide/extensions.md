@@ -131,8 +131,8 @@ tools came and went.
 
 Not while a subagent works in the background, which a reload would stop, nor
 while an extension holds the chat (`chats.hold`): the chat is then reloaded
-once its run is over, or at a step of a later run where neither holds any
-more. A chat whose pi runs in a container of its own (`EXECUTOR=container`) is
+once neither does any more, at a later step, as its run ends, or before the
+next message starts a run. A chat whose pi runs in a container of its own (`EXECUTOR=container`) is
 reloaded once its run is over. A reload keeps the conversation and the chat's
 tool switches; what it loads again is the extensions, skills, prompts and pi's
 settings, and an MCP server the adapter keeps connected is started again.

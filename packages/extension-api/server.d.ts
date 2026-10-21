@@ -507,8 +507,9 @@ export interface ServerPortal {
      * that is working is counted as `waiting`, and loaded again at its next
      * step, between two requests of its run, so the model's next request has
      * the tools as they are then. Where a subagent works in the background or
-     * an extension holds the chat (`hold`), it waits for the end of its run, or
-     * a later step, where neither does.
+     * an extension holds the chat (`hold`), it is loaded again once neither
+     * does: at a later step, as its run ends, or before the next message starts
+     * a run.
      */
     reload(): Promise<{ reloaded: number; waiting: number }>;
     /**
@@ -516,7 +517,10 @@ export interface ServerPortal {
      * pi as it starts, so its tools hold what this module holds. Only where pi
      * runs in the portal's own process. A tool registered with
      * `offByDefault: true` is off in every chat until somebody switches it on,
-     * and one with `guard` is held to what it declares: see ToolGuard.
+     * and one with `guard` is held to what it declares: see ToolGuard. A
+     * factory that throws is that chat's load error: nothing the package adds
+     * to that chat's pi is there, and the chat says why. One whose promise
+     * fails later is only logged.
      */
     extend(factory: (pi: any, chat: Chat) => void): void;
     /**

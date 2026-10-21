@@ -86,9 +86,9 @@ While you work on it:
 | You changed | To see it |
 | --- | --- |
 | The browser half | Reload the page |
-| The server half's module | Install the folder again by its path |
+| The server half's module, its `chats.extend` factories among it | Install the folder again by its path |
 | Another file the server half imports | Restart the portal |
-| The pi extension, or what the server half adds to a chat's pi | Install the folder again by its path, or `/reload` in one chat |
+| The pi extension | Install the folder again by its path, or `/reload` in one chat |
 
 pi installs a folder by reference, so installing it again copies nothing: it
 starts the server half again where its module changed, and reloads the open
@@ -1972,8 +1972,8 @@ reload or a restart. The open chats are loaded again with it, for their pi to
 have the package's pi extension and what its server half adds as they are now:
 an idle chat at once, and one that is working at its next step, between two
 requests of its run (see
-[a chat that is working](/guide/extensions#a-chat-that-is-working)). A change of
-pi's `settings.json` by hand does the same.
+[a chat that is working](/guide/extensions#a-chat-that-is-working)). So does
+saving pi's `settings.json` in Settings → **Advanced**.
 
 Of two installed packages that go by one name, the first is the one, whole.
 
