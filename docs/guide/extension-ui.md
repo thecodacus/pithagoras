@@ -1976,9 +1976,11 @@ reload or a restart: at once in the page it was done from, and within five
 seconds in the others, wherever it was done (another tab, the API, an agent).
 Every page asks for the list of chats every five seconds, and is told with it a
 revision of what is installed: of every package, one that brings nothing to the
-page included (a pi half, skills, prompts). When that is not the revision the
-page last went through, the page goes through what is installed again, and
-Settings → Extensions lists it again.
+page included (a pi half, skills, prompts), and of where each server half
+stands, so that a crash reaches every open page too
+([When the server half crashes](#when-the-server-half-crashes)). When that is
+not the revision the page last went through, the page goes through what is
+installed again, and Settings → Extensions lists it again.
 
 A browser half is fetched under its revision, which changes with its module's
 file and its stylesheet's: installing a package again from its folder after you
@@ -2174,8 +2176,10 @@ would end the portal. They do not: each is that extension's crash.
 - A request to its routes that had not been answered is answered with
   `503` and the crash; one whose answer had begun is cut off.
 - Settings → Extensions shows the crash beside the package, with what the
-  half said last, as it is opened or refreshed. `GET /api/extension-ui` has it
-  as `crash`, and Settings → Logs has every line.
+  half said last, in every open page within five seconds, as it shows an
+  install ([What is loaded, and when](#what-is-loaded-and-when)).
+  `GET /api/extension-ui` has it as `crash`, and Settings → Logs has every
+  line.
 
 What the half said is kept for it, the latest 200 lines: what it writes with
 `portal.log`, the portal's own lines about it, and whatever is printed while
