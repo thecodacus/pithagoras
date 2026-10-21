@@ -1,7 +1,6 @@
 import Database from "better-sqlite3";
 import { inTurnWithSettings, piSetting, readPiSettings, readProjectPiSettings } from "./pi-settings.js";
 import { packageIndex, packageKey, packageLabel, toolAvailability } from "./extension-switch.js";
-import { UNDERSTORY } from "./features.js";
 import { GUARD_RULE_NAMES } from "./pi/guard-rule-names.js";
 import { BUILT_IN_SET, PI_BUILT_IN_TOOLS, defaultsFor, lazyToolEntry, mcpServerOf, toolEnabled, toolSetOf } from "./tool-policy.js";
 import { projectOf } from "./workspaces.js";
@@ -3259,9 +3258,9 @@ export function setBrowserAllowlist(domains: string): void {
  * somebody else's words, and so is the browser's, trusted or not. Read at each result, so a change holds at once.
  */
 export function trustedMcpServers(): Set<string> {
-  // Until the person says otherwise, the portal's own memory server, whose words are the agent's own notes.
+  // Until the person, or an extension on their word (`portal.mcp.set` with `trusted`), says one is, none.
   const set = getSetting("guard_trusted_mcp_servers");
-  if (set === undefined) return new Set([UNDERSTORY]);
+  if (set === undefined) return new Set();
   try {
     const names = JSON.parse(set);
     return new Set(Array.isArray(names) ? names.filter((name): name is string => typeof name === "string") : []);

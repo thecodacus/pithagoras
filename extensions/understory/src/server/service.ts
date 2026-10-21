@@ -1,23 +1,27 @@
 import { randomBytes } from "node:crypto";
-import { existsSync } from "node:fs";
-import { getSetting, putSetting } from "../db.js";
-import { tlsFiles } from "../http-security.js";
-import { readModelsJson, resolveKey, storedKey } from "../providers.js";
-import { containerAction, dockerAvailable, ensureImage, imagePresent, request, type PullState } from "./docker.js";
+import type { ContainerInfo, PullState } from "../../../docker/src/api";
+import { docker, portal } from "./host";
+import { modelServer } from "./llm";
+import { putSettings, setting } from "./store";
 
 /**
- * Understory, run by the portal: installed from Settings → Add-ons → Memory
- * like the browser, so the model that keeps the memory and how often it tidies
- * up can be chosen there.
+ * Understory, run by the portal: installed from Settings → Memory, so the
+ * model that keeps the memory and how often it tidies up can be chosen there.
+ * Docker runs its container (`pithagoras-docker`, which Understory requires).
  *
  * Understory reads all of that from its environment, once, when it starts —
  * its own settings page only shows it. So a change is saved here and the
  * container made again with it; the memory is in a volume and stays.
  *
- * Host networking, as the browser has: a model server the portal reaches on
- * localhost is reached the same way from here. Understory listens on every
- * interface, so it gets a token of its own, which only the portal holds — the
- * agent's MCP entry and the Memory page are its only callers.
+ * It shares the portal's loopback (`sharedNetwork`): a model server the
+ * portal reaches on localhost is reached the same way from there, and so is
+ * the one of this half (llm.ts). Understory listens on every interface, so it
+ * gets a token of its own, which only the portal holds — the agent's MCP entry
+ * and the Memory page are its only callers.
+ *
+ * The container and the volume the portal made before Understory was an
+ * extension carry no extension's name, and are taken over by their names
+ * (`settleKept`, and again before Understory acts on them).
  */
 
 export const IMAGE = "ghcr.io/thecodacus/understory:latest";
@@ -30,8 +34,8 @@ export type LlmFormat = "openai" | "anthropic";
 
 /**
  * Where the model that keeps the memory comes from: the chat's (the one the
- * chat asking is on — see memory-llm.ts), a provider set up here, or an
- * address of its own.
+ * chat asking is on — see llm.ts), a provider set up here, or an address of
+ * its own.
  */
 export type LlmChoice =
   | { source: "auto" }
@@ -50,11 +54,6 @@ export interface UnderstoryConfig {
   dreamAt: string;
 }
 
-const KEY = "understory_config";
-const TOKEN = "understory_token";
-const LLM_TOKEN = "understory_llm_token";
-const LAST_DREAM = "understory_last_dream";
-
 /** Understory's own reading of an interval, and its floor: five minutes. */
 export function intervalMs(raw: string): number | null {
   const m = raw.trim().match(/^(\d+(?:\.\d+)?)\s*(m|h|d)$/i);
@@ -72,20 +71,15 @@ export function validInterval(raw: string): boolean {
 }
 
 export function config(): UnderstoryConfig {
-  try {
-    const raw = JSON.parse(getSetting(KEY) || "{}");
-    return {
-      // Nothing chosen is the chat's: the model already loaded, which asks nothing of anyone.
-      llm: raw.llm && typeof raw.llm === "object" ? (raw.llm as LlmChoice) : { source: "auto" },
-      dreamInterval: typeof raw.dreamInterval === "string" && validInterval(raw.dreamInterval) ? raw.dreamInterval : "",
-      dreamAt: typeof raw.dreamAt === "string" && validTime(raw.dreamAt) ? raw.dreamAt : "",
-    };
-  } catch {
-    return { llm: { source: "auto" }, dreamInterval: "", dreamAt: "" };
-  }
+  const saved = setting("config");
+  const raw = (saved && typeof saved === "object" ? saved : {}) as Record<string, unknown>;
+  return {
+    // Nothing chosen is the chat's: the model already loaded, which asks nothing of anyone.
+    llm: raw.llm && typeof raw.llm === "object" ? (raw.llm as LlmChoice) : { source: "auto" },
+    dreamInterval: typeof raw.dreamInterval === "string" && validInterval(raw.dreamInterval) ? raw.dreamInterval : "",
+    dreamAt: typeof raw.dreamAt === "string" && validTime(raw.dreamAt) ? raw.dreamAt : "",
+  };
 }
-
-const put = putSetting;
 
 /**
  * A choice as it would be saved: as given, except that a custom address sent
@@ -102,86 +96,66 @@ export function withSavedKey(llm: LlmChoice): LlmChoice {
 export function saveConfig(next: UnderstoryConfig): UnderstoryConfig {
   const llm = withSavedKey(next.llm);
   // A set time wins, and Understory's own timer is left off: two passes a day would be one too many.
-  put(KEY, JSON.stringify({ llm, dreamInterval: next.dreamAt ? "" : next.dreamInterval, dreamAt: next.dreamAt }));
+  putSettings({ config: { llm, dreamInterval: next.dreamAt ? "" : next.dreamInterval, dreamAt: next.dreamAt } });
   scheduleDreams();
   return config();
 }
 
 /** Puts back what was saved before, key and all, as it was. */
 export function restoreConfig(before: UnderstoryConfig): void {
-  put(KEY, JSON.stringify(before));
+  putSettings({ config: before });
   scheduleDreams();
 }
 
-function secret(key: string): string {
-  const had = getSetting(key);
+function secret(key: "token" | "llmToken"): string {
+  const had = setting(key);
   if (had) return had;
   const made = randomBytes(24).toString("hex");
-  put(key, made);
+  putSettings({ [key]: made });
   return made;
 }
 
 /** The token the container is given and the portal calls it with; made once. */
-export const token = (): string => secret(TOKEN);
+export const token = (): string => secret("token");
 
-/** The key Understory calls the portal's model server with, in "the chat's" mode; made once. */
-export const llmToken = (): string => secret(LLM_TOKEN);
-
-/** That key if one was ever made — never made by asking: a stranger's request must not make one. */
-export const existingLlmToken = (): string | undefined => getSetting(LLM_TOKEN);
-
-/**
- * Where Understory reaches the portal's model server: on the host network,
- * the portal's own port on loopback. Not over the portal's own TLS, whose
- * certificate Understory has no reason to trust — then there is no "the
- * chat's", and a model of its own is needed.
- */
-export function portalLlmBase(): string | undefined {
-  // The portal's own decision, the one the server serves by.
-  if (tlsFiles()) return undefined;
-  return `http://127.0.0.1:${Number(process.env.PORT || 4100)}/understory-llm/v1`;
-}
-
-/**
- * The key a provider is saved with, as pi reads it. A command (`!…`) is pi's
- * to run, not ours to hand a container.
- */
-function providerKey(provider: string): string | undefined {
-  const key = storedKey(provider);
-  if (key?.startsWith("!")) throw new Error("That provider's key is a command pi runs; give Understory an address and key of its own instead");
-  return resolveKey(key);
-}
+/** The key Understory calls the model server with, in "the chat's" mode; made once. */
+export const llmToken = (): string => secret("llmToken");
 
 /** What Understory is told about its model: the provider's address and key, looked up when the container is made. */
-export function llmEnv(llm: LlmChoice): { baseUrl: string; apiKey: string; model: string; format: LlmFormat } {
+export async function llmEnv(llm: LlmChoice): Promise<{ baseUrl: string; apiKey: string; model: string; format: LlmFormat }> {
   if (llm.source === "auto") {
-    const baseUrl = portalLlmBase();
-    if (!baseUrl) throw new Error("The portal serves its own TLS, which Understory cannot reach it through; give Understory a model of its own");
-    return { baseUrl, apiKey: llmToken(), model: "auto", format: "openai" };
+    // Where Understory reaches the model server of this half: on the loopback it shares with the portal.
+    const { listening, port: at } = modelServer();
+    if (!listening) throw new Error(`Understory's model server could not listen on 127.0.0.1:${at}; set UNDERSTORY_LLM_PORT to a port that is free, or give Understory a model of its own`);
+    return { baseUrl: `http://127.0.0.1:${at}/v1`, apiKey: llmToken(), model: "auto", format: "openai" };
   }
   if (llm.source === "custom") return { baseUrl: llm.baseUrl, apiKey: llm.apiKey || "none", model: llm.model, format: llm.format };
-  const raw = readModelsJson().providers?.[llm.provider];
-  if (!raw || typeof raw.baseUrl !== "string") throw new Error(`There is no provider "${llm.provider}" with an address any more`);
+  const { models } = portal();
+  if (!models.list().some((p) => p.provider === llm.provider && p.baseUrl !== undefined)) throw new Error(`There is no provider "${llm.provider}" with an address any more`);
+  const endpoint = await models.endpoint(llm.provider, llm.model);
+  // A command (`!…`) is pi's to run, not ours to hand a container: what it gave this time outlives the request there.
+  if (endpoint.keyFromCommand) throw new Error("That provider's key is a command pi runs; give Understory an address and key of its own instead");
   return {
-    baseUrl: raw.baseUrl,
+    baseUrl: endpoint.baseUrl,
     // A local server without one still needs something: Understory refuses to start with no key.
-    apiKey: providerKey(llm.provider) || "none",
+    apiKey: endpoint.key || "none",
     model: llm.model,
-    format: raw.api === "anthropic-messages" ? "anthropic" : "openai",
+    format: endpoint.api === "anthropic-messages" ? "anthropic" : "openai",
   };
 }
 
-/** How the portal's own container is told from anything else by that name: its label. */
+/** How a container the portal made before Understory was an extension is told from anything else by that name: its label. */
 export const LABEL = "pithagoras.addon";
-const ours = (labels: Record<string, string> | undefined) =>
-  labels?.[LABEL] === "understory" || labels?.["pithagoras.managed"] === "true";
+const portalMade = (labels: Record<string, string>) => labels[LABEL] === "understory" || labels["pithagoras.managed"] === "true";
 
 /**
  * `networkMode`: the portal's own network — the host's, or the portal
  * container's where it runs in one — so each reaches the other on loopback.
+ * The label stays as the portal wrote it, so a portal that goes back to an
+ * older version still knows the container (Docker adds Understory's name).
  */
-export function spec(cfg: UnderstoryConfig, auth: string, networkMode = "host") {
-  const llm = llmEnv(cfg.llm);
+export async function spec(cfg: UnderstoryConfig, auth: string, networkMode = "host") {
+  const llm = await llmEnv(cfg.llm);
   return {
     Image: IMAGE,
     Env: [
@@ -206,55 +180,56 @@ export function spec(cfg: UnderstoryConfig, auth: string, networkMode = "host") 
 
 let pulling: PullState = { active: false, line: "" };
 
-/** The container by that name: whether it is there, running, and the portal's own. */
-async function inspect(): Promise<{ exists: boolean; running: boolean; ours: boolean }> {
-  const { status, body } = await request<{ State?: { Running?: boolean }; Config?: { Labels?: Record<string, string> } }>(
-    "GET",
-    `/containers/${CONTAINER}/json`,
-  );
-  if (status !== 200) return { exists: false, running: false, ours: false };
-  return { exists: true, running: Boolean(body?.State?.Running), ours: ours(body?.Config?.Labels) };
+/** The container by that name as the page sees it: none, Understory's (running or not), or one that is not, which it leaves alone. */
+type Kind = "absent" | "stopped" | "running" | "foreign";
+function kindOf(found: ContainerInfo | undefined): Kind {
+  if (!found) return "absent";
+  // The portal's own from before, not taken over yet, is Understory's all the same.
+  if (found.owner !== portal().extension && (found.owner || !portalMade(found.labels))) return "foreign";
+  return found.state === "running" ? "running" : "stopped";
 }
 
-/** Whether the portal's own Understory is running: what a script may be run in. */
+const foreign = () => Object.assign(new Error(`A container named ${CONTAINER} is there that the portal did not make; rename or remove it first`), { status: 409 });
+
+/** Docker's answer that there is no such container or volume, which is no failure where nothing has to be there. */
+function absent(e: unknown): void {
+  if ((e as { status?: number }).status !== 404) throw e;
+}
+
+/**
+ * The container, where it is Understory's: one the portal made before Understory was an extension is taken over first,
+ * and one by that name that is not is refused, and left alone.
+ */
+async function ours(): Promise<ContainerInfo | undefined> {
+  const d = docker();
+  const found = await d.containers.get(CONTAINER);
+  if (kindOf(found) === "foreign") throw foreign();
+  if (!found || found.owner === portal().extension) return found;
+  return d.containers.adopt(CONTAINER);
+}
+
+/** Whether Understory's container is running: what a script may be run in. */
 export async function runningHere(): Promise<boolean> {
-  if (!dockerAvailable()) return false;
-  const c = await inspect();
-  return c.ours && c.running;
+  if (!(await docker().available())) return false;
+  const found = await ours().catch((e) => {
+    if ((e as { status?: number }).status !== 409) throw e;
+    return undefined;
+  });
+  return found?.state === "running";
 }
 
 export async function status() {
-  if (!dockerAvailable()) return { available: false, image: false, container: "absent" as const, pulling };
-  // A socket there but not usable — no permission, no daemon — is no Docker, not a failure of the page.
-  const [image, c] = await Promise.all([imagePresent(IMAGE), inspect()]).catch(
-    () => [false, { exists: false, running: false, ours: false }] as const,
-  );
-  if (!c.exists && !image && !(await request("GET", "/_ping").then((r) => r.status === 200, () => false))) {
-    return { available: false, image: false, container: "absent" as const, pulling };
-  }
-  return {
-    available: true,
-    image,
-    // "foreign": one by that name that is not the portal's, which it leaves alone.
-    container: (!c.exists ? "absent" : !c.ours ? "foreign" : c.running ? "running" : "stopped") as "absent" | "stopped" | "running" | "foreign",
-    pulling,
-  };
+  const d = docker();
+  if (!(await d.available())) return { available: false, image: false, container: "absent" as Kind, pulling };
+  const [image, found] = await Promise.all([d.images.present(IMAGE), d.containers.get(CONTAINER)]);
+  return { available: true, image, container: kindOf(found), pulling };
 }
 
-/** Whether the portal runs Understory: its own container is there. */
+/** Whether the portal runs Understory: its container is there. */
 export async function installed(): Promise<boolean> {
-  if (!dockerAvailable()) return false;
-  const c = await inspect();
-  return c.exists && c.ours;
-}
-
-/** Refuses to touch a container by that name that the portal did not make. */
-async function onlyOurs(): Promise<{ exists: boolean; running: boolean }> {
-  const c = await inspect();
-  if (c.exists && !c.ours) {
-    throw Object.assign(new Error(`A container named ${CONTAINER} is there that the portal did not make; rename or remove it first`), { status: 409 });
-  }
-  return c;
+  const d = docker();
+  if (!(await d.available())) return false;
+  return ["running", "stopped"].includes(kindOf(await d.containers.get(CONTAINER)));
 }
 
 /**
@@ -267,47 +242,35 @@ export const start = (): Promise<void> => exclusive(startNow, WAIT_MS);
 export const stop = (): Promise<void> => exclusive(stopNow, WAIT_MS);
 export const remove = (): Promise<void> => exclusive(removeNow, WAIT_MS);
 
-/** Share loopback with the portal; no published host ports or gateway lookup. */
-async function sharedNetworkMode(): Promise<string> {
-  if (!existsSync('/.dockerenv') && !process.env.PORTAL_CONTAINER_NAME) {
-    if (process.platform !== 'linux') throw new Error('A container shares the network of a portal on the machine itself only on Linux. Run the portal in Docker on this platform.');
-    return 'host';
-  }
-  const name = process.env.PORTAL_CONTAINER_NAME || process.env.HOSTNAME;
-  if (!name) throw new Error('Set PORTAL_CONTAINER_NAME to the portal Docker container name.');
-  const detail = await request<{Id?: string; State?: {Running?: boolean}}>('GET', `/containers/${encodeURIComponent(name)}/json`);
-  if (detail.status !== 200 || !detail.body?.Id || !detail.body.State?.Running) {
-    throw new Error('Cannot identify the running portal container. Set PORTAL_CONTAINER_NAME to its Docker name.');
-  }
-  return `container:${detail.body.Id}`;
-}
-
 async function installNow(start = true): Promise<void> {
-  if (!dockerAvailable()) throw new Error("The portal cannot reach Docker here, so it cannot run Understory");
-  const cfg = config();
-  const made = spec(cfg, token(), await sharedNetworkMode());
-  await ensureImage(IMAGE, (state) => (pulling = state));
-  await request("POST", "/volumes/create", { Name: VOLUME });
-  if ((await onlyOurs()).exists) await removeNow();
-  const created = await request<{ message?: string }>("POST", `/containers/create?name=${CONTAINER}`, made);
-  if (created.status >= 400) throw new Error(created.body?.message || `Create failed (${created.status})`);
-  if (start) await startNow();
+  const d = docker();
+  if (!(await d.available())) throw new Error("The portal cannot reach Docker here, so it cannot run Understory");
+  // Worked out first: a choice it cannot be made with leaves the container as it is.
+  const made = await spec(config(), token(), await d.sharedNetwork());
+  await d.images.ensure(IMAGE, (state) => (pulling = state));
+  // The volume the portal made before Understory was an extension is taken over; one there is none of is made.
+  await d.volumes.adopt(VOLUME).catch(absent);
+  await d.volumes.create(VOLUME);
+  // Made again in place of the one there: Docker replaces only what is Understory's.
+  await ours();
+  await d.containers.create(CONTAINER, made);
+  if (start) await d.containers.start(CONTAINER);
 }
 
 async function startNow(): Promise<void> {
-  await onlyOurs();
-  await containerAction(CONTAINER, "start");
+  await ours();
+  await docker().containers.start(CONTAINER);
 }
 
 async function stopNow(): Promise<void> {
-  await onlyOurs();
-  await containerAction(CONTAINER, "stop");
+  await ours();
+  await docker().containers.stop(CONTAINER);
 }
 
 /** Removes the container. The memory is in its volume, and stays. */
 async function removeNow(): Promise<void> {
-  if (!(await onlyOurs()).exists) return;
-  await containerAction(CONTAINER, "remove");
+  await ours();
+  await docker().containers.remove(CONTAINER);
 }
 
 /** Forgets the memory as well. Separate on purpose, and not undoable. */
@@ -315,8 +278,83 @@ export const forgetMemory = (): Promise<void> => exclusive(forgetNow, WAIT_MS);
 
 async function forgetNow(): Promise<void> {
   await removeNow();
-  const res = await request<{ message?: string }>("DELETE", `/volumes/${VOLUME}`);
-  if (res.status >= 400 && res.status !== 404) throw new Error(res.body?.message || `Could not remove the memory (${res.status})`);
+  // Taken over first, as the container is; one that is gone already is gone.
+  await docker().volumes.adopt(VOLUME).catch(absent);
+  await docker().volumes.remove(VOLUME);
+}
+
+/** Of Docker's inspect body, what is read here. */
+type Inspected = { Config?: { Env?: string[] | null }; HostConfig?: { NetworkMode?: string } };
+
+/**
+ * Whether the container was made for what is there no more: the portal's own model route of before Understory was an
+ * extension (`/understory-llm/v1`), or the network of a portal container that has been made again since.
+ */
+async function stale(): Promise<boolean> {
+  const made = (await docker().containers.inspect(CONTAINER)) as Inspected | undefined;
+  if (!made) return false;
+  const base = made.Config?.Env?.find((line) => line.startsWith("LLM_API_BASE_URL="));
+  return Boolean(base?.endsWith("/understory-llm/v1")) || made.HostConfig?.NetworkMode !== (await docker().sharedNetwork());
+}
+
+/**
+ * The container made again with what is saved, and started if it was running: its memory is in the volume, and its
+ * token stays. Not without the token it was made with, which the agent's MCP entry calls it with: until what the
+ * portal kept is taken up (handoff.ts), it is left as it is. What it cannot be made with is said in the log.
+ */
+async function remake(running: boolean): Promise<void> {
+  if (setting("token") === undefined) {
+    portal().log(`${CONTAINER} is left as it is: the token it was made with has not been taken up from what the portal kept`);
+    return;
+  }
+  await installNow(running).then(
+    () => portal().log(`${CONTAINER} was made again with its settings, its memory and its token kept`),
+    (e) => portal().log(`${CONTAINER} could not be made again with its settings, and is left as it is: ${(e as Error).message}`),
+  );
+}
+
+/**
+ * Takes over the volume and the container the portal made before Understory was an extension, by their names, as the
+ * half starts: the first in the queue, so no change runs before it. Then, where the container runs, ends what of the
+ * portal's still runs in it (a run left going when the portal or this half last stopped), and makes it again once
+ * where it was made for what is there no more (`stale`). One that is not there is not taken over, and one that is
+ * another's is not Understory's to take, which the portal's log says.
+ */
+export function settleKept(): Promise<void> {
+  return exclusive(async () => {
+    const d = docker();
+    if (!(await d.available())) return;
+    await d.volumes.adopt(VOLUME).catch((e) => {
+      if ((e as { status?: number }).status !== 404) portal().log(`could not take over the memory, the volume ${VOLUME}: ${(e as Error).message}`);
+    });
+    const found = await ours().catch((e) => {
+      if ((e as { status?: number }).status !== 409) throw e;
+      portal().log(`${CONTAINER} is not Understory's, and is left alone`);
+      return undefined;
+    });
+    if (!found) return;
+    const running = found.state === "running";
+    if (running) await endRuns();
+    if (await stale()) await remake(running);
+  });
+}
+
+/**
+ * Made again where the portal's own container was made again since, while it runs: asked every half minute, and not
+ * again while one asked is still waiting its turn (a pass of the model holds the queue for as long as it takes).
+ */
+let looking = false;
+export function lookAfter(): void {
+  if (looking) return;
+  looking = true;
+  void exclusive(async () => {
+    const d = docker();
+    if (!(await d.available()) || kindOf(await d.containers.get(CONTAINER)) !== "running") return;
+    await ours();
+    if (await stale()) await remake(true);
+  })
+    .catch((e) => portal().log(`could not look after ${CONTAINER}: ${(e as Error).message}`))
+    .finally(() => (looking = false));
 }
 
 // --- tidying up at a set time ---
@@ -332,12 +370,7 @@ export interface DreamRun {
 }
 
 export function lastDream(): DreamRun | null {
-  try {
-    const raw = getSetting(LAST_DREAM);
-    return raw ? (JSON.parse(raw) as DreamRun) : null;
-  } catch {
-    return null;
-  }
+  return (setting("lastDream") as DreamRun | undefined) ?? null;
 }
 
 /** In every script the portal runs there, so one given up on can be found and ended. */
@@ -442,8 +475,8 @@ export function readReport(output: string): Record<string, any> | null {
  * up on may still be going in the container; the ones after it go ahead.
  */
 const MODEL_RUNS = new Set<keyof typeof SCRIPTS>(["dream", "repair"]);
-const RUN_MS = 60_000;
-const MODEL_RUN_MS = 30 * 60_000;
+/** Replaceable, so that a test need not wait a minute for a run to be given up on. */
+export const runLimits = { run: 60_000, model: 30 * 60_000 };
 /** How long a change waits for the run before it, before it says Understory is busy. */
 export const WAIT_MS = 15_000;
 
@@ -453,32 +486,28 @@ export const WAIT_MS = 15_000;
  * name and its end included — measured as it goes, UTF-8 and base64.
  */
 const ENV_MAX = 131_072;
-const envOf = (input: unknown) => `PORTAL_INPUT=${Buffer.from(JSON.stringify(input), "utf8").toString("base64")}`;
-export const fitsInEnv = (input: unknown): boolean => Buffer.byteLength(envOf(input)) + 1 <= ENV_MAX;
+const encoded = (input: unknown) => Buffer.from(JSON.stringify(input), "utf8").toString("base64");
+export const fitsInEnv = (input: unknown): boolean => Buffer.byteLength(`PORTAL_INPUT=${encoded(input)}`) + 1 <= ENV_MAX;
 
 const refused = (message: string, status: number) => Object.assign(new Error(message), { status });
 
 /** Runs one of the scripts in the container and reads what it said. */
 async function exec(name: keyof typeof SCRIPTS, input: unknown, timeoutMs: number): Promise<Record<string, any>> {
   if (!(await runningHere())) throw new Error("Understory is not running");
-  const made = await request<{ Id?: string; message?: string }>("POST", `/containers/${CONTAINER}/exec`, {
-    Cmd: ["node", "-e", SCRIPTS[name]],
-    WorkingDir: "/app/server",
-    Env: input === undefined ? [] : [envOf(input)],
-    AttachStdout: true,
-    AttachStderr: true,
+  const ran = await docker().containers.exec(CONTAINER, ["node", "-e", SCRIPTS[name]], {
+    env: input === undefined ? {} : { PORTAL_INPUT: encoded(input) },
+    workingDir: "/app/server",
     // A terminal: its output comes back as it was printed, not in Docker's framed stream.
-    Tty: true,
+    tty: true,
+    timeoutMs,
   });
-  if (made.status >= 400 || !made.body?.Id) throw new Error(made.body?.message || `Could not reach Understory (${made.status})`);
-  const out = await request<unknown>("POST", `/exec/${made.body.Id}/start`, { Detach: false, Tty: true }, timeoutMs).catch(async (e) => {
-    if ((e as { code?: string }).code !== "ETIMEDOUT") throw e;
+  if (ran.timedOut) {
     // Given up on here, and ended there too: left, it would go on writing
     // while the next run in the queue writes as well.
     await endRuns().catch(() => {});
     throw new Error("Understory did not finish in time");
-  });
-  const report = readReport(typeof out.body === "string" ? out.body : JSON.stringify(out.body ?? ""));
+  }
+  const report = readReport(ran.output);
   if (!report) throw new Error("Understory ended without saying what it did");
   if (report.error) throw new Error(report.error);
   return report;
@@ -486,12 +515,7 @@ async function exec(name: keyof typeof SCRIPTS, input: unknown, timeoutMs: numbe
 
 /** Ends whatever script of the portal's still runs in the container. */
 async function endRuns(): Promise<void> {
-  const made = await request<{ Id?: string }>("POST", `/containers/${CONTAINER}/exec`, {
-    Cmd: ["pkill", "-f", MARK],
-    AttachStdout: true,
-    AttachStderr: true,
-  });
-  if (made.body?.Id) await request("POST", `/exec/${made.body.Id}/start`, { Detach: false }, 10_000);
+  await docker().containers.exec(CONTAINER, ["pkill", "-f", MARK], { timeoutMs: 10_000 });
 }
 
 // Changes one at a time: two writers in the bundle at once would each rewrite
@@ -538,7 +562,7 @@ function exclusive<T>(fn: () => Promise<T>, waitMs?: number): Promise<T> {
 function run(name: keyof typeof SCRIPTS, input?: unknown): Promise<Record<string, any>> {
   if (input !== undefined && !fitsInEnv(input)) return Promise.reject(refused("Too much to hand Understory at once", 400));
   const model = MODEL_RUNS.has(name);
-  const limit = model ? MODEL_RUN_MS : RUN_MS;
+  const limit = model ? runLimits.model : runLimits.run;
   if (name === "health") return exec(name, input, limit);
   return exclusive(() => exec(name, input, limit), model ? undefined : WAIT_MS);
 }
@@ -579,9 +603,9 @@ export async function repair(): Promise<{ ran: boolean; reason?: string; summary
  */
 export function wipe(): Promise<{ health: Health }> {
   return exclusive(async () => {
-    const r = await exec("wipe", undefined, RUN_MS);
-    const res = await request<{ message?: string }>("POST", `/containers/${CONTAINER}/restart?t=5`);
-    if (res.status >= 400) throw new Error(res.body?.message || `Understory could not be started again (${res.status})`);
+    const r = await exec("wipe", undefined, runLimits.run);
+    await docker().containers.stop(CONTAINER);
+    await docker().containers.start(CONTAINER);
     // Answered once it answers again: the page reads the memory straight after.
     await untilAnswering();
     return { health: r.health };
@@ -652,7 +676,7 @@ export async function dreamNow(): Promise<DreamRun> {
   } finally {
     dreaming = false;
   }
-  put(LAST_DREAM, JSON.stringify(result));
+  putSettings({ lastDream: result });
   return result;
 }
 
@@ -670,24 +694,31 @@ let nextDream: Date | undefined;
 export const nextDreamAt = () => nextDream;
 
 /**
- * The pass at the set time, once a day, while the portal runs Understory.
- * Set anew whenever the settings are saved, and when the portal starts.
+ * The pass at the set time, once a day, while Understory's server half runs.
+ * Set anew whenever the settings are saved, and when the half starts.
  */
 export function scheduleDreams(): void {
-  if (timer) clearTimeout(timer);
-  timer = undefined;
-  nextDream = undefined;
+  stopDreams();
   const { dreamAt } = config();
   if (!dreamAt) return;
   nextDream = nextAt(dreamAt);
-  timer = setTimeout(async () => {
+  const armed = setTimeout(async () => {
     try {
       if (await runningHere()) await dreamNow();
     } catch (e) {
-      console.error(`[portal] tidying the memory up failed: ${(e as Error).message}`);
+      portal().log(`tidying the memory up failed: ${(e as Error).message}`);
     }
-    scheduleDreams();
+    // Not where the half stopped meanwhile, or the settings were saved and set it anew.
+    if (timer === armed) scheduleDreams();
   }, nextDream.getTime() - Date.now());
   // Never what keeps the portal running.
-  timer.unref();
+  armed.unref();
+  timer = armed;
+}
+
+/** No pass at a set time: as the half stops. */
+export function stopDreams(): void {
+  if (timer) clearTimeout(timer);
+  timer = undefined;
+  nextDream = undefined;
 }

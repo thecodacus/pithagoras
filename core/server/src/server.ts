@@ -73,7 +73,7 @@ import { AgentError, agentsRoot, chatsOf, defaultAgent, deletable, deleteAgent, 
 import { sweepRemoved } from "./folder-removal.js";
 import { agentsRouter } from "./api/agents.js";
 import { agentFor, linkedAgent } from "./project-agent.js";
-import { understoryOn } from "./features.js";
+import { memoryHolder } from "./memory-holder.js";
 import { heartbeat } from "./heartbeat.js";
 import { deleteNotesOf } from "./activity.js";
 import { EXECUTOR_KIND } from "./executor-kind.js";
@@ -96,8 +96,6 @@ import { filesRouter } from "./api/files.js";
 import { holdsWork, unsavedRefusal, unsavedWork } from "./git.js";
 import { skillsRouter } from "./api/skills.js";
 import { featuresRouter } from "./api/features.js";
-import { memoryRouter } from "./api/memory.js";
-import { memoryLlmRouter } from "./memory-llm.js";
 import { modelLevels, modelRuntime, providersRouter } from "./api/providers.js";
 import { peopleRouter } from "./api/people.js";
 import { voiceRouter } from "./api/voice.js";
@@ -115,7 +113,6 @@ import { startUpdateChecks, updateRouter } from "./api/update.js";
 import { requestedExit } from "./restart.js";
 import { LOG_BOOT } from "./logs.js";
 import { closeConnections } from "./close-connections.js";
-import { scheduleDreams } from "./extensions/understory-service.js";
 import { routineSupervisor } from "./routines/supervisor.js";
 import { channelSupervisor } from "./channels/supervisor.js";
 import {
@@ -162,9 +159,8 @@ const promptJson = express.json({ limit: `${Math.ceil((MAX_IMAGES * MAX_IMAGE_BY
 const UPLOAD_ROUTE = /^\/api\/sessions\/[^/]+\/upload$/;
 const smallJson = express.json({ limit: "2mb" });
 app.use((req, res, next) => {
-  // Understory's requests for a model carry whole conversations: its route reads its own.
-  // An extension's routes read their own as well, each as it needs: see extension-host.ts.
-  if (UPLOAD_ROUTE.test(req.path) || PROMPT_ROUTE.test(req.path) || req.path.startsWith("/understory-llm/") || req.path.startsWith("/api/x/")) return next();
+  // An extension's routes read their own, each as it needs: see extension-host.ts.
+  if (UPLOAD_ROUTE.test(req.path) || PROMPT_ROUTE.test(req.path) || req.path.startsWith("/api/x/")) return next();
   smallJson(req, res, next);
 });
 app.use(cookieParser());
@@ -293,8 +289,6 @@ app.put("/api/auth/sso", requireAuth, loginThrottle(), async (req, res) => {
   res.json({ settings: shownForm(config), only: config.only, ...(config.endSession && !provider.endSessionEndpoint ? { noEndSession: true } : {}) });
 });
 
-// Understory's model server, in "the chat's" mode: its own token, not a portal login.
-app.use(memoryLlmRouter((id) => sessions.currentModel(id)));
 app.use("/api", requireAuth);
 
 // --- global settings (defaults for every new session) ---
@@ -554,8 +548,8 @@ function agentOfProject(name: string) {
     agent,
     // What the chats get (see understoryAt): a blank slate has no agent whose memory it would be, whatever the stored switch says.
     understory: !!agent && !link.understoryOff,
-    // Whether the portal has Understory at all: without it there is nothing for the project to do without.
-    understoryAvailable: understoryOn(),
+    // Whether something holds the agent's memory at all: without it there is nothing for the project to do without.
+    understoryAvailable: memoryHolder() !== undefined,
   };
 }
 
@@ -1732,7 +1726,6 @@ app.get("/api/sessions/:id/commands", async (req, res) => {
 app.use("/api", packagesRouter());
 app.use("/api", extensionsRouter());
 app.use("/api", featuresRouter());
-app.use("/api", memoryRouter());
 app.use("/api", channelsRouter());
 app.use("/api", agentsRouter());
 app.use("/api", routinesRouter());
@@ -1900,8 +1893,6 @@ const startingWith = installDefaultExtensions()
 void applyOnStart(sandboxPolicy(), sandboxSupport()).then((r) => {
   if (sandboxPolicy().enabled) console.log(`[sandbox] ${r.ok ? "on" : "not applied"}${r.warnings.length ? `: ${r.warnings.join("; ")}` : ""}`);
 });
-// The memory tidied up at its set time, when the portal runs Understory.
-scheduleDreams();
 
 /**
  * The stop is one, however many signals ask for it: a second Ctrl-C does, and so

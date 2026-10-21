@@ -4,8 +4,7 @@ import { Agent, EnvHttpProxyAgent, setGlobalDispatcher } from "undici";
  * has moved no bytes for five minutes; the timer here is between bytes, not against the clock, so the wait
  * is long enough for one full answer by default, settable from where the portal starts, `0` turning it off.
  * A wait as said must be whole milliseconds: a negative or a fraction would not be a wait at all, and past
- * what a timer may hold there is nothing to wait for, so what is not a number stays the default.
- * Taken here rather than kept twice: memory-llm's model waits are cut with the same knife. */
+ * what a timer may hold there is nothing to wait for, so what is not a number stays the default. */
 export const waitMs = (raw: string | undefined, fallback: number): number => {
   if (raw == null) return fallback;
   const t = raw.trim();
@@ -14,16 +13,16 @@ export const waitMs = (raw: string | undefined, fallback: number): number => {
 };
 
 /** How long Node's own fetch may go quiet on an answer. Its five quiet minutes are no wait the portal chose:
- * they cut Understory's tool calls off mid-thought — its model moves no byte between the ask and the one JSON
- * it answers with — and everything else that reaches out from this process, pi's MCP adapters among them (pi runs
- * in it), ran on them too. memory-llm took waits of its own for its own fetch; these are the ones the rest takes:
- * long enough for one run by default, settable from where the portal starts, `0` turning the wait off. The timer
- * is between bytes, not against the clock: a flowing answer may go on as long as it flows.
+ * they cut an MCP server's tool calls off mid-thought — one whose model moves no byte between the ask and the
+ * one JSON it answers with — and everything else that reaches out from this process, pi's MCP adapters among
+ * them (pi runs in it), ran on them too. These are the waits it takes: long enough for one run by default,
+ * settable from where the portal starts, `0` turning the wait off. The timer is between bytes, not against the
+ * clock: a flowing answer may go on as long as it flows.
  *
  * They ride on every fetch the process makes — pi's provider calls and any extension's included — so the default
  * is a ceiling of quiet, not of work: half an hour of silence ends a hung upstream, while an answer that keeps
- * moving is never cut by these waits. It must outlast Understory's own model wait (thirty minutes, memory-llm)
- * or the tool call would die of the same death this exists to stop, one minute later than before. */
+ * moving is never cut by these waits. An extension that waits on a model for as long, for a tool call, takes
+ * waits of its own on an agent of its own, or the call would die of the same death this exists to stop. */
 export const globalWaits = {
   headers: waitMs(process.env.PORTAL_FETCH_HEADERS_TIMEOUT_MS, 30 * 60_000), // between the ask and the first byte of the answer
   body: waitMs(process.env.PORTAL_FETCH_BODY_TIMEOUT_MS, 30 * 60_000), // between the bytes of a streaming answer
@@ -37,7 +36,7 @@ export const globalWaits = {
 const throughEnvProxies = (): boolean => (process.env.NODE_USE_ENV_PROXY ?? "").trim() === "1";
 
 /** An agent carrying a pair of waits — the portal's own when node was asked to take the environment's proxies,
- * the plain one otherwise. Memory-llm's model agent is made the same way, so the rule lives here once. */
+ * the plain one otherwise. */
 export const waitsAgent = (waits: { headers: number; body: number }): Agent | EnvHttpProxyAgent =>
   throughEnvProxies()
     ? new EnvHttpProxyAgent({ headersTimeout: waits.headers, bodyTimeout: waits.body })

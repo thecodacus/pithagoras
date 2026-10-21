@@ -12,6 +12,9 @@
     "requires": { "pithagoras-docker": "^1.1.0" }
   },
   "scripts": { "build": "node build.mjs && tsc --noEmit -p ." },
+  "dependencies": {
+    "undici": "^8.11.2"
+  },
   "devDependencies": {
     "react-icons": "5.7.0"
   },
