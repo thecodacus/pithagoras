@@ -1,9 +1,8 @@
 import type { MemoryHolder } from "@pithagoras/extension-api/server";
 
 /**
- * What holds the agent's memory in place of MEMORY.md, where something does: an
- * extension (`portal.memory.hold`), or the portal's own Understory, which says
- * so through the same function (features.ts).
+ * What holds the agent's memory in place of MEMORY.md, where something does
+ * (`portal.memory.hold`).
  *
  * While it holds it, a chat with the person does not read MEMORY.md and is told
  * the holder's rule in its place (sdk-client.ts), a project linked to an agent

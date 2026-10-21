@@ -5,9 +5,7 @@ import { readModelsJson, storedKey } from "./providers.js";
 
 /**
  * The models the chats use, and how to reach them: for what asks a model
- * itself, outside a chat's pi. What `portal.models` gives a server half, and
- * what the portal's own Understory thinks with in "the chat's" mode
- * (memory-llm.ts).
+ * itself, outside a chat's pi. What `portal.models` gives a server half.
  */
 
 /** The model a chat's pi is on now, where it runs here: the session manager's to say. */
@@ -54,7 +52,7 @@ export async function modelEndpoint(provider: string, id: string): Promise<Model
 export function modelProviders(): ModelProvider[] {
   const providers = readModelsJson().providers ?? {};
   return Object.entries<Record<string, any>>(providers)
-    .filter(([, p]) => p && typeof p === "object" && Array.isArray(p.models))
+    .filter(([, p]) => Array.isArray(p?.models))
     .map(([provider, p]) => ({
       provider,
       ...(typeof p.api === "string" ? { api: p.api } : {}),
