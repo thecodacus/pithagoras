@@ -73,6 +73,27 @@ test("the memory is read through the portal: only Understory's read API, with it
   understory.state.down = false;
 });
 
+test("one run's steps are read from Understory through the portal, with its token, by the id asked for", async () => {
+  elsewhere();
+  process.env.MEMORY_UNDERSTORY_AUTH_TOKEN = "s3cret";
+  try {
+    understory.state.reads = { "/api/trace": { body: { id: "run-1", kind: "query", notation: "read owner.md → ✓", steps: [{ seq: 1, tool: "read_concept", summary: "/people/owner.md", paths: ["/people/owner.md"], write: false }] } } };
+    const run = await get("/trace?id=run-1");
+    assert.equal(run.status, 200);
+    assert.deepEqual(run.body.steps[0].paths, ["/people/owner.md"], "the full path of the note the step touched");
+    assert.deepEqual(understory.seen.at(-1), { method: "GET", url: "/api/trace?id=run-1", auth: "Bearer s3cret" });
+    // An id Understory does not know is the page's to say.
+    understory.state.reads = { "/api/trace": { status: 404, body: { error: "trace not found" } } };
+    assert.deepEqual(await get("/trace?id=gone"), { status: 404, body: { error: "trace not found" } });
+    // And only while Understory is the memory.
+    putServers({});
+    assert.equal((await get("/trace?id=run-1")).status, 409);
+  } finally {
+    delete process.env.MEMORY_UNDERSTORY_AUTH_TOKEN;
+    understory.state.reads = {};
+  }
+});
+
 test("notes are changed only in the Understory the portal runs, while it runs and is the agent's memory", async () => {
   machine.reset();
   // Understory elsewhere: read, not written.
