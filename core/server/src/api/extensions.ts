@@ -415,6 +415,16 @@ function importUrl(half: ClientHalf, file: string): string | undefined {
 /** What a page asks for ahead with the module of `half`. */
 const preloadOf = (half: ClientHalf): string[] => staticImports(half).map((file) => importUrl(half, file)).filter((url) => url !== undefined);
 
+/** Why a browser half failed in a page, to load or to draw, as the page said: the latest, by the package's name, with the revision that failed. */
+const clientFailures = new Map<string, { rev: string; error: string }>();
+/** What a page said of `half` while it is that revision: another one has not failed yet. */
+function clientFailure(half: ClientHalf): string | undefined {
+  const failure = clientFailures.get(half.name);
+  if (failure?.rev === half.rev) return failure.error;
+  clientFailures.delete(half.name);
+  return undefined;
+}
+
 export function extensionsRouter(): Router {
   const router = express.Router();
 
@@ -431,11 +441,13 @@ export function extensionsRouter(): Router {
           const server = servers.find((half) => half.name === name);
           const themes = themed.find((half) => half.name === name);
           const failure = server && serverFailure(name);
+          const failed = client && clientFailure(client);
           return {
             name,
             version: (client ?? server ?? themes)!.version,
             ...(themes ? { themes: themes.themes } : {}),
-            ...(client ? { entry: clientUrl(client, client.entry) } : {}),
+            // Its revision, which a page says a failure of it under.
+            ...(client ? { rev: client.rev, entry: clientUrl(client, client.entry) } : {}),
             ...(client?.style ? { style: clientUrl(client, client.style) } : {}),
             // What its module imports along with itself, for the page to ask for all at once.
             ...(client && preloadOf(client).length ? { preload: preloadOf(client) } : {}),
@@ -444,9 +456,32 @@ export function extensionsRouter(): Router {
             // What its server half cannot start without.
             ...(server?.requires ? { requires: server.requires } : {}),
             ...(failure ? { serverError: failure } : {}),
+            // Why its browser half failed in a page, as that page said.
+            ...(failed ? { clientError: failed } : {}),
           };
         }),
       });
+    } catch (e) {
+      res.status(500).json({ error: (e as Error).message });
+    }
+  });
+
+  /**
+   * A page says that a browser half failed there, to load or to draw, for whoever looks at the extension next (Settings,
+   * the agent). Kept until another revision of it is installed. Only of the revision installed now: a page that still
+   * has an older one says nothing of this one.
+   */
+  router.post("/extension-ui/failures", async (req, res) => {
+    const { name, rev, error } = req.body ?? {};
+    if (typeof name !== "string" || typeof rev !== "string" || typeof error !== "string" || !error) {
+      return res.status(400).json({ error: "name, rev and error are required" });
+    }
+    try {
+      if (!(await clientHalves()).some((half) => half.name === name && half.rev === rev)) {
+        return res.status(404).json({ error: "No browser half of that name is installed at that revision" });
+      }
+      clientFailures.set(name, { rev, error });
+      res.json({ ok: true });
     } catch (e) {
       res.status(500).json({ error: (e as Error).message });
     }
