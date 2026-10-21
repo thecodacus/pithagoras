@@ -759,7 +759,19 @@ export function hostExtensions(chatId: string): { name: string; factory: (pi: an
       factory: (pi: any) => {
         const row = getSession(chatId);
         if (!row) return;
-        for (const factory of ext.factories) guarded(ext.half.name, "adding to a chat's pi", () => factory(pi, chatOf(row)));
+        for (const factory of ext.factories) {
+          let added: unknown;
+          try {
+            added = factory(pi, chatOf(row));
+          } catch (e) {
+            // pi keeps it as the chat's load error, which the chat is told (see loadErrors in pi/sdk-client.ts), and
+            // loads nothing of the package's in that chat.
+            console.error(`[extension ${ext.half.name}] adding to a chat's pi failed:`, e);
+            throw e;
+          }
+          // One that fails later, after pi has loaded it, is in the log alone.
+          if (added instanceof Promise) guarded(ext.half.name, "adding to a chat's pi", () => added);
+        }
       },
     }));
 }

@@ -328,9 +328,10 @@ test("a tool that is on is not called through the tools tool: it has its own nam
 });
 
 test("a lazy tool's result is wrapped as somebody else's words, and the next push is refused", async () => {
+  // Nobody answers a dialog here, as in a routine's run: see guard-asks.test.mjs for where the push is asked about.
   const { results } = await run(
     [via("call", { name: "mcp_page", args: { url: "https://example.test" } }), { name: "bash", args: { command: "git push origin main" } }],
-    { toolsLazy: ["mcp_page"] },
+    { toolsLazy: ["mcp_page"], dialogs: false },
   );
   assert.equal(results.length, 2);
   assert.match(textOf(results[0]), /<<<untrusted:[0-9a-f]{16}>>>/, "the guard saw the result of the tool it was called through");
@@ -799,8 +800,9 @@ test("a result a lazy tool returned that looks like a prompt injection is flagge
     },
   });
   model.requests.length = 0;
+  // Nobody answers a dialog here, so the push before the trust is refused rather than asked about.
   const client = await SdkPiClient.create({
-    cwd: chat(), sessionDir: mkdtempSync(path.join(home, "chat-")), provider: "fake", modelId: "m", sessionId: session, toolsLazy: ["mcp_page"], lazySets: ["pages"],
+    cwd: chat(), sessionDir: mkdtempSync(path.join(home, "chat-")), provider: "fake", modelId: "m", sessionId: session, toolsLazy: ["mcp_page"], lazySets: ["pages"], dialogs: false,
   });
   client.on("event", (e) => events.push(e));
   try {

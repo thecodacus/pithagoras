@@ -50,6 +50,8 @@ export interface LaunchOptions {
   heartbeatAgent?: string;
   /** Told the chat's model when a spoken turn is about to run on another. */
   rememberChatModel?: (provider: string, modelId: string) => void;
+  /** Whether a reload that is due may happen now, between two requests of a run: nothing goes on beside the run that it would cut off. */
+  canReloadNow?: () => boolean;
 }
 
 export interface Executor {
@@ -112,6 +114,7 @@ export class HostExecutor implements Executor {
       subagentModel: opts.subagentModel,
       heartbeatAgent: opts.heartbeatAgent,
       rememberChatModel: opts.rememberChatModel,
+      canReloadNow: opts.canReloadNow,
       provider: opts.provider,
       modelId: opts.model,
       thinkingLevel: opts.thinkingLevel,
