@@ -1,4 +1,5 @@
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import semver from "semver";
 
@@ -57,7 +58,7 @@ export interface ClientHalf {
   /** The module, and the stylesheet if it has one, as paths inside `dir`. */
   entry: string;
   style?: string;
-  /** Changes when the module's file does, or the stylesheet's, so a page loads it again rather than the one it has. */
+  /** Changes when a file of `dir` does (see revOf), so a page loads it again rather than the one it has. */
   rev: string;
 }
 
@@ -67,7 +68,10 @@ export interface ServerHalf {
   version?: string;
   /** The module's file. */
   file: string;
-  /** Changes when the file does, so the portal loads it again rather than the one it has. */
+  /**
+   * Changes when a file of the module's folder does (see revOf), so the portal loads it again rather than the one it has, with
+   * every file of that folder it imports (see half-modules.ts).
+   */
   rev: string;
   /** The extensions it builds on and cannot start without, by name, with the versions it takes (`pithagoras.requires`). */
   requires?: Record<string, string>;
@@ -96,14 +100,52 @@ export const takes = (range: string, version: string | undefined) => Boolean(ver
 export const validName = (name: unknown): name is string =>
   typeof name === "string" && /^(@[\w~-][\w.~-]*\/)?[\w~-][\w.~-]*$/.test(name);
 
-/** When each of the files last changed, and its size: a change to any of them is another revision. */
-const revOf = (...files: string[]) =>
-  files
-    .map((file) => {
-      const stat = statSync(file);
-      return `${Math.round(stat.mtimeMs).toString(36)}-${stat.size.toString(36)}`;
-    })
-    .join("-");
+/** How many files of a half's folder its revision looks at: see revOf. */
+const REV_FILES = 1000;
+
+/**
+ * A half's revision: of the files it is made of, which are `files` and those of the folder `dir`, its folders' as well,
+ * by when each last changed, its size and where it is. A change to any of them, a file more or a file less, is another
+ * revision. Not what is in `node_modules`, which a half imports by name and which is not loaded again (see
+ * half-modules.ts), nor a file or folder whose name starts with a dot. Of the folder, the first REV_FILES files met are
+ * looked at, each folder's entries taken by name and a folder's own files before the entries after it: a change to a file
+ * past them alone is not another revision. `files` always count.
+ */
+function revOf(dir: string, ...files: string[]): string {
+  const hash = createHash("sha256");
+  const add = (file: string, at: string): boolean => {
+    const stat = statSync(file);
+    if (!stat.isFile()) return false;
+    hash.update(`${at}\0${stat.mtimeMs}\0${stat.size}\n`);
+    return true;
+  };
+  for (const file of files) add(file, file);
+  let left = REV_FILES;
+  const walk = (folder: string, at: string) => {
+    let entries;
+    try {
+      entries = readdirSync(folder, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    for (const entry of entries) {
+      if (!left) return;
+      if (entry.name === "node_modules" || entry.name.startsWith(".")) continue;
+      const full = path.join(folder, entry.name);
+      if (entry.isDirectory()) walk(full, `${at}${entry.name}/`);
+      else {
+        try {
+          if (add(full, `${at}${entry.name}`)) left--;
+        } catch {
+          // Gone meanwhile, or a link that leads nowhere.
+        }
+      }
+    }
+  };
+  walk(dir, "");
+  return hash.digest("base64url").slice(0, 16);
+}
 
 /** A file's path inside `dir`, or nothing when it is outside it or not a file. */
 function fileIn(dir: string, file: string): string | undefined {
@@ -138,14 +180,19 @@ export function clientHalf(packageDir: string): ClientHalf | undefined {
   const dir = path.dirname(client);
   if (dir === root || !fileIn(root, client)) return undefined;
   const style = typeof declared.style === "string" ? fileIn(dir, path.resolve(root, declared.style)) : undefined;
+  let rev: string | undefined;
   return {
     name: meta.name,
     ...(typeof meta.version === "string" ? { version: meta.version } : {}),
     dir,
     entry: path.basename(client),
     ...(style ? { style } : {}),
-    // The stylesheet too: the page tells one revision from another by the module's address alone.
-    rev: style ? revOf(client, path.join(dir, style)) : revOf(client),
+    // Read as it is first asked for: a file a page fetches is found by the folder alone, and every fetch would otherwise
+    // look at every file of every half. The stylesheet too, however many files there are: the page tells one revision
+    // from another by the module's address alone.
+    get rev() {
+      return (rev ??= style ? revOf(dir, client, path.join(dir, style)) : revOf(dir, client));
+    },
   };
 }
 
@@ -260,11 +307,15 @@ export function serverHalf(packageDir: string): ServerHalf | undefined {
   const file = path.resolve(root, meta.pithagoras.server);
   if (!fileIn(root, file)) return undefined;
   const requires = requiresOf(meta), optional = buildsOn(meta.pithagoras.optional);
+  let rev: string | undefined;
   return {
     name: meta.name,
     ...(typeof meta.version === "string" ? { version: meta.version } : {}),
     file,
-    rev: revOf(file),
+    // Read as it is first asked for, as a browser half's is.
+    get rev() {
+      return (rev ??= revOf(path.dirname(file), file));
+    },
     ...(requires ? { requires } : {}),
     ...(optional ? { optional } : {}),
   };

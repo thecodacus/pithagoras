@@ -113,8 +113,8 @@ test("the browser halves listed are those of the portal's own packages that are 
   assert.deepEqual(extensions.find((e) => e.name === "only-themes"), { name: "only-themes", version: "1.0.0", themes: [{ id: "dusk", name: "Dusk", dark: { accent: "#ff79c6" } }] });
   const notes = extensions.find((e) => e.name === "@codacus/notes");
   assert.equal(notes.version, "1.0.0");
-  // Under its revision, of the module's file and the stylesheet's, which is listed for a page to say a failure of it under.
-  assert.match(notes.rev, /^[0-9a-z]+-[0-9a-z]+-[0-9a-z]+-[0-9a-z]+$/);
+  // Under its revision, of the files of its web folder, which is listed for a page to say a failure of it under.
+  assert.match(notes.rev, /^[\w-]{16}$/);
   assert.equal(notes.entry, `/api/extension-ui/%40codacus/notes/~${notes.rev}/client.js`);
   assert.equal(notes.style, `/api/extension-ui/%40codacus/notes/~${notes.rev}/client.css`);
 });

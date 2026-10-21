@@ -8,7 +8,8 @@ import { inProcessHome } from "./server-harness.mjs";
 /**
  * Installing, removing and updating packages, and a change of pi's settings by hand, reload the open chats: what a
  * package's server half adds to a chat's pi is there without /reload, and gone with it. With pi's own CLI, which
- * installs a folder by reference: installing the same folder again is how a package written there is reloaded.
+ * installs a folder by reference: installing the same folder again is how a package written there is reloaded, every
+ * file of its halves as it is now, without a restart.
  */
 const home = inProcessHome("pithagoras-package-reload-");
 mkdirSync(process.env.PI_CODING_AGENT_DIR, { recursive: true });
@@ -30,12 +31,15 @@ writeFileSync(path.join(pkg, "server.js"), `export default function (portal) {
 
 const { default: express } = await import("express");
 const { packagesRouter } = await import("../dist/api/packages.js");
+const { extensionsRouter } = await import("../dist/api/extensions.js");
 const { createSession } = await import("../dist/db.js");
 const { sessions } = await import("../dist/session-manager.js");
-const { stopServerHalves } = await import("../dist/extension-host.js");
+const { extensionRoutes, isServing, stopServerHalves } = await import("../dist/extension-host.js");
 const app = express();
 app.use(express.json());
 app.use("/api", packagesRouter());
+app.use("/api", extensionsRouter());
+app.use("/api/x", extensionRoutes);
 const listener = app.listen(0, "127.0.0.1");
 await new Promise((resolve) => listener.once("listening", resolve));
 const base = `http://127.0.0.1:${listener.address().port}/api`;
@@ -75,4 +79,59 @@ test("the package routes reload the open chats", async () => {
 
   await send("/packages", "DELETE", { spec: pkg });
   assert.equal(await has(), false, "removed");
+});
+
+test("a folder installed again runs every file of its halves as they are now, without a restart, and removed, its routes are gone", async () => {
+  const dir = mkdtempSync(path.join(home, "in-place-"));
+  const write = (file, text) => {
+    mkdirSync(path.dirname(path.join(dir, file)), { recursive: true });
+    writeFileSync(path.join(dir, file), text);
+  };
+  write("package.json", JSON.stringify({ name: "in-place", version: "1.0.0", type: "module", keywords: ["pi-package"], pi: {}, pithagoras: { server: "./server.js", client: "./web/client.js" } }));
+  // Its module answers with what it says itself and what a file it imports says; each revision stopped is counted.
+  const server = (said) => `import { said as lib } from "./lib.js";
+export default function (portal) {
+  portal.router.get("/said", (req, res) => res.json({ server: ${JSON.stringify(said)}, lib }));
+  return () => { globalThis.inPlaceStops = (globalThis.inPlaceStops ?? 0) + 1; };
+}
+`;
+  write("server.js", server("first"));
+  write("lib.js", 'export const said = "first";\n');
+  write("web/client.js", 'import { part } from "./part.js";\nexport default function () { return part; }\n');
+  write("web/part.js", 'export const part = "first";\n');
+  const said = async () => {
+    const res = await fetch(`${base}/x/in-place/said`);
+    return res.status === 200 ? await res.json() : res.status;
+  };
+  const listed = async () => (await (await fetch(`${base}/extension-ui`)).json()).extensions.find((e) => e.name === "in-place");
+
+  await send("/packages", "POST", { spec: dir });
+  assert.deepEqual(await said(), { server: "first", lib: "first" });
+  const first = await listed();
+
+  // Only the file its module imports changed: that is what answers now.
+  write("lib.js", 'export const said = "second, and longer";\n');
+  await send("/packages", "POST", { spec: dir });
+  assert.deepEqual(await said(), { server: "first", lib: "second, and longer" });
+  assert.equal(globalThis.inPlaceStops, 1, "the revision before was stopped");
+  assert.equal((await listed()).rev, first.rev, "a file outside the web folder is not the browser half's");
+
+  // Its module changed.
+  write("server.js", server("third, the longest"));
+  await send("/packages", "POST", { spec: dir });
+  assert.deepEqual(await said(), { server: "third, the longest", lib: "second, and longer" });
+
+  // A file the browser half's module imports changed: another revision of it, under which a page fetches that file as
+  // it is now. The web folder is in the server half's folder here, so that half is started again too.
+  write("web/part.js", 'export const part = "fourth, and longer";\n');
+  await send("/packages", "POST", { spec: dir });
+  const changed = await listed();
+  assert.notEqual(changed.rev, first.rev);
+  assert.equal(await (await fetch(new URL("./part.js", new URL(changed.entry, base)))).text(), 'export const part = "fourth, and longer";\n');
+  assert.equal(globalThis.inPlaceStops, 3);
+
+  await send("/packages", "DELETE", { spec: dir });
+  assert.equal(await said(), 404, "removed: its routes are gone");
+  assert.equal(isServing("in-place"), false);
+  assert.equal(globalThis.inPlaceStops, 4, "and it was stopped");
 });
