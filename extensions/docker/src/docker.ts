@@ -1,4 +1,4 @@
-import { readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import type { ContainerInfo, ContainerSpec, Docker, PullState, VolumeInfo } from "./api";
 import { checked, DockerError, exec, logs, ping, pull, request, socketThere } from "./engine";
@@ -24,6 +24,25 @@ const MOST_TAIL = 5_000;
 const nameOf = (raw: Raw) => (raw.Names?.[0] ?? "").replace(/^\//, "");
 /** A name Docker takes for a container or a volume. */
 const validName = (name: string) => /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(name);
+
+/**
+ * The network mode that puts a container on the portal's own loopback (api.ts): `host` for a portal on the machine itself
+ * (Linux only), else `container:<id>` of the running container named by `PORTAL_CONTAINER_NAME`, or by `HOSTNAME`.
+ * Whether the portal runs in a container, and on which system, are the portal's own unless a test gives them.
+ */
+export async function sharedNetwork(inContainer = existsSync("/.dockerenv"), platform = process.platform): Promise<string> {
+  if (!inContainer && !process.env.PORTAL_CONTAINER_NAME) {
+    if (platform !== "linux") throw new Error("A container shares the network of a portal on the machine itself only on Linux. Run the portal in Docker on this platform.");
+    return "host";
+  }
+  const name = process.env.PORTAL_CONTAINER_NAME || process.env.HOSTNAME;
+  if (!name) throw new Error("Set PORTAL_CONTAINER_NAME to the portal Docker container name.");
+  const detail = await request<{ Id?: string; State?: { Running?: boolean } }>("GET", `/containers/${encodeURIComponent(name)}/json`);
+  if (detail.status !== 200 || !detail.body?.Id || !detail.body.State?.Running) {
+    throw new Error("Cannot identify the running portal container. Set PORTAL_CONTAINER_NAME to its Docker name.");
+  }
+  return `container:${detail.body.Id}`;
+}
 
 export function dockerFor(dataDir: string) {
   const file = path.join(dataDir, "adopted.json");
@@ -161,6 +180,7 @@ export function dockerFor(dataDir: string) {
   function forExtension(who: string): Docker {
     return {
       available: async () => socketThere() && (await ping()),
+      sharedNetwork: () => sharedNetwork(),
       images: {
         present: async (image) => (await request("GET", `/images/${encodeURIComponent(image)}/json`)).status === 200,
         ensure,

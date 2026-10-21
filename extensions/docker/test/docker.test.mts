@@ -12,7 +12,7 @@ import type { Docker } from "../src/api.ts";
 // Docker for the extensions that build on it (src/docker.ts), against a daemon of the tests' own on a socket.
 const docker = await fakeDocker();
 process.env.DOCKER_SOCKET = docker.socket;
-const { dockerFor, OWNER_LABEL } = await import("../src/docker.ts");
+const { dockerFor, OWNER_LABEL, sharedNetwork } = await import("../src/docker.ts");
 const { demux } = await import("../src/engine.ts");
 const { default: serverHalf } = await import("../src/server.ts");
 test.after(() => docker.close());
@@ -192,6 +192,31 @@ test("a command that does not end in time is given up on with what it wrote by t
     docker.hold.exec = undefined;
     end();
     await own.containers.remove("dk-slow");
+  }
+});
+
+test("a container shares the portal's network: the machine's for a portal on it, on Linux only, else the portal's own running container's, by PORTAL_CONTAINER_NAME or else HOSTNAME", async () => {
+  const was = { PORTAL_CONTAINER_NAME: process.env.PORTAL_CONTAINER_NAME, HOSTNAME: process.env.HOSTNAME };
+  delete process.env.PORTAL_CONTAINER_NAME;
+  docker.containers.push({ Id: "portal0000000", Name: "dk-portal", Image: "pithagoras-portal", State: "running", Labels: {}, Tty: false, out: "", err: "" });
+  try {
+    assert.equal(await sharedNetwork(false, "linux"), "host");
+    await assert.rejects(sharedNetwork(false, "darwin"), /only on Linux/);
+    process.env.HOSTNAME = "dk-portal";
+    assert.equal(await sharedNetwork(true, "linux"), "container:portal0000000", "in a container: the one its host name names");
+    process.env.PORTAL_CONTAINER_NAME = "dk-portal";
+    process.env.HOSTNAME = "0123456789ab";
+    assert.equal(await dockerFor(dataDir()).forExtension("a").sharedNetwork(), "container:portal0000000", "the one named, wherever the portal runs");
+    docker.containers.find((c) => c.Name === "dk-portal")!.State = "exited";
+    await assert.rejects(sharedNetwork(true, "linux"), /Cannot identify the running portal container/);
+    process.env.PORTAL_CONTAINER_NAME = "dk-missing";
+    await assert.rejects(sharedNetwork(true, "linux"), /Cannot identify the running portal container/);
+  } finally {
+    for (const [key, value] of Object.entries(was)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    docker.containers.splice(docker.containers.findIndex((c) => c.Name === "dk-portal"), 1);
   }
 });
 

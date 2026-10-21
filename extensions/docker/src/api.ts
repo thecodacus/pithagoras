@@ -72,6 +72,15 @@ export interface PullState {
 export interface Docker {
   /** Whether Docker can be reached now: its socket is there, and answers. */
   available(): Promise<boolean>;
+  /**
+   * The `NetworkMode` (in `spec.HostConfig`) that puts a container on the portal's own loopback, so that each reaches
+   * what the other serves on 127.0.0.1: `host` for a portal on the machine itself (Linux only), else `container:<id>` of
+   * the portal's running container, named by `PORTAL_CONTAINER_NAME`, or else by `HOSTNAME`. The id changes when the
+   * portal's container is made again, and a container made with the old one is then to be made again with the new.
+   * Refused, with an Error that says what to do, on another system than Linux outside a container, or where the
+   * portal's container is not found running.
+   */
+  sharedNetwork(): Promise<string>;
   images: {
     present(image: string): Promise<boolean>;
     /** The image is there, or is downloaded, with how the download goes told as it goes. One download for an image at a time, whoever asks. */
