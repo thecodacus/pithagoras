@@ -1,6 +1,6 @@
 import { execFile, spawn, type SpawnOptions } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { dockerAvailable, request } from "./extensions/docker.js";
+import http from "node:http";
 
 /**
  * How this portal was started, and starting it again.
@@ -225,17 +225,33 @@ const inContainer = (): boolean => existsSync("/.dockerenv") || existsSync("/run
 
 /**
  * The restart policy Docker has for this container (`always`, `unless-stopped`, `on-failure`, or `no` / empty for
- * none), asked over the socket by the container's name; nothing where that cannot be asked (no socket, another name).
+ * none), asked over Docker's socket (`DOCKER_SOCKET`, else the usual one) by the container's name; nothing where that
+ * cannot be asked (no socket, another name) or Docker has not answered within three seconds in all. One question, so
+ * it is asked here, with no Docker client: restarting is the portal's own, whatever extensions it has.
  */
 export async function containerRestartPolicy(env: NodeJS.ProcessEnv = process.env): Promise<string | undefined> {
   const name = env.PORTAL_CONTAINER_NAME || env.HOSTNAME;
-  if (!name || !dockerAvailable()) return undefined;
-  try {
-    const res = await request<{ HostConfig?: { RestartPolicy?: { Name?: string } } }>("GET", `/containers/${encodeURIComponent(name)}/json`, undefined, 3000);
-    return res.status === 200 ? (res.body?.HostConfig?.RestartPolicy?.Name ?? "") : undefined;
-  } catch {
-    return undefined;
-  }
+  const socketPath = env.DOCKER_SOCKET || "/var/run/docker.sock";
+  if (!name || !existsSync(socketPath)) return undefined;
+  return new Promise((resolve) => {
+    const req = http.request({ socketPath, path: `/containers/${encodeURIComponent(name)}/json`, method: "GET" }, (res) => {
+      const chunks: Buffer[] = [];
+      res.on("data", (c: Buffer) => chunks.push(c));
+      res.on("error", () => resolve(undefined));
+      res.on("end", () => {
+        try {
+          const found = res.statusCode === 200 ? (JSON.parse(Buffer.concat(chunks).toString("utf8")) as { HostConfig?: { RestartPolicy?: { Name?: string } } }) : undefined;
+          resolve(found && (found.HostConfig?.RestartPolicy?.Name ?? ""));
+        } catch {
+          resolve(undefined);
+        }
+      });
+    });
+    const deadline = setTimeout(() => req.destroy(), 3000);
+    req.on("close", () => clearTimeout(deadline));
+    req.on("error", () => resolve(undefined));
+    req.end();
+  });
 }
 
 /** What is there to start the portal again, or why nothing is. */

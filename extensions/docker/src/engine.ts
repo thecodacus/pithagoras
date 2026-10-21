@@ -2,8 +2,9 @@ import { existsSync } from "node:fs";
 import http from "node:http";
 
 /**
- * Docker's own API, over its socket: the portal's image has no docker command, and a client library for a dozen
- * endpoints is a dependency to keep up with for good. `DOCKER_SOCKET` names another socket than the usual one.
+ * Docker's own API, over its socket: the docker command in the portal's image is the container executor's, and a
+ * portal run on the machine itself may have none; a client library for a dozen endpoints is a dependency to keep up
+ * with for good. `DOCKER_SOCKET` names another socket than the usual one.
  */
 
 export const socketPath = () => process.env.DOCKER_SOCKET || "/var/run/docker.sock";
