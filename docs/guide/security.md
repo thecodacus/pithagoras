@@ -136,7 +136,8 @@ leaves that conversation able to use the rule.
 
 A flagged result marks the session **tainted**. Until it is trusted or its turn
 removed, the handful of actions that turn a bad suggestion into a lasting
-problem are refused:
+problem are held: put to you where you are there to answer (see
+[below](#asked-or-refused)), refused everywhere else.
 
 | Rule | Why |
 | --- | --- |
@@ -162,8 +163,22 @@ Enforcement is **tainted-only** on purpose. A session writing code in a
 repository never meets any of this; the rules apply exactly where the risk
 appeared.
 
-A refusal is logged in [Audit](/guide/sessions#audit) and the agent is told to
-say it was refused rather than to find another route. A [routine](/guide/routines#the-injection-guard)
+### Asked or refused
+
+Where you are there to answer, a call a rule holds is put to you in the chat
+before it runs: in a chat of yours, and in a conversation you started on the
+Agent page, while you are the one speaking. The dialog names the tool and what it
+was given, the result that was flagged and what made it look like an injection,
+and the rule that holds the call and why. **Yes** lets that one call run, and
+[Audit](/guide/sessions#audit) records it as *Allowed by approval*; the
+conversation stays tainted, so the next such call is asked about again. **No**,
+closing the dialog or stopping the run refuses it. The run waits for your answer,
+and a page that opens the chat later is shown the dialog.
+
+Where nobody can answer, the call is refused: a routine's run, a heartbeat, a chat
+on a channel, and a conversation in which somebody other than the primary user is
+speaking. A refusal is logged in Audit and the agent is told to say it was
+refused rather than to find another route. A [routine](/guide/routines#the-injection-guard)
 can be let off a rule, one at a time, in **Settings → Guard**; what that rule would
 have stopped is then recorded instead. Nothing else can be: chats, channels and
 heartbeats keep every rule.
