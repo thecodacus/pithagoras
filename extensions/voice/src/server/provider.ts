@@ -22,7 +22,8 @@ async function speechModel(action: "load" | "unload"): Promise<void> {
   loaded = action === "load";
 }
 
-export const provider: VoiceProvider = {
+/** What voice mode is offered, anew for each start of the half: voice mode tells one started anew that it is in use again. */
+export const provider = (): VoiceProvider => ({
   label: "Voice service",
   // While the service was last found running, at the addresses of the engines its container was built for.
   where() {
@@ -34,7 +35,7 @@ export const provider: VoiceProvider = {
     if (inUse) await speechModel("load");
     else if (setting("lazyLoad") !== false) await speechModel("unload");
   },
-};
+});
 
 /**
  * A setup that was started from the page and has finished is made voice mode's source, once: what the page's Install

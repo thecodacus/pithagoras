@@ -22,7 +22,7 @@ export default function voice(portal: ServerPortal) {
   setPortal(portal);
   openStore(portal.dataDir());
   takeHandoff();
-  portal.voice.provide(provider);
+  portal.voice.provide(provider());
   voiceRoutes(portal.router);
 
   let stopped = false;
