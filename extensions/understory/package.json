@@ -1,0 +1,19 @@
+{
+  "name": "pithagoras-understory",
+  "version": "0.1.0",
+  "description": "The agent's memory for Pithagoras: Understory run in a container through Docker and given to the agent as its memory, with a page to read and tend the notes it keeps",
+  "type": "module",
+  "keywords": ["pi-package"],
+  "pi": {},
+  "pithagoras": {
+    "client": "./web/client.js",
+    "style": "./web/client.css",
+    "server": "./server.js",
+    "requires": { "pithagoras-docker": "^1.1.0" }
+  },
+  "scripts": { "build": "node build.mjs && tsc --noEmit -p ." },
+  "devDependencies": {
+    "react-icons": "5.7.0"
+  },
+  "license": "Apache-2.0"
+}
