@@ -116,7 +116,7 @@ export async function imagePresent(image: string): Promise<boolean> {
   return status === 200;
 }
 
-export async function containerState(
+async function containerState(
   name: string
 ): Promise<{ exists: boolean; running: boolean; id?: string }> {
   const { status, body } = await request<{ State?: { Running?: boolean }; Id?: string }>(
@@ -128,7 +128,7 @@ export async function containerState(
 }
 
 /** What a pull says before the daemon has said anything. */
-export const PULL_STARTING = "starting";
+const PULL_STARTING = "starting";
 
 /** How a pull is going, for the page that shows it: under way with what the daemon last said, or ended with or without a failure. */
 export interface PullState {
