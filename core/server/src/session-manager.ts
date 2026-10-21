@@ -3177,5 +3177,6 @@ setChatBridge({
   tell: (chatId, extension, data) => sessions.tellExtension(chatId, extension, data),
   offers: (chatId, tool) => sessions.toolOffered(chatId, tool),
   reload: () => sessions.reloadIdle(),
+  model: (chatId) => sessions.currentModel(chatId),
 });
 export { SESSION_ROOT, IMAGE_ROOT };

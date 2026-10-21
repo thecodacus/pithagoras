@@ -20,7 +20,7 @@ import { sessions } from "../session-manager.js";
 import { followPackages, switchPackage } from "./extensions.js";
 import { ADAPTER_SPEC, mcpAdapter, readMcpFile, writeMcpFile } from "./mcp.js";
 import * as service from "../extensions/understory-service.js";
-import { readModelsJson } from "../providers.js";
+import { modelProviders } from "../models.js";
 import { pi } from "./packages.js";
 import { serverTimeZone } from "../time-zone.js";
 
@@ -46,10 +46,9 @@ function shownConfig() {
 
 /** Providers set up here that have an address Understory can be pointed at, with their models. */
 function providersForUnderstory() {
-  const providers = readModelsJson().providers ?? {};
-  return Object.entries<Record<string, any>>(providers)
-    .filter(([, p]) => p && typeof p.baseUrl === "string" && Array.isArray(p.models))
-    .map(([id, p]) => ({ id, models: p.models.filter((m: any) => typeof m?.id === "string").map((m: any) => String(m.id)) }));
+  return modelProviders()
+    .filter((p) => p.baseUrl !== undefined)
+    .map(({ provider, models }) => ({ id: provider, models }));
 }
 
 async function understoryState() {

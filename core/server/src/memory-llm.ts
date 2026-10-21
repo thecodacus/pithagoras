@@ -3,8 +3,7 @@ import { Readable } from "node:stream";
 import express, { type Router } from "express";
 import { fetch as modelFetch } from "undici";
 import { waitsAgent, waitMs } from "./fetch-waits.js";
-import { chatModel, getSession } from "./db.js";
-import { modelRuntime } from "./api/providers.js";
+import { modelEndpoint, modelOf, type LiveModel } from "./models.js";
 import { UNDERSTORY } from "./features.js";
 import { existingLlmToken } from "./extensions/understory-service.js";
 
@@ -80,22 +79,14 @@ export function forgetAsking(): void {
   lastAsked = undefined;
 }
 
-type ModelOf = (sessionId: string) => Promise<{ provider: string; id: string } | undefined>;
-
 /** The provider and model a request goes to. */
-export async function chosenModel(modelOf: ModelOf): Promise<{ provider: string; id: string; chat?: string }> {
+export async function chosenModel(live: LiveModel): Promise<{ provider: string; id: string; chat?: string }> {
   const chat = askingChat();
-  if (chat) {
-    const live = await modelOf(chat).catch(() => undefined);
-    if (live) return { ...live, chat };
-    const row = getSession(chat);
-    if (row) {
-      const { provider, model } = chatModel(row);
-      if (model) return { provider, id: model, chat };
-    }
-  }
-  const { provider, model } = chatModel({});
-  return { provider, id: model };
+  const asked = chat ? await modelOf(chat, live) : undefined;
+  if (asked) return { ...asked, chat };
+  const model = await modelOf(undefined, live);
+  if (!model) throw new Refused("No chat is asking, and new chats have no model chosen to think with");
+  return model;
 }
 
 class Refused extends Error {
@@ -140,30 +131,18 @@ const timedOut = (e: unknown): boolean => {
 
 /** Where a model's chat completions go, and how to sign in there. */
 async function endpointOf(provider: string, id: string): Promise<{ url: string; headers: Record<string, string> }> {
-  const rt = await modelRuntime();
-  const model = rt.getModel(provider, id);
-  if (!model) throw new Refused(`The chat's model ${provider}/${id} is not one pi knows`);
-  if (model.api !== "openai-completions") {
+  const { api, baseUrl, headers } = await modelEndpoint(provider, id);
+  if (api !== "openai-completions") {
     throw new Refused(
-      `The chat's model ${provider}/${id} speaks ${model.api}, not OpenAI chat completions, which is what Understory sends. Give Understory a model of its own in Settings → Add-ons → Memory.`,
+      `The chat's model ${provider}/${id} speaks ${api}, not OpenAI chat completions, which is what Understory sends. Give Understory a model of its own in Settings → Add-ons → Memory.`,
     );
   }
-  const auth = (await rt.getAuth(model).catch(() => undefined))?.auth ?? {};
-  const base = String(auth.baseUrl ?? model.baseUrl ?? "").replace(/\/+$/, "");
-  if (!base) throw new Refused(`The chat's model ${provider}/${id} has no address`);
-  return {
-    url: `${base}/chat/completions`,
-    headers: {
-      "content-type": "application/json",
-      ...(model.headers ?? {}),
-      ...(auth.headers ?? {}),
-      ...(auth.apiKey ? { authorization: `Bearer ${auth.apiKey}` } : {}),
-    },
-  };
+  if (!baseUrl) throw new Refused(`The chat's model ${provider}/${id} has no address`);
+  return { url: `${baseUrl}/chat/completions`, headers: { "content-type": "application/json", ...headers } };
 }
 
 /** Mounted outside /api: Understory signs in with its own token, not a portal session. */
-export function memoryLlmRouter(modelOf: ModelOf): Router {
+export function memoryLlmRouter(live: LiveModel): Router {
   const router = express.Router();
   // Compared in constant time, and never against a key made for the asking:
   // none is there until Understory is set up to think with the chat's model.
@@ -188,7 +167,7 @@ export function memoryLlmRouter(modelOf: ModelOf): Router {
 
   router.post("/understory-llm/v1/chat/completions", onlyUnderstory, express.json({ limit: "50mb" }), async (req, res) => {
     try {
-      const { provider, id, chat } = await chosenModel(modelOf);
+      const { provider, id, chat } = await chosenModel(live);
       const { url, headers } = await endpointOf(provider, id);
       console.log(`[portal] understory thinks with ${provider}/${id}${chat ? ` for ${chat}` : " (no chat asking)"}`);
       // Stopped with the request: Understory giving up is the model's cue to stop too.

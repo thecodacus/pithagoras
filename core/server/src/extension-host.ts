@@ -21,6 +21,7 @@ import { personsEnv } from "./background.js";
 import { gitAt } from "./git.js";
 import { folderAllowed, folderLabel, listFolders } from "./agent-folders.js";
 import { handoffDone, takeHandoff } from "./handoff.js";
+import { modelEndpoint, modelOf, modelProviders, type LiveModel } from "./models.js";
 import type { Chat, ChatLife as Life, Ran, ServerPortal, Upgrade } from "@pithagoras/extension-api/server";
 
 /**
@@ -248,10 +249,12 @@ function wire(name: string, data: unknown): string | undefined {
 let tellChat: (chatId: string, extension: string, data: unknown) => Promise<boolean> = async () => false;
 let toolOffered: (chatId: string, tool: string) => "direct" | "lazy" | undefined = () => undefined;
 let reloadChats: () => Promise<{ reloaded: number; waiting: number }> = async () => ({ reloaded: 0, waiting: 0 });
-export function setChatBridge(bridge: { tell: typeof tellChat; offers: typeof toolOffered; reload: typeof reloadChats }): void {
+let liveModel: LiveModel = async () => undefined;
+export function setChatBridge(bridge: { tell: typeof tellChat; offers: typeof toolOffered; reload: typeof reloadChats; model: LiveModel }): void {
   tellChat = bridge.tell;
   toolOffered = bridge.offers;
   reloadChats = bridge.reload;
+  liveModel = bridge.model;
 }
 
 function whoOf(chatId: string) {
@@ -339,6 +342,11 @@ function portalFor(ext: Running): ServerPortal {
         if (!ext.apis.has(of)) ext.apis.set(of, provider.provider({ name }));
         return ext.apis.get(of) as never;
       },
+    },
+    models: {
+      of: (chatId) => modelOf(chatId, liveModel),
+      endpoint: (provider, id) => modelEndpoint(provider, id),
+      list: () => modelProviders(),
     },
     router: ext.router,
     http: {

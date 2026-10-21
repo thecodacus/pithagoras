@@ -212,6 +212,37 @@ export interface ToolGuard {
   files?: string[];
 }
 
+/** A model, by its provider and its id, as pi names them (`provider/id`). */
+export interface ModelRef {
+  provider: string;
+  id: string;
+}
+
+/** Where a model is asked, and how a request signs in there: see `models.endpoint`. */
+export interface ModelEndpoint {
+  /** What it speaks, as pi says it: "openai-completions", "anthropic-messages"… */
+  api: string;
+  /** Its address, with no slash at the end: for "openai-completions", where `/chat/completions` is. */
+  baseUrl: string;
+  /** What a request carries: the headers its provider adds, and its key as `authorization: Bearer <key>` where it has one. */
+  headers: Record<string, string>;
+  /**
+   * The provider's key is a command pi runs (`!…`), whose answer is in `headers`: fit for a request now, not for
+   * keeping where it outlives the request, such as a container's environment.
+   */
+  keyFromCommand: boolean;
+}
+
+/** A provider set up by its address (pi's models.json), with its models: see `models.list`. */
+export interface ModelProvider {
+  provider: string;
+  /** What it speaks, where models.json says it for the provider. */
+  api?: string;
+  baseUrl?: string;
+  /** Its models' ids. */
+  models: string[];
+}
+
 export interface ServerPortal {
   /** Of this interface: raised when something an extension relies on changes. */
   version: 1;
@@ -296,6 +327,24 @@ export interface ServerPortal {
      * started again when such an extension comes or goes. Naming one that is in neither is an error.
      */
     use<T = unknown>(name: string): T | undefined;
+  };
+  /**
+   * The models the chats use, and how to reach them: for a server half that asks a model itself, such as the one the
+   * chat asking it is on.
+   */
+  models: {
+    /**
+     * The model a chat is on now: the one its pi has, where it runs, else the one stored for it. Without a chat, the
+     * one new chats start on. Nothing for a chat that is not known, or where no model is chosen.
+     */
+    of(chatId?: string): Promise<ModelRef | undefined>;
+    /**
+     * Where a model pi knows is asked, with the provider's key: rejects for one it does not know. The key is the
+     * person's, for that model's own address.
+     */
+    endpoint(provider: string, id: string): Promise<ModelEndpoint>;
+    /** The providers set up by their address (pi's models.json), with their models. Services pi has built in are not listed. */
+    list(): ModelProvider[];
   };
   /**
    * The package's own routes, at /api/x/<package>/…, behind the portal's
