@@ -28,7 +28,7 @@ const HELD = /^It crashed at \S+: (.*)\. It stays off until another revision of 
 test("one that throws in a timer is held, with what requires it; the rest runs; another revision starts", async () => {
   const { code, err, result } = await scenario("timer");
   assert.equal(code, 0, err);
-  assert.deepEqual(result.started, [true, true, true, true, true, true]);
+  assert.deepEqual(result.started, [true, true, true, true, true, true, true, true]);
   const { crashy, needs, likes, other, parser, micro } = result.after;
   assert.equal(crashy.running, false);
   assert.equal(HELD.exec(crashy.failure)?.[1], "Error: thrown in a timer");
@@ -43,8 +43,15 @@ test("one that throws in a timer is held, with what requires it; the rest runs; 
   // One whose timer threw with nothing of its own in the stack is known by the code that set it.
   assert.match(parser.crash.error, /^SyntaxError: /);
   assert.doesNotMatch(parser.crash.stack, /halves\/parser/);
-  // One whose error came by a way Node does not follow is known by its folder.
+  // One whose error came by a way Node does not follow is known by its folder: its module's address, or a CommonJS file's path.
   assert.equal(micro.crash.error, "Error: thrown in a microtask");
+  assert.match(micro.crash.stack, /file:\/\/\S*\/halves\/micro\/server\.js/);
+  assert.equal(result.after.cjs.crash.error, "Error: thrown in a CommonJS file");
+  assert.match(result.after.cjs.crash.stack, /at \S*\/halves\/cjs\/lib\.cjs:/);
+  assert.doesNotMatch(result.after.cjs.crash.stack, /file:\/\//);
+  // So is one of a pi extension kept in the server module's folder, though the portal did not run it as the half's code.
+  assert.equal(result.after.withPi.crash.error, "Error: its pi extension's own bug");
+  assert.equal(result.after.withPi.running, false);
   assert.equal(result.sameRevision, false, "the revision that crashed is not started again");
   assert.equal(result.fixed.running, true, "another revision is");
   assert.equal(result.fixed.crash, undefined);
@@ -73,16 +80,89 @@ test("one that calls process.exit() has crashed, and the portal goes on", async 
   assert.equal(result.timed.running, false);
 });
 
-test("a tool's call pending in one that crashes ends at once with the crash and its last lines; a later call does not run it", async () => {
+test("a tool's call and a handler pending in one that crashes end at once with the crash and its last lines; later ones do not run it", async () => {
   const { code, err, result } = await scenario("tool");
   assert.equal(code, 0, err);
   assert.match(result.pending, /^The server half of tooly crashed: Error: the tool's timer threw\. The call was not answered\. It is off until another revision of it is installed, or it is switched off and on\.\n\nIts last lines:\n/);
   assert.match(result.pending, /INFO {2}\[extension tooly\] working on it\n.*ERROR \[extension tooly\] its server half crashed/);
   assert.ok(result.took < 2000, `answered when it crashed, not later: ${result.took} ms`);
+  assert.equal(result.handling, result.pending, "its handler that was pending in the chat's pi ends with it");
   assert.equal(result.later, result.pending);
-  assert.equal(result.calls, 1, "the later call did not run its code");
+  assert.equal(result.laterHandler, null, "a later event is not handled by it");
+  assert.equal(result.laterCommand, result.pending);
+  assert.deepEqual(result.calls, ["handler", "called"], "nothing later ran its code");
   assert.deepEqual(result.held, { serving: false, tools: 0 }, "a chat that loads now has none of its tools");
   assert.deepEqual(result.fixed, { content: [{ type: "text", text: "done" }], details: {} });
+});
+
+test("code a half left going after it crashed, or after it was stopped, is said each time it fails, and the portal goes on", async () => {
+  const { code, err, result } = await scenario("left");
+  assert.equal(code, 0, err);
+  const { listener, leaky } = result;
+  assert.equal(listener.crash.error, "Error: its listener threw 1");
+  assert.match(listener.lines.at(-1), /^\[extension listener\] code of its server half that had crashed failed again: Error: its listener threw 2/);
+  // The start that left a timer going was stopped as it was started again; the one in its place runs on.
+  assert.equal(leaky.running, true);
+  assert.equal(leaky.crash, undefined);
+  assert.equal(leaky.failure, undefined);
+  assert.equal(leaky.lines.filter((line) => line.startsWith("[extension leaky] code of its server half that had been stopped failed: Error: left behind")).length, 1, leaky.lines.join("\n"));
+});
+
+test("one that crashes as it starts is given up on at once", async () => {
+  const { code, err, result } = await scenario("starting");
+  assert.equal(code, 0, err);
+  assert.ok(result.took < 2000, `given up on as it crashed, not after the time to start: ${result.took} ms`);
+  assert.equal(result.status.running, false);
+  assert.equal(result.status.crash.error, "Error: boom at start");
+  assert.equal(HELD.exec(result.status.failure)?.[1], "Error: boom at start");
+  assert.ok(result.status.lines.some((line) => line.startsWith("[extension slow-start] its server half could not be started: Error: It crashed as it started: Error: boom at start")), result.status.lines.join("\n"));
+});
+
+test("the code the portal runs as a half's is known as its own with nothing of it in the stack: its tools, handlers, events, upgrades, sockets and requests", async () => {
+  const { code, err, result } = await scenario("scoped");
+  assert.equal(code, 0, err);
+  for (const [name, crash] of Object.entries(result.crashes)) {
+    assert.match(crash?.error ?? "", ["from-socket", "from-request", "from-answer"].includes(name) ? /^TypeError: fetch failed$/ : /^SyntaxError: /, name);
+    assert.doesNotMatch(crash.stack ?? "", new RegExp(`halves/${name}/`), name);
+  }
+  assert.match(result.call, /^The server half of from-tool crashed: SyntaxError: /);
+  assert.deepEqual(result.answered, ["AbortError", "AbortError"]);
+});
+
+test("what a half said is kept for it, the latest up to a limit; a call its crash ends carries the last few, with no secret in them", async () => {
+  const { code, err, result } = await scenario("lines");
+  assert.equal(code, 0, err);
+  assert.equal(result.kept.length, 200);
+  assert.equal(result.kept[0], "[extension chatty] line 303");
+  // What its code printed is its own, whatever it says it is.
+  assert.deepEqual(result.kept.slice(-2), ["[extension other] forged", "[extension chatty] server half started"]);
+  assert.deepEqual(result.other, []);
+  const { count, chars, last: wordyLast } = result.wordy;
+  assert.ok(chars <= 100_000 && chars > 90_000 && count < 150, `${count} lines, ${chars} characters`);
+  assert.equal(wordyLast, "[extension wordy] server half started");
+  const [, last] = result.call.split("\n\nIts last lines:\n");
+  // Each as a log file has it, its time first; the crash's own goes on with its stack.
+  assert.equal(last.match(/^\d{4}-\d\d-\d\dT\S+ /gm).length, 20);
+  assert.match(last, /\[extension chatty\] sending Bearer \[redacted\]/);
+  assert.doesNotMatch(result.call, /abcdefghijklmnop1234/);
+  assert.match(result.call, /^The server half of chatty crashed: Error: refused: Bearer \[redacted\]/);
+  // Settings has it as it was.
+  assert.equal(result.crash.error, "Error: refused: Bearer abcdefghijklmnop1234");
+});
+
+test("what the portal does that a half asks for is not the half's code", async () => {
+  const { code, err, result } = await scenario("portalsOwn");
+  assert.equal(code, 0, err);
+  assert.equal(result.asked.status, 404, "handed on to the portal");
+  assert.deepEqual(result.lines, ["[extension asker] server half started", "[extension asker] asked", "[extension asker] sent"]);
+});
+
+test("what a half's routes had not answered when it crashed is answered then", async () => {
+  const { code, err, result } = await scenario("pending");
+  assert.equal(code, 0, err);
+  assert.deepEqual(result.waited, { status: 503, body: { error: "Its server half crashed: Error: thrown while a request waited" } });
+  assert.equal(result.streamed.status, 200);
+  assert.match(result.streamed.cut, /terminated/);
 });
 
 test("an error that is no extension's ends the process as Node does: thrown, or a rejection nobody heard", async () => {
@@ -113,7 +193,7 @@ const SERVER = (revision, execute) => `export default function (portal) {
   }));
 }
 `;
-writeFileSync(path.join(pkg, "server.js"), SERVER(1, `portal.log("about to crash"); setTimeout(() => { throw new Error("the tool's timer threw"); }, 50); return new Promise(() => {});`));
+writeFileSync(path.join(pkg, "server.js"), SERVER(1, `for (let i = 1; i <= 40; i++) portal.log("step " + i); portal.log("about to crash"); setTimeout(() => { throw new Error("the tool's timer threw"); }, 50); return new Promise(() => {});`));
 
 const model = await fakeModel((request) => (request.messages.at(-1).role === "user" ? { name: "crash_now", args: {} } : "Done."));
 mkdirSync(process.env.PI_CODING_AGENT_DIR, { recursive: true });
@@ -161,6 +241,9 @@ test("a real chat: the tool's call that crashes its half comes back as the call'
   assert.equal(HELD.exec(ui.serverError)?.[1], "Error: the tool's timer threw");
   assert.equal(ui.crash.error, "Error: the tool's timer threw");
   assert.ok(ui.crash.lines.some((line) => line.endsWith("[extension crashy] about to crash")), ui.crash.lines.join("\n"));
+  // The last of them.
+  assert.equal(ui.crash.lines.length, 30);
+  assert.match(ui.crash.lines.at(-1), /ERROR \[extension crashy\] its server half crashed/);
   assert.equal((await fetch(`${base}/api/x/crashy/revision`)).status, 404);
 
   // Installed again, changed: it runs, and the chat has its tool once it is reloaded.

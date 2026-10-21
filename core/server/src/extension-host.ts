@@ -130,9 +130,12 @@ interface Running {
   where: string[];
   /** How it crashed, once it has (see crashed). */
   crash?: ServerHalfCrash;
-  /** Rejected once it has crashed, with what a call into it is answered: what waits on it ends then, not when it would have. */
-  ended: Promise<never>;
-  end: (error: Error) => void;
+  /** What a call into it is answered with once it has crashed. */
+  answer?: Error;
+  /** What waits on its code now, its start, a tool's call or a handler in a chat's pi: each is ended at once should it crash. */
+  waiting: Set<(error: Error) => void>;
+  /** The answers of its routes that are still open: answered should it crash (see crashed). */
+  responses: Set<Response>;
 }
 
 /** How a server half crashed: an error of its code reached the process, or its code called `process.exit()`. */
@@ -147,19 +150,23 @@ export interface ServerHalfCrash {
 
 /**
  * The server half whose code runs now. Set around all the portal calls of a half's: its module as it starts, its
- * routes, its handlers, what it adds to a chat's pi and its tools' calls; and kept, as Node keeps it, by what that code
- * starts in turn: its timers, promises, callbacks, sockets and processes. An error that reaches the process from there,
- * and a line printed there, is that half's (see catchExtensionCrashes, and said). The portal's own work it asks for
- * (a chat told, the chats reloaded) runs outside it.
+ * routes and what their request, answer and upgraded socket say later (see heardAs), its handlers, and what it adds
+ * to a chat's pi: its tools' calls, handlers and commands; and kept, as Node keeps it, by what that code starts in
+ * turn: its timers, promises, callbacks, sockets and processes. An error that reaches the process from there, and a
+ * line printed there, is that half's (see catchExtensionCrashes, and said). The portal's own work it asks for (a chat
+ * told, the chats reloaded, a turn of a chat's pi) runs outside it.
  */
 const scope = new AsyncLocalStorage<Running>();
 
-/** A promise to reject once something is over, which nobody has to be waiting on. */
-function endable(): { ended: Promise<never>; end: (error: Error) => void } {
-  let end!: (error: Error) => void;
-  const ended = new Promise<never>((_, reject) => (end = reject));
-  ended.catch(() => {});
-  return { ended, end };
+/**
+ * What `emitter` tells its listeners runs as `ext`'s code: an object the portal made and handed to the half (a
+ * request to its routes, the answer, an upgrade's socket), whose events Node would otherwise run as the portal's.
+ */
+function heardAs(ext: Running, emitter: EventEmitter): void {
+  const emit = emitter.emit;
+  emitter.emit = function (this: EventEmitter, ...args: Parameters<EventEmitter["emit"]>) {
+    return scope.run(ext, () => emit.apply(this, args));
+  };
 }
 
 /**
@@ -244,6 +251,8 @@ export function voiceProviders(): Map<string, VoiceProvider> {
 const running = new Map<string, Running>();
 /** Those running and the one starting: what an error's stack is looked through for (see whose). */
 const live = new Set<Running>();
+/** Of each package, the last half that was stopped or failed to start: what it left going is still known by its stack. */
+const left = new Map<string, Running>();
 /** Why a package's server half is not running, by the package's name. */
 const failures = new Map<string, string>();
 /** The crash a package's server half is held off for, by the package's name: until another revision of it is wanted, or it is switched off and on. */
@@ -297,12 +306,12 @@ onLogLine((line) => {
 /** How many of a half's last lines a call that its crash ended is answered with, and at most how long they are together. */
 const LAST_LINES = 20;
 const LAST_CHARS = 8000;
-/** The last lines a half said, as a log file has them, with nothing in them that looks like a secret: they go to the model. */
+/** The last lines a half said, as a log file has them. */
 function lastLines(name: string): string {
   const out: string[] = [];
   let size = 0;
   for (const line of [...(said.get(name)?.lines ?? [])].reverse()) {
-    const text = scrubSecrets(logFileLine(line));
+    const text = logFileLine(line);
     if (out.length === LAST_LINES || (out.length && size + text.length > LAST_CHARS)) break;
     out.unshift(text.length > LAST_CHARS ? `${text.slice(0, LAST_CHARS)}…` : text);
     size += text.length;
@@ -316,35 +325,52 @@ const describe = (error: unknown) => (error instanceof Error ? String(error) : t
 /**
  * The half an error is of: the one whose code it came from (see scope); else, for one that came by a way Node does
  * not follow (a listener of an emitter the half does not own, a `queueMicrotask`), the one whose folder its stack goes
- * through. None, for an error of the portal's own.
+ * through, running or, for what one left going, stopped. None, for an error of the portal's own.
  */
 function whose(error: unknown): Running | undefined {
+  const own = scope.getStore();
   const stack = (error as { stack?: unknown } | null | undefined)?.stack;
-  return scope.getStore() ?? (typeof stack === "string" ? [...live].find((ext) => ext.where.some((at) => stack.includes(at))) : undefined);
+  if (own || typeof stack !== "string") return own;
+  const through = (ext: Running) => ext.where.some((at) => stack.includes(at));
+  return [...live].find(through) ?? [...left.values()].find(through);
 }
 
 /**
  * A half crashed: an error of its code reached the process, or it called `process.exit()`. It is said, with its last
  * lines kept beside it; the half and those that build on it are stopped, and it is held off until another revision of
- * it is installed or it is switched off and on (see syncServerHalves); what waits on it, a tool's call or its start,
- * ends at once. The portal and its chats go on. Code of a half that had been stopped already (a timer it left) is said
- * and nothing more. What its code does after that is not said again.
+ * it is installed or it is switched off and on (see syncServerHalves); what waits on it, its start, a tool's call or a
+ * handler in a chat's pi, ends at once, and so does what its routes had not answered. The portal and its chats go on.
+ * Code of a half that had been stopped already (a timer it left) is said, and what waits on it ends. Each later error
+ * of a half that crashed is said, and nothing more.
  */
 function crashed(ext: Running, error: unknown): void {
-  if (ext.crash) return;
   const name = ext.half.name;
-  ext.crash = { name, rev: ext.half.rev, at: new Date().toISOString(), error: describe(error), ...(error instanceof Error && error.stack ? { stack: error.stack } : {}) };
+  if (ext.crash) {
+    console.error(`[extension ${name}] code of its server half that had crashed failed again:`, error);
+    return;
+  }
+  const crash: ServerHalfCrash = { name, rev: ext.half.rev, at: new Date().toISOString(), error: describe(error), ...(error instanceof Error && error.stack ? { stack: error.stack } : {}) };
+  ext.crash = crash;
   const held = ext.stopped ? "" : " It is off until another revision of it is installed, or it is switched off and on.";
   if (ext.stopped) {
     console.error(`[extension ${name}] code of its server half that had been stopped failed:`, error);
   } else {
-    crashes.set(name, ext.crash);
+    crashes.set(name, crash);
     console.error(`[extension ${name}] its server half crashed.${held}`, error);
     // Outside its code: what is stopped and started now is not the crashed half's doing.
     scope.exit(() => syncServerHalves(asked).catch((e) => console.error(`[extensions] could not stop ${name} and what builds on it after it crashed:`, e)));
+    // Once what runs now is done: a route whose code called process.exit() is answered as one that threw.
+    setImmediate(() => {
+      for (const res of ext.responses) {
+        if (!res.headersSent) res.status(503).json({ error: `Its server half crashed: ${crash.error}` });
+        else if (!res.writableEnded) res.destroy();
+      }
+    });
   }
   const last = lastLines(name);
-  ext.end(new Error(`The server half of ${name} crashed: ${ext.crash.error}. The call was not answered.${held}${last ? `\n\nIts last lines:\n${last}` : ""}`));
+  // It goes to the model: nothing in it that looks like a secret.
+  ext.answer = new Error(scrubSecrets(`The server half of ${name} crashed: ${crash.error}. The call was not answered.${held}${last ? `\n\nIts last lines:\n${last}` : ""}`));
+  for (const end of ext.waiting) end(ext.answer);
 }
 
 /**
@@ -662,10 +688,11 @@ async function stop(ext: Running): Promise<void> {
   for (const fn of ext.stops.reverse()) await guarded(ext, "stopping", () => within(STOP_MS, Promise.resolve().then(fn), "stopping"));
   ext.life.removeAllListeners();
   live.delete(ext);
+  left.set(ext.half.name, ext);
 }
 
 async function start(half: ServerHalf, sig: string, uses: Set<string>): Promise<void> {
-  const ext: Running = { half, router: express.Router(), stops: [], opens: [], life: new EventEmitter(), events: [], factories: [], holds: new Map(), apis: new Map(), uses, sig, removed: [], where: [], ...endable() };
+  const ext: Running = { half, router: express.Router(), stops: [], opens: [], life: new EventEmitter(), events: [], factories: [], holds: new Map(), apis: new Map(), uses, sig, removed: [], where: [], waiting: new Set(), responses: new Set() };
   // Read before it starts: a folder deleted while it does is one it missed.
   const since = toldUpTo(half.name);
   try {
@@ -676,15 +703,14 @@ async function start(half: ServerHalf, sig: string, uses: Set<string>): Promise<
     // code, and given up on at once should it crash meanwhile.
     const stopper = await within(
       START_MS,
-      Promise.race([
-        scope.run(ext, () =>
-          import(`${pathToFileURL(half.file).href}?v=${half.rev}`).then((module: any) => {
-            if (typeof module.default !== "function") throw new Error("Its module has no default export to call");
-            return module.default(portalFor(ext));
-          }),
-        ),
-        ext.ended.catch(() => Promise.reject(new Error(`It crashed as it started: ${ext.crash!.error}`))),
-      ]),
+      callInto(ext, () =>
+        import(`${pathToFileURL(half.file).href}?v=${half.rev}`).then((module: any) => {
+          if (typeof module.default !== "function") throw new Error("Its module has no default export to call");
+          return module.default(portalFor(ext));
+        }),
+      ).catch((e) => {
+        throw ext.crash ? new Error(`It crashed as it started: ${ext.crash.error}`) : e;
+      }),
       "starting",
     );
     if (typeof stopper === "function") ext.stops.push(stopper);
@@ -696,6 +722,7 @@ async function start(half: ServerHalf, sig: string, uses: Set<string>): Promise<
     ext.stopped = true;
     for (const fn of ext.stops.reverse()) await guarded(ext, "stopping", () => within(STOP_MS, Promise.resolve().then(fn), "stopping"));
     live.delete(ext);
+    left.set(half.name, ext);
     failures.set(half.name, (e as Error)?.message || String(e));
     console.error(`[extension ${half.name}] its server half could not be started:`, e);
   }
@@ -837,16 +864,15 @@ export const serverFailure = (name: string): string | undefined => failures.get(
 
 /**
  * Where a package's server half stands, for whoever looks into it (the agent that is making the extension, a person in
- * Settings): whether it runs, why not, the crash it is held off for, and what it said lately: the lines after `since`, a
- * line's id from an earlier answer (or Settings → Logs), all it keeps without one.
+ * Settings): whether it runs, why not, the crash it is held off for, and the lines it said lately.
  */
-export function serverHalfStatus(name: string, since = 0): { running: boolean; failure?: string; crash?: ServerHalfCrash; lines: LogLine[] } {
+export function serverHalfStatus(name: string): { running: boolean; failure?: string; crash?: ServerHalfCrash; lines: LogLine[] } {
   const failure = failures.get(name), crash = crashes.get(name);
   return {
     running: running.has(name),
     ...(failure ? { failure } : {}),
     ...(crash ? { crash } : {}),
-    lines: (said.get(name)?.lines ?? []).filter((line) => line.id > since),
+    lines: [...(said.get(name)?.lines ?? [])],
   };
 }
 
@@ -877,13 +903,22 @@ export const extensionRoutes: RequestHandler = (req: Request, res: Response, nex
   const at = was.indexOf("?");
   const found = owner(at === -1 ? was : was.slice(0, at));
   if (!found) return next();
-  // A route may hold its answer open, as a stream: ended with the login it was asked under, like the portal's own.
-  res.once("close", watchStream(() => res.destroy()));
-  // The package's routes are written from its own root, whatever it is called. They run as its code; what the portal
-  // does when they hand the request on is not.
+  const { ext } = found;
+  // A route may hold its answer open, as a stream: ended with the login it was asked under, like the portal's own, and
+  // answered should the half crash first.
+  const unwatch = watchStream(() => res.destroy());
+  ext.responses.add(res);
+  res.once("close", () => {
+    unwatch();
+    ext.responses.delete(res);
+  });
+  // The package's routes are written from its own root, whatever it is called. They run as its code, and so do the
+  // listeners it puts on the request and the answer; what the portal does when they hand the request on is not.
+  heardAs(ext, req);
+  heardAs(ext, res);
   req.url = found.rest + (at === -1 ? "" : was.slice(at));
-  scope.run(found.ext, () =>
-    found.ext.router(req, res, (error?: unknown) => {
+  scope.run(ext, () =>
+    ext.router(req, res, (error?: unknown) => {
       req.url = was;
       scope.exit(() => next(error));
     }),
@@ -902,6 +937,8 @@ export function extensionUpgrade(url: string | undefined): Upgrade | undefined {
   if (!found || !handler) return undefined;
   return (req, socket, head) => {
     req.url = found.rest + (at === -1 ? "" : url.slice(at));
+    // The stream is the half's from here: what its socket says later runs as its code.
+    heardAs(found.ext, socket);
     guarded(found.ext, "an upgrade", () => handler(req, socket, head));
   };
 }
@@ -968,10 +1005,19 @@ export function hostExtensions(chatId: string): { name: string; factory: (pi: an
       factory: (pi: any) => {
         const row = getSession(chatId);
         if (!row) return;
-        // What it registers is its code too: its handlers run as that, and so do its tools' calls, which a crash of it ends at once.
+        // What it registers is its code too: its tools' calls, its handlers and its commands run as that, and a crash of it
+        // ends them at once. A handler of a half that crashed is not called again: it has no more say in the chat. A turn
+        // it asks for is the chat's pi's work, not its code.
         const own = Object.create(pi, {
           registerTool: { value: (tool: any) => pi.registerTool({ ...tool, execute: (...args: unknown[]) => callInto(ext, () => tool.execute(...args)) }) },
-          on: { value: (event: string, handler: (...args: unknown[]) => unknown) => pi.on(event, (...args: unknown[]) => scope.run(ext, () => handler(...args))) },
+          on: { value: (event: string, handler: (...args: unknown[]) => unknown) => pi.on(event, (...args: unknown[]) => (ext.crash ? undefined : callInto(ext, () => handler(...args)))) },
+          // One with no handler is left to pi to refuse.
+          registerCommand: {
+            value: (name: string, options: any) =>
+              pi.registerCommand(name, typeof options?.handler === "function" ? { ...options, handler: (...args: unknown[]) => callInto(ext, () => options.handler(...args)) } : options),
+          },
+          sendMessage: { value: (...args: unknown[]) => scope.exit(() => pi.sendMessage(...args)) },
+          sendUserMessage: { value: (...args: unknown[]) => scope.exit(() => pi.sendUserMessage(...args)) },
         });
         for (const factory of ext.factories) guarded(ext, "adding to a chat's pi", () => factory(own, chatOf(row)));
       },
@@ -979,12 +1025,18 @@ export function hostExtensions(chatId: string): { name: string; factory: (pi: an
 }
 
 /**
- * A tool's call into a server half, from a chat: run as the half's code, and answered at once with its crash, and its
- * last lines, should it crash before the call is done (see crashed). The agent reads that as the call's error, in the
- * same turn, and the chat goes on. One whose half has crashed already is answered so without being called.
+ * A call into a server half, its start or from a chat: run as the half's code, and answered at once with its crash,
+ * and its last lines, should it crash before the call is done (see crashed). The agent reads that as the call's error,
+ * in the same turn, and the chat goes on. One whose half has crashed already is answered so without being called.
  */
-function callInto<T>(ext: Running, call: () => T): Promise<Awaited<T>> {
-  if (ext.crash) return ext.ended;
-  // The crash first: where both are over already (it called process.exit), the crash is the answer.
-  return scope.run(ext, () => Promise.race([ext.ended, new Promise<Awaited<T>>((resolve) => resolve(call() as Awaited<T>))]));
+function callInto<T>(ext: Running, call: () => T | PromiseLike<T>): Promise<T> {
+  if (ext.answer) return Promise.reject(ext.answer);
+  return new Promise<T>((resolve, reject) => {
+    // Ended by its crash as soon as that comes: where the call fails with it (it called process.exit), the crash is the answer.
+    ext.waiting.add(reject);
+    scope
+      .run(ext, async () => call())
+      .then(resolve, reject)
+      .finally(() => ext.waiting.delete(reject));
+  });
 }
