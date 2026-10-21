@@ -6,11 +6,11 @@ test('two tabs share a model until the last one disconnects',async()=>{
  await leases.acquire('a');await leases.acquire('b');await leases.release('a');assert.equal(calls.includes('unload'),false);
  await leases.release('b');assert.equal(calls.at(-1),'unload');
 });
-test('abandoned leases expire and eager mode keeps the model warm',async()=>{
+test('abandoned leases expire',async()=>{
  let time=0,unloads=0;const leases=new VoiceLeases(async()=>{},async()=>{unloads++},()=>time);
- await leases.acquire('a');time=76000;await leases.sweep(true);assert.equal(unloads,1);
- await leases.acquire('b');await leases.release('b',false);assert.equal(unloads,1);
- await leases.sweep(true);assert.equal(unloads,2);
+ await leases.acquire('a');time=76000;await leases.sweep();assert.equal(unloads,1);
+ await leases.acquire('b');await leases.sweep();assert.equal(unloads,1);
+ await leases.release('b');assert.equal(unloads,2);
 });
 test('disconnect while loading queues unload after the load completes',async()=>{
  let finish!:()=>void;const calls:string[]=[];const leases=new VoiceLeases(()=>new Promise<void>(resolve=>{calls.push('load');finish=resolve}),async()=>{calls.push('unload')});

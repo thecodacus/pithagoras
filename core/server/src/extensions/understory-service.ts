@@ -1,9 +1,9 @@
 import { randomBytes } from "node:crypto";
+import { existsSync } from "node:fs";
 import { getSetting, putSetting } from "../db.js";
 import { tlsFiles } from "../http-security.js";
 import { readModelsJson, resolveKey, storedKey } from "../providers.js";
 import { containerAction, dockerAvailable, ensureImage, imagePresent, request, type PullState } from "./docker.js";
-import { voiceNetworkMode as sharedNetworkMode } from "./voice-service.js";
 
 /**
  * Understory, run by the portal: installed from Settings → Add-ons → Memory
@@ -266,6 +266,21 @@ export const install = ({ start = true }: { start?: boolean } = {}): Promise<voi
 export const start = (): Promise<void> => exclusive(startNow, WAIT_MS);
 export const stop = (): Promise<void> => exclusive(stopNow, WAIT_MS);
 export const remove = (): Promise<void> => exclusive(removeNow, WAIT_MS);
+
+/** Share loopback with the portal; no published host ports or gateway lookup. */
+async function sharedNetworkMode(): Promise<string> {
+  if (!existsSync('/.dockerenv') && !process.env.PORTAL_CONTAINER_NAME) {
+    if (process.platform !== 'linux') throw new Error('A container shares the network of a portal on the machine itself only on Linux. Run the portal in Docker on this platform.');
+    return 'host';
+  }
+  const name = process.env.PORTAL_CONTAINER_NAME || process.env.HOSTNAME;
+  if (!name) throw new Error('Set PORTAL_CONTAINER_NAME to the portal Docker container name.');
+  const detail = await request<{Id?: string; State?: {Running?: boolean}}>('GET', `/containers/${encodeURIComponent(name)}/json`);
+  if (detail.status !== 200 || !detail.body?.Id || !detail.body.State?.Running) {
+    throw new Error('Cannot identify the running portal container. Set PORTAL_CONTAINER_NAME to its Docker name.');
+  }
+  return `container:${detail.body.Id}`;
+}
 
 async function installNow(start = true): Promise<void> {
   if (!dockerAvailable()) throw new Error("The portal cannot reach Docker here, so it cannot run Understory");

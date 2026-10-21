@@ -1,43 +1,13 @@
 import { VoiceLibrary, kokoroVoiceOptions } from './VoiceLibrary';
-import { VoiceEngines } from './VoiceEngines';
 import { Select } from "./Select";
-import { useCallback, useEffect, useRef, useState } from "react";
-import { DEFAULT_VAD, api, speakingRuntime, type AvailableModel, type VoiceInstallStatus, type VoiceConfig, type VoiceHardware } from "../api";
+import { useEffect, useRef, useState } from "react";
+import { DEFAULT_VAD, api, speakingRuntime, type AvailableModel, type VoiceConfig } from "../api";
 import { INPUT_LANGUAGES, CHATTERBOX_LANGUAGES } from "../../../server/src/voice-languages";
-import { sameChoice, type VoiceChoice } from "../../../server/src/voice-engines";
 import { NUMBER_PACK_LANGUAGES } from "../../../server/src/voice-numbers";
 import { DEFAULT_KOKORO_VOICE } from "../../../server/src/kokoro-voices";
-import { labelOf, languageName, msg, t } from "../i18n";
+import { languageName, msg, t } from "../i18n";
 import { LoadFailed, btnCls, inputCls } from "./SettingsUi";
-import { confirmDialog } from "./ConfirmDialog";
 import { useUnsavedDraft } from "./Modal";
-import { pollWhileVisible } from "../poll";
-
-/** What the voice service is doing, as its badge says it. */
-const INSTALL_STATE: Record<string, string> = {
-  unavailable: msg("unavailable"),
-  starting: msg("starting"),
-  stopped: msg("stopped"),
-  failed: msg("failed"),
-};
-
-/**
- * What the uninstall asks. The dialog is drawn by the host, away from this page, so the box reports its answer to
- * `removeData`, which the page reads once the dialog is answered. Off: the downloads stay, and a new install is quick.
- */
-function UninstallQuestion({ removeData }: { removeData: { current: boolean } }) {
-  const [on, setOn] = useState(false);
-  return <div className="space-y-3">
-    <p>{t("The voice container is stopped and removed. The voice settings go back to what they were before voice was installed; speech servers you set up yourself stay as they are.")}</p>
-    <label className="flex items-start gap-2 text-fg">
-      <input type="checkbox" className="mt-1" checked={on} onChange={e => { setOn(e.target.checked); removeData.current = e.target.checked; }} />
-      <span>{t("Also delete the downloaded engines and models")}<span className="mt-1 block text-xs text-fg-muted">{t("Leave it off to keep them, so that installing again is quick. Delete them to free the disk space: the next install downloads and builds them again.")}</span></span>
-    </label>
-  </div>;
-}
-
-/** What the install and the uninstall write into the settings, apart from what is edited on this page. */
-const managed = (c: VoiceConfig) => ({ enabled: c.enabled, provider: c.provider, runtime: c.runtime, whisperUrl: c.whisperUrl, breezeUrl: c.breezeUrl, sttModel: c.sttModel, dictationModel: c.dictationModel, dictationUrl: c.dictationUrl });
 
 export function VoiceAddon({ onError }: { onError: (message: string) => void }) {
   const [config, setConfig] = useState<VoiceConfig | null>(null);
@@ -47,54 +17,6 @@ export function VoiceAddon({ onError }: { onError: (message: string) => void }) 
   const [edited, setEdited] = useState(false);
   // Settings from the server replace what was typed, which would otherwise show a list other than the one saved.
   const fromServer = (value: VoiceConfig) => { setConfig(value); setProvidersText(null); setEdited(false); };
-  const [install, setInstall] = useState<VoiceInstallStatus | null>(null);
-  // The install writes its connection settings as the service comes up. Only those are taken over, so that what is being typed here is not replaced; a failed poll makes the state flip to unavailable and back, and would otherwise do it every time.
-  useEffect(()=>{if(install?.state==='running')void api.voice().then(value=>{setConfig(current=>current?{...current,...managed(value)}:value);window.dispatchEvent(new Event('voice-config-changed'));}).catch(e=>onError(e.message));},[install?.state]);
-  const [actionBusy, setActionBusy] = useState(false);
-  // One question at a time, and none for a page that has gone: each asks Docker several things.
-  const alive = useRef(true), asking = useRef(false);
-  const poll = useCallback(async () => {
-    if (asking.current) return;
-    asking.current = true;
-    try { const state = await api.voiceInstallStatus(); if (alive.current) setInstall(state); } catch (e) { if (alive.current) setInstall({ available: false, state: 'unavailable', busy: false, progress: '', error: (e as Error).message }); } finally { asking.current = false; }
-  }, []);
-  useEffect(() => { alive.current = true; void poll(); return () => { alive.current = false; }; }, [poll]);
-  // Quickly while something is changing, which is what the page is open for; slowly once it is as it will stay, and not at all in a tab nobody looks at, which asks at once when it is looked at again. The state says it: `progress` is the container's log once there is a container, so it is never empty for a service that is up.
-  const changing = !install || install.busy || install.state === 'installing' || install.state === 'starting';
-  const every = changing ? 2500 : install?.state === 'unavailable' ? 10_000 : 30_000;
-  useEffect(() => pollWhileVisible(() => void poll(), every), [poll, every]);
-  // The GPU as nvidia-smi reports it, for the engine choice. Where it cannot be read the install reads it, so a failure here is no error.
-  const [hardware, setHardware] = useState<VoiceHardware | null>(null);
-  useEffect(() => { void api.voiceHardware().then(setHardware).catch(() => {}); }, []);
-  // The engines picked here; null leaves the choice to the install, or to what is installed.
-  const [picked, setPicked] = useState<VoiceChoice | null>(null);
-  // Once the container is built for what was picked, the pick is what is installed.
-  useEffect(() => { if (picked && install?.choice && sameChoice(picked, install.choice)) setPicked(null); }, [install?.choice, picked]);
-  // The card is chosen on its own and at once: a running service moves to it, any other is on it from its next start.
-  const chooseGpu = async (gpu: string) => {
-    setActionBusy(true);
-    // Saved even where the restart is refused, so what the page shows is read again either way.
-    try { await api.setVoiceGpu(gpu); } catch (e) { onError((e as Error).message); }
-    try { setHardware(await api.voiceHardware()); setInstall(await api.voiceInstallStatus()); } catch { /* the next poll shows it */ }
-    setActionBusy(false);
-  };
-  const manage=async(action:'install'|'start'|'stop',choice?:VoiceChoice)=>{setActionBusy(true);try{await api.voiceAction(action,choice);setInstall(await api.voiceInstallStatus());}catch(e){onError((e as Error).message);}finally{setActionBusy(false);}};
-  const uninstall = async () => {
-    const removeData = { current: false };
-    if (!await confirmDialog({ title: t("Uninstall voice?"), message: <UninstallQuestion removeData={removeData} />, confirmLabel: t("Uninstall"), danger: true, deletes: true })) return;
-    setActionBusy(true);
-    // Whatever the answer, the portal may have gone as far as removing the container: what the page shows is read again either way.
-    try { await api.uninstallVoice(removeData.current); } catch (e) { onError((e as Error).message); }
-    try {
-      setInstall(await api.voiceInstallStatus());
-      setPicked(null);
-      // The portal put the settings back. Taken over here, so that a save does not write the managed ones again; the rest of the page, edits not yet saved among it, stays.
-      const back = await api.voice();
-      setConfig(current => current && { ...current, ...managed(back) });
-      window.dispatchEvent(new Event('voice-config-changed'));
-    } catch { /* the next poll shows it */ }
-    setActionBusy(false);
-  };
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
   // The descriptions edited in the voice library and not stored are drafts of its own: it says so itself, where they are typed.
@@ -114,8 +36,6 @@ export function VoiceAddon({ onError }: { onError: (message: string) => void }) 
   const builtIn = config.defaultResponseInstructions ?? "";
   // Text that is still the built-in one this page was given is sent as nothing: the portal may have been updated since, and its newer text is then the one to follow.
   const toSave = () => instructions.trim() === builtIn.trim() ? { ...config, responseInstructions: "" } : config;
-  // Another choice than the installed one, picked for a container that exists: it is a rebuild, not a start. While a first install is still pulling the image there is no container, and nothing to rebuild.
-  const rebuild = !!picked && !!install?.choice;
   // How voice mode speaks: through the extension chosen, or at the person's own addresses.
   const speaking = speakingRuntime(config);
   // No speech synthesis: the page can listen (dictation), and replies are not spoken.
@@ -203,27 +123,6 @@ export function VoiceAddon({ onError }: { onError: (message: string) => void }) 
           <span className="mt-1 block text-fg-faint">{t(help)}</span>
         </label>)}
         <button type="button" className="rounded-lg border border-line px-3 py-1.5 text-xs" onClick={() => update({vad: {...DEFAULT_VAD}})}>{t("Reset speech detection")}</button>
-      </div>
-    </details>
-    <details className="group rounded-xl border border-line p-4">
-      <summary className="cursor-pointer text-sm font-medium">{t("Voice service")} <span className="ml-2 rounded-full bg-accent/10 px-2 py-0.5 text-xs font-normal text-accent">{install?.state === 'absent' ? t("Not installed") : install?.state === 'running' ? t("Ready") : install?.state ? labelOf(INSTALL_STATE, install.state) : t("Checking…")}</span><span className="mt-1 block text-xs font-normal text-fg-muted">{t("Installation, GPU memory and service controls")}</span></summary>
-    <div className="mt-4 space-y-3">
-      <p className="text-xs text-fg-faint">{t("Install once on your Docker host. Setup builds and downloads the engines you choose: speech synthesis needs an NVIDIA GPU except Kokoro, which also runs on the CPU, and speech recognition does not. Allow 30 GB of disk space during setup.")}</p>
-      {install?.available && <VoiceEngines installed={install.choice} fresh={install.state==='absent'} busy={actionBusy||install.busy} hardware={hardware} picked={picked} onPick={setPicked} onGpu={chooseGpu} />}
-      <div className="flex gap-2 flex-wrap">
-        {install?.available && rebuild && <button disabled={actionBusy || install.busy} className="rounded-lg bg-accent/12 px-3 py-1.5 text-xs text-accent disabled:opacity-40" onClick={()=>manage('install',picked)}>{t("Rebuild with these engines")}</button>}
-        {install?.available && !rebuild && <button disabled={actionBusy || install.busy || ['starting','running'].includes(install.state)} className="rounded-lg bg-accent/12 px-3 py-1.5 text-xs text-accent disabled:opacity-40" onClick={()=>manage(install.state==='absent'?'install':'start',install.state==='absent'?picked??undefined:undefined)}>{install.state==='absent'?t("Install voice"):install.state==='failed'?t("Retry setup"):t("Start voice")}</button>}
-        {install?.available && ['starting','running'].includes(install.state) && <button disabled={actionBusy} className="rounded-lg border border-line px-3 py-1.5 text-xs" onClick={()=>manage('stop')}>{t("Stop · release VRAM")}</button>}
-        {install?.available && (install.state!=='absent' || install.connected) && <button disabled={actionBusy || install.busy} className="rounded-lg border border-line px-3 py-1.5 text-xs text-fg-muted transition hover:bg-danger/10 hover:text-danger disabled:opacity-40" onClick={()=>void uninstall()}>{t("Uninstall")}</button>}
-        {install?.state==='running' && <button disabled={busy} className="rounded-lg bg-accent/12 px-3 py-1.5 text-xs text-accent" onClick={async()=>{setBusy(true);try{fromServer(await api.connectVoice());window.dispatchEvent(new Event('voice-config-changed'));}catch(e){onError((e as Error).message);}finally{setBusy(false);}}}>{t("Use installed voice")}</button>}
-      </div>
-      {install?.error && <p role="alert" className="text-xs text-danger">{install.error}</p>}
-      {install?.progress && <details open={install.state==='starting'||install.state==='failed'||install.busy}><summary className="text-xs cursor-pointer text-fg-muted">{t("Setup log")}</summary><pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-all text-[10px] text-fg-faint" aria-label={t("Voice setup log")}>{install.progress}</pre></details>}
-      <p className="text-xs text-fg-faint">{t("Stopping releases GPU memory and keeps your models.")}</p>
-    </div>
-      <div className="mt-4 border-t border-line pt-4 space-y-2">
-    <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={config.lazyLoad!==false} onChange={e=>update({lazyLoad:e.target.checked})}/>{t("Lazy load · release GPU memory when voice is idle")}</label>
-    <p className="text-xs text-fg-faint">{t("Load on connection and release memory after the last session ends. Turn off to keep the speech model ready for faster starts.")}</p>
       </div>
     </details>
     <details className="rounded-xl border border-line p-4">

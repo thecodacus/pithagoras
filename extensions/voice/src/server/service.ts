@@ -1,8 +1,16 @@
 import { readFile } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
-import { checked, containerAction, containerState, dockerAvailable, ensureImage, PULL_STARTING, request } from './docker.js';
-import { asrDevice, ttsDevice, choiceFromKey, choiceKey, cpuServerConfig, cpuThreads, DEFAULT_CHOICE, healthUrls, parseChoice, pickGpu, sameChoice, serverConfig, SPEECH_PORT, suggestChoice, suggestCpuChoice, ttsModel, usesGpu, type Gpu, type Host, type TtsEngine, type VoiceChoice } from '../voice-engines.js';
-import { NoGpu, askedCard, cardOf, decide, detectGpus, deviceId, explain, holds, hostProbe, isNoGpu, readHost, SMI_ARGS, type Card, type Detected, type Probe } from '../voice-gpu.js';
+import { setTimeout as delay } from 'node:timers/promises';
+import { asrDevice, ttsDevice, choiceFromKey, choiceKey, cpuServerConfig, cpuThreads, DEFAULT_CHOICE, healthUrls, parseChoice, pickGpu, sameChoice, serverConfig, SPEECH_PORT, suggestChoice, suggestCpuChoice, ttsModel, usesGpu, type Gpu, type Host, type TtsEngine, type VoiceChoice } from '../engines';
+import { NoGpu, askedCard, cardOf, decide, detectGpus, deviceId, explain, holds, hostProbe, isNoGpu, readHost, SMI_ARGS, type Card, type Detected, type Probe } from './gpu';
+import { docker, portal } from './host';
+import { setting } from './store';
+
+/**
+ * The voice service: speech recognition and speech synthesis, built and run in a container of their own. Docker runs
+ * the container (`pithagoras-docker`, which Voice requires), and what Voice may do with it is what Docker lets any
+ * extension do with its own. The container and the volume the portal made before Voice was an extension carry no
+ * extension's name, and are taken over by their names (`adoptKept`, and again before Voice acts on them).
+ */
 
 export const CONTAINER = 'pithagoras-voice';
 export const IMAGE = 'nvidia/cuda:12.4.1-devel-ubuntu22.04';
@@ -11,61 +19,71 @@ export const BASE_IMAGE = 'ubuntu:22.04';
 /** The image a choice runs in: the CUDA one wherever the GPU is used, else the small base. */
 export const imageFor = (choice: VoiceChoice) => usesGpu(choice) ? IMAGE : BASE_IMAGE;
 const VOLUME = 'pithagoras_voice-models';
+/** The short-lived container the GPU check runs nvidia-smi in: shown in Settings → Docker while it runs. */
+const PROBE = 'pithagoras-voice-probe';
+/** The setup script, which the package ships beside its server half as it is built (server.js). */
+const SETUP = new URL('./setup.sh', import.meta.url);
+/** A container by the voice container's name that is not the voice service's: it is left alone. */
+class NotVoices extends Error {
+  constructor() { super('The pithagoras-voice container is not the voice service\'s, so it is left alone. Rename it before installing.'); }
+}
 let pending = false;
 let progress = '';
 let error = '';
-/**
- * The GPU chosen on the page, by UUID; empty leaves it to `VOICE_GPU` and then to the card with the most room.
- *
- * Set by the API from the stored choice. A UUID rather than an index, because the index order is the driver's
- * and a UUID names the same card after a reboot or a card added beside it.
- */
-let chosenGpu = '';
-export function useGpu(id: string): void { chosenGpu = id; }
+/** The GPU chosen on the page, by UUID (`gpu` in the store); empty leaves it to `VOICE_GPU` and then to the card with the most room. */
+const chosenGpu = () => setting('gpu') ?? '';
 async function healthy(url: string) {
   try { return (await fetch(url, { signal: AbortSignal.timeout(1500) })).ok; } catch { return false; }
 }
-export interface ServiceStatus { available: boolean; state: string; busy: boolean; progress: string; error: string; /** The engines the managed container is built for, once there is one. */ choice?: VoiceChoice }
+/** Of Docker's inspect body, what is read here. */
+type Inspected = { Config?: { Labels?: Record<string, string> | null }; HostConfig?: { NetworkMode?: string; DeviceRequests?: { DeviceIDs?: string[] | null }[] | null }; State?: { Running?: boolean; ExitCode?: number; Error?: string } };
+/** Docker's answer that there is no such container or volume, which is no failure where nothing has to be there. */
+function absent(e: unknown): void {
+  if ((e as { status?: number }).status !== 404) throw e;
+}
+/**
+ * How the voice container was made and how it stands, where there is one: one the portal made before Voice was an
+ * extension is taken over first. One by its name that is not the voice service's is refused, and left alone.
+ */
+async function inspected(): Promise<Inspected | undefined> {
+  const d = docker();
+  const found = await d.containers.get(CONTAINER);
+  if (!found) return undefined;
+  if (found.owner !== portal().extension) {
+    if (found.owner || found.labels['pithagoras.addon'] !== 'voice') throw new NotVoices();
+    await d.containers.adopt(CONTAINER);
+  }
+  return (await d.containers.inspect(CONTAINER)) as Inspected | undefined;
+}
+export interface ServiceStatus { available: boolean; state: string; busy: boolean; progress: string; error: string; /** The engines the container is built for, once there is one. */ choice?: VoiceChoice }
+/** What `status` last found: where voice mode listens and speaks is asked at each of its requests, and has to be answered at once. */
+let seen: ServiceStatus | undefined;
+export const lastSeen = () => seen;
 export async function status(): Promise<ServiceStatus> {
-  if (!dockerAvailable()) return { available: false, state: 'unavailable', busy: false, progress: '', error: 'Automatic voice setup requires access to Docker.' };
-  const state = await containerState(CONTAINER);
-  if (state.running && !pending) {
-    const detail = await request<{Config?: {Labels?: Record<string,string>}; HostConfig?: {NetworkMode?: string}}>('GET', `/containers/${CONTAINER}/json`);
-    if (detail.body?.Config?.Labels?.['pithagoras.addon'] === 'voice') {
-      const target = await voiceNetworkMode();
-      if (detail.body.Config.Labels['pithagoras.voice-network'] !== 'shared-v1' || detail.body.HostConfig?.NetworkMode !== target) {
-        await install();
-        return {available:true, state:'installing', busy:true, progress:'Updating managed voice networking; keeping downloaded models', error:''};
-      }
+  return (seen = await statusNow());
+}
+async function statusNow(): Promise<ServiceStatus> {
+  const d = docker();
+  if (!(await d.available())) return { available: false, state: 'unavailable', busy: false, progress: '', error: 'Automatic voice setup requires access to Docker.' };
+  let detail: Inspected | undefined;
+  try { detail = await inspected(); }
+  catch (e) { if (!(e instanceof NotVoices)) throw e; return { available: true, state: 'failed', busy: false, progress: '', error: e.message }; }
+  const running = detail?.State?.Running === true;
+  // A running container rejoins the portal's loopback after the portal's own container was made again; stopped ones stay stopped.
+  if (running && !pending) {
+    const target = await d.sharedNetwork();
+    if (detail!.Config?.Labels?.['pithagoras.voice-network'] !== 'shared-v1' || detail!.HostConfig?.NetworkMode !== target) {
+      await install();
+      return {available:true, state:'installing', busy:true, progress:'Updating managed voice networking; keeping downloaded models', error:''};
     }
   }
-  let logs = '';
-  if (state.exists) {
-    // Tty=true in the container spec makes logs plain text, without Docker multiplex frames.
-    const result = await request<string>('GET', `/containers/${CONTAINER}/logs?stdout=1&stderr=1&tail=25`);
-    if (result.status === 200) logs = String(result.body ?? '').replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').slice(-6000);
-  }
-  const detail = state.exists ? await request<{ Config?: { Labels?: Record<string, string> }; State?: { ExitCode?: number; Error?: string } }>('GET', `/containers/${CONTAINER}/json`) : null;
+  // Tty=true in the container spec makes logs plain text, without Docker multiplex frames.
+  const logs = detail ? (await d.containers.logs(CONTAINER, { tail: 25 })).replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').slice(-6000) : '';
   // A container made before engines could be chosen has no recipe label, and is the original combination.
-  const labels = detail?.body?.Config?.Labels;
-  const choice = labels?.['pithagoras.addon'] === 'voice' ? choiceFromKey(labels['pithagoras.voice-recipe']) : undefined;
-  const ready = state.running && (await Promise.all(healthUrls(choice ?? DEFAULT_CHOICE).map(healthy))).every(Boolean);
-  const failed = !state.running && Boolean(detail?.body?.State?.ExitCode);
-  return { available: true, state: pending ? 'installing' : ready ? 'running' : state.running ? 'starting' : failed ? 'failed' : state.exists ? 'stopped' : 'absent', busy: pending, progress: pending ? progress : logs, error: error || (failed ? explain(detail?.body?.State?.Error || 'Voice setup or service exited. Review the log, then retry.') : ''), choice };
-}
-/** Share loopback with the portal; no published host ports or gateway lookup. */
-export async function voiceNetworkMode(): Promise<string> {
-  if (!existsSync('/.dockerenv') && !process.env.PORTAL_CONTAINER_NAME) {
-    if (process.platform !== 'linux') throw new Error('Native managed voice requires Linux. Run the portal in Docker on this platform.');
-    return 'host';
-  }
-  const name = process.env.PORTAL_CONTAINER_NAME || process.env.HOSTNAME;
-  if (!name) throw new Error('Set PORTAL_CONTAINER_NAME to the portal Docker container name.');
-  const detail = await request<{Id?: string; State?: {Running?: boolean}}>('GET', `/containers/${encodeURIComponent(name)}/json`);
-  if (detail.status !== 200 || !detail.body?.Id || !detail.body.State?.Running) {
-    throw new Error('Cannot identify the running portal container. Set PORTAL_CONTAINER_NAME to its Docker name.');
-  }
-  return `container:${detail.body.Id}`;
+  const choice = detail ? choiceFromKey(detail.Config?.Labels?.['pithagoras.voice-recipe']) : undefined;
+  const ready = running && (await Promise.all(healthUrls(choice ?? DEFAULT_CHOICE).map(healthy))).every(Boolean);
+  const failed = !running && Boolean(detail?.State?.ExitCode);
+  return { available: true, state: pending ? 'installing' : ready ? 'running' : running ? 'starting' : failed ? 'failed' : detail ? 'stopped' : 'absent', busy: pending, progress: pending ? progress : logs, error: error || (failed ? explain(detail?.State?.Error || 'Voice setup or service exited. Review the log, then retry.') : ''), choice };
 }
 /** What a container is set up with besides its engines: the card, the threads of recognition on the CPU, and what the check found. */
 interface Plan { card?: Card; note?: string; threads?: number }
@@ -94,64 +112,72 @@ const heldCard = (requests?: { DeviceIDs?: string[] | null }[] | null): Card | u
   return id === undefined ? undefined : cardOf(id);
 };
 async function ensureContainer(script: string, choice: VoiceChoice, plan: Plan) {
-  const networkMode = await voiceNetworkMode();
-  const existing = await request<{Config?: {Labels?: Record<string,string>}; HostConfig?: {NetworkMode?: string; DeviceRequests?: { DeviceIDs?: string[] | null }[] | null}; State?: {Running?: boolean}}>('GET', `/containers/${CONTAINER}/json`);
-  if (existing.status !== 404) {
-    if (existing.status >= 400) throw new Error(`Cannot inspect voice container: Docker ${existing.status}`);
-    if (existing.body.Config?.Labels?.['pithagoras.addon'] !== 'voice') throw new Error('The pithagoras-voice container is not a managed voice add-on. Rename it before installing.');
-    const labels = existing.body.Config.Labels;
+  const d = docker();
+  const networkMode = await d.sharedNetwork();
+  const existing = await inspected();
+  if (existing) {
+    const labels = existing.Config?.Labels ?? {};
     // A card that is asked for and is not the one it has makes it another container, so that Start moves it.
-    const onCard = !usesGpu(choice) || !plan.card || holds(heldCard(existing.body.HostConfig?.DeviceRequests), plan.card);
-    const current = labels['pithagoras.voice-network'] === 'shared-v1' && existing.body.HostConfig?.NetworkMode === networkMode && sameChoice(choiceFromKey(labels['pithagoras.voice-recipe']), choice) && onCard;
-    if (current) { await containerAction(CONTAINER, 'start'); return; }
-    // Container config is immutable. Retain /voice and the cached model/build
-    // files while replacing the old published-port container, a stale namespace
-    // or one built for other engines.
-    await containerAction(CONTAINER, 'remove');
+    const onCard = !usesGpu(choice) || !plan.card || holds(heldCard(existing.HostConfig?.DeviceRequests), plan.card);
+    const current = labels['pithagoras.voice-network'] === 'shared-v1' && existing.HostConfig?.NetworkMode === networkMode && sameChoice(choiceFromKey(labels['pithagoras.voice-recipe']), choice) && onCard;
+    if (current) { await d.containers.start(CONTAINER); return; }
   }
-  await checked('POST', '/volumes/create', { Name: VOLUME });
-  await checked('POST', `/containers/create?name=${CONTAINER}`, containerSpec(script, networkMode, choice, plan));
-  await containerAction(CONTAINER, 'start');
+  // Container config is immutable: one with a stale namespace, or built for other engines or another card, is made
+  // again below, which replaces it. /voice, with the cached model and build files, is kept. The volume the portal
+  // made before Voice was an extension is taken over; one there is none of is made.
+  await d.volumes.adopt(VOLUME).catch(absent);
+  await d.volumes.create(VOLUME);
+  await d.containers.create(CONTAINER, containerSpec(script, networkMode, choice, plan));
+  await d.containers.start(CONTAINER);
 }
 
-/** The managed container as far as a recreation has to keep it: its engines and the card it was given. None when there is no managed container. */
+/** The container as far as a recreation has to keep it: its engines and the card it was given. None when there is no voice container. */
 async function installedContainer(): Promise<{ choice: VoiceChoice; card?: Card; running: boolean } | undefined> {
-  const found = await request<{Config?: {Labels?: Record<string,string>}; HostConfig?: {DeviceRequests?: {DeviceIDs?: string[] | null}[] | null}; State?: {Running?: boolean}}>('GET', `/containers/${CONTAINER}/json`);
-  const labels = found.status === 200 ? found.body?.Config?.Labels : undefined;
+  const found = await inspected();
+  const labels = found?.Config?.Labels;
   if (labels?.['pithagoras.addon'] !== 'voice') return undefined;
-  return { choice: choiceFromKey(labels['pithagoras.voice-recipe']), card: heldCard(found.body.HostConfig?.DeviceRequests), running: Boolean(found.body.State?.Running) };
+  return { choice: choiceFromKey(labels['pithagoras.voice-recipe']), card: heldCard(found!.HostConfig?.DeviceRequests), running: Boolean(found!.State?.Running) };
 }
 
-/** The image of a setup, with what the download says shown on the page; what is said before the first line comes is not worth showing over what was there. */
-const downloadImage = (image: string) => ensureImage(image, state => { if (state.active && state.line !== PULL_STARTING) progress = state.line; });
+/** The image of a setup, with what the download says shown on the page; what Docker says before the first line comes ("starting") is not worth showing over what was there. */
+const downloadImage = (image: string) => docker().images.ensure(image, state => { if (state.active && state.line !== 'starting') progress = state.line; });
 
+/** `work`, or a failure that says `what` once `ms` have gone by. */
+async function within<T>(ms: number, work: Promise<T>, what: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try { return await Promise.race([work, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(what)), ms); })]); }
+  finally { clearTimeout(timer); }
+}
 /**
  * nvidia-smi inside a short-lived container, for a portal that runs in a container itself and has no GPU
  * tool. The container is of the small base image, which the toolkit gives nvidia-smi to as it does to any
  * other: the CUDA image is many gigabytes, and a host without a GPU has no use for it. Docker refusing
- * to start a container that asks for a GPU is the answer "no GPU" here.
+ * to start a container that asks for a GPU is the answer "no GPU" here, and so is a Docker that does not answer.
  */
 const dockerProbe: Probe = {
   name: 'docker',
   async run() {
-    if (!dockerAvailable()) throw new NoGpu('Docker is unavailable');
-    await ensureImage(BASE_IMAGE, undefined, 120000).catch(unanswered);
-    const created = await checked<{ Id: string }>('POST', '/containers/create', { Image: BASE_IMAGE, Tty: true, Cmd: ['nvidia-smi', ...SMI_ARGS],
+    const d = docker();
+    if (!(await d.available())) throw new NoGpu('Docker did not answer');
+    await within(120000, d.images.ensure(BASE_IMAGE), `${BASE_IMAGE} was not downloaded in time`);
+    await d.containers.create(PROBE, { Image: BASE_IMAGE, Tty: true, Cmd: ['nvidia-smi', ...SMI_ARGS],
       // nvidia-smi is a utility of the driver: the image says nothing of it, so it is asked for.
-      Env: ['NVIDIA_DRIVER_CAPABILITIES=utility'], Labels: { 'pithagoras.addon': 'voice-probe' }, HostConfig: { DeviceRequests: [{ Driver: 'nvidia', Count: -1, Capabilities: [['gpu']] }] } }).catch(unanswered);
-    const id = created.body.Id;
+      Env: ['NVIDIA_DRIVER_CAPABILITIES=utility'], Labels: { 'pithagoras.addon': 'voice-probe' }, HostConfig: { DeviceRequests: [{ Driver: 'nvidia', Count: -1, Capabilities: [['gpu']] }] } });
     try {
-      await checked('POST', `/containers/${id}/start`);
-      const done = await request<{ StatusCode?: number }>('POST', `/containers/${id}/wait`, undefined, 30000);
-      const logs = await request<string>('GET', `/containers/${id}/logs?stdout=1&stderr=1`);
-      const text = String(logs.body ?? '');
-      if (done.body?.StatusCode) throw new Error(text.trim().split('\n').at(-1) || 'nvidia-smi failed');
+      await d.containers.start(PROBE);
+      // Until it has exited: Docker's own wait is not one an extension is given.
+      const ended = Date.now() + 30000;
+      let state: Inspected['State'];
+      while ((state = ((await d.containers.inspect(PROBE)) as Inspected | undefined)?.State)?.Running) {
+        if (Date.now() > ended) throw new Error('nvidia-smi did not end in time');
+        await delay(200);
+      }
+      const text = await d.containers.logs(PROBE);
+      if (state?.ExitCode) throw new Error(text.trim().split('\n').at(-1) || 'nvidia-smi failed');
       return text;
-    } finally { await request('DELETE', `/containers/${id}?force=1`).catch(() => {}); }
+    } finally { await d.containers.remove(PROBE).catch(() => {}); }
   },
 };
-/** A Docker that does not answer at all, a socket error rather than a refusal, is no GPU either. */
-const unanswered = (e: unknown): never => { throw typeof (e as NodeJS.ErrnoException).code === 'string' ? new NoGpu('Docker did not answer') : e; };
 let probing: Promise<Detected> | undefined;
 /**
  * The GPUs, and whether Docker can hand them to a container: the first probe that lists a card wins, but the
@@ -160,7 +186,7 @@ let probing: Promise<Detected> | undefined;
  */
 async function detectGpuUse(): Promise<Detected> {
   const found = await detectGpus([hostProbe, dockerProbe]);
-  if (found.source !== 'host' || !dockerAvailable()) return found;
+  if (found.source !== 'host' || !(await docker().available())) return found;
   try { await dockerProbe.run(); }
   catch (e) {
     // Only Docker saying there is no GPU for it counts; not being able to ask leaves the host's word.
@@ -178,7 +204,7 @@ async function detect(fresh = false): Promise<Detected> {
   probing ??= detectGpuUse().finally(() => { probing = undefined; });
   return probing;
 }
-/** The managed container as `installedContainer` reads it. */
+/** The container as `installedContainer` reads it. */
 type Installed = NonNullable<Awaited<ReturnType<typeof installedContainer>>>;
 /**
  * The card an installed service is to be moved to: the one asked for, or another where the one it was given is no longer
@@ -198,7 +224,7 @@ export async function checkGpu(uuid: string) {
   const { gpus } = await detect();
   const card = gpus.find(g => g.uuid === uuid);
   if (!card) throw new Error('That GPU is not on this host');
-  const existing = dockerAvailable() ? await installedContainer().catch(() => undefined) : undefined;
+  const existing = await docker().available() ? await installedContainer().catch(() => undefined) : undefined;
   if (existing && usesGpu(existing.choice)) moveTo(existing, gpus, card);
 }
 /**
@@ -219,34 +245,37 @@ export const hostReader = { read: (): Host => readHost() };
  */
 export async function hardware() {
   // No Docker, or one that does not answer, is no container: the GPUs can still be read from the host.
-  const existing = dockerAvailable() ? await installedContainer().catch(() => undefined) : undefined;
+  const existing = await docker().available() ? await installedContainer().catch(() => undefined) : undefined;
   const found = await detect();
   const reserve = reserveMiB();
   const host = hostReader.read();
   const cpuOnly = found.checked && !found.gpus.length;
   const held = existing && usesGpu(existing.choice) ? found.gpus.find(g => holds(existing.card, g)) : undefined;
-  const gpu = pickGpu(found.gpus, (askedCard(found.gpus, chosenGpu, preferredGpu()) ?? held)?.index);
+  const gpu = pickGpu(found.gpus, (askedCard(found.gpus, chosenGpu(), preferredGpu()) ?? held)?.index);
   // A choice for a card that is no longer there is not one: the page shows what is used.
-  const chosen = found.gpus.find(g => g.uuid && g.uuid === chosenGpu)?.uuid ?? '';
+  const chosen = found.gpus.find(g => g.uuid && g.uuid === chosenGpu())?.uuid ?? '';
   return { ...found, host, cpuOnly, selected: gpu?.index ?? null, chosen, reserveMiB: reserve, suggestion: cpuOnly ? suggestCpuChoice(host) : suggestChoice(gpu, reserve) };
 }
 
 /**
- * Installs the managed container, or starts it. `requested` is the engines to run: a new
+ * Installs the voice container, or starts it. `requested` is the engines to run: a new
  * installation without it takes what the GPU check suggests, and an existing container
  * without it keeps the engines it has. A different choice recreates the container; the
  * downloads and builds in the volume stay.
  */
 export async function install(requested?: VoiceChoice) {
   if (pending) throw new Error('Voice setup is already in progress');
-  if (!dockerAvailable()) throw new Error('Docker is unavailable');
   const wanted = requested && parseChoice(requested);
   pending = true; error = ''; progress = 'Preparing voice setup';
-  // Read before returning so a packaging error is reported immediately.
   let script: string;
-  try { script = await readFile(new URL('../../../../deploy/voice/setup.sh', import.meta.url), 'utf8'); }
+  try {
+    if (!(await docker().available())) throw new Error('Docker is unavailable');
+    // Read before returning so a packaging error is reported immediately.
+    script = await readFile(SETUP, 'utf8');
+  }
   catch (e) { pending = false; throw e; }
   void (async () => {
+    const d = docker();
     try {
       const existing = await installedContainer();
       let choice = wanted ?? existing?.choice;
@@ -257,12 +286,12 @@ export async function install(requested?: VoiceChoice) {
         // The running container is about to be replaced. Left up, the memory it holds would count as used by other programs,
         // and the card with the most room could be another one than its own.
         const stopped = existing?.running;
-        if (stopped) await containerAction(CONTAINER, 'stop');
+        if (stopped) await d.containers.stop(CONTAINER);
         try {
           progress = 'Checking the GPU';
           // Read after the stop, not from a check of the page that began while the service still held its memory.
           const found = await detect(true);
-          const asked = askedCard(found.gpus, chosenGpu, preferredGpu());
+          const asked = askedCard(found.gpus, chosenGpu(), preferredGpu());
           // A host that was found to have no GPU gets recognition alone, on the CPU, in the small image.
           const decision = decide(wanted, found.gpus, { reserveMiB: reserveMiB(), preferredGpu: asked?.index, host: hostReader.read(), noGpu: found.checked && !found.gpus.length, unusable: found.unusable });
           choice = decision.choice;
@@ -272,15 +301,15 @@ export async function install(requested?: VoiceChoice) {
           await downloadImage(imageFor(choice));
         } catch (e) {
           // Refused, or the image did not come: the service that was running goes on running.
-          if (stopped) await request('POST', `/containers/${CONTAINER}/start`).catch(() => {});
+          if (stopped) await d.containers.start(CONTAINER).catch(() => {});
           throw e;
         }
       } else {
-        if (usesGpu(existing.choice) && (chosenGpu || preferredGpu() !== undefined || existing.card)) {
+        if (usesGpu(existing.choice) && (chosenGpu() || preferredGpu() !== undefined || existing.card)) {
           // A kept choice is not checked against the card it is on, but a move to another one is, and a card that is asked for has to be one that
           // is there, as an install insists. Where no GPU can be read it is taken as it is, as an install does.
           const { gpus } = await detect();
-          const target = moveTo(existing, gpus, askedCard(gpus, chosenGpu, preferredGpu()));
+          const target = moveTo(existing, gpus, askedCard(gpus, chosenGpu(), preferredGpu()));
           if (target) plan = { card: target };
         }
         await downloadImage(imageFor(existing.choice));
@@ -298,36 +327,52 @@ export async function start() {
 }
 export async function stop() {
   if (pending) throw new Error('Wait for the image download to finish before stopping');
-  await containerAction(CONTAINER, 'stop');
+  if (await inspected()) await docker().containers.stop(CONTAINER);
   error = '';
 }
 
 /** The container is gone, and the volume with the downloads is not: what the caller has to go on with is the same, and what it says is not. */
 export class DataNotRemoved extends Error {}
 /**
- * Removes the managed container, and with `removeData` the volume that holds its downloads and builds (the engines and
+ * Removes the voice container, and with `removeData` the volume that holds its downloads and builds (the engines and
  * models), which a reinstall would otherwise reuse. Nothing there is not an error: the container may have been removed by hand.
  * The image is left, as other containers may be made from it. A volume that cannot be removed is a `DataNotRemoved`, thrown
  * when the container is already gone.
  */
 export async function uninstall(removeData = false) {
   if (pending) throw new Error('Wait for voice setup to finish before uninstalling');
-  if (!dockerAvailable()) throw new Error('Docker is unavailable');
   // Held like a setup: the page shows it as under way, and no start or install begins in the middle of it.
   pending = true; error = ''; progress = 'Removing the voice service';
   try {
-    const found = await request<{Config?: {Labels?: Record<string,string>}; State?: {Running?: boolean}}>('GET', `/containers/${CONTAINER}/json`);
-    if (found.status !== 404) {
-      if (found.status >= 400) throw new Error(`Cannot inspect voice container: Docker ${found.status}`);
-      if (found.body.Config?.Labels?.['pithagoras.addon'] !== 'voice') throw new Error('The pithagoras-voice container is not a managed voice add-on, so it is left alone.');
-      await containerAction(CONTAINER, 'remove');
-    }
+    const d = docker();
+    if (!(await d.available())) throw new Error('Docker is unavailable');
+    if (await inspected()) await d.containers.remove(CONTAINER);
     if (removeData) {
       progress = 'Removing the downloaded engines and models';
-      const volume = await request<{ message?: string }>('DELETE', `/volumes/${VOLUME}`);
-      if (volume.status >= 400 && volume.status !== 404) throw new DataNotRemoved(`The voice container is removed, but its downloaded engines and models could not be deleted: ${volume.body?.message || `Docker returned ${volume.status}`}`);
+      try {
+        // Taken over first, as the container is; one that is gone already is gone.
+        await d.volumes.adopt(VOLUME).catch(absent);
+        await d.volumes.remove(VOLUME);
+      } catch (e) { throw new DataNotRemoved(`The voice container is removed, but its downloaded engines and models could not be deleted: ${(e as Error).message}`); }
     }
   } finally { pending = false; }
+}
+
+/**
+ * Takes over the container and the volume the portal made before Voice was an extension, by their names, so that Voice
+ * may start, stop and remove them as its own: as the half starts, every time, so that a record of them Docker lost is
+ * made again. Nothing is made or started here. One that is not there is not taken over, and one that is not the voice
+ * service's is not Voice's to take, which the portal's log says.
+ */
+export async function adoptKept(): Promise<void> {
+  const d = docker();
+  if (!(await d.available())) return;
+  const take = (what: string, adopt: () => Promise<unknown>) =>
+    adopt().catch((e) => {
+      if ((e as { status?: number }).status !== 404) portal().log(`could not take over ${what}: ${(e as Error).message}`);
+    });
+  await take(`the voice service's downloads, the volume ${VOLUME}`, () => d.volumes.adopt(VOLUME));
+  await take(`the voice container ${CONTAINER}`, inspected);
 }
 
 /** `port` is the audio.cpp process the engine is in: the GPU one, unless speech is put on the CPU. */

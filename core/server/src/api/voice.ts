@@ -1,11 +1,9 @@
 import { addVoice, listVoices, readVoice, updateVoice, deleteVoice, VoiceNotFound } from '../voice-presets.js';
 import { spokenNumbers } from '../voice-numbers.js';
 import { INPUT_LANGUAGES, CHATTERBOX_LANGUAGES } from '../voice-languages.js';
-import { DEFAULT_CHOICE, cpuSpeechUrl, endpoints, isManagedUrl, parseChoice, speechUrl, type VoiceChoice } from '../voice-engines.js';
 import { DEFAULT_KOKORO_VOICE, KOKORO_SPEEDS, isKokoroVoice } from '../kokoro-voices.js';
 import { VoiceLeases } from '../voice-leases.js';
 import { DEFAULT_SKIP_THINKING_PROVIDERS, DEFAULT_VOICE_INSTRUCTIONS, voiceInstructions, voiceRulesOn } from '../pi/voice-first.js';
-import * as voiceService from '../extensions/voice-service.js';
 import { setTimeout as delay } from "node:timers/promises";
 import { once } from "node:events";
 import { createHash } from "node:crypto";
@@ -21,7 +19,6 @@ const DEFAULT_VAD = { positiveSpeechThreshold: 0.65, negativeSpeechThreshold: 0.
 export interface VoiceConfig {
   vad?: typeof DEFAULT_VAD;
   enabled: boolean;
-  lazyLoad?: boolean;
   whisperUrl: string;
   breezeUrl: string;
   instruction: string;
@@ -57,7 +54,7 @@ export interface VoiceConfig {
 }
 /** Long enough for the built-in text several times over; every voice turn carries it. */
 export const MAX_RESPONSE_INSTRUCTIONS = 8000;
-// The addresses of a portal with nothing set up: services of the Compose overlay, not the managed ones.
+// The addresses of a portal with nothing set up: services of the Compose overlay.
 const DEFAULT_WHISPER_URL = "http://127.0.0.1:8178/inference";
 const DEFAULT_BREEZE_URL = "http://127.0.0.1:7860/v1/audio/speech";
 function config(): VoiceConfig {
@@ -140,7 +137,7 @@ export function validateConfig(value: any): VoiceConfig {
     if (typeof vad[key] !== 'number' || !Number.isFinite(vad[key]) || vad[key] < min || vad[key] > max) throw new Error(`Invalid VAD ${key}: expected ${min}–${max}`);
   }
   if (vad.negativeSpeechThreshold >= vad.positiveSpeechThreshold) throw new Error('Speech-end threshold must be lower than speech-start threshold');
-  return { vad, lazyLoad: value.lazyLoad !== false, provider, runtime, voice, language, cfgScale, sttModel, dictationModel, dictationUrl: dictationUrl.trim(), exaggeration, kokoroVoice, speed, responseInstructions: savedInstructions(responseInstructions), skipThinkingProviders, voiceModel, enabled: value.enabled, whisperUrl: value.whisperUrl.trim(), breezeUrl: value.breezeUrl.trim(), instruction: value.instruction.trim() };
+  return { vad, provider, runtime, voice, language, cfgScale, sttModel, dictationModel, dictationUrl: dictationUrl.trim(), exaggeration, kokoroVoice, speed, responseInstructions: savedInstructions(responseInstructions), skipThinkingProviders, voiceModel, enabled: value.enabled, whisperUrl: value.whisperUrl.trim(), breezeUrl: value.breezeUrl.trim(), instruction: value.instruction.trim() };
 }
 /**
  * The providers as saved: names as the model menu shows them, each once. The
@@ -207,11 +204,6 @@ export function pcmWav(pcm: Buffer): Buffer {
   header.write("data", 36); header.writeUInt32LE(pcm.length, 40);
   return Buffer.concat([header, pcm]);
 }
-// Speech is in the GPU process, or in the CPU one where Kokoro is put on the CPU. Voice mode speaks to it where no extension is chosen in place of these addresses.
-const managedVoice = () => !config().provider && ['audio-cpp', 'chatterbox', 'kokoro'].includes(config().runtime ?? '') && [speechUrl, cpuSpeechUrl].includes(config().breezeUrl);
-const managedPort = () => Number(new URL(config().breezeUrl).port);
-// The lease loads the speech model the saved runtime speaks with. Recognition loads itself on its first request.
-const managedEngine = () => { const runtime = config().runtime; return runtime === 'chatterbox' || runtime === 'kokoro' ? runtime : 'breeze'; };
 /** Voice mode listens and speaks through an extension that is not running, or cannot be used now: said, rather than other addresses used. */
 class SourceAbsent extends Error {
   constructor() { super("Voice mode listens and speaks through an extension that is not running: install or start it, or choose your own addresses in Settings → Add-ons → Voice"); }
@@ -248,8 +240,8 @@ function usable(res: express.Response, settings: () => VoiceConfig): VoiceConfig
   }
 }
 /**
- * How long an extension may take over hearing that voice mode is used or not: as long as the managed service may take to
- * load its model. The leases wait for it, every voice session's.
+ * How long an extension may take over hearing that voice mode is used or not: as long as a speech model in a container
+ * may take to load. The leases wait for it, every voice session's.
  */
 export const providerUse = { limitMs: 120_000 };
 const tell = (provider: VoiceProvider, inUse: boolean) =>
@@ -271,8 +263,7 @@ async function letGo(name: string) {
 }
 /**
  * What a session's lease loads. An extension that is the source is told voice mode is in use: once, and again where the
- * source changed to another, or the same was started anew; the one it changed from is told it is not. The managed service
- * loads its speech model at every lease, as it may have let it go meanwhile.
+ * source changed to another, or the same was started anew; the one it changed from is told it is not.
  */
 async function load() {
   const name = config().provider;
@@ -281,7 +272,6 @@ async function load() {
     // Back at the person's own addresses while voice mode is in use: the extension it was is used no longer.
     told = undefined;
     if (before) await letGo(before.name);
-    if (managedVoice()) await voiceService.modelAction('load', managedEngine(), managedPort());
     return;
   }
   const provider = voiceProviders().get(name);
@@ -291,136 +281,23 @@ async function load() {
   told = { name, provider };
   if (before && before.name !== name) await letGo(before.name);
 }
-/** What the end of the last lease unloads: the provider that was told voice mode is in use, or the managed service's speech model. */
+/** What the end of the last lease unloads: the provider that was told voice mode is in use is told it is not. */
 async function unload() {
   const was = told;
   told = undefined;
   if (was) await letGo(was.name);
-  if (managedVoice()) await voiceService.modelAction('unload', managedEngine(), managedPort());
 }
 const leases = new VoiceLeases(load, unload);
-// Only the managed service keeps its model between sessions (Lazy load off). An extension is told when voice mode is no longer used, and keeps what it will.
-const keepLoaded = () => managedVoice() && config().lazyLoad === false;
-/**
- * A setup that was started here and has finished is connected to, once: what the page's Install did not wait for.
- * Taken up wherever the finished service is first seen, which is the timer or the page asking after it.
- */
-function adoptFinishedInstall(service: Awaited<ReturnType<typeof voiceService.status>>) {
-  if (service.state !== 'running' || getSetting('voice_setup_pending') !== '1') return;
-  connectManagedVoice(service.choice);
-  putSetting('voice_setup_pending', '');
-}
-async function maintainVoice() {
-  // Also reconciles running legacy containers after portal updates, without
-  // requiring the settings modal to be opened. Stopped add-ons stay stopped.
-  await voiceService.status().then(adoptFinishedInstall).catch(e => console.error('[voice] maintenance:', (e as Error).message));
-  // The leases of sessions that were left run out, whatever voice mode listens and speaks through, and whether or not Docker answered.
-  await leases.sweep(!keepLoaded()).catch(e => console.error('[voice] maintenance:', (e as Error).message));
-}
-const maintain = () => void maintainVoice();
-const leaseTimer = setInterval(maintain, 30000);
+// The leases of sessions that were left run out, whatever voice mode listens and speaks through.
+const leaseTimer = setInterval(() => void leases.sweep().catch(e => console.error('[voice] leases:', (e as Error).message)), 30000);
 leaseTimer.unref();
-// Wait until module initialization finishes before accessing configuration.
-setImmediate(maintain);
-
-/**
- * What the portal keeps of the settings a connect overwrites, for the uninstall to put back. Kept for each side on its own, so
- * that an address the user sets up after the install is remembered as well: `listening` is the recognition address with its
- * model, `speaking` the speech address with its runtime. A side is there once it held something that was not the managed
- * service's, with whether voice was on then: that goes with the side, as the connect itself saves voice as on, and a side that
- * stays the service's while the other is set up again must not take the other's flag over. `noSpeech`: the last connect saved
- * no speech address, which is how recognition alone leaves the speech side, and which is then the managed service's and not the user's.
- */
-interface Remembered {
-  listening?: { whisperUrl: string; sttModel: string; dictationModel: string; dictationUrl: string; enabled: boolean };
-  speaking?: { breezeUrl: string; runtime: NonNullable<VoiceConfig["runtime"]>; enabled: boolean };
-  noSpeech?: boolean;
-}
-const REMEMBERED_KEY = "voice_before_managed";
 function saveVoice(value: VoiceConfig) {
   putSetting("voice", JSON.stringify(value));
-}
-function remembered(): Remembered {
-  try {
-    const value = JSON.parse(getSetting(REMEMBERED_KEY) ?? "{}");
-    const { listening, speaking } = value;
-    return {
-      ...(typeof listening?.whisperUrl === "string" ? { listening: { whisperUrl: listening.whisperUrl, sttModel: typeof listening.sttModel === "string" ? listening.sttModel : "", dictationModel: typeof listening.dictationModel === "string" ? listening.dictationModel : "", dictationUrl: typeof listening.dictationUrl === "string" ? listening.dictationUrl : "", enabled: listening.enabled === true } } : {}),
-      ...(typeof speaking?.breezeUrl === "string" && typeof speaking.runtime === "string" ? { speaking: { breezeUrl: speaking.breezeUrl, runtime: speaking.runtime, enabled: speaking.enabled === true } } : {}),
-      ...(typeof value.noSpeech === "boolean" ? { noSpeech: value.noSpeech } : {}),
-    };
-  } catch { return {}; }
-}
-/** Which sides of the saved settings are the managed service's, as far as the portal can tell. */
-function managedSides(c: VoiceConfig, noSpeech: boolean | undefined) {
-  const listening = isManagedUrl(c.whisperUrl);
-  // No speech address and the runtime none is the service's where a connect saved it. Where nothing says (a service connected by an older portal), it is when the recognition is.
-  const speaking = isManagedUrl(c.breezeUrl) || (c.runtime === "none" && !c.breezeUrl && (noSpeech ?? listening));
-  return { listening, speaking };
-}
-/** Do the saved settings still point at the managed service, in either side? */
-export const pointsAtManagedVoice = () => { const c = config(); const { listening, speaking } = managedSides(c, remembered().noSpeech); return listening || speaking || isManagedUrl(c.dictationUrl); };
-/** A dictation address the user set up themselves, which belongs with the dictation model beside it and not to the service. */
-const ownDictation = (c: VoiceConfig) => !!c.dictationUrl?.trim() && !isManagedUrl(c.dictationUrl);
-/** Point the saved config at the managed services, for the engines they were built with. */
-export function connectManagedVoice(choice: VoiceChoice = DEFAULT_CHOICE) {
-  const { runtime, ...urls } = endpoints(choice);
-  const current = config();
-  // What is about to be overwritten is kept for the uninstall, side by side: a side that is the managed service's already (a
-  // rebuild, a second connect) keeps what was remembered of it, as the service is not what there was before it.
-  const kept = remembered();
-  const { listening, speaking } = managedSides(current, kept.noSpeech);
-  const next: Remembered = { ...kept, noSpeech: runtime === "none" };
-  // A dictation address that is the service's own was never the user's, so it is not kept with its model: the uninstall would put it back.
-  const dictationKept = isManagedUrl(current.dictationUrl) ? { dictationModel: "", dictationUrl: "" } : { dictationModel: current.dictationModel ?? "", dictationUrl: current.dictationUrl ?? "" };
-  if (!listening) next.listening = { whisperUrl: current.whisperUrl, sttModel: current.sttModel ?? "", ...dictationKept, enabled: current.enabled };
-  if (!speaking) next.speaking = { breezeUrl: current.breezeUrl, runtime: current.runtime ?? "breeze", enabled: current.enabled };
-  putSetting(REMEMBERED_KEY, JSON.stringify(next));
-  // Chatterbox is told a language and has no detection mode; keep one it speaks rather than save a setting it refuses.
-  const language = runtime === 'chatterbox' && !CHATTERBOX_LANGUAGES.includes(current.language) ? 'en' : current.language;
-  // Whisper.cpp serves one model and is sent no model field: an id left over
-  // from another runtime would reach it in the multipart body.
-  // The same goes for the dictation model and address, which the service's replace: but only where the connect takes the
-  // recognition over from the user (what they had is remembered above), or where the dictation address is the service's own.
-  // On a service that is connected already (Start voice, a rebuild), what they set up since is theirs.
-  const dictation = !listening || isManagedUrl(current.dictationUrl) ? { dictationModel: "", dictationUrl: "" } : {};
-  // The service is used at these addresses: an extension chosen in their place gives them back.
-  const saved = { ...current, language, enabled: true, runtime, ...urls, ...dictation, provider: "" };
-  saveVoice(saved);
-  return {...saved, managed:true};
-}
-/**
- * Takes the managed service out of the saved settings after it has been uninstalled: what the connect overwrote is put back, or,
- * where nothing was remembered of a side (the service was connected before the portal did), what points at it is reset to a portal
- * with nothing set up. Only what points at the managed service is touched: an address the user set up themselves stays as it is,
- * and so do the voice, the speech detection and the rest.
- */
-export function disconnectManagedVoice() {
-  const current = config();
-  const kept = remembered();
-  putSetting(REMEMBERED_KEY, "");
-  const { listening, speaking } = managedSides(current, kept.noSpeech);
-  // A dictation address that is the service's is gone with it, whatever voice mode listens to.
-  const dictationManaged = isManagedUrl(current.dictationUrl);
-  if (!listening && !speaking && !dictationManaged) return current;
-  const back = {
-    ...(listening ? { whisperUrl: kept.listening?.whisperUrl ?? DEFAULT_WHISPER_URL, sttModel: kept.listening?.sttModel ?? "" } : {}),
-    // The dictation pair that was there before goes back, unless they set up an address of their own since: that one stays with its model.
-    ...(listening && !ownDictation(current) ? { dictationModel: kept.listening?.dictationModel ?? "", dictationUrl: kept.listening?.dictationUrl ?? "" } : {}),
-    ...(!listening && dictationManaged ? { dictationModel: "", dictationUrl: "" } : {}),
-    ...(speaking ? { breezeUrl: kept.speaking?.breezeUrl ?? DEFAULT_BREEZE_URL, runtime: kept.speaking?.runtime ?? "breeze" } : {}),
-  };
-  // Voice was switched on by the connect, and is left on only where everything put back is what the user had, it was on when each
-  // part of it was, and it has not been turned off since; an address that is only a default is no use switched on.
-  const on = (!listening || kept.listening?.enabled === true) && (!speaking || kept.speaking?.enabled === true);
-  const saved: VoiceConfig = { ...current, ...back, enabled: on && current.enabled };
-  saveVoice(saved);
-  return saved;
 }
 /**
  * An extension makes itself voice mode's source, and voice mode on (`voice.choose(true)`), or gives the source back to the
  * person's own addresses where it is the source now (false). Nothing else of the settings changes, but the input language
- * where the extension speaks with Chatterbox, which is told one and has no detection mode: as a connect of the managed service does.
+ * where the extension speaks with Chatterbox, which is told one and has no detection mode.
  */
 function chooseProvider(name: string, chosen: boolean) {
   const current = config();
@@ -457,7 +334,7 @@ function shown() {
   // Whether replies are spoken, through what is used now: an extension chosen that is not running is not known not to, and voice mode then says why it cannot start.
   let speech = true;
   try { speech = inUse(saved).runtime !== "none"; } catch { /* SourceAbsent */ }
-  return {...withInstructions(saved),provider:saved.provider ?? "",providers,managed:managedVoice(),speech,comparison:process.env.VOICE_COMPARISON === "true",statusSpeech:process.env.VOICE_STATUS_SPEECH !== "false",ttsPrefetch:process.env.VOICE_TTS_PREFETCH === "true",sentenceChunks:process.env.VOICE_SENTENCE_CHUNKS === "true",pipelineMode:process.env.VOICE_PIPELINE_MODE === "sequential" ? "sequential" : "parallel"};
+  return {...withInstructions(saved),provider:saved.provider ?? "",providers,speech,comparison:process.env.VOICE_COMPARISON === "true",statusSpeech:process.env.VOICE_STATUS_SPEECH !== "false",ttsPrefetch:process.env.VOICE_TTS_PREFETCH === "true",sentenceChunks:process.env.VOICE_SENTENCE_CHUNKS === "true",pipelineMode:process.env.VOICE_PIPELINE_MODE === "sequential" ? "sequential" : "parallel"};
 }
 /**
  * The settings a chat speaks with: the voice of the agent the chat is with, where it has one of its own (the agent a project is
@@ -484,7 +361,7 @@ async function speechRequest(settings: VoiceConfig, text: string): Promise<Speec
   }
   // Chatterbox clones a speaker; it has no designed or built-in voice.
   // validateConfig refuses this combination on save; a config written before
-  // that check, or by the managed connect, still reaches here.
+  // that check, or an extension that speaks with Chatterbox chosen, still reaches here.
   if (settings.runtime === "chatterbox" && !reference)
     throw new Error("Chatterbox speaks with a reference clone: choose a voice with a recording");
   let json: Record<string, unknown> | undefined;
@@ -586,74 +463,11 @@ async function makeErrorLine(settings: VoiceConfig, request: SpeechRequest, key:
 }
 export function voiceRouter(): Router {
   const router = express.Router();
-  // The stored GPU choice, in place before anything asks the service to start.
-  voiceService.useGpu(getSetting('voice_gpu') ?? '');
-  /** Choose the GPU by UUID, or "" to leave it to VOICE_GPU and then the card with the most room. A running voice moves now; a stopped one on its next start. */
-  router.put('/voice/gpu', async (req, res) => {
-    const id = req.body?.gpu;
-    if (typeof id !== 'string') return res.status(400).json({ error: 'gpu must be a GPU UUID, or empty to choose automatically' });
-    try {
-      // Before anything is saved or stopped: a card that is not there, or that cannot hold the engines installed, leaves the service where it is.
-      if (id) await voiceService.checkGpu(id);
-      putSetting('voice_gpu', id);
-      voiceService.useGpu(id);
-      const restarting = ['running', 'starting'].includes((await voiceService.status()).state);
-      if (restarting) {
-        // Saved either way: a setup already under way picks the new GPU up on the next start.
-        try { await voiceService.install(); }
-        catch (e) { return res.status(409).json({ error: `GPU choice saved, but voice could not restart on it now: ${(e as Error).message}. It moves on the next start.` }); }
-      }
-      res.json({ selected: id, restarting });
-    } catch (e) { res.status(400).json({ error: (e as Error).message }); }
-  });
   router.get('/voice/presets',(_req,res)=>res.json(listVoices()));
   router.post('/voice/presets',(req,res)=>{try{res.json(addVoice(req.body));}catch(e){res.status(400).json({error:(e as Error).message});}});
   router.patch('/voice/presets/:id',(req,res)=>{try{res.json(updateVoice(String(req.params.id),req.body));}catch(e){res.status(e instanceof VoiceNotFound?404:400).json({error:(e as Error).message});}});
   router.get('/voice/presets/:id/audio',(req,res)=>{try{const row=readVoice(String(req.params.id));if(!row.audio)return res.sendStatus(404);res.set({'Content-Type':'audio/wav','Cache-Control':'no-store'}).send(row.audio);}catch{res.sendStatus(404);}});
   router.delete('/voice/presets/:id',(req,res)=>{try{deleteVoice(String(req.params.id));res.json({ok:true});}catch(e){res.status(404).json({error:(e as Error).message});}});
-  router.get('/voice/install', async (_req, res) => {
-    try {
-      const state = await voiceService.status();
-      adoptFinishedInstall(state);
-      // `connected`: the saved settings point at the service, whether or not it is there, so that they can be put right after the container was removed by hand.
-      res.json({ ...state, connected: pointsAtManagedVoice() });
-    } catch (e) { res.status(503).json({ error: (e as Error).message }); }
-  });
-  router.get('/voice/hardware', async (_req, res) => {
-    try { res.json(await voiceService.hardware()); } catch (e) { res.status(503).json({ error: (e as Error).message }); }
-  });
-  for (const action of ['install', 'start', 'stop'] as const) router.post(`/voice/${action}`, async (req, res) => {
-    try {
-      // Install takes the engines to build for; without them it keeps what is installed, or picks for the GPU.
-      if (action === 'install') await voiceService.install(Object.keys(req.body ?? {}).length ? parseChoice(req.body) : undefined);
-      else await voiceService[action]();
-      putSetting('voice_setup_pending', action !== 'stop' ? '1' : '');
-      res.json({ ok: true });
-    } catch (e) { res.status(400).json({ error: (e as Error).message }); }
-  });
-  // The container goes, and with it the settings that point at it. The downloads stay unless `removeData` says they go too.
-  router.post('/voice/uninstall', async (req, res) => {
-    try {
-      const removeData = req.body?.removeData ?? false;
-      if (typeof removeData !== 'boolean') throw new Error('removeData must be true or false');
-      // The container being gone is what the settings follow, whether or not the downloads could be deleted after it.
-      let kept: Error | undefined;
-      try { await voiceService.uninstall(removeData); }
-      catch (e) { if (!(e instanceof voiceService.DataNotRemoved)) throw e; kept = e; }
-      putSetting('voice_setup_pending', '');
-      disconnectManagedVoice();
-      if (kept) return res.status(409).json({ error: kept.message });
-      res.json({ ok: true });
-    } catch (e) { res.status(400).json({ error: (e as Error).message }); }
-  });
-  router.post('/voice/connect', async (_req, res) => {
-    try {
-      const state = await voiceService.status();
-      if (state.state !== 'running') throw new Error('Wait for voice setup to finish before connecting');
-      connectManagedVoice(state.choice);
-      res.json(shown());
-    } catch (e) { res.status(400).json({ error: (e as Error).message }); }
-  });
   router.get("/voice", (_req, res) => res.json(shown()));
   router.put("/voice", (req, res) => {
     try {
@@ -672,7 +486,7 @@ export function voiceRouter(): Router {
     if(typeof client!=='string'||client.length>100||!client||typeof active!=='boolean')return res.status(400).json({error:'A client ID and active flag are required'});
     try {
       const key=String(req.params.id)+':'+client;
-      if(active)await leases.acquire(key);else await leases.release(key,!keepLoaded());
+      if(active)await leases.acquire(key);else await leases.release(key);
       res.json({ok:true});
     } catch(e){res.status(503).json({error:(e as Error).message});}
   });

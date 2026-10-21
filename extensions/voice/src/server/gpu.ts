@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import os from "node:os";
-import { LEAN_CHOICE, asrDevice, choiceLabel, cpuRecognition, cpuSlow, fitOn, speechSlow, ttsDevice, fitRam, pickGpu, ramNeeded, sameChoice, suggestChoice, suggestCpuChoice, usesGpu, vramNeeded, type Gpu, type Host, type VoiceChoice } from "./voice-engines.js";
+import { LEAN_CHOICE, asrDevice, choiceLabel, cpuRecognition, cpuSlow, fitOn, speechSlow, ttsDevice, fitRam, pickGpu, ramNeeded, sameChoice, suggestChoice, suggestCpuChoice, usesGpu, vramNeeded, type Gpu, type Host, type VoiceChoice } from "../engines";
 
 /** The query every probe runs. Not `compute_cap`: older drivers refuse the whole query over it. */
 export const SMI_ARGS = ["--query-gpu=index,uuid,name,memory.total,memory.free", "--format=csv,noheader,nounits"];

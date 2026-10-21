@@ -1,4 +1,5 @@
-import type { Portal } from "@pithagoras/extension-api";
+import type { ReactNode } from "react";
+import type { Portal, SelectOption } from "@pithagoras/extension-api";
 
 /** The portal the extension was loaded into, for every part of it: set before anything is registered. */
 export let portal: Portal;
@@ -11,3 +12,17 @@ export function setPortal(given: Portal): void {
 export const t = (text: string, vars?: Record<string, string | number>) => portal.t(text, vars);
 /** A text to be translated where it is shown, marked here as one: a title the portal draws, a label kept in a table. */
 export const msg = <T extends string>(text: T): T => text;
+
+/** The portal's own Select, whose props say what it holds, drawn as a component of the extension's. */
+export function Select<T extends string | number = string>(props: {
+  value: T;
+  onChange: (value: T) => void;
+  options: SelectOption<T>[];
+  disabled?: boolean;
+  className?: string;
+  size?: "sm" | "md";
+  "aria-label"?: string;
+}) {
+  const Own = portal.ui.Select as (props: unknown) => ReactNode;
+  return <Own {...props} />;
+}

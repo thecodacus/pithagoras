@@ -94,7 +94,6 @@ RUN for dir in extensions/*/; do \
       if [ -f "${dir}package-lock.json" ]; then npm ci --omit=dev --ignore-scripts --no-audit --no-fund --prefix "$dir" || exit 1; fi; \
     done \
     && npm cache clean --force
-COPY deploy/voice deploy/voice
 
 # HOME lives on the data volume so pi packages and settings (~/.pi/agent)
 # survive image rebuilds instead of being silently wiped.

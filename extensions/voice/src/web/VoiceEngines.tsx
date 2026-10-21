@@ -1,16 +1,15 @@
 import { useEffect } from "react";
-import { Select } from "./Select";
-import { ASR_MODELS, DEFAULT_CHOICE, TTS_ENGINES, asrDevice, asrDevices, asrOption, canonicalChoice, cpuSlow, fitOn, fitRam, ramNeeded, sameChoice, speechCpuSeconds, speechSlow, ttsDevice, ttsDevices, usesGpu, vramNeeded, type AsrDevice, type Device, type Fit, type TtsChoice, type VoiceChoice } from "../../../server/src/voice-engines";
-import type { VoiceHardware } from "../api";
-import { formatNumber, t } from "../i18n";
-import { btnCls } from "./SettingsUi";
+import { ASR_MODELS, DEFAULT_CHOICE, TTS_ENGINES, asrDevice, asrDevices, asrOption, canonicalChoice, cpuSlow, fitOn, fitRam, ramNeeded, sameChoice, speechCpuSeconds, speechSlow, ttsDevice, ttsDevices, usesGpu, vramNeeded, type AsrDevice, type Device, type Fit, type TtsChoice, type VoiceChoice } from "../engines";
+import type { VoiceHardware } from "./api";
+import { Select, portal, t } from "../portal";
 
+const formatNumber = (n: number, options?: Intl.NumberFormatOptions) => portal.format.number(n, options);
 const gib = (mib: number) => formatNumber(mib / 1024, { maximumFractionDigits: 1 });
 const asrKey = (c: Pick<VoiceChoice, "asr" | "asrModel">) => `${c.asr}:${c.asrModel}`;
 const tone = (level: Fit) => level === "fits" ? "text-fg-faint" : level === "tight" ? "text-warn" : "text-danger";
 
 /**
- * Which speech engine and which recognition model, on which device, the managed voice container is built for,
+ * Which speech engine and which recognition model, on which device, the voice container is built for,
  * with what the GPU and the host can hold. `picked` is null while the choice is left to the install, which takes
  * what fits; once there is a container, the choice shown is the one it was built for.
  *
@@ -66,7 +65,7 @@ export function VoiceEngines({ installed, fresh, busy, hardware, picked: pickedN
       { value: "kokoro", label: TTS_ENGINES.kokoro.label, hint: t("Built-in voices in eight languages, the least GPU memory") },
       ...(cpuOnly || installed?.tts === "none" ? [noSpeech] : []),
     ];
-  const suggest = suggestion && !sameChoice(suggestion, shown) && <> <button type="button" className={btnCls} onClick={() => onPick(installed && sameChoice(suggestion, installed) ? null : suggestion)}>{t("Use the suggestion")}</button></>;
+  const suggest = suggestion && !sameChoice(suggestion, shown) && <> <button type="button" className={portal.ui.classes.button} onClick={() => onPick(installed && sameChoice(suggestion, installed) ? null : suggestion)}>{t("Use the suggestion")}</button></>;
   return <div className="space-y-3 rounded-lg border border-line p-3">
     <div><p className="text-xs font-medium">{t("Speech engines")}</p><p className="mt-1 text-xs text-fg-faint">{t("Pick how the voice speaks and listens. Pithagoras checks your GPU and tells you what fits.")}</p></div>
     {cpuOnly && <p role="alert" className="rounded-md border border-warn/40 bg-warn/10 px-3 py-2 text-xs text-warn">{hardware?.unusable?.length

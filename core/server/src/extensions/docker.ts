@@ -127,16 +127,6 @@ export async function containerState(
   return { exists: true, running: Boolean(body?.State?.Running), id: body?.Id };
 }
 
-/**
- * A call to the daemon that has to come out right: what Docker says when it does not.
- * The one place a refusal is turned into an error, so that every add-on says it alike.
- */
-export async function checked<T = unknown>(method: string, path: string, body?: unknown) {
-  const result = await request<T & { message?: string }>(method, path, body);
-  if (result.status >= 400) throw new Error(result.body?.message || `Docker returned ${result.status}`);
-  return result;
-}
-
 /** What a pull says before the daemon has said anything. */
 export const PULL_STARTING = "starting";
 
@@ -147,29 +137,17 @@ export interface PullState {
   error?: string;
 }
 
-/**
- * The image is there, or is pulled, with `onState` told as it goes. `timeoutMs`
- * stops waiting for a download that does not come; it goes on without being
- * waited for.
- */
-export async function ensureImage(image: string, onState: (state: PullState) => void = () => {}, timeoutMs?: number): Promise<void> {
+/** The image is there, or is pulled, with `onState` told as it goes. */
+export async function ensureImage(image: string, onState: (state: PullState) => void = () => {}): Promise<void> {
   if (await imagePresent(image)) return;
   onState({ active: true, line: PULL_STARTING });
-  const pull = pullImage(image, (line) => onState({ active: true, line })).then(
+  return pullImage(image, (line) => onState({ active: true, line })).then(
     () => onState({ active: false, line: "done" }),
     (e) => {
       onState({ active: false, line: "", error: (e as Error).message });
       throw e;
     },
   );
-  if (!timeoutMs) return pull;
-  pull.catch(() => {});
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    await Promise.race([pull, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(`${image} was not downloaded in time`)), timeoutMs); })]);
-  } finally {
-    clearTimeout(timer);
-  }
 }
 
 /**

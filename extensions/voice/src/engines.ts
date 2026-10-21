@@ -1,10 +1,12 @@
+import type { VoiceWhere } from "@pithagoras/extension-api/server";
+
 /**
- * The speech engines the managed Voice service can run, in one place.
+ * The speech engines the voice service can run, in one place.
  *
  * The container spec, the setup script's environment, the health checks, the
- * settings the portal saves after an install and the choices the add-on page
+ * addresses voice mode is offered and the choices the service's page in Settings
  * offers all read this table, so an engine or a model size is added here once.
- * It has no node imports: the page uses it too.
+ * It has no node imports: both halves of the extension use it.
  *
  * Speech synthesis needs a GPU, except Kokoro, which is small enough to run on the
  * CPU too. Speech recognition does not: Whisper always runs on the CPU, and
@@ -22,7 +24,7 @@ export type AsrEngine = "whisper" | "qwen3-asr";
 export type AsrDevice = "cpu" | "gpu";
 export type Device = AsrDevice;
 /**
- * What the managed container is built for: one speech engine and one recognition model.
+ * What the voice container is built for: one speech engine and one recognition model.
  * `asrDevice` is only ever `cpu`, and only where the other device is possible (Qwen3-ASR
  * next to a speech engine on the GPU); `ttsDevice` likewise, for a speech engine that runs
  * on the CPU too (Kokoro). Everything else has one device, and a choice made before the
@@ -280,38 +282,20 @@ export function cpuServerConfig(c: VoiceChoice, threads = 4) {
   const speech = c.tts !== "none" && ttsDevice(c) === "cpu";
   const models = [...(speech ? [ttsModel(c.tts as TtsEngine)] : []), ...(c.asr === "qwen3-asr" && asrDevice(c) === "cpu" ? [asrModel(c.asrModel)] : [])];
   if (!models.length) return undefined;
-  // Speech is loaded and unloaded by the portal as voice sessions come and go, which audio.cpp allows only with model management on.
+  // Speech is loaded and unloaded as voice mode begins and stops being used, which audio.cpp allows only with model management on.
   return { host: "127.0.0.1", port: CPU_PORT, backend: "cpu", device: 0, threads, lazy_load: true, idle_unload_ms: 90000, ...(speech ? { ui_management: true } : {}), max_loaded_models: models.length, models };
 }
 /** Threads for what runs on the CPU: all the host has, up to the ones the speeds above were measured on, and not fewer than two. */
 export const cpuThreads = (cores: number) => Math.min(Math.max(Math.floor(cores) || 1, 2), MEASURED_THREADS);
 
-/** The settings that point the portal at the managed services of the choice. */
-export function endpoints(c: VoiceChoice) {
-  const whisper = c.asr === "whisper";
+/** Where voice mode listens and speaks with the services of the choice: on the portal's loopback, which the container shares. */
+export function endpoints(c: VoiceChoice): VoiceWhere {
   return {
-    runtime: c.tts === "none" ? "none" as const : c.tts === "breeze" ? "audio-cpp" as const : c.tts,
-    // Without speech synthesis there is no address to speak to.
-    breezeUrl: c.tts === "none" ? "" : ttsDevice(c) === "cpu" ? cpuSpeechUrl : speechUrl,
-    whisperUrl: whisper ? whisperUrl : `http://127.0.0.1:${asrDevice(c) === "cpu" ? CPU_PORT : SPEECH_PORT}/v1/audio/transcriptions`,
     // Whisper.cpp serves one model and is sent no model field; audio.cpp names the one it loaded.
-    sttModel: whisper ? "" : "qwen3-asr",
+    listen: c.asr === "whisper" ? { url: whisperUrl } : { url: `http://127.0.0.1:${asrDevice(c) === "cpu" ? CPU_PORT : SPEECH_PORT}/v1/audio/transcriptions`, model: "qwen3-asr" },
+    // Without speech synthesis there is nothing to speak with: recognition alone.
+    ...(c.tts === "none" ? {} : { speak: { url: ttsDevice(c) === "cpu" ? cpuSpeechUrl : speechUrl, runtime: c.tts === "breeze" ? "audio-cpp" : c.tts } }),
   };
-}
-
-/** Every address `endpoints` can write: where the managed container's services listen, on the portal's loopback. */
-const MANAGED_URLS = [speechUrl, cpuSpeechUrl, whisperUrl, `http://127.0.0.1:${SPEECH_PORT}/v1/audio/transcriptions`, `http://127.0.0.1:${CPU_PORT}/v1/audio/transcriptions`];
-/**
- * Does the address lead to a service of the managed container? Judged by where it points, so that it holds for settings
- * saved by hand or by an older portal as well. `localhost` is the same loopback, and a slash at the end is the same path.
- */
-export function isManagedUrl(value: unknown): boolean {
-  if (typeof value !== "string") return false;
-  try {
-    const url = new URL(value.trim());
-    if (url.protocol !== "http:" || !["127.0.0.1", "localhost"].includes(url.hostname)) return false;
-    return MANAGED_URLS.includes(`http://127.0.0.1:${url.port}${url.pathname.replace(/\/+$/, "")}`);
-  } catch { return false; }
 }
 
 /** What has to answer before the service counts as ready. */

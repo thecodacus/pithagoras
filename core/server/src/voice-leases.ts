@@ -11,11 +11,10 @@ export class VoiceLeases {
     this.leases.set(key,this.now()+75000);
     return this.serial(async()=>{try{await this.load();this.loaded=true;}catch(e){this.leases.delete(key);throw e;}});
   }
-  release(key:string,lazy=true) { this.leases.delete(key);return this.sweep(lazy); }
-  sweep(lazy:boolean) {
+  release(key:string) { this.leases.delete(key);return this.sweep(); }
+  sweep() {
     return this.serial(async()=>{
       for(const [key,expires] of this.leases)if(expires<=this.now())this.leases.delete(key);
-      if(!lazy){await this.load();this.loaded=true;return;}
       if(!this.leases.size&&this.loaded){await this.unload();this.loaded=false;}
     });
   }
