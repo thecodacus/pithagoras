@@ -415,11 +415,20 @@ export interface VoiceConfig {
   // The model spoken turns run on, "provider/model"; empty means the chat's own.
   voiceModel?: string;
   pipelineMode?: "parallel" | "sequential";
-  // False with no speech synthesis (runtime "none"): the page can listen, but replies are not spoken.
+  // False with no speech synthesis (runtime "none") where voice mode listens now: the page can listen, but replies are not spoken.
   speech?: boolean;
+  // The extension voice mode listens and speaks through, by its package's name; empty for the addresses below, the person's own.
+  provider?: string;
+  // The extensions that offer voice mode a place to listen and speak.
+  providers?: VoiceProvider[];
   vad?: typeof DEFAULT_VAD;
   enabled: boolean; lazyLoad?: boolean; managed?: boolean; whisperUrl: string; breezeUrl: string; instruction: string; voice?: string; language?: string; cfgScale?: number; runtime?: "breeze" | "audio-cpp" | "chatterbox" | "kokoro" | "none"; sttModel?: string; dictationModel?: string; dictationUrl?: string; exaggeration?: number; kokoroVoice?: string; speed?: number;
 }
+/** An extension that offers voice mode a place to listen and speak: `ready` while it can be used now, with how it speaks then (`none`: recognition alone). */
+export interface VoiceProvider { name: string; label: string; ready: boolean; runtime?: VoiceConfig["runtime"] }
+/** How voice mode speaks with these settings: through the extension chosen while it answers, else at the person's own addresses. */
+export const speakingRuntime = (config: VoiceConfig): VoiceConfig["runtime"] =>
+  config.provider ? config.providers?.find((p) => p.name === config.provider)?.runtime : config.runtime;
 
 export interface VoiceInstallStatus { available: boolean; state: string; busy: boolean; progress: string; error: string; choice?: VoiceChoice; /** The saved settings point at the managed service, whether or not its container is there. */ connected?: boolean; }
 /** The GPUs the voice container can use, as nvidia-smi reports them, and the combination that fits the one it would take. */

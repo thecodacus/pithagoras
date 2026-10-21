@@ -170,7 +170,6 @@ export function VoiceControl({ sessionId, folder, items, running, work, onSend, 
   const [sequentialMode, setSequentialMode] = useState(false);
   const context = useRef<AudioContext | null>(null);
   const stream = useRef<MediaStream | null>(null);
-  const managed = useRef(false);
   const connection = useRef<string | null>(null);
   const heartbeat = useRef<ReturnType<typeof setInterval>>();
   const connectVoice = async(client:string,active:boolean)=>{
@@ -213,7 +212,6 @@ export function VoiceControl({ sessionId, folder, items, running, work, onSend, 
     mounted.current = true;
     const load = () => api.voice().then(config => {
       if (!mounted.current) return;
-      managed.current=config.managed===true;
       statusSpeech.current = config.statusSpeech !== false;
       setComparison(config.comparison === true);
       sequential.current = config.pipelineMode === "sequential";
@@ -505,12 +503,11 @@ export function VoiceControl({ sessionId, folder, items, running, work, onSend, 
       } });
       if (!current()) { mic.getTracks().forEach(track => track.stop()); return; }
       stream.current = mic;
-      if(managed.current){
-        const lease=crypto.randomUUID();connection.current=lease;
-        await connectVoice(lease,true);
-        if(!current())return;
-        heartbeat.current=setInterval(()=>{void connectVoice(lease,true).catch(e=>{if(current()){setError(e.message);stop();}});},25000);
-      }
+      // The session's lease, before anything listens: what voice mode listens and speaks through gets ready for it (a model loaded), and says here when it cannot.
+      const lease=crypto.randomUUID();connection.current=lease;
+      await connectVoice(lease,true);
+      if(!current())return;
+      heartbeat.current=setInterval(()=>{void connectVoice(lease,true).catch(e=>{if(current()){setError(e.message);stop();}});},25000);
       // The spoken error line is made now, while the speech model is at hand, and kept: at error time it is only played. Not waited
       // for, and no failure here is shown: if it is missing then, that is said with the error.
       void json(`/api/sessions/${sessionId}/voice/error-line`, { method: 'POST', body: JSON.stringify({ text: t("An error occurred.") }) }).catch(() => {});

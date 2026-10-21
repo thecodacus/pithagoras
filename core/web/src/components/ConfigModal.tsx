@@ -191,6 +191,8 @@ export const ConfigModal = memo(function ConfigModal({
   const loadExtensions = async () => (await exts.reload())?.extensions ?? [];
 
   useEffect(() => prefetchSettings(), []);
+  // What changed in voice mode's settings here, its source chosen on an extension's page among it, reaches the voice controls open as Settings closes.
+  useEffect(() => () => void window.dispatchEvent(new Event("voice-config-changed")), []);
 
   // A refused save is said at the top of the pane, which a long form has scrolled away from: it is brought into
   // view when it comes, and it is not the next section's.

@@ -270,10 +270,10 @@ test.describe('with a window in the middle', () => {
   });
 });
 
-test('managed voice connects before listening and releases its lease on End',async({page})=>{
+test('voice mode takes its lease before listening and gives it back on End, whatever it listens and speaks through',async({page})=>{
  const leases:boolean[]=[];
- await page.route('**/api/voice',r=>r.fulfill({json:{enabled:true,managed:true,lazyLoad:true}}));
- await page.route('**/api/sessions/test/voice/connection',r=>{leases.push(r.request().postDataJSON().active);return r.fulfill({json:{managed:true}});});
+ await page.route('**/api/voice',r=>r.fulfill({json:{enabled:true}}));
+ await page.route('**/api/sessions/test/voice/connection',r=>{leases.push(r.request().postDataJSON().active);return r.fulfill({json:{ok:true}});});
  await page.goto('/tests/voice.html');
  await page.getByRole('button',{name:'Turn on hands-free voice'}).click();
  await expect(page.getByRole('status')).toHaveText('Listening',{timeout:25000});
@@ -282,13 +282,13 @@ test('managed voice connects before listening and releases its lease on End',asy
  await expect.poll(()=>leases).toEqual([true,false]);
 });
 
-test('ending while the managed model loads releases the connection and never starts listening',async({page})=>{
+test('ending while the lease is being taken (a model loading) gives it back and never starts listening',async({page})=>{
  let finishLoad!:()=>Promise<void>; const leases:boolean[]=[];
- await page.route('**/api/voice',r=>r.fulfill({json:{enabled:true,managed:true}}));
+ await page.route('**/api/voice',r=>r.fulfill({json:{enabled:true}}));
  await page.route('**/api/sessions/test/voice/connection',async r=>{
   const active=r.request().postDataJSON().active;leases.push(active);
-  if(active){finishLoad=()=>r.fulfill({json:{managed:true}});return;}
-  await r.fulfill({json:{managed:true}});
+  if(active){finishLoad=()=>r.fulfill({json:{ok:true}});return;}
+  await r.fulfill({json:{ok:true}});
  });
  await page.goto('/tests/voice.html');await page.getByRole('button',{name:'Turn on hands-free voice'}).click();
  await expect.poll(()=>leases).toEqual([true]);
@@ -296,6 +296,18 @@ test('ending while the managed model loads releases the connection and never sta
  await expect.poll(()=>leases).toEqual([true,false]);await finishLoad();
  await expect(page.getByRole('button',{name:'Turn on hands-free voice'})).toBeVisible();
  await expect(page.getByLabel('Voice conversation')).toHaveCount(0);
+});
+
+test('a lease voice mode is refused, as by an extension it listens through that is not running, is said, and nothing listens',async({page})=>{
+ const notRunning='Voice mode listens and speaks through an extension that is not running: install or start it, or choose your own addresses in Settings → Add-ons → Voice';
+ await page.route('**/api/voice',r=>r.fulfill({json:{enabled:true,provider:'test-speaker',providers:[]}}));
+ await page.route('**/api/sessions/test/voice/connection',r=>r.fulfill({status:503,json:{error:notRunning}}));
+ await page.goto('/tests/voice.html');
+ await page.getByRole('button',{name:'Turn on hands-free voice'}).click();
+ await expect(page.getByRole('alert')).toContainText(notRunning);
+ await page.getByRole('button',{name:'Check mic tracks'}).click();
+ await expect(page.getByTestId('tracks')).toHaveText('ended:true');
+ await expect(page.getByRole('button',{name:'Turn on hands-free voice'})).toBeVisible();
 });
 
 

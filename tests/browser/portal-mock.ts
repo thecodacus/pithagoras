@@ -9,7 +9,9 @@ import { test as base, expect, type Page, type Route } from '@playwright/test';
  * name, so a call that no test mocked fails where it is made, with the URL in the message. Nothing reaches the dev
  * server's proxy, and so no portal that runs on this machine. The extensions the portal has installed are the
  * exception: they are listed and their files served, for the app and for a fixture page that loads them as the app
- * does. A test's own `page.route` is registered after it and wins; what it does not answer falls back to this one.
+ * does. So is the lease every voice session takes as it starts and gives back at its end (`…/voice/connection`),
+ * which is granted. A test's own `page.route` is registered after it and wins; what it does not answer falls back to
+ * this one.
  *
  * `installed` is those extensions, by their folders from the repository's root, and is none unless a spec says:
  * `test.use({ installed: ['extensions/git'] })`. The portal's own specs install a stand-in where they need an
@@ -27,6 +29,7 @@ export const test = base.extend<{ unmocked: string[]; installed: string[] }>({
         if (pathname === '/api/extension-ui') return route.fulfill({ json: { extensions: extensions.map((ext) => ext.listing) } });
         for (const ext of extensions) if (await ext.serve(pathname, route)) return;
       }
+      if (route.request().method() === 'POST' && /^\/api\/sessions\/[^/]+\/voice\/connection$/.test(pathname)) return route.fulfill({ json: { ok: true } });
       const what = `${route.request().method()} ${pathname}${search}`;
       asked.push(what);
       return route.fulfill({ status: 501, json: { error: `Not mocked: ${what}` } });
