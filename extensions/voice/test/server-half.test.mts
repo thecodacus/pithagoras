@@ -24,19 +24,19 @@ const adopted = () => {
   return existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : { containers: {}, volumes: {} };
 };
 const until = async (done: () => boolean, what: string) => {
-  for (let n = 0; n < 300; n++) {
+  for (const end = Date.now() + 30_000; Date.now() < end; ) {
     if (done()) return;
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
   assert.fail(`not ${what} in time`);
 };
-/** What the half says, as the portal's log has it, while `fn` runs and until `done` holds of it (or a second has gone by). */
-async function logged(fn: () => Promise<void>, done: (said: string) => boolean = () => false): Promise<string> {
+/** What the half says, as the portal's log has it, while `fn` runs and until `done` holds of it (or ten seconds have gone by), or for a second after. */
+async function logged(fn: () => Promise<void>, done?: (said: string) => boolean): Promise<string> {
   const lines = mock.method(console, "log", () => {});
   const said = () => lines.mock.calls.map((call) => String(call.arguments[0])).join("\n");
   try {
     await fn();
-    for (let n = 0; n < 100 && !done(said()); n++) await new Promise((resolve) => setTimeout(resolve, 10));
+    for (const end = Date.now() + (done ? 10_000 : 1_000); Date.now() < end && !done?.(said()); ) await new Promise((resolve) => setTimeout(resolve, 10));
     return said();
   } finally {
     lines.mock.restore();

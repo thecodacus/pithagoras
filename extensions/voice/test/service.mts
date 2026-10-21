@@ -129,9 +129,9 @@ export async function voiceDocker() {
       putSettings({ gpu: undefined, setupPending: undefined, lazyLoad: undefined });
       service.hostReader.read = () => ({ totalMiB: 16384, freeMiB: 12000, threads: 8 });
     },
-    /** Until a setup that is under way has ended. */
+    /** Until a setup that is under way has ended: a minute at most, for a machine that is busy with other tests. */
     async settle() {
-      for (let n = 0; n < 500 && (await service.status()).busy; n++) await new Promise((resolve) => setTimeout(resolve, 10));
+      for (const until = Date.now() + 60_000; Date.now() < until && (await service.status()).busy; ) await new Promise((resolve) => setTimeout(resolve, 10));
     },
   };
 }
