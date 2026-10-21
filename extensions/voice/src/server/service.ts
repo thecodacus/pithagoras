@@ -60,8 +60,18 @@ export interface ServiceStatus { available: boolean; state: string; busy: boolea
 /** What `status` last found: where voice mode listens and speaks is asked at each of its requests, and has to be answered at once. */
 let seen: ServiceStatus | undefined;
 export const lastSeen = () => seen;
+/**
+ * The engines of the running container, from when they were first found answering until the container is found stopped,
+ * gone or being made again. A health check that is slow once, as an engine busy speaking may be, or a Docker slow to
+ * answer, does not take them away from voice mode in the middle of a conversation.
+ */
+let served: VoiceChoice | undefined;
+export const serving = () => served;
 export async function status(): Promise<ServiceStatus> {
-  return (seen = await statusNow());
+  seen = await statusNow();
+  if (seen.state === 'running') served = seen.choice;
+  else if (seen.state !== 'starting' && seen.state !== 'unavailable') served = undefined;
+  return seen;
 }
 async function statusNow(): Promise<ServiceStatus> {
   const d = docker();
