@@ -109,6 +109,35 @@ test("what a container wrote is its output and its errors as text, from Docker's
   assert.equal(demux(Buffer.from([1, 0, 0, 0, 0, 0, 0, 9, 104, 105]), false), "hi");
 });
 
+test("an extension reads how its own containers were made and how they stand, and those it took over, and not another's", async () => {
+  const { forExtension } = dockerFor(dataDir());
+  const voice = forExtension("pithagoras-voice"), other = forExtension("someone-else");
+  await voice.containers.create("dk-inspect", {
+    Image: "voice:1",
+    Env: ["VOICE_TTS=breeze"],
+    Cmd: ["bash", "-c", "serve"],
+    HostConfig: { NetworkMode: "container:portal", DeviceRequests: [{ Driver: "nvidia", DeviceIDs: ["GPU-1"], Capabilities: [["gpu"]] }], RestartPolicy: { Name: "no" } },
+  });
+  const made = (await voice.containers.inspect("dk-inspect")) as any;
+  assert.deepEqual([made.Config.Env, made.Config.Cmd, made.Config.Labels[OWNER_LABEL]], [["VOICE_TTS=breeze"], ["bash", "-c", "serve"], "pithagoras-voice"]);
+  assert.equal(made.HostConfig.NetworkMode, "container:portal");
+  assert.deepEqual(made.HostConfig.DeviceRequests[0].DeviceIDs, ["GPU-1"]);
+  assert.deepEqual([made.State.Running, made.State.ExitCode], [false, 0]);
+  Object.assign(docker.containers.find((c) => c.Name === "dk-inspect")!, { State: "exited", code: 1, error: "could not select device driver" });
+  const ended = (await voice.containers.inspect("dk-inspect")) as any;
+  assert.deepEqual([ended.State.Status, ended.State.ExitCode, ended.State.Error], ["exited", 1, "could not select device driver"]);
+  await assert.rejects(other.containers.inspect("dk-inspect"), { status: 403, message: /dk-inspect is pithagoras-voice's container, not someone-else's/ });
+  assert.equal(await voice.containers.inspect("dk-none"), undefined, "nothing where there is none");
+  // One the portal made before its app was an extension: nobody's until it is taken over, then read as one's own.
+  docker.containers.push({ Id: "core000000000", Name: "dk-core-made", Image: "voice:old", State: "running", Labels: { "pithagoras.addon": "voice" }, Tty: true, out: "", err: "", HostConfig: { NetworkMode: "container:old-portal", DeviceRequests: [{ DeviceIDs: ["GPU-2"] }] } });
+  await assert.rejects(voice.containers.inspect("dk-core-made"), { status: 403, message: /take it over first/ });
+  await voice.containers.adopt("dk-core-made");
+  const adopted = (await voice.containers.inspect("dk-core-made")) as any;
+  assert.deepEqual([adopted.Id, adopted.HostConfig.NetworkMode, adopted.HostConfig.DeviceRequests[0].DeviceIDs], ["core000000000", "container:old-portal", ["GPU-2"]]);
+  await voice.containers.remove("dk-core-made");
+  await voice.containers.remove("dk-inspect");
+});
+
 test("an extension's volumes are its own as its containers are", async () => {
   const { forExtension } = dockerFor(dataDir());
   const browser = forExtension("pithagoras-browser"), voice = forExtension("pithagoras-voice");

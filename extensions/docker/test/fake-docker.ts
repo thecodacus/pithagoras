@@ -25,8 +25,10 @@ export interface FakeContainer {
   Ports?: { PrivatePort: number; PublicPort?: number; Type: string; IP?: string }[];
   /** What it was made with: Docker's create body. */
   made?: Record<string, unknown>;
-  /** The exit code `wait` answers with. */
+  /** The exit code `wait` answers with, and inspect has. */
   code?: number;
+  /** Why it could not run, as inspect has it. */
+  error?: string;
 }
 
 /** What a list's `filters` asks of something's labels: each "key" there, and each "key=value" so. */
@@ -117,9 +119,18 @@ export async function fakeDocker() {
       }
       if ((m = /^\/containers\/([^/]+)\/json$/.exec(p))) {
         const c = find(m[1]);
-        return c
-          ? send(200, { Id: c.Id, Name: `/${c.Name}`, Config: { Image: c.Image, Tty: c.Tty, Labels: c.Labels, ...(c.User !== undefined ? { User: c.User } : {}) }, State: { Status: c.State, Running: c.State === "running" }, HostConfig: c.HostConfig ?? {}, Mounts: c.Mounts ?? [], NetworkSettings: { Networks: c.Networks ?? {} } })
-          : send(404, { message: `No such container: ${m[1]}` });
+        if (!c) return send(404, { message: `No such container: ${m[1]}` });
+        // Docker's create body is the container's Config, with its HostConfig and NetworkingConfig apart.
+        const { HostConfig: madeHost, NetworkingConfig: _networking, ...config } = c.made ?? {};
+        return send(200, {
+          Id: c.Id,
+          Name: `/${c.Name}`,
+          Config: { ...config, Image: c.Image, Tty: c.Tty, Labels: c.Labels, ...(c.User !== undefined ? { User: c.User } : {}) },
+          State: { Status: c.State, Running: c.State === "running", ExitCode: c.code ?? 0, Error: c.error ?? "" },
+          HostConfig: c.HostConfig ?? madeHost ?? {},
+          Mounts: c.Mounts ?? [],
+          NetworkSettings: { Networks: c.Networks ?? {} },
+        });
       }
       if ((m = /^\/containers\/([^/]+)\/(start|stop)$/.exec(p))) {
         const c = find(m[1]);

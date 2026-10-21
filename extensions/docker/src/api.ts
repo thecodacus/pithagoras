@@ -72,6 +72,12 @@ export interface Docker {
     /** The end of what it wrote, both its output and its errors, as text. */
     logs(name: string, options?: { tail?: number }): Promise<string>;
     /**
+     * How one of this extension's containers was made, and how it stands: Docker's own inspect body (`Config`,
+     * `HostConfig`, `State`, …), as `create` takes Docker's own create body. Nothing where there is none; refused as
+     * `start` is for one that is another's, or nobody's.
+     */
+    inspect(name: string): Promise<Record<string, unknown> | undefined>;
+    /**
      * A container made before there was this extension, which carries no extension's name (one of the portal's own,
      * from before its app was an extension), made this extension's from now on. Another extension's is refused.
      */

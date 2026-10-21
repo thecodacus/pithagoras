@@ -195,6 +195,8 @@ export function dockerFor(dataDir: string) {
           if (!found) throw new DockerError(`There is no container ${name}`, 404);
           return logs(found.Id, Math.min(Math.max(1, Math.floor(options?.tail ?? TAIL)), MOST_TAIL), Boolean(found.Config?.Tty));
         },
+        // Docker's whole answer: how it was made, and how it stands.
+        inspect: (name) => own(who, name),
         async adopt(name) {
           const found = await inspect(name);
           if (!found) throw new DockerError(`There is no container ${name}`, 404);
