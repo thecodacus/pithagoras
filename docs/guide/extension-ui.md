@@ -2139,8 +2139,10 @@ as it always has.
 What this cannot stop:
 
 - Code that never yields, a loop or a long synchronous call, holds the whole
-  portal, and code that takes all the memory ends it. Both are code in the
-  portal's process; a restart starts the half again.
+  portal, and code that takes all the memory ends it: both run in the
+  portal's own process, and a restart starts the half again. Remove the
+  package with `pi remove <spec>` where the portal runs (in its container),
+  then restart it.
 - A timer or a process the half left behind goes on until the portal
   restarts; its errors are not said again.
 - A package's pi extension (`pi.extensions`) runs in each chat's pi, not here,
