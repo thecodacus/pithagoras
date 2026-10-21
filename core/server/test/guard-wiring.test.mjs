@@ -95,6 +95,8 @@ async function run(cwd, options = {}) {
 }
 const textOf = (result) => JSON.stringify(result.result);
 const chat = () => mkdtempSync(path.join(process.env.WORKSPACE_ROOT, "chat-"));
+/** A conversation with nobody to answer a dialog, as a routine's run: what a rule holds after a suspected injection is refused there (see guard-asks.test.mjs for where it is asked). */
+const nobodyToAsk = { dialogs: false };
 
 test("a colleague's scripted command is refused by pi, end to end, and leaves no trace", async () => {
   const cwd = chat();
@@ -119,7 +121,7 @@ test("by default the conversation is the primary user's, and an ordinary command
 test("a result of an MCP server's tool is wrapped, and the next push is refused", async () => {
   const cwd = chat();
   script = [{ name: "mcp", args: { url: "https://example.test" } }, { name: "bash", args: { command: "git push origin main" } }];
-  const { results } = await run(cwd);
+  const { results } = await run(cwd, nobodyToAsk);
   assert.equal(results.length, 2);
   assert.match(textOf(results[0]), /<<<untrusted:[0-9a-f]{16}>>>/, "the page came wrapped as somebody else's words");
   assert.equal(results[1].isError, true);
@@ -143,7 +145,7 @@ test("what a conversation read stays read when it is opened again", async () => 
 
   // The one result is in the history, so the model's next call is the second of the script.
   script = [{ name: "mcp", args: {} }, { name: "bash", args: { command: "git push origin main" } }];
-  const again = await run(cwd, { sessionFile: first.file });
+  const again = await run(cwd, { ...nobodyToAsk, sessionFile: first.file });
   assert.equal(again.results.length, 1);
   assert.match(textOf(again.results[0]), /Refused \(publish\)/, "a guard that starts again has not forgotten what the conversation read");
 });
@@ -201,7 +203,7 @@ test("what a tool declares holds as pi runs it: its pages are outside content, w
   ({ results } = await run(chat()));
   assert.equal(results[0].isError, false, "nothing read, nothing held");
   script = [{ name: "mcp", args: {} }, { name: "share_note", args: { to: "team" } }];
-  ({ results } = await run(chat()));
+  ({ results } = await run(chat(), nobodyToAsk));
   assert.match(textOf(results[1]), /Refused \(upload\)/);
 });
 
