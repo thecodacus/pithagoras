@@ -500,6 +500,8 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     heartbeatAgent?: string;
     /** Told the chat's model when a spoken turn is about to run on another: see useVoiceModel. */
     rememberChatModel?: (provider: string, modelId: string) => void;
+    /** Whether a reload that is due may happen between two requests of a run: see prepareEachTurn. */
+    canReloadNow?: () => boolean;
   }): Promise<SdkPiClient> {
     // Imported lazily so the server still boots (and the container executor
     // still works) if the SDK cannot initialise in this environment.
@@ -705,6 +707,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     client.portalSessionId = opts.sessionId;
     client.dialogs = opts.dialogs !== false;
     client.rememberChatModel = opts.rememberChatModel;
+    client.canReloadNow = opts.canReloadNow;
     if (eventBus && resourceLoader) {
       client.bus = eventBus;
       client.unbridge = bridgeSubagents(
@@ -721,7 +724,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       client.voiceFirst = voiceFirst;
       client.audioRule = audioRule;
       client.loader = resourceLoader;
-      client.sayAudioRuleEachTurn();
+      client.prepareEachTurn();
     }
     // The tool a call through the gateway called, from its start to its end.
     const lazyCalls = new Map<string, string>();
@@ -969,6 +972,8 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     message: string,
     options?: { voice?: boolean; images?: ImageContent[]; steer?: boolean },
   ): Promise<PromptTaken> {
+    // See `reloading`. Failed or not, the chat is what it left.
+    if (this.reloading) await this.reloading.catch(() => {});
     if (options?.voice) {
       this.useVoiceModel();
       this.voiceFirst?.arm(this.isIdle());
@@ -1116,7 +1121,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
    *
    * In before pi takes the message, so a run it starts has the rule from its
    * first turn: pi's prompt is built again at once. Every turn after that is
-   * seen to by sayAudioRuleEachTurn, whoever set its prompt.
+   * seen to by prepareEachTurn, whoever set its prompt.
    */
   private sayAudioRule(spoken: boolean): boolean {
     if (!spoken || !this.audioRule?.set(true)) return false;
@@ -1160,17 +1165,24 @@ export class SdkPiClient extends EventEmitter implements PiClient {
   }
 
   /**
-   * The rule as it should be, in the prompt of every turn after a run's first.
+   * What pi's own preparation of every turn after a run's first is to find.
    *
-   * pi takes that prompt afresh between turns, from the options the run was
-   * started with: what it appends to its own prompt, and the whole text where
-   * an extension forced one for the run (pi-background-tasks sets one for every
-   * run on the test host). Those say what they were given when the run started,
-   * so a message queued into a run that is going would be answered without the
-   * rule, or with an earlier wording of it. So before pi builds each turn's
-   * prompt from them, both are made to say what the rule says now.
+   * A reload that became due while the run went on (see reloadIdle), where
+   * nothing beside the run would be cut off by it (`canReloadNow`): between two
+   * requests no tool is running, and pi's preparation takes the tools again
+   * from what the reload left, so the next request has them. Where it cannot,
+   * the chat is reloaded once the run is over.
+   *
+   * And the rule as it should be, in the prompt. pi takes that prompt afresh
+   * between turns, from the options the run was started with: what it appends
+   * to its own prompt, and the whole text where an extension forced one for
+   * the run (pi-background-tasks sets one for every run on the test host).
+   * Those say what they were given when the run started, so a message queued
+   * into a run that is going would be answered without the rule, or with an
+   * earlier wording of it. So before pi builds each turn's prompt from them,
+   * both are made to say what the rule says now.
    */
-  private sayAudioRuleEachTurn(): void {
+  private prepareEachTurn(): void {
     const session = this.session;
     const agent = session?.agent;
     const rule = this.audioRule;
@@ -1178,6 +1190,14 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     const prepare = agent?.prepareNextTurnWithContext;
     if (!rule || !loader || typeof prepare !== "function") return;
     agent.prepareNextTurnWithContext = async (turn: unknown, signal: unknown) => {
+      if (this.reloadDue && this.canReloadNow?.()) {
+        try {
+          await this.reload();
+        } catch (e) {
+          // The run goes on with what it had, as a chat that could not be reloaded while idle does.
+          console.error(`[portal] could not reload ${this.portalSessionId ?? "a chat"} between two steps: ${(e as Error).message}`);
+        }
+      }
       const options = session._runSystemPromptOptions as { appendSystemPrompt?: unknown; forceSystemPrompt?: unknown } | undefined;
       if (options) {
         const after = loader.appendedByPi();
@@ -1821,7 +1841,31 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     await this.session.compact();
   }
 
+  /** See PiClient.reloadDue. */
+  reloadDue = false;
+
+  /** Set by create(): whether a reload that is due may happen between two requests of a run. See prepareEachTurn. */
+  canReloadNow?: () => boolean;
+
+  /**
+   * A reload under way. A message handed over meanwhile waits for it rather than meet the extensions half loaded:
+   * one sent into a run that is being reloaded between two of its steps, or one that started on its way just as a run
+   * was over and its chat was reloaded.
+   */
+  private reloading?: Promise<void>;
+
   async reload(): Promise<void> {
+    this.reloadDue = false;
+    const reloading = this.loadAgain();
+    this.reloading = reloading;
+    try {
+      await reloading;
+    } finally {
+      if (this.reloading === reloading) this.reloading = undefined;
+    }
+  }
+
+  private async loadAgain(): Promise<void> {
     await this.session.reload();
     // Reloading has extensions register their providers again, which puts the
     // registry's model, with its own window, back on the session.

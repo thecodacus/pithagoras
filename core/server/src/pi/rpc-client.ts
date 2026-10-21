@@ -38,6 +38,9 @@ export class PiRpcClient extends EventEmitter implements PiClient {
   >();
   private closed = false;
 
+  /** See PiClient.reloadDue. pi in its container reloads only between runs: the portal does that once the run is over. */
+  reloadDue = false;
+
   /**
    * `dialogs` is false where nobody can answer a dialog an extension opens (see showsDialogs): pi's RPC mode
    * sends each as a request and waits for the answer, so it is answered here at once with "cancelled", which
@@ -203,6 +206,7 @@ export class PiRpcClient extends EventEmitter implements PiClient {
   }
 
   async reload(): Promise<void> {
+    this.reloadDue = false;
     await this.data("reload", {}, LONG_COMMAND_MS);
   }
 

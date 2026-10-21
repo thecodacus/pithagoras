@@ -1187,6 +1187,7 @@ class SessionManager extends EventEmitter {
       // A chat that names no model is reopened on the model of its last answer,
       // and after a spoken turn on the voice model that would be the voice's.
       rememberChatModel: (provider, model) => keepChatModel(sessionId, provider, model),
+      canReloadNow: () => this.canReloadNow(sessionId),
       // A heartbeat is the agent looking around on its own: its own context,
       // but held to reading by a role of its own. See heartbeat.ts.
       ...(session.kind === "heartbeat"
@@ -1374,6 +1375,7 @@ class SessionManager extends EventEmitter {
         this.inRun.delete(sessionId);
         this.settleWaiting(sessionId);
         if (!this.failed.delete(sessionId)) this.mark(sessionId, "idle");
+        if (client.reloadDue) void this.reloadSettled(sessionId, client);
       }
     });
 
@@ -2862,11 +2864,13 @@ class SessionManager extends EventEmitter {
 
   /**
    * pi reads which packages to load when a conversation starts, so a package
-   * switched on or off reaches the open ones by reloading them. Only the idle:
-   * a reload rebinds every extension, which is not something to do under a run or a
-   * compaction — nor under an edit, whose rewrite of pi's file a reload could
-   * read half-done or write over. Those are counted rather than skipped in
-   * silence, since they keep what they had until they are reloaded.
+   * switched on or off reaches the open ones by reloading them. The idle ones
+   * at once. A reload rebinds every extension, which is not something to do in
+   * the middle of a request or a compaction — nor under an edit, whose rewrite
+   * of pi's file a reload could read half-done or write over. A chat that is
+   * working is marked due instead (PiClient.reloadDue) and counted as waiting:
+   * it is reloaded at its next step, between two requests of its run, or else
+   * once the run is over (reloadSettled).
    *
    * Held like an edit while it runs, so a message arriving in the middle — from
    * another tab, a channel — waits for the extensions to be back rather than
@@ -2876,9 +2880,8 @@ class SessionManager extends EventEmitter {
     let waiting = 0;
     const done = await Promise.all(
       [...this.live.entries()].map(async ([sessionId, { client }]) => {
-        // A subagent in the background would be stopped by the reload: its
-        // chat is idle, and still working.
-        if (this.isBusy(sessionId) || this.compacting.has(sessionId) || this.editing.has(sessionId) || this.backgroundWork(sessionId) || extensionHolds(sessionId)) {
+        if (this.isBusy(sessionId) || this.reloadCutsOff(sessionId)) {
+          client.reloadDue = true;
           waiting++;
           return false;
         }
@@ -2893,6 +2896,38 @@ class SessionManager extends EventEmitter {
       })
     );
     return { reloaded: done.filter(Boolean).length, waiting };
+  }
+
+  /**
+   * Whether reloading the chat's pi now would cut off something that goes on
+   * beside a run: a compaction, an edit, or what canReloadNow names.
+   */
+  private reloadCutsOff(sessionId: string): boolean {
+    return this.compacting.has(sessionId) || this.editing.has(sessionId) || !this.canReloadNow(sessionId);
+  }
+
+  /**
+   * Whether a reload may happen while the chat works, between two requests of
+   * a run. Not while a subagent works in the background, which the reload
+   * would stop, nor while an extension holds the chat's pi.
+   */
+  private canReloadNow(sessionId: string): boolean {
+    return !this.backgroundWork(sessionId) && !extensionHolds(sessionId);
+  }
+
+  /**
+   * A reload that became due while the chat worked and that no step of its run
+   * could take, now that the run is over. Not where pi has started the next
+   * run already, with a message it took as this one ended (a step of that run
+   * takes it), nor under what a reload would cut off: due until then.
+   */
+  private async reloadSettled(sessionId: string, client: PiClient): Promise<void> {
+    if (client.isIdle?.() === false || this.reloadCutsOff(sessionId)) return;
+    try {
+      await this.withEdit(sessionId, () => client.reload());
+    } catch (e) {
+      console.error(`[portal] could not reload ${sessionId}: ${(e as Error).message}`);
+    }
   }
 
   async abort(sessionId: string): Promise<void> {

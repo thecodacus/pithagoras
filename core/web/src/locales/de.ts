@@ -680,7 +680,7 @@ const de: Locale = {
     "{name} is on.": "{name} ist an.",
     "{name} is off.": "{name} ist aus.",
     "{n} open conversations reloaded.": { one: "{n} offenes Gespräch neu geladen.", other: "{n} offene Gespräche neu geladen." },
-    "{n} still working — they keep it as it was until /reload, or their next start.": { one: "{n} arbeitet noch — behält den alten Stand bis /reload oder zum nächsten Start.", other: "{n} arbeiten noch — behalten den alten Stand bis /reload oder zum nächsten Start." },
+    "{n} still working — they take the change at their next step.": { one: "{n} arbeitet noch — übernimmt die Änderung bei seinem nächsten Schritt.", other: "{n} arbeiten noch — übernehmen die Änderung bei ihrem nächsten Schritt." },
     "Find packages": "Pakete finden",
     "Published for pi on npm: tools, skills, providers and themes. The most used first.": "Für pi auf npm veröffentlicht: Tools, Skills, Anbieter und Designs. Die meistgenutzten zuerst.",
     "Install by name": "Nach Namen installieren",
@@ -818,7 +818,7 @@ const de: Locale = {
     "Move {option} up": "{option} nach oben",
     "Move {option} down": "{option} nach unten",
     // components/FeatureAddons.tsx
-    "Idle chats have it now; {n} busy chats pick it up once they are idle and reloaded (/reload).": { one: "Chats ohne laufende Aufgabe haben es jetzt; ein beschäftigter Chat bekommt es, sobald er frei ist und neu geladen wird (/reload).", other: "Chats ohne laufende Aufgabe haben es jetzt; {n} beschäftigte Chats bekommen es, sobald sie frei sind und neu geladen werden (/reload)." },
+    "Idle chats have it now; {n} busy chats have it from their next step.": { one: "Chats ohne laufende Aufgabe haben es jetzt; ein beschäftigter Chat hat es ab seinem nächsten Schritt.", other: "Chats ohne laufende Aufgabe haben es jetzt; {n} beschäftigte Chats haben es ab ihrem nächsten Schritt." },
     "Chats have it from now on.": "Chats haben es ab jetzt.",
     "Interrupt": "Unterbrechen",
     "The agent waits for the subagent's answer before it goes on. One agent works at a time — safe on a single GPU or a local model.": "Der Agent wartet auf die Antwort des Subagents, bevor er weitermacht. Es arbeitet immer nur ein Agent — sicher auf einer einzelnen GPU oder mit einem lokalen Modell.",

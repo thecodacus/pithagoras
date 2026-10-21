@@ -81,6 +81,13 @@ export interface PiCommand {
 export interface PiClient extends EventEmitter {
   readonly running: boolean;
   /**
+   * Set where the open chats were reloaded while this one was working (see
+   * reloadIdle): it is loaded again at its next step, where the executor can
+   * do that between two requests of a run, or else once the run is over.
+   * Cleared by a reload.
+   */
+  reloadDue?: boolean;
+  /**
    * Speak to a subagent an extension announced over the subagent protocol
    * (see subagent-protocol.ts). False when this executor cannot reach the
    * extensions' event bus. Optional: only the in-process client can.

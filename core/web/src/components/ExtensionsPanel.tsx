@@ -181,7 +181,7 @@ export function ExtensionsPanel({
       if (r.reloaded) parts.push(() => tp(r.reloaded, "{n} open conversation reloaded.", "{n} open conversations reloaded."));
       if (r.waiting)
         parts.push(() =>
-          tp(r.waiting, "{n} still working — it keeps it as it was until /reload, or its next start.", "{n} still working — they keep it as it was until /reload, or their next start."),
+          tp(r.waiting, "{n} still working — it takes the change at its next step.", "{n} still working — they take the change at their next step."),
         );
       setNote(() => () => parts.map((part) => part()).join(" "));
     });
