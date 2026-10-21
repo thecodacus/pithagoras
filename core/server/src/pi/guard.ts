@@ -1875,17 +1875,21 @@ const flaggedAs = (toolName: string, subject: string, labels: string[]): string 
 
 /**
  * What the primary user is asked about a call a rule holds after a suspected
- * prompt injection (see guardExtension): the call, what was flagged, and the
- * rule and why it holds such a call.
+ * prompt injection (see guardExtension): the rule and why it holds such a call,
+ * what was flagged, and the call. The call is the agent's, and so may be what
+ * the injection asked for: it comes last, so that whatever it is (a long
+ * command, or lines that read like the guard's) the guard's own lines come
+ * first and stay at the top of the dialog.
  */
 function heldQuestion(toolName: string, subject: string, rule: Rule, flagged: string[]): { title: string; message: string } {
   return {
-    title: `Let ${toolName} run after a suspected prompt injection?`,
+    title: `Let ${toolName} run after a suspected prompt injection? (${rule.name})`,
     message: [
-      `Call: ${subject}.`,
-      `Flagged: ${flagged.join("; ")}.`,
       `After a result that looks like a prompt injection the guard holds this back (${rule.name}): ${rule.why}.`,
+      `Flagged: ${flagged.join("; ")}.`,
       "Yes lets this one call run; No refuses it.",
+      "The call, as the agent wrote it:",
+      subject,
     ].join("\n"),
   };
 }
@@ -2349,8 +2353,9 @@ export function guardExtension(
         ...[...readByCalls.values()].filter((signals) => signals.length > 0).map((signals) => `what the calls of a tool still running read (it ${signals.map((s) => s.label).join("; ")})`),
       ];
       const { title, message } = heldQuestion(event.toolName, subject, rule, flaggedNow);
-      return ctx.ui.confirm(title, message).then((yes: boolean) => {
-        if (!yes) return refuse();
+      // Only a yes: the answer comes from a page as it was sent (see respondUi), and anything else refuses.
+      return ctx.ui.confirm(title, message).then((yes: unknown) => {
+        if (yes !== true) return refuse();
         note("allowed-by-approval", `${rule.name} — you allowed this one call in the chat after a suspected prompt injection`);
         return undefined;
       });

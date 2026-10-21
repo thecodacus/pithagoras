@@ -167,13 +167,15 @@ appeared.
 
 Where you are there to answer, a call a rule holds is put to you in the chat
 before it runs: in a chat of yours, and in a conversation you started on the
-Agent page, while you are the one speaking. The dialog names the tool and what it
-was given, the result that was flagged and what made it look like an injection,
-and the rule that holds the call and why. **Yes** lets that one call run, and
-[Audit](/guide/sessions#audit) records it as *Allowed by approval*; the
-conversation stays tainted, so the next such call is asked about again. **No**,
-closing the dialog or stopping the run refuses it. The run waits for your answer,
-and a page that opens the chat later is shown the dialog.
+Agent page, while you are the one speaking. The dialog names the tool and the
+rule that holds the call in its title. Its text says first why the rule holds such
+a call, then the result that was flagged and what made it look like an injection,
+and last the call as the agent wrote it: the call may be what the injection asked
+for, so however long it is, the guard's own lines stay at the top. **Yes** lets
+that one call run, and [Audit](/guide/sessions#audit) records it as *Allowed by
+approval*; the conversation stays tainted, so the next such call is asked about
+again. **No**, closing the dialog or stopping the run refuses it. The run waits
+for your answer, and a page that opens the chat later is shown the dialog.
 
 Where nobody can answer, the call is refused: a routine's run, a heartbeat, a chat
 on a channel, and a conversation in which somebody other than the primary user is

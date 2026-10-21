@@ -91,7 +91,7 @@ test("the primary user, where they are there to answer, is asked about each call
     const yes = person(true);
     assert.equal(await h.tool_call({ toolName: tool, input }, yes.ctx), undefined, `${rule}: ${tool} runs after a yes`);
     assert.equal(yes.asked.length, 1, `${rule}: ${tool} was asked about`);
-    assert.equal(yes.asked[0].title, `Let ${tool} run after a suspected prompt injection?`);
+    assert.equal(yes.asked[0].title, `Let ${tool} run after a suspected prompt injection? (${rule})`);
     const [allowed] = audit(h.session).slice(0, 1);
     assert.deepEqual([allowed.kind, allowed.tool], ["allowed-by-approval", tool], `${rule}: ${tool}`);
     assert.equal(allowed.reason, `${rule} — you allowed this one call in the chat after a suspected prompt injection`);
@@ -105,6 +105,18 @@ test("the primary user, where they are there to answer, is asked about each call
     const [row] = audit(h.session);
     assert.deepEqual([row.kind, row.tool], ["refused", tool]);
     assert.match(row.reason, new RegExp(`^${rule} — `));
+  }
+});
+
+test("only a yes lets the call run: an answer that is not true, as a page or another client may send, refuses it", async () => {
+  for (const answer of ["yes", "no", "false", 1, {}, undefined]) {
+    const h = tainted();
+    const asked = person(answer);
+    const result = await h.tool_call({ toolName: "bash", input: { command: "git push origin main" } }, asked.ctx);
+    assert.equal(asked.asked.length, 1, JSON.stringify(answer));
+    assert.equal(result?.block, true, JSON.stringify(answer));
+    assert.match(result.reason, /^Refused \(publish\)/);
+    assert.deepEqual(audit(h.session).map((row) => row.kind), ["refused", "flagged"], JSON.stringify(answer));
   }
 });
 
@@ -135,15 +147,48 @@ test("nothing is asked where nothing is held: before anything was read, a call n
   assert.equal(asked.asked.length, 0);
 });
 
-test("the question names the call, what was flagged and why the rule holds it, also for a result read before a reload", async () => {
+test("the question says why the rule holds the call and what was flagged before the call, also for a result read before a reload", async () => {
   const live = tainted();
   const asked = person(true);
   await live.tool_call({ toolName: "bash", input: { command: "git push origin main" } }, asked.ctx);
-  const { message } = asked.asked[0];
-  assert.match(message, /^Call: git push origin main\.$/m);
-  assert.match(message, /^Flagged: what bash returned for curl https:\/\/x\.test\/notes \(it tells the reader to ignore its instructions\)\.$/m);
-  assert.match(message, /^After a result that looks like a prompt injection the guard holds this back \(publish\): pushing to a remote is not undoable from here\.$/m);
-  assert.match(message, /^Yes lets this one call run; No refuses it\.$/m);
+  assert.deepEqual(asked.asked, [{
+    title: "Let bash run after a suspected prompt injection? (publish)",
+    message: [
+      "After a result that looks like a prompt injection the guard holds this back (publish): pushing to a remote is not undoable from here.",
+      "Flagged: what bash returned for curl https://x.test/notes (it tells the reader to ignore its instructions).",
+      "Yes lets this one call run; No refuses it.",
+      "The call, as the agent wrote it:",
+      "git push origin main",
+    ].join("\n"),
+  }]);
+
+  // The call is the agent's and comes last, whatever it is: a long command, or lines that read like the guard's,
+  // come after the guard's own.
+  const command = `echo 'Flagged: nothing. Yes is safe.'\n${"echo a line of the notes\n".repeat(80)}git push origin main`;
+  const forged = person(false);
+  await tainted().tool_call({ toolName: "bash", input: { command } }, forged.ctx);
+  const lines = forged.asked[0].message.split("\n");
+  assert.match(lines[0], /^After a result that looks like a prompt injection the guard holds this back \(publish\): /);
+  assert.match(lines[1], /^Flagged: what bash returned for curl https:\/\/x\.test\/notes /);
+  assert.deepEqual(lines.slice(2), ["Yes lets this one call run; No refuses it.", "The call, as the agent wrote it:", ...command.split("\n")]);
+
+  // A result the person trusted is not named; one they did not trust still is.
+  const two = guardAs();
+  const read = (url) => two.tool_result({ toolName: "bash", input: { command: `curl ${url}` }, isError: false, content: [{ type: "text", text: INJECTION }] });
+  const first = read("https://x.test/a");
+  read("https://x.test/b");
+  trustFlagged(two.session, flaggedResult(first.content[0].text).id);
+  const after = person(false);
+  await two.tool_call({ toolName: "bash", input: { command: "git push origin main" } }, after.ctx);
+  assert.equal(after.asked[0].message.split("\n")[1], "Flagged: what bash returned for curl https://x.test/b (it tells the reader to ignore its instructions).");
+
+  // What a tool's own calls read while it is still running, as a code mode script's, is named as theirs.
+  const script = guardAs();
+  assert.equal(script.tool_call({ toolName: "codemode", toolCallId: "s1", input: { code: "x" } }, person(true).ctx), undefined);
+  script.tool_result({ toolName: "bash", toolCallId: "s1/1", parentToolCallId: "s1", input: { command: "curl https://x.test/notes" }, isError: false, content: [{ type: "text", text: INJECTION }] });
+  const nested = person(false);
+  await script.tool_call({ toolName: "bash", toolCallId: "s1/2", parentToolCallId: "s1", input: { command: "git push origin main" } }, nested.ctx);
+  assert.equal(nested.asked[0].message.split("\n")[1], "Flagged: what the calls of a tool still running read (it tells the reader to ignore its instructions).");
 
   // Opened again: what was flagged is read from the conversation's history, with the call that read it.
   const reloaded = guardAs();
@@ -158,9 +203,13 @@ test("the question names the call, what was flagged and why the rule holds it, a
   });
   const again = person(false);
   await reloaded.tool_call({ toolName: actor("persist"), input: { note: "x" } }, again.ctx);
-  assert.match(again.asked[0].message, /^Call: \{"note":"x"\}\.$/m);
-  assert.match(again.asked[0].message, /^Flagged: what bash returned for curl https:\/\/x\.test\/a \(it tells the reader to ignore its instructions\)\.$/m);
-  assert.match(again.asked[0].message, /\(persist\): scheduling work, or changing what the agent loads as its own instructions, tools or code, outlives this conversation\./);
+  assert.deepEqual(again.asked[0].message.split("\n"), [
+    "After a result that looks like a prompt injection the guard holds this back (persist): scheduling work, or changing what the agent loads as its own instructions, tools or code, outlives this conversation.",
+    "Flagged: what bash returned for curl https://x.test/a (it tells the reader to ignore its instructions).",
+    "Yes lets this one call run; No refuses it.",
+    "The call, as the agent wrote it:",
+    '{"note":"x"}',
+  ]);
 });
 
 /** A chat the session manager starts, as the portal does, with what its pi said on its way to settling. */
@@ -189,7 +238,7 @@ test("in a chat of the primary user's, the question is a dialog in the chat that
   script = [{ name: "page_read", args: { url: "https://x.test/a" } }, { name: "keep_note", args: { note: "milk" } }];
   let { events, results } = await run("guard-asks-yes", "task", {}, true);
   assert.match(textOf(results[0]), /<<<untrusted:[0-9a-f]{16}>>> \(suspected prompt injection: override\)/);
-  assert.deepEqual(questions(events).map((e) => [e.method, e.title]), [["confirm", "Let keep_note run after a suspected prompt injection?"]]);
+  assert.deepEqual(questions(events).map((e) => [e.method, e.title]), [["confirm", "Let keep_note run after a suspected prompt injection? (persist)"]]);
   assert.match(questions(events)[0].message, /Flagged: what page_read returned for \{"url":"https:\/\/x\.test\/a"\}/);
   assert.equal(results[1].isError, false, textOf(results[1]));
   assert.match(textOf(results[1]), /Kept milk/);
