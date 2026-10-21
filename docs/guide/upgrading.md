@@ -524,10 +524,11 @@ service's addresses:
 
 Your voices, your voice settings otherwise, and each agent's voice stay as they
 were. A start on which the hand-off cannot be finished keeps everything, says so
-in the log, and goes on with it on the next start. Voice takes it up when it
-starts: `extension-data/pithagoras-voice/settings.json` then holds each setting
-it did not have of its own, and the log says what it took up. With Voice not
-installed the hand-off waits, nothing of it lost, until it is.
+in the log, and goes on with it on the next start. Past that, the service's
+addresses that you set as your own stay as you set them. Voice takes the
+hand-off up when it starts: `extension-data/pithagoras-voice/settings.json` then
+holds each setting it did not have of its own, and the log says what it took up.
+With Voice not installed the hand-off waits, nothing of it lost, until it is.
 
 ### Going back to a version before Voice was an extension
 
@@ -610,5 +611,6 @@ Run a release rather than `latest`, so that going back is changing one value. Ea
 
 Going back to a version from before Media was an extension also needs Media's files moved back, and what is left of its hand-off and its store out of the way, before step 3: see [Media is an extension](#going-back-to-a-version-before-it).
 Going back to a version from before Browser was an extension needs Browser removed first, and a local Chrome's profile moved back, and what is left of its hand-off and its folder out of the way, before step 3: see [Browser is an extension](#going-back-to-a-version-before-browser-was-an-extension).
+Going back to a version from before Voice's service was an extension needs Voice removed first, and what is left of its hand-off and its folder out of the way, before step 3: see [Voice's service is an extension](#going-back-to-a-version-before-voice-was-an-extension).
 
 From this version on, an older version does not start on a newer database: it stops at the page described above, because a newer version may have renamed or dropped columns, not only added them. Versions before this one open it anyway and run against it, so put the backup back before you start one of them. The backup from `backups/` is the database as it was before the newer version changed it, which is why going back means putting it back.
