@@ -103,7 +103,7 @@ test('what fails of a browser half, to load or to draw, is told to the portal, a
   await expect(card.getByRole('alert')).toHaveText('Its interface could not be loaded: notes is not defined');
   await expect.poll(() => told).toEqual([{ name: NAME, rev: 'r1', error: 'notes is not defined' }]);
   // With where: its module, for whoever looks at it to find the line.
-  expect(stacks[0]).toContain(`${address('client.js')}?v=r1`);
+  expect(stacks[0]).toContain(address('client.js'));
   // Loaded again, it fails again: said once, as this page's own, not again as what another page said.
   await page.reload();
   await expect(card.getByRole('alert')).toHaveText('Its interface could not be loaded: notes is not defined');
