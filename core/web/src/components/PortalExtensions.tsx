@@ -1,16 +1,12 @@
 import { VoiceAddon } from "./VoiceAddon";
 import { MemoryAddon, SubagentAddon } from "./FeatureAddons";
-import { useEffect, useId, useState } from "react";
-import { LuBot, LuBrain, LuCheck, LuGlobe, LuMic, LuRefreshCw } from "react-icons/lu";
-import { api, type BrowserStatus } from "../api";
-import { BrowserInstall } from "./BrowserInstall";
-import { LoadFailed } from "./SettingsUi";
+import { useId, useState } from "react";
+import { LuBot, LuBrain, LuMic } from "react-icons/lu";
 import { msg, t } from "../i18n";
 import { tabKeys } from "../tab-keys";
 
 /** The add-ons, in the order they are listed. */
 const addons = [
-  { id: 'browser', label: msg('Browser'), Icon: LuGlobe },
   { id: 'voice', label: msg('Voice'), Icon: LuMic },
   { id: 'subagents', label: msg('Subagents'), Icon: LuBot },
   { id: 'memory', label: msg('Memory'), Icon: LuBrain },
@@ -27,8 +23,8 @@ type Addon = typeof addons[number]['id'];
  */
 export function PortalExtensions({ onError }: { onError: (e: string) => void }) {
   const id = useId();
-  const [selected, setSelected] = useState<Addon>('browser');
-  const [visited, setVisited] = useState<Addon[]>(['browser']);
+  const [selected, setSelected] = useState<Addon>('voice');
+  const [visited, setVisited] = useState<Addon[]>(['voice']);
   const select = (addon: Addon) => {
     setSelected(addon);
     setVisited(previous => previous.includes(addon) ? previous : [...previous, addon]);
@@ -45,96 +41,9 @@ export function PortalExtensions({ onError }: { onError: (e: string) => void }) 
     </div>
     {addons.map(({ id: addon }) => <div key={addon} role="tabpanel" id={`${id}-${addon}-panel`}
       aria-labelledby={`${id}-${addon}-tab`} hidden={selected !== addon}>
-      {visited.includes(addon) && (addon === 'browser' ? <BrowserAddon onError={onError} />
-        : addon === 'voice' ? <VoiceAddon onError={onError} />
+      {visited.includes(addon) && (addon === 'voice' ? <VoiceAddon onError={onError} />
         : addon === 'subagents' ? <SubagentAddon onError={onError} />
         : <MemoryAddon onError={onError} />)}
     </div>)}
   </div>;
-}
-
-function BrowserAddon({ onError }: { onError: (e: string) => void }) {
-  const [status, setStatus] = useState<BrowserStatus | null>(null);
-  const [failed, setFailed] = useState<string | null>(null);
-
-  // Before the first read there is no page to put the error on, so the page says it; a poll that fails later goes to the banner.
-  const load = () =>
-    api
-      .browser()
-      .then((s) => {
-        setFailed(null);
-        setStatus(s);
-      })
-      .catch((e) => {
-        if (status) onError((e as Error).message);
-        else setFailed((e as Error).message);
-      });
-
-  useEffect(() => {
-    load();
-  }, []);
-
-  if (!status) {
-    if (failed) return <LoadFailed error={failed} onRetry={load} />;
-    return (
-      <p className="flex items-center gap-2 text-sm text-fg-subtle">
-        <LuRefreshCw className="h-3.5 w-3.5 animate-spin" /> {t("Loading…")}
-      </p>
-    );
-  }
-
-  const i = status.install;
-  const installed = i.container === "running" || i.container === "stopped";
-  const dockerMode = i.mode === "docker";
-
-  return (
-    <>
-      <div className="mt-4 rounded-xl border border-line bg-raised/40 p-3">
-        <div className="flex items-start gap-2.5">
-          <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-accent/10 text-accent">
-            <LuGlobe className="h-4 w-4" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <p className="text-sm text-fg">{t("Browser")}</p>
-              {installed && (
-                <span className="inline-flex items-center gap-1 text-[11px] text-ok">
-                  <LuCheck className="h-3 w-3" />
-                  {i.container === "running" ? t("running") : t("installed")}
-                </span>
-              )}
-            </div>
-            <p className="mt-0.5 text-[11px] text-fg-faint">
-              {t("A real browser with a profile that stays logged in. Sign into it once; the agent drives the same one afterwards and never handles a password.")}
-            </p>
-
-            {!i.available && (
-              <p className="mt-2 text-[11px] text-warn">
-                {t("Not possible here — the portal cannot reach Docker and there is no Chrome on the machine.")}
-              </p>
-            )}
-
-            {i.available && !installed && (
-              <p className="mt-2 text-[11px] text-fg-faint">
-                {dockerMode
-                  ? i.image
-                    ? t("Runs as its own container. The image is already downloaded.")
-                    : t("Runs as its own container. Installing downloads a 4.6GB image.")
-                  : t("Uses the Chrome on this machine ({binary}).", { binary: i.binary ?? "" })}
-              </p>
-            )}
-          </div>
-        </div>
-
-        <div className="mt-1">
-          <BrowserInstall status={status} reload={load} onError={onError} lifecycle />
-        </div>
-        {installed && (
-          <p className="mt-2 text-[11px] text-fg-faint">
-            {t("Removing keeps the profile, so its logins are still there if you install it again.")}
-          </p>
-        )}
-      </div>
-    </>
-  );
 }

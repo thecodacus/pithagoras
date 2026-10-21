@@ -559,7 +559,6 @@ test("the Stop button of voice mode is there at once when a run starts, and the 
   await page.route('**/api/sessions/test/commands', (route) => route.fulfill({ json: { commands: [] } }));
   await page.route('**/api/sessions/test/config', (route) => route.fulfill({ status: 503, json: {} }));
   await page.route('**/api/voice', (route) => route.fulfill({ json: { enabled: true } }));
-  await page.route('**/api/browser', (route) => route.fulfill({ json: { install: { container: 'running' } } }));
   await page.setViewportSize({ width: 1400, height: 860 });
   await page.goto('/tests/voice.html');
   await page.evaluate(() => { document.documentElement.dataset.motion = 'fancy'; });

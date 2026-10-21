@@ -1,16 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import { LuRefreshCw, LuTrash2 } from "react-icons/lu";
-import { api, type BrowserStatus } from "../api";
-import { t } from "../i18n";
+import { api, type BrowserState } from "./api";
+import { t } from "../portal";
 
 /**
  * Getting the agent's browser, and starting, stopping and removing it: what the
- * Browser page and Settings → Add-ons both offer. It was written twice and the
- * copies drifted: only one guarded a second click (a second 4.6 GB download),
- * only one showed the download or what went wrong with it.
+ * Browser page and its page in Settings both offer. It was written twice and the
+ * copies drifted: only one guarded a second click (a second download of the
+ * whole image), only one showed the download or what went wrong with it.
  *
- * Whether the agent is wired to the browser is the portal's to decide when it is
- * installed or removed, so nothing here does it.
+ * Whether the agent is wired to the browser is the server half's to decide when
+ * it is installed or removed, so nothing here does it.
  *
  * `lifecycle` also offers Stop and Remove for a browser that is running.
  */
@@ -20,7 +20,7 @@ export function BrowserInstall({
   onError,
   lifecycle,
 }: {
-  status: BrowserStatus;
+  status: BrowserState;
   reload: () => Promise<unknown>;
   /** An empty message takes back the last one: what was said of an action that went before is not said of this one. */
   onError: (message: string) => void;
@@ -77,7 +77,7 @@ export function BrowserInstall({
             disabled={busy}
             onClick={() => {
               onError("");
-              api.suggestBrowserPassword().then((r) => setPassword(r.password), (e) => onError((e as Error).message));
+              api.suggestPassword().then((r) => setPassword(r.password), (e) => onError((e as Error).message));
             }}
             className="rounded-lg bg-fg/5 px-2.5 py-1.5 text-[11px] text-fg-muted transition hover:bg-fg/10 disabled:opacity-40"
           >
@@ -93,28 +93,28 @@ export function BrowserInstall({
             disabled={working || (needsPassword && !password.trim())}
             onClick={() =>
               act(async () => {
-                if (password.trim()) await api.setBrowserConfig({ password: password.trim() });
-                await api.installBrowser();
+                if (password.trim()) await api.setConfig({ password: password.trim() });
+                await api.install();
               })
             }
             className={`${btn} bg-accent/12 text-accent ring-1 ring-inset ring-accent/25 hover:bg-accent/20`}
           >
             {working && <LuRefreshCw aria-hidden className="h-3.5 w-3.5 animate-spin" />}
-            {i.image || !dockerMode ? t("Install") : t("Install (downloads 4.6GB)")}
+            {i.image || !dockerMode ? t("Install") : t("Install (downloads a few GB)")}
           </button>
         )}
         {stopped && (
-          <button type="button" disabled={working} onClick={() => act(() => api.startBrowser())} className={`${btn} bg-accent/12 text-accent ring-1 ring-inset ring-accent/25 hover:bg-accent/20`}>
+          <button type="button" disabled={working} onClick={() => act(() => api.start())} className={`${btn} bg-accent/12 text-accent ring-1 ring-inset ring-accent/25 hover:bg-accent/20`}>
             {t("Start it")}
           </button>
         )}
         {i.container === "running" && lifecycle && (
-          <button type="button" disabled={working} onClick={() => act(() => api.stopBrowser())} className={quiet}>
+          <button type="button" disabled={working} onClick={() => act(() => api.stop())} className={quiet}>
             {t("Stop")}
           </button>
         )}
         {installed && (lifecycle || stopped) && (
-          <button type="button" disabled={working} onClick={() => act(() => api.removeBrowser(false))} className={`${quiet} hover:bg-danger/10 hover:text-danger`}>
+          <button type="button" disabled={working} onClick={() => act(() => api.remove())} className={`${quiet} hover:bg-danger/10 hover:text-danger`}>
             <LuTrash2 aria-hidden className="h-3.5 w-3.5" /> {t("Remove")}
           </button>
         )}

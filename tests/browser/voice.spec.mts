@@ -6,7 +6,6 @@ import { readFileSync } from 'node:fs';
 test.use({ installed: ['tests/fixtures/extensions/console'] });
 const sample = readFileSync(new URL('../fixtures/jfk.wav', import.meta.url));
 test.beforeEach(async ({ page }) => {
-  await page.route('**/api/browser', route => route.fulfill({ json: { running: false, sessions: [], install: { container: 'stopped' } } }));
   await page.route('**/api/sessions/test/commands', route => route.fulfill({ json: { commands: [] } }));
   await page.route('**/api/sessions/test/config', route => route.fulfill({ status: 503, json: {} }));
 });
@@ -214,58 +213,61 @@ test('live transcription begins before turn completion and previews recognized w
 });
 
 
-test('voice panels animate into browser, side window and simultaneous layouts', async ({ page }) => {
-  await page.addInitScript(() => {
-    // Streams, which have no server behind them here.
-    (window as any).EventSource=class { onmessage:any; onopen:any; close(){} };
-  });
-  const failures: string[] = []; page.on('pageerror', e => failures.push(e.message));
-  await page.route('**/api/voice', route => route.fulfill({ json: { enabled: true } }));
-  await page.route('**/api/browser', route => route.fulfill({ json: { install: { container: 'running' } } }));
-  await page.route('**/browser-ui/', route => route.fulfill({ contentType: 'text/html', body: '<body style="margin:0;background:#171a20;color:#d1d8e3;font:15px system-ui;padding:36px"><small style="color:#778294">EXAMPLE.COM</small><h1 style="font-weight:500">A browser, in view.</h1><p>The live page stays visible while you keep talking.</p></body>' }));
-  await page.goto('/tests/voice.html');
-  await page.getByRole('button', { name: 'Turn on hands-free voice' }).click();
-  await expect(page.getByRole('status')).toHaveText('Listening', { timeout: 25000 });
-  await page.getByRole('button', { name: 'Voice settings' }).click();
-  await page.getByRole('group', { name: 'Sound effects' }).getByRole('button', { name: 'Off' }).click();
-  expect(await page.evaluate(() => localStorage.getItem('voiceSounds'))).toBe('off');
-  await page.keyboard.press('Escape');
-  await page.getByRole('button', { name: 'Use browser', exact: true }).click();
-  await expect(page.getByRole('region', { name: 'Live browser', exact: true })).toBeVisible();
-  await expect(page.locator('.voice-stage')).toHaveClass(/is-browsing/);
-  await settled(page);
-  await page.getByRole('button', { name: 'Use terminal', exact: true }).click();
-  await expect(page.getByRole('region', { name: 'Console', exact: true })).toBeVisible();
-  await expect(page.getByLabel('Console output')).toContainText('42 modules transformed');
-  await expect(page.getByLabel('Tool activity')).toContainText('Running a command');
-  await settled(page);
-  const browser = await page.locator('.voice-browser-window').boundingBox();
-  const consoleWindow = await page.locator('.voice-extension-window[data-extension="test-console"]').boundingBox();
-  expect(browser!.width).toBeGreaterThan(consoleWindow!.width * 1.8);
-  expect(browser!.x + browser!.width).toBeLessThan(consoleWindow!.x);
+// An extension's window in the middle as well, beside the console's at the side: the portal's tests' stand-in for one.
+test.describe('with a window in the middle', () => {
+  test.use({ installed: ['tests/fixtures/extensions/console', 'tests/fixtures/extensions/viewer'] });
 
-  await page.getByRole('button', { name: 'Minimize browser' }).click();
-  await settled(page);
-  const orb = await page.locator('.voice-presence').boundingBox();
-  const right = await page.locator('.voice-extension-window[data-extension="test-console"]').boundingBox();
-  const stage = await page.locator(".voice-stage").boundingBox();
-  expect(orb!.x + orb!.width).toBeLessThan(right!.x);
-  expect(orb!.height).toBeGreaterThan(150);
-  await page.getByRole('button', { name: 'Finish terminal', exact: true }).click();
-  await expect(page.getByLabel('Console output')).toContainText('Build completed successfully');
-  await page.getByRole('button', { name: 'Show browser', exact: true }).click();
-  await page.getByRole('button', { name: 'Stream thinking', exact: true }).click();
-  await expect(page.getByLabel('Live model thinking')).toContainText('verify the page layout');
-  await expect(page.locator('.voice-presence')).toHaveCSS('height', '80px');
-  await page.setViewportSize({ width: 390, height: 844 });
-  await settled(page);
-  const mobileBrowser = await page.locator('.voice-browser-window').boundingBox();
-  const mobileConsole = await page.locator('.voice-extension-window[data-extension="test-console"]').boundingBox();
-  expect(mobileBrowser!.y + mobileBrowser!.height).toBeLessThan(mobileConsole!.y);
-  expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)).toBe(false);
-  await page.getByRole('button', { name: 'End voice mode' }).click();
-  await expect(page.getByRole('textbox', { name: 'Message' })).toBeVisible();
-  expect(failures).toEqual([]);
+  test('voice panels animate into a middle window, a side window and both at once', async ({ page }) => {
+    await page.addInitScript(() => {
+      // Streams, which have no server behind them here.
+      (window as any).EventSource=class { onmessage:any; onopen:any; close(){} };
+    });
+    const failures: string[] = []; page.on('pageerror', e => failures.push(e.message));
+    await page.route('**/api/voice', route => route.fulfill({ json: { enabled: true } }));
+    await page.goto('/tests/voice.html');
+    await page.getByRole('button', { name: 'Turn on hands-free voice' }).click();
+    await expect(page.getByRole('status')).toHaveText('Listening', { timeout: 25000 });
+    await page.getByRole('button', { name: 'Voice settings' }).click();
+    await page.getByRole('group', { name: 'Sound effects' }).getByRole('button', { name: 'Off' }).click();
+    expect(await page.evaluate(() => localStorage.getItem('voiceSounds'))).toBe('off');
+    await page.keyboard.press('Escape');
+    await page.getByRole('button', { name: 'Show Viewer', exact: true }).click();
+    await expect(page.getByRole('region', { name: 'Viewer', exact: true })).toBeVisible();
+    await expect(page.locator('.voice-stage')).toHaveClass(/is-browsing/);
+    await settled(page);
+    await page.getByRole('button', { name: 'Use terminal', exact: true }).click();
+    await expect(page.getByRole('region', { name: 'Console', exact: true })).toBeVisible();
+    await expect(page.getByLabel('Console output')).toContainText('42 modules transformed');
+    await expect(page.getByLabel('Tool activity')).toContainText('Running a command');
+    await settled(page);
+    const middle = await page.locator('.voice-extension-window[data-extension="test-viewer"]').boundingBox();
+    const consoleWindow = await page.locator('.voice-extension-window[data-extension="test-console"]').boundingBox();
+    expect(middle!.width).toBeGreaterThan(consoleWindow!.width * 1.8);
+    expect(middle!.x + middle!.width).toBeLessThan(consoleWindow!.x);
+
+    await page.getByRole('button', { name: 'Minimize Viewer' }).click();
+    await settled(page);
+    const orb = await page.locator('.voice-presence').boundingBox();
+    const right = await page.locator('.voice-extension-window[data-extension="test-console"]').boundingBox();
+    const stage = await page.locator(".voice-stage").boundingBox();
+    expect(orb!.x + orb!.width).toBeLessThan(right!.x);
+    expect(orb!.height).toBeGreaterThan(150);
+    await page.getByRole('button', { name: 'Finish terminal', exact: true }).click();
+    await expect(page.getByLabel('Console output')).toContainText('Build completed successfully');
+    await page.getByRole('button', { name: 'Show Viewer', exact: true }).click();
+    await page.getByRole('button', { name: 'Stream thinking', exact: true }).click();
+    await expect(page.getByLabel('Live model thinking')).toContainText('verify the page layout');
+    await expect(page.locator('.voice-presence')).toHaveCSS('height', '80px');
+    await page.setViewportSize({ width: 390, height: 844 });
+    await settled(page);
+    const mobileMiddle = await page.locator('.voice-extension-window[data-extension="test-viewer"]').boundingBox();
+    const mobileConsole = await page.locator('.voice-extension-window[data-extension="test-console"]').boundingBox();
+    expect(mobileMiddle!.y + mobileMiddle!.height).toBeLessThan(mobileConsole!.y);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)).toBe(false);
+    await page.getByRole('button', { name: 'End voice mode' }).click();
+    await expect(page.getByRole('textbox', { name: 'Message' })).toBeVisible();
+    expect(failures).toEqual([]);
+  });
 });
 
 test('managed voice connects before listening and releases its lease on End',async({page})=>{

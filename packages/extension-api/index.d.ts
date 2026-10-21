@@ -140,8 +140,8 @@ export interface SlotMap {
    * button. `useButton` is a hook, called as the chat's header is drawn: how
    * its button is for this chat. `name` is a name of its own that
    * `portal.panels.open(name, params)` reaches it by, from anywhere: the
-   * portal's own panels go by "browser" and "agents", and while
-   * one of those is the portal's, it is the one.
+   * portal's own panel goes by "agents", and while that is the
+   * portal's, it is the one.
    * Of two extensions that name a panel alike, the one first in the slot's
    * order has it (a lower `order`, then the one whose extension is first in the list of installed extensions).
    * `bleed` makes its body black from edge to edge, and not a box that
@@ -669,7 +669,7 @@ export interface Portal {
     run(name: string, ...args: unknown[]): unknown;
     has(name: string): boolean;
   };
-  /** The panels of the chat on screen, any of them: the portal's ("browser", "agents") and an extension's ("<package>/<id>", or the name it gave itself, as Files' is "files"). */
+  /** The panels of the chat on screen, any of them: the portal's ("agents") and an extension's ("<package>/<id>", or the name it gave itself, as Files' is "files"). */
   panels: PanelController;
   chats: {
     /**

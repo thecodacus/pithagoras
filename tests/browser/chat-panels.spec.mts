@@ -1,7 +1,7 @@
 import { type Page } from '@playwright/test';
 import { test, expect } from './portal-mock';
 
-// Two extensions' panels, and the portal's own: the portal's tests' stand-ins for them.
+// Two extensions' panels: the portal's tests' stand-ins for them.
 test.use({ installed: ['tests/fixtures/extensions/console', 'tests/fixtures/extensions/viewer'] });
 
 const box = async (page: Page, selector: string) => (await page.locator(selector).first().boundingBox())!;
@@ -9,7 +9,7 @@ const box = async (page: Page, selector: string) => (await page.locator(selector
 const panels = (page: Page) => page.locator('.chat-aside');
 const placeAt = (page: Page, place: string) => page.locator(`.chat-aside[data-dock="${place}"]`);
 const body = async (page: Page) => (await page.locator('.chat-body').boundingBox())!;
-type Panel = 'Viewer' | 'Console' | 'Browser';
+type Panel = 'Viewer' | 'Console';
 /** A panel's header, which carries it. */
 const head = (page: Page, panel: Panel) => page.locator(panel === 'Console' ? '.chat-aside-head:has([aria-label="Consoles"])' : `.chat-aside-head:has-text("${panel}")`);
 /** Where in the chat to let the panels go for each place. */
@@ -578,9 +578,6 @@ test('a panel not placed on its own yet goes where all of them went before', asy
 });
 
 test('a place keeps the size it was made, whichever panels are opened in it', async ({ page }) => {
-  await page.route('**/api/browser', (route) => route.fulfill({ json: { install: { container: 'running' } } }));
-  await page.route('**/browser-ui/', (route) => route.fulfill({ contentType: 'text/html', body: '<body>A browser, in view.</body>' }));
-  // Read again, with the browser there to open.
   await reopen(page, 'Console', 'Viewer');
   await page.getByRole('button', { name: 'Close Viewer' }).click();
   const edge = (await page.locator('.chat-aside-edge').boundingBox())!;
@@ -589,8 +586,8 @@ test('a place keeps the size it was made, whichever panels are opened in it', as
   await page.mouse.move(edge.x + edge.width / 2 + 120, edge.y + 200, { steps: 6 });
   await page.mouse.up();
   const made = (await panels(page).boundingBox())!.width;
-  // The browser, never sized, comes before the console: the place went to its size.
-  await page.getByRole('button', { name: 'Browser', exact: true }).click();
+  // The viewer, opened again beside the console: the place keeps its size.
+  await page.getByRole('button', { name: 'Viewer', exact: true }).click();
   await expect(page.locator('.chat-aside-panel')).toHaveCount(2);
   expect((await panels(page).boundingBox())!.width).toBeCloseTo(made, 0);
 });
@@ -689,21 +686,19 @@ test('panels that floated together before each had a window are put apart, both 
   expect(await floating(page, 'Console').boundingBox()).toEqual(consoleBox);
 });
 
-test('a panel carried elsewhere is moved, not taken off the page: the browser in it keeps its page', async ({ page }) => {
-  await page.route('**/api/browser', (route) => route.fulfill({ json: { install: { container: 'running' } } }));
-  await page.route('**/browser-ui/', (route) => route.fulfill({ contentType: 'text/html', body: '<body style="height:3000px;background:#171a20;color:#d1d8e3">A browser, in view.</body>' }));
-  await reopen(page, 'Browser');
-  const browser = () => page.frames().find((f) => f.url().includes('/browser-ui/'))!;
-  await expect.poll(() => !!browser()).toBe(true);
-  await browser().waitForLoadState();
-  await browser().evaluate(() => { (window as any).kept = 'this page'; window.scrollTo(0, 400); });
-  const kept = async () => browser().evaluate(() => [(window as any).kept, window.scrollY]);
+test('a panel carried elsewhere is moved, not taken off the page: the frame in it keeps its page', async ({ page }) => {
+  await reopen(page, 'Viewer');
+  const frame = () => page.frame({ name: 'viewer-pane' })!;
+  await expect.poll(() => !!frame()).toBe(true);
+  await frame().waitForLoadState();
+  await frame().evaluate(() => { (window as any).kept = 'this page'; window.scrollTo(0, 400); });
+  const kept = async () => frame().evaluate(() => [(window as any).kept, window.scrollY]);
   for (const where of ['Left', 'Bottom', 'Floating', 'Right']) {
-    await place(page, where, 'Browser');
+    await place(page, where);
     expect(await kept()).toEqual(['this page', 400]);
   }
   // Across the phone's width and back, where they all go to one place and back again.
-  await place(page, 'Left', 'Browser');
+  await place(page, 'Left');
   await page.setViewportSize({ width: 390, height: 780 });
   // The left place is drawn again as the one place there is, a new element: a look at the old one, as it goes, finds no box.
   await expect(placeAt(page, 'right')).toBeVisible();

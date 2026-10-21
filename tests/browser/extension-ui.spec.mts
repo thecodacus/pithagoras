@@ -130,8 +130,8 @@ const PROBE = `export default function (portal) {
   } });
   portal.slots.register("chat.overlay", { id: "corner", component: ({ chat }) => h("div", { "data-testid": "overlay", style: { position: "absolute", left: 8, bottom: 8, zIndex: 30 } },
     "Over " + chat.title + " · " + portal.api.url("/state") + " ",
-    h(function Has() { return h("span", { "data-testid": "has", "data-browser": String(portal.panels.useHas("browser")), "data-files": String(portal.panels.useHas("files")), "data-runs": String(portal.panels.useHas("probe/runs")) }); }),
-    h("button", { type: "button", onClick: () => portal.panels.open("browser") }, "Show the browser")) });
+    h(function Has() { return h("span", { "data-testid": "has", "data-browser": String(portal.panels.useHas("browser")), "data-viewer": String(portal.panels.useHas("test-viewer/viewer")), "data-files": String(portal.panels.useHas("files")), "data-runs": String(portal.panels.useHas("probe/runs")) }); }),
+    h("button", { type: "button", onClick: () => portal.panels.open("test-viewer/viewer") }, "Show the viewer")) });
   portal.slots.register("chat.composer.above", { id: "chip", component: ({ chat }) => h("div", { "data-testid": "above" }, "Above the box of " + chat.id) });
   portal.slots.register("settings.page", {
     id: "own",
@@ -153,17 +153,15 @@ const sidebar = (page: Page) => page.getByRole('navigation', { name: 'Destinatio
 
 test('an extension\'s panel is opened from the chat\'s header, talks to its extension in that chat, and closes like the portal\'s own', async ({ page }) => {
   await page.setViewportSize({ width: 1300, height: 800 });
-  // The browser, one of the portal's own panels, and the console stand-in's, to open beside it as a second and a third.
-  const { said, hears } = await portal(page, undefined, undefined, ['tests/fixtures/extensions/console']);
-  await page.route('**/api/browser', (route) => route.fulfill({ json: { install: { container: 'running' } } }));
-  await page.route('**/browser-ui/', (route) => route.fulfill({ contentType: 'text/html', body: '<body>A browser, in view.</body>' }));
+  // The viewer's and the console's panels, the stand-ins', to open beside it as a second and a third.
+  const { said, hears } = await portal(page, undefined, undefined, ['tests/fixtures/extensions/console', 'tests/fixtures/extensions/viewer']);
   await page.goto('/s/a');
   const toggle = header(page).getByRole('button', { name: 'Notes', exact: true });
   await expect(toggle).toHaveAttribute('aria-expanded', 'false');
-  // Its button, and the extension's own control beside it, are the size of the portal's.
+  // Its button, and the extension's own control beside it, are the size of another panel's.
   const sizes = await header(page).getByRole('button').evaluateAll((items) => Object.fromEntries(items.map((b) => [b.getAttribute('aria-label'), [b.getBoundingClientRect().height, b.querySelector('svg')?.getBoundingClientRect().width]])));
-  expect(sizes.Notes).toEqual(sizes.Browser);
-  expect(sizes["Pin the agent's last reply to Notes"]).toEqual(sizes.Browser);
+  expect(sizes.Notes).toEqual(sizes.Viewer);
+  expect(sizes["Pin the agent's last reply to Notes"]).toEqual(sizes.Viewer);
   await toggle.click();
   await expect(toggle).toHaveAttribute('aria-expanded', 'true');
   await expect(panel(page)).toBeVisible();
@@ -185,7 +183,7 @@ test('an extension\'s panel is opened from the chat\'s header, talks to its exte
   await expect(panel(page).getByRole('listitem')).toHaveCount(1);
 
   // Two panels beside the conversation is what fits: a third closes the one open longest, whoever brought it.
-  await header(page).getByRole('button', { name: 'Browser', exact: true }).click();
+  await header(page).getByRole('button', { name: 'Viewer', exact: true }).click();
   await header(page).getByRole('button', { name: 'Console', exact: true }).click();
   await expect(panel(page)).toHaveCount(0);
   await expect(toggle).toHaveAttribute('aria-expanded', 'false');
@@ -353,10 +351,8 @@ test('an extension that fails to load, or to draw, fails alone', async ({ page }
 
 test('a panel says more of itself: tabs in its head, a button that follows the chat, kept and asking while something in it would be lost', async ({ page }) => {
   await page.setViewportSize({ width: 1300, height: 800 });
-  const { hears, pushed } = await portal(page, undefined, undefined, ['tests/fixtures/extensions/console']);
-  // The browser, one of the portal's own panels, to open as a third.
-  await page.route('**/api/browser', (route) => route.fulfill({ json: { install: { container: 'running' } } }));
-  await page.route('**/browser-ui/', (route) => route.fulfill({ contentType: 'text/html', body: '<body>A browser, in view.</body>' }));
+  // The viewer's and the console's panels, the stand-ins', to open as a second and a third.
+  const { hears, pushed } = await portal(page, undefined, undefined, ['tests/fixtures/extensions/console', 'tests/fixtures/extensions/viewer']);
   await page.goto('/s/a');
   const toggle = header(page).getByRole('button', { name: 'Notes', exact: true });
   await expect(toggle).toHaveAttribute('title', 'Notes');
@@ -381,12 +377,12 @@ test('a panel says more of itself: tabs in its head, a button that follows the c
   await expect(page.getByRole('alertdialog')).toContainText('Discard the note you were writing?');
   await page.getByRole('alertdialog').getByRole('button', { name: 'Cancel' }).click();
   await expect(panel(page).getByRole('textbox', { name: 'New note' })).toHaveValue('Half a thought');
-  // And it is not the one closed to make room for a third: the browser, opened after it, goes instead.
-  const browser = header(page).getByRole('button', { name: 'Browser', exact: true });
-  await browser.click();
+  // And it is not the one closed to make room for a third: the viewer, opened after it, goes instead.
+  const viewer = header(page).getByRole('button', { name: 'Viewer', exact: true });
+  await viewer.click();
   await header(page).getByRole('button', { name: 'Console', exact: true }).click();
   await expect(panel(page)).toBeVisible();
-  await expect(browser).toHaveAttribute('aria-expanded', 'false');
+  await expect(viewer).toHaveAttribute('aria-expanded', 'false');
   await toggle.click();
   await page.getByRole('alertdialog').getByRole('button', { name: 'Discard' }).click();
   await expect(panel(page)).toHaveCount(0);
@@ -418,10 +414,8 @@ test("a call of an extension's tool is drawn by the extension, and any other cal
 
 test('an extension follows what the agent runs from the chat itself, and is drawn again only for what it reads of it', async ({ page }) => {
   await page.setViewportSize({ width: 1300, height: 800 });
-  const { says, pushed, caughtUp } = await portal(page, undefined, PROBE);
-  // The browser, one of the portal's own panels, to open by its name.
-  await page.route('**/api/browser', (route) => route.fulfill({ json: { install: { container: 'running' } } }));
-  await page.route('**/browser-ui/', (route) => route.fulfill({ contentType: 'text/html', body: '<body>A browser, in view.</body>' }));
+  // The viewer's panel, the stand-in's, to open by its key.
+  const { says, pushed, caughtUp } = await portal(page, undefined, PROBE, ['tests/fixtures/extensions/viewer']);
   await page.goto('/s/a');
   await caughtUp('a');
   // Nothing run yet: its button is not in the header, where the other extension's is.
@@ -459,14 +453,16 @@ test('an extension follows what the agent runs from the chat itself, and is draw
   // Over the chat and above the message box, with where its own routes are.
   await expect(page.getByTestId('overlay')).toContainText('Over First chat · /api/x/probe/state');
   await expect(page.getByTestId('above')).toHaveText('Above the box of a');
-  // Any panel of the chat by its name, the portal's own included; and whether there is one by a name, for one that is not.
-  await expect(page.getByTestId('has')).toHaveAttribute('data-browser', 'true');
+  // Any panel of the chat by its key, another extension's included; and whether there is one by a name, for one that is
+  // not: the browser is no panel of the portal's own, and none until an extension brings one.
+  await expect(page.getByTestId('has')).toHaveAttribute('data-viewer', 'true');
   await expect(page.getByTestId('has')).toHaveAttribute('data-runs', 'true');
   await expect(page.getByTestId('has')).toHaveAttribute('data-files', 'false');
-  const browser = header(page).getByRole('button', { name: 'Browser', exact: true });
-  await expect(browser).toHaveAttribute('aria-expanded', 'false');
-  await page.getByTestId('overlay').getByRole('button', { name: 'Show the browser' }).click();
-  await expect(browser).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.getByTestId('has')).toHaveAttribute('data-browser', 'false');
+  const viewer = header(page).getByRole('button', { name: 'Viewer', exact: true });
+  await expect(viewer).toHaveAttribute('aria-expanded', 'false');
+  await page.getByTestId('overlay').getByRole('button', { name: 'Show the viewer' }).click();
+  await expect(viewer).toHaveAttribute('aria-expanded', 'true');
 });
 
 test("an extension's own page in Settings, and why its server half is not running", async ({ page }) => {
@@ -505,7 +501,6 @@ test.describe('beside a window that asks for the side', () => {
     await page.route('**/api/sessions/test/commands', (route) => route.fulfill({ json: { commands: [] } }));
     await page.route('**/api/sessions/test/config', (route) => route.fulfill({ status: 503, json: {} }));
     await page.route('**/api/voice', (route) => route.fulfill({ json: { enabled: true } }));
-    await page.route('**/api/browser', (route) => route.fulfill({ json: { install: { container: 'running' } } }));
     await page.setViewportSize({ width: 1400, height: 860 });
     await page.goto('/tests/voice.html?brought=1');
     await page.getByRole('button', { name: 'Turn on hands-free voice' }).click();
@@ -847,7 +842,6 @@ test.describe("a call of an extension's tool in voice mode", () => {
     await page.route('**/api/sessions/test/config', (route) => route.fulfill({ status: 503, json: {} }));
     await page.route('**/api/sessions/test/picture?**', (route) => route.fulfill({ status: 404, json: {} }));
     await page.route('**/api/voice', (route) => route.fulfill({ json: { enabled: true } }));
-    await page.route('**/api/browser', (route) => route.fulfill({ json: { install: { container: 'running' } } }));
     await page.goto('/tests/voice.html');
     await page.getByRole('button', { name: 'Turn on hands-free voice' }).click();
     await expect(page.getByRole('status')).toHaveText('Listening', { timeout: 25000 });

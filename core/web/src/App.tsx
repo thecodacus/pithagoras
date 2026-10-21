@@ -39,7 +39,6 @@ const ProjectsPage = lazyComponent(() => import("./components/ProjectsPage"), "P
 const AgentPage = lazyComponent(() => import("./components/AgentPage"), "AgentPage");
 const RoutinesPage = lazyComponent(() => import("./components/RoutinesPage"), "RoutinesPage");
 const AuditPage = lazyComponent(() => import("./components/AuditPanel"), "AuditPage");
-const BrowserPage = lazyComponent(() => import("./components/BrowserPage"), "BrowserPage");
 const MemoryPage = lazyComponent(() => import("./components/MemoryPage"), "MemoryPage");
 const ExtensionPage = lazyComponent(() => import("./components/ExtensionPage"), "ExtensionPage");
 const ConfigModal = lazyComponent(() => import("./components/ConfigModal"), "ConfigModal");
@@ -134,7 +133,6 @@ export default function App() {
       {/* Where the page was while there was one agent: old links and bookmarks. */}
       <Route path="/agent" element={<Navigate to={{ pathname: "/agents", search: window.location.search }} replace />} />
       <Route path="/routines" element={<Shell view="routines" />} />
-      <Route path="/browser" element={<Shell view="browser" />} />
       <Route path="/memory" element={<Shell view="memory" />} />
       <Route path="/audit" element={<Shell view="audit" />} />
       {/* A page an extension brought: /x/<extension>/<page id>, and an extension's name may have a slash in it. */}
@@ -161,7 +159,7 @@ function Shell({
   view = "chat",
 }: {
   settings?: boolean;
-  view?: "chat" | "sessions" | "projects" | "agents" | "routines" | "browser" | "memory" | "audit" | "extension";
+  view?: "chat" | "sessions" | "projects" | "agents" | "routines" | "memory" | "audit" | "extension";
 }) {
   // What follows /x/ in the address: `<extension>/<page id>` of a page an extension brought, or `<extension>` of its page in Settings.
   const { sessionId, tab, "*": extensionPart = "" } = useParams<{ sessionId?: string; tab?: string; "*"?: string }>();
@@ -216,9 +214,6 @@ function Shell({
   // them, and without this those links landed on the empty state.
   const [other, setOther] = useState<Session | null>(null);
   const [executor, setExecutor] = useState("host");
-  // Asked once: the browser is optional, and the answer only changes when
-  // somebody starts or stops a container.
-  const [hasBrowser, setHasBrowser] = useState(false);
   // Whether Understory is the agent's memory, which is when its page is in the sidebar.
   const [hasMemory, setHasMemory] = useState(false);
   useEffect(() => {
@@ -281,17 +276,6 @@ function Shell({
     setMobileNav(false);
     navigate(`/s/${s.id}`);
   });
-
-  useEffect(() => {
-    api
-      .browser()
-      // Whether one is wired up, not whether anyone has been given it: the
-      // browser is on by default now, so "somebody has it" is not a sign that
-      // the add-on is there, and a tool name lingering in the catalogue would
-      // keep the nav after the add-on was removed.
-      .then((b) => setHasBrowser(b.running || b.configured || b.routines.length > 0))
-      .catch(() => setHasBrowser(false));
-  }, []);
 
   // Not tied to where the page is: going from chat to chat is no reason to ask
   // for the list again, nor to start its poll over.
@@ -717,7 +701,6 @@ function Shell({
         executor={executor}
         activeId={sessionId ?? null}
         view={view === "extension" ? `x/${extensionPart}` : view}
-        hasBrowser={hasBrowser}
         hasMemory={hasMemory}
         places={places}
         onNavigate={onNavigate}
@@ -778,8 +761,6 @@ function Shell({
           <AgentPage onSelect={(id) => navigate(`/s/${id}`)} onNewChat={startChat} reloadPlaces={reloadPlaces} />
         ) : view === "routines" ? (
           <RoutinesPage onOpenSession={(id) => navigate(`/s/${id}`)} />
-        ) : view === "browser" ? (
-          <BrowserPage onOpenSession={(id) => navigate(`/s/${id}`)} />
         ) : view === "memory" ? (
           <MemoryPage />
         ) : view === "audit" ? (

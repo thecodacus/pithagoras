@@ -19,12 +19,8 @@ test('other tools say what they are doing and where it can be seen', () => {
   // No window of the portal's own: the terminal extension's says it is for commands (`opensFor`).
   assert.equal(describeCall(start('bash', { command: 'x' }), folder).target, undefined);
   assert.equal(describeCall(start('grep', { pattern: 'retry', glob: '*.ts' }), folder).label, 'Searching for “retry”');
-  assert.deepEqual(describeCall(start('browser_navigate', { url: 'https://example.com/a?b' }), folder), { label: 'Opening a page', detail: 'example.com', target: 'browser' });
-  assert.deepEqual(describeCall(start('mcp', { tool: 'browser_take_screenshot', args: {} }), folder), { label: 'Taking a screenshot', detail: '', target: 'browser' });
-  assert.deepEqual(describeCall(start('browser_scroll', {}), folder), { label: 'Scrolling the page', detail: '', target: 'browser' });
-  assert.deepEqual(describeCall(start('browser_find', { query: 'pricing' }), folder), { label: 'Searching the page', detail: 'pricing', target: 'browser' });
-  assert.deepEqual(describeCall(start('browser_get_text', { ref: 'e5' }), folder), { label: 'Reading the page', detail: '', target: 'browser' });
-  assert.deepEqual(describeCall(start('browser_key', { key: 'Enter' }), folder), { label: 'Typing in the browser', detail: '', target: 'browser' });
+  // A browser tool's card is the browser's extension's to word (its window's `describe`), and opens its window: none of the portal's own.
+  assert.deepEqual(describeCall(start('browser_navigate', { url: 'https://example.com/a?b' }), folder), { label: 'Using browser navigate', detail: 'https://example.com/a?b' });
   assert.deepEqual(describeCall(start('jira_get_issue', { query: 'ABC-1' }), folder), { label: 'Using jira get issue', detail: 'ABC-1' });
 });
 

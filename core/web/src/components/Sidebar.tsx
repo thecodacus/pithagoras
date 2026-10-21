@@ -11,7 +11,6 @@ import {
   LuPanelLeftOpen,
   LuClock,
   LuFolderKanban,
-  LuGlobe,
   LuBrain,
   LuChevronRight,
   LuMessagesSquare,
@@ -57,7 +56,6 @@ export const Sidebar = memo(function Sidebar({
   executor,
   activeId,
   view,
-  hasBrowser,
   hasMemory = false,
   places,
   onSelect,
@@ -75,8 +73,6 @@ export const Sidebar = memo(function Sidebar({
   activeId: string | null;
   /** Which top-level destination is showing, so the nav can mark it. */
   view: "chat" | Destination;
-  /** Whether the optional browser service is there at all. */
-  hasBrowser: boolean;
   /** Understory is the agent's memory: its page is there to read. */
   hasMemory?: boolean;
   /** Where Home and the projects are, to list the chats by folder: undefined until known, null if they could not be. */
@@ -204,10 +200,7 @@ export const Sidebar = memo(function Sidebar({
     { to: "projects", icon: <LuFolderKanban />, label: t("Projects") },
     { to: "agents", icon: <LuBot />, label: t("Agents") },
     { to: "routines", icon: <LuClock />, label: t("Routines") },
-    // Hidden unless there is one. The browser is an optional service, and
-    // a dead link to a feature you did not install is just clutter.
-    ...(hasBrowser ? [{ to: "browser" as const, icon: <LuGlobe />, label: t("Browser") }] : []),
-    // Likewise: only while Understory holds the agent's memory.
+    // Hidden unless Understory holds the agent's memory: a dead link to a feature you did not set up is just clutter.
     ...(hasMemory ? [{ to: "memory" as const, icon: <LuBrain />, label: t("Memory") }] : []),
   ];
   // Last of the destinations, after the extensions' group.
@@ -396,7 +389,7 @@ const GroupLabel = ({ children }: { children: ReactNode }) => (
 );
 
 /** A page of the portal's, or one an extension brought: `x/<extension>/<page id>`. */
-type Destination = "sessions" | "projects" | "agents" | "routines" | "browser" | "memory" | "audit" | `x/${string}`;
+type Destination = "sessions" | "projects" | "agents" | "routines" | "memory" | "audit" | `x/${string}`;
 
 function RailButton({
   icon,

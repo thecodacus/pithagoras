@@ -11,14 +11,14 @@ import { GATEWAY_TOOL, calledThrough } from "../../server/src/pi/tools-gateway-n
  * starts, and given its outcome when it ends: how many lines an edit changed,
  * how many files a search found, the first line of what went wrong. And each
  * card knows where the thing it is about can be seen, so that tapping it
- * opens that: the file, the browser, the document, the picture, or a window
- * an extension brought for it (a command, in the terminal's).
+ * opens that: the picture, or a window an extension brought for it (a
+ * command, in the terminal's).
  *
  * Tolerant like the transcript: pi's payloads vary by tool and version, and
  * anything unrecognised is described by its name rather than not at all.
  */
 
-export type ToolTarget = "browser" | "pictures";
+export type ToolTarget = "pictures";
 
 export interface ToolCall {
   label: string;
@@ -80,20 +80,6 @@ export const unwrap = (p: any) => unwrapCall(toolNameOf(p, "tool"), toolArgsOf(p
 /** The name to show for a call. */
 export const toolName = (name: string, args: unknown): string => unwrapCall(name, args).name;
 
-function browser(action: string, input: Record<string, any>): ToolCall {
-  const url = text(input.url);
-  if (/navigate|open|goto/.test(action)) return { label: t("Opening a page"), detail: url ? hostOf(url) : "", target: "browser" };
-  if (/screenshot/.test(action)) return { label: t("Taking a screenshot"), detail: "", target: "browser" };
-  if (/scroll|wheel/.test(action)) return { label: t("Scrolling the page"), detail: "", target: "browser" };
-  if (/find/.test(action)) return { label: t("Searching the page"), detail: text(input.query), target: "browser" };
-  if (/get_text/.test(action)) return { label: t("Reading the page"), detail: "", target: "browser" };
-  if (/click|hover|drag/.test(action)) return { label: t("Clicking in the browser"), detail: text(input.element), target: "browser" };
-  if (/type|fill|press|select|key/.test(action)) return { label: t("Typing in the browser"), detail: text(input.element), target: "browser" };
-  if (/snapshot|evaluate|console|network/.test(action)) return { label: t("Reading the page"), detail: "", target: "browser" };
-  if (/tab|close|back|forward|resize|wait/.test(action)) return { label: t("Using the browser"), detail: "", target: "browser" };
-  return { label: t("Using the browser"), detail: url ? hostOf(url) : "", target: "browser" };
-}
-
 /**
  * A call as it starts. `folder` is the chat's: a file in it is named by its
  * path there. A file's card has no target of the portal's: the window it opens
@@ -124,8 +110,6 @@ export function describeCall(payload: any, folder: string): ToolCall {
   if (name === "find") return { label: t("Looking for “{pattern}”", { pattern: flat(text(input.pattern), 40) }), detail: flat(text(input.path)) };
   if (name === "ls") return { label: t("Listing {folder}", { folder: path ? base(path) : t("the folder") }), detail: "" };
   if (name === "ask_question") return { label: t("Asking you a question"), detail: flat(text(input.title) || text((input.questions as { question?: unknown }[] | undefined)?.[0]?.question)) };
-  if (/^browser[_.]/.test(name)) return browser(name.replace(/^browser[_.]/, ""), input);
-  if (typeof input.tool === "string" && /browser/.test(input.tool)) return browser(input.tool, input);
   if (/web_?search|search_web/.test(name)) return { label: t("Searching the web"), detail: flat(text(input.query)) };
   if (/fetch|scrape|read_url|web_read/.test(name) && text(input.url)) return { label: t("Opening a page"), detail: hostOf(text(input.url)) };
   if (/search/.test(name)) return { label: t("Searching"), detail: flat(text(input.query) || text(input.pattern)) };

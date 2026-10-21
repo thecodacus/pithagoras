@@ -31,45 +31,6 @@ test('the portal-wide alert can be put away by hand', async ({ page }) => {
   await expect(page.getByRole('alert')).toHaveCount(0);
 });
 
-test('the browser page forgets a failed poll when the next one works, and keeps what a button said until the next press', async ({ page }) => {
-  let down = false;
-  const status = {
-    running: false, unprotected: false, connectedAs: null, install: { available: true, image: true, container: 'stopped', pulling: { active: false, line: '' } },
-    config: { user: '', hasPassword: false }, version: null, pages: [], uiPort: '3011', uiExposed: false, uiOutdated: false, cursor: true, configured: true, byDefault: false, sessions: [], routines: [],
-  };
-  await mockPortal(page, ({ path, method }) => {
-    if (path === '/api/browser' && method === 'GET') return down ? reply(500, { error: 'The browser did not answer' }) : status;
-    if (path === '/api/browser/start') return reply(500, { error: 'No room to start it' });
-  });
-  await page.clock.install();
-  await page.goto('/browser');
-  await expect(page.getByRole('heading', { name: 'Browser', exact: true })).toBeVisible();
-  down = true;
-  await page.clock.runFor(8500);
-  await expect(page.getByRole('alert')).toContainText('The browser did not answer');
-  down = false;
-  await page.clock.runFor(8500);
-  await expect(page.getByRole('alert')).toHaveCount(0);
-  // A refused start is said, and a poll that works does not take it back before it was read.
-  await page.getByRole('button', { name: /^Start/ }).first().click();
-  await expect(page.getByRole('alert')).toContainText('No room to start it');
-  await page.clock.runFor(8500);
-  await expect(page.getByRole('alert')).toContainText('No room to start it');
-});
-
-test('the browser page that could not read its status at all says so, with Try again', async ({ page }) => {
-  let down = true;
-  await mockPortal(page, ({ path, method }) => {
-    if (path === '/api/browser' && method === 'GET' && down) return reply(500, { error: 'The browser did not answer' });
-  });
-  await page.goto('/browser');
-  await expect(page.getByRole('alert')).toContainText('The browser did not answer');
-  down = false;
-  await page.getByRole('button', { name: 'Try again' }).click();
-  await expect(page.getByRole('heading', { name: 'Browser', exact: true })).toBeVisible();
-  await expect(page.getByRole('alert')).toHaveCount(0);
-});
-
 test('the routines page forgets a failed poll when the next one works', async ({ page }) => {
   let down = false;
   await mockPortal(page, ({ path, method }) => {

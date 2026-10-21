@@ -3,7 +3,7 @@ import { slotEntries, useSlot } from "./slots";
 
 /**
  * The panels beside the conversation on screen, opened and closed by name
- * from anywhere in the page: the portal's own ("browser", "agents") and an
+ * from anywhere in the page: the portal's own ("agents") and an
  * extension's ("<package>/<id>", or the `name` its entry gave it, as the
  * terminal's is "terminal", Git's "git", Files' "files" and Canvases'
  * "canvas": the chat resolves it, see Chat.tsx).
@@ -27,7 +27,7 @@ const onScreen = (): ChatPanels => {
 };
 
 /** The portal's own panels' names: see Chat.tsx. */
-const OWN = ["browser", "agents"];
+const OWN = ["agents"];
 const named = (entries: ReturnType<typeof slotEntries<"chat.panel">>, key: string) =>
   OWN.includes(key) || entries.some((entry) => entry.key === key || entry.name === key);
 

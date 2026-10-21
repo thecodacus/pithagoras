@@ -11,7 +11,6 @@ const ROUTES = '**/api/x/pithagoras-canvas/chats/test/canvases';
 const says = (page: Page, message: unknown) => page.evaluate((m) => (window as any).extensionSays('pithagoras-canvas', m), message);
 
 async function chat(page: Page, list: unknown[] = []) {
-  await page.route('**/api/browser', (r) => r.fulfill({ json: { running: false, install: { container: 'stopped' }, sessions: [] } }));
   await page.route('**/api/voice', (r) => r.fulfill({ json: { enabled: false } }));
   await page.route('**/api/sessions/test/commands', (r) => r.fulfill({ json: { commands: [] } }));
   await page.route('**/api/sessions/test/config', (r) => r.fulfill({ status: 503, json: {} }));

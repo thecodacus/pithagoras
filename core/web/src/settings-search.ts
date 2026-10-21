@@ -59,7 +59,7 @@ export const SETTINGS_INDEX: SettingEntry[] = [
   { tab: "authentication", section: msg("Single sign-on"), title: msg("Single sign-on"), words: "sso oidc openid connect provider authentik keycloak entra google login sign in anmeldung einmalanmeldung authentication authentifizierung" },
   // The section that opens and closes, which is in view whether it is open or not: the search opens it.
   { tab: "authentication", section: msg("Single sign-on"), title: msg("OIDC only"), words: "sso oidc only password off passwort aus nur" },
-  { tab: "add-ons", title: msg("Add-ons"), words: "portal addon optional voice browser terminal" },
+  { tab: "add-ons", title: msg("Add-ons"), words: "portal addon optional voice terminal" },
   { tab: "shortcuts", section: msg("Chat"), title: msg("Keyboard shortcuts"), words: "keys hotkey keybinding shortcut tastenkürzel tastatur" },
   { tab: "shortcuts", section: msg("Voice mode"), title: msg("Voice mode shortcuts"), words: "voice speak microphone push to talk sprache" },
   { tab: "logs", title: msg("Logs"), words: "log logs error errors warning console output stream download audit debug level verbose server protokoll fehler" },

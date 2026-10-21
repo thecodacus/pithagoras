@@ -94,8 +94,8 @@ export function extensionOnDisk(dir: string) {
 
 
 /**
- * What every portal says unless a test says otherwise: signed in without a password, no chats, and the three things the
- * shell asks of every page (the add-on flags, the browser add-on, the voice add-on, which extensions draw in it, the places for a new chat) and of
+ * What every portal says unless a test says otherwise: signed in without a password, no chats, and the things the
+ * shell asks of every page (the add-on flags, the voice add-on, which extensions draw in it, the places for a new chat) and of
  * every chat (what runs in the background, what came before), with nothing set up.
  */
 const portalBase = ({ path, method, url }: Ask): Answer => {
@@ -103,10 +103,6 @@ const portalBase = ({ path, method, url }: Ask): Answer => {
   if (path === '/api/auth/status') return { authed: true, authRequired: false };
   if (path === '/api/sessions') return { sessions: [], executor: 'host' };
   if (path === '/api/features/flags') return { subagent: { enabled: false }, understory: { enabled: false } };
-  if (path === '/api/browser') return {
-    running: false, unprotected: false, connectedAs: null, install: { available: false, image: false, container: 'absent', pulling: { active: false, line: '' } },
-    config: { user: '', hasPassword: false }, version: null, pages: [], uiPort: '', uiExposed: false, uiOutdated: false, cursor: true, configured: false, byDefault: true, sessions: [], routines: [],
-  };
   if (path === '/api/voice') return { enabled: false };
   // A portal that is not run from a checkout: nothing to update, no notice.
   if (path === '/api/update') return { kind: 'none', boot: 'boot-a' };

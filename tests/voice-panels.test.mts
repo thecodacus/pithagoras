@@ -1,17 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { latestBrowserActivity } from '../core/web/src/voice-browser.js';
 import { latestCommand, terminalRuns } from '../extensions/terminal/src/runs.ts';
 
-test('only browser tool calls activate the browser; plain mentions and old text do not', () => {
+test('the terminal extension opens on a command, not on a mention of one or another tool', () => {
   const events = [
-    { seq: 1, type: 'message_update', payload: { text: 'browser' } },
+    { seq: 1, type: 'message_update', payload: { text: 'bash' } },
     { seq: 2, type: 'tool_execution_start', payload: { toolName: 'bash', input: { command: 'echo browser' } } },
     { seq: 3, type: 'tool_execution_start', payload: { toolName: 'mcp', input: { tool: 'browser_navigate' } } },
   ];
-  assert.equal(latestBrowserActivity(events.slice(0, 2)), 0);
-  assert.equal(latestBrowserActivity(events), 3);
-  // The terminal extension opens on a command the same way.
+  assert.equal(latestCommand(events.slice(0, 1)), 0);
   assert.equal(latestCommand(events), 2);
 });
 test('terminal follows cumulative streamed output and final tool errors by call id', () => {
@@ -39,18 +36,20 @@ test('a shell tool called through MCP is a run, and one its run left open is set
 
 test('the pictures and a window that says nothing of its place take the side first, and the middle when the side is taken', async () => {
   const { placeWindows } = await import('../core/web/src/voice-windows.js');
-  const none = { browser: false, pictures: false };
-  // The terminal's window, an extension's that asks for the side, and Files', which does not say.
-  const terminal = 'x:pithagoras-terminal/terminal' as const, side = { [terminal]: 'side' as const };
+  const none = { pictures: false };
+  // The terminal's window, an extension's that asks for the side; the browser's, one that asks for the middle; and
+  // Files', which does not say.
+  const terminal = 'x:pithagoras-terminal/terminal' as const, browser = 'x:pithagoras-browser/browser' as const;
+  const wants = { [terminal]: 'side' as const, [browser]: 'middle' as const };
   const files = 'x:pithagoras-files/files' as const;
   assert.deepEqual(placeWindows({ ...none, pictures: true }), { main: undefined, side: 'pictures' });
-  assert.deepEqual(placeWindows({ ...none, [files]: true, [terminal]: true }, side), { main: files, side: terminal });
-  assert.deepEqual(placeWindows({ ...none, pictures: true, browser: true }), { main: 'browser', side: 'pictures' });
+  assert.deepEqual(placeWindows({ ...none, [files]: true, [terminal]: true }, wants), { main: files, side: terminal });
+  assert.deepEqual(placeWindows({ ...none, pictures: true, [browser]: true }, wants), { main: browser, side: 'pictures' });
   assert.deepEqual(placeWindows({ ...none, pictures: true, [files]: true }), { main: files, side: 'pictures' });
-  assert.deepEqual(placeWindows({ ...none, browser: true, [terminal]: true }, side), { main: 'browser', side: terminal });
+  assert.deepEqual(placeWindows({ ...none, [browser]: true, [terminal]: true }, wants), { main: browser, side: terminal });
   // The conversation is a window like them, not something drawn over them.
   assert.deepEqual(placeWindows({ ...none, conversation: true }), { main: undefined, side: 'conversation' });
-  assert.deepEqual(placeWindows({ ...none, conversation: true, [terminal]: true }, side), { main: 'conversation', side: terminal });
+  assert.deepEqual(placeWindows({ ...none, conversation: true, [terminal]: true }, wants), { main: 'conversation', side: terminal });
   assert.deepEqual(placeWindows({ ...none, conversation: true, pictures: true }), { main: 'pictures', side: 'conversation' });
 });
 

@@ -1,4 +1,4 @@
-/* Voice mode's stage, and the windows (browser, files, pictures, an extension's) that open on it. Tokens and base rules are in index.css. */
+/* Voice mode's stage, and the windows (pictures, the conversation, an extension's) that open on it. Tokens and base rules are in index.css. */
 
 /* The stage's colour fades from one state to the next rather than jumping: its
    channels are registered so they can be transitioned, and --voice-hue, which
@@ -13,9 +13,9 @@
 .voice-stage-header { position: absolute; inset: 0 0 auto; display: flex; align-items: center; justify-content: space-between; padding: 20px 26px; z-index: 5; }
 .voice-stage-session { position: absolute; top: 20px; left: 26px; color: rgb(var(--fg)); font-size: 12px; font-weight: 500; max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .voice-utilities { display: flex; gap: 6px; }
-.voice-utilities button, .voice-browser-window header button { width: 32px; height: 32px; border-radius: 10px; display: grid; place-items: center; color: rgb(var(--fg)); background: rgb(var(--fg) / .09); border: 1px solid rgb(var(--fg) / .3); transition: color .2s, background .2s; }
-.voice-utilities button:hover, .voice-browser-window header button:hover { color: rgb(var(--fg)); background: rgb(var(--fg) / .18); }
-.voice-utilities svg, .voice-browser-window header svg { width: 15px; height: 15px; }
+.voice-utilities button { width: 32px; height: 32px; border-radius: 10px; display: grid; place-items: center; color: rgb(var(--fg)); background: rgb(var(--fg) / .09); border: 1px solid rgb(var(--fg) / .3); transition: color .2s, background .2s; }
+.voice-utilities button:hover { color: rgb(var(--fg)); background: rgb(var(--fg) / .18); }
+.voice-utilities svg { width: 15px; height: 15px; }
 .voice-presence { position: absolute; z-index: 3; left: 50%; top: 49%; transform: translate(-50%, -50%); width: 380px; max-width: 92%; display: flex; flex-direction: column; align-items: center; transition: left .7s cubic-bezier(.22,1,.36,1), top .7s cubic-bezier(.22,1,.36,1), width .7s cubic-bezier(.22,1,.36,1), padding .7s, background .5s, border-radius .5s; }
 .voice-avatar { width: 100%; line-height: 0; transition: width .7s cubic-bezier(.22,1,.36,1); }
 .voice-orb { width: 100%; aspect-ratio: 1; height: auto; filter: saturate(1.1); }
@@ -28,16 +28,7 @@
 .voice-stage-action:disabled { opacity: .4; }
 .voice-live-transcript { max-width: 440px; max-height: 66px; margin: 18px 12px 0; color: rgb(var(--fg)); font-size: 14px; line-height: 1.55; text-align: center; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .voice-stage-error { position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%); width: min(430px, 90%); color: #ffe5e5; background: #743d47; border: 1px solid #c88490; border-radius: 12px; padding: 8px 12px; font-size: 12px; text-align: center; z-index: 6; }
-.voice-browser-window { position: absolute; z-index: 2; overflow: hidden; border: 1px solid #62718a; border-radius: 18px; background: #0b0b0d; box-shadow: 0 22px 30px -22px #000c, 0 2px 6px #0003; display: flex; flex-direction: column; opacity: 0; visibility: hidden; pointer-events: none; transition: transform .7s cubic-bezier(.22,1,.36,1), left .7s cubic-bezier(.22,1,.36,1), top .7s cubic-bezier(.22,1,.36,1), width .7s cubic-bezier(.22,1,.36,1), height .7s cubic-bezier(.22,1,.36,1), opacity .4s, visibility .7s; }
-.voice-browser-window { left: 50%; top: var(--window-middle); width: min(1000px, calc(100% - 64px)); height: var(--window-room); transform: translate(-50%, -42%) scale(.92); }
-.voice-browser-window > header { flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; height: 42px; padding: 0 10px 0 16px; border-bottom: 1px solid #62718a; background: rgb(var(--surface)); color: rgb(var(--fg)); font-size: 11px; font-weight: 500; }
-.voice-browser-window header > span { display: flex; align-items: center; gap: 8px; }
-.voice-browser-window header > div { display: flex; gap: 2px; }
-.voice-browser-window header i { width: 5px; height: 5px; border-radius: 50%; background: #3fe1c6; }
-.voice-browser-window iframe { width: 100%; flex: 1; min-height: 0; border: 0; background: #0b0b0d; }
-.voice-browser-window.is-open { opacity: 1; visibility: visible; pointer-events: auto; transform: translate(-50%, -50%) scale(1); }
 @keyframes voice-pulse { to { opacity: .25; } }
-.is-browsing.has-side .voice-browser-window { left: 35%; width: calc(70% - 42px); }
 @media (max-height: 650px) and (min-width: 601px) { .voice-presence { width: 310px; } }
 @media (max-width: 600px) {
   .prompt-shell { padding: 10px; border-radius: 20px; }
@@ -46,14 +37,9 @@
   .composer-settings > button:first-child { max-width: 145px; }
   .voice-stage-header { padding: 16px; }
   .voice-presence { width: min(360px, 92%); }
-  .voice-browser-window { left: 12px; right: 12px; top: var(--window-top); width: auto; height: var(--window-room); transform: translateY(24px) scale(.96); }
-  .voice-browser-window.is-open { transform: translateY(0) scale(1); }
-}
-@media (max-width: 600px) {
-  .is-browsing.has-side .voice-browser-window { left: 12px; width: auto; height: var(--window-upper); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .voice-presence, .voice-avatar, .voice-status, .voice-stage-controls, .voice-stage-action, .voice-browser-window, .prompt-action { transition: none; }
+  .voice-presence, .voice-avatar, .voice-status, .voice-stage-controls, .voice-stage-action, .prompt-action { transition: none; }
 }
 
 
@@ -157,8 +143,7 @@
   .voice-stage.voice-stage:is([data-orb="beside"], [data-orb="free"]) .voice-stage-action { width: 38px; height: 38px; }
   .voice-stage.voice-stage:is([data-orb="beside"], [data-orb="free"]) .voice-stage-action svg { width: 17px; height: 17px; }
   .voice-stage.voice-stage:is([data-orb="beside"], [data-orb="free"]) .voice-tool-activity { left: var(--stand-x); top: 48%; --origin-x: 0px; --origin-y: -30px; }
-  .voice-stage[data-panels="1"] .voice-files-window,
-  .voice-stage[data-panels="1"] .voice-browser-window { left: auto; right: 18px; top: var(--window-middle); transform: translateY(-50%); width: 57%; height: var(--window-room); }
+  .voice-stage[data-panels="1"] .voice-files-window { left: auto; right: 18px; top: var(--window-middle); transform: translateY(-50%); width: 57%; height: var(--window-room); }
 }
 @media (min-width: 601px) { .voice-stage:is([data-orb="beside"], [data-orb="free"]) .voice-tool-float.flies-left { --flight-x: max(-60px, -6cqw); } }
 
@@ -190,9 +175,9 @@
 .voice-profile table {width:100%;margin:12px 0;}.voice-profile td{padding:5px 3px;border-bottom:1px solid rgb(var(--line));}.voice-profile td:not(:first-child){text-align:right;white-space:nowrap;}
 .voice-profile pre {white-space:pre-wrap;font-size:10px;max-height:160px;overflow:auto;}.voice-profile button{padding:6px 10px;border:1px solid rgb(var(--line));border-radius:8px;}
 
-/* Files, in voice mode: a window like the browser's, as the pictures, the
-   conversation and an extension's are. It takes the middle when the side is
-   taken and the browser is not, and the side otherwise; the stage's classes say where the presence goes. The
+/* Files, in voice mode: a window as the pictures, the conversation and an
+   extension's are. It takes the middle when the side is taken and the middle
+   is not, and the side otherwise; the stage's classes say where the presence goes. The
    window has the theme's own surface, since what is in it is text to read. */
 .voice-files-window { position: absolute; z-index: 2; overflow: hidden; border: 1px solid #62718a; border-radius: 18px; background: rgb(var(--surface)); color: rgb(var(--fg)); box-shadow: 0 22px 30px -22px #000c, 0 2px 6px #0003; display: flex; flex-direction: column; opacity: 0; visibility: hidden; pointer-events: none; transition: transform .7s cubic-bezier(.22,1,.36,1), left .7s cubic-bezier(.22,1,.36,1), top .7s cubic-bezier(.22,1,.36,1), width .7s cubic-bezier(.22,1,.36,1), height .7s cubic-bezier(.22,1,.36,1), opacity .4s, visibility .7s; }
 .voice-files-window > header { flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; height: 42px; padding: 0 10px 0 16px; border-bottom: 1px solid #62718a; background: rgb(var(--surface)); color: rgb(var(--fg)); font-size: 11px; font-weight: 500; }
@@ -338,17 +323,17 @@
 .resize-se::after, .resize-sw::after { content: ""; position: absolute; bottom: 4px; width: 8px; height: 8px; border-bottom: 2px solid rgb(var(--fg) / .35); opacity: 0; transition: opacity .2s; }
 .resize-se::after { right: 4px; border-right: 2px solid rgb(var(--fg) / .35); border-bottom-right-radius: 3px; }
 .resize-sw::after { left: 4px; border-left: 2px solid rgb(var(--fg) / .35); border-bottom-left-radius: 3px; }
-:is(.voice-browser-window, .voice-files-window):hover > :is(.resize-se, .resize-sw)::after, .resize-handle:focus-visible::after { opacity: 1; }
-/* While dragging, a frame under the pointer (the browser) must not take the moves, and text is not selected. */
+.voice-files-window:hover > :is(.resize-se, .resize-sw)::after, .resize-handle:focus-visible::after { opacity: 1; }
+/* While dragging, a frame under the pointer must not take the moves, and text is not selected. */
 body.is-resizing { user-select: none; -webkit-user-select: none; }
 body.is-resizing iframe { pointer-events: none; }
 @media (max-width: 600px) { .resize-handle { display: none; } }
 
-/* A window made as large as the stage allows (not the page's fullscreen): the
-   browser, or an extension's that may be. Over the other windows, with the dock
+/* A window made as large as the stage allows (not the page's fullscreen): an
+   extension's that may be. Over the other windows, with the dock
    and the stage's buttons still in reach under it. Above a size set by hand,
    which it gives back when restored. */
-.voice-stage :is(.voice-browser-window, .voice-extension-window).is-open.is-maximized { left: 12px !important; top: 12px !important; right: 12px !important; bottom: calc(var(--dock-middle) + var(--dock-height) / 2 + 14px) !important; width: auto !important; height: auto !important; max-width: none !important; max-height: none !important; transform: none !important; z-index: 4; border-radius: 14px; }
+.voice-stage .voice-extension-window.is-open.is-maximized { left: 12px !important; top: 12px !important; right: 12px !important; bottom: calc(var(--dock-middle) + var(--dock-height) / 2 + 14px) !important; width: auto !important; height: auto !important; max-width: none !important; max-height: none !important; transform: none !important; z-index: 4; border-radius: 14px; }
 .is-maximized > .resize-handle { display: none; }
 /* Pictures waiting to be sent sit at the top right, over where the window's buttons would be. */
-.voice-stage:has(.voice-attachments) :is(.voice-browser-window, .voice-extension-window).is-open.is-maximized { top: 56px !important; }
+.voice-stage:has(.voice-attachments) .voice-extension-window.is-open.is-maximized { top: 56px !important; }

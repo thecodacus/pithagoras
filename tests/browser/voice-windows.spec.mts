@@ -2,8 +2,9 @@ import { type Locator, type Page } from '@playwright/test';
 import { test, expect } from './portal-mock';
 import { settled } from './settled';
 
-// An extension's window at the side: the portal's tests' stand-in for one, opening on each command the agent runs.
-test.use({ installed: ['tests/fixtures/extensions/console'] });
+// An extension's window at the side, opening on each command the agent runs, and one in the middle that may be maximized
+// and is kept loaded: the portal's tests' stand-ins for them.
+test.use({ installed: ['tests/fixtures/extensions/console', 'tests/fixtures/extensions/viewer'] });
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
@@ -13,8 +14,6 @@ test.beforeEach(async ({ page }) => {
   await page.route('**/api/sessions/test/commands', route => route.fulfill({ json: { commands: [] } }));
   await page.route('**/api/sessions/test/config', route => route.fulfill({ status: 503, json: {} }));
   await page.route('**/api/voice', route => route.fulfill({ json: { enabled: true } }));
-  await page.route('**/api/browser', route => route.fulfill({ json: { install: { container: 'running' } } }));
-  await page.route('**/browser-ui/', route => route.fulfill({ contentType: 'text/html', body: '<body style="margin:0;background:#171a20;color:#d1d8e3;padding:36px">A browser, in view.</body>' }));
   await page.setViewportSize({ width: 1400, height: 860 });
   await page.goto('/tests/voice.html');
   await page.getByRole('button', { name: 'Turn on hands-free voice' }).click();
@@ -33,63 +32,43 @@ async function drag(page: Page, handle: Locator, dx: number) {
 
 const box = async (l: Locator) => (await l.boundingBox())!;
 
+/** The stand-in's window in the middle. */
+const middleOf = (page: Page) => page.locator('.voice-extension-window[data-extension="test-viewer"]');
+/** It, shown by hand. */
+async function openMiddle(page: Page) {
+  await page.getByRole('button', { name: 'Show Viewer' }).click();
+  await expect(middleOf(page)).toHaveClass(/is-open/);
+}
+
 test('two windows cannot be dragged over each other, and a gap between them brings the orb back', async ({ page }) => {
-  await page.getByRole('button', { name: 'Use browser', exact: true }).click();
+  await openMiddle(page);
   await page.getByRole('button', { name: 'Use terminal', exact: true }).click();
-  const browser = page.locator('.voice-browser-window'), consoleWindow = page.locator('.voice-extension-window[data-extension="test-console"]');
+  const middle = middleOf(page), consoleWindow = page.locator('.voice-extension-window[data-extension="test-console"]');
   await expect(consoleWindow).toHaveClass(/is-open/);
   await settled(page);
 
-  await drag(page, browser.locator('.resize-e'), 600);
-  expect((await box(consoleWindow)).x - ((await box(browser)).x + (await box(browser)).width)).toBeGreaterThanOrEqual(15);
+  await drag(page, middle.locator('.resize-e'), 600);
+  expect((await box(consoleWindow)).x - ((await box(middle)).x + (await box(middle)).width)).toBeGreaterThanOrEqual(15);
   await drag(page, consoleWindow.locator('.resize-w'), -600);
-  expect((await box(consoleWindow)).x - ((await box(browser)).x + (await box(browser)).width)).toBeGreaterThanOrEqual(15);
+  expect((await box(consoleWindow)).x - ((await box(middle)).x + (await box(middle)).width)).toBeGreaterThanOrEqual(15);
   const stage = await box(page.locator('.voice-stage'));
-  expect((await box(browser)).x).toBeGreaterThanOrEqual(stage.x);
+  expect((await box(middle)).x).toBeGreaterThanOrEqual(stage.x);
 
   // Docked while the windows leave no room; standing in the gap once there is.
   const presence = page.locator('.voice-presence');
   await expect(page.locator('.voice-stage')).not.toHaveAttribute('data-orb', 'free');
-  await drag(page, browser.locator('.resize-e'), -700);
+  await drag(page, middle.locator('.resize-e'), -700);
   await drag(page, consoleWindow.locator('.resize-w'), 300);
   await expect(page.locator('.voice-stage')).toHaveAttribute('data-orb', 'free');
   await settled(page);
-  const orb = await box(presence), left = await box(browser), right = await box(consoleWindow);
+  const orb = await box(presence), left = await box(middle), right = await box(consoleWindow);
   expect(orb.x).toBeGreaterThanOrEqual(left.x + left.width);
   expect(orb.x + orb.width).toBeLessThanOrEqual(right.x);
   expect(orb.height).toBeGreaterThan(150);
 
   // Closing the gap again sends it back to its dock.
-  await drag(page, browser.locator('.resize-e'), 700);
+  await drag(page, middle.locator('.resize-e'), 700);
   await expect(page.locator('.voice-stage')).not.toHaveAttribute('data-orb', 'free');
-});
-
-test('the browser maximizes within the stage, not the page, and gives its place back', async ({ page }) => {
-  await page.getByRole('button', { name: 'Use browser', exact: true }).click();
-  const browser = page.locator('.voice-browser-window');
-  await expect(browser).toHaveClass(/is-open/);
-  await page.getByRole('button', { name: 'Maximize browser' }).click();
-  await expect(browser).toHaveClass(/is-maximized/);
-  expect(await page.evaluate(() => document.fullscreenElement)).toBeNull();
-  const stage = await box(page.locator('.voice-stage'));
-  await settled(page);
-  expect((await box(browser)).width).toBeGreaterThan(stage.width - 30);
-  await expect(page.getByRole('button', { name: 'End voice mode' })).toBeVisible();
-
-  await page.getByRole('button', { name: 'Restore browser size' }).click();
-  await expect(browser).not.toHaveClass(/is-maximized/);
-  await page.getByRole('button', { name: 'Maximize browser' }).click();
-  await page.keyboard.press('Escape');
-  await expect(browser).not.toHaveClass(/is-maximized/);
-  await expect(page.getByRole('button', { name: 'End voice mode' })).toBeVisible();
-
-  // Minimized while large, it opens again at its usual size.
-  await page.getByRole('button', { name: 'Maximize browser' }).click();
-  await page.getByRole('button', { name: 'Minimize browser' }).click();
-  await expect(browser).not.toHaveClass(/is-open/);
-  await page.getByRole('button', { name: 'Show browser' }).click();
-  await expect(browser).toHaveClass(/is-open/);
-  await expect(browser).not.toHaveClass(/is-maximized/);
 });
 
 test('a single window stays inside its workspace and the orb moves aside for it', async ({ page }) => {
@@ -128,39 +107,29 @@ async function openConsole(page: Page) {
 const overlap = (a: { x: number; y: number; width: number; height: number }, b: typeof a) =>
   a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
 
-test('a browser closed for a third window is not maximized any more: Escape is Stop again, and it opens at its size', async ({ page }) => {
-  await page.getByRole('button', { name: 'Use browser', exact: true }).click();
-  const browser = page.locator('.voice-browser-window');
-  await page.getByRole('button', { name: 'Maximize browser' }).click();
+test('a window closed for a third window is not maximized any more: Escape is Stop again, and it opens at its size', async ({ page }) => {
+  await openMiddle(page);
+  const middle = middleOf(page);
+  await page.getByRole('button', { name: 'Maximize Viewer' }).click();
   await page.getByRole('button', { name: 'Use terminal', exact: true }).click();
   await page.getByRole('button', { name: 'Show the conversation' }).click();
-  await expect(browser).not.toHaveClass(/is-open/);
-  await page.getByRole('button', { name: 'Show browser' }).click();
-  await expect(browser).toHaveClass(/is-open/);
-  await expect(browser).not.toHaveClass(/is-maximized/);
-  await page.getByRole('button', { name: 'Minimize browser' }).click();
-  // Nothing running: Escape ends voice mode, where a maximized browser would have taken it.
+  await expect(middle).not.toHaveClass(/is-open/);
+  await page.getByRole('button', { name: 'Show Viewer' }).click();
+  await expect(middle).toHaveClass(/is-open/);
+  await expect(middle).not.toHaveClass(/is-maximized/);
+  await page.getByRole('button', { name: 'Minimize Viewer' }).click();
+  // Nothing running: Escape ends voice mode, where a maximized window would have taken it.
   await page.keyboard.press('Escape');
   await expect(page.getByRole('button', { name: 'End voice mode' })).toHaveCount(0);
 });
 
-test('Escape restores the browser from inside the page in it', async ({ page }) => {
-  await page.getByRole('button', { name: 'Use browser', exact: true }).click();
-  const browser = page.locator('.voice-browser-window');
-  await page.getByRole('button', { name: 'Maximize browser' }).click();
-  await page.frameLocator('.voice-browser-window iframe').locator('body').click();
-  await page.keyboard.press('Escape');
-  await expect(browser).not.toHaveClass(/is-maximized/);
-  await expect(page.getByRole('button', { name: 'End voice mode' })).toBeVisible();
-});
-
-test('on a phone the maximized browser ends above the dock', async ({ page }) => {
+test('on a phone the maximized window ends above the dock', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.getByRole('button', { name: 'Use browser', exact: true }).click();
-  await page.getByRole('button', { name: 'Maximize browser' }).click();
+  await openMiddle(page);
+  await page.getByRole('button', { name: 'Maximize Viewer' }).click();
   await settled(page);
-  const browser = await box(page.locator('.voice-browser-window')), dock = await box(page.locator('.voice-presence'));
-  expect(browser.y + browser.height).toBeLessThanOrEqual(dock.y);
+  const middle = await box(middleOf(page)), dock = await box(page.locator('.voice-presence'));
+  expect(middle.y + middle.height).toBeLessThanOrEqual(dock.y);
 });
 
 test('a window dragged by its corner stops short of a window off that corner', async ({ page }) => {
@@ -187,14 +156,14 @@ test('a window dragged by its corner stops short of a window off that corner', a
 test('a window opens down to just above the dock, and goes no further, so a window drawn over the orb has nothing under the dock to lift', async ({ page }) => {
   // Tall, where the windows opened well above the dock: about a centimetre was left there.
   await page.setViewportSize({ width: 1400, height: 1200 });
-  await page.getByRole('button', { name: 'Use browser', exact: true }).click();
+  await openMiddle(page);
   await page.getByRole('button', { name: 'Use terminal', exact: true }).click();
-  const browser = page.locator('.voice-browser-window'), consoleWindow = page.locator('.voice-extension-window[data-extension="test-console"]');
+  const middle = middleOf(page), consoleWindow = page.locator('.voice-extension-window[data-extension="test-console"]');
   await settled(page);
-  const opened = { browser: await box(browser), consoleWindow: await box(consoleWindow) };
+  const opened = { middle: await box(middle), consoleWindow: await box(consoleWindow) };
   const foot = (b: { y: number; height: number }) => b.y + b.height;
   // A gap between them, the orb standing in it: the dock is not there to stop them.
-  await drag(page, browser.locator('.resize-e'), -700);
+  await drag(page, middle.locator('.resize-e'), -700);
   await drag(page, consoleWindow.locator('.resize-w'), 300);
   await expect(page.locator('.voice-stage')).toHaveAttribute('data-orb', 'free');
   await settled(page);
@@ -204,9 +173,9 @@ test('a window opens down to just above the dock, and goes no further, so a wind
   // Opened as deep as they go: the gap between two windows short of the dock.
   for (const w of Object.values(opened)) expect(Math.abs(foot(w) - (dockTop - 16))).toBeLessThan(1);
   // Both dragged to the stage's foot: they went down to it, under where the dock goes.
-  await drag2(page, browser.locator('.resize-s'), 0, 600);
+  await drag2(page, middle.locator('.resize-s'), 0, 600);
   await drag2(page, consoleWindow.locator('.resize-s'), 0, 600);
-  for (const w of [browser, consoleWindow]) expect(Math.abs(foot(await box(w)) - (dockTop - 16))).toBeLessThan(1);
+  for (const w of [middle, consoleWindow]) expect(Math.abs(foot(await box(w)) - (dockTop - 16))).toBeLessThan(1);
   // Up is still theirs.
   await drag2(page, consoleWindow.locator('.resize-s'), 0, -120);
   expect(foot(await box(consoleWindow))).toBeLessThan(dockTop - 120);
@@ -216,11 +185,11 @@ test('a window opens down to just above the dock, and goes no further, so a wind
   // The left one drawn slowly over the orb: it goes to its dock, and neither window is moved for it.
   await page.evaluate(() => {
     const moved: string[] = ((window as any).moved = []);
-    for (const w of document.querySelectorAll<HTMLElement>('.voice-browser-window, .voice-extension-window[data-extension="test-console"]')) {
-      new MutationObserver(() => moved.push(`${w.dataset.extension ?? 'browser'} ${w.style.top} ${w.style.height}`)).observe(w, { attributes: true, attributeFilter: ['style'] });
+    for (const w of document.querySelectorAll<HTMLElement>('.voice-extension-window:is([data-extension="test-viewer"], [data-extension="test-console"])')) {
+      new MutationObserver(() => moved.push(`${w.dataset.extension} ${w.style.top} ${w.style.height}`)).observe(w, { attributes: true, attributeFilter: ['style'] });
     }
   });
-  const grip = await box(browser.locator('.resize-e'));
+  const grip = await box(middle.locator('.resize-e'));
   const x = grip.x + 4, y = grip.y + 60;
   await page.mouse.move(x, y); await page.mouse.down();
   // At a hand's pace, a frame between moves: how slowly it is drawn is what the test is about.
@@ -229,10 +198,10 @@ test('a window opens down to just above the dock, and goes no further, so a wind
   await expect(page.locator('.voice-stage')).toHaveAttribute('data-orb', 'dock');
   await settled(page);
   const heights = await page.evaluate(() => ((window as any).moved as string[]).filter(m => m.startsWith('test-console ')));
-  // The browser's width changes as it is dragged; the console is not touched, nor either one's height.
+  // The middle one's width changes as it is dragged; the console is not touched, nor either one's height.
   expect(heights).toEqual([]);
   const dock = await box(page.locator('.voice-presence'));
-  for (const w of [browser, consoleWindow]) expect(foot(await box(w))).toBeLessThanOrEqual(dock.y - 15);
+  for (const w of [middle, consoleWindow]) expect(foot(await box(w))).toBeLessThanOrEqual(dock.y - 15);
 });
 
 test('a window dragged while the orb goes back to its dock is not fought over, and ends clear of the dock', async ({ page }) => {
@@ -268,9 +237,9 @@ test('a window sized by hand takes its place again when another window opens', a
   await settled(page);
   const panel = page.locator('.voice-extension-window[data-extension="test-console"]');
   await drag(page, panel.locator('.resize-w'), -150);
-  await page.getByRole('button', { name: 'Use browser', exact: true }).click();
+  await openMiddle(page);
   await settled(page);
-  expect(overlap(await box(panel), await box(page.locator('.voice-browser-window')))).toBe(false);
+  expect(overlap(await box(panel), await box(middleOf(page)))).toBe(false);
   await expect(page.locator('.voice-stage')).not.toHaveAttribute('data-orb', 'free');
 });
 
@@ -295,47 +264,33 @@ test('the orb is placed again when a window slides, not at every hover or fade o
   expect(await placings('.voice-extension-window[data-extension="test-console"]', 'width')).toBeGreaterThan(0);
 });
 
-test('a window opening while the browser is maximized gives it its place back', async ({ page }) => {
-  await page.getByRole('button', { name: 'Use browser', exact: true }).click();
-  const browser = page.locator('.voice-browser-window');
-  await page.getByRole('button', { name: 'Maximize browser' }).click();
+test('a window opening while another is maximized gives it its place back', async ({ page }) => {
+  await openMiddle(page);
+  const middle = middleOf(page);
+  await page.getByRole('button', { name: 'Maximize Viewer' }).click();
   // The agent runs a command: the console opens for it.
   await page.getByRole('button', { name: 'Use terminal', exact: true }).click();
-  await expect(browser).not.toHaveClass(/is-maximized/);
+  await expect(middle).not.toHaveClass(/is-maximized/);
   await expect(page.locator('.voice-extension-window[data-extension="test-console"]')).toHaveClass(/is-open/);
-  await page.getByRole('button', { name: 'Maximize browser' }).click();
+  await page.getByRole('button', { name: 'Maximize Viewer' }).click();
   await page.getByRole('button', { name: 'Show the conversation' }).click();
-  await expect(browser).not.toHaveClass(/is-maximized/);
+  await expect(middle).not.toHaveClass(/is-maximized/);
   await expect(page.getByRole('region', { name: 'Conversation', exact: true })).toHaveClass(/is-open/);
 });
 
-test('pictures waiting to be sent do not cover the maximized browser\'s buttons', async ({ page }) => {
+test('pictures waiting to be sent do not cover the maximized window\'s buttons', async ({ page }) => {
   const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGP8z8DAwMDAxMDAwMDAAAANHQEDasKb6QAAAABJRU5ErkJggg==', 'base64');
   await page.locator('.voice-stage input[type=file]').setInputFiles({ name: 'photo.png', mimeType: 'image/png', buffer: png });
-  await page.getByRole('button', { name: 'Use browser', exact: true }).click();
-  await page.getByRole('button', { name: 'Maximize browser' }).click();
+  await openMiddle(page);
+  await page.getByRole('button', { name: 'Maximize Viewer' }).click();
   await settled(page);
-  for (const name of ['Restore browser size', 'Minimize browser']) {
+  for (const name of ['Restore the size of Viewer', 'Minimize Viewer']) {
     const b = await box(page.getByRole('button', { name }));
     const hit = await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.closest('button')?.getAttribute('aria-label'), { x: b.x + b.width / 2, y: b.y + b.height / 2 });
     expect(hit).toBe(name);
   }
-  await page.getByRole('button', { name: 'Minimize browser' }).click();
+  await page.getByRole('button', { name: 'Minimize Viewer' }).click();
   await expect(page.getByLabel('Pictures for your next message').getByRole('img', { name: 'photo.png' })).toHaveCount(1);
-});
-
-test('Escape in a field of the browser viewer\'s own is that field\'s; in the one it passes keys on through, it restores', async ({ page }) => {
-  await page.getByRole('button', { name: 'Use browser', exact: true }).click();
-  const browser = page.locator('.voice-browser-window');
-  await page.getByRole('button', { name: 'Maximize browser' }).click();
-  const frame = page.frameLocator('.voice-browser-window iframe');
-  await frame.locator('body').evaluate(b => { b.insertAdjacentHTML('beforeend', '<input aria-label="Search settings"><input id="overlayInput" type="search" aria-label="Keys">'); });
-  await frame.getByLabel('Search settings').click();
-  await page.keyboard.press('Escape');
-  await expect(browser).toHaveClass(/is-maximized/);
-  await frame.getByLabel('Keys').click();
-  await page.keyboard.press('Escape');
-  await expect(browser).not.toHaveClass(/is-maximized/);
 });
 
 test('a press on an edge that goes nowhere changes nothing', async ({ page }) => {
@@ -352,30 +307,30 @@ test('a press on an edge that goes nowhere changes nothing', async ({ page }) =>
 });
 
 test('a window that stands closer to the dock than the gap does not jump when its edge is taken', async ({ page }) => {
-  await page.getByRole('button', { name: 'Use browser', exact: true }).click();
+  await openMiddle(page);
   await page.getByRole('button', { name: 'Use terminal', exact: true }).click();
-  const browser = page.locator('.voice-browser-window');
+  const middle = middleOf(page);
   // Placed a few pixels closer than the gap: as a stage whose dock grew after the windows were placed would leave them.
   await page.locator('.voice-stage').evaluate(el => el.style.setProperty('--window-room', 'calc(100% - 52px - 98px)'));
   await settled(page);
-  const before = await box(browser), dock = await box(page.locator('.voice-presence'));
+  const before = await box(middle), dock = await box(page.locator('.voice-presence'));
   expect(dock.y - (before.y + before.height)).toBeLessThan(16);
   // At its left end, clear of the tool cards that float up from the dock.
-  const grip = await box(browser.locator('.resize-s'));
+  const grip = await box(middle.locator('.resize-s'));
   expect(await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.className, { x: grip.x + 20, y: grip.y + 4 })).toContain('resize-s');
   await page.mouse.move(grip.x + 20, grip.y + 4); await page.mouse.down();
   await page.mouse.move(grip.x + 20, grip.y + 5);
-  expect((await box(browser)).height).toBeGreaterThanOrEqual(before.height - 0.5);
+  expect((await box(middle)).height).toBeGreaterThanOrEqual(before.height - 0.5);
   await page.mouse.up();
 });
 
 test('closing one of two windows stands the orb beside the other from the first frame', async ({ page }) => {
-  await page.getByRole('button', { name: 'Use browser', exact: true }).click();
+  await openMiddle(page);
   await page.getByRole('button', { name: 'Use terminal', exact: true }).click();
-  const browser = page.locator('.voice-browser-window');
+  const middle = middleOf(page);
   await settled(page);
   // Sized by hand so there is no gap: the orb is in its dock.
-  await drag(page, browser.locator('.resize-e'), 400);
+  await drag(page, middle.locator('.resize-e'), 400);
   await expect.poll(() => page.locator('.voice-presence').evaluate(p => getComputedStyle(p).flexDirection)).toBe('row');
   // Every frame after the console closes: how the orb is laid out.
   const frames = await page.evaluate(async () => {
@@ -392,15 +347,15 @@ test('closing one of two windows stands the orb beside the other from the first 
 });
 
 test('a drag measures the other windows once, not at every move of the pointer', async ({ page }) => {
-  await page.getByRole('button', { name: 'Use browser', exact: true }).click();
+  await openMiddle(page);
   await page.getByRole('button', { name: 'Use terminal', exact: true }).click();
-  const browser = page.locator('.voice-browser-window');
+  const middle = middleOf(page);
   await settled(page);
-  const grip = await box(browser.locator('.resize-e'));
+  const grip = await box(middle.locator('.resize-e'));
   await page.mouse.move(grip.x + 4, grip.y + 40); await page.mouse.down();
   // Twenty moves in one frame, as a fast mouse sends them: how often the console beside it is measured.
   const reads = await page.evaluate(({ x, y }) => {
-    const handle = document.querySelector('.voice-browser-window .resize-e')!, other = document.querySelector('.voice-extension-window[data-extension="test-console"]')!;
+    const handle = document.querySelector('.voice-extension-window[data-extension="test-viewer"] .resize-e')!, other = document.querySelector('.voice-extension-window[data-extension="test-console"]')!;
     let reads = 0;
     const read = other.getBoundingClientRect;
     other.getBoundingClientRect = function () { reads++; return read.call(this); };
@@ -420,9 +375,9 @@ test('on a phone the windows end above the dock, one or two of them, and the car
   await settled(page);
   // The console reached 36px under the dock, its last lines behind the orb.
   expect(foot(await box(page.locator('.voice-extension-window[data-extension="test-console"]')))).toBeLessThanOrEqual((await dock()).y - 10);
-  await page.getByRole('button', { name: 'Use browser', exact: true }).click();
+  await openMiddle(page);
   await settled(page);
-  const upper = await box(page.locator('.voice-browser-window')), lower = await box(page.locator('.voice-extension-window[data-extension="test-console"]'));
+  const upper = await box(middleOf(page)), lower = await box(page.locator('.voice-extension-window[data-extension="test-console"]'));
   expect(foot(upper)).toBeLessThanOrEqual(lower.y - 8);
   expect(foot(lower)).toBeLessThanOrEqual((await dock()).y - 10);
   // Room for a few lines of output: it was a header and one line.
@@ -456,19 +411,19 @@ test('a window\'s shadow falls downwards and does not reach across the gap onto 
 });
 
 test('a window sized by hand is lifted clear of the dock when the stage gets shorter under it', async ({ page }) => {
-  await page.getByRole('button', { name: 'Use browser', exact: true }).click();
+  await openMiddle(page);
   await page.getByRole('button', { name: 'Use terminal', exact: true }).click();
-  const browser = page.locator('.voice-browser-window'), consoleWindow = page.locator('.voice-extension-window[data-extension="test-console"]');
+  const middle = middleOf(page), consoleWindow = page.locator('.voice-extension-window[data-extension="test-console"]');
   await settled(page);
   // Sized by hand, with no gap for the orb: it is in its dock, and the windows are pinned in pixels.
-  await drag(page, browser.locator('.resize-e'), 60);
+  await drag(page, middle.locator('.resize-e'), 60);
   await drag2(page, consoleWindow.locator('.resize-s'), 0, -2);
   await expect(page.locator('.voice-stage')).toHaveAttribute('data-orb', 'dock');
   // A shorter window: the dock moves up, under the windows' feet.
   await page.setViewportSize({ width: 1400, height: 700 });
   await settled(page);
   const dock = await box(page.locator('.voice-presence'));
-  for (const w of [browser, consoleWindow]) { const b = await box(w); expect(b.y + b.height).toBeLessThanOrEqual(dock.y - 15); }
+  for (const w of [middle, consoleWindow]) { const b = await box(w); expect(b.y + b.height).toBeLessThanOrEqual(dock.y - 15); }
 });
 
 test('the windows have their place at any width, not only on either side of the phone\'s', async ({ page }) => {
@@ -484,9 +439,8 @@ test('the windows have their place at any width, not only on either side of the 
   expect(unset).toBe(false);
 });
 
-// An extension's window that may be maximized and is kept loaded, as the browser's is: the portal's tests' stand-in for one.
+// An extension's window that may be maximized and is kept loaded: the portal's tests' stand-in for one.
 test.describe('a window an extension lets be maximized', () => {
-  test.use({ installed: ['tests/fixtures/extensions/console', 'tests/fixtures/extensions/viewer'] });
   const viewerOf = (page: Page) => page.locator('.voice-extension-window[data-extension="test-viewer"]');
 
   test('it fills the stage until it is restored: by its button, by Escape, by being minimized, or by another window opening', async ({ page }) => {
@@ -495,6 +449,8 @@ test.describe('a window an extension lets be maximized', () => {
     await expect(viewer).toHaveClass(/is-open/);
     await page.getByRole('button', { name: 'Maximize Viewer' }).click();
     await expect(viewer).toHaveClass(/is-maximized/);
+    // Within the stage, not the page's fullscreen.
+    expect(await page.evaluate(() => document.fullscreenElement)).toBeNull();
     await settled(page);
     expect((await box(viewer)).width).toBeGreaterThan((await box(page.locator('.voice-stage'))).width - 30);
     await expect(page.locator('.voice-stage')).toHaveAttribute('data-orb', 'dock');
@@ -515,19 +471,17 @@ test.describe('a window an extension lets be maximized', () => {
     await expect(viewer).toHaveClass(/is-open/);
     await expect(viewer).not.toHaveClass(/is-maximized/);
 
-    // A window opening is there to be seen: the portal's own, and the browser.
+    // A window opening is there to be seen: the portal's own, and an extension's that opens for the agent's work.
     await page.getByRole('button', { name: 'Maximize Viewer' }).click();
     await page.getByRole('button', { name: 'Show the conversation' }).click();
     await expect(viewer).not.toHaveClass(/is-maximized/);
     await page.getByRole('button', { name: 'Close the conversation' }).click();
     await page.getByRole('button', { name: 'Maximize Viewer' }).click();
-    await page.getByRole('button', { name: 'Use browser', exact: true }).click();
-    await expect(page.locator('.voice-browser-window')).toHaveClass(/is-open/);
+    await page.getByRole('button', { name: 'Use terminal', exact: true }).click();
+    await expect(page.locator('.voice-extension-window[data-extension="test-console"]')).toHaveClass(/is-open/);
     await expect(viewer).not.toHaveClass(/is-maximized/);
 
     // A window that does not ask for it has no such button.
-    await page.getByRole('button', { name: 'Use terminal', exact: true }).click();
-    await expect(page.locator('.voice-extension-window[data-extension="test-console"]')).toHaveClass(/is-open/);
     await expect(page.getByRole('button', { name: 'Maximize Console' })).toHaveCount(0);
   });
 

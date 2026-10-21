@@ -22,14 +22,14 @@ export function clearSize(el: HTMLElement | null) {
 }
 
 /** Every window a voice stage can have open. */
-export const WINDOWS = ".voice-browser-window.is-open, .voice-files-window.is-open";
+export const WINDOWS = ".voice-files-window.is-open";
 /** Kept clear at the edges of the area a window lives in. */
 const EDGE = 8;
 
 /**
  * The windows open around `root` — a chat's workspace, which holds the voice
  * stage's windows — that are there to be seen: not one hidden
- * under a maximized browser. What the orb makes room for and what a window
+ * under a maximized one. What the orb makes room for and what a window
  * being resized stops at are the same windows.
  */
 export function openWindows(root: ParentNode): HTMLElement[] {

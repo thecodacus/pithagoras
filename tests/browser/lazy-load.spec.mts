@@ -24,7 +24,7 @@ async function portal(page: Page, more: (path: string) => unknown = () => undefi
   return files;
 }
 
-const PAGES = /\/components\/(SessionsPage|ProjectsPage|AgentPage|RoutinesPage|AuditPanel|BrowserPage|MemoryPage|SetupAssistant)\.tsx$/;
+const PAGES = /\/components\/(SessionsPage|ProjectsPage|AgentPage|RoutinesPage|AuditPanel|MemoryPage|SetupAssistant)\.tsx$/;
 test('the first draw does not fetch the other pages, and a page is fetched when it is opened', async ({ page }) => {
   const files = await portal(page);
   await page.goto('/s/a');

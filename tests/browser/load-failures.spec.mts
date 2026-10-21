@@ -24,10 +24,6 @@ const answers: Record<string, unknown> = {
   '/api/tool-rules': { rules: [] },
   '/api/channels': { channels: [], kinds: [], agentHome: '/a/home' },
   '/api/skills': { skills: [{ name: 'release-notes', description: 'How releases are cut', editable: true, enabled: true, source: 'user', path: '/a/skills/release-notes' }], diagnostics: [], root: '/a/skills' },
-  '/api/browser': {
-    running: false, unprotected: false, connectedAs: null, version: null, pages: [], uiPort: '3011', uiExposed: false, uiOutdated: false, cursor: true, configured: false, byDefault: true, sessions: [], routines: [],
-    install: { available: true, mode: 'docker', image: false, container: 'absent', binary: '/usr/bin/chromium', pulling: { active: false, line: '' } }, config: { user: 'abc', hasPassword: true },
-  },
   '/api/voice': { enabled: false, whisperUrl: 'http://127.0.0.1:8178/inference', breezeUrl: 'http://127.0.0.1:7860/v1/audio/speech', instruction: 'Clear speech', voice: 'design', runtime: 'breeze', language: 'auto', cfgScale: 4 },
   '/api/voice/install': { available: true, state: 'absent', busy: false, progress: '', error: '' },
   '/api/voice/presets': [],
@@ -117,15 +113,10 @@ test('Settings → Skills does not say there are none when the list could not be
 });
 
 test('Settings → Add-ons: each add-on says what it could not read, and reads it again', async ({ page }) => {
-  const { up, asked } = await portal(page, ['/api/browser', '/api/voice', '/api/features/subagent', '/api/features']);
+  const { up, asked } = await portal(page, ['/api/voice', '/api/features/subagent', '/api/features']);
   await page.goto('/settings/add-ons');
   const dialog = settingsDialog(page);
-  await expect(dialog.getByRole('alert')).toContainText(FAILED);
-  up('/api/browser');
-  await dialog.getByRole('button', { name: 'Try again' }).click();
-  await expect(dialog.getByText('A real browser with a profile that stays logged in.')).toBeVisible();
-
-  await dialog.getByRole('tab', { name: 'Voice' }).click();
+  await expect(dialog.getByRole('tab', { name: 'Voice' })).toHaveAttribute('aria-selected', 'true');
   await expect(dialog.getByRole('alert')).toContainText(FAILED);
   up('/api/voice');
   await dialog.getByRole('button', { name: 'Try again' }).click();

@@ -18,7 +18,6 @@ async function fixture(page: Page, { jobs = [] as unknown[] } = {}) {
   await page.route('**/api/sessions/test/config', (route) => route.fulfill({ status: 503, json: {} }));
   await page.route('**/api/sessions/test/background', (route) => route.fulfill({ json: { supported: true, jobs, statuses: [], widgets: [] } }));
   await page.route('**/api/voice', (route) => route.fulfill({ json: { enabled: true } }));
-  await page.route('**/api/browser', (route) => route.fulfill({ json: { install: { container: 'running' } } }));
   await page.setViewportSize({ width: 1400, height: 860 });
   await page.goto('/tests/voice.html?hooks=1');
 }
