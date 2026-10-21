@@ -67,7 +67,7 @@ writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR, "models.json"), JSON.st
 
 const express = (await import("express")).default;
 const { memoryLlmRouter, noteToolCall, forgetAsking, upstream: llm } = await import("../dist/memory-llm.js");
-const { putSetting } = await import("../dist/db.js");
+const { putSetting, setSettings } = await import("../dist/db.js");
 // Its keep-alive sockets would outlive the servers of the test, so the agent goes too.
 after(() => { upstream.close(); http.close(); forgetAsking(); llm.agent.close().catch(() => {}); });
 
@@ -134,4 +134,15 @@ test("an address no one answers is not 'the wait came round' — it stays a plai
   assert.equal(r.status, 502);
   assert.doesNotMatch((await r.json()).error.message, /did not answer within/);
   target = { provider: "fake", id: "m" };
+});
+
+// Last: it forgets the asking chat.
+test("with no chat asking and no model for new chats, it is refused, saying so", async () => {
+  forgetAsking();
+  setSettings({ provider: "", model: "" });
+  const before = requests.length;
+  const r = await ask("test-key");
+  assert.equal(r.status, 502);
+  assert.match((await r.json()).error.message, /No chat is asking, and new chats have no model chosen/);
+  assert.equal(requests.length, before);
 });
