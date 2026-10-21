@@ -1040,7 +1040,7 @@ export const api = {
     json<{ ok: true }>(`/api/sessions/${id}/draft`, { method: "PUT", body: JSON.stringify({ text, caret }) }),
   piSettings: () => json<{ path: string; content: string }>("/api/pi-settings"),
   savePiSettings: (content: string) =>
-    json<{ ok: true; path: string; note: string }>("/api/pi-settings", {
+    json<{ ok: true; path: string }>("/api/pi-settings", {
       method: "PUT",
       body: JSON.stringify({ content }),
     }),

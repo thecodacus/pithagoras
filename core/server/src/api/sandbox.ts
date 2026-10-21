@@ -10,25 +10,6 @@ interface OpenChats {
   reloadIdle(): Promise<{ reloaded: number; waiting: number }>;
 }
 
-/**
- * The open chats reloaded, so each takes the sandbox as it now is: tools are
- * bound when a chat's pi loads its extensions, and a chat opened before the
- * switch would otherwise keep what it had. A busy one is tried again until it
- * is idle, for up to ten minutes.
- */
-async function reloadChats(chats: OpenChats): Promise<{ reloaded: number; waiting: number }> {
-  const first = await chats.reloadIdle();
-  if (first.waiting) {
-    let tries = 0;
-    const retry = setInterval(async () => {
-      const r = await chats.reloadIdle().catch(() => ({ reloaded: 0, waiting: 0 }));
-      if (!r.waiting || ++tries >= 60) clearInterval(retry);
-    }, 10_000);
-    retry.unref?.();
-  }
-  return first;
-}
-
 /** Settings → Sandbox: the policy, whether this portal can sandbox, and putting a policy on. */
 export function sandboxRouter(chats: OpenChats): Router {
   const router = express.Router();
@@ -69,7 +50,9 @@ export function sandboxRouter(chats: OpenChats): Router {
       return res.status(500).json({ error: `The sandbox was not switched on: ${lastReport.warnings.join("; ")}`, report: lastReport });
     }
     saveSandboxPolicy(policy);
-    const reloaded = await reloadChats(chats);
+    // Tools are bound when a chat's pi loads its extensions: the open chats are reloaded to take the sandbox as it is
+    // now, a working one at its next step.
+    const reloaded = await chats.reloadIdle();
     res.json({ policy: sandboxPolicy(), report: lastReport, chats: reloaded });
   });
 

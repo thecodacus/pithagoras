@@ -349,9 +349,9 @@ overrides; `defaults` is what an unset field falls back to. An empty string in
 | | |
 | --- | --- |
 | `GET /api/packages` | Raw `pi list` output |
-| `POST /api/packages` | `{ spec }`: a spec of a form pi documents, or `npm:<name>@<range>` with a semver range, as an extension that requires the package installs it |
-| `DELETE /api/packages` | `{ spec }` |
-| `POST /api/packages/update` | Update the installed pi packages (`pi update --extensions`); pi itself comes with the portal's version |
+| `POST /api/packages` | `{ spec }`: a spec of a form pi documents, or `npm:<name>@<range>` with a semver range, as an extension that requires the package installs it. Answers `{ ok, output, reloaded, waiting }`: the open sessions are reloaded, an idle one at once and a working one at its next step (`waiting`). A folder installed again is loaded again in place |
+| `DELETE /api/packages` | `{ spec }`; reloads the open sessions as installing does |
+| `POST /api/packages/update` | Update the installed pi packages (`pi update --extensions`); pi itself comes with the portal's version. Reloads the open sessions as installing does |
 | `GET /api/extensions` | Parsed packages with their recovered settings, each with `kinds`: what it brings, of `pi`, `pithagoras` and `themes` |
 | `GET /api/extensions/shipped` | `{ extensions: [{ name, version?, description?, kinds, spec, requires? }] }` — the extensions that come with the portal; `spec` is the folder each is installed by, `requires` the extensions each cannot work without |
 | `GET /api/extensions/plan?spec=` | `{ name?, version?, needs: [{ name, range, for, action, spec?, from?, version?, error? }] }` — what installing `spec` brings with it: each extension it requires, and each those require, that is not there as it is needed, each before what needs it. `action` is `install` (by `spec`, `from` the portal's folder or npm), `switch-on`, `missing` or `version` (there in a version not taken: installed, or with `from`, the portal's folder's or the one npm gives what needed it first). No `name` and no needs for a spec that cannot be read beforehand: a git URL, a folder ([Installing what it requires](/guide/extension-ui#installing-what-it-requires)) |
@@ -359,10 +359,10 @@ overrides; `defaults` is what an unset field falls back to. An empty string in
 | `POST /api/extension-ui/failures` | `{ name, rev, error, stack? }` — a page says that the browser half of `name`, at revision `rev`, failed there: to load, to draw, or in what it runs of its own; `stack` is where, as the page had it. The latest is kept for each package and said as its `clientError` and `clientStack` until another revision of it is installed. 400 without `name`, `rev` and `error`, 404 when no browser half of that name is installed at that revision |
 | `GET /api/extension-ui/<package>/~<rev>/<file>` | A file of that package's web folder, under the revision of its browser half; without `~<rev>/`, or under another revision, the same file |
 | `/api/x/<package>/…` | The routes of that package's server half, whatever it serves there, behind the portal's login; no body is read for them unless the route asks. WebSocket upgrades under the same address go to it, checked for the login and for the page they come from |
-| `PUT /api/extensions/enabled` | `{ spec, enabled }` — switch a package off or on without uninstalling it; reloads idle open sessions and says how many were left waiting |
+| `PUT /api/extensions/enabled` | `{ spec, enabled }` — switch a package off or on without uninstalling it; reloads the open sessions, an idle one at once, and says how many are working and reloaded at their next step (`waiting`) |
 | `PUT /api/extensions/settings` | `{ key, value }` — empty value removes the key |
 | `GET /api/pi-settings` | Raw `settings.json` |
-| `PUT /api/pi-settings` | `{ content }` — refused unless it parses as JSON |
+| `PUT /api/pi-settings` | `{ content }` — refused unless it parses as JSON; reloads the open sessions as installing a package does, and answers `{ ok, path, reloaded, waiting }` |
 
 ## Opt-in features
 
