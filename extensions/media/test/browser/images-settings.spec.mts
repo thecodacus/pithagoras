@@ -96,7 +96,7 @@ test('image generation needs an endpoint before it can be switched on, and the k
   await tool.click();
   await expect(tool).toHaveAttribute('aria-checked', 'true');
   await expect(panel.getByText('On: pictures are made on the Media page and by the agent.')).toBeVisible();
-  await expect(panel.getByText(/one busy chat picks it up/)).toBeVisible();
+  await expect(panel.getByText(/one busy chat has it from its next step/)).toBeVisible();
   expect(sent.at(-1)!.body).toEqual({ enabled: true });
 
   // Changing only the model keeps the key: it is not sent again.
@@ -187,7 +187,7 @@ test('image editing has a switch and an endpoint of its own: it needs an address
   await editing.click();
   await expect(editing).toHaveAttribute('aria-checked', 'true');
   await expect(panel.getByText('On: pictures are changed on the Media page and by the agent.')).toBeVisible();
-  await expect(panel.getByText(/one busy chat picks it up/)).toBeVisible();
+  await expect(panel.getByText(/one busy chat has it from its next step/)).toBeVisible();
   expect(sent.at(-1)!.body).toEqual({ editEnabled: true });
   // Generation is its own switch: still off.
   await expect(panel.getByRole('switch', { name: 'Image generation', exact: true })).toHaveAttribute('aria-checked', 'false');
@@ -288,7 +288,7 @@ test('several pictures per edit is a switch of its own that waits for the editin
   await expect(several).toHaveAttribute('aria-checked', 'true');
   await expect(panel.getByText('On: an edit takes up to eight pictures.')).toBeVisible();
   // The tool has another shape from now on, so the chats are reloaded like for a tool that came.
-  await expect(panel.getByText(/one busy chat picks it up/)).toBeVisible();
+  await expect(panel.getByText(/one busy chat has it from its next step/)).toBeVisible();
   expect(sent.at(-1)!.body).toEqual({ editMultiple: true });
   await several.click();
   await expect(several).toHaveAttribute('aria-checked', 'false');
@@ -315,7 +315,7 @@ test('Stable Diffusion extra settings is a switch of its own, off by default, th
   await expect(sd).toHaveAttribute('aria-checked', 'true');
   await expect(panel.getByText('On: the Media page shows stable-diffusion.cpp settings under Advanced.')).toBeVisible();
   expect(sent.at(-1)!.body).toEqual({ sdExtras: true });
-  await expect(panel.getByText(/one busy chat picks it up/)).toHaveCount(0);
+  await expect(panel.getByText(/one busy chat has it from its next step/)).toHaveCount(0);
   await sd.click();
   await expect(sd).toHaveAttribute('aria-checked', 'false');
   expect(sent.at(-1)!.body).toEqual({ sdExtras: false });

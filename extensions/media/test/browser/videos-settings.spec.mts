@@ -67,7 +67,7 @@ test('video generation needs an endpoint before it can be switched on, and the k
   await tool.click();
   await expect(tool).toHaveAttribute('aria-checked', 'true');
   await expect(panel.getByText('On: videos are made on the Media page and by the agent.')).toBeVisible();
-  await expect(panel.getByText(/one busy chat picks it up/)).toBeVisible();
+  await expect(panel.getByText(/one busy chat has it from its next step/)).toBeVisible();
   expect(sent.at(-1)!.body).toEqual({ enabled: true });
 
   // Changing only the model keeps the key: it is not sent again.
