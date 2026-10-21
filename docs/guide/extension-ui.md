@@ -1330,10 +1330,12 @@ anything (see below).
 - `acts`: the rules after a suspected prompt injection that every call of it
   is the shape of, by their names: `pipe-to-shell`, `write-to-path`, `upload`,
   `read-credentials`, `publish`, `persist`, `delegate`. Once the conversation
-  has read a flagged result, a call is held as a command that rule catches: it
-  is refused, and no approval is asked for or spent on it, unless a routine is
-  exempt from the rule, which Audit records. Before that it runs. A name that is
-  no rule's is left out, and said in the portal's log.
+  has read a flagged result, a call is held as a command that rule catches: the
+  primary user is asked about that one call where they are there to answer, and
+  it is refused everywhere else (see [Asked or refused](/guide/security#asked-or-refused)).
+  No approval for somebody else is asked for or spent on it, and a routine that
+  is exempt from the rule runs it, which Audit records. Before that it runs. A
+  name that is no rule's is left out, and said in the portal's log.
 - `files`: the names of its parameters that hold the files a call works on,
   each declared as text or a list of text (Media's `edit_image` names `path`
   and `paths`, one picture or a list as its settings say). A call is approved

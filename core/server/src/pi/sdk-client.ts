@@ -568,6 +568,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
             (name) => filesOf(name),
             (name) => fromAdapter(name),
             (name) => guardOf(name),
+            opts.dialogs !== false,
           ) },
         // Offered only while the conversation has a lazy tool: see applyToolsOff.
         { name: "tools-gateway", factory: gateway.extension },

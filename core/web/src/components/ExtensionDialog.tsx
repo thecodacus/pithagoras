@@ -87,8 +87,9 @@ export function ExtensionDialog({
           </div>
           <div className="min-w-0 flex-1">
             <h2 className="text-sm font-medium text-fg">{request.title || t("Extension")}</h2>
+            {/* With its lines, and scrolled where it is long, such as the guard's question about a long command: the answers stay in view. */}
             {request.message && (
-              <p className="mt-0.5 text-xs text-fg-muted">{request.message}</p>
+              <p className="mt-0.5 max-h-[40vh] overflow-y-auto whitespace-pre-line text-xs text-fg-muted [overflow-wrap:anywhere]">{request.message}</p>
             )}
           </div>
           <button
