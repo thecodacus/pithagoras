@@ -247,6 +247,7 @@ async function catchUp(name: string): Promise<void> {
  */
 let early: Promise<{ extensions: ExtensionUi[] } | undefined> | undefined;
 export function askForExtensions(): void {
+  if (extensionsOff()) return;
   early ??= api.extensionUi().catch(() => undefined);
   // The modules are fetched, not yet called, while the question of who is signed in is still out: they are there to call when it is
   // answered. For somebody who is not signed in the fetch is refused, and nothing was called.
@@ -340,13 +341,21 @@ export const failedToDraw = (name: string) => (e: Error) => {
   tell(name, revisions.get(name), error);
 };
 
+/**
+ * `?extensions=off` in the address the page was opened at: no extension's browser half is loaded into it, for a way
+ * into a page that one of them breaks, to switch that one off in Settings → Extensions. Read once, the first time it
+ * is asked (as the page starts, by askForExtensions), before anything in the page changes the address.
+ */
+let off: boolean | undefined;
+const extensionsOff = () => (off ??= new URLSearchParams(window.location.search).get("extensions") === "off");
+
 let started = false;
 /**
  * Load them, and from then on follow what is installed. Once per page load:
- * the app's shell is drawn again on every route.
+ * the app's shell is drawn again on every route. Not at all with `?extensions=off`.
  */
 export function startExtensions(): void {
-  if (started) return;
+  if (started || extensionsOff()) return;
   started = true;
   void loadExtensions();
   const again = () => void loadExtensions();
