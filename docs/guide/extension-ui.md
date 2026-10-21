@@ -85,18 +85,18 @@ While you work on it:
 
 | You changed | To see it |
 | --- | --- |
-| The browser half | Reload the page |
-| The server half's module, its `chats.extend` factories among it | Install the folder again by its path |
-| Another file the server half imports | Restart the portal |
+| A file of the browser half | Reload the page, or install the folder again by its path for every open page |
+| A file of the server half, its `chats.extend` factories among it | Install the folder again by its path |
 | The pi extension | Install the folder again by its path, or `/reload` in one chat |
 
 pi installs a folder by reference, so installing it again copies nothing: it
-starts the server half again where its module changed, swaps the browser half
-into every open page where its module or its stylesheet changed, and reloads
-the open chats, a chat that is working at its next step (see
+starts the server half again where a file of it changed, swaps the browser half
+into every open page where a file of it changed, and reloads the open chats, a
+chat that is working at its next step (see
 [a chat that is working](/guide/extensions#a-chat-that-is-working)). What a
 chat could not load, such as a factory of `chats.extend` that throws, is said
-in that chat.
+in that chat. Which files are a half's, and what still needs a restart of the
+portal, is in [What is loaded, and when](#what-is-loaded-and-when).
 
 ## The package
 
@@ -773,10 +773,13 @@ given up on, with the reason beside the package in Settings → Extensions, and
 nothing else waits for it. One that crashes, an error of its code that nothing
 catches or a call of `process.exit()`, is stopped and held off, and the portal
 and its chats go on: see [When the server half crashes](#when-the-server-half-crashes).
-The module itself is read again each time it is
-started. What it imports from its own package is read once for as long as the
-portal runs, as Node reads modules: after an update that changes those files,
-restart the portal.
+Each time it is started its files are read again: its module, and every file
+of its module's folder that it imports by a relative address (`./`, `../`) or a
+`file:` URL, as far down as the imports go. What it imports by a bare name (its
+dependencies in `node_modules`, Node's own modules), a file outside its
+module's folder, and what it loads with `require()` are read once for as long
+as the portal runs, as Node reads modules: after an update that changes those,
+restart the portal. See [What is loaded, and when](#what-is-loaded-and-when).
 
 | `portal.` | |
 | --- | --- |
@@ -1982,14 +1985,43 @@ stands, so that a crash reaches every open page too
 not the revision the page last went through, the page goes through what is
 installed again, and Settings → Extensions lists it again.
 
-A browser half is fetched under its revision, which changes with its module's
-file and its stylesheet's: installing a package again from its folder after you
-changed either swaps the new one into every page, in place. Every file the
-module imports by a relative address is fetched under the same revision, so the
-new one comes with the files of its own revision, not with those the page had.
-A change to such a file alone is not another revision: change the module too,
-or build it again; [`buildExtension`](#writing-it-in-typescript) writes the
-module on every build.
+Each half has a revision of the files it is made of: for the browser half the
+files of its web folder, for the server half those of the folder its module is
+in, the folders below included, but not `node_modules`, nor a file or folder
+whose name starts with a dot. A file changed, added, removed or renamed there
+is another revision. Of a folder with more than 1,000 such files, the first
+1,000 count, each folder's entries taken by name: a change to a file past them
+alone is not another revision. The module and the stylesheet always count.
+
+A browser half is fetched under its revision: installing a package again from
+its folder after you changed a file of its web folder swaps the new one into
+every page, in place, and a page loaded again has it too. Every file the module
+imports by a relative address is fetched under the same revision, so the new
+one comes with the files of its own revision, not with those the page had.
+
+A server half is started again when its revision changes, and its module and
+every file of its folder it imports by a relative address or a `file:` URL are
+loaded under that revision, as new modules: the half runs its files as they are
+now, and keeps nothing of the revision before but what it keeps itself
+([Where it keeps things](#where-it-keeps-things)). Node loads once, for as long
+as the portal runs, what it imports by a bare name (a dependency in
+`node_modules`, `node:fs`), a file outside its module's folder, and what it
+loads with `require()`: a change to those needs a restart of the portal. A
+server half whose module is at the package's root has all of the package as its
+folder, the web folder too, so a change to the browser half starts it again as
+well; a module in a folder of its own keeps the two apart. Node keeps every
+module it has loaded, so each revision a server half was started at stays in
+the portal's memory until the portal restarts.
+
+A new revision of a server half that cannot start is off, with the reason
+beside the package in Settings → Extensions; the revision before it is not
+started again. Its files have been replaced already: only its server module
+would be the old one, beside the new files of its browser half and its pi
+extension.
+
+pi reads again the `.ts` and `.js` files a pi extension imports each time it
+loads it. `.mjs` and `.cjs` files it leaves to Node, which keeps them for as
+long as the process pi runs in: the portal's, where pi runs on the host.
 
 Installing, removing, updating or switching a package also loads the open chats
 again, for their pi to have the package's pi extension and what its server half
@@ -2040,6 +2072,13 @@ installed, and says it with the package (`clientError` and `clientStack` in
 the page it failed in at once, and in any other page that goes through what is
 installed after that: one opened or reloaded later, and every open page once
 what is installed next changes.
+
+A page that could not take an extension's old version out cleanly as what is
+installed changed, because something that version had put into the page threw
+as it was undone (the function its module gave back to be called as it goes,
+say), names it in a line at the top, with **Reload**: what that version left may
+still be at work beside the new one until the page is loaded again. Nothing is
+said where every change went in cleanly.
 
 A browser half that breaks the whole page, or keeps it from answering, can be
 switched off all the same: open the portal with `?extensions=off` on its address
@@ -2163,9 +2202,9 @@ would end the portal. They do not: each is that extension's crash.
   that require it (`pithagoras.requires`); those that only use it where it is
   there (`optional`) start again without it.
 - It stays off while the files are the ones that crashed: until another
-  version of it is installed (its server module changed), or it is switched
-  off and on in Settings → Extensions. A restart of the portal starts it again
-  as well.
+  version of it is installed (a file of its server half changed), or it is
+  switched off and on in Settings → Extensions. A restart of the portal starts
+  it again as well.
 - A tool of its that a chat had called, and that had not answered yet, answers
   at once with an error that names the crash and carries the half's last
   lines, so the agent reads what happened in the same turn and the chat goes
