@@ -375,7 +375,8 @@ export interface ServerPortal {
      * there under that name, or removes it (`undefined`). Writing one installs pi-mcp-adapter where it is not
      * installed, and switches it on where it is off, which waits for the server halves to follow: not while this
      * half starts. `trusted`: the person counts what its tools return as their own, not outside content; the name
-     * is added to Settings → Guard's trusted servers, where they can take it out. Then the idle chats are loaded
+     * is added to Settings → Guard's trusted servers, where they can take it out. Removing the server takes the name
+     * out of them again, so a server given that name later is not trusted unasked. Then the idle chats are loaded
      * again, as `chats.reload` does. Rejects while the file cannot be read, which is the person's to fix in
      * Settings → MCP, and for a name or a server the adapter would not take.
      */

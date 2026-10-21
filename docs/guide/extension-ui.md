@@ -1548,7 +1548,9 @@ await portal.mcp.set("notes", undefined);
   [Prompt injection](/guide/security#marking-untrusted-output)). The name is
   added to the trusted servers in Settings → Guard, where it is shown and the
   person can take it out. Say it only for the extension's own service, on the
-  person's word on its page.
+  person's word on its page. `set(name, undefined)` takes the name out of the
+  trusted servers again: Settings → Guard lists only the servers there are, and
+  a server given that name later has to be trusted anew.
 - It rejects while mcp.json cannot be read, which is the person's to fix in
   Settings → MCP (nothing is written over it), for a name that is not letters,
   digits, dots, dashes and underscores, and for an entry the adapter would not

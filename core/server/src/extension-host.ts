@@ -7,7 +7,7 @@ import semver from "semver";
 import express, { type NextFunction, type Request, type RequestHandler, type Response, type Router } from "express";
 import { agentOf, defaultAgent, listAgents } from "./agents.js";
 import { DATA_DIR } from "./data-dir.js";
-import { getSession, getSetting, listSessions, putSetting, sessionsByWorkspace, setServerHalfOffers, toolExceptions, type SessionRow } from "./db.js";
+import { getSession, getSetting, listSessions, putSetting, sessionsByWorkspace, setServerHalfOffers, setTrustedMcpServers, toolExceptions, trustedMcpServers, untrustMcpServer, type SessionRow } from "./db.js";
 import { EXECUTOR_KIND } from "./executor-kind.js";
 import { takes, type ServerHalf } from "./extension-ui.js";
 import { asAgent, runAsAgent, sandboxEnv } from "./sandbox/exec.js";
@@ -355,7 +355,12 @@ function portalFor(ext: Running): ServerPortal {
       async set(server, entry, options = {}) {
         // Imported when first asked: it installs packages through what starts and stops these halves, which imports this module.
         const { setMcpServer } = await import("./mcp-entry.js");
-        await setMcpServer(server, entry, { trusted: options.trusted === true });
+        await setMcpServer(server, entry);
+        // Counted as the person's own on the extension's word, and no longer once the server is gone: Settings → Guard
+        // lists only the servers there are, so a name left trusted could not be taken out, and would trust whatever
+        // server is given that name next.
+        if (entry === undefined) untrustMcpServer(server);
+        else if (options.trusted === true) setTrustedMcpServers([...trustedMcpServers(), server]);
         await reloadChats();
       },
     },

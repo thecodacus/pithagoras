@@ -3183,6 +3183,13 @@ export function setTrustedMcpServers(names: readonly string[]): void {
   putSetting("guard_trusted_mcp_servers", JSON.stringify([...new Set(names.map((name) => name.trim()).filter(Boolean))]));
 }
 
+/** One server no longer counted as the person's own, where they have said which are: while they have not, the default stays as it is. */
+export function untrustMcpServer(name: string): void {
+  if (getSetting("guard_trusted_mcp_servers") === undefined) return;
+  const trusted = trustedMcpServers();
+  if (trusted.delete(name)) setTrustedMcpServers([...trusted]);
+}
+
 /**
  * The model a chat's subagents run on, where the chat says one: "provider/model",
  * or "auto" for the one the chat is on. Null follows the portal's default.
