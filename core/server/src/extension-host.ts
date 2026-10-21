@@ -1019,7 +1019,20 @@ export function hostExtensions(chatId: string): { name: string; factory: (pi: an
           sendMessage: { value: (...args: unknown[]) => scope.exit(() => pi.sendMessage(...args)) },
           sendUserMessage: { value: (...args: unknown[]) => scope.exit(() => pi.sendUserMessage(...args)) },
         });
-        for (const factory of ext.factories) guarded(ext, "adding to a chat's pi", () => factory(own, chatOf(row)));
+        for (const factory of ext.factories) {
+          let added: unknown;
+          try {
+            // As its code (see scope).
+            added = scope.run(ext, () => factory(own, chatOf(row)));
+          } catch (e) {
+            // pi keeps it as the chat's load error, which the chat is told (see loadErrors in pi/sdk-client.ts), and
+            // loads nothing of the package's in that chat.
+            console.error(`[extension ${ext.half.name}] adding to a chat's pi failed:`, e);
+            throw e;
+          }
+          // One that fails later, after pi has loaded it, is in the log alone.
+          if (added instanceof Promise) guarded(ext, "adding to a chat's pi", () => added);
+        }
       },
     }));
 }

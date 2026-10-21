@@ -57,7 +57,7 @@ export interface ClientHalf {
   /** The module, and the stylesheet if it has one, as paths inside `dir`. */
   entry: string;
   style?: string;
-  /** Changes when the module's file does, so a page loads it again rather than the one it has. */
+  /** Changes when the module's file does, or the stylesheet's, so a page loads it again rather than the one it has. */
   rev: string;
 }
 
@@ -96,10 +96,14 @@ export const takes = (range: string, version: string | undefined) => Boolean(ver
 export const validName = (name: unknown): name is string =>
   typeof name === "string" && /^(@[\w~-][\w.~-]*\/)?[\w~-][\w.~-]*$/.test(name);
 
-const revOf = (file: string) => {
-  const stat = statSync(file);
-  return `${Math.round(stat.mtimeMs).toString(36)}-${stat.size.toString(36)}`;
-};
+/** When each of the files last changed, and its size: a change to any of them is another revision. */
+const revOf = (...files: string[]) =>
+  files
+    .map((file) => {
+      const stat = statSync(file);
+      return `${Math.round(stat.mtimeMs).toString(36)}-${stat.size.toString(36)}`;
+    })
+    .join("-");
 
 /** A file's path inside `dir`, or nothing when it is outside it or not a file. */
 function fileIn(dir: string, file: string): string | undefined {
@@ -140,7 +144,8 @@ export function clientHalf(packageDir: string): ClientHalf | undefined {
     dir,
     entry: path.basename(client),
     ...(style ? { style } : {}),
-    rev: revOf(client),
+    // The stylesheet too: the page tells one revision from another by the module's address alone.
+    rev: style ? revOf(client, path.join(dir, style)) : revOf(client),
   };
 }
 

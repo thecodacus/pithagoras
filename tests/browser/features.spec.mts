@@ -91,7 +91,7 @@ test('a fresh install has no subagent tool; switching it on installs it, and the
   await tool.click();
   await expect(tool).toHaveAttribute('aria-checked', 'true');
   await expect(addons(page).getByText('Installed as a pi package (/app/extensions/subagent).')).toBeVisible();
-  await expect(addons(page).getByText(/one busy chat picks it up/)).toBeVisible();
+  await expect(addons(page).getByText(/one busy chat has it from its next step/)).toBeVisible();
 
   await addons(page).getByRole('radio', { name: /^Background/ }).check();
   await expect(addons(page).getByRole('radio', { name: /^Background/ })).toBeChecked();

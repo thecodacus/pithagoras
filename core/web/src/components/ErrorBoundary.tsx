@@ -1,4 +1,4 @@
-import { Component, type ReactNode } from "react";
+import { Component, type ErrorInfo, type ReactNode } from "react";
 import { LuRotateCw, LuTriangleAlert } from "react-icons/lu";
 import { t } from "../i18n";
 import { ChunkLoadFailed } from "../lazy";
@@ -10,9 +10,9 @@ import { primarySmCls } from "./SettingsUi";
  * blank: the sidebar stays, the other pages still open, and this one can be
  * tried again. `resetKey` changing — another page, another chat — starts over.
  * `fallback` is what is shown instead of the page's own message, for what is not
- * a page.
+ * a page. `onError` is told of each failure as it is caught, with the components it was drawn in.
  */
-export class ErrorBoundary extends Component<{ resetKey: string; fallback?: (error: Error) => ReactNode; children: ReactNode }, { error: Error | null; key: string }> {
+export class ErrorBoundary extends Component<{ resetKey: string; fallback?: (error: Error) => ReactNode; onError?: (error: Error, info: ErrorInfo) => void; children: ReactNode }, { error: Error | null; key: string }> {
   state = { error: null as Error | null, key: this.props.resetKey };
 
   static getDerivedStateFromError(error: Error) {
@@ -23,8 +23,9 @@ export class ErrorBoundary extends Component<{ resetKey: string; fallback?: (err
     return props.resetKey !== state.key ? { error: null, key: props.resetKey } : null;
   }
 
-  componentDidCatch(error: Error) {
+  componentDidCatch(error: Error, info: ErrorInfo) {
     console.error("[portal] a page failed to draw:", error);
+    this.props.onError?.(error, info);
   }
 
   render() {

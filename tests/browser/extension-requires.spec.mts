@@ -168,7 +168,7 @@ test('a package from npm asks once, with what it needs under the warning, and in
   await expect(question.getByRole('listitem')).toHaveText(['test-engine 1.2.0 is installed from npm.']);
   await expect(question).toContainText('Those installed from npm run inside pi with the same rights as the agent');
   await question.getByRole('button', { name: 'Install', exact: true }).click();
-  await expect(page.getByRole('status').filter({ hasText: 'Chats started from now on have it' })).toBeVisible();
+  await expect(page.getByRole('tabpanel', { name: 'Discover' }).getByRole('listitem').filter({ hasText: 'pi-viewer' })).toContainText('Installed');
   expect(changes).toEqual(['plan npm:pi-viewer', 'install npm:test-engine@^1.0.0', 'install npm:pi-viewer']);
 });
 

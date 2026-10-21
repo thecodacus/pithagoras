@@ -132,9 +132,10 @@ export function ExtensionsPanel({
   const [busy, setBusy] = useState<string | null>(null);
   // Which package an install of more than one has come to.
   const [step, setStep] = useState<InstallStep | null>(null);
-  // Why a package's interface is not in the page, or its server half not running, where it brings one: see extensions/loader.ts.
+  // Why a package's interface is not in the page, or failed in a page (this one or another), or its server half is not
+  // running, where it brings one: see extensions/loader.ts.
   // Gone through again as the list is shown, and as it is refreshed: a server half can crash at any time, and nothing tells the page.
-  const { failures, serverFailures, serverCrashes } = useExtensions();
+  const { failures, clientFailures, serverFailures, serverCrashes } = useExtensions();
   const goThrough = () => void window.dispatchEvent(new Event(EXTENSIONS_CHANGED));
   useEffect(goThrough, []);
   const ownPages = useSlot("settings.page");
@@ -184,7 +185,7 @@ export function ExtensionsPanel({
       if (r.reloaded) parts.push(() => tp(r.reloaded, "{n} open conversation reloaded.", "{n} open conversations reloaded."));
       if (r.waiting)
         parts.push(() =>
-          tp(r.waiting, "{n} still working — it keeps it as it was until /reload, or its next start.", "{n} still working — they keep it as it was until /reload, or their next start."),
+          tp(r.waiting, "{n} still working — it takes the change at its next step.", "{n} still working — they take the change at their next step."),
         );
       setNote(() => () => parts.map((part) => part()).join(" "));
     });
@@ -344,10 +345,16 @@ export function ExtensionsPanel({
                       )}
                       {/* Said where it is not the usual one: a package a project brings has no switch here, and this is why. */}
                       {ext.scope && !/^user/i.test(ext.scope) && <span className={pillCls}>{ext.scope}</span>}
-                      {failures[ext.name] && (
+                      {failures[ext.name] ? (
                         <p role="alert" className="basis-full break-words text-xs text-warn">
                           {t("Its interface could not be loaded: {reason}", { reason: failures[ext.name] })}
                         </p>
+                      ) : (
+                        clientFailures[ext.name] && (
+                          <p role="alert" className="basis-full break-words text-xs text-warn">
+                            {t("Its interface failed in a page: {reason}", { reason: clientFailures[ext.name] })}
+                          </p>
+                        )
                       )}
                       {serverCrashes[ext.name] ? (
                         <div role="alert" className="basis-full text-xs text-warn">

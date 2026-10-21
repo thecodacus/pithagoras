@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { promisify } from "node:util";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
@@ -357,12 +358,25 @@ async function installedExtensions(): Promise<InstalledExtension[]> {
 }
 
 /**
+ * What is installed, as the last sync found it: the packages pi's settings list, with what is switched on of each; the
+ * halves and themes of them the pages load; and where each server half stands, as a digest. Every page asks for it
+ * with the list of chats (`GET /api/sessions`) and goes through what is installed again when it changes, so that an
+ * install made anywhere else (another tab, the API, an agent) reaches it, Settings → Extensions included.
+ */
+let revision = "";
+export const extensionsRevision = (): string => revision;
+
+/**
  * Bring the server halves that run in line with what is installed and switched
  * on: as the portal starts, and whenever a package is installed, removed,
  * updated or switched.
  */
 export async function syncExtensionServers(): Promise<void> {
-  await syncServerHalves((await halves()).servers);
+  const found = await halves();
+  await syncServerHalves(found.servers);
+  const standing = found.servers.map((half) => [isServing(half.name), serverFailure(half.name) ?? null]);
+  // The packages too: one with nothing for the pages (a pi half, skills, prompts) is still listed in Settings.
+  revision = createHash("sha256").update(JSON.stringify([readPiSettings().packages ?? null, found, standing])).digest("base64url").slice(0, 16);
 }
 
 /**
@@ -384,9 +398,13 @@ export const preparingExtensions = <T>(work: Promise<T>): Promise<T> => {
   return work;
 };
 
-/** Where a page fetches a file of a package's web folder from. */
+/**
+ * Where a page fetches a file of a package's web folder from: under the half's revision, as a folder of its own, so
+ * that what the module imports by a relative address is fetched under that revision too, and another revision is
+ * other files to the page, every one of them.
+ */
 const clientUrl = (half: ClientHalf, file: string) =>
-  `/api/extension-ui/${[...half.name.split("/"), ...file.split("/")].map(encodeURIComponent).join("/")}?v=${half.rev}`;
+  `/api/extension-ui/${[...half.name.split("/"), `~${half.rev}`, ...file.split("/")].map(encodeURIComponent).join("/")}`;
 
 /**
  * Where a module's import of `file` (a path from the web folder) is fetched from: the address the browser makes
@@ -395,7 +413,7 @@ const clientUrl = (half: ClientHalf, file: string) =>
  * browser would not read as that file (a `#` or a `?` in it).
  */
 function importUrl(half: ClientHalf, file: string): string | undefined {
-  const base = `/api/extension-ui/${half.name.split("/").map(encodeURIComponent).join("/")}/`;
+  const base = `/api/extension-ui/${half.name.split("/").map(encodeURIComponent).join("/")}/~${half.rev}/`;
   const url = new URL(file, `http://portal${base}`);
   const expected = `${decodeURIComponent(base)}${file}`;
   return url.search === "" && url.hash === "" && decodeURIComponent(url.pathname) === expected ? url.pathname : undefined;
@@ -407,6 +425,19 @@ const preloadOf = (half: ClientHalf): string[] => staticImports(half).map((file)
 /** How many of the lines a crashed server half said last are listed with its crash. */
 const CRASH_LINES = 30;
 
+/**
+ * Why a browser half failed in a page, as the page said: to load, to draw, or in what it runs of its own there. The
+ * latest, by the package's name, with the revision that failed and where it failed, as the page had it.
+ */
+const clientFailures = new Map<string, { rev: string; error: string; stack?: string }>();
+/** What a page said of `half` while it is that revision: another one has not failed yet. */
+function clientFailure(half: ClientHalf): { error: string; stack?: string } | undefined {
+  const failure = clientFailures.get(half.name);
+  if (failure?.rev === half.rev) return failure;
+  clientFailures.delete(half.name);
+  return undefined;
+}
+
 export function extensionsRouter(): Router {
   const router = express.Router();
 
@@ -415,21 +446,27 @@ export function extensionsRouter(): Router {
       // What is being started or stopped is waited for: a page is told where a server half's routes are only once they are there.
       await preparing;
       await serversSettled();
+      // What is installed, as GET /api/sessions says it, for the page to tell by whether this list is still what is
+      // installed. Read before the list: a list newer than it is only gone through once more.
+      const revision = extensionsRevision();
       const { clients, servers, themed } = await halves();
       const names = [...new Set([...clients, ...servers, ...themed].map((half) => half.name))];
       res.json({
+        revision,
         extensions: names.map((name) => {
           const client = clients.find((half) => half.name === name);
           const server = servers.find((half) => half.name === name);
           const themes = themed.find((half) => half.name === name);
           const failure = server && serverFailure(name);
+          const failed = client && clientFailure(client);
           // The crash its server half is held off for, with what it said last.
           const status = server && serverHalfStatus(name);
           return {
             name,
             version: (client ?? server ?? themes)!.version,
             ...(themes ? { themes: themes.themes } : {}),
-            ...(client ? { entry: clientUrl(client, client.entry) } : {}),
+            // Its revision, which a page says a failure of it under.
+            ...(client ? { rev: client.rev, entry: clientUrl(client, client.entry) } : {}),
             ...(client?.style ? { style: clientUrl(client, client.style) } : {}),
             // What its module imports along with itself, for the page to ask for all at once.
             ...(client && preloadOf(client).length ? { preload: preloadOf(client) } : {}),
@@ -439,6 +476,9 @@ export function extensionsRouter(): Router {
             ...(server?.requires ? { requires: server.requires } : {}),
             ...(failure ? { serverError: failure } : {}),
             ...(status && status.crash ? { crash: { ...status.crash, lines: status.lines.slice(-CRASH_LINES).map(logFileLine) } } : {}),
+            // Why its browser half failed in a page, and where, as that page said.
+            ...(failed ? { clientError: failed.error } : {}),
+            ...(failed?.stack ? { clientStack: failed.stack } : {}),
           };
         }),
       });
@@ -447,13 +487,36 @@ export function extensionsRouter(): Router {
     }
   });
 
+  /**
+   * A page says that a browser half failed there, to load, to draw or in what it runs of its own, with where (`stack`),
+   * for whoever looks at the extension next (Settings, the agent). Kept until another revision of it is installed. Only
+   * of the revision installed now: a page that still has an older one says nothing of this one.
+   */
+  router.post("/extension-ui/failures", async (req, res) => {
+    const { name, rev, error, stack } = req.body ?? {};
+    if (typeof name !== "string" || typeof rev !== "string" || typeof error !== "string" || !error) {
+      return res.status(400).json({ error: "name, rev and error are required" });
+    }
+    if (stack !== undefined && typeof stack !== "string") return res.status(400).json({ error: "stack is text" });
+    try {
+      if (!(await clientHalves()).some((half) => half.name === name && half.rev === rev)) {
+        return res.status(404).json({ error: "No browser half of that name is installed at that revision" });
+      }
+      clientFailures.set(name, { rev, error, ...(stack ? { stack } : {}) });
+      res.json({ ok: true });
+    } catch (e) {
+      res.status(500).json({ error: (e as Error).message });
+    }
+  });
+
   // A file of a package's web folder. The package's name may have a slash in it (`@scope/name`), so it is found by
-  // what the path starts with.
+  // what the path starts with; then the revision it is asked for under (see clientUrl), when it is. The file is the one
+  // there now, whichever revision it is asked for under.
   router.get("/extension-ui/*file", async (req, res) => {
     try {
       const asked = (req.params as unknown as { file: string[] }).file.join("/");
       const half = (await clientHalves()).find((h) => asked.startsWith(`${h.name}/`));
-      const file = half ? asked.slice(half.name.length + 1) : "";
+      const file = half ? asked.slice(half.name.length + 1).replace(/^~[^/]+\//, "") : "";
       if (!half || !file) return res.status(404).json({ error: "Not found" });
       // Asked for by the module's revision, so what a page holds is never stale; checked each time all the same.
       // A text file goes compressed to a browser that takes it; the rest, and what is refused, as it is.

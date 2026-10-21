@@ -86,9 +86,17 @@ While you work on it:
 | You changed | To see it |
 | --- | --- |
 | The browser half | Reload the page |
-| The server half's module | Switch the package off and on in Settings → Extensions |
+| The server half's module, its `chats.extend` factories among it | Install the folder again by its path |
 | Another file the server half imports | Restart the portal |
-| The pi extension | `/reload` in the chat |
+| The pi extension | Install the folder again by its path, or `/reload` in one chat |
+
+pi installs a folder by reference, so installing it again copies nothing: it
+starts the server half again where its module changed, swaps the browser half
+into every open page where its module or its stylesheet changed, and reloads
+the open chats, a chat that is working at its next step (see
+[a chat that is working](/guide/extensions#a-chat-that-is-working)). What a
+chat could not load, such as a factory of `chats.extend` that throws, is said
+in that chat.
 
 ## The package
 
@@ -1251,8 +1259,11 @@ portal.chats.extend((pi, chat) => {
 The factory is pi's own extension API, called for every chat as its pi loads.
 Its tools are listed under Settings → Tools in a group named after your
 package, the same group as your package's pi extension's, and that group is
-what a lazy mark or a name given to it holds to. A chat whose pi was running
-when your package was installed has them after its next reload.
+what a lazy mark or a name given to it holds to. Installing your package
+reloads the open chats, so a chat whose pi was running has them from its next
+step. A factory that throws is that chat's load error: nothing your package
+adds to its pi is there, and the chat says why. One whose promise fails later
+is only in the [log](/guide/settings#logs).
 A server half is plain Node, though: what it imports is its own package's
 dependencies, not what pi lends its extensions. So a tool's parameters are
 written as a JSON schema, as above, unless the package depends on `typebox`
@@ -1364,7 +1375,7 @@ only those, and `tools.offer` says the same to the portal: Settings → Tools
 then lists them before any chat has reported them, and leaves out the ones it
 remembers that are not offered now. After a change, `chats.reload()` loads the
 idle chats again, for each to have the tools as they are now; one that is
-working is reloaded when it is done, as for a package switched on.
+working is reloaded at its next step, as for a package switched on.
 
 ```js
 const offered = () => (settings().endpoint ? [{ name: "make_picture", description: "Make a picture from a description." }] : []);
@@ -1960,8 +1971,30 @@ each a whole theme in the one `package.json`.
 
 The portal loads the browser half, the server half and the themes of every
 package that is installed in the portal and switched on. Installing, removing, updating or
-switching one takes effect in the open page and in the server, without a
-reload or a restart.
+switching one takes effect in the server and in every open page, without a
+reload or a restart: at once in the page it was done from, and within five
+seconds in the others, wherever it was done (another tab, the API, an agent).
+Every page asks for the list of chats every five seconds, and is told with it a
+revision of what is installed: of every package, one that brings nothing to the
+page included (a pi half, skills, prompts). When that is not the revision the
+page last went through, the page goes through what is installed again, and
+Settings → Extensions lists it again.
+
+A browser half is fetched under its revision, which changes with its module's
+file and its stylesheet's: installing a package again from its folder after you
+changed either swaps the new one into every page, in place. Every file the
+module imports by a relative address is fetched under the same revision, so the
+new one comes with the files of its own revision, not with those the page had.
+A change to such a file alone is not another revision: change the module too,
+or build it again; [`buildExtension`](#writing-it-in-typescript) writes the
+module on every build.
+
+Installing, removing, updating or switching a package also loads the open chats
+again, for their pi to have the package's pi extension and what its server half
+adds as they are now: an idle chat at once, and one that is working at its next
+step, between two requests of its run (see
+[a chat that is working](/guide/extensions#a-chat-that-is-working)). So does
+saving pi's `settings.json` in Settings → **Advanced**.
 
 Of two installed packages that go by one name, the first is the one, whole.
 
@@ -1992,6 +2025,25 @@ are there to choose all the while. A component that fails to draw takes down its
 page, and a server half's handler that throws is answered as an error; the
 rest of the portal goes on. A server half that crashes is stopped and held off
 ([When the server half crashes](#when-the-server-half-crashes)).
+
+A page tells the portal when a browser half fails there, with the revision that
+failed and where it failed (`POST /api/extension-ui/failures`): when it fails to
+load or to draw, when a handler of its throws (what its server half or its
+extension in a chat said to it, a shortcut), and when something it runs of its
+own throws and nothing catches it (a timer, a promise, a click handler), told
+apart by the address its files come from. Each failure is told once per page.
+The portal keeps the latest for each package until another revision of it is
+installed, and says it with the package (`clientError` and `clientStack` in
+`GET /api/extension-ui`). Settings → Extensions shows it beside the package in
+the page it failed in at once, and in any other page that goes through what is
+installed after that: one opened or reloaded later, and every open page once
+what is installed next changes.
+
+A browser half that breaks the whole page, or keeps it from answering, can be
+switched off all the same: open the portal with `?extensions=off` on its address
+(`/settings/extensions?extensions=off`). That page loads no browser half, and
+Settings → Extensions lists every package, with its switch and Remove. An
+extension's own page opened that way says so.
 
 ### The extensions a portal starts with
 

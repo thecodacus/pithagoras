@@ -52,7 +52,8 @@ test('a package that declares a browser half has its web folder, its module and 
   assert.equal(half.dir, path.join(dir, 'web'));
   assert.equal(half.entry, 'client.js');
   assert.equal(half.style, 'look/client.css');
-  assert.match(half.rev, /^[0-9a-z]+-[0-9a-z]+$/);
+  // Of both files: the module's and the stylesheet's.
+  assert.match(half.rev, /^[0-9a-z]+-[0-9a-z]+-[0-9a-z]+-[0-9a-z]+$/);
 });
 
 test('what a browser half imports along with itself is found by what each module says, down to the last, and not what it imports when called', () => {
@@ -91,11 +92,14 @@ test('what a browser half imports is found in time in step with the size of its 
   assert.deepEqual(staticImports(clientHalf(dir)!), []);
 });
 
-test('a module changed is a module under another revision', () => {
-  const dir = pkg({ client: './web/client.js' }, ['web/client.js']);
+test('a module changed, or only its stylesheet, is a module under another revision', () => {
+  const dir = pkg({ client: './web/client.js', style: './web/client.css' }, ['web/client.js', 'web/client.css']);
   const before = clientHalf(dir)!.rev;
   writeFileSync(path.join(dir, 'web', 'client.js'), '// here, and longer than it was');
-  assert.notEqual(clientHalf(dir)!.rev, before);
+  const changed = clientHalf(dir)!.rev;
+  assert.notEqual(changed, before);
+  writeFileSync(path.join(dir, 'web', 'client.css'), '/* here, and longer than it was */');
+  assert.notEqual(clientHalf(dir)!.rev, changed);
 });
 
 test('a package with no browser half, or one it cannot have, has none', () => {

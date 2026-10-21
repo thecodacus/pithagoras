@@ -508,10 +508,14 @@ export interface ServerPortal {
     /** To the package's own pi extension in a chat, starting its pi if need be. False where pi does not run in the portal. */
     tell(chatId: string, data: unknown): Promise<boolean>;
     /**
-     * Loads every chat's pi that is idle again, as switching a package on or
-     * off does: each then has what the server halves add to it now. A chat
-     * that is working, compacting or being edited is left as it is until then,
-     * and counted as `waiting`.
+     * Loads every chat's pi again, as switching a package on or off does: each
+     * then has what the server halves add to it now. An idle one at once. One
+     * that is working is counted as `waiting`, and loaded again at its next
+     * step, between two requests of its run, so the model's next request has
+     * the tools as they are then. Where a subagent works in the background or
+     * an extension holds the chat (`hold`), it is loaded again once neither
+     * does: at a later step, as its run ends, or before the next message starts
+     * a run.
      */
     reload(): Promise<{ reloaded: number; waiting: number }>;
     /**
@@ -519,12 +523,15 @@ export interface ServerPortal {
      * pi as it starts, so its tools hold what this module holds. Only where pi
      * runs in the portal's own process. A tool registered with
      * `offByDefault: true` is off in every chat until somebody switches it on,
-     * and one with `guard` is held to what it declares: see ToolGuard. Should
-     * this server half crash while a tool's call, a handler (`pi.on`) or a
-     * command of it is running, that ends at once with an error that says so,
-     * with the half's last lines; its handlers are not called after that. A
-     * turn it asks the chat's pi for (`pi.sendMessage`, `pi.sendUserMessage`)
-     * is the chat's, not this module's code.
+     * and one with `guard` is held to what it declares: see ToolGuard. A
+     * factory that throws is that chat's load error: nothing the package adds
+     * to that chat's pi is there, and the chat says why. One whose promise
+     * fails later is only logged. Should this server half crash while a
+     * tool's call, a handler (`pi.on`) or a command of it is running, that
+     * ends at once with an error that says so, with the half's last lines;
+     * its handlers are not called after that. A turn it asks the chat's pi
+     * for (`pi.sendMessage`, `pi.sendUserMessage`) is the chat's, not this
+     * module's code.
      */
     extend(factory: (pi: any, chat: Chat) => void): void;
     /**
@@ -533,7 +540,7 @@ export interface ServerPortal {
      * call of a tool by a name it is not offered under is refused and never runs.
      */
     offers(chatId: string, tool: string): "direct" | "lazy" | undefined;
-    /** Keeps a chat's pi from being let go while work of the package's goes on. Returns what lets it go again. */
+    /** Keeps a chat's pi from being let go, or reloaded, while work of the package's goes on. Returns what lets it go again. */
     hold(chatId: string): () => void;
   };
   sandbox: {

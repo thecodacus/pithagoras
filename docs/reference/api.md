@@ -52,7 +52,7 @@ them. See [Projects](/guide/projects).
 
 | | |
 | --- | --- |
-| `GET /api/sessions` | `{ sessions, executor }` — pinned first, then most recent. The chats, and the conversations started on an agent's page; not those that came through a channel, nor routine runs. |
+| `GET /api/sessions` | `{ sessions, executor, extensions }` — pinned first, then most recent. The chats, and the conversations started on an agent's page; not those that came through a channel, nor routine runs. `extensions` is a revision of what is installed: of the packages pi's settings list and what is switched on of each, of the browser halves, server halves and themes the portal loads, and of where each server half stands. It changes when installing, removing, updating or switching a package changes any of that, and a page that sees it differ from the `revision` of the list it last went through goes through `GET /api/extension-ui` again ([What is loaded, and when](/guide/extension-ui#what-is-loaded-and-when)) |
 | `GET /api/agent/sessions` | `{ sessions, agentHome }` — one agent's conversations (`?agent=`, the first agent without it): every chat in its home, each with the channel that owns it or `null` for a chat started in the portal |
 | `POST /api/sessions` | `{ workspace?, agent?, title? }` — `agent` starts it in that agent's home; neither means the agent picked for new chats, the first agent (Home) by default; no title means "New chat", replaced by the first message |
 | `GET /api/sessions/:id` | One session |
@@ -349,19 +349,20 @@ overrides; `defaults` is what an unset field falls back to. An empty string in
 | | |
 | --- | --- |
 | `GET /api/packages` | Raw `pi list` output |
-| `POST /api/packages` | `{ spec }`: a spec of a form pi documents, or `npm:<name>@<range>` with a semver range, as an extension that requires the package installs it |
-| `DELETE /api/packages` | `{ spec }` |
-| `POST /api/packages/update` | Update the installed pi packages (`pi update --extensions`); pi itself comes with the portal's version |
+| `POST /api/packages` | `{ spec }`: a spec of a form pi documents, or `npm:<name>@<range>` with a semver range, as an extension that requires the package installs it. Answers `{ ok, output, reloaded, waiting }`: the open sessions are reloaded, an idle one at once and a working one at its next step (`waiting`). A folder installed again is loaded again in place |
+| `DELETE /api/packages` | `{ spec }`; reloads the open sessions as installing does |
+| `POST /api/packages/update` | Update the installed pi packages (`pi update --extensions`); pi itself comes with the portal's version. Reloads the open sessions as installing does |
 | `GET /api/extensions` | Parsed packages with their recovered settings, each with `kinds`: what it brings, of `pi`, `pithagoras` and `themes` |
 | `GET /api/extensions/shipped` | `{ extensions: [{ name, version?, description?, kinds, spec, requires? }] }` — the extensions that come with the portal; `spec` is the folder each is installed by, `requires` the extensions each cannot work without |
 | `GET /api/extensions/plan?spec=` | `{ name?, version?, needs: [{ name, range, for, action, spec?, from?, version?, error? }] }` — what installing `spec` brings with it: each extension it requires, and each those require, that is not there as it is needed, each before what needs it. `action` is `install` (by `spec`, `from` the portal's folder or npm), `switch-on`, `missing` or `version` (there in a version not taken: installed, or with `from`, the portal's folder's or the one npm gives what needed it first). No `name` and no needs for a spec that cannot be read beforehand: a git URL, a folder ([Installing what it requires](/guide/extension-ui#installing-what-it-requires)) |
-| `GET /api/extension-ui` | `{ extensions: [{ name, version, entry?, style?, server?, serverError?, crash?, requires?, themes? }] }` — the installed packages, switched on, that bring a browser half, a server half or themes: the addresses its module and stylesheet are fetched from, where its server half's routes are, why that half is not running if it could not be started, and what it requires. `crash` (`{ name, rev, at, error, stack?, lines }`) is there while the server half is held off for a crash: when, the revision that crashed, the error, and its last lines as a log file has them ([When the server half crashes](/guide/extension-ui#when-the-server-half-crashes)) |
-| `GET /api/extension-ui/<package>/<file>` | A file of that package's web folder |
+| `GET /api/extension-ui` | `{ revision, extensions: [{ name, version, rev?, entry?, style?, clientError?, clientStack?, server?, serverError?, crash?, requires?, themes? }] }` — the installed packages, switched on, that bring a browser half, a server half or themes, with the revision of what is installed this list is of (as `GET /api/sessions` says it): the revision of its browser half (of its module's file and its stylesheet's) and the addresses its module and stylesheet are fetched from under it, why that half failed in a page and where if one said so of this revision, where its server half's routes are, why that half is not running if it could not be started, and what it requires. `crash` (`{ name, rev, at, error, stack?, lines }`) is there while the server half is held off for a crash: when, the revision that crashed, the error, and its last lines as a log file has them ([When the server half crashes](/guide/extension-ui#when-the-server-half-crashes)) |
+| `POST /api/extension-ui/failures` | `{ name, rev, error, stack? }` — a page says that the browser half of `name`, at revision `rev`, failed there: to load, to draw, or in what it runs of its own; `stack` is where, as the page had it. The latest is kept for each package and said as its `clientError` and `clientStack` until another revision of it is installed. 400 without `name`, `rev` and `error`, 404 when no browser half of that name is installed at that revision |
+| `GET /api/extension-ui/<package>/~<rev>/<file>` | A file of that package's web folder, under the revision of its browser half; without `~<rev>/`, or under another revision, the same file |
 | `/api/x/<package>/…` | The routes of that package's server half, whatever it serves there, behind the portal's login; no body is read for them unless the route asks. WebSocket upgrades under the same address go to it, checked for the login and for the page they come from |
-| `PUT /api/extensions/enabled` | `{ spec, enabled }` — switch a package off or on without uninstalling it; reloads idle open sessions and says how many were left waiting |
+| `PUT /api/extensions/enabled` | `{ spec, enabled }` — switch a package off or on without uninstalling it; reloads the open sessions, an idle one at once, and says how many are working and reloaded at their next step (`waiting`) |
 | `PUT /api/extensions/settings` | `{ key, value }` — empty value removes the key |
 | `GET /api/pi-settings` | Raw `settings.json` |
-| `PUT /api/pi-settings` | `{ content }` — refused unless it parses as JSON |
+| `PUT /api/pi-settings` | `{ content }` — refused unless it parses as JSON; reloads the open sessions as installing a package does, and answers `{ ok, path, reloaded, waiting }` |
 
 ## Opt-in features
 

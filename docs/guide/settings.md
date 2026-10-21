@@ -133,6 +133,16 @@ browser used to re-parse it and listed some packages twice.
 Any extension whose settings the server can recover gets its own page in the
 navigation, with a field per key.
 
+The list follows what is installed elsewhere (another tab, the API, an agent)
+while it is open. Beside a package is why a half of it is not working: its
+server half could not be started, its interface could not be loaded in this
+page, or its interface failed in a page: in this one, or in another before this
+one last went through what is installed (when it was opened, or when what is
+installed last changed). A page that one of them breaks is opened with `?extensions=off` on its
+address (`/settings/extensions?extensions=off`): it loads no extension's
+interface, and the package can be switched off or removed here. See
+[What is loaded, and when](/guide/extension-ui#what-is-loaded-and-when).
+
 ::: warning Recovered, not declared
 pi publishes no schema for extension settings — extensions simply read keys off
 the settings object. The portal recovers them by reading the package source,
@@ -528,7 +538,8 @@ the message box — are listed there too, and are fixed.
 pi's raw `settings.json`, edited in place. It is validated as JSON before
 writing — a broken file stops every future session from starting, so an invalid
 save is refused rather than accepted. It has to be an object, and what a save
-replaces is kept beside the file as `settings.json.bak`.
+replaces is kept beside the file as `settings.json.bak`. A save reloads the
+open chats, as installing a package does.
 
 If you edit the file by hand and leave it unreadable, the other places that
 write to it (the compaction slider, the extension switches and forms) refuse to

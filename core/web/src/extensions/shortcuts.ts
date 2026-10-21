@@ -1,6 +1,7 @@
 import type { Chat, Shortcut, VoiceWindows } from "@pithagoras/extension-api";
 import { addAction, bindingFrom, type Action, type ActionId } from "../keybindings";
 import { t } from "../i18n";
+import { failedIn } from "./loader";
 import { translate } from "./strings";
 
 /**
@@ -38,6 +39,7 @@ export function runShortcut(id: ActionId, chat: Chat, windowsOf: (extension: str
     return shortcut.run({ chat, windows: windowsOf(shortcut.extension) });
   } catch (e) {
     console.error(`[extensions] ${shortcut.extension}'s shortcut failed:`, e);
+    failedIn(shortcut.extension)(e);
     return false;
   }
 }

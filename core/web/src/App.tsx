@@ -27,7 +27,7 @@ import { reconcile } from "./reconcile";
 import { useStable } from "./use-stable";
 import { useDialogFocus } from "./dialog-focus";
 import { t, useLanguage } from "./i18n";
-import { Here, setNavigate, startExtensions } from "./extensions/loader";
+import { followInstalled, Here, setNavigate, startExtensions } from "./extensions/loader";
 import { extensionMessage } from "./extensions/channel";
 import { serverPush, setChatOnScreen } from "./extensions/server-feed";
 import { titleOf, useSlot } from "./extensions/slots";
@@ -259,6 +259,8 @@ function Shell({
 
   const refreshSessions = useCallback(async () => {
     const r = await api.sessions();
+    // What is installed changed since the page last went through it, wherever it was changed: it goes through it again.
+    followInstalled(r.extensions);
     // Kept as it was when it says the same: a list asked for every few seconds is
     // mostly unchanged, and a new array is a draw of the portal for nothing.
     setSessions((prev) => reconcile(prev, r.sessions));
