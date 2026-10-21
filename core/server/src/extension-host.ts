@@ -233,7 +233,7 @@ export function setLimits(start: number, stop: number): void {
 }
 
 /** `work`, or a rejection once it has taken longer than `ms`. */
-function within<T>(ms: number, work: Promise<T>, what: string): Promise<T> {
+export function within<T>(ms: number, work: Promise<T>, what: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout>;
   const late = new Promise<never>((_, reject) => {
     timer = setTimeout(() => reject(new Error(`It had not finished ${what} after ${ms / 1000} seconds`)), ms);

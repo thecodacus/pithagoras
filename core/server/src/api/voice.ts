@@ -10,9 +10,9 @@ import { setTimeout as delay } from "node:timers/promises";
 import { once } from "node:events";
 import { createHash } from "node:crypto";
 import express, { type Router } from "express";
-import { getSession, getSetting, putSetting } from "../db.js";
+import { getSession, getSetting, putSetting, setVoiceSpeaks } from "../db.js";
 import { agentFor } from "../project-agent.js";
-import { setVoiceChooser, voiceProviders } from "../extension-host.js";
+import { setVoiceChooser, voiceProviders, within } from "../extension-host.js";
 import { validName } from "../extension-ui.js";
 import type { VoiceProvider, VoiceWhere } from "@pithagoras/extension-api/server";
 import { errorLineKey, readErrorLine, saveErrorLine, touchErrorLine } from "../voice-error-line.js";
@@ -120,7 +120,13 @@ export function validateConfig(value: any): VoiceConfig {
   const voiceModel = typeof value.voiceModel === "string" ? value.voiceModel.trim() : value.voiceModel ?? "";
   if (typeof voiceModel !== "string" || voiceModel.length > 300 || (voiceModel && !/^[^/\s]+\/\S+$/.test(voiceModel)))
     throw new Error("Name the voice model as provider/model, or leave it empty to use the chat's own");
-  if (runtime === "chatterbox") {
+  // Any extension's name: one that is not running now stays chosen, and voice mode says so.
+  const provider = value.provider ?? "";
+  if (provider !== "" && !validName(provider)) throw new Error("provider must be an extension's package name, or empty for your own addresses");
+  // Chatterbox's rules are for what voice mode speaks with: the extension chosen, while it says where, else the runtime saved here.
+  const source = provider ? voiceProviders().get(provider) : undefined;
+  const where = source && whereOf(provider, source);
+  if ((where ? where.speak?.runtime : runtime) === "chatterbox") {
     // Chatterbox is told a language or it refuses; it has no detection mode,
     // and the language also decides how numbers are written out for synthesis.
     if (language === "auto") throw new Error("Chatterbox needs an input language: auto-detect selects no voice");
@@ -134,9 +140,6 @@ export function validateConfig(value: any): VoiceConfig {
     if (typeof vad[key] !== 'number' || !Number.isFinite(vad[key]) || vad[key] < min || vad[key] > max) throw new Error(`Invalid VAD ${key}: expected ${min}–${max}`);
   }
   if (vad.negativeSpeechThreshold >= vad.positiveSpeechThreshold) throw new Error('Speech-end threshold must be lower than speech-start threshold');
-  // Any extension's name: one that is not running now stays chosen, and voice mode says so.
-  const provider = value.provider ?? "";
-  if (provider !== "" && !validName(provider)) throw new Error("provider must be an extension's package name, or empty for your own addresses");
   return { vad, lazyLoad: value.lazyLoad !== false, provider, runtime, voice, language, cfgScale, sttModel, dictationModel, dictationUrl: dictationUrl.trim(), exaggeration, kokoroVoice, speed, responseInstructions: savedInstructions(responseInstructions), skipThinkingProviders, voiceModel, enabled: value.enabled, whisperUrl: value.whisperUrl.trim(), breezeUrl: value.breezeUrl.trim(), instruction: value.instruction.trim() };
 }
 /**
@@ -244,42 +247,55 @@ function usable(res: express.Response, settings: () => VoiceConfig): VoiceConfig
     return undefined;
   }
 }
+/**
+ * How long an extension may take over hearing that voice mode is used or not: as long as the managed service may take to
+ * load its model. The leases wait for it, every voice session's.
+ */
+export const providerUse = { limitMs: 120_000 };
+const tell = (provider: VoiceProvider, inUse: boolean) =>
+  within(providerUse.limitMs, Promise.resolve().then(() => provider.use?.(inUse)), inUse ? "getting ready for voice mode" : "hearing that voice mode is no longer used");
 /** The provider voice mode last told it is in use, by its package's name, until it is told it is not. */
 let told: { name: string; provider: VoiceProvider } | undefined;
-/** Voice mode is no longer used where a provider was told it is: one whose server half has stopped since is not asked, as what it held went with it. */
-async function letGo({ name, provider }: NonNullable<typeof told>) {
-  if (voiceProviders().get(name) !== provider) return;
+/**
+ * Voice mode is no longer used through the extension of that name: told to it as it runs now, which may have been started
+ * anew since it was told it was, while what it got ready (a model loaded in a container of its own) is still there.
+ */
+async function letGo(name: string) {
+  const provider = voiceProviders().get(name);
+  if (!provider) return;
   try {
-    await provider.use?.(false);
+    await tell(provider, false);
   } catch (e) {
     console.error(`[extension ${name}] hearing voice mode is no longer used failed:`, e);
   }
 }
 /**
  * What a session's lease loads. An extension that is the source is told voice mode is in use: once, and again where the
- * source changed to another, or the same was started anew. The managed service loads its speech model at every lease, as it
- * may have let it go meanwhile.
+ * source changed to another, or the same was started anew; the one it changed from is told it is not. The managed service
+ * loads its speech model at every lease, as it may have let it go meanwhile.
  */
 async function load() {
   const name = config().provider;
+  const before = told;
   if (!name) {
+    // Back at the person's own addresses while voice mode is in use: the extension it was is used no longer.
+    told = undefined;
+    if (before) await letGo(before.name);
     if (managedVoice()) await voiceService.modelAction('load', managedEngine(), managedPort());
     return;
   }
   const provider = voiceProviders().get(name);
   if (!provider || !whereOf(name, provider)) throw new SourceAbsent();
-  if (told?.provider === provider) return;
-  await provider.use?.(true);
-  const before = told;
+  if (before?.provider === provider) return;
+  await tell(provider, true);
   told = { name, provider };
-  // The source changed while voice mode was in use: the one before is used no longer.
-  if (before) await letGo(before);
+  if (before && before.name !== name) await letGo(before.name);
 }
 /** What the end of the last lease unloads: the provider that was told voice mode is in use, or the managed service's speech model. */
 async function unload() {
   const was = told;
   told = undefined;
-  if (was) await letGo(was);
+  if (was) await letGo(was.name);
   if (managedVoice()) await voiceService.modelAction('unload', managedEngine(), managedPort());
 }
 const leases = new VoiceLeases(load, unload);
@@ -417,6 +433,32 @@ function chooseProvider(name: string, chosen: boolean) {
   saveVoice({ ...current, ...(chatterbox ? { language: "en" } : {}), enabled: true, provider: name });
 }
 setVoiceChooser(chooseProvider);
+// Whether voice mode can speak now, for the rule that is then in every conversation: switched on, and speaking where it listens and speaks.
+setVoiceSpeaks(() => {
+  try {
+    const saved = config();
+    return saved.enabled === true && inUse(saved).runtime !== "none";
+  } catch {
+    // Its extension is not running, or the settings cannot be read: nothing speaks.
+    return false;
+  }
+});
+/**
+ * The settings as the page gets them, from every route that answers with them: what is saved, with the extensions it can
+ * listen and speak through, and what the portal is set to.
+ */
+function shown() {
+  const saved = config();
+  // Each extension that offers voice mode a place to listen and speak: `ready` while it can be used now, with how it speaks then (`none`: recognition alone).
+  const providers = [...voiceProviders()].map(([name, provider]) => {
+    const where = whereOf(name, provider);
+    return { name, label: provider.label, ready: !!where, ...(where ? { runtime: where.speak?.runtime ?? "none" } : {}) };
+  });
+  // Whether replies are spoken, through what is used now: an extension chosen that is not running is not known not to, and voice mode then says why it cannot start.
+  let speech = true;
+  try { speech = inUse(saved).runtime !== "none"; } catch { /* SourceAbsent */ }
+  return {...withInstructions(saved),provider:saved.provider ?? "",providers,managed:managedVoice(),speech,comparison:process.env.VOICE_COMPARISON === "true",statusSpeech:process.env.VOICE_STATUS_SPEECH !== "false",ttsPrefetch:process.env.VOICE_TTS_PREFETCH === "true",sentenceChunks:process.env.VOICE_SENTENCE_CHUNKS === "true",pipelineMode:process.env.VOICE_PIPELINE_MODE === "sequential" ? "sequential" : "parallel"};
+}
 /**
  * The settings a chat speaks with: the voice of the agent the chat is with, where it has one of its own (the agent a project is
  * linked to for a chat in it, else the first agent's, as its avatar is). An agent's voice is one of Kokoro's or one from the
@@ -608,26 +650,15 @@ export function voiceRouter(): Router {
     try {
       const state = await voiceService.status();
       if (state.state !== 'running') throw new Error('Wait for voice setup to finish before connecting');
-      res.json(withInstructions(connectManagedVoice(state.choice)));
+      connectManagedVoice(state.choice);
+      res.json(shown());
     } catch (e) { res.status(400).json({ error: (e as Error).message }); }
   });
-  router.get("/voice", (_req, res) => {
-    const saved = config();
-    // Each extension that offers voice mode a place to listen and speak: `ready` while it can be used now, with how it speaks then (`none`: recognition alone).
-    const providers = [...voiceProviders()].map(([name, provider]) => {
-      const where = whereOf(name, provider);
-      return { name, label: provider.label, ready: !!where, ...(where ? { runtime: where.speak?.runtime ?? "none" } : {}) };
-    });
-    // Whether replies are spoken, through what is used now: an extension chosen that is not running is not known not to, and voice mode then says why it cannot start.
-    let speech = true;
-    try { speech = inUse(saved).runtime !== "none"; } catch { /* SourceAbsent */ }
-    res.json({...withInstructions(saved),provider:saved.provider ?? "",providers,managed:managedVoice(),speech,comparison:process.env.VOICE_COMPARISON === "true",statusSpeech:process.env.VOICE_STATUS_SPEECH !== "false",ttsPrefetch:process.env.VOICE_TTS_PREFETCH === "true",sentenceChunks:process.env.VOICE_SENTENCE_CHUNKS === "true",pipelineMode:process.env.VOICE_PIPELINE_MODE === "sequential" ? "sequential" : "parallel"});
-  });
+  router.get("/voice", (_req, res) => res.json(shown()));
   router.put("/voice", (req, res) => {
     try {
-      const saved = validateConfig(req.body);
-      saveVoice(saved);
-      res.json(withInstructions(saved));
+      saveVoice(validateConfig(req.body));
+      res.json(shown());
     } catch (e) { res.status(400).json({ error: (e as Error).message }); }
   });
   router.use("/sessions/:id/voice", (req, res, next) => {

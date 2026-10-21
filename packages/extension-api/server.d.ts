@@ -233,7 +233,10 @@ export interface VoiceProvider {
   label: string;
   /** Where it listens and speaks now; nothing while it cannot be used. Asked at each request: keep it quick. */
   where(): VoiceWhere | undefined;
-  /** Voice mode began (true) or stopped (false) being used anywhere. Awaited when it begins; a throw is the page's error. */
+  /**
+   * Voice mode began (true) or stopped (false) being used anywhere. Awaited when it begins; a throw is the page's error.
+   * Given 120 seconds: one that has not settled by then counts as failed.
+   */
   use?(inUse: boolean): Promise<void>;
 }
 
