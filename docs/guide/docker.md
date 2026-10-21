@@ -142,7 +142,7 @@ agent you would let run containers.
 Name it in your package.json, and ask for it in your server half:
 
 ```json
-"pithagoras": { "server": "./server.js", "requires": { "pithagoras-docker": "^1.0.0" } }
+"pithagoras": { "server": "./server.js", "requires": { "pithagoras-docker": "^1.1.0" } }
 ```
 
 ```js
@@ -196,11 +196,12 @@ gives:
 - `exitCode`: the code it ended with;
 - `timedOut`: it did not end within `timeoutMs`.
 
-Without `timeoutMs`, or with 0, it waits as long as the command takes: Docker's
-other requests are given up on after 30 seconds, and this one is not. A command
-given up on is not a failure: `output` is what it wrote by then, and `exitCode`
-is `null`. Docker has no way to end it, so it may still be running in the
-container; ending it is yours, with another command that does (`pkill -f …`).
+Without `timeoutMs`, or with 0, it waits as long as the command takes. Docker's
+other calls, apart from a download (`images.ensure`), are given up on after 30
+seconds; this one is not. A command given up on is not a failure: `output` is
+what it wrote by then, and `exitCode` is `null`. Docker has no way to end it, so
+it may still be running in the container; ending it is yours, with another
+command that does (`pkill -f …`).
 
 ```js
 const run = await docker.containers.exec("my-redis", ["redis-cli", "ping"], { timeoutMs: 10_000 });

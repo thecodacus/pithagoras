@@ -2,10 +2,10 @@
  * What Docker gives an extension that builds on it: name `pithagoras-docker` in `pithagoras.requires` (or `optional`)
  * in its package.json, and ask for it with `portal.extensions.use<Docker>("pithagoras-docker")`.
  *
- * Each extension has its own: the containers and volumes it makes carry its name, and it may start, stop, remove and
- * read only those, and the ones it took over (`adopt`). Another extension's are not its to touch, and neither is a
- * container nobody made through here until one takes it over. The person sees all of them in Settings → Docker, by the
- * extension that runs each, and may stop or remove any.
+ * Each extension has its own: the containers and volumes it makes carry its name, and it may start, stop, remove, read
+ * and run commands in only those, and the ones it took over (`adopt`). Another extension's are not its to touch, and
+ * neither is a container nobody made through here until one takes it over. The person sees all of them in Settings →
+ * Docker, by the extension that runs each, and may stop or remove any.
  *
  * A server half runs with the portal's own rights, and Docker's socket is root on the machine: what a container is made
  * with (`spec`, Docker's own create body) is the extension's to choose. This keeps extensions apart, and shows the person
@@ -58,7 +58,7 @@ export interface ExecOptions {
   workingDir?: string;
   /** With a terminal: its output and its errors come back as it wrote them, colours and all. */
   tty?: boolean;
-  /** How long to wait for it to end, in milliseconds; none, or 0, waits as long as it takes. Not Docker's 30 s for a request. */
+  /** How long to wait for it to end, in milliseconds; none, or 0, waits as long as it takes. */
   timeoutMs?: number;
 }
 
