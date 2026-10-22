@@ -3,21 +3,28 @@ import { parseChoice } from "../engines";
 import { portal } from "./host";
 import { chooseFinished } from "./provider";
 import * as service from "./service";
-import { putSettings, setting } from "./store";
+import { checkSpeech, putSettings, setting, speech } from "./store";
+import { addVoice, deleteVoice, listVoices, updateVoice, voiceAudio, VoiceNotFound } from "./voices";
 
 /**
  * The voice service's page in Settings, at /api/x/pithagoras-voice/…, behind the portal's login.
  *
  *   GET  /state       how the service stands: whether Docker answers, its state, the setup log, the engines it is built
- *                     for, and whether its speech model is let go of once voice mode no longer uses it (`lazyLoad`)
+ *                     for, whether its speech model is let go of once voice mode no longer uses it (`lazyLoad`), and
+ *                     whether it is voice mode's source (`chosen`)
  *   GET  /hardware    the GPUs, and what would fit
  *   PUT  /gpu         {gpu}: the card, by UUID, or "" to leave it to VOICE_GPU and then the card with the most room
  *   POST /install     [a choice of engines]: builds and starts it; voice mode listens and speaks through it once it is up
  *   POST /start, /stop
- *   POST /uninstall   {removeData}: removes the container, and with removeData the downloads; voice mode goes back to
- *                     the person's own addresses where it listened and spoke through it
- *   POST /connect     voice mode listens and speaks through it from now on
+ *   POST /uninstall   {removeData}: removes the container, and with removeData the downloads; voice mode has no source
+ *                     after, where it listened and spoke through it
+ *   PUT  /chosen      {chosen}: voice mode listens and speaks through it from now on, or no longer does
  *   PUT  /lazy-load   {on}
+ *   GET, PUT /speech  how it speaks: its own choice of voice, the designed voice, the engines' settings, the language
+ *   GET, POST /voices the voice library, and a voice added to it
+ *   PATCH  /voices/:id         {instruction}: what the voice is told to sound like
+ *   GET    /voices/:id/audio   a clone's recording
+ *   DELETE /voices/:id
  */
 export function voiceRoutes(router: Router): void {
   const json = portal().http.json();
@@ -48,7 +55,7 @@ export function voiceRoutes(router: Router): void {
     try {
       const state = await service.status();
       chooseFinished(state);
-      res.json({ ...state, lazyLoad: setting("lazyLoad") !== false });
+      res.json({ ...state, lazyLoad: setting("lazyLoad") !== false, chosen: portal().voice.chosen() });
     } catch (e) {
       res.status(503).json({ error: (e as Error).message });
     }
@@ -73,7 +80,7 @@ export function voiceRoutes(router: Router): void {
       }
     });
   }
-  // The container goes, and voice mode with it, where it listened and spoke through it. The downloads stay unless `removeData` says they go too.
+  // The container goes, and voice mode has no source after, where it listened and spoke through it. The downloads stay unless `removeData` says they go too.
   router.post("/uninstall", json, async (req, res) => {
     try {
       const removeData = req.body?.removeData ?? false;
@@ -94,11 +101,14 @@ export function voiceRoutes(router: Router): void {
       res.status(400).json({ error: (e as Error).message });
     }
   });
-  router.post("/connect", async (_req, res) => {
+  // Use for voice mode, and Stop using: only a service that runs is made the source.
+  router.put("/chosen", json, async (req, res) => {
+    const chosen = req.body?.chosen;
+    if (typeof chosen !== "boolean") return res.status(400).json({ error: "chosen must be a boolean" });
     try {
-      if ((await service.status()).state !== "running") throw new Error("Wait for voice setup to finish before connecting");
-      portal().voice.choose(true);
-      res.json({ ok: true });
+      if (chosen && (await service.status()).state !== "running") throw new Error("Wait for voice setup to finish before using it for voice mode");
+      portal().voice.choose(chosen);
+      res.json({ chosen: portal().voice.chosen() });
     } catch (e) {
       res.status(400).json({ error: (e as Error).message });
     }
@@ -108,5 +118,47 @@ export function voiceRoutes(router: Router): void {
     if (typeof on !== "boolean") return res.status(400).json({ error: "on must be a boolean" });
     putSettings({ lazyLoad: on });
     res.json({ lazyLoad: on });
+  });
+  router.get("/speech", (_req, res) => res.json(speech()));
+  // Held to what the engine of the container takes, where there is a container.
+  router.put("/speech", json, async (req, res) => {
+    try {
+      putSettings(checkSpeech(req.body ?? {}, (await service.status()).choice?.tts));
+      res.json(speech());
+    } catch (e) {
+      res.status(400).json({ error: (e as Error).message });
+    }
+  });
+  router.get("/voices", (_req, res) => res.json(listVoices()));
+  // A clone's recording comes as base64 in the JSON: about 1.3 MB for 30 seconds.
+  router.post("/voices", portal().http.json({ limit: "2mb" }), (req, res) => {
+    try {
+      res.json(addVoice(req.body));
+    } catch (e) {
+      res.status(400).json({ error: (e as Error).message });
+    }
+  });
+  router.patch("/voices/:id", json, (req, res) => {
+    try {
+      res.json(updateVoice(String(req.params.id), req.body));
+    } catch (e) {
+      res.status(e instanceof VoiceNotFound ? 404 : 400).json({ error: (e as Error).message });
+    }
+  });
+  router.get("/voices/:id/audio", (req, res) => {
+    try {
+      const wav = voiceAudio(String(req.params.id));
+      res.set({ "Content-Type": "audio/wav", "Cache-Control": "no-store" }).send(wav);
+    } catch {
+      res.sendStatus(404);
+    }
+  });
+  router.delete("/voices/:id", (req, res) => {
+    try {
+      deleteVoice(String(req.params.id));
+      res.json({ ok: true });
+    } catch (e) {
+      res.status(404).json({ error: (e as Error).message });
+    }
   });
 }

@@ -5,6 +5,7 @@ import { portal } from "./host";
 import * as service from "./service";
 import * as speech from "./speech";
 import { putSettings, setting } from "./store";
+import { listVoices } from "./voices";
 
 /**
  * The voice service as voice mode is offered it (`portal.voice.provide`): what it offers while it runs, recognition and
@@ -25,9 +26,15 @@ async function speechModel(action: "load" | "unload"): Promise<void> {
   loaded = action === "load";
 }
 
-/** The voices an agent's voice is chosen from, for the speech engine the container was built for. */
+/**
+ * The voices an agent's voice is chosen from, for the speech engine the container was built for: Breeze's designed
+ * voice and the library, the library's clones for Chatterbox, which speaks only with a recording, and Kokoro's own.
+ * A voice of the library goes by the name the person gave it.
+ */
 function voicesFor(tts: TtsChoice): ProvidedVoice[] {
-  if (tts === "breeze") return [{ id: "design", name: "Designed voice", builtIn: true }];
+  const library = listVoices();
+  if (tts === "breeze") return [{ id: "design", name: "Designed voice", builtIn: true }, ...library.map(({ id, name }) => ({ id, name }))];
+  if (tts === "chatterbox") return library.filter((voice) => voice.kind === "clone").map(({ id, name }) => ({ id, name }));
   if (tts === "kokoro") return KOKORO_VOICES.map((v) => ({ id: v.id, name: `${v.name} (${v.locale})`, builtIn: true }));
   return [];
 }
