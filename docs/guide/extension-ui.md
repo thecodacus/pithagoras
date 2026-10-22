@@ -2336,12 +2336,16 @@ Run by hand, it is run on the tag.
 
 npm links a trusted publisher only to a package that exists, so the first
 version is published by hand, from a clean checkout of main:
-`npm publish --provenance=false -w packages/extension-api`. Provenance is made
-only in CI, and the package's `publishConfig` asks for it. Then, on
-npmjs.com, the package's **Settings → Trusted Publisher** takes GitHub
-Actions, with the organization or user `thecodacus`, the repository
-`pithagoras`, the workflow filename `publish-extension-api.yml`, and no
-environment name.
+`npm publish -w packages/extension-api`. The trusted publisher is added when
+the next version is released, between steps 1 and 2: on npmjs.com, the
+package's **Settings → Trusted Publisher** takes GitHub Actions, with the
+organization or user `thecodacus`, the repository `pithagoras`, the workflow
+filename `publish-extension-api.yml`, no environment name, and `npm publish`
+selected under **Allowed actions** (`npm dist-tag` stays off). Without it, a
+new trusted publisher allows only `npm stage publish`, and npm refuses the
+workflow's `npm publish`. A new trusted publisher expires when no publish goes
+through it within 2 days: push the tag within 2 days of adding it, and if it
+expires, delete it and add it again.
 
 ## Troubleshooting
 

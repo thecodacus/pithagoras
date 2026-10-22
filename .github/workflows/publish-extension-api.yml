@@ -1,9 +1,10 @@
 name: Publish extension API
 
 # Publishes @pithagoras/extension-api (packages/extension-api) to npm when a tag extension-api-v<version> is pushed.
-# npm's trusted publishing signs in with this workflow's identity, so there is no token, and the package carries
-# provenance. Run by hand, it is run on such a tag: on anything else it stops before publishing. Releasing, and the
-# first version, which is published by hand, are described in docs/guide/extension-ui.md.
+# npm's trusted publishing signs in with this workflow's identity, so there is no token, and npm adds provenance, as it
+# does for a public package published from a public repository. Run by hand, it is run on such a tag: on anything else
+# it stops before publishing. Releasing, and the first version, which is published by hand, are described in
+# docs/guide/extension-ui.md.
 on:
   push:
     tags: ["extension-api-v*"]
@@ -21,12 +22,11 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      # Trusted publishing needs npm 11.5.1 or later, which Node 24 comes with and Node 22 does not.
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           registry-url: https://registry.npmjs.org
-      # Trusted publishing needs npm 11.5.1 or later, which Node 22 does not come with.
-      - run: npm install -g npm@latest
       - name: The tag is the version in package.json
         run: |
           version=$(node -p 'require("./packages/extension-api/package.json").version')
@@ -34,4 +34,4 @@ jobs:
             echo "::error::$GITHUB_REF is not refs/tags/extension-api-v$version: packages/extension-api/package.json says $version"
             exit 1
           fi
-      - run: npm publish --provenance --access public -w packages/extension-api
+      - run: npm publish -w packages/extension-api
