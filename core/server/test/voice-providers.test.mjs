@@ -62,7 +62,7 @@ const recording = () => {
   wav.writeUInt32LE(16000, 24); wav.writeUInt32LE(32000, 28); wav.writeUInt16LE(2, 32); wav.writeUInt16LE(16, 34); wav.write("data", 36); wav.writeUInt32LE(32, 40);
   return wav;
 };
-const transcribe = (query = "") => fetch(at(`/api/sessions/talk/voice/transcribe${query}`), { method: "POST", headers: { "content-type": "audio/wav" }, body: recording() });
+const transcribe = (query = "", signal) => fetch(at(`/api/sessions/talk/voice/transcribe${query}`), { method: "POST", headers: { "content-type": "audio/wav" }, body: recording(), signal });
 const speak = (session = "talk", signal) => fetch(at(`/api/sessions/${session}/voice/speech`), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: "Hello there." }), signal });
 const lease = (client, active) => send("POST", "/api/sessions/talk/voice/connection", { client, active });
 const agentVoice = (id, value) => send("PUT", `/api/agents/${id}/voice`, { voice: value });
@@ -189,6 +189,14 @@ test("a request that is closed ends the signal the source was given, and a sourc
     gone.abort();
     await asking;
     await until(async () => (await asked()).aborted > before.aborted, "the signal to end");
+    // A recording the page gave up on, as at barge-in or End: recognising it ends too.
+    const ended = (await asked()).aborted;
+    const left = new AbortController();
+    const hearing = transcribe("", left.signal).catch(() => {});
+    await until(async () => (await asked()).heard.length > before.heard.length, "the recording to be sent");
+    left.abort();
+    await hearing;
+    await until(async () => (await asked()).aborted > ended, "the signal to end");
     providerCall.limitMs = 50;
     const spoken = await speak();
     assert.deepEqual([spoken.status, (await spoken.json()).error], [502, "It had not finished speaking after 0.05 seconds"]);
