@@ -1,7 +1,7 @@
 {
   "name": "pithagoras-voice",
   "version": "0.1.0",
-  "description": "The voice service for Pithagoras: speech recognition and speech synthesis built and run in a container through Docker, on the GPU or the CPU, and offered to voice mode as a place to listen and speak",
+  "description": "The voice service for Pithagoras: speech recognition and speech synthesis built and run in a container through Docker, on the GPU or the CPU, with a library of voices to speak with, offered to voice mode as the source it listens and speaks through",
   "type": "module",
   "keywords": ["pi-package"],
   "pi": {},
