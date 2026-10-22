@@ -38,7 +38,7 @@ export function useSubagentChoice(sessionId: string, onError?: (e: string) => vo
   const [picked, setPicked] = useState<{ model: string | null } | null>(null);
   useEffect(() => setPicked(null), [sessionId]);
 
-  // Settings → Add-ons says when it switches the tool on or off.
+  // Settings → Tools says when it switches the tool on or off.
   const reloadFeatures = features.reload;
   useEffect(() => {
     const again = () => void reloadFeatures();

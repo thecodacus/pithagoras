@@ -42,10 +42,9 @@ const answered = (address: string) =>
  * system that has none — one named after the directory stands in, outside it.
  *
  * The directory is closed to everyone but its owner, on every start, one made
- * by an older version or by hand too: portal.db holds the channels' bot tokens,
- * the add-ons' passwords and every conversation, and with the usual umask the
- * folder, the database and its backups would be readable by every account on
- * the machine.
+ * by an older version or by hand too: portal.db holds the channels' bot tokens
+ * and every conversation, and with the usual umask the folder, the database and
+ * its backups would be readable by every account on the machine.
  */
 export async function holdDataDir(dir: string): Promise<boolean> {
   mkdirSync(dir, { recursive: true, mode: 0o700 });

@@ -86,7 +86,7 @@ COPY skills skills
 # The extensions the portal ships, as the build left them: each built in its own
 # folder, where nothing of it is kept in git. Nothing loads one until it is
 # installed as a local pi package pointing here (Settings → Extensions, or
-# Settings → Add-ons for the subagent tool). One with packages of its own gets
+# Settings → Tools for the subagent tool). One with packages of its own gets
 # what it needs to run and not what only its build did, so a new container does
 # not reach for the registry.
 COPY --from=build /app/extensions extensions

@@ -246,7 +246,7 @@ With the supplied Compose files, `WORKSPACES_DIR` selects the **host** directory
 mounted at `/workspaces`, and has to be set. Keep the portal's
 `WORKSPACE_ROOT=/workspaces` so it uses the path visible inside its container.
 
-## Installing add-ons
+## Installing the voice service and the agent's browser
 
 To install the voice service through the Voice and Docker extensions, or the
 agent's browser through the Browser and Docker extensions:
@@ -368,8 +368,8 @@ into place by hand without them is sent as it is.
 
 The portal closes `/data` to every account but the one it runs as (mode `0700`)
 each time it starts, a folder made by hand or by an older version too:
-`portal.db` holds the channels' bot tokens, the add-ons' passwords and every
-conversation. A data folder on the host, mounted as `/data`, is closed the same way.
+`portal.db` holds the channels' bot tokens and every conversation. A data
+folder on the host, mounted as `/data`, is closed the same way.
 
 Inside `/data`:
 

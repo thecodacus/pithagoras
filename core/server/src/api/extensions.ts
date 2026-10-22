@@ -59,7 +59,7 @@ export interface ShippedExtension {
 /**
  * The extensions in the portal's own `extensions` folder, each a package in a
  * folder of its own. Not the subagent tool: that one is switched in Settings →
- * Add-ons, which also keeps its settings.
+ * Tools, which also keeps its settings.
  */
 export function shippedExtensions(dir = bundledPath("extensions")): ShippedExtension[] {
   if (!dir) return [];

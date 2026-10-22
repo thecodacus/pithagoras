@@ -1926,7 +1926,7 @@ export function getStoredSettings(): Partial<GlobalSettings> {
 
 /**
  * The stored defaults the page may see: the three it edits. The table holds
- * much else — passwords, tokens, keys the portal keeps for its add-ons — and
+ * much else — passwords, tokens and keys the portal keeps — and
  * none of that is the page's to have.
  */
 export function shownStoredSettings(): Partial<GlobalSettings> {
