@@ -1,5 +1,5 @@
 /**
- * Whisper answers a stretch of silence or noise with a note in brackets —
+ * Speech recognition answers a stretch of silence or noise with a note in brackets —
  * "[BLANK_AUDIO]", "(silence)", "[Music]" — instead of nothing. Dictated into
  * a message box that is junk, so a transcript made only of such notes is empty.
  * Brackets inside a sentence are left alone: "see (a) below" is what was said.

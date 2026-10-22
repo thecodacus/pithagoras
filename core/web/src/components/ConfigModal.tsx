@@ -46,6 +46,7 @@ import { setCommandTrigger, typedCharacter, useCommandTrigger, validTrigger } fr
 import { DEFAULT_TRIGGER } from "../slash-palette";
 import { PeoplePanel } from "./PeoplePanel";
 import { PortalExtensions } from "./PortalExtensions";
+import { VoiceModeSettings } from "./VoiceModeSettings";
 import { RestartSection } from "./RestartSection";
 import { UpdateSection } from "./UpdateSection";
 import { Modal, useUnsavedDraft } from "./Modal";
@@ -345,7 +346,7 @@ export const ConfigModal = memo(function ConfigModal({
 
       <div key={section} ref={page} className={`settings-page${nav.kind === "tab" && OWN_LAYOUT.has(nav.id) ? "" : " settings-flow"}`}>
       {nav.kind === "tab" && nav.id === "models" && <ProvidersPanel onError={setError} onSetup={onSetup} />}
-      {nav.kind === "tab" && nav.id === "general" && <GeneralPanel onError={setError} onProviders={() => setNav({ kind: "tab", id: "models" })} />}
+      {nav.kind === "tab" && nav.id === "general" && <GeneralPanel onError={setError} onProviders={() => setNav({ kind: "tab", id: "models" })} onExtensions={() => setNav({ kind: "tab", id: "extensions" })} onSource={(name) => setNav({ kind: "ext", name })} />}
       {nav.kind === "tab" && nav.id === "browser" && <BrowserPanel onError={setError} />}
       {nav.kind === "tab" && nav.id === "authentication" && <><PasswordPanel /><SsoPanel /></>}
       {nav.kind === "tab" && nav.id === "logs" && <LogsPanel onError={setError} />}
@@ -887,7 +888,7 @@ function modelHint(m: AvailableModel): string {
   return [m.name !== m.id ? m.id : "", ...modelTraits(m)].filter(Boolean).join(" · ");
 }
 
-function GeneralPanel({ onError, onProviders }: { onError: (e: string) => void; onProviders: () => void }) {
+function GeneralPanel({ onError, onProviders, onExtensions, onSource }: { onError: (e: string) => void; onProviders: () => void; onExtensions: () => void; onSource: (name: string) => void }) {
   // All three are fetched ahead and kept, and the page waits for all three:
   // drawn part by part, the model menus filled in and a warning pushed the
   // context settings down after the page was already on screen.
@@ -1167,6 +1168,7 @@ function GeneralPanel({ onError, onProviders }: { onError: (e: string) => void; 
       </Section>
 
       <ReportDefault onError={onError} />
+      <VoiceModeSettings onError={onError} onExtensions={onExtensions} onSource={onSource} />
     </>
   );
 }

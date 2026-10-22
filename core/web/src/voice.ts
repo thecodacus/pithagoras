@@ -17,7 +17,7 @@ export function speechChunks(text: string): string[] {
   if (remaining) chunks.push(remaining);
   return chunks;
 }
-/** Silero already returns mono 16 kHz samples, ready for Whisper. */
+/** Silero already returns mono 16 kHz samples, ready for speech recognition. */
 export function samplesWav(samples: Float32Array): Blob {
   const data = new ArrayBuffer(44 + samples.length * 2);
   const view = new DataView(data);

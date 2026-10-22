@@ -11,7 +11,8 @@ test.beforeEach(async ({ page }) => {
   await page.route('**/api/sessions/test/commands', route => route.fulfill({ json: { commands: [] } }));
   await page.route('**/api/sessions/test/config', route => route.fulfill({ status: 503, json: {} }));
   await page.route('**/api/voice', route => route.fulfill({ json: { enabled: true } }));
-  await page.route('**/voice/speech', route => route.fulfill({ status: 204 }));
+  // A short phrase of silence, as the portal answers one: 24 kHz PCM.
+  await page.route('**/voice/speech', route => route.fulfill({ body: Buffer.alloc(4800), headers: { 'content-type': 'audio/pcm', 'x-sample-rate': '24000' } }));
   await page.route('**/api/sessions/test/picture?**', route => route.fulfill({ body: png, contentType: 'image/png' }));
 });
 

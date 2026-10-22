@@ -24,8 +24,7 @@ const answers: Record<string, unknown> = {
   '/api/tool-rules': { rules: [] },
   '/api/channels': { channels: [], kinds: [], agentHome: '/a/home' },
   '/api/skills': { skills: [{ name: 'release-notes', description: 'How releases are cut', editable: true, enabled: true, source: 'user', path: '/a/skills/release-notes' }], diagnostics: [], root: '/a/skills' },
-  '/api/voice': { enabled: false, whisperUrl: 'http://127.0.0.1:8178/inference', breezeUrl: 'http://127.0.0.1:7860/v1/audio/speech', instruction: 'Clear speech', voice: 'design', runtime: 'breeze', language: 'auto', cfgScale: 4 },
-  '/api/voice/presets': [],
+  '/api/voice': { provider: '', ready: false, speech: true, voices: [], enabled: false },
   '/api/features/subagent': { subagent: { available: true, installed: false, enabled: false, source: null, mode: 'interrupt', maxParallel: 1, model: 'auto' } },
   '/api/audit': { entries: [{ id: 2, at: '2026-10-01T09:00:00Z', kind: 'refused', tool: 'bash', subject: 'rm -rf /', reason: 'on the list', person_key: null, person_name: null, session_id: null }] },
   '/api/projects': { root: '/w', home: '/h', projects: [{ name: 'demo', path: '/w/demo', isGit: false, hasInstructions: false, hasTools: false, sessions: 0, lastActive: null }] },
@@ -111,16 +110,12 @@ test('Settings → Skills does not say there are none when the list could not be
 });
 
 test('Settings → Add-ons: each add-on says what it could not read, and reads it again', async ({ page }) => {
-  const { up, asked } = await portal(page, ['/api/voice', '/api/features/subagent', '/api/features']);
+  const { up, asked } = await portal(page, ['/api/features/subagent', '/api/features']);
   await page.goto('/settings/add-ons');
   const dialog = settingsDialog(page);
-  await expect(dialog.getByRole('tab', { name: 'Voice' })).toHaveAttribute('aria-selected', 'true');
-  await expect(dialog.getByRole('alert')).toContainText(FAILED);
-  up('/api/voice');
-  await dialog.getByRole('button', { name: 'Try again' }).click();
-  await expect(dialog.getByRole('checkbox', { name: 'Enable voice controls in sessions' })).toBeVisible();
-
-  await dialog.getByRole('tab', { name: 'Subagents' }).click();
+  // Voice mode is set in Settings → Defaults: the tab opens on Subagents.
+  await expect(dialog.getByRole('tab', { name: 'Voice' })).toHaveCount(0);
+  await expect(dialog.getByRole('tab', { name: 'Subagents' })).toHaveAttribute('aria-selected', 'true');
   await expect(dialog.getByRole('alert')).toContainText(FAILED);
   up('/api/features/subagent');
   await dialog.getByRole('button', { name: 'Try again' }).click();
@@ -132,6 +127,19 @@ test('Settings → Add-ons: each add-on says what it could not read, and reads i
   const before = asked.filter((p) => p === '/api/features').length;
   await dialog.getByRole('button', { name: 'Try again' }).click();
   await expect.poll(() => asked.filter((p) => p === '/api/features').length).toBeGreaterThan(before);
+});
+
+test('Settings → Defaults → Voice mode says what it could not read, and reads it again', async ({ page }) => {
+  const { up } = await portal(page, ['/api/voice']);
+  await page.goto('/settings/general');
+  const dialog = settingsDialog(page);
+  // The rest of the page is there: only the section says what failed.
+  await expect(dialog.getByText('For new chats')).toBeVisible();
+  await expect(dialog.getByRole('alert')).toContainText(FAILED);
+  up('/api/voice');
+  await dialog.getByRole('button', { name: 'Try again' }).click();
+  await expect(dialog.getByText('Nothing listens and speaks for voice mode.', { exact: false })).toBeVisible();
+  await expect(dialog.getByRole('alert')).toHaveCount(0);
 });
 
 test('the Audit page does not say nothing was recorded, with "0 refused", when it could not be read', async ({ page }) => {
