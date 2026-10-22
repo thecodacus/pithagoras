@@ -585,14 +585,36 @@ servers does not speak those, and the log says so. Each says in the log what it
 took up. With the extension not installed, its hand-off waits, nothing of it
 lost, until it is.
 
-**The Compose overlay**, `docker-compose.voice.yml` with
-`deploy/voice-multilingual/`, stays, and its services keep running. Voice
-servers listens to its `whisper`, and to the Qwen3-ASR of its `audiocpp`; no
-source speaks to its `breeze` (Breeze Python) or to the Chatterbox of its
-`audiocpp`, which needs a recording with every phrase. A portal that spoke
-through them keeps speaking by installing Voice, which runs both engines itself
-with the voices the upgrade handed over (see
-[The Compose overlay](/guide/voice#the-compose-overlay)).
+**The Compose overlay is gone:** `docker-compose.voice.yml` and
+`deploy/voice-multilingual/` are no longer in the repository. No source speaks
+to its `breeze` (Breeze Python), nor to the Chatterbox of its `audiocpp`, which
+needs a recording with every phrase. A portal that spoke through them keeps
+speaking by installing Voice, which listens as well and runs Breeze and
+Chatterbox itself with the voices the upgrade left for it, and choosing it on
+its page with **Use for voice mode**. One that keeps the overlay's `whisper`
+alone listens to it through [Voice servers](/guide/voice-servers): the upgrade
+gave Voice servers its address where voice mode listened there, and elsewhere it
+is `http://127.0.0.1:8178/inference` as the **Speech recognition URL**, with no
+model.
+
+The overlay's containers are not touched by the upgrade. They keep running as
+orphans of the Compose project, and `docker compose up` says it found them.
+Remove the ones voice mode no longer uses:
+
+```sh
+docker rm -f <project>-breeze-1 <project>-audiocpp-1
+```
+
+`<project>` is the Compose project, the checkout's folder name unless you named
+it otherwise; `docker ps -a` lists them. `<project>-whisper-1`, on
+`127.0.0.1:8178`, goes the same way where Voice servers does not listen to it.
+`docker compose up -d --remove-orphans` removes all three, the whisper one with
+them. The source checkouts and models they were built from are in
+`voice-runtime/`; delete it once no container of the overlay is left, as the
+whisper one reads its model from there. A systemd unit installed from
+`deploy/voice-multilingual/` read its `server.json` from the checkout, so stop
+and disable it (`systemctl disable --now pithagoras-audio-cpp-multilingual`) and
+remove its unit file.
 
 ### Going back to a version before Voice was an extension
 
