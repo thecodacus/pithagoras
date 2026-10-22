@@ -23,7 +23,8 @@ import { asksQuestions } from "../pi/ask-question.js";
 import { SessionEditError } from "../pi/session-edit.js";
 import { sessions } from "../session-manager.js";
 import { isToolList, layerExceptions, layerTools, toolsUnsupported } from "../tool-layers.js";
-import { defaultsFor } from "../tool-policy.js";
+import { defaultsFor, toolEnabled } from "../tool-policy.js";
+import { CODEMODE_TOOL } from "../pi/codemode.js";
 
 /**
  * The modes a chat may be put in: none where it may not choose. A chat with the person on the portal's pages (a task
@@ -120,9 +121,12 @@ export function modesRouter(): Router {
    * chat's agent, project and routine, so a tool it leaves as the default is still theirs to decide.
    */
   router.get("/chat-modes/:id/tools", (req, res) => {
-    const id = req.params.id;
-    if (!customMode(id)) return res.status(404).json({ error: "Not found" });
-    res.json(layerTools(undefined, toolDefaultsOff(), customModeTools(id)));
+    const row = customMode(req.params.id);
+    if (!row) return res.status(404).json({ error: "Not found" });
+    const below = toolDefaultsOff();
+    const tools = customModeTools(row.id);
+    // The lazy marks as a chat in the mode shows them (see getTools): none where it works through the code tool.
+    res.json(layerTools(undefined, below, tools, false, row.codemode === 1 && toolEnabled(CODEMODE_TOOL, below, tools)));
   });
 
   /** Says which tools the mode's chats start with: what is not named is on. Chats running in it are told at once. */
