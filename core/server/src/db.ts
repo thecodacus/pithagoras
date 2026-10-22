@@ -1461,6 +1461,14 @@ export function modeOf(stored: string | null | undefined): ChatModeEntry | undef
   return CORE_MODES.find((mode) => mode.id === stored);
 }
 
+/**
+ * Whether a chat in `mode` has the code tool held on: the mode's tools switch it on, whoever made the mode. The chat's
+ * own switches cannot turn it off there (ownTools).
+ */
+export function modeHoldsCodemode(mode: string | null | undefined): boolean {
+  return Boolean(modeOf(mode)?.tools?.on.includes(CODEMODE_TOOL));
+}
+
 /** The tools off for a chat in `mode`, given those off under it: the mode's layer folded in, as each layer is. */
 const withMode = (off: string[], mode: string | null | undefined): string[] => {
   const layer = modeOf(mode)?.tools;
@@ -2425,9 +2433,7 @@ function chatsDifferingWith(policy: ToolsPolicy, byDefault: boolean): SessionRow
     rows.sort((a, b) => (a.updated_at < b.updated_at ? 1 : a.updated_at > b.updated_at ? -1 : 0));
   }
   // The policy once for all of them, and what each says about tools from the row that was read.
-  return rows.filter(
-    (row) => toolsOnWith(row, policy, { off: parseToolsOff(row.tools_off), on: parseToolsOff(row.tools_on) }) !== byDefault
-  );
+  return rows.filter((row) => toolsOnWith(row, policy, ownTools(row)) !== byDefault);
 }
 
 /**
@@ -2463,10 +2469,19 @@ export interface SessionTools {
 }
 
 export function sessionTools(sessionId: string): SessionTools {
-  const row = getDb().prepare("SELECT tools_off, tools_on FROM sessions WHERE id = ?").get(
+  const row = getDb().prepare("SELECT tools_off, tools_on, mode FROM sessions WHERE id = ?").get(
     sessionId
-  ) as { tools_off: string | null; tools_on: string | null } | undefined;
-  return { off: parseToolsOff(row?.tools_off), on: parseToolsOff(row?.tools_on) };
+  ) as Pick<SessionRow, "tools_off" | "tools_on" | "mode"> | undefined;
+  return ownTools(row);
+}
+
+/**
+ * What a chat's own switches say, from its row. Where its mode holds the code tool on (modeHoldsCodemode), an off of
+ * the chat's own for it does not count: it stays stored, and counts again once the mode no longer holds it.
+ */
+function ownTools(row: Pick<SessionRow, "tools_off" | "tools_on" | "mode"> | undefined): SessionTools {
+  const off = parseToolsOff(row?.tools_off);
+  return { off: modeHoldsCodemode(row?.mode) ? off.filter((name) => name !== CODEMODE_TOOL) : off, on: parseToolsOff(row?.tools_on) };
 }
 
 export function parseToolsOff(raw: string | null | undefined): string[] {
