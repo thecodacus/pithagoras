@@ -8,7 +8,6 @@ export const TAB_IDS = [
   "general",
   "channels",
   "people",
-  "add-ons",
   "tools",
   "sandbox",
   "guard",

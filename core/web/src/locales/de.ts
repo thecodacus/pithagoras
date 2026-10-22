@@ -575,8 +575,6 @@ const de: Locale = {
     "This browser": "Dieser Browser",
     "Theme, notifications, confirmations": "Design, Benachrichtigungen, Rückfragen",
     "The password, and signing in through a provider": "Das Passwort und die Anmeldung über einen Anbieter",
-    "Add-ons": "Add-ons",
-    "Optional parts of the portal itself": "Optionale Teile des Portals selbst",
     "Shortcuts": "Tastenkürzel",
     "Keyboard shortcuts, and changing them": "Tastenkürzel, und wie man sie ändert",
     "About": "Über",
@@ -825,7 +823,7 @@ const de: Locale = {
     "Keep this order": "Diese Reihenfolge behalten",
     "Move {option} up": "{option} nach oben",
     "Move {option} down": "{option} nach unten",
-    // components/FeatureAddons.tsx
+    // components/SubagentSettings.tsx
     "Idle chats have it now; {n} busy chats have it from their next step.": { one: "Chats ohne laufende Aufgabe haben es jetzt; ein beschäftigter Chat hat es ab seinem nächsten Schritt.", other: "Chats ohne laufende Aufgabe haben es jetzt; {n} beschäftigte Chats haben es ab ihrem nächsten Schritt." },
     "Chats have it from now on.": "Chats haben es ab jetzt.",
     "Interrupt": "Unterbrechen",
@@ -1065,9 +1063,8 @@ const de: Locale = {
     "What {name} may do despite their role — written by {allow}, revoked by deleting. {star} covers the parts that vary; a shell rule matches one command, never a pipeline.": "Was {name} trotz der Rolle darf — angelegt über {allow}, widerrufen durch Löschen. {star} deckt die Teile ab, die sich ändern; eine Shell-Regel passt auf einen Befehl, nie auf eine Pipeline.",
     "Always allow": "Immer erlauben",
     "Allow": "Erlauben",
-    // components/PortalExtensions.tsx
+    // components/AgentVoice.tsx, SkillsPanel.tsx
     "Voice": "Sprachsteuerung",
-    "Install and manage the add-ons for your sessions.": "Die Add-ons für deine Sitzungen installieren und verwalten.",
     "installed": "installiert",
     // components/ProjectsPage.tsx
     "{n} files ({size}) in its folder": { one: "{n} Datei ({size}) in seinem Ordner", other: "{n} Dateien ({size}) in seinem Ordner" },

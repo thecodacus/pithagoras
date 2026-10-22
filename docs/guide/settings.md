@@ -9,7 +9,7 @@ German. Navigation runs down the left edge, in four groups:
 | **Models** | **Providers** — where models come from, see [Models and providers](/guide/models); **Defaults** — model, effort and context for new chats |
 | **Agent** | **Tools**, **Skills**, **MCP**, **Extensions** |
 | **Reach** | **Channels**, **People** |
-| **Portal** | **This browser**, **Authentication**, **Add-ons**, **Shortcuts**, **Logs**, **About** (with **Update** and **Restart**), **Advanced** |
+| **Portal** | **This browser**, **Authentication**, **Shortcuts**, **Logs**, **About** (with **Update** and **Restart**), **Advanced** |
 
 Plus a page for every extension that exposes configuration, under **Extension
 settings**: [Media](/guide/media)'s is **Media**, at
@@ -35,7 +35,7 @@ A page that cannot read what it shows, because the portal was restarting or coul
 not be reached, says so in red with the reason and a **Try again** button, in the
 place of its list. It does not show an empty list or "Nobody yet" as if that were
 what the portal holds. The same goes for the Projects, Audit and Agents pages and
-for the add-ons. A refresh that fails while a page is already showing something
+for **Subagents** in **Tools**. A refresh that fails while a page is already showing something
 is a message at the top of the dialog instead, and what was shown stays.
 
 ## Defaults
@@ -86,14 +86,18 @@ and the flagged results you trusted, each of which can be taken back, and what i
 saved as it is made.
 
 **Tools** sets which tools every conversation starts with, see
-[The interface](/guide/interface#tools). **Skills** lists, creates, imports and
+[The interface](/guide/interface#tools). Under them, **Subagents** switches the
+subagent tool on or off and sets how it runs, see
+[Opt-in features](/guide/features#subagents). **Skills** lists, creates, imports and
 switches the agent's procedures, see [Skills](/guide/skills). **MCP** manages MCP servers, see
 [MCP servers](/guide/mcp).
 
 **Browser**, under **Extension settings** while the [Browser](/guide/browser)
 extension is installed, installs, starts, stops and removes the agent's browser,
 with the password of its web UI and how the download of its image goes; see
-[Installing it](/guide/browser#installing-it).
+[Installing it](/guide/browser#installing-it). The voice service and Understory,
+the agent's memory, are extensions with pages there too: see
+[The voice service](/guide/voice-service) and [Memory: Understory](/guide/features#memory-understory).
 
 **Media**, under **Extension settings**, is the page of the [Media](/guide/media)
 extension. It has two sections, **Image model** and **Video model**. Each has its **switches** at the top, always in view,
@@ -257,15 +261,6 @@ change to the provider or to **OIDC only** signs out every other
 browser; this one stays signed in. **Take out single sign-on** removes the button
 and the settings, after asking. Wrong passwords here are counted like those of
 **Change password**; settings refused after the right password are not.
-
-## Add-ons
-
-The optional parts of the portal itself: voice mode's settings (Voice), and
-Subagents, see [Voice control](/guide/voice) and
-[Opt-in features](/guide/features). The voice service, the agent's browser and
-Understory, the agent's memory, are extensions, each with its own page under
-**Extension settings**: see [The voice service](/guide/voice-service),
-[The agent's browser](/guide/browser) and [Memory: Understory](/guide/features#memory-understory).
 
 ## Logs
 

@@ -33,6 +33,7 @@ export const SETTINGS_INDEX: SettingEntry[] = [
   { tab: "general", section: msg("Routine reports"), title: msg("Routine reports"), words: "routine schedule cron report destination channel bericht" },
   { tab: "tools", title: msg("Default tools"), words: "tools enable disable default on off werkzeuge" },
   { tab: "tools", title: msg("Questions from the agent"), words: "ask_question question questions wait timeout answer fragen frage warten antwort" },
+  { tab: "tools", section: msg("Subagents"), title: msg("Subagents"), words: "subagent subagents parallel background interrupt model at once teilagenten parallel hintergrund" },
   { tab: "skills", title: msg("Skills"), words: "skill procedure import repository fähigkeiten" },
   { tab: "mcp", title: msg("MCP servers"), words: "mcp model context protocol server adapter tools" },
   { tab: "extensions", section: msg("Comes with Pithagoras"), title: msg("Extensions that come with Pithagoras"), words: "shipped bundled built-in included sample notes dusk mitgeliefert" },
@@ -59,7 +60,6 @@ export const SETTINGS_INDEX: SettingEntry[] = [
   { tab: "authentication", section: msg("Single sign-on"), title: msg("Single sign-on"), words: "sso oidc openid connect provider authentik keycloak entra google login sign in anmeldung einmalanmeldung authentication authentifizierung" },
   // The section that opens and closes, which is in view whether it is open or not: the search opens it.
   { tab: "authentication", section: msg("Single sign-on"), title: msg("OIDC only"), words: "sso oidc only password off passwort aus nur" },
-  { tab: "add-ons", title: msg("Add-ons"), words: "portal addon optional voice terminal" },
   { tab: "shortcuts", section: msg("Chat"), title: msg("Keyboard shortcuts"), words: "keys hotkey keybinding shortcut tastenkürzel tastatur" },
   { tab: "shortcuts", section: msg("Voice mode"), title: msg("Voice mode shortcuts"), words: "voice speak microphone push to talk sprache" },
   { tab: "logs", title: msg("Logs"), words: "log logs error errors warning console output stream download audit debug level verbose server protokoll fehler" },

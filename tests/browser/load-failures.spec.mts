@@ -110,21 +110,8 @@ test('Settings → Skills does not say there are none when the list could not be
   await failsThenRecovers(page, 'skills', ['/api/skills'], { shown: 'release-notes', gone: 'None yet.' });
 });
 
-test('Settings → Add-ons: each add-on says what it could not read, and reads it again', async ({ page }) => {
-  const { up } = await portal(page, ['/api/voice', '/api/features/subagent']);
-  await page.goto('/settings/add-ons');
-  const dialog = settingsDialog(page);
-  await expect(dialog.getByRole('tab', { name: 'Voice' })).toHaveAttribute('aria-selected', 'true');
-  await expect(dialog.getByRole('alert')).toContainText(FAILED);
-  up('/api/voice');
-  await dialog.getByRole('button', { name: 'Try again' }).click();
-  await expect(dialog.getByRole('checkbox', { name: 'Enable voice controls in sessions' })).toBeVisible();
-
-  await dialog.getByRole('tab', { name: 'Subagents' }).click();
-  await expect(dialog.getByRole('alert')).toContainText(FAILED);
-  up('/api/features/subagent');
-  await dialog.getByRole('button', { name: 'Try again' }).click();
-  await expect(dialog.getByRole('alert')).toHaveCount(0);
+test('Settings → Tools: the subagent tool says what it could not read, and reads it again', async ({ page }) => {
+  await failsThenRecovers(page, 'tools', ['/api/features/subagent'], { shown: 'Off: the agent has no subagent tool.' });
 });
 
 test('the Audit page does not say nothing was recorded, with "0 refused", when it could not be read', async ({ page }) => {

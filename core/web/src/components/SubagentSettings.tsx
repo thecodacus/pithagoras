@@ -6,7 +6,7 @@ import { LoadFailed, SwitchRow } from "./SettingsUi";
 import { msg, t, tp, tx } from "../i18n";
 
 /**
- * The opt-in add-ons: off in a fresh install, one switch each. Each is written
+ * The subagent tool: off in a fresh install, with one switch. It is written
  * into pi's own configuration — a package — so what the switch does can also
  * be seen, and undone, from Extensions.
  */
@@ -67,7 +67,7 @@ const MODES: { value: SubagentMode; label: string; detail: string }[] = [
   },
 ];
 
-export function SubagentAddon({ onError }: { onError: (e: string) => void }) {
+export function SubagentSettings({ onError }: { onError: (e: string) => void }) {
   const [subagent, setSubagent, failed, retry] = useFirstRead(() => api.subagentFeature().then((r) => r.subagent));
   const [busy, setBusy] = useState(false);
   // Said in the language shown, whenever it is drawn.
@@ -102,7 +102,7 @@ export function SubagentAddon({ onError }: { onError: (e: string) => void }) {
   };
 
   return (
-    <div className="mt-4 space-y-3">
+    <div className="mt-4 space-y-3" data-setting={t("Subagents")}>
       <div className="rounded-xl border border-line bg-raised/40 p-3">
         <Header Icon={LuBot} title={t("Subagents")}>
           {tx("A {tool} tool: the agent hands a self-contained task to a second agent with a context of its own, and gets its answer back. You can watch it beside the chat and give it instructions while it works.", { tool: <code>subagent</code> })}

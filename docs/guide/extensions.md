@@ -1,7 +1,7 @@
 # Extensions
 
 ::: tip Looking for Voice, or the agent's browser?
-Voice mode is in **Settings → Add-ons**: see [Voice control](/guide/voice). The
+Voice mode's settings are at the end of **Settings → Defaults**: see [Voice control](/guide/voice). The
 voice service it can listen and speak through is the Voice extension, and the
 agent's browser the Browser extension, both installed here: see
 [The voice service](/guide/voice-service) and [The agent's browser](/guide/browser).
@@ -516,7 +516,7 @@ not reloaded when a package is switched: it is reloaded later, see
 `extensions/subagent` in this repository is a complete example: a `subagent`
 tool that hands a task to a second pi and can be steered while it works, in
 the foreground or the background. It ships with the portal and is switched on
-in Settings → Add-ons → Subagents (see [Opt-in features](/guide/features));
+in Settings → Tools → Subagents (see [Opt-in features](/guide/features));
 outside the portal, install it like any local package
 (`pi install ./extensions/subagent`). Only the in-process executor
 (`EXECUTOR=host`) shares the event bus with the portal.

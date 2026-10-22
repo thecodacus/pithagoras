@@ -45,7 +45,7 @@ import { useNotifyState } from "../notify";
 import { setCommandTrigger, typedCharacter, useCommandTrigger, validTrigger } from "../command-trigger";
 import { DEFAULT_TRIGGER } from "../slash-palette";
 import { PeoplePanel } from "./PeoplePanel";
-import { PortalExtensions } from "./PortalExtensions";
+import { SubagentSettings } from "./SubagentSettings";
 import { RestartSection } from "./RestartSection";
 import { UpdateSection } from "./UpdateSection";
 import { Modal, useUnsavedDraft } from "./Modal";
@@ -129,7 +129,6 @@ const GROUPS: { label: string; tabs: TabDef[] }[] = [
     tabs: [
       { id: "browser", label: msg("This browser"), icon: <LuMonitor />, hint: msg("Theme, notifications, confirmations") },
       { id: "authentication", label: msg("Authentication"), icon: <LuKeyRound />, hint: msg("The password, and signing in through a provider") },
-      { id: "add-ons", label: msg("Add-ons"), icon: <LuPuzzle />, hint: msg("Optional parts of the portal itself") },
       { id: "shortcuts", label: msg("Shortcuts"), icon: <LuKeyboard />, hint: msg("Keyboard shortcuts, and changing them") },
       { id: "logs", label: msg("Logs"), icon: <LuScrollText />, hint: msg("What the server prints, and a file to take away") },
       { id: "about", label: msg("About"), icon: <LuInfo />, hint: msg("Where this portal keeps things") },
@@ -352,8 +351,7 @@ export const ConfigModal = memo(function ConfigModal({
       {nav.kind === "tab" && nav.id === "about" && <AboutPanel onError={setError} />}
       {nav.kind === "tab" && nav.id === "channels" && <ChannelsPanel onError={setError} />}
       {nav.kind === "tab" && nav.id === "people" && <PeoplePanel onError={setError} />}
-      {nav.kind === "tab" && nav.id === "add-ons" && <PortalExtensions onError={setError} />}
-      {nav.kind === "tab" && nav.id === "tools" && <ToolDefaults onError={setError} />}
+      {nav.kind === "tab" && nav.id === "tools" && <><ToolDefaults onError={setError} /><SubagentSettings onError={setError} /></>}
       {nav.kind === "tab" && nav.id === "sandbox" && <SandboxSettings onError={setError} />}
       {nav.kind === "tab" && nav.id === "guard" && <GuardSettings onError={setError} onOpen={(id) => setNav({ kind: "tab", id })} />}
       {nav.kind === "tab" && nav.id === "skills" && <SkillsPanel onError={setError} />}

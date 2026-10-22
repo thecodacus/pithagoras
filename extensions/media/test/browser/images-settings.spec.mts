@@ -344,9 +344,6 @@ test("Media's page in Settings holds the image settings and no switch for the to
   await expect(here.getByText(/Which chats' agents get the tools is set in the tool lists \(Settings → Agent → Tools\), in the pithagoras-media group/)).toBeVisible();
   await expect(here.getByText('Picture tools', { exact: true })).toHaveCount(0);
   for (const name of ['show_image', 'generate_image', 'edit_image']) await expect(here.getByRole('switch', { name: `${name} in new chats` })).toHaveCount(0);
-  // Settings → Add-ons has no Images tab.
-  await page.goto('/settings/add-ons');
-  await expect(here.getByRole('tab', { name: 'Images' })).toHaveCount(0);
 });
 
 test("Media's page in Settings fits a phone", async ({ page }) => {

@@ -60,8 +60,8 @@ Browsers install the portal as an app (PWA) only over HTTPS or on `localhost`.
   removing it.
 - **Voice mode** — local speech-to-text and text-to-speech, from the voice service (the Voice
   extension, with Docker) or services of your own, pictures both ways, push-to-talk.
-- **Add-ons** — the agent's own browser (the Browser extension, with Docker, both installed from
-  Settings → Extensions), and opt-in features: a subagent tool, Understory
+- **Opt-in features** — the agent's own browser (the Browser extension, with Docker, both installed from
+  Settings → Extensions), a subagent tool (switched on in Settings → Tools), Understory
   memory with a Memory page (the Understory extension, with Docker, installed from Settings →
   Extensions), and, from the Media extension the portal installs, image generation
   and editing through an endpoint you choose and video generation through a stable-diffusion.cpp
@@ -116,7 +116,7 @@ The rest is in [Configuration](https://thecodacus.github.io/pithagoras/reference
 
 **Settings** (bottom of the sidebar) is the web equivalent of pi's slash commands:
 **Providers** and **Defaults** for models, **Tools**, **Skills**, **MCP** and
-**Extensions** for the agent, **Channels** and **People**, and **This browser**, **Add-ons**, **Shortcuts**,
+**Extensions** for the agent, **Channels** and **People**, and **This browser**, **Shortcuts**,
 **About** and **Advanced** for the portal, with a page for each extension that has settings, such as
 **Media**. What a chat uses lives on the pills under its
 composer. Defaults you set apply to **newly started** sessions only.

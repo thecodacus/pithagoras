@@ -117,7 +117,7 @@ test('a floating window is sized from its grip with the arrow keys, and Home giv
   await expect.poll(async () => (await bounds(page)).height).toBeCloseTo(first.height, 0);
 });
 
-test('the sections of an agent and the add-ons take the arrow keys the same way', async ({ page }) => {
+test('the sections of an agent take the arrow keys', async ({ page }) => {
   const agent = { id: 'home', name: 'Home', home: '/a', first: true, initialised: true, chats: 0, channels: [], orb: DEFAULT_ORB, voice: '', heartbeat: { minutes: 0, quietStart: '', quietEnd: '', timeZone: 'UTC', last: null, status: null, running: false, watching: false, available: true }, unread: 0 };
   await mockPortal(page, ({ path: p, method }) => {
     if (method !== 'GET') return;
@@ -137,15 +137,4 @@ test('the sections of an agent and the add-ons take the arrow keys the same way'
   await expect(first).toHaveAttribute('tabindex', '-1');
   await page.keyboard.press('End');
   await expect(sections.getByRole('tab').last()).toHaveAttribute('aria-selected', 'true');
-
-  await page.goto('/settings/add-ons');
-  const addons = page.getByRole('tablist', { name: 'Add-ons' });
-  const voice = addons.getByRole('tab').first();
-  await voice.focus();
-  await page.keyboard.press('ArrowRight');
-  await expect(addons.getByRole('tab').nth(1)).toBeFocused();
-  await expect(addons.getByRole('tab').nth(1)).toHaveAttribute('aria-selected', 'true');
-  await page.keyboard.press('Home');
-  await expect(voice).toBeFocused();
-  await expect(voice).toHaveAttribute('aria-selected', 'true');
 });

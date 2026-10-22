@@ -1,10 +1,10 @@
 # Opt-in features
 
 Four capabilities ship with Pithagoras and are **off** until you switch them on
-in **Settings**: a **subagent tool** under **Add-ons**, **Understory** as the
+in **Settings**: a **subagent tool** under **Tools**, **Understory** as the
 agent's memory under **Extension settings → Memory**, and **image generation and
 editing** and **video generation** under **Extension settings → Media**. A fresh
-install has none of them. (The Add-ons page also holds [voice mode](/guide/voice)'s settings;
+install has none of them. ([Voice mode](/guide/voice)'s settings are at the end of **Settings → Defaults**;
 the [voice service](/guide/voice-service) and the agent's [browser](/guide/browser) are extensions.) Switching on
 the first two writes them into pi's own configuration — a package, an MCP
 server — so they can also be seen, and undone, from Settings → Extensions and
@@ -30,7 +30,7 @@ in the background once that is done: see
 
 ## Subagents
 
-**Settings → Add-ons → Subagents.** The `subagent` tool hands a self-contained
+**Settings → Tools → Subagents.** The `subagent` tool hands a self-contained
 task to a second pi with a context of its own and gets its answer back. You can
 watch it beside the chat (the robot button in the chat's header), give it
 instructions while it works, and stop it.
@@ -55,7 +55,7 @@ window. Closing or reloading the chat does.
 
 By default a subagent runs on **the model its chat is on** when it starts one —
 the one already loaded, so a local server does not have to load a second one.
-**Model** on the Subagents tab names another for every chat instead, and each
+**Model** under Subagents names another for every chat instead, and each
 chat can say its own in its model menu (*Subagents in this chat run on*):
 the default, this chat's model, or any model there is. A choice is read when a
 subagent starts, so it needs no restart.
@@ -86,8 +86,8 @@ share pi's event bus with the tool.
 **Settings → Extension settings → Media**, **Image model.** The image endpoint, and the switches for
 **Image generation**, **Image editing**, **Several pictures per edit** and **Stable Diffusion extra settings**. The section opens and
 closes, with the first two switches always in view; the editing endpoint and the last two switches are groups in it
-(**Editing endpoint**, **More options**). It was a tab of Settings → Add-ons once, and **Settings → Agent → Media** until
-Media became an extension; what was set there is carried over.
+(**Editing endpoint**, **More options**). Before Media became an extension it was on other Settings pages, last
+**Settings → Agent → Media**; what was set there is carried over.
 
 The two switches, **Image generation** and **Image editing**, are the general switches of the
 feature: they decide whether it exists. Switched on, with an address, the [Media page](/guide/media)
