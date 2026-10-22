@@ -91,7 +91,6 @@ stray file would attach the wrong conversation.
 | `settings` | Portal-wide overrides, and the small things the portal remembers (the tools it has seen, the model's context windows) |
 | `project_tools` | A project's tool switches |
 | `open_subagents` | The subagents still running in a session |
-| `voice_presets` | The saved voices |
 | `signed_out` | Logins that were ended early, until they would have expired anyway |
 
 Changes to the schema are made in place — `ALTER TABLE` rather than recreating

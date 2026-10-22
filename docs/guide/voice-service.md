@@ -4,25 +4,28 @@
 speech recognition and speech synthesis for [voice mode](/guide/voice) in a
 container of their own, `pithagoras-voice`, on the same Docker host as
 Pithagoras, through [Docker for extensions](/guide/docker), which it requires.
-Once it is up, voice mode listens and speaks through it: it is one of the
-places **Settings → Add-ons → Voice → Listen and speak through** can choose, and
-it chooses itself there when you install or start it from its page.
+It keeps your voices, clones of a recording among them. Once it is up, voice
+mode listens and speaks through it: it is a
+[source](/guide/voice#where-voice-mode-listens-and-speaks) for voice mode, and
+it chooses itself when you install or start it from its page.
 
 Optional. Neither Voice nor Docker is installed by default: install them from
 **Settings → Extensions → Discover → Comes with Pithagoras → Voice**, which
 installs Docker first ([Installing what it requires](/guide/extension-ui#installing-what-it-requires)).
 Its page is **Settings → Extension settings → Voice service**
-(`/settings/x/pithagoras-voice`). Voice mode itself, with your voice, its
-language and your own addresses, stays the portal's, in **Settings → Add-ons →
-Voice**. A portal that ran the voice service before it was an extension handed
-what it kept over to it: see [Upgrading](/guide/upgrading#voice-s-service-is-an-extension).
+(`/settings/x/pithagoras-voice`), and it holds [your voice](#your-voice) as
+well: the voice the service speaks with, your voices and the input language.
+Voice mode's other settings, such as speech detection and speaking
+instructions, are in **Settings → Defaults → Voice mode**. A portal that ran the
+voice service before it was an extension handed what it kept over to it, your
+voices among it: see [Upgrading](/guide/upgrading#voice-s-service-is-an-extension).
 
 The portal talks directly to the host Docker API; no Docker CLI inside the portal and no Docker-in-Docker daemon are required.
 
 ## Choose your next step
 
 - **First installation:** [Docker access](#docker-access) → [GPU access](#gpu-access-for-voice) → [install Voice](#install-voice).
-- **Already installed:** jump to [controls](#voice-controls-and-memory), [troubleshooting](#troubleshooting), or [updates and removal](#updates-and-removal).
+- **Already installed:** jump to [your voice](#your-voice), [controls](#voice-controls-and-memory), [troubleshooting](#troubleshooting), or [updates and removal](#updates-and-removal).
 
 ## Docker access
 
@@ -143,7 +146,9 @@ The first installation needs internet access for container registries, Ubuntu pa
 The installer downloads an image, builds the runtimes, and downloads the models of the engines you chose. A running container is not yet a ready service.
 :::
 
-Once the services are healthy, voice mode listens and speaks through the service and is switched on: an install or a start you began on this page chooses it once it is up, whether or not the page is still open. **Use for voice mode** chooses it again, after you chose your own addresses in **Settings → Add-ons → Voice → Listen and speak through**, say. Your own addresses are never changed for it: choose **Your own addresses** there and they are used as they were. Your voice, speech detection and speaking instructions are not touched, and neither is your input language, with one exception: choosing a service that speaks with Chatterbox changes a language Chatterbox does not speak, such as auto-detect, to English.
+### Use for voice mode
+
+Once the services are healthy, voice mode listens and speaks through the service: an install or a start you began on this page makes it voice mode's source once it is up, whether or not the page is still open. While the service runs and is not the source, **Use for voice mode** makes it the source, after another extension was chosen or you stopped using it, say. While it is, the page says **In use for voice mode**, and **Stop using** leaves voice mode with no source until one is chosen. Voice mode has one source, the one chosen last; **Settings → Defaults → Voice mode** names it and can stop using it too (see [Where voice mode listens and speaks](/guide/voice#where-voice-mode-listens-and-speaks)). Choosing it changes nothing of your voice, speech detection or speaking instructions.
 
 ### Engines, devices and memory
 
@@ -185,7 +190,7 @@ Breeze and Chatterbox need a GPU: on a CPU Breeze took about 3.5 seconds to comp
 - The **Speech engines** block warns **No GPU detected. Everything runs on the CPU: Kokoro can speak, the other speech engines need a GPU.** The speech synthesis engine offers Kokoro, on the CPU, and **No speech synthesis**; the page says how long each second of speech takes on the host's threads, and warns where it may take longer to make than to say. Recognition stays selectable: Whisper base or small, Qwen3-ASR 0.6B or 1.7B, on the CPU, each with the memory it needs and a warning where the host has too few threads.
 - **Choose for me** picks Kokoro with the largest recognition that fits the host's memory beside it and keeps ahead of the speaker, or recognition alone where the host has too little memory or too few threads for Kokoro.
 - **Install voice** builds a container with no GPU request, from the small base image, with a CPU-only audio.cpp build for Kokoro and Qwen3-ASR (no CUDA toolchain, no CUDA image) or only Whisper.cpp for Whisper alone. Nothing is refused and nothing fails because there is no GPU.
-- With recognition alone the saved settings have no speech runtime. **Dictation** works. The voice-conversation control is not offered, because it speaks the replies, and the voice settings drop what concerns speaking (the voice, how it is generated, the speaking instructions). Where a speech engine is installed and the GPU is later gone (a driver that no longer loads), recognition alone is offered beside the engine, and **Rebuild with these engines** switches to it. A GPU added later offers speech synthesis in the same block, next to **No speech synthesis**, which an installation of recognition alone keeps showing; **Rebuild with these engines** installs the speech engine you pick.
+- With recognition alone the service has no speech synthesis. **Dictation** works. The voice-conversation control is not offered, because it speaks the replies; [Your voice](#your-voice) shows the input language alone, and **Settings → Defaults → Voice mode** drops what concerns speaking (the voice model, replying without thinking first, the speaking instructions). Where a speech engine is installed and the GPU is later gone (a driver that no longer loads), recognition alone is offered beside the engine, and **Rebuild with these engines** switches to it. A GPU added later offers speech synthesis in the same block, next to **No speech synthesis**, which an installation of recognition alone keeps showing; **Rebuild with these engines** installs the speech engine you pick.
 
 With several GPUs, **Speech engines** shows a **GPU** menu where the engines you pick use one, with each card's free memory. **Automatic** takes the card `VOICE_GPU` names (see below); without one, installing or rebuilding takes the one with the most memory free, and the container is given that card, while a restart of an installed service keeps the card it is on. Choosing one yourself lets the session model keep the other. The choice is saved by the card's UUID, which names the same card after a reboot or a card added beside it, and it holds at once: a running service is recreated on that card, with its models kept, and a service that is stopped or not installed yet is on it from its next start. A card that cannot hold the engines installed is refused, with what would fit, as it is for a new install, and the service stays where it is. A saved card that is no longer there is ignored, and so is the card a container was given when it has been taken out: the container is then made again on a card that is there, as an install picks it, or refused where that one cannot hold the engines. When the container is recreated later with the engines it has, for instance after a portal update, it stays on its card. Settings on the portal set the defaults, as in the multilingual Compose service. Put them in `.env` (the shipped Compose files and the Portainer stack pass both on to the portal) or set them in the portal's environment:
 
@@ -195,21 +200,21 @@ With several GPUs, **Speech engines** shows a **GPU** menu where the engines you
 | `VOICE_VRAM_RESERVE_MIB` | GPU memory, in MiB, to keep free for something else on the same card, such as a model you run in the container later. Counted against every combination. |
 | `NVIDIA_SMI` | The `nvidia-smi` binary to run, when it is not on the portal's `PATH`. |
 
-To change the engines of an installed service, pick others under **Speech engines** and click **Rebuild with these engines**. The running service is stopped first, so the memory it holds is not counted against the new choice, and started again if the choice is refused. The container is recreated, with the models and builds in the volume kept; only what the new choice needs is built or downloaded, and a runtime already built for an engine is not built again. The CUDA kernels are compiled for the architecture of one card, so a different card, such as another `VOICE_GPU` or another GPU chosen on the page, rebuilds the runtime once. Voice mode listens and speaks with the new engines as soon as they are up. A Chatterbox choice needs an input language (not auto-detect) and a voice with a recording, as in [voice control](/guide/voice#other-languages-chatterbox-and-qwen3-asr).
+To change the engines of an installed service, pick others under **Speech engines** and click **Rebuild with these engines**. The running service is stopped first, so the memory it holds is not counted against the new choice, and started again if the choice is refused. The container is recreated, with the models and builds in the volume kept; only what the new choice needs is built or downloaded, and a runtime already built for an engine is not built again. The CUDA kernels are compiled for the architecture of one card, so a different card, such as another `VOICE_GPU` or another GPU chosen on the page, rebuilds the runtime once. Voice mode listens and speaks with the new engines as soon as they are up. A Chatterbox choice needs an input language (not auto-detect) and a voice with a recording, as in [Chatterbox](#chatterbox) under Your voice.
 
-### Choose your voice settings
+### Choose your voice
 
-1. In **Settings → Add-ons → Voice**, choose a **Speaking voice** and **Input language**. **Listen and speak through** shows **Voice service**.
-2. Choose **Fast** speech generation to start with. **Expressive** uses more compute and VRAM.
+1. Under **Your voice** on the service's page, choose a **Speaking voice** and the **Input language** (see [Your voice](#your-voice)).
+2. With Breeze, choose **Fast** speech generation to start with. **Expressive** uses more compute and VRAM.
 3. Click **Save voice settings**.
-4. On the service's page, keep **Lazy load · release GPU memory when voice is idle** on, unless you want the model kept warm. It is saved as you switch it.
+4. Keep **Lazy load · release GPU memory when voice is idle** on, unless you want the model kept warm. It is saved as you switch it.
 
 ### Start talking
 
 Open a session, click the **microphone**, allow microphone access, and speak.
 The first connection loads the speech model into GPU memory.
 
-Use **Add voice** for your own designed or reference-cloned voice. Installing the runtime does not install a reference recording. See [voice control](/guide/voice) for references and speech detection settings.
+Use **Add voice** under [Your voice](#add-your-own-voices) for your own designed or reference-cloned voice. Installing the runtime does not install a reference recording. See [voice control](/guide/voice) for using voice mode and its speech detection settings.
 
 ::: details What the installer downloads and builds
 
@@ -224,12 +229,11 @@ The installer:
 
 ### Service addresses and health checks
 
-Voice mode listens and speaks at these while the service is chosen and runs. They are the service's, offered to voice mode as it is asked, and not written into your own addresses:
+The service's engines listen and speak at these, on the portal's loopback. Voice mode does not call them itself: it asks the extension, which sends each recording and each phrase there in the form its engine takes:
 
 | | Where it listens and speaks |
 | --- | --- |
-| Speech runtime | **Breeze audio.cpp · streaming**, **Chatterbox audio.cpp · multilingual**, **Kokoro audio.cpp · built-in voices**, or none (recognition only) |
-| Speech synthesis | `http://127.0.0.1:7862/v1/audio/speech`; `http://127.0.0.1:7863/v1/audio/speech` for Kokoro on the CPU; none without speech synthesis |
+| Speech synthesis | Breeze (streaming), Chatterbox or Kokoro on audio.cpp: `http://127.0.0.1:7862/v1/audio/speech`; `http://127.0.0.1:7863/v1/audio/speech` for Kokoro on the CPU; none without speech synthesis |
 | Speech recognition | Whisper: `http://127.0.0.1:8188/inference`. Qwen3-ASR: `http://127.0.0.1:7862/v1/audio/transcriptions` on the GPU, `http://127.0.0.1:7863/v1/audio/transcriptions` on the CPU |
 | Speech recognition model | Whisper: none. Qwen3-ASR: `qwen3-asr` |
 
@@ -271,9 +275,9 @@ The service can be healthy while the TTS model is unloaded. GPU memory is alloca
 | **Retry setup** | Restarts a failed container and its setup script; retained downloads/builds are reused where the script can reuse them. |
 | **Stop · release VRAM** | Stops the voice processes in the container, releasing their GPU allocations. Keeps model files. |
 | **Use for voice mode** | Makes the running service voice mode's source, and voice mode on. |
-| **Uninstall** | Asks first, then stops and removes the `pithagoras-voice` container, and voice mode goes back to your own addresses where it listened through the service (see [Remove Voice](#remove-voice)). Keeps the downloaded engines and models unless you tick the box in the question. |
+| **Stop using** | Shown while the service is voice mode's source: voice mode has no source until one is chosen, and its controls are hidden. The service stays as it is. |
+| **Uninstall** | Asks first, then stops and removes the `pithagoras-voice` container; where voice mode listened through the service, it has no source until one is chosen (see [Remove Voice](#remove-voice)). Your voices are kept. Keeps the downloaded engines and models unless you tick the box in the question. |
 | **GPU** (shown when the host has more than one GPU and the engines use one) | Runs the speech engines on the chosen GPU, so the session model can keep the other. A running voice service is recreated on it at once and a stopped one on its next start; model files are kept. **Automatic** takes the GPU `VOICE_GPU` names, else the one with the most free memory when installing or rebuilding; a start keeps the GPU the service is on. A GPU that cannot hold the engines installed is refused. |
-| Disable voice controls in **Settings → Add-ons → Voice** and save | Hides the session controls; the service stays installed. Use **Uninstall** to remove it. |
 
 ### When GPU memory is released
 
@@ -288,6 +292,125 @@ Every voice session holds a lease, and the service is told when voice mode begin
 ::: warning After a reboot or service exit
 The voice container has **no automatic Docker restart policy**. After a host reboot or service exit, use **Start voice** or **Retry setup**. Activating the microphone loads a model in a running service; it does not install or restart a stopped service.
 :::
+
+## Your voice
+
+**Your voice**, on the service's page once it is installed, is how the service
+speaks and what language it listens for. Its speaking voice is the service's
+own choice: what an agent speaks with that has no voice of its own (**As Voice
+service chooses** on the Agents page). What it shows follows the speech engine
+installed:
+
+| Speech engine | Your voice |
+| --- | --- |
+| Breeze | **Speaking voice** (the designed voice or one of your voices), **Describe the speaking voice** for the designed voice, and [Speech generation](#speech-generation) |
+| Chatterbox | **Speaking voice** (your voices with a recording) and **Speech delivery**, see [Chatterbox](#chatterbox) |
+| Kokoro | **Speaking voice** from [Kokoro's voices](#kokoro-s-voices), and **Speaking speed** |
+| No speech synthesis | Nothing but the input language: replies are not spoken, and dictation, which only listens, works |
+
+Every engine has **Input language** (see
+[Input language and accuracy](/guide/voice#input-language-and-accuracy)).
+**Save voice settings** saves them, with a voice description you edited and have
+not saved yet. Leaving the page with changes not saved asks first.
+
+The voices the service offers voice mode follow the engine too: the designed
+voice and your voices with Breeze, your voices with a recording with Chatterbox,
+and Kokoro's own with Kokoro. Those are what an agent's voice is chosen from
+([Its voice](/guide/agents#its-voice)). An agent whose voice the engine does not
+have, a Kokoro voice while Breeze speaks say, speaks with the service's own
+choice, and keeps its voice for when the engine has it again.
+
+### Add your own voices
+
+Under **Speaking voice**, click **Add voice**. Give the voice a name and choose
+**Reference clone** or **Designed voice**. For a clone, upload a clear recording
+of 1–30 seconds (up to 20 MB) and enter the exact words spoken. The browser converts
+supported audio files to mono 16 kHz WAV. For a designed voice, describe the voice
+instead. Each voice stores its own voice description.
+
+Click **Save new voice**, then **Save voice settings** to make the selected
+voice the service's own. Saved voices appear in the Speaking voice dropdown, and
+in each agent's voice menu while the engine speaks them. Clones include a
+reference preview and transcript.
+
+To change a saved voice's description later, select the voice, edit **Voice
+description** and click **Save description**. The change is stored at once and
+applies from the next phrase spoken, for a clone as well as a designed voice;
+the recording and its transcript stay as they are. **Save voice settings** also
+saves a description you edited and have not saved yet, and stops with an error,
+without saving the other settings, if the description cannot be saved. Breeze is
+the engine that reads the description. Chatterbox takes no description: it speaks
+from the recording alone, so editing the description of a voice used with
+Chatterbox changes nothing you can hear.
+
+**Delete voice** removes the voice and its recording. Where it was the service's
+own choice, the designed voice is again; an [agent](/guide/agents#its-voice) that
+had it keeps it as its voice and speaks with the service's own choice. Your
+voices are kept in Voice's folder in the data folder
+(`extension-data/pithagoras-voice`: `voices.json`, and a WAV in `voices/` for
+each recording), which only the portal can read. They are shared across
+sessions and require portal authentication to access. Adding a voice does not
+retrain or download another model.
+
+### Speech generation
+
+With Breeze, **Fast** uses CFG 1, avoiding the extra guidance branch.
+**Expressive** uses CFG 4 for stronger voice direction. Fast can change delivery
+and voice similarity, so compare using the same reference.
+
+### Chatterbox
+
+Chatterbox has no detection mode, so **Auto-detect** is not offered for it and
+**Input language** lists only the nineteen languages it speaks: the language you
+choose is the one it speaks too. Where the container is made for Chatterbox, a
+saved language it does not speak becomes English. Chatterbox always clones a
+reference recording: choose or add a voice with a recording in the language you
+want to hear. A designed voice is refused when you save, not silently replaced.
+Use a clean 10-second reference.
+
+**Speech delivery** replaces Breeze's Fast/Expressive choice. It sets
+Chatterbox's emotion exaggeration: calm, natural, or expressive.
+
+Numbers are written out before synthesis for languages that have a pack
+(currently German and English), because Chatterbox otherwise reads digit groups
+unreliably — "4070" came back from recognition as "70". The transcript keeps the
+digits; only synthesis sees the words. Each pack knows how its language groups
+thousands, so German "100.000" is spoken as one number rather than as a decimal.
+Dates, clock times, version strings, ranges and anything with a leading zero
+keep their digits: reading them as quantities would be worse than leaving them.
+So do the digits of a name such as `v20.11` or `Qwen3.5`, which are not spoken
+as a number of their own.
+Adding a language is one entry in `extensions/voice/src/numbers.ts`; a language
+without a pack keeps its digits, and the page says so under the language.
+
+Chatterbox has no streaming mode in audio.cpp, so each phrase arrives as one
+complete WAV instead of a PCM stream. Playback is unchanged, because the browser
+buffers each phrase before playing it either way, but the first audio of a reply
+waits for its whole first sentence. Measured on an RTX 3060 with a German
+reference: a short sentence took 1.25 s, and 14 s of speech took 5.7 s
+(about 0.4× real time). Qwen3-ASR transcribed 3-second German clips in about
+0.3 s. These are sample measurements, not guarantees.
+
+### Kokoro's voices
+
+Kokoro cannot clone a recording or follow a description: it speaks with one of
+the voices that come with it. With Kokoro as the speech engine, **Speaking
+voice** lists those voices instead of your library, each with its language:
+American and British English, Spanish, French, Hindi, Italian, Brazilian
+Portuguese and Mandarin Chinese. Kokoro reads the text in the language of the
+voice, whatever the input language is set to. Its Japanese voices are not
+offered: they need a dictionary the packaged model does not carry.
+**Speaking speed** (slower, normal, faster) takes the place of **Speech
+generation**.
+
+Your library voice stays the service's choice for the other engines, so
+rebuilding with Breeze or Chatterbox brings it back. An agent can have a Kokoro
+voice of its own, from the voice menu under its avatar; with another engine it
+speaks with the service's own choice, and a library voice given to an agent is
+not used while Kokoro speaks.
+
+Kokoro has no streaming mode in audio.cpp: each phrase comes back as one WAV, as
+with Chatterbox, which Kokoro's size makes quick.
 
 ## Troubleshooting
 
@@ -315,8 +438,8 @@ Run `nvidia-smi` and check other LLM/TTS processes. Stop duplicate voice service
 Use HTTPS or localhost, grant browser permission, then restart voice mode.
 :::
 
-::: details HTTP 409 during speech
-Another synthesis request owns the runtime. End the competing voice session and retry.
+::: details Speech waits, or takes long to start
+The engines make one phrase at a time: a phrase asked for while another voice session's is being made waits for it, for up to two minutes. End the competing voice session.
 :::
 
 ::: details Portal rebuild did not update Voice
@@ -347,22 +470,23 @@ Voice's setup script is captured when its container is created. To apply a newer
 Click **Uninstall** on the service's page. It is offered once there is a container, and asks first, naming what goes (with **Ask before deleting** turned off under [Settings](/guide/interface#confirmations), the question is skipped and the downloads are kept). Then:
 
 - The `pithagoras-voice` container is stopped and removed. Nothing else of yours is touched: a container of that name that is not the voice service's is left alone, and the Docker image the container ran in stays, since other containers may use it.
-- Where voice mode listened and spoke through the service, it goes back to your own addresses, which are as you left them. Where you chose your own addresses or another extension, nothing changes.
+- Where voice mode listened and spoke through the service, it has no source until one is chosen. Where another extension is the source, nothing changes.
+- Your voices and [your voice](#your-voice) settings are kept, in Voice's folder.
 - **Also delete the downloaded engines and models** is off by default. Off, the volume `pithagoras_voice-models` stays and a later **Install voice** is quick. Ticked, the volume is deleted too, and the next install downloads and builds the engines again. This cannot be undone.
-- If Docker refuses to delete the volume (another extension's volume by that name, say), the container is still removed and voice mode is still given back; the page says why the downloads stay, and they can be removed by hand (see below).
+- If Docker refuses to delete the volume (another extension's volume by that name, say), the container is still removed and voice mode still stops using it; the page says why the downloads stay, and they can be removed by hand (see below).
 - The GPU chosen on the page is kept: it is a choice about the host, not about the service.
 
 Afterwards the page shows **Not installed**, and **Install voice** works again. Uninstalling something that is not installed changes nothing. It waits while a setup is under way. Without access to Docker the API answers `Docker is unavailable`, as it does for an install.
 
-Switching Voice off or removing it in **Settings → Extensions** does not remove the container: one that runs keeps running, and stays listed under `pithagoras-voice` in **Settings → Docker**, where it can be stopped or removed. Voice mode, where it listened through the service, says the extension is not running until you choose your own addresses or Voice is back. Voice's folder in the data folder (`extension-data/pithagoras-voice`: the GPU chosen, a setup still to come up, and lazy loading) stays for when it is back.
+Switching Voice off or removing it in **Settings → Extensions** does not remove the container: one that runs keeps running, and stays listed under `pithagoras-voice` in **Settings → Docker**, where it can be stopped or removed. Voice mode, where it listened through the service, says the extension is not running until Voice is back or you stop using it in **Settings → Defaults → Voice mode**. Voice's folder in the data folder (`extension-data/pithagoras-voice`: your voices, [your voice](#your-voice) settings, the GPU chosen, a setup still to come up, and lazy loading) stays for when it is back.
 
 ::: tip By hand
-Without the button, `docker rm -f pithagoras-voice` removes the container, and `docker volume rm pithagoras_voice-models` the downloads, **only after the container is removed**. Voice mode is then yours to point elsewhere, in **Settings → Add-ons → Voice**.
+Without the button, `docker rm -f pithagoras-voice` removes the container, and `docker volume rm pithagoras_voice-models` the downloads, **only after the container is removed**. Voice mode still names the service as its source until you stop using it in **Settings → Defaults → Voice mode** or choose another extension on its page.
 :::
 
 ### Data that remains
 
-Voice mode's settings and uploaded voice references live separately in the portal's `/data` volume; do not delete that volume to reset the service.
+Your voices, with their recordings, and your voice settings live in Voice's folder in the portal's `/data` volume, and voice mode's other settings in the portal's database; do not delete that volume to reset the service.
 
 The voice container and its volume are not part of the portal Compose lifecycle, so `docker compose down` does not stop or remove them.
 

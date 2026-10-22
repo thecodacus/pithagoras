@@ -5,7 +5,7 @@ in **Settings**: a **subagent tool** under **Tools**, **Understory** as the
 agent's memory under **Extension settings → Memory**, and **image generation and
 editing** and **video generation** under **Extension settings → Media**. A fresh
 install has none of them. ([Voice mode](/guide/voice)'s settings are at the end of **Settings → Defaults**;
-the [voice service](/guide/voice-service) and the agent's [browser](/guide/browser) are extensions.) Switching on
+the [voice service](/guide/voice-service), [Voice servers](/guide/voice-servers) and the agent's [browser](/guide/browser) are extensions.) Switching on
 the first two writes them into pi's own configuration — a package, an MCP
 server — so they can also be seen, and undone, from Settings → Extensions and
 Settings → MCP. Switching one off removes it. Understory is the

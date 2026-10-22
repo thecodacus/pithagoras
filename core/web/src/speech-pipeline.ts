@@ -44,7 +44,7 @@ export class SpeechPipeline {
       })();
     }
     if (run !== this.run) return;
-    // Keep at most two completed phrases ahead of playback. Breeze itself has
+    // Keep at most two completed phrases ahead of playback. The speech engine itself has
     // one GPU request slot; overlapping playback needs no additional GPU slot.
     if (!run.generating && (this.sequential && !this.prefetch ? !run.playing : run.audio.length < 2) && run.text.length) {
       const phrase = run.text.shift()!;

@@ -47,6 +47,7 @@ export default defineConfig({
           { text: "MCP servers", link: "/guide/mcp" },
           { text: "The agent's browser", link: "/guide/browser" },
           { text: "The voice service", link: "/guide/voice-service" },
+          { text: "Voice servers", link: "/guide/voice-servers" },
           { text: "Docker for extensions", link: "/guide/docker" },
           { text: "Opt-in features", link: "/guide/features" },
           { text: "Voice control", link: "/guide/voice" },

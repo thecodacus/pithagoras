@@ -5,6 +5,8 @@ import { readFileSync } from 'node:fs';
 // An extension's window at the side: the portal's tests' stand-in for one, opening on each command the agent runs.
 test.use({ installed: ['tests/fixtures/extensions/console'] });
 const sample = readFileSync(new URL('../fixtures/jfk.wav', import.meta.url));
+// What the portal answers a phrase with: 24 kHz PCM, here the fixture's samples.
+const speech = { body: sample.subarray(sample.indexOf('data') + 8), headers: { 'content-type': 'audio/pcm', 'x-sample-rate': '24000' } };
 // A 2×2 PNG, as a picture from the phone or the folder would be.
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGP8z8DAwMDAxMDAwMDAAAANHQEDasKb6QAAAABJRU5ErkJggg==', 'base64');
 
@@ -13,7 +15,7 @@ test.beforeEach(async ({ page }) => {
   await page.route('**/api/sessions/test/config', route => route.fulfill({ status: 503, json: {} }));
   await page.route('**/api/voice', route => route.fulfill({ json: { enabled: true } }));
   await page.route('**/test-speech.wav', route => route.fulfill({ body: sample, contentType: 'audio/wav' }));
-  await page.route('**/voice/speech', route => route.fulfill({ body: sample, contentType: 'audio/wav' }));
+  await page.route('**/voice/speech', route => route.fulfill(speech));
   await page.route('**/api/sessions/test/picture?**', route => route.fulfill({ body: png, contentType: 'image/png' }));
 });
 
@@ -329,52 +331,62 @@ test('the conversation window renders a reply as markdown, also while it is writ
   }
 });
 
-test('a model error in voice mode opens the conversation on it and plays the line kept at the start, without asking the speech model', async ({ page }) => {
-  const asked: string[] = [], made: string[] = [], played: string[] = [];
-  await page.route('**/voice/speech', route => { asked.push(route.request().postData() ?? ''); return route.fulfill({ body: sample, contentType: 'audio/wav' }); });
-  await page.route('**/voice/error-line**', route => {
-    if (route.request().method() === 'POST') { made.push(route.request().postData() ?? ''); return route.fulfill({ json: { ready: true, generated: true } }); }
-    played.push(decodeURIComponent(new URL(route.request().url()).searchParams.get('text') ?? ''));
-    return route.fulfill({ body: sample, contentType: 'audio/wav' });
-  });
+test('a model error in voice mode opens the conversation on it and plays the line fetched at the start, without asking the speech model again', async ({ page }) => {
+  const asked: string[] = [];
+  await page.route('**/voice/speech', route => { asked.push(route.request().postDataJSON().text); return route.fulfill(speech); });
   await start(page);
-  // Made as voice mode started, in the words it will say.
-  await expect.poll(() => made).toEqual([JSON.stringify({ text: 'An error occurred.' })]);
+  // Fetched as voice mode started, in the words it will say.
+  await expect.poll(() => asked).toEqual(['An error occurred.']);
   const conversation = page.getByRole('region', { name: 'Conversation', exact: true });
   await expect(page.getByRole('button', { name: 'Show the conversation' })).toBeVisible();
   await page.getByRole('button', { name: 'Fail the model' }).click();
   // Opened by itself, with the error written in it.
   await expect(page.getByRole('button', { name: 'Show the conversation' })).toHaveCount(0);
   await expect(conversation.getByRole('alert')).toHaveText('Model error: the provider is down');
-  // And said: the kept line, not the error's own words, and not made again.
-  await expect.poll(() => played).toEqual(['An error occurred.']);
+  // And said: the kept line, played from memory, not the error's own words, and not asked for again.
+  await expect(page.locator('.voice-orb')).toHaveAttribute('data-mode', 'output');
   await settled(page);
-  expect(asked).toEqual([]);
+  expect(asked).toEqual(['An error occurred.']);
 });
 
-test('without the kept line the error is shown in writing only, and said so', async ({ page }) => {
+test('the error line is tried again while the speech model comes up', async ({ page }) => {
   const asked: string[] = [];
-  await page.route('**/voice/speech', route => { asked.push(route.request().postData() ?? ''); return route.fulfill({ body: sample, contentType: 'audio/wav' }); });
-  // The speech model was not there when voice mode started: nothing was made, and nothing is found.
-  await page.route('**/voice/error-line**', route => route.request().method() === 'POST'
-    ? route.fulfill({ status: 502, json: { error: 'Breeze returned HTTP 503' } })
-    : route.fulfill({ status: 404, json: { error: 'The spoken error line has not been made for this voice yet' } }));
+  // Not ready for the first two tries, as a speech model that is still loading.
+  await page.route('**/voice/speech', route => {
+    asked.push(route.request().postDataJSON().text);
+    return asked.length < 3 ? route.fulfill({ status: 503, json: { error: 'The speech model is loading' } }) : route.fulfill(speech);
+  });
   await start(page);
+  await expect.poll(() => asked.length, { timeout: 10000 }).toBe(3);
+  await page.getByRole('button', { name: 'Fail the model' }).click();
+  await expect(page.locator('.voice-orb')).toHaveAttribute('data-mode', 'output');
+  await expect(page.getByText('The spoken error line is not available')).toHaveCount(0);
+  expect(asked).toEqual(['An error occurred.', 'An error occurred.', 'An error occurred.']);
+});
+
+/** Voice mode started where the error line cannot be had, with every try at it counted in `asked`. */
+async function withoutErrorLine(page: import('@playwright/test').Page) {
+  const asked: string[] = [];
+  await page.route('**/voice/speech', route => { asked.push(route.request().postDataJSON().text); return route.fulfill({ status: 503, json: { error: 'The speech model is not ready' } }); });
+  await start(page);
+  return asked;
+}
+
+test('without the line the error is shown in writing only, and said so', async ({ page }) => {
+  const asked = await withoutErrorLine(page);
   await page.getByRole('button', { name: 'Fail the model' }).click();
   await expect(page.getByRole('region', { name: 'Conversation', exact: true }).getByRole('alert')).toHaveText('Model error: the provider is down');
-  await expect(page.getByText('The spoken error line is not available, so the error is shown in writing only.')).toBeVisible();
-  // The speech model is not asked as a way round it.
-  expect(asked).toEqual([]);
+  // Said once the tries at the start are over.
+  await expect(page.getByText('The spoken error line is not available, so the error is shown in writing only.')).toBeVisible({ timeout: 10000 });
+  // Three tries as voice mode started, and the speech model is not asked as a way round it.
+  expect(asked).toEqual(['An error occurred.', 'An error occurred.', 'An error occurred.']);
   await expect(page.getByRole('button', { name: 'End voice mode' })).toBeVisible();
 });
 
 async function missingErrorLine(page: import('@playwright/test').Page) {
-  await page.route('**/voice/error-line**', route => route.request().method() === 'POST'
-    ? route.fulfill({ status: 502, json: { error: 'Breeze returned HTTP 503' } })
-    : route.fulfill({ status: 404, json: { error: 'The spoken error line has not been made for this voice yet' } }));
-  await start(page);
+  await withoutErrorLine(page);
   await page.getByRole('button', { name: 'Fail the model' }).click();
-  await expect(page.getByText('The spoken error line is not available, so the error is shown in writing only.')).toBeVisible();
+  await expect(page.getByText('The spoken error line is not available, so the error is shown in writing only.')).toBeVisible({ timeout: 10000 });
   await page.getByRole('button', { name: 'End voice mode' }).click();
   return page.getByRole('alert').filter({ hasText: 'The spoken error line is not available' });
 }

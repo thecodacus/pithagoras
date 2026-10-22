@@ -5,6 +5,7 @@ import { maintain, provider } from "./server/provider";
 import { voiceRoutes } from "./server/routes";
 import { adoptKept } from "./server/service";
 import { openStore } from "./server/store";
+import { openLibrary } from "./server/voices";
 
 /**
  * Voice's server half: the voice service's container through Docker, offered to voice mode as a place to listen and
@@ -15,12 +16,13 @@ import { openStore } from "./server/store";
  * before this one, and this one is started again whenever Docker is. So it starts without waiting on Docker, and stops
  * without touching the container: a start or a stop of it is not one of the service's.
  *
- * Its settings are in its own folder (`portal.dataDir()`, server/store.ts). What the portal kept of the service from
- * before Voice was an extension is taken up first (server/handoff.ts).
+ * Its settings and its voice library are in its own folder (`portal.dataDir()`, server/store.ts and server/voices.ts).
+ * What the portal kept of the service from before Voice was an extension is taken up first (server/handoff.ts).
  */
 export default function voice(portal: ServerPortal) {
   setPortal(portal);
   openStore(portal.dataDir());
+  openLibrary(portal.dataDir());
   takeHandoff();
   portal.voice.provide(provider());
   voiceRoutes(portal.router);

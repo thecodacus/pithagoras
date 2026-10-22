@@ -59,7 +59,8 @@ Browsers install the portal as an app (PWA) only over HTTPS or on `localhost`.
   packages from a catalogue, MCP servers, skills, and a switch to turn a package off without
   removing it.
 - **Voice mode** — local speech-to-text and text-to-speech, from the voice service (the Voice
-  extension, with Docker) or services of your own, pictures both ways, push-to-talk.
+  extension, with Docker) or speech servers of your own (the Voice servers extension), pictures
+  both ways, push-to-talk.
 - **Opt-in features** — the agent's own browser (the Browser extension, with Docker, both installed from
   Settings → Extensions), a subagent tool (switched on in Settings → Tools), Understory
   memory with a Memory page (the Understory extension, with Docker, installed from Settings →

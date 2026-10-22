@@ -821,7 +821,7 @@ restart the portal.
 | `mcp.get(name)`, `mcp.set(name, entry, options?)` | [An MCP server](#mcp-servers) in pi's mcp.json, and whether the chats have its tools now |
 | `memory.hold({ label, rule, on })` | [Holding the agent's memory](#the-agent-s-memory) in place of its MEMORY.md |
 | `provide(factory)`, `extensions.use(name)` | [Building on another extension](#building-on-another-extension): what it gives the extensions that build on it, and what one it builds on gives it |
-| `voice.provide(provider)`, `voice.choose(chosen)` | [Voice providers](#voice-providers): a place for voice mode to listen and speak, and making it voice mode's source |
+| `voice.provide(provider)`, `voice.choose(chosen)`, `voice.chosen()` | [Voice providers](#voice-providers): recognising and speaking for voice mode, with the voices it has; making it voice mode's source, and whether it is |
 | `log(text)`, `extension`, `executor`, `version` | A line in the portal's log; the package's name; how pi is run here; `1` |
 
 ### Routes
@@ -939,9 +939,13 @@ pictures and clips of its page and the copies made of them
 takes `browser`, which schema 8 left: the browser's settings, its password among
 them, and the profile of the machine's own Chrome
 (`extensions/browser/src/server/handoff.ts`). [Voice](/guide/voice-service)
-takes `voice`, which schema 9 left: the GPU chosen on its page, a setup still
-to come up, and whether its speech model is let go of once voice mode no longer
-uses it (`extensions/voice/src/server/handoff.ts`).
+takes `voice-service`, which schema 9 left: the GPU chosen on its page, a setup
+still to come up, whether its speech model is let go of once voice mode no
+longer uses it, the voice settings and the voice library with its recordings
+(`extensions/voice/src/server/handoff.ts`). [Voice servers](/guide/voice-servers)
+takes `voice-addresses`, which the same schema left: the speech recognition and
+speech synthesis addresses of the person's own
+(`extensions/voice-servers/src/server/handoff.ts`).
 [Understory](/guide/features#memory-understory) takes `understory`, which
 schema 10 left: its four settings, the token its container was made with among
 them (`extensions/understory/src/server/handoff.ts`).
@@ -1733,23 +1737,39 @@ requires ("Needs pithagoras-docker").
 
 ### Voice providers
 
-An extension can give [voice mode](/guide/voice) a place to listen and speak:
-a speech recognition and a speech synthesis service it runs, in a container of
-its own, say. It offers them with `portal.voice.provide`, and the person
-chooses it in Settings → Add-ons → Voice, under **Listen and speak through**,
-beside their own addresses.
+An extension can be [voice mode](/guide/voice)'s source: it recognises speech
+for voice mode and dictation, speaks the replies, and names the voices it speaks
+with, through a service it runs or one it reaches. It offers this with
+`portal.voice.provide`. The person chooses it on the extension's own page, which
+calls `portal.voice.choose`, and can stop using it there or in **Settings →
+Defaults → Voice mode**. Voice mode has one source, the one chosen last.
+[The voice service](/guide/voice-service) and
+[Voice servers](/guide/voice-servers) are two.
 
 ```js
 portal.voice.provide({
-  label: "Voice service",
-  // Where it listens and speaks now; nothing while it cannot be used.
-  where: () =>
-    running
-      ? {
-          listen: { url: "http://127.0.0.1:8188/inference" },
-          speak: { url: "http://127.0.0.1:7862/v1/audio/speech", runtime: "kokoro" },
-        }
-      : undefined,
+  label: "My speech",
+  // What it offers now; nothing while it cannot be used.
+  state: () => (running ? { speaks: true, voices: [{ id: "warm", name: "Warm", builtIn: true }] } : undefined),
+  // The words said in one recording.
+  async transcribe(wav, { purpose, signal }) {
+    const form = new FormData();
+    form.set("file", new Blob([wav], { type: "audio/wav" }), "recording.wav");
+    const answer = await fetch("http://127.0.0.1:8188/inference", { method: "POST", body: form, signal });
+    if (!answer.ok) throw new Error(`The recogniser answered HTTP ${answer.status}`);
+    return (await answer.json()).text;
+  },
+  // One phrase, as 24 kHz audio.
+  async speak(text, { voice, signal }) {
+    const answer = await fetch("http://127.0.0.1:7862/v1/audio/speech", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ input: text, voice: voice ?? "warm", response_format: "pcm" }),
+      signal,
+    });
+    if (!answer.ok) throw new Error(`The speech engine answered HTTP ${answer.status}`);
+    return new Response(answer.body, { headers: { "content-type": "audio/pcm", "x-sample-rate": "24000" } });
+  },
   // Voice mode began, or stopped, being used anywhere.
   async use(inUse) {
     await (inUse ? loadModel() : unloadModel());
@@ -1757,53 +1777,72 @@ portal.voice.provide({
 });
 ```
 
-- **`label`** names it under **Listen and speak through**, in the person's
-  language from the extension's own texts (`portal.locale.add`), as a Settings
-  page's title is.
-- **`where()`** is asked at each request while it is the source, and as
-  Settings lists the sources: keep it quick. `listen` is an address that takes
-  a WAV as Whisper.cpp's `/inference` or an OpenAI transcription endpoint
-  does, with the `model` it is sent where it names one. `speak` is the speech
-  service and how it is spoken to: `audio-cpp`, `kokoro`, `chatterbox` or
-  `breeze`, the [speech runtimes](/guide/voice#speech-runtimes) voice mode
-  knows. Without `speak` it recognises speech only: dictation works, and
-  replies are not spoken.
-- **Not running.** While `where()` answers nothing, or the server half is not
-  running, voice mode answers 503, "Voice mode listens and speaks through an
-  extension that is not running: install or start it, or choose your own
-  addresses in Settings → Add-ons → Voice", and uses no other address.
+- **`label`** names it where the portal names voice mode's source (Settings →
+  Defaults → Voice mode, an agent's voice menu), in the person's language from
+  the extension's own texts (`portal.locale.add`), as a Settings page's title
+  is.
+- **`state()`** says what it offers now: `{ speaks, voices }`, or nothing while
+  it cannot be used. It is asked at each request and as each prompt is built:
+  keep it quick, and give a value, not a promise. `speaks: false` is recognition
+  alone: dictation works, voice mode is not offered, and replies are not spoken.
+  `voices` are `{ id, name, builtIn? }`, what an agent's voice is chosen from on
+  the Agents page. A `name` is shown as it is, unless `builtIn` is true: a voice
+  the provider has of itself, whose name is its own English text, is shown
+  through the extension's translations, and a voice the person added is shown by
+  the name they gave it. An answer of another shape counts as nothing, and so
+  does a throw; the log says which.
+- **Not running.** While `state()` answers nothing, or the server half is not
+  running, voice mode answers 503, "Voice mode listens and speaks through
+  `<name>`, which is not running: install or start it in Settings → Extensions,
+  or stop using it in Settings → Defaults → Voice mode", and uses nothing else.
+- **`transcribe(wav, { purpose, signal })`** gives the words said in `wav`, one
+  recording: a 16 kHz mono 16-bit WAV of at most 12 MB. `purpose` is
+  `"dictation"` for the message box's microphone and `"voice"` for voice mode,
+  for a provider that sends them to different places. The portal trims what it
+  gives.
+- **`speak(text, { voice, signal })`** speaks one phrase of at most 600
+  characters in `voice`, an id from `state().voices` (the agent's own), or its
+  own choice where `voice` is undefined or an id it no longer has. It answers an
+  ok `Response` whose body is either `audio/pcm` (mono, 24 kHz, signed 16-bit
+  little-endian; an `x-sample-rate` header, where there is one, says `24000`),
+  which the portal passes on to the page as it arrives, or `audio/wav` (mono,
+  24 kHz, 16-bit PCM), which it reads whole, checks and sends on as PCM. Anything
+  else, a WAV at another rate say, is refused with a message naming the label,
+  and the portal cancels the answer's body, so that a stream behind it stops.
+  Nothing is resampled.
+- **What they throw** is what the page shows, as a 502: say it so that the
+  person knows what to do. `signal` ends when the page gives up on the request
+  (the person spoke over the reply, ended voice mode or closed the tab), or after
+  two minutes; the portal stops waiting then either way, so pass it on to what
+  you call.
 - **`use(inUse)`**, which may be left out. Every voice session holds a lease
   while it is on: each tab renews it every 25 seconds, and one not renewed for
   75 runs out. The provider chosen is told `true` at the first lease and
   `false` once the last has ended or run out, not at each lease; `true` again
   where the person chose it while voice mode was in use, or its server half
   was started anew. Where another source is chosen while voice mode is in use,
-  another extension or the person's own addresses, it is told `false` at the
-  next renewal. `true` is awaited as voice mode begins: what it throws is said
-  on the page, and voice mode does not start. What it throws for `false` is
-  logged. Each call has 120 seconds, as long as a speech model may take to
-  load; one that has not settled by then counts as failed, so that it holds
-  up no voice session.
-- **`choose(true)`** makes the extension voice mode's source and switches voice
-  mode on; **`choose(false)`** gives the source back to the person's own
-  addresses, where this extension is the source. Neither changes those
-  addresses, nor anything else of the settings, but for one thing: a provider
-  that speaks with Chatterbox, which has no detection mode, is given English
-  where the input language is one it does not speak. The source decides where
-  the person's voice goes, so `choose` answers what they ask for on the
-  extension's own page, such as using it once it is installed, or an
-  uninstall; Settings shows which it is.
-- **Dictation** goes to the source as well, unless the person set a dictation
-  endpoint of their own, which is then used with the dictation model they
-  named.
+  or none, it is told `false` at the next renewal. `true` is awaited as voice
+  mode begins: what it throws is said on the page, and voice mode does not
+  start. What it throws for `false` is logged. Each call has 120 seconds, as
+  long as a speech model may take to load; one that has not settled by then
+  counts as failed, so that it holds up no voice session.
+- **`choose(true)`** makes the extension voice mode's source, and so switches
+  voice mode on; **`choose(false)`** stops it being the source where it is, and
+  voice mode then has none. Neither changes anything else of voice mode's
+  settings. The source decides where the person's voice goes, so `choose`
+  answers what they ask for on the extension's own page, such as using it once
+  it is installed, or an uninstall. **`chosen()`** says whether this extension
+  is the source now, for its page to say so and offer **Stop using**.
 - **One for each package.** `provide` again replaces the one before, and it
   goes when the server half stops. A choice of it stays: voice mode says it is
-  not running until it is back, or the person chooses otherwise.
+  not running until it is back, or the person stops using it.
 
-Voice mode asks for the source at each request, so a change is used at once.
-The voice controls that are open read the settings again as Settings closes,
-so they follow a source chosen on the extension's page there (whether its
-replies are spoken, say) without a reload.
+The portal keeps no address, engine, language or recording of a source's: how
+an engine is spoken to, and in which language, is the provider's own. Voice
+mode asks for the source at each request, so a change is used at once. The
+voice controls that are open read the settings again as Settings closes, so
+they follow a source chosen on the extension's page there (whether its replies
+are spoken, say) without a reload.
 
 ## Panels and commands
 
@@ -2224,7 +2263,7 @@ from the portal, and what gives the same to an extension:
 | A page in the sidebar only once its service is set up | `useShown` on its `nav.page` |
 | A container of its own, and the one the portal made before it was an extension taken over by its name | `requires` with `pithagoras-docker`, `extensions.use`, `containers.adopt` and `volumes.adopt` |
 | A container on the portal's loopback, made again on its network after the portal's container was, on the GPU it was given | `sharedNetwork()`, `containers.inspect`, and `DeviceRequests` in the create body |
-| Being where voice mode listens and speaks, chosen once its service is up, with its model loaded while voice mode is used | `portal.voice.provide` and `voice.choose` |
+| Recognising and speaking for voice mode with the voices it has, chosen once its service is up, with its model loaded while voice mode is used | `portal.voice.provide`, `voice.choose` and `voice.chosen` |
 | Scripts run in its container, one at a time, and ended where they took too long | `containers.exec`, with `timeoutMs` |
 | The agent's memory: its tools as an MCP server's, counted as the person's own words, and MEMORY.md left aside while it is on | `portal.mcp.set` with `trusted`, `portal.memory.hold` |
 | A model server of its own for its service, passing each request to the model of the chat whose tool is asking | `portal.models.of` and `endpoint`, `chats.onEvent`, `chats.on("stopped")` |

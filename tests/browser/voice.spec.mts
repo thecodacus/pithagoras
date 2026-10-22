@@ -5,6 +5,9 @@ import { readFileSync } from 'node:fs';
 // An extension's window at the side: the portal's tests' stand-in for one, opening on each command the agent runs.
 test.use({ installed: ['tests/fixtures/extensions/console'] });
 const sample = readFileSync(new URL('../fixtures/jfk.wav', import.meta.url));
+// What the portal answers a phrase with: 24 kHz PCM, here the fixture's samples.
+const pcm = sample.subarray(sample.indexOf('data') + 8);
+const speech = { body: pcm, headers: { 'content-type': 'audio/pcm', 'x-sample-rate': '24000' } };
 test.beforeEach(async ({ page }) => {
   await page.route('**/api/sessions/test/commands', route => route.fulfill({ json: { commands: [] } }));
   await page.route('**/api/sessions/test/config', route => route.fulfill({ status: 503, json: {} }));
@@ -18,10 +21,7 @@ test('real browser VAD submits turns, supports barge-in, and releases the mic', 
     expect(route.request().postDataBuffer()?.subarray(0, 4).toString()).toBe('RIFF');
     return route.fulfill({ json: { text: 'A test voice turn.' } });
   });
-  let speechRequests = 0;
-  await page.route('**/voice/speech', route => ++speechRequests === 1
-    ? route.fulfill({ status: 502, json: { error: 'Breeze returned HTTP 409 (voice service is busy; try again)' } })
-    : route.fulfill({ body: sample, contentType: 'audio/wav' }));
+  await page.route('**/voice/speech', route => route.fulfill(speech));
   await page.goto('/tests/voice.html');
   await page.getByRole('textbox', { name: 'Message' }).fill('Keep this draft');
   await page.getByRole('button', { name: 'Profile voice latency' }).click();
@@ -75,7 +75,7 @@ test('mute keeps playback and option prompts available; end restores the chat', 
   await page.route('**/api/voice', route => route.fulfill({ json: { enabled: true } }));
   await page.route('**/test-speech.wav', route => route.fulfill({ body: sample, contentType: 'audio/wav' }));
   await page.route('**/voice/transcribe', route => route.fulfill({ json: { text: 'A test voice turn.' } }));
-  await page.route('**/voice/speech', route => route.fulfill({ body: sample, contentType: 'audio/wav' }));
+  await page.route('**/voice/speech', route => route.fulfill(speech));
   let chosen: unknown;
   await page.route('**/ui-response', route => { chosen = route.request().postDataJSON(); return route.fulfill({ json: { ok: true } }); });
   await page.goto('/tests/voice.html');
@@ -127,8 +127,9 @@ test('voice pipelines next-sentence synthesis during PCM playback and cancels on
   const texts: string[] = [];
   await page.route('**/api/voice', route => route.fulfill({ json: { enabled: true } }));
   await page.route('**/voice/speech', route => {
-    expect(route.request().headers().accept).toBe('audio/pcm');
-    texts.push(route.request().postDataJSON().text);
+    // The spoken error line, asked for as voice mode starts, is not a phrase of the reply.
+    const text = route.request().postDataJSON().text;
+    if (text !== 'An error occurred.') texts.push(text);
     return route.fulfill({ body: pcm, headers: { 'content-type': 'audio/pcm', 'x-sample-rate': '24000' } });
   });
   await page.goto('/tests/voice.html');
@@ -196,7 +197,7 @@ test('live transcription begins before turn completion and previews recognized w
   await page.route('**/test-speech.wav', route => route.fulfill({ body: sample, contentType: 'audio/wav' }));
   const purposes: (string | null)[] = [];
   await page.route('**/voice/transcribe*', route => { purposes.push(new URL(route.request().url()).searchParams.get('purpose')); return route.fulfill({ json: { text: 'Recognized while you speak.' } }); });
-  await page.route('**/voice/speech', route => route.fulfill({ body: sample, contentType: 'audio/wav' }));
+  await page.route('**/voice/speech', route => route.fulfill(speech));
   await page.goto('/tests/voice.html');
   await page.getByRole('button', { name: 'Turn on hands-free voice' }).click();
   await expect(page.getByRole('status')).toHaveText('Listening', { timeout: 25000 });
@@ -302,8 +303,8 @@ test('ending while the lease is being taken (a model loading) gives it back once
 });
 
 test('a lease voice mode is refused, as by an extension it listens through that is not running, is said, and nothing listens',async({page})=>{
- const notRunning='Voice mode listens and speaks through an extension that is not running: install or start it, or choose your own addresses in Settings → Add-ons → Voice';
- await page.route('**/api/voice',r=>r.fulfill({json:{enabled:true,provider:'test-speaker',providers:[]}}));
+ const notRunning='Voice mode listens and speaks through test-speaker, which is not running: install or start it in Settings → Extensions, or stop using it in Settings → Defaults → Voice mode';
+ await page.route('**/api/voice',r=>r.fulfill({json:{enabled:true,provider:'test-speaker',ready:false,speech:true,voices:[]}}));
  await page.route('**/api/sessions/test/voice/connection',r=>r.fulfill({status:503,json:{error:notRunning}}));
  await page.goto('/tests/voice.html');
  await page.getByRole('button',{name:'Turn on hands-free voice'}).click();
@@ -316,7 +317,7 @@ test('a lease voice mode is refused, as by an extension it listens through that 
 
 test('prompt and compaction progress remain visible in chat and voice',async({page})=>{
  await page.route('**/api/voice',r=>r.fulfill({json:{enabled:true}}));
- await page.route('**/voice/speech',r=>r.fulfill({body:sample,contentType:'audio/wav'}));
+ await page.route('**/voice/speech',r=>r.fulfill(speech));
  await page.goto('/tests/voice.html');
  await page.getByRole('button',{name:'Show prefill',exact:true}).click();
  // In the chat it is the status pill, there at once like the other phases rather than after two seconds.

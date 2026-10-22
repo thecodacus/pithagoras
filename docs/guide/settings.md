@@ -46,6 +46,13 @@ What new chats start with: provider, model, effort, the context window, how much
 is kept when a chat is compacted, and where routines report. The fields are
 described in [Models and providers](/guide/models#defaults).
 
+At the end of the page, **Voice mode** holds what voice mode does whatever
+listens and speaks for it: speech detection, the speaking instructions, the
+model that answers spoken messages and the providers that reply without
+thinking first, each saved as it is changed. It names voice mode's source too,
+says whether it is running, and has a button to its page and **Stop using**:
+see [Voice mode's settings](/guide/voice#voice-mode-s-settings).
+
 The fields show **only your explicit overrides**. Leave one empty and it
 inherits, with the inherited value shown as the placeholder. Clearing a field
 hands the setting back to pi; clicking the active effort level again unsets it.
@@ -95,9 +102,11 @@ switches the agent's procedures, see [Skills](/guide/skills). **MCP** manages MC
 **Browser**, under **Extension settings** while the [Browser](/guide/browser)
 extension is installed, installs, starts, stops and removes the agent's browser,
 with the password of its web UI and how the download of its image goes; see
-[Installing it](/guide/browser#installing-it). The voice service and Understory,
-the agent's memory, are extensions with pages there too: see
-[The voice service](/guide/voice-service) and [Memory: Understory](/guide/features#memory-understory).
+[Installing it](/guide/browser#installing-it). The voice service and Voice
+servers, which voice mode can listen and speak through, and Understory, the
+agent's memory, are extensions with pages there too: see
+[The voice service](/guide/voice-service), [Voice servers](/guide/voice-servers)
+and [Memory: Understory](/guide/features#memory-understory).
 
 **Media**, under **Extension settings**, is the page of the [Media](/guide/media)
 extension. It has two sections, **Image model** and **Video model**. Each has its **switches** at the top, always in view,

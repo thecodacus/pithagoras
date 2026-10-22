@@ -1,10 +1,12 @@
 # Extensions
 
 ::: tip Looking for Voice, or the agent's browser?
-Voice mode's settings are at the end of **Settings → Defaults**: see [Voice control](/guide/voice). The
-voice service it can listen and speak through is the Voice extension, and the
-agent's browser the Browser extension, both installed here: see
-[The voice service](/guide/voice-service) and [The agent's browser](/guide/browser).
+Voice mode listens and speaks through an extension installed here: the Voice
+extension, the voice service, or Voice servers, for speech servers you run
+yourself. Its other settings are in **Settings → Defaults → Voice mode**: see
+[Voice control](/guide/voice), [The voice service](/guide/voice-service) and
+[Voice servers](/guide/voice-servers). The agent's browser is the Browser
+extension: see [The agent's browser](/guide/browser).
 :::
 
 Extensions are pi's own package system, not something the portal invented.
@@ -29,7 +31,7 @@ packages** and **Install by name**.
 
 **Comes with Pithagoras** lists the extensions shipped with the portal itself
 (a pack of seven themes, the terminal, Git, Files, Canvases, [Media](/guide/media), [Documents](/guide/documents),
-[Docker for extensions](/guide/docker), [Kanban](/guide/kanban), the agent's [Browser](/guide/browser), the [voice service](/guide/voice-service) and [Understory](/guide/features#memory-understory), the agent's memory), each installed from the portal's own folder with one click.
+[Docker for extensions](/guide/docker), [Kanban](/guide/kanban), the agent's [Browser](/guide/browser), the [voice service](/guide/voice-service), [Voice servers](/guide/voice-servers) and [Understory](/guide/features#memory-understory), the agent's memory), each installed from the portal's own folder with one click.
 
 **Find packages** searches the npm registry for packages published for pi — by
 keyword, with a separate search for packages that bring a model provider — and

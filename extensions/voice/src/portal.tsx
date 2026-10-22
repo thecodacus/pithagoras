@@ -13,6 +13,15 @@ export const t = (text: string, vars?: Record<string, string | number>) => porta
 /** A text to be translated where it is shown, marked here as one: a title the portal draws, a label kept in a table. */
 export const msg = <T extends string>(text: T): T => text;
 
+/** A language's name (`code`) in the page's language (`page`, as `portal.locale.use()` gives it), or `fallback` where the browser has none. */
+export function languageName(page: string, code: string, fallback: string): string {
+  try {
+    return new Intl.DisplayNames([page], { type: "language" }).of(code) ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 /** The portal's own Select, whose props say what it holds, drawn as a component of the extension's. */
 export function Select<T extends string | number = string>(props: {
   value: T;

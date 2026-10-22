@@ -1,11 +1,14 @@
 import { useEffect, useRef } from "react";
 
-const TABBABLE = 'a[href], button, input:not([type="hidden"]), select, textarea, [tabindex]:not([tabindex="-1"])';
+const TABBABLE = 'a[href], button, input:not([type="hidden"]), select, textarea, details > summary, [tabindex]:not([tabindex="-1"])';
 
-/** What Tab can reach inside `box`: not what is disabled, hidden, or left out of the order. */
+/**
+ * What Tab can reach inside `box`: not what is disabled, hidden, or left out of the order. What a closed disclosure
+ * holds is out of reach although the browser gives it a box; its summary is not.
+ */
 function tabbables(box: HTMLElement): HTMLElement[] {
   return [...box.querySelectorAll<HTMLElement>(TABBABLE)].filter(
-    (el) => !(el as HTMLButtonElement).disabled && el.getAttribute("tabindex") !== "-1" && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== "hidden",
+    (el) => !(el as HTMLButtonElement).disabled && el.getAttribute("tabindex") !== "-1" && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== "hidden" && !el.closest("details:not([open]) > :not(summary)"),
   );
 }
 

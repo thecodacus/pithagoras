@@ -5,9 +5,10 @@ import { msg, portal, setPortal, t } from "./portal";
 import { de } from "./de";
 
 /**
- * Voice: the voice service, which voice mode listens and speaks through once it is installed. Its page in Settings,
- * where it is installed, started, stopped and removed, and where its engines and its GPU are chosen. Voice mode itself
- * is the portal's, in Settings → Add-ons → Voice. Its texts in German are in de.ts.
+ * Voice: the voice service, which voice mode listens and speaks through once it is chosen. Its page in Settings, where
+ * it is installed, started, stopped and removed, where its engines and its GPU are chosen, where it is made voice mode's
+ * source or stops being that, and where the voices it speaks with are (Your voice, with the voice library). Voice
+ * mode's other settings are the portal's, in Settings → Defaults → Voice mode. Its texts in German are in de.ts.
  */
 export default function voice(given: Portal) {
   setPortal(given);
@@ -22,7 +23,7 @@ export default function voice(given: Portal) {
     search: [
       {
         title: msg("Voice service"),
-        words: "voice speech whisper breeze kokoro chatterbox qwen gpu install docker container models stimme sprache spracherkennung sprachausgabe grafikkarte installieren modelle",
+        words: "voice voices clone library language speech whisper breeze kokoro chatterbox qwen gpu install docker container models stimme stimmen klon bibliothek sprache spracherkennung sprachausgabe grafikkarte installieren modelle",
       },
     ],
     component: () => (

@@ -31,6 +31,7 @@ export const SETTINGS_INDEX: SettingEntry[] = [
   { tab: "general", section: msg("Context"), title: msg("Context window"), words: "tokens ctx context window size length kontext fenster" },
   { tab: "general", section: msg("Context"), title: msg("Kept when compacting"), words: "compaction compact keep recent summary kompaktieren zusammenfassung" },
   { tab: "general", section: msg("Routine reports"), title: msg("Routine reports"), words: "routine schedule cron report destination channel bericht" },
+  { tab: "general", section: msg("Voice mode"), title: msg("Voice mode"), words: "voice speech speak source vad detection silence threshold speaking instructions model thinking stimme sprache sprachmodus quelle" },
   { tab: "tools", title: msg("Default tools"), words: "tools enable disable default on off werkzeuge" },
   { tab: "tools", title: msg("Questions from the agent"), words: "ask_question question questions wait timeout answer fragen frage warten antwort" },
   { tab: "tools", section: msg("Subagents"), title: msg("Subagents"), words: "subagent subagents parallel background interrupt model at once teilagenten parallel hintergrund" },

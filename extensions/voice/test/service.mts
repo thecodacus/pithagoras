@@ -50,13 +50,34 @@ export async function voiceDocker() {
   };
 
   // The voice processes on the portal's loopback answer their health checks, unless a test says one does not, and a
-  // load or an unload of the speech model is kept. Anything else is fetched as it is.
+  // load or an unload of the speech model is kept. What they are asked to hear and to say is kept too, and answered as
+  // a test says, or as the engines answer: recognition with a transcript, Breeze with PCM as audio.cpp labels it, and
+  // the others with a 24 kHz WAV. Anything else is fetched as it is.
   const real = globalThis.fetch;
-  const voiceProcesses = { unhealthy: [] as string[], models: [] as { url: string; body: unknown }[] };
+  const voiceProcesses = {
+    unhealthy: [] as string[],
+    models: [] as { url: string; body: unknown }[],
+    /** Each recording sent to recognition: where, and the form it was sent as. */
+    heard: [] as { url: string; form: FormData }[],
+    /** Each phrase asked for: where, and the JSON it was asked with. */
+    spoken: [] as { url: string; body: any }[],
+    /** How a phrase is answered, where a test says. */
+    speak: undefined as ((body: any, init?: RequestInit) => Response | Promise<Response>) | undefined,
+  };
   globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
     const at = String(url);
     if (!/^http:\/\/127\.0\.0\.1:(7862|7863|8188)\//.test(at)) return real(url, init);
     if (at.includes("/v1/models/")) voiceProcesses.models.push({ url: at, body: JSON.parse(String(init?.body)) });
+    if (/\/(inference|v1\/audio\/transcriptions)$/.test(at)) {
+      voiceProcesses.heard.push({ url: at, form: init?.body as FormData });
+      return Response.json({ text: " Heard you. " });
+    }
+    if (at.endsWith("/v1/audio/speech")) {
+      const body = JSON.parse(String(init?.body));
+      voiceProcesses.spoken.push({ url: at, body });
+      if (voiceProcesses.speak) return voiceProcesses.speak(body, init);
+      return body.model === "breeze" ? new Response(PCM, { headers: { "content-type": "application/octet-stream" } }) : new Response(wav24k(PCM), { headers: { "content-type": "audio/wav" } });
+    }
     return new Response("{}", { status: voiceProcesses.unhealthy.some((port) => at.includes(port)) ? 503 : 200 });
   }) as typeof fetch;
 
@@ -107,8 +128,8 @@ export async function voiceDocker() {
     dropVoice,
     /**
      * As the tests began: the portal's container running as `portal-one`, no voice container, both images there, a
-     * Docker that hands out GPUs, the host's memory and threads as `host` says, nothing chosen, and every voice process
-     * answering. Nothing is said to have happened.
+     * Docker that hands out GPUs, the host's memory and threads as `host` says, nothing chosen or set on the page, and
+     * every voice process answering as the engines do. Nothing is said to have happened.
      */
     reset() {
       daemon.containers.length = 0;
@@ -124,9 +145,12 @@ export async function voiceDocker() {
       inDocker = "";
       voiceProcesses.unhealthy = [];
       voiceProcesses.models.length = 0;
+      voiceProcesses.heard.length = 0;
+      voiceProcesses.spoken.length = 0;
+      voiceProcesses.speak = undefined;
       delete process.env.VOICE_GPU;
       delete process.env.VOICE_VRAM_RESERVE_MIB;
-      putSettings({ gpu: undefined, setupPending: undefined, lazyLoad: undefined });
+      putSettings({ gpu: undefined, setupPending: undefined, lazyLoad: undefined, voice: undefined, instruction: undefined, cfgScale: undefined, exaggeration: undefined, kokoroVoice: undefined, speed: undefined, language: undefined });
       service.hostReader.read = () => ({ totalMiB: 16384, freeMiB: 12000, threads: 8 });
     },
     /** Until a setup that is under way has ended: a minute at most, for a machine that is busy with other tests. */
@@ -153,6 +177,27 @@ export async function voiceService() {
   } as unknown as ServerPortal);
   openStore(data);
   return Object.assign(machine, { docker, told, data });
+}
+
+/** Two samples of speech, as the engines answer them here. */
+export const PCM = Buffer.from([0, 0, 255, 127]);
+
+/** `pcm` as a WAV of mono 24 kHz 16-bit samples, as Chatterbox and Kokoro answer. */
+export function wav24k(pcm: Buffer): Buffer {
+  const header = Buffer.alloc(44);
+  header.write("RIFF");
+  header.writeUInt32LE(36 + pcm.length, 4);
+  header.write("WAVEfmt ", 8);
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20);
+  header.writeUInt16LE(1, 22);
+  header.writeUInt32LE(24000, 24);
+  header.writeUInt32LE(48000, 28);
+  header.writeUInt16LE(2, 32);
+  header.writeUInt16LE(16, 34);
+  header.write("data", 36);
+  header.writeUInt32LE(pcm.length, 40);
+  return Buffer.concat([header, pcm]);
 }
 
 /** A container's environment as names and values. */

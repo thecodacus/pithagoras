@@ -137,7 +137,7 @@ export interface Agent {
   channels: { slug: string; name: string }[];
   /** Its avatar. */
   orb: OrbStyle;
-  /** The voice it speaks with: "design", a voice library id, or "" for the one in the voice settings. */
+  /** The voice it speaks with: an id from the voices voice mode's source offers, or "" for its own choice. */
   voice: string;
   /** How it looks around on its own. */
   heartbeat: {
@@ -440,20 +440,22 @@ export interface VoiceConfig {
   // The model spoken turns run on, "provider/model"; empty means the chat's own.
   voiceModel?: string;
   pipelineMode?: "parallel" | "sequential";
-  // False with no speech synthesis (runtime "none") where voice mode listens now: the page can listen, but replies are not spoken.
-  speech?: boolean;
-  // The extension voice mode listens and speaks through, by its package's name; empty for the addresses below, the person's own.
-  provider?: string;
-  // The extensions that offer voice mode a place to listen and speak.
-  providers?: VoiceProvider[];
+  // The extension voice mode listens and speaks through, by its package's name; "" for none.
+  provider: string;
+  // Its label, while its server half runs.
+  label?: string;
+  // Whether it can be used now.
+  ready: boolean;
+  // False where it recognises speech alone: the page can listen, but replies are not spoken.
+  speech: boolean;
+  // The voices it offers now, which an agent's voice is chosen from.
+  voices: { id: string; name: string; builtIn?: boolean }[];
+  // Voice mode is on while it has a source.
+  enabled: boolean;
   vad?: typeof DEFAULT_VAD;
-  enabled: boolean; whisperUrl: string; breezeUrl: string; instruction: string; voice?: string; language?: string; cfgScale?: number; runtime?: "breeze" | "audio-cpp" | "chatterbox" | "kokoro" | "none"; sttModel?: string; dictationModel?: string; dictationUrl?: string; exaggeration?: number; kokoroVoice?: string; speed?: number;
 }
-/** An extension that offers voice mode a place to listen and speak: `ready` while it can be used now, with how it speaks then (`none`: recognition alone). */
-export interface VoiceProvider { name: string; label: string; ready: boolean; runtime?: VoiceConfig["runtime"] }
-/** How voice mode speaks with these settings: through the extension chosen while it answers, else at the person's own addresses. */
-export const speakingRuntime = (config: VoiceConfig): VoiceConfig["runtime"] =>
-  config.provider ? config.providers?.find((p) => p.name === config.provider)?.runtime : config.runtime;
+/** What the page saves of voice mode: how a spoken conversation goes, whatever listens and speaks for it. */
+export interface VoiceModeSave { vad: typeof DEFAULT_VAD; responseInstructions: string; skipThinkingProviders?: string[]; voiceModel: string }
 
 /** Who is signed in, and how one signs in. */
 export interface AuthStatus {
@@ -506,7 +508,9 @@ export const api = {
     return { text: String(body.text ?? ""), serverTiming: res.headers.get("server-timing") ?? "" };
   },
   voice: () => json<VoiceConfig>("/api/voice"),
-  setVoice: (value: VoiceConfig) => json<VoiceConfig>("/api/voice", { method: "PUT", body: JSON.stringify(value) }),
+  setVoice: (value: VoiceModeSave) => json<VoiceConfig>("/api/voice", { method: "PUT", body: JSON.stringify(value) }),
+  /** Voice mode stops using its source: it is off until an extension's page chooses one again. */
+  stopVoiceSource: () => json<VoiceConfig>("/api/voice/provider", { method: "DELETE" }),
   /** `setup`: no password has been chosen yet, so the page asks for one. `oidc`: a single sign-on provider is offered too. */
   authStatus: () => json<AuthStatus>("/api/auth/status"),
   login: (password: string) =>
