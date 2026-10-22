@@ -595,11 +595,16 @@ its page with **Use for voice mode**. One that keeps the overlay's `whisper`
 alone listens to it through [Voice servers](/guide/voice-servers): the upgrade
 gave Voice servers its address where voice mode listened there, and elsewhere it
 is `http://127.0.0.1:8178/inference` as the **Speech recognition URL**, with no
-model.
+model. A portal that listened at the overlay's `audiocpp`
+(`http://127.0.0.1:7871/v1/audio/transcriptions`, model `qwen3-asr`) listens
+there through Voice servers too, as the upgrade gave it that address. That
+container, like the systemd unit, read its `server.json` from
+`deploy/voice-multilingual/`, so it does not start again once it stops: choose
+Voice, with Qwen3-ASR under **Speech engines**, before then.
 
 The overlay's containers are not touched by the upgrade. They keep running as
 orphans of the Compose project, and `docker compose up` says it found them.
-Remove the ones voice mode no longer uses:
+Once voice mode no longer uses them, remove them:
 
 ```sh
 docker rm -f <project>-breeze-1 <project>-audiocpp-1
