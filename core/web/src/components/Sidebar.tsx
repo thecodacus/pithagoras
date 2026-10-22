@@ -29,6 +29,7 @@ import { HOME, folderKeys, hasMoreThanHome, folderName, folderNameOf, groupByFol
 import { useFolderPrefs, useOpenFolders } from "../use-session-folders";
 import { t, useLanguage } from "../i18n";
 import { titleOf, useSlot, type Registered } from "../extensions/slots";
+import { failedIn } from "../extensions/loader";
 import { ErrorBoundary } from "./ErrorBoundary";
 
 /** How many unpinned sessions the sidebar shows before deferring to Sessions. */
@@ -214,7 +215,7 @@ export const Sidebar = memo(function Sidebar({
     <aside aria-label={t("Sidebar")} className={`relative flex shrink-0 flex-col overflow-hidden border-r border-line bg-surface transition-[width] duration-300 ease-in-out motion-reduce:transition-none ${collapsed ? "w-12" : "w-64"}`}>
       {/* One that fails to answer is not listed: its page is at its address all the same. */}
       {entries.filter((page) => page.useShown).map((page) => (
-        <ErrorBoundary key={page.key} resetKey={page.key} fallback={() => null}>
+        <ErrorBoundary key={page.key} resetKey={page.key} fallback={() => null} onError={failedIn(page.extension)}>
           <PageShown entry={page} onChange={(shown) => setShownPages((keys) => (shown ? (keys.includes(page.key) ? keys : [...keys, page.key]) : keys.filter((key) => key !== page.key)))} />
         </ErrorBoundary>
       ))}

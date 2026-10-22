@@ -1,4 +1,5 @@
 import { api } from "../api";
+import { failedIn } from "./loader";
 import type { Channel } from "./slots";
 
 /**
@@ -20,6 +21,7 @@ export function extensionMessage(chatId: string, extension: string, data: unknow
       handler(data);
     } catch (e) {
       console.error(`[extensions] ${extension} failed on hearing from its extension:`, e);
+      failedIn(extension)(e);
     }
   }
 }

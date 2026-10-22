@@ -1,5 +1,5 @@
 import { useSlot } from "../extensions/slots";
-import { useExtensions } from "../extensions/loader";
+import { extensionsOff, failedIn, useExtensions } from "../extensions/loader";
 import { ErrorBoundary, PartFailed } from "./ErrorBoundary";
 import { t } from "../i18n";
 
@@ -10,6 +10,14 @@ import { t } from "../i18n";
 export function ExtensionPage({ entryKey }: { entryKey: string }) {
   const entry = useSlot("nav.page").find((e) => e.key === entryKey);
   const { settled, failures } = useExtensions();
+  // Opened with ?extensions=off: no extension is loaded into this page, nor will be.
+  if (!entry && extensionsOff()) {
+    return (
+      <div className="flex flex-1 items-center justify-center px-6 text-center text-sm text-fg-subtle" role="status">
+        <p>{t("This page was opened with ?extensions=off: no extension is loaded into it.")}</p>
+      </div>
+    );
+  }
   if (!entry) {
     // Before the installed extensions have been gone through, it may only not be there yet.
     const failure = Object.entries(failures).find(([name]) => entryKey.startsWith(`${name}/`))?.[1];
@@ -24,7 +32,7 @@ export function ExtensionPage({ entryKey }: { entryKey: string }) {
   return (
     <div className="extension-page min-h-0 flex-1 overflow-y-auto" data-extension={entry.extension}>
       {/* An extension's page failing to draw takes down that page, not the portal. */}
-      <ErrorBoundary resetKey={entry.key} fallback={(error) => <div className="p-6"><PartFailed error={error} /></div>}>
+      <ErrorBoundary resetKey={entry.key} fallback={(error) => <div className="p-6"><PartFailed error={error} /></div>} onError={failedIn(entry.extension)}>
         <Page />
       </ErrorBoundary>
     </div>

@@ -1,3 +1,5 @@
+import { failedIn } from "./loader";
+
 /**
  * What an extension's server half tells the pages open on a chat, passed from
  * the chat's event stream to the extension's browser half. The server's side
@@ -8,6 +10,7 @@
  * yet waits for it, and is handed over, in order, once its module has been
  * called: a module that listens as it is called misses nothing.
  */
+
 type Handler = (chatId: string, data: unknown) => void;
 
 const handlers = new Map<string, Set<Handler>>();
@@ -29,6 +32,7 @@ export function serverPush(chatId: string, extension: string, data: unknown): vo
       handler(chatId, data);
     } catch (e) {
       console.error(`[extensions] ${extension} failed on hearing from its server half:`, e);
+      failedIn(extension)(e);
     }
   }
 }

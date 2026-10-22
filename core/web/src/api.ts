@@ -316,7 +316,9 @@ export interface PortalEvent {
 /**
  * Fired when what is installed changed (a package installed, removed, updated
  * or switched), so the page loads or drops an extension's interface at once:
- * see extensions/loader.ts.
+ * see extensions/loader.ts. By this page's own changes as they are made, and by
+ * the list of chats when it says that what is installed changed elsewhere, or
+ * where a server half stands: one may have crashed.
  */
 export const EXTENSIONS_CHANGED = "pithagoras:extensions-changed";
 const changesExtensions = <T>(request: Promise<T>): Promise<T> =>
@@ -325,18 +327,40 @@ const changesExtensions = <T>(request: Promise<T>): Promise<T> =>
     return result;
   });
 
+/** How a server half crashed, with the lines it said last, as a log file has them: as GET /api/extension-ui gives it. */
+export interface ServerCrash {
+  name: string;
+  at: string;
+  rev: string;
+  error: string;
+  stack?: string;
+  lines: string[];
+}
+
 /** An installed extension's browser half: where its module is fetched from, and its stylesheet if it has one. */
 export interface ExtensionUi {
   name: string;
   version?: string;
   /** Absent for a package that has only a server half. */
   entry?: string;
+  /** The revision of its browser half, which `entry` and `style` carry: what a failure of it is told to the portal under. */
+  rev?: string;
   style?: string;
+  /** Why its browser half failed in a page, this one or another, while that revision is the one installed: to load, to draw, or in what it runs of its own. */
+  clientError?: string;
+  /** Where it failed, as that page had it: the error's stack, and the components it was drawn in. */
+  clientStack?: string;
   /** The files its module imports along with itself, to be asked for at once rather than one level at a time. */
   preload?: string[];
   /** Where its server half's own routes are, when it has one; why it is not running, when it could not be started. */
   server?: string;
   serverError?: string;
+  /**
+   * Its server half crashed (an error of its code reached the portal's process, or it called process.exit()), and is
+   * off until another revision of it is installed or it is switched off and on: when, which revision, the error, and
+   * the last lines it said, as a log file has them.
+   */
+  crash?: ServerCrash;
   /** The extensions its server half cannot start without, each with the versions it takes. */
   requires?: Record<string, string>;
   /** The themes its package.json names: colours in place of the portal's own, with no code. See extensions/themes.ts. */
@@ -503,7 +527,8 @@ export const api = {
       body: JSON.stringify({ current, settings, only }),
     }),
   workspaces: () => json<{ root: string; workspaces: Workspace[] }>("/api/workspaces"),
-  sessions: () => json<{ sessions: Session[]; executor: string }>("/api/sessions"),
+  /** With what is installed and where its server halves stand, as a revision that changes whenever either does: see EXTENSIONS_CHANGED. */
+  sessions: () => json<{ sessions: Session[]; executor: string; extensions: string }>("/api/sessions"),
   /** Without a workspace the chat starts in the home of the agent New is set to. */
   createSession: (workspace?: string, title?: string) =>
     json<Session>("/api/sessions", {
@@ -1080,8 +1105,11 @@ export const api = {
     })),
   updatePackages: () =>
     changesExtensions(json<{ ok: true; output: string }>("/api/packages/update", { method: "POST" })),
-  /** The installed extensions that bring an interface: see extensions/loader.ts. */
-  extensionUi: () => json<{ extensions: ExtensionUi[] }>("/api/extension-ui"),
+  /** The installed extensions that bring an interface (see extensions/loader.ts), with what is installed as GET /api/sessions says it (`revision`), as it was when this list was made. */
+  extensionUi: () => json<{ extensions: ExtensionUi[]; revision: string }>("/api/extension-ui"),
+  /** Tells the portal that an extension's browser half, at revision `rev`, failed in this page, and where: its `clientError` and `clientStack` from then on. */
+  extensionFailed: (name: string, rev: string, error: string, stack?: string) =>
+    json<{ ok: true }>("/api/extension-ui/failures", { method: "POST", body: JSON.stringify({ name, rev, error, stack }) }),
   /** What an extension's server half would tell a page that opens the chat now: for a browser half that came into the page later. */
   extensionOpening: (id: string, extension: string) => json<{ pushes: unknown[] }>(`/api/sessions/${id}/extension-ui?extension=${encodeURIComponent(extension)}`),
   /** What an extension's browser half says to its own half in a chat: see extensions/channel.ts. */

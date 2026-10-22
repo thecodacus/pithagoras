@@ -113,17 +113,21 @@ test("the browser halves listed are those of the portal's own packages that are 
   assert.deepEqual(extensions.find((e) => e.name === "only-themes"), { name: "only-themes", version: "1.0.0", themes: [{ id: "dusk", name: "Dusk", dark: { accent: "#ff79c6" } }] });
   const notes = extensions.find((e) => e.name === "@codacus/notes");
   assert.equal(notes.version, "1.0.0");
-  assert.match(notes.entry, /^\/api\/extension-ui\/%40codacus\/notes\/client\.js\?v=[0-9a-z]+-[0-9a-z]+$/);
-  assert.match(notes.style, /^\/api\/extension-ui\/%40codacus\/notes\/client\.css\?v=/);
+  // Under its revision, of the files of its web folder, which is listed for a page to say a failure of it under.
+  assert.match(notes.rev, /^[\w-]{16}$/);
+  assert.equal(notes.entry, `/api/extension-ui/%40codacus/notes/~${notes.rev}/client.js`);
+  assert.equal(notes.style, `/api/extension-ui/%40codacus/notes/~${notes.rev}/client.css`);
 });
 
 test("what a module imports along with itself is listed, for the page to ask for at once, and what it only imports when it is called is not", async () => {
   const { extensions } = await (await fetch(at("/api/extension-ui"))).json();
   const notes = extensions.find((e) => e.name === "@codacus/notes");
-  // Without the revision the module is asked for under: its import resolves to the file as it is addressed, and the page's fetch ahead must be that one.
-  assert.deepEqual(notes.preload, ["/api/extension-ui/%40codacus/notes/dep.js", "/api/extension-ui/%40codacus/notes/deeper/two.js", "/api/extension-ui/%40codacus/notes/x@1+b$c.js"]);
+  // Under the revision the module is asked for under: its import resolves to the file there, and the page's fetch ahead must be that one.
+  const under = `/api/extension-ui/%40codacus/notes/~${notes.rev}`;
+  assert.deepEqual(notes.preload, [`${under}/dep.js`, `${under}/deeper/two.js`, `${under}/x@1+b$c.js`]);
   // A name with characters a browser leaves as they are in an address is listed as it makes the address, or the import would fetch it again.
-  assert.equal(notes.preload[2], new URL("./x@1+b$c.js", at("/api/extension-ui/%40codacus/notes/dep.js")).pathname);
+  assert.equal(notes.preload[2], new URL("./x@1+b$c.js", at(`${under}/dep.js`)).pathname);
+  assert.equal(new URL("./dep.js", at(notes.entry)).pathname, notes.preload[0]);
   for (const address of notes.preload) assert.equal((await fetch(at(address))).status, 200, address);
   assert.equal(extensions.find((e) => e.name === "only-themes").preload, undefined);
 });
@@ -227,6 +231,8 @@ test("a package's web folder is served as the addresses listed say, and as what 
   const picture = await fetch(at("/api/extension-ui/@codacus/notes/img/logo.svg"));
   assert.equal(picture.status, 200);
   assert.match(picture.headers.get("content-type"), /svg/);
+  // Under a revision that is not the one there now, as a page that has an older one asks: the file there now.
+  assert.match(await (await fetch(at("/api/extension-ui/@codacus/notes/~older/client.js"))).text(), /scoped/);
 });
 
 /** A GET with the headers as given, and the body as it came, not unpacked. */
@@ -289,6 +295,8 @@ test("nothing else of a package is served, and nothing of a package that has no 
     "/api/extension-ui/@codacus/notes/.env",
     "/api/extension-ui/@codacus/notes/missing.js",
     "/api/extension-ui/@codacus/notes/",
+    "/api/extension-ui/@codacus/notes/~1/",
+    "/api/extension-ui/@codacus/notes/~1/%2e%2e/index.ts",
     "/api/extension-ui/@codacus/client.js",
     "/api/extension-ui/switched-off/client.js",
     "/api/extension-ui/from-a-folder/client.js",
@@ -318,7 +326,7 @@ test("the server halves that run are those of the same packages, each said with 
   // One that could not start says why, and its browser half is still offered.
   assert.equal(byName.breaks.server, undefined);
   assert.equal(byName.breaks.serverError, "no licence");
-  assert.match(byName.breaks.entry, /^\/api\/extension-ui\/breaks\/client\.js/);
+  assert.match(byName.breaks.entry, /^\/api\/extension-ui\/breaks\/~[^/]+\/client\.js$/);
   // Switched off, or a folder's: never loaded into the portal.
   for (const none of ["/api/x/switched-off/hello", "/api/x/from-a-folder/hello"]) assert.equal((await fetch(at(none))).status, 404, none);
 });

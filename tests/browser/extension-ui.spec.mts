@@ -22,7 +22,7 @@ async function portal(page: Page, module = web('client.js'), probe?: string, als
   ];
   const model = { id: 'model-a', name: 'Model A', provider: 'llama-swap' };
   const state = {
-    installed: true, revision: 1, probeServerError: undefined as string | undefined, themed: true, hangs: false, probeListed: true, openingHangs: false, preload: [] as string[],
+    installed: true, revision: 1, probeServerError: undefined as string | undefined, probeCrash: undefined as unknown, themed: true, hangs: false, probeListed: true, openingHangs: false, preload: [] as string[],
     /** What the Notes extension's server half would tell a page opening a chat now. */
     opening: [] as unknown[],
     /** Themes the Notes package names beside its module. */
@@ -33,6 +33,8 @@ async function portal(page: Page, module = web('client.js'), probe?: string, als
   const dusk = { name: pack.name, version: pack.version, themes: pack.pithagoras.themes.filter((theme: { id: string }) => theme.id === 'dusk') };
   /** What the browser half said to its extension, by chat. */
   const said: { chat: string; extension: string; data: any }[] = [];
+  /** What a page told the portal failed of a browser half. */
+  const failed: { name: string; rev: string; error: string }[] = [];
   await mockPortal(page, async ({ path: p, method, route, json }) => {
     if (p === '/api/extension-ui') {
       // Not answered: no extension is in the page, however long it waits.
@@ -44,12 +46,17 @@ async function portal(page: Page, module = web('client.js'), probe?: string, als
           // A second package with themes of its own, two of them, one under the id the first uses.
           ...(state.themed ? [{ name: 'more-themes', version: '1.0.0', themes: [{ id: 'dusk', name: 'Noon', light: { accent: '#0055aa' } }, { id: 'midnight', name: 'Midnight', dark: { canvas: '#05070d' } }] }] : []),
           ...(state.installed ? [{ name: NAME, version: '0.2.0', entry: address(NAME, 'client.js') + v, style: address(NAME, 'client.css') + v, server: `/api/x/${NAME}`, ...(state.preload.length ? { preload: state.preload } : {}), ...(state.notesThemes ? { themes: state.notesThemes } : {}) }] : []),
-          ...(probe && state.probeListed ? [{ name: 'probe', version: '1.0.0', entry: address('probe', 'client.js') + v, server: '/api/x/probe', serverError: state.probeServerError }] : []),
+          ...(probe && state.probeListed ? [{ name: 'probe', version: '1.0.0', rev: String(state.revision), entry: address('probe', 'client.js') + v, server: '/api/x/probe', serverError: state.probeServerError, crash: state.probeCrash }] : []),
           ...more.map((extension) => extension.listing),
         ],
       };
     }
     // What is installed, as Settings lists it.
+    if (p === '/api/extension-ui/failures' && method === 'POST') {
+      const { name, rev, error } = json();
+      failed.push({ name, rev, error });
+      return { ok: true };
+    }
     if (p === '/api/extensions' && probe) return { settingsPath: '/a/settings.json', extensions: [{ spec: 'npm:probe', name: 'probe', version: '1.0.0', enabled: true, settings: [] }] };
     if (p === address('probe', 'client.js')) { await route.fulfill({ contentType: 'text/javascript', body: probe! }); return DONE; }
     for (const extension of more) if (await extension.serve(p, route)) return DONE;
@@ -94,7 +101,7 @@ async function portal(page: Page, module = web('client.js'), probe?: string, als
     await page.waitForFunction((chat) => (window as any).streams?.some((s: any) => !s.closed && s.url.includes(`/api/sessions/${chat}/events`)), chat);
     await page.evaluate((chat) => (window as any).streams.find((s: any) => !s.closed && s.url.includes(`/api/sessions/${chat}/events`)).emit('caught-up', {}), chat);
   };
-  return { said, hears, changed, pushed, says: said2, caughtUp, state };
+  return { said, hears, changed, pushed, says: said2, caughtUp, state, failed };
 }
 
 /**
@@ -349,6 +356,16 @@ test('an extension that fails to load, or to draw, fails alone', async ({ page }
   await expect(sidebar(page).getByRole('button', { name: 'Draws badly' })).toBeVisible();
 });
 
+test("what an extension's handler throws on hearing from its server half is told to the portal as that extension's failure, and the page goes on", async ({ page }) => {
+  const probe = 'export default function (portal) { portal.server.on(() => { throw new Error("heard badly"); }); }';
+  const { pushed, caughtUp, failed } = await portal(page, undefined, probe);
+  await page.goto('/s/a');
+  await caughtUp('a');
+  await pushed('a', 'probe', { type: 'anything' });
+  await expect.poll(() => failed).toEqual([{ name: 'probe', rev: '1', error: 'heard badly' }]);
+  await expect(header(page).getByRole('button', { name: 'Notes', exact: true })).toBeVisible();
+});
+
 test('a panel says more of itself: tabs in its head, a button that follows the chat, kept and asking while something in it would be lost', async ({ page }) => {
   await page.setViewportSize({ width: 1300, height: 800 });
   // The viewer's and the console's panels, the stand-ins', to open as a second and a third.
@@ -478,6 +495,24 @@ test("an extension's own page in Settings, and why its server half is not runnin
   await expect(row).toBeVisible();
   await changed({ probeServerError: 'cannot start here' });
   await expect(dialog.getByRole('listitem').filter({ hasText: 'probe' }).getByRole('alert')).toHaveText('Its server half could not be started: cannot start here');
+});
+
+test("a server half that crashed is shown in Settings with what it said last", async ({ page }) => {
+  const { state } = await portal(page, undefined, PROBE);
+  const lines = ['2026-10-22T10:00:00.000Z INFO  [extension probe] about to fail', '2026-10-22T10:00:01.000Z ERROR [extension probe] its server half crashed. Error: boom\n    at Timeout._onTimeout (server.js:3:9)'];
+  Object.assign(state, {
+    probeServerError: 'It crashed at 2026-10-22T10:00:01.000Z: Error: boom. It stays off until another revision of it is installed, or it is switched off and on.',
+    probeCrash: { name: 'probe', rev: 'r1', at: '2026-10-22T10:00:01.000Z', error: 'Error: boom', lines },
+  });
+  await page.goto('/settings/extensions');
+  const dialog = page.getByRole('dialog', { name: 'Settings' });
+  const row = dialog.getByRole('listitem').filter({ hasText: 'probe' });
+  const alert = row.getByRole('alert');
+  await expect(alert).toContainText('Its server half crashed at ');
+  await expect(alert).toContainText('is off until another version of it is installed, or it is switched off and on: Error: boom');
+  await expect(alert).not.toContainText('could not be started');
+  await alert.getByText('What it said last').click();
+  await expect(alert.locator('pre')).toHaveText(lines.join('\n'));
 });
 
 test("Settings' search finds what an extension's own page says is on it, and goes to its heading there", async ({ page }) => {

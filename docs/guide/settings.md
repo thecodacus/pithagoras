@@ -133,6 +133,16 @@ browser used to re-parse it and listed some packages twice.
 Any extension whose settings the server can recover gets its own page in the
 navigation, with a field per key.
 
+The list follows what is installed elsewhere (another tab, the API, an agent)
+while it is open. Beside a package is why a half of it is not working: its
+server half could not be started, or crashed (with what it said last), its
+interface could not be loaded in this page, or its interface failed in a page:
+in this one, or in another before this one last went through what is installed
+(when it was opened, or when what is installed last changed). A page that one of them breaks is opened with `?extensions=off` on its
+address (`/settings/extensions?extensions=off`): it loads no extension's
+interface, and the package can be switched off or removed here. See
+[What is loaded, and when](/guide/extension-ui#what-is-loaded-and-when).
+
 ::: warning Recovered, not declared
 pi publishes no schema for extension settings — extensions simply read keys off
 the settings object. The portal recovers them by reading the package source,

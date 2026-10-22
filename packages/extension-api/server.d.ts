@@ -3,7 +3,12 @@
  * default export is called with, in the portal's own process. The portal
  * implements exactly this, and is checked against it when it is built.
  *
- * See docs/guide/extension-ui.md, "The server half".
+ * An error of its code that nothing catches, a promise of its that rejects with
+ * nobody to hear it, and a call of `process.exit()` from it, are its crash: it is
+ * stopped and held off until another version is installed or it is switched off
+ * and on, and the portal goes on.
+ *
+ * See docs/guide/extension-ui.md, "The server half" and "When the server half crashes".
  */
 import type { IncomingMessage } from "node:http";
 import type { Duplex } from "node:stream";
@@ -296,6 +301,7 @@ export interface ServerPortal {
   extension: string;
   /** How pi is run here: "host" is in the portal's own process, where a chat's pi and this module can reach each other. */
   executor: string;
+  /** A line in the portal's log, kept with the extension's own lines: what Settings → Extensions shows of it should it crash. */
   log(text: string): void;
   /**
    * What this extension gives the extensions that build on it, those that name it in `pithagoras.requires` or
@@ -520,7 +526,12 @@ export interface ServerPortal {
      * and one with `guard` is held to what it declares: see ToolGuard. A
      * factory that throws is that chat's load error: nothing the package adds
      * to that chat's pi is there, and the chat says why. One whose promise
-     * fails later is only logged.
+     * fails later is only logged. Should this server half crash while a
+     * tool's call, a handler (`pi.on`) or a command of it is running, that
+     * ends at once with an error that says so, with the half's last lines;
+     * its handlers are not called after that. A turn it asks the chat's pi
+     * for (`pi.sendMessage`, `pi.sendUserMessage`) is the chat's, not this
+     * module's code.
      */
     extend(factory: (pi: any, chat: Chat) => void): void;
     /**
