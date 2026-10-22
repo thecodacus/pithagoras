@@ -41,9 +41,9 @@ const model = await fakeModel((request) => {
 });
 writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR, "models.json"), JSON.stringify(model.models()));
 
-const { createSession, getSession, getSettings, rememberTools, setLazyToolSets, setSettings, updateSession } = await import("../dist/db.js");
+const { createSession, getSession, getSettings, rememberTools, sessionTools, setLazyToolSets, setSettings, updateSession } = await import("../dist/db.js");
 const { lazyToolEntry } = await import("../dist/tool-policy.js");
-const { sessions } = await import("../dist/session-manager.js");
+const { CodemodeHeld, sessions } = await import("../dist/session-manager.js");
 const { modesRouter } = await import("../dist/api/modes.js");
 setSettings({ ...getSettings(), provider: "fake", model: "m" });
 rememberTools([{ name: "lazy_one", source: "lazy", package: null }]);
@@ -250,6 +250,34 @@ test("a mode made to work through the code tool has it on in its layer, and its 
   assert.equal(results.find((r) => r.toolName === "lazy_one")?.isError, false, "a lazy tool in a script's reach");
   assert.equal(globalThis.lazyOneRan, ran + 1);
   assert.equal((await tool(id, "lazy_one")).lazy, undefined);
+});
+
+test("in a mode of the person's whose tools switch the code tool on, a chat's switch cannot turn it off; where they leave it, it can", async () => {
+  const mode = await made("Held", { codemode: true });
+  const id = chat();
+  await choose(id, `custom/${mode}`);
+  const held = await tool(id, "codemode");
+  assert.deepEqual([held.enabled, held.byMode], [true, true]);
+  await assert.rejects(sessions.setTools(id, ["codemode"]), CodemodeHeld);
+  assert.deepEqual(sessionTools(id), { off: [], on: [] });
+  assert.equal((await tool(id, "codemode")).enabled, true);
+
+  // The code tool switched on in the mode's tools, without working through it: the same layer, so held the same.
+  const beside = await made("Beside");
+  const listed = (await call("GET", `/chat-modes/${beside}/tools`)).body;
+  await call("PUT", `/chat-modes/${beside}/tools`, { off: listed.off.filter((name) => name !== "codemode") });
+  const other = chat();
+  await choose(other, `custom/${beside}`);
+  assert.equal((await tool(other, "codemode")).byMode, true);
+  await assert.rejects(sessions.setTools(other, ["codemode"]), CodemodeHeld);
+
+  // Switched off in the mode's tools later, it is not the mode's to hold: the chat's switch is its own again.
+  await call("PUT", `/chat-modes/${mode}/tools`, { off: [...(await call("GET", `/chat-modes/${mode}/tools`)).body.off, "codemode"] });
+  assert.deepEqual([(await tool(id, "codemode")).enabled, (await tool(id, "codemode")).byMode], [false, undefined]);
+  await sessions.setTools(id, []);
+  assert.equal((await tool(id, "codemode")).enabled, true);
+  await sessions.setTools(id, ["codemode"]);
+  assert.equal((await tool(id, "codemode")).enabled, false);
 });
 
 test("the code-tool switch of a mode reaches a running chat at its next start; the code tool in its layer at once", async () => {

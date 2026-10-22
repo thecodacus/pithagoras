@@ -161,7 +161,8 @@ A mode of yours has:
   and comes above a chat's agent, project and routine, so a tool the mode leaves
   as Settings → Tools has it is still decided by them: a mode cannot switch on,
   over a project, a tool that Settings → Tools has on. A chat's own switches are
-  still the last word.
+  still the last word, but where the mode switches the code tool on, they cannot
+  switch it off, as in Code mode.
 
 These are saved as they are changed, except the texts.
 
