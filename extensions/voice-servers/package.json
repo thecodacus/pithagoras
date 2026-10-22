@@ -1,0 +1,18 @@
+{
+  "name": "pithagoras-voice-servers",
+  "version": "0.1.0",
+  "description": "Voice servers for Pithagoras: voice mode listens and speaks through speech recognition and speech synthesis servers you run, spoken to as OpenAI's audio API is, with the voices you name",
+  "type": "module",
+  "keywords": ["pi-package"],
+  "pi": {},
+  "pithagoras": {
+    "client": "./web/client.js",
+    "style": "./web/client.css",
+    "server": "./server.js"
+  },
+  "scripts": { "build": "node build.mjs && tsc --noEmit -p ." },
+  "devDependencies": {
+    "react-icons": "5.7.0"
+  },
+  "license": "Apache-2.0"
+}
