@@ -252,7 +252,9 @@ To install the voice service through the Voice and Docker extensions, or the
 agent's browser through the Browser and Docker extensions:
 
 - Keep the **Docker socket mount** and **host networking**.
-- For the voice service, configure **NVIDIA Container Toolkit** on the host.
+- For voice service engines on an NVIDIA GPU, configure **NVIDIA Container
+  Toolkit** on the host. Kokoro and speech recognition run on the CPU without a
+  GPU or the toolkit ([GPU access for Voice](/guide/voice-service#gpu-access-for-voice)).
 
 Follow [The voice service](/guide/voice-service) for its installation, controls,
 storage and cleanup, and [The agent's browser](/guide/browser) for the browser's.
