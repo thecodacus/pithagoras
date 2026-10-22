@@ -109,9 +109,10 @@ checked. Choose before the first message: from then on the chat keeps it.
   stays behind the adapter's `mcp` tool, which a script calls like any other.
   A script has no time limit; **Stop** ends it. The
   [guard](/guide/security#marking-untrusted-output) holds each call a script
-  makes as it holds the model's own. Switching `codemode` off in the chat's
-  tools has the chat work as in Standard mode, though its header still says
-  Code mode.
+  makes as it holds the model's own. In the chat's tools, `codemode` is on and
+  its switch cannot turn it off, with a line that says why: to work without the
+  code tool, start a chat in Standard mode. The other switches work as in any
+  chat.
 
 The mode is fixed once the chat has said something: its first message, or a
 command sent to pi. Leaving a mode means starting a new chat; `/new` and

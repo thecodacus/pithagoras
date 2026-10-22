@@ -266,6 +266,8 @@ export interface PortalTool {
   enabled: boolean;
   /** Whether it is on by default, so a chat can show where it disagrees. */
   defaultOn?: boolean;
+  /** A chat's only: the code tool, on, in a chat whose mode switches it on. Its switch cannot turn it off. */
+  byMode?: true;
   /** One of the portal's own, not an extension's of the same name: the list groups code mode by it. */
   inline?: true;
   /** An MCP server's tool listed from the adapter's cache: the server starts when one of its tools is first used. */

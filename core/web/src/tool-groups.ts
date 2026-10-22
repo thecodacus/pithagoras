@@ -28,6 +28,9 @@ const BUILT_IN = msg("built in");
  */
 const CODEMODE = "<portal:codemode>";
 
+/** Why a chat's switch of the code tool cannot turn it off (PortalTool.byMode), and what the server's refusal is said as. */
+export const CODEMODE_HELD = msg("This chat's mode works through the code tool, so it stays on: start a chat in Standard mode to work without it.");
+
 /** The portal's code mode, not an extension's tool of that name. */
 const isCodemode = (tool: Pick<PortalTool, "name" | "inline">): boolean => Boolean(tool.inline) && tool.name === "codemode";
 

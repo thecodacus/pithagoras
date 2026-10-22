@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { api, ApiError, type PortalTool } from "../api";
 import { LoadFailed } from "./SettingsUi";
 import { ToolGroupList } from "./ToolGroupList";
-import { nextOff } from "../tool-groups";
+import { CODEMODE_HELD, nextOff } from "../tool-groups";
 import { t, tp } from "../i18n";
 
 /**
@@ -125,7 +125,7 @@ export function ToolSwitches(
       // Put it back rather than showing a switch that did not take, and say why.
       setOff(before.off);
       setTools(before.tools);
-      setFlipError((e as Error).message);
+      setFlipError(e instanceof ApiError && e.body.code === "codemode-held" ? t(CODEMODE_HELD) : (e as Error).message);
     } finally {
       setBusy(false);
     }

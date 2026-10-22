@@ -1827,6 +1827,7 @@ const de: Locale = {
     "{n} files": { one: "{n} Datei", other: "{n} Dateien" },
     "{n} entries": { one: "{n} Eintrag", other: "{n} Einträge" },
     // tool-groups.ts
+    "This chat's mode works through the code tool, so it stays on: start a chat in Standard mode to work without it.": "Der Modus dieses Chats arbeitet über das Code-Tool, daher bleibt es an: Starte einen Chat im Standardmodus, um ohne es zu arbeiten.",
     "built in": "eingebaut",
     "{n} off": { one: "{n} aus", other: "{n} aus" },
     "{off} of {n} off": { one: "{off} von {n} aus", other: "{off} von {n} aus" },
