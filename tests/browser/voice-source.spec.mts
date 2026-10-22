@@ -60,14 +60,14 @@ test("a voice of the source's own is named in its German, and one the person nam
   const dialog = await avatar(page, () => ({ ...SOURCE, voices: [{ id: 'morning', name: 'Morning voice', builtIn: true }, { id: 'voice-1', name: 'Calm' }] }));
   await page.waitForFunction(() => (window as any).speakerStrings);
   const picker = dialog.getByRole('combobox', { name: 'Sprachsteuerung' });
-  await expect(picker).toContainText('Wie Sprecher es wählt');
+  await expect(picker).toContainText('Wie „Sprecher“ es wählt');
   await picker.click();
   await expect(page.getByRole('option', { name: 'Morgenstimme' })).toBeVisible();
   // "Calm" is a word both the source and the portal have German for: a name the person gave is neither.
   await expect(page.getByRole('option', { name: 'Calm', exact: true })).toBeVisible();
   await expect(page.getByRole('option', { name: /Gelassen|Ruhig/ })).toHaveCount(0);
   await page.keyboard.press('Escape');
-  await expect(dialog.getByRole('link', { name: 'Eine Stimme in Sprecher hinzufügen' })).toBeVisible();
+  await expect(dialog.getByRole('link', { name: 'Eine Stimme in „Sprecher“ hinzufügen' })).toBeVisible();
 });
 
 test('the picker reads the voices again as Settings closes, so a voice added there is listed', async ({ page }) => {
