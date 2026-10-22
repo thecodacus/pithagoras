@@ -797,7 +797,7 @@ restart the portal.
 | `http.upgrade(handler)` | WebSocket upgrades under the package's routes |
 | `http.endWithLogin(end)` | Ends a long response, such as a stream, when the login it was opened under ends (the password changed, single sign-on was set up anew), so what it showed is not shown to whoever signs in next. Returns what stops the watching, for a response that ended by itself |
 | `http.send(req, res, file, options?)` | [Sends a file](#sending-a-file) opened by `files.open` as the portal sends its own: a version, the part a player asks for, or to be saved |
-| `chats.get(id)`, `chats.list()` | A chat: `{ id, title, workspace, status }` |
+| `chats.get(id)`, `chats.list()` | A chat: `{ id, title, workspace, status, mode? }` |
 | `chats.folder(id)` | The folder the chat's pi works in, on this disk |
 | `chats.inFolder(folder)` | The sessions of every kind that work in a folder: tasks, and also routine runs, Agent-page and channel conversations and heartbeats, which `chats.list()` leaves out and which have the package's tools in their pi. One for each agent that has some there (what an agent can reach is the same from each of its sessions; none is removed, and a stored path can be a link an agent made) |
 | `chats.send(chatId, data)`, `chats.onOpen(fn)` | [Telling the pages open on a chat](#telling-the-pages-open-on-a-chat) |
@@ -807,7 +807,7 @@ restart the portal.
 | `chats.extend(factory)` | [Tools that share this module's state](#tools-that-share-the-server-half-s-state) |
 | `tools.offer(fn)`, `chats.reload()` | [Tools that follow the settings](#tools-that-follow-the-settings): which of them it offers now, and the open chats given the change |
 | `tools.exceptions(names)` | [Who has its tools](#who-has-its-tools): the chats and routines where those tools are not what the default says |
-| `chats.offers(chatId, tool)` | How the chat's model is offered a tool now: `"direct"`, `"lazy"` (through the `tools` tool) or nothing (switched off, out of reach, or the chat's pi not running here) |
+| `chats.offers(chatId, tool)` | How the chat's model is offered a tool now: `"direct"`, `"lazy"` (through the `tools` tool) or nothing (switched off, out of reach, or the chat's pi not running here). In a chat whose mode works through the code tool ([Code mode](/guide/sessions#modes)), `"direct"` means that a script calls the tool by its name, with no streamed arguments of its own |
 | `chats.hold(chatId)` | Keeps the chat's pi from being let go for being idle, or reloaded, while work goes on; returns what lets it go |
 | `sandbox.run(chatId, argv, options?)`, `sandbox.spawnAs(chatId)`, `sandbox.on()` | [Running things as the chat's agent](#running-things-as-the-chat-s-agent) |
 | `sandbox.personEnv()` | The portal's environment for a process the person starts, such as a shell of their own: without the mark the agent's processes carry, so it is not listed as a job the agent left running |
@@ -822,6 +822,7 @@ restart the portal.
 | `memory.hold({ label, rule, on })` | [Holding the agent's memory](#the-agent-s-memory) in place of its MEMORY.md |
 | `provide(factory)`, `extensions.use(name)` | [Building on another extension](#building-on-another-extension): what it gives the extensions that build on it, and what one it builds on gives it |
 | `voice.provide(provider)`, `voice.choose(chosen)`, `voice.chosen()` | [Voice providers](#voice-providers): recognising and speaking for voice mode, with the voices it has; making it voice mode's source, and whether it is |
+| `modes.provide(mode)` | [A chat mode](#chat-modes) the person can start a chat in |
 | `log(text)`, `extension`, `executor`, `version` | A line in the portal's log; the package's name; how pi is run here; `1` |
 
 ### Routes
@@ -1300,7 +1301,9 @@ To follow a call of your tool as the model writes its arguments (Canvases
 shows a document being written), ask `portal.chats.offers(chatId, tool)` how
 the tool is offered first: a call by a name it is not offered under is refused
 and never runs, so its text is nobody's. A call of a lazy tool comes as a call
-of the `tools` tool, with yours in its arguments.
+of the `tools` tool, with yours in its arguments. In a chat in
+[Code mode](/guide/sessions#modes) a call of your tool comes inside the code
+tool's: a script makes it, and nothing of its arguments is streamed.
 
 What the model is to be told of a tool goes in its description, or in pi's
 `promptGuidelines`, in every turn while the tool is on. What only a spoken
@@ -1423,14 +1426,15 @@ A page that says who may use its tools asks the portal where they are not
 what the default says. `tools.exceptions(names)` answers for those tools, by
 name, as the switches have them now: `byDefault`, whether a chat that has
 never said anything about them has any of them on; `chats`, those that have
-them otherwise, by their own switches or by their agent's or project's, newest
-first, each `{ id, title, kind }` and each the opposite of `byDefault`; and
-`routines`, those whose own switches give their runs another answer than a
-routine that sets nothing would have in the same place, by name, each
-`{ slug, name, allowed }` with the answer its runs have. A routine that sets
-nothing has each tool as a chat in its place has it. The switches themselves
-stay in Settings → Tools, beside each chat's composer and on each routine's
-page. Browser's page says who may drive the browser this way.
+them otherwise, by their own switches or by their agent's, project's or
+[mode's](/guide/sessions#modes), newest first, each `{ id, title, kind }` and
+each the opposite of `byDefault`; and `routines`, those whose own switches give
+their runs another answer than a routine that sets nothing would have in the
+same place, by name, each `{ slug, name, allowed }` with the answer its runs
+have. A routine that sets nothing has each tool as a chat in its place has it.
+The switches themselves stay in Settings → Tools, beside each chat's composer
+and on each routine's page. Browser's page says who may drive the browser this
+way.
 
 ```js
 portal.router.get("/who", (_req, res) => res.json(portal.tools.exceptions(["page_open", "page_read"])));
@@ -1843,6 +1847,69 @@ mode asks for the source at each request, so a change is used at once. The
 voice controls that are open read the settings again as Settings closes, so
 they follow a source chosen on the extension's page there (whether its replies
 are spoken, say) without a reload.
+
+### Chat modes
+
+A chat can be started in a [mode](/guide/sessions#modes): how it works, chosen
+above the message box before its first message and fixed once it has one. An
+extension offers a mode with `portal.modes.provide`, and does what the mode
+means in its own `chats.extend` factory, which finds the chat's mode on
+`chat.mode`:
+
+```js
+const DEPLOY = portal.modes.provide({
+  id: "deploy",
+  label: "Deploy mode",
+  description: "The agent can ship what it builds to your servers.",
+  confirm: "The agent can deploy to your servers from this chat without asking each time. Use it for work you would deploy yourself.",
+});
+
+portal.chats.extend((pi, chat) => {
+  if (chat.mode !== DEPLOY) return;
+  pi.registerTool({ name: "deploy_run", /* … */ });
+});
+```
+
+- **What it returns** is what a chat in the mode stores, `"<package>/<id>"`,
+  which `chat.mode` is in its chats (and in `chats.get` and `chats.list`). A
+  chat in Standard mode has no `mode`; one in a mode of the portal's has its
+  name (`"code"`), and one in a mode the person made `"custom/<id>"`. `id` is
+  lower-case letters, digits and `-`, one the package does not offer already;
+  `label`, `description` and `confirm`, where there is one, are texts. Anything
+  else throws a `TypeError`, and so does a package called `custom`, whose modes
+  would be taken for the person's own.
+- **What the mode does is the extension's.** A mode has no tools of its own:
+  the factory registers what the mode's chats have, and can add to their prompt
+  as any pi extension can; it leaves the other chats as they are. It is called
+  each time a chat's pi starts, and a chat's mode is fixed once it has said
+  something, so it decides once, and a tool of the mode's needs no check at
+  each call.
+- **Where it is offered.** The picker lists the portal's own modes first and
+  the extensions' last, in the order they were offered. Modes are offered in
+  the chats the person starts on the portal's pages and the conversations on an
+  agent's page, where pi runs in the portal's own process (`portal.executor` is
+  `"host"`): not to a routine's run, a heartbeat, a chat that came through a
+  channel, or a colleague's chat. Leaving a mode means a new chat; `/new` and
+  `/clear` start one in Standard mode, and a subagent does not take the mode.
+- **It goes with the server half.** When the half stops (switched off,
+  removed, or crashed), the mode leaves the picker. A chat started in it keeps
+  it, and its header says it is not available; from its next load it has
+  nothing of the extension's, as the factory is gone, and it has the mode again
+  once the extension is back. One that offers a mode after its half has
+  stopped, from a timer it left or a start the portal gave up on, offers
+  nothing, with a line in the log.
+- **`confirm`** is asked in the portal's dialog, with a yes or no, before a
+  chat is put in the mode, and a yes is kept in [Audit](/guide/sessions#audit)
+  as *Mode chosen*, with the mode's label and what the chat stores. The mode is
+  shown in the warning colour in the picker and in the chat's header. It warns
+  the person; it is no gate: `PUT /api/sessions/:id/modes` takes
+  `confirmed: true` from whoever sends it, and a browser half runs with the
+  person's login.
+- **Its texts are English**, as the server half writes them, and shown in the
+  page's language through the extension's own texts, which its browser half
+  gives with `portal.locale.add`: give their German there, and mark the same
+  English with a `msg()` of your own so that your texts' check finds it, as
+  for a panel's title.
 
 ## Panels and commands
 
