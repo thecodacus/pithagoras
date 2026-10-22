@@ -400,8 +400,8 @@ a mark on it changes nothing in the chats where it stays off. The mark is the po
 agent's, project's, routine's or chat's, so where one of those switches the tool on, the mark still
 applies. In a chat in Code mode the marks do not apply: every tool that is on is in a script's reach,
 found with `searchTools`, and the `tools` tool is not offered. An MCP server's tools still stay behind
-`mcp`, which a script calls like any other tool (see [Modes](/guide/sessions#modes)). To set or take away such a mark, switch the tool on by default for a moment. A mark that was
-set stays as it is.
+`mcp`, which a script calls like any other tool (see [Modes](/guide/sessions#modes)). To set or take
+away such a mark, switch the tool on by default for a moment. A mark that was set stays as it is.
 
 Any tool can be made lazy except pi's own built-in ones (`read`, `bash`, `edit`, `write`, `grep`, `find`
 and `ls`), which every conversation works with and which are always offered. They have no lazy button, and
