@@ -282,8 +282,8 @@ export function withParts(text: string, vars: Record<string, ReactNode>): ReactN
  * Formatters are costly to make and shown by the hundred — a count in every
  * row — so each is made once per language and set of options.
  */
-const formatters = new Map<string, Intl.NumberFormat | Intl.DateTimeFormat | Intl.DisplayNames | Intl.RelativeTimeFormat>();
-function formatter<F extends Intl.NumberFormat | Intl.DateTimeFormat | Intl.DisplayNames | Intl.RelativeTimeFormat>(kind: string, locale: string, options: object | undefined, make: () => F): F {
+const formatters = new Map<string, Intl.NumberFormat | Intl.DateTimeFormat | Intl.RelativeTimeFormat>();
+function formatter<F extends Intl.NumberFormat | Intl.DateTimeFormat | Intl.RelativeTimeFormat>(kind: string, locale: string, options: object | undefined, make: () => F): F {
   // Most calls pass no options — a count in a row — and are found without building a key from them.
   const key = options ? `${kind}|${locale}|${JSON.stringify(options)}` : `${kind}|${locale}`;
   let made = formatters.get(key) as F | undefined;
@@ -328,15 +328,6 @@ export const formatDate = (d: Date | number | string, options?: Intl.DateTimeFor
 /** A time of day the language's way. */
 export const formatTime = (d: Date | number | string, options?: Intl.DateTimeFormatOptions): string =>
   dateTime(d, "time", withDefaults(options, TIME));
-
-/** A language's name in the language shown: "de" is "German" in English, "Deutsch" in German. */
-export function languageName(code: string, fallback = code): string {
-  try {
-    return formatter("language", current.code, undefined, () => new Intl.DisplayNames([current.code], { type: "language" })).of(code) ?? fallback;
-  } catch {
-    return fallback;
-  }
-}
 
 /** "3 days ago", with the unit given, the language's way. */
 export const formatRelative = (value: number, unit: Intl.RelativeTimeFormatUnit): string =>

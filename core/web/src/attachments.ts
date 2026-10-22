@@ -74,9 +74,6 @@ const readAsDataUrl = (blob: Blob): Promise<string> =>
     reader.readAsDataURL(blob);
   });
 
-/** A blob's bytes as base64, the part of its data URL after the comma; a failed read is the browser's own error. */
-export const blobBase64 = async (blob: Blob): Promise<string> => (await readAsDataUrl(blob)).split(",")[1] ?? "";
-
 let counter = 0;
 
 /**

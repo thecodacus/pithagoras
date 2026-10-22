@@ -1784,7 +1784,6 @@ const de: Locale = {
     "The microphone is blocked for this site. Allow it in the browser's site settings (the icon at the left of the address), then try again.": "Das Mikrofon ist für diese Seite gesperrt. Erlaube es in den Website-Einstellungen des Browsers (das Symbol links neben der Adresse) und versuch es dann erneut.",
     "No microphone was found. Connect one and try again.": "Es wurde kein Mikrofon gefunden. Schließ eines an und versuch es erneut.",
     "The microphone cannot be used, perhaps because another program has it. Close that and try again.": "Das Mikrofon lässt sich nicht verwenden, vielleicht weil ein anderes Programm es belegt. Schließ das und versuch es erneut.",
-    "That file could not be read as audio. Choose a WAV or MP3 recording.": "Diese Datei ließ sich nicht als Audio lesen. Wähl eine WAV- oder MP3-Aufnahme.",
     "The microphone could not be opened.": "Das Mikrofon konnte nicht geöffnet werden.",
     "Transcription failed": "Transkription fehlgeschlagen",
     "Microphone disconnected. Reconnect it and turn the mic on again.": "Mikrofon getrennt. Schließ es wieder an und schalte das Mikrofon erneut ein.",
