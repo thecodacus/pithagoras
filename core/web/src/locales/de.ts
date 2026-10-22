@@ -1780,7 +1780,6 @@ const de: Locale = {
     "Only PNG, JPEG, GIF and WebP pictures can be sent in voice mode. Put other files in the chat's folder.": "Im Sprachmodus lassen sich nur PNG-, JPEG-, GIF- und WebP-Bilder senden. Leg andere Dateien im Ordner des Chats ab.",
     "Speech generation failed": "Sprachgenerierung fehlgeschlagen",
     "Unsupported speech stream": "Nicht unterstützter Sprachstream",
-    "Speech generation returned no audio": "Die Sprachgenerierung hat kein Audio geliefert",
     "Microphone access requires HTTPS or localhost.": "Mikrofonzugriff braucht HTTPS oder localhost.",
     "The microphone is blocked for this site. Allow it in the browser's site settings (the icon at the left of the address), then try again.": "Das Mikrofon ist für diese Seite gesperrt. Erlaube es in den Website-Einstellungen des Browsers (das Symbol links neben der Adresse) und versuch es dann erneut.",
     "No microphone was found. Connect one and try again.": "Es wurde kein Mikrofon gefunden. Schließ eines an und versuch es erneut.",
