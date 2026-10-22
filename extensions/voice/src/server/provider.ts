@@ -59,7 +59,12 @@ export function provider(): VoiceProvider {
     speak: (text, { voice, signal }) => speech.speak(text, voice, signal),
     async use(inUse) {
       used = inUse;
-      if (inUse) await speechModel("load");
+      // Voice mode does not hold what failed to load, and is never told it no longer uses it: the half does not load it either.
+      if (inUse)
+        await speechModel("load").catch((e) => {
+          used = false;
+          throw e;
+        });
       else if (setting("lazyLoad") !== false) await speechModel("unload");
     },
   };

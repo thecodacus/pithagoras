@@ -98,7 +98,7 @@ test("the voices are read from the speech server into the list, and the one chos
   await expect(dialog.getByLabel('Voices')).toHaveValue('af_heart\nbm_george = George');
   expect(sent).toEqual([{ method: 'POST', route: '/server-voices', body: { ttsUrl: 'http://127.0.0.1:8880/v1/audio/speech' } }]);
   // Sky is no longer listed: the server's own voice, until one is chosen.
-  await expect(dialog.getByRole('combobox', { name: 'Voice', exact: true })).toContainText("the server's own");
+  await expect(dialog.getByRole('combobox', { name: 'Voice', exact: true })).toContainText("The server's own");
   await dialog.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(dialog.getByRole('status').filter({ hasText: 'Saved' })).toBeVisible();
   expect(sent[1].body).toMatchObject({ voices: [{ id: 'af_heart', name: 'af_heart' }, { id: 'bm_george', name: 'George' }], voice: '' });

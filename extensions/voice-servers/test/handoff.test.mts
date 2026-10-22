@@ -5,7 +5,7 @@ import path from "node:path";
 import { takeHandoff } from "../src/server/handoff.ts";
 import { setPortal } from "../src/server/host.ts";
 import { openStore, saveSettings } from "../src/server/store.ts";
-import { scratch } from "../../../tests/helpers.mts";
+import { renamesOnDisk, scratch } from "../../../tests/helpers.mts";
 
 /**
  * Taking up the person's own addresses for voice mode, as the portal kept them before voice mode's sources were
@@ -67,6 +67,13 @@ test("where Kokoro spoke, the addresses are taken with its speech, its model and
   assert.equal(statSync(path.join(data, "settings.json")).mode & 0o777, 0o600, "for its owner alone");
   assert.equal(existsSync(handoff), false);
   assert.deepEqual(logged, ["took up the addresses the portal kept for voice mode: the settings sttUrl, sttModel, dictationUrl, dictationModel, language, ttsUrl, ttsModel, voices, voice"]);
+});
+
+test("the settings taken are on disk before they are put in place, and so before the hand-off, the only other copy, is done with", () => {
+  const { data, handoff } = voiceServers();
+  leave(handoff);
+  assert.deepEqual(renamesOnDisk(takeHandoff), [{ to: path.join(data, "settings.json"), synced: true }]);
+  assert.equal(existsSync(handoff), false);
 });
 
 test("where Breeze, Breeze on audio.cpp or Chatterbox spoke, recognition alone is taken, and the log says why", () => {

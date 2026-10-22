@@ -63,8 +63,10 @@ your voices, or Kokoro's own voices while Kokoro speaks; with
 [Voice servers](/guide/voice-servers), the voices on its page. **As Voice
 service chooses** (named after the source) is the source's own choice, the
 voice set on its page. Under the menu, **Add a voice in Voice service** opens
-the source's page, where voices are added; the menu lists a new one when
-Settings closes. A chat in a project shows the avatar of the agent the project
+the source's page in Settings, where voices are added, and asks first whether
+to discard what you changed in the avatar and did not save. Closing Settings
+brings you back to the Agents page, and opening the avatar again lists the new
+voice. A chat in a project shows the avatar of the agent the project
 works with and speaks with its voice, the first agent's where the project works
 with none.
 

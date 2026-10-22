@@ -60,28 +60,51 @@ test("a voice of the source's own is named in its German, and one the person nam
   const dialog = await avatar(page, () => ({ ...SOURCE, voices: [{ id: 'morning', name: 'Morning voice', builtIn: true }, { id: 'voice-1', name: 'Calm' }] }));
   await page.waitForFunction(() => (window as any).speakerStrings);
   const picker = dialog.getByRole('combobox', { name: 'Sprachsteuerung' });
-  await expect(picker).toContainText('Wie Sprecher es wählt');
+  await expect(picker).toContainText('Wie „Sprecher“ es wählt');
   await picker.click();
   await expect(page.getByRole('option', { name: 'Morgenstimme' })).toBeVisible();
   // "Calm" is a word both the source and the portal have German for: a name the person gave is neither.
   await expect(page.getByRole('option', { name: 'Calm', exact: true })).toBeVisible();
   await expect(page.getByRole('option', { name: /Gelassen|Ruhig/ })).toHaveCount(0);
   await page.keyboard.press('Escape');
-  await expect(dialog.getByRole('link', { name: 'Eine Stimme in Sprecher hinzufügen' })).toBeVisible();
+  await expect(dialog.getByRole('link', { name: 'Eine Stimme in „Sprecher“ hinzufügen' })).toBeVisible();
 });
 
-test('the picker reads the voices again as Settings closes, so a voice added there is listed', async ({ page }) => {
+test("the link opens the source's page in Settings, which closes back to the agent, whose avatar then lists a voice added there", async ({ page }) => {
   let voices = [{ id: 'voice-1', name: 'Library clone' }];
   const dialog = await avatar(page, () => ({ ...SOURCE, voices }));
+  await dialog.getByRole('link', { name: 'Add a voice in Speaker' }).click();
+  const settings = page.getByRole('dialog', { name: 'Settings' });
+  await expect(settings).toBeVisible();
+  await expect(page).toHaveURL(/\/settings\/x\/test-speaker$/);
+  // Added on the source's page.
+  voices = [...voices, { id: 'voice-2', name: 'New clone' }];
+  await page.keyboard.press('Escape');
+  await expect(settings).toBeHidden();
+  await expect(page).toHaveURL(/\/agents\?agent=home$/);
+  await page.getByRole('button', { name: 'Customize the avatar' }).click();
+  await page.getByRole('dialog', { name: 'Avatar' }).getByRole('combobox', { name: 'Voice' }).click();
+  await expect(page.getByRole('option', { name: 'New clone' })).toBeVisible();
+});
+
+test('a voice picked and not saved is asked about before the link leaves the avatar, as closing it asks', async ({ page }) => {
+  const dialog = await avatar(page, () => ({ ...SOURCE, voices: [{ id: 'voice-1', name: 'Library clone' }] }));
   const picker = dialog.getByRole('combobox', { name: 'Voice' });
   await picker.click();
-  await expect(page.getByRole('option')).toHaveCount(2);
-  await page.keyboard.press('Escape');
-  // Added on the source's page, and Settings closed, which tells voice mode's controls.
-  voices = [...voices, { id: 'voice-2', name: 'New clone' }];
-  await page.evaluate(() => window.dispatchEvent(new Event('voice-config-changed')));
-  await picker.click();
-  await expect(page.getByRole('option', { name: 'New clone' })).toBeVisible();
+  await page.getByRole('option', { name: 'Library clone' }).click();
+  const link = dialog.getByRole('link', { name: 'Add a voice in Speaker' });
+  const question = page.getByRole('alertdialog', { name: 'Discard your changes?' });
+  // Kept: the avatar stays open with the voice picked.
+  await link.click();
+  await question.getByRole('button', { name: 'Cancel' }).click();
+  await expect(question).toBeHidden();
+  await expect(picker).toContainText('Library clone');
+  await expect(page).toHaveURL(/\/agents\?agent=home$/);
+  // Discarded: Settings opens on the source's page.
+  await link.click();
+  await question.getByRole('button', { name: 'Discard' }).click();
+  await expect(page.getByRole('dialog', { name: 'Settings' })).toBeVisible();
+  await expect(page).toHaveURL(/\/settings\/x\/test-speaker$/);
 });
 
 test('a source chosen, or stopped, while Settings is open reaches the chat behind it, without a reload', async ({ page }) => {

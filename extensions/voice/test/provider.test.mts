@@ -163,6 +163,24 @@ test("its speech model is loaded as voice mode begins to use it, and let go of a
   assert.deepEqual(models(), ["7863/v1/models/load kokoro", "7863/v1/models/unload kokoro"]);
 });
 
+test("a speech model that fails to load is not loaded by the half after, as voice mode does not hold it", async () => {
+  await reset();
+  running("breeze+whisper:base");
+  await state();
+  useSource("pithagoras-voice");
+  machine.voiceProcesses.failLoads = 1;
+  const refused = await lease("h", true);
+  assert.deepEqual([refused.status, (await refused.json()).error], [503, "Voice model load failed (500): boom"]);
+  machine.voiceProcesses.models.length = 0;
+  await maintain();
+  await maintain();
+  assert.deepEqual(models(), []);
+  // The next session loads it as voice mode begins.
+  assert.equal((await lease("h", true)).status, 200);
+  assert.deepEqual(models(), ["7862/v1/models/load breeze"]);
+  await lease("h", false);
+});
+
 test("a half started anew while voice mode is in use is told so again, and loads its model", async () => {
   await reset();
   running("breeze+whisper:base");

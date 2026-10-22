@@ -27,7 +27,7 @@ export const de: Record<string, string | Plural> = {
   "Stop using": "Nicht mehr verwenden",
   "The address the microphone button of the message box sends its recordings to. Voice mode keeps using the one above, so dictation can run on another service.": "Die Adresse, an die die Mikrofontaste des Nachrichtenfelds ihre Aufnahmen schickt. Der Sprachmodus nutzt weiter die Adresse oben, so kann das Diktieren auf einem anderen Dienst laufen.",
   "The model the microphone button of the message box transcribes with. Voice mode keeps using the one above, so a conversation can have the quick model and dictation the accurate one.": "Das Modell, mit dem die Mikrofontaste des Nachrichtenfelds transkribiert. Der Sprachmodus nutzt weiter das Modell oben, so kann ein Gespräch das schnelle Modell haben und das Diktieren das genauere.",
-  "the server's own": "vom Server vorgegeben",
+  "The server's own": "Vom Server vorgegeben",
   "Use for voice mode": "Für den Sprachmodus verwenden",
   "Voice": "Stimme",
   "Voice servers": "Sprachserver",

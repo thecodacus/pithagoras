@@ -98,6 +98,13 @@ test("Breeze speaks a voice of the library with its recording, its words and its
   db.createSession({ id: "herald-chat", title: "Herald", workspace: agent.home, executor: "host" });
   await (await speak("Hello.", "herald-chat")).arrayBuffer();
   assert.equal(asked().body.reference_text, "My reference words.", "the agent's clone, not the designed voice of the page");
+  // An agent whose voice is the designed one speaks with it, though the page's own voice is a clone.
+  assert.equal((await setSpeech({ voice: clone.id })).status, 200);
+  const designer = createAgent({ name: "Designer" });
+  setVoice(designer.id, "design", offers()!.voices.map((v) => v.id));
+  db.createSession({ id: "designer-chat", title: "Designer", workspace: designer.home, executor: "host" });
+  await (await speak("Designed.", "designer-chat")).arrayBuffer();
+  assert.deepEqual([asked().body.options.instruction, asked().body.voice_ref, asked().body.reference_text], ["A calm English voice.", undefined, undefined]);
   // A voice chosen on the page that has gone since is the designed one.
   putSettings({ voice: "voice-gone" });
   await (await speak("Gone.")).arrayBuffer();

@@ -7,7 +7,7 @@ import { takeHandoff } from "../src/server/handoff.ts";
 import { setPortal } from "../src/server/host.ts";
 import { openStore, putSettings } from "../src/server/store.ts";
 import { addVoices, keepRecording, listVoices, openLibrary, voiceAudio } from "../src/server/voices.ts";
-import { scratch } from "../../../tests/helpers.mts";
+import { renamesOnDisk, scratch } from "../../../tests/helpers.mts";
 
 /**
  * Taking up what the portal kept of the voice service when Voice became an extension: its voice library and its
@@ -81,6 +81,18 @@ test("what the portal kept is taken up: the library with each clone's recording 
   takeHandoff();
   assert.equal(pending.stored().setupPending, true);
   assert.equal(pending.stored().lazyLoad, false);
+});
+
+test("each file the take-up writes is on disk before it is put in place, and so before the hand-off, the only other copy, is done with", () => {
+  const { data, handoff } = voice();
+  leave(handoff);
+  const renamed = renamesOnDisk(takeHandoff);
+  assert.deepEqual(renamed, [
+    { to: path.join(data, "voices", `${ARIA}.wav`), synced: true },
+    { to: path.join(data, "voices.json"), synced: true },
+    { to: path.join(data, "settings.json"), synced: true },
+  ]);
+  assert.equal(existsSync(handoff), false);
 });
 
 test("only what Voice lacks is taken: a voice whose id its library has, and a setting said since, are the person's latest word", () => {

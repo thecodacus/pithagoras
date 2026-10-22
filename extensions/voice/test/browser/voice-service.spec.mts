@@ -97,7 +97,7 @@ test.describe('in a browser set to German', () => {
     // Voice mode's source in Settings → Defaults → Voice mode: Voice's label, in Voice's German.
     await page.route('**/api/voice', r => r.fulfill({ json: { provider: 'pithagoras-voice', label: 'Voice service', ready: true, speech: true, voices: [], enabled: true, responseInstructions: '', defaultResponseInstructions: '', responseInstructionsOff: false, skipThinkingProviders: [], defaultSkipThinkingProviders: [], voiceModel: '' } }));
     await page.goto('/settings/general');
-    await expect(settings.getByText('Hört zu und spricht über Sprachdienst')).toBeVisible();
+    await expect(settings.getByText('Hört zu und spricht über „Sprachdienst“')).toBeVisible();
   });
 
   test('the uninstall question says in German that the voices are kept', async ({ page }) => {

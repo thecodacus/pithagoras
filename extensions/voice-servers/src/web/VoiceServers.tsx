@@ -148,7 +148,7 @@ export function VoiceServers() {
             className="mt-1 w-full"
             value={voice}
             onChange={(chosen) => edit({ voice: chosen })}
-            options={[{ value: "", label: t("the server's own") }, ...voices.map((v) => ({ value: v.id, label: v.name }))]}
+            options={[{ value: "", label: t("The server's own") }, ...voices.map((v) => ({ value: v.id, label: v.name }))]}
           />
         </div>
         <label className="text-xs text-fg-muted sm:col-span-2">

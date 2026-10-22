@@ -57,6 +57,8 @@ export async function voiceDocker() {
   const voiceProcesses = {
     unhealthy: [] as string[],
     models: [] as { url: string; body: unknown }[],
+    /** How many of the next loads of a speech model fail, as an engine with no room left on its GPU answers. */
+    failLoads: 0,
     /** Each recording sent to recognition: where, and the form it was sent as. */
     heard: [] as { url: string; form: FormData }[],
     /** Each phrase asked for: where, and the JSON it was asked with. */
@@ -67,7 +69,13 @@ export async function voiceDocker() {
   globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
     const at = String(url);
     if (!/^http:\/\/127\.0\.0\.1:(7862|7863|8188)\//.test(at)) return real(url, init);
-    if (at.includes("/v1/models/")) voiceProcesses.models.push({ url: at, body: JSON.parse(String(init?.body)) });
+    if (at.includes("/v1/models/")) {
+      voiceProcesses.models.push({ url: at, body: JSON.parse(String(init?.body)) });
+      if (at.endsWith("/load") && voiceProcesses.failLoads > 0) {
+        voiceProcesses.failLoads--;
+        return new Response("boom", { status: 500 });
+      }
+    }
     if (/\/(inference|v1\/audio\/transcriptions)$/.test(at)) {
       voiceProcesses.heard.push({ url: at, form: init?.body as FormData });
       return Response.json({ text: " Heard you. " });
@@ -145,6 +153,7 @@ export async function voiceDocker() {
       inDocker = "";
       voiceProcesses.unhealthy = [];
       voiceProcesses.models.length = 0;
+      voiceProcesses.failLoads = 0;
       voiceProcesses.heard.length = 0;
       voiceProcesses.spoken.length = 0;
       voiceProcesses.speak = undefined;

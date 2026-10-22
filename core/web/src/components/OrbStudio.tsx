@@ -254,7 +254,7 @@ export function OrbStudio({ agent, orb, voice, onSaved }: { agent: string; orb: 
               </button>
             ))}
           </div>
-          <VoicePicker value={voiceDraft} onChange={(v) => { setVoiceDraft(v); setDone(false); }} />
+          <VoicePicker value={voiceDraft} onChange={(v) => { setVoiceDraft(v); setDone(false); }} unsaved={dirty && !busy} />
         </div>
 
         <div className="min-w-0">
