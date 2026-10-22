@@ -287,23 +287,27 @@ test("in Code mode only the code tool is declared, and a script reaches a lazy t
   assert.equal((await lazyOf(plain)).lazy, true);
 });
 
-test("a Code-mode chat with the code tool switched off has its tools declared, and its lazy tools lazy again", async () => {
+test("a chat whose own switches had the code tool off before Code mode was chosen has it on and held, and its switch back in Standard", async () => {
   const id = chat();
-  // Switched off in the chat before it was put in the mode, where Settings → Tools has it on: the mode's layer is under it.
+  // Switched off in the chat before it was put in the mode, as a chat stores it where a layer under it has it on.
   setSessionTools(id, { off: ["codemode"], on: [] });
   await put(id, "code");
-  await sessions.client(id);
-  const { requests } = await say(id, "Hello");
-  const names = declared(requests[0]);
-  assert.ok(names.includes("bash"));
-  assert.ok(names.includes("tools"));
-  assert.ok(!names.includes("lazy_one"));
-  assert.ok(!names.includes("codemode"));
-  assert.equal((await lazyOf(id)).lazy, true);
-  // Off, it is not held: the chat's switches still save with it off, and switch it on, which holds it.
+  const codemode = await codemodeOf(id);
+  assert.deepEqual([codemode.enabled, codemode.byMode], [true, true]);
+  assert.deepEqual(sessionTools(id), { off: [], on: [] }, "the chat's own off does not count");
+  assert.ok(toolExceptions(["codemode"]).chats.some((row) => row.id === id), "listed with the code tool on");
+  assert.ok(!sessions.piOff(id).includes("codemode"));
+  await assert.rejects(sessions.setTools(id, ["codemode", "bash"]), CodemodeHeld);
+  assert.equal(getDb().prepare("SELECT tools_off FROM sessions WHERE id = ?").get(id).tools_off, "codemode", "kept, and nothing of the list written");
+
+  // Standard chosen before the first message: the mode holds it no more, and the chat's own off counts again.
+  await put(id, "standard");
+  assert.deepEqual(sessionTools(id), { off: ["codemode"], on: [] });
   assert.equal((await codemodeOf(id)).byMode, undefined);
-  await sessions.setTools(id, ["codemode", "bash"]);
-  await sessions.setTools(id, []);
-  assert.equal((await codemodeOf(id)).byMode, true);
-  await assert.rejects(sessions.setTools(id, ["codemode"]), CodemodeHeld);
+
+  // In Code mode again, the model is offered the code tool alone.
+  await put(id, "code");
+  const { requests } = await say(id, "Hello");
+  assert.deepEqual(declared(requests[0]), ["codemode"]);
+  assert.equal((await lazyOf(id)).lazy, undefined);
 });

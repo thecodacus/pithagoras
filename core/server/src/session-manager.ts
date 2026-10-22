@@ -11,7 +11,7 @@ import { agentAt } from "./agents.js";
 import { HEARTBEAT_ROLE } from "./pi/heartbeat-names.js";
 import path from "node:path";
 import type { Draft, PiClient, PiTool, PromptTaken } from "./pi/types.js";
-import { effectiveOff, exceptionsFor, heldOffUnshown, toolEnabled, toolSource, type ToolExceptions } from "./tool-policy.js";
+import { effectiveOff, exceptionsFor, heldOffUnshown, toolEnabled, toolSource } from "./tool-policy.js";
 import { scriptedMark } from "./tool-layers.js";
 import { unlisted } from "./mcp-offer.js";
 import { projectOf } from "./workspaces.js";
@@ -62,6 +62,7 @@ import {
   hasAnswer,
   chatSaid,
   modeOf,
+  modeHoldsCodemode,
   unsettledMessages,
   unansweredCommands,
   chatModel,
@@ -270,7 +271,7 @@ const hasRoutineTools = (session: SessionRow) =>
 const canAsk = (session: SessionRow) => asksQuestions(session, onChannel(session));
 
 /**
- * The chat's own switches turning the code tool off where its mode switches it on (codemodeHeld): refused. With a
+ * The chat's own switches turning the code tool off where its mode switches it on (modeHoldsCodemode): refused. With a
  * `code`, so that the page says it in its own language.
  */
 export class CodemodeHeld extends Error {
@@ -278,14 +279,6 @@ export class CodemodeHeld extends Error {
   constructor() {
     super("This chat's mode works through the code tool, so it stays on: start a chat in Standard mode to work without it.");
   }
-}
-
-/**
- * Whether the chat's mode switches the code tool on and the chat has it on: then its own switches cannot turn it off.
- * Any mode whose tools switch it on, whoever made the mode. `defaults` and `own` are the chat's, as for toolEnabled.
- */
-function codemodeHeld(session: SessionRow | undefined, defaults: string[], own: ToolExceptions): boolean {
-  return Boolean(modeOf(session?.mode)?.tools?.on.includes(CODEMODE_TOOL)) && toolEnabled(CODEMODE_TOOL, defaults, own);
 }
 
 /**
@@ -2797,7 +2790,7 @@ class SessionManager extends EventEmitter {
     // MCP server's is still behind `mcp`. Read from the running pi where there is one: its presentation was fixed as it started.
     const scripted = (client ? client.codemodeOnly : modeOf(session?.mode)?.codemode) && toolEnabled(CODEMODE_TOOL, defaults, exceptions);
     // Its switch cannot turn it off here (setTools): the page shows it on and says why.
-    const held = codemodeHeld(session, defaults, exceptions);
+    const held = modeHoldsCodemode(session?.mode);
     // An idle chat is shown what the portal has seen registered; the tool is not there for every kind of chat (see asksQuestions).
     const asks = session ? canAsk(session) : true;
     const shown: { name: string; source: string; package?: string | null; description?: string; inline?: true; cached?: true }[] = listed.length
@@ -2840,7 +2833,7 @@ class SessionManager extends EventEmitter {
     const session = getSession(sessionId);
     const held = sessionTools(sessionId);
     const defaults = toolDefaultsForSession(session);
-    if (wantedOff.includes(CODEMODE_TOOL) && codemodeHeld(session, defaults, held)) throw new CodemodeHeld();
+    if (wantedOff.includes(CODEMODE_TOOL) && modeHoldsCodemode(session?.mode)) throw new CodemodeHeld();
     const workspace = session?.workspace;
     const view = mcpView();
     // Not what the adapter no longer registers: the page did not show it, so it said nothing about it.
