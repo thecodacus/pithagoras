@@ -1242,3 +1242,33 @@ test("friday's database of version 8 is brought to this version in one start: vo
   assert.deepEqual([voice.voice, voice.table], [{ provider: "pithagoras-voice", vad: VAD, responseInstructions: "" }, false]);
   assert.deepEqual(voiceLeft(dir, "voice-service", "voices.json").map((v) => v.name), ["Aria"]);
 });
+
+test("a database of version 8 whose voice mode listened at the person's own addresses, and which ran Understory, leaves all three for their extensions in one start", async () => {
+  const dir = path.join(home, "both-from-8");
+  const own = { ...FRIDAY_VOICE, whisperUrl: OWN.whisper, sttModel: "my-model", breezeUrl: OWN.speech, runtime: "kokoro", kokoroVoice: "am_onyx" };
+  voiceOfV8(dir, { voice: own, ...UNDERSTORY_KEPT }, [ARIA]);
+  const d = new Database(path.join(dir, "portal.db"));
+  d.prepare("INSERT INTO project_agent (project, agent, understory_off) VALUES ('research', 'home', 1)").run();
+  d.close();
+  assert.match(await upgradedWith(dir, UNDERSTORY_ENTRY), new RegExp(`upgrading the database from version 8 to ${SCHEMA_VERSION}`));
+  const backups = backupsIn(path.join(dir, "backups"));
+  assert.equal(backups.length, 1, "one backup, of version 8");
+  assert.match(path.basename(backups[0]), /^portal-v8-\d{8}-\d{6}\.db$/);
+
+  const now = understoryIn(dir);
+  assert.deepEqual([now.version, now.fingerprint], [SCHEMA_VERSION, PINNED.fingerprint]);
+  assert.deepEqual(leftAt(dir), ["understory", "voice-addresses", "voice-service"]);
+  for (const [name, schema] of [["voice-service", 9], ["voice-addresses", 9], ["understory", 10]]) {
+    const { made: _made, ...about } = JSON.parse(readFileSync(path.join(dir, "handoff", name, "handoff.json"), "utf8"));
+    assert.deepEqual(about, { format: 1, name, schema }, name);
+  }
+  assert.deepEqual(voiceLeft(dir, "voice-service", "settings.json"), serviceOf(own));
+  assert.deepEqual(voiceLeft(dir, "voice-service", "voices.json").map((v) => v.name), ["Aria"]);
+  assert.deepEqual(voiceLeft(dir, "voice-addresses", "settings.json"), addressesOf(own));
+  assert.deepEqual(understoryLeft(dir, "settings.json"), UNDERSTORY_KEPT);
+  for (const key of Object.keys(UNDERSTORY_KEPT)) assert.equal(now.value(key), undefined, key);
+  assert.equal(now.value("guard_trusted_mcp_servers"), JSON.stringify(["understory"]));
+  assert.deepEqual(now.projects, [{ project: "research", agent: "home", memory_off: 1 }]);
+  const voice = voiceIn(dir);
+  assert.deepEqual([voice.voice, voice.table], [{ provider: "pithagoras-voice-servers", vad: VAD, responseInstructions: "" }, false]);
+});
