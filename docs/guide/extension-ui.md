@@ -87,7 +87,7 @@ While you work on it:
 | --- | --- |
 | A file of the browser half | Reload the page, or install the folder again by its path for every open page |
 | A file of the server half, its `chats.extend` factories among it | Install the folder again by its path |
-| The pi extension | Install the folder again by its path, or `/reload` in one chat |
+| The pi extension | Install the folder again by its path, or `/reload` in one chat: its `.ts` files, and its `.js` files where the package is not `"type": "module"`. Its other files need a restart of the portal |
 
 pi installs a folder by reference, so installing it again copies nothing: it
 starts the server half again where a file of it changed, swaps the browser half
@@ -773,13 +773,19 @@ given up on, with the reason beside the package in Settings → Extensions, and
 nothing else waits for it. One that crashes, an error of its code that nothing
 catches or a call of `process.exit()`, is stopped and held off, and the portal
 and its chats go on: see [When the server half crashes](#when-the-server-half-crashes).
-Each time it is started its files are read again: its module, and every file
-of its module's folder that it imports by a relative address (`./`, `../`) or a
-`file:` URL, as far down as the imports go. What it imports by a bare name (its
-dependencies in `node_modules`, Node's own modules), a file outside its
-module's folder, and what it loads with `require()` are read once for as long
-as the portal runs, as Node reads modules: after an update that changes those,
-restart the portal. See [What is loaded, and when](#what-is-loaded-and-when).
+Each time it is started at another revision, after a file of it changed (see
+[What is loaded, and when](#what-is-loaded-and-when)), its files are read
+again: its module, and every file of its module's folder that it imports by a
+relative address (`./`, `../`) or a `file:` URL, as far down as the imports go.
+Started again at the same revision (switched off and on, or after what it
+builds on started again), it runs the modules already loaded: its default export
+is called again, and what its modules keep at their top level is as it was.
+What it imports by a bare name (its dependencies in `node_modules`, Node's own
+modules), a file outside its module's folder, and a CommonJS file (a `.cjs`
+file, a `.js` file of a package that is not `"type": "module"`, or anything
+loaded with `require()`), imported or required, are read once for as long as
+the portal runs, as Node reads modules: after an update that changes those,
+restart the portal.
 
 | `portal.` | |
 | --- | --- |
@@ -2005,25 +2011,34 @@ A server half is started again when its revision changes, and its module and
 every file of its folder it imports by a relative address or a `file:` URL are
 loaded under that revision, as new modules: the half runs its files as they are
 now, and keeps nothing of the revision before but what it keeps itself
-([Where it keeps things](#where-it-keeps-things)). Node loads once, for as long
-as the portal runs, what it imports by a bare name (a dependency in
-`node_modules`, `node:fs`), a file outside its module's folder, and what it
-loads with `require()`: a change to those needs a restart of the portal. A
-server half whose module is at the package's root has all of the package as its
-folder, the web folder too, so a change to the browser half starts it again as
-well; a module in a folder of its own keeps the two apart. Node keeps every
-module it has loaded, so each revision a server half was started at stays in
-the portal's memory until the portal restarts.
+([Where it keeps things](#where-it-keeps-things)). Started again at the same
+revision, as when it is switched off and on, it runs the modules already loaded.
+Node loads once, for as long as the portal runs, what it imports by a bare name
+(a dependency in `node_modules`, `node:fs`), a file outside its module's
+folder, and a CommonJS file (a `.cjs` file, a `.js` file of a package that is
+not `"type": "module"`, or anything loaded with `require()`), whether imported
+or required: a change to those needs a restart of the portal. A server half
+whose module is at the package's root has all of the package as its folder,
+the web folder too, so a change to the browser half starts it again as well. A
+module in a folder of its own keeps the two apart, but what it then imports
+from the rest of the package, outside its folder (a file both halves use), is
+outside its revision and loaded once. Node keeps every module it has loaded, so
+each revision a server half was started at stays in the portal's memory until
+the portal restarts.
 
 A new revision of a server half that cannot start is off, with the reason
 beside the package in Settings → Extensions; the revision before it is not
-started again. Its files have been replaced already: only its server module
-would be the old one, beside the new files of its browser half and its pi
-extension.
+started again. Its files have been replaced already: only its server half's
+code already loaded would be the old one, beside the new files of its browser
+half and its pi extension.
 
-pi reads again the `.ts` and `.js` files a pi extension imports each time it
-loads it. `.mjs` and `.cjs` files it leaves to Node, which keeps them for as
-long as the process pi runs in: the portal's, where pi runs on the host.
+pi reads a pi extension's `.ts` files again each time it loads it, and its
+`.js` files where the package is not `"type": "module"`. A `.js` file of a
+`"type": "module"` package, the extension's entry too, and `.mjs` and `.cjs`
+files, it leaves to Node, which keeps them for as long as the process pi runs
+in: the portal's, where pi runs on the host. A change to those needs a restart
+of the portal. A pi extension whose own files are `.ts` files is read again
+whole.
 
 Installing, removing, updating or switching a package also loads the open chats
 again, for their pi to have the package's pi extension and what its server half
