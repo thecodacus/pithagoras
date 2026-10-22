@@ -1874,7 +1874,8 @@ portal.chats.extend((pi, chat) => {
   which `chat.mode` is in its chats (and in `chats.get` and `chats.list`). A
   chat in Standard mode has no `mode`; one in a mode of the portal's has its
   name (`"code"`), and one in a mode the person made `"custom/<id>"`. `id` is
-  lower-case letters, digits and `-`, one the package does not offer already;
+  lower-case letters, digits and `-`, starting with a letter or a digit, one the
+  package does not offer already;
   `label`, `description` and `confirm`, where there is one, are texts. Anything
   else throws a `TypeError`, and so does a package called `custom`, whose modes
   would be taken for the person's own.

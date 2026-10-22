@@ -317,7 +317,10 @@ export interface VoiceProvider {
 
 /** A mode a chat can be started in, which an extension offers: see `modes.provide`. */
 export interface ChatMode {
-  /** Its name among the package's modes: lower-case letters, digits and "-". A chat in it stores "<package>/<id>". */
+  /**
+   * Its name among the package's modes: lower-case letters, digits and "-", starting with a letter or a digit. A chat
+   * in it stores "<package>/<id>".
+   */
   id: string;
   /** What the picker above the message box calls it, in English: shown through the extension's own translations. */
   label: string;
@@ -493,8 +496,10 @@ export interface ServerPortal {
     /**
      * Offers a mode. Returns what a chat in it stores, "<package>/<id>", which this package's `chats.extend` factory
      * finds as `chat.mode`: what the mode does is the extension's to do there. It goes when this server half stops; a
-     * chat started in it keeps it, and has it again when the extension does. Throws for a wrong shape, or an id this
-     * extension offers already.
+     * chat started in it keeps it, and has it again when the extension does. Throws a TypeError for a wrong shape, an
+     * id this extension offers already, or a package named `custom` (its modes would read as the person's own,
+     * "custom/<id>"). Called after this server half has stopped, it offers nothing, with a line in the log, and still
+     * returns what a chat in the mode would store.
      */
     provide(mode: ChatMode): string;
   };
