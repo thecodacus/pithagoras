@@ -18,8 +18,10 @@ import { freePort, inProcessHome } from "./server-harness.mjs";
 // src/schema-version.ts (once for the release, not once for each change),
 // pin the new version and fingerprint here, and have an upgrade test for what
 // changed (below) that starts from a database made before it.
-const PINNED = { version: 10, fingerprint: "155cf58f87a19f0a102c8475bdceee87a98d9169c400d887a37411107f0a5ccf" };
-/** The schema of version 9, the one pinned before: a project's switch for the agent's memory named for Understory. */
+const PINNED = { version: 11, fingerprint: "d118d40ea237b90e58c0ef97d6f1cdcb5e876ed739c3e2bbc6684f74a8aa653a" };
+/** The schema of version 10, the one pinned before: chats with no mode, and no table of the modes the person made. */
+const V10_FINGERPRINT = "155cf58f87a19f0a102c8475bdceee87a98d9169c400d887a37411107f0a5ccf";
+/** The schema of version 9: a project's switch for the agent's memory named for Understory. */
 const V9_FINGERPRINT = "656225d48b5a69bf29eefe05e4e51928df1e1a8f7baab4c60dd40723978dd419";
 
 const home = inProcessHome("pithagoras-schema-");
@@ -27,10 +29,17 @@ const home = inProcessHome("pithagoras-schema-");
 const { SCHEMA_VERSION } = await import("../dist/schema-version.js");
 const { getDb } = await import("../dist/db.js");
 
-/** A database of the schema of version 9 at `file`, open: a fresh one, with the project's switch for the agent's memory named for Understory. */
-function freshAt9(file) {
+/** A database of the schema of version 10 at `file`, open: a fresh one, with no mode on a chat and no table of the person's modes. */
+function freshAt10(file) {
   getDb().exec(`VACUUM INTO '${file}'`);
   const d = new Database(file);
+  d.exec("ALTER TABLE sessions DROP COLUMN mode; DROP TABLE chat_modes;");
+  return d;
+}
+
+/** A database of the schema of version 9 at `file`, open: one of version 10, with the project's switch for the agent's memory named for Understory. */
+function freshAt9(file) {
+  const d = freshAt10(file);
   d.exec("ALTER TABLE project_agent RENAME COLUMN memory_off TO understory_off");
   return d;
 }
@@ -1228,11 +1237,12 @@ test("what Understory kept that cannot be left is kept for the next start, which
   assert.deepEqual(understoryLeft(dir, "settings.json"), UNDERSTORY_KEPT);
 });
 
-test("friday's database of version 8 is brought to this version in one start: voice mode is left for Voice, and Understory, which it never ran, leaves nothing and is trusted nowhere", async () => {
+test("friday's database of version 8 is brought to this version in one start: voice mode is left for Voice, Understory, which it never ran, leaves nothing and is trusted nowhere, and its chats are in Standard", async () => {
   const dir = path.join(home, "friday-from-8");
   voiceOfV8(dir, { voice: FRIDAY_VOICE, voice_gpu: "GPU-648bf6c5-346e-81f5-f155-dc8061172da3", voice_before_managed: { noSpeech: false } }, [ARIA]);
   const d = new Database(path.join(dir, "portal.db"));
   d.prepare("INSERT INTO project_agent (project, agent, understory_off) VALUES ('research', 'home', 1)").run();
+  d.prepare("INSERT INTO sessions (id, title, workspace, kind) VALUES ('c1', 'Kites', '/w/site', 'task')").run();
   d.close();
   assert.deepEqual(upgradeCheck(path.join(dir, "portal.db")), { needed: true, from: 8 });
   assert.match(await upgradedWith(dir), new RegExp(`upgrading the database from version 8 to ${SCHEMA_VERSION}`));
@@ -1248,6 +1258,7 @@ test("friday's database of version 8 is brought to this version in one start: vo
   const voice = voiceIn(dir);
   assert.deepEqual([voice.voice, voice.table], [{ provider: "pithagoras-voice", vad: VAD, responseInstructions: "" }, false]);
   assert.deepEqual(voiceLeft(dir, "voice-service", "voices.json").map((v) => v.name), ["Aria"]);
+  assert.deepEqual(modesIn(dir), { chats: [{ id: "c1", mode: null }], made: [] });
 });
 
 test("a database of version 8 whose voice mode listened at the person's own addresses, and which ran Understory, leaves all three for their extensions in one start", async () => {
@@ -1278,4 +1289,36 @@ test("a database of version 8 whose voice mode listened at the person's own addr
   assert.deepEqual(now.projects, [{ project: "research", agent: "home", memory_off: 1 }]);
   const voice = voiceIn(dir);
   assert.deepEqual([voice.voice, voice.table], [{ provider: "pithagoras-voice-servers", vad: VAD, responseInstructions: "" }, false]);
+});
+
+/** The modes of the chats in the upgraded database, and the modes the person made. */
+function modesIn(dir) {
+  const d = new Database(path.join(dir, "portal.db"), { readonly: true });
+  try {
+    return { chats: d.prepare("SELECT id, mode FROM sessions ORDER BY id").all(), made: d.prepare("SELECT * FROM chat_modes").all() };
+  } finally {
+    d.close();
+  }
+}
+
+test("a database of version 10 is backed up and given chat modes: every chat is in Standard, and there are no modes of the person's own", async () => {
+  const dir = path.join(home, "modes-from-10");
+  mkdirSync(dir, { recursive: true });
+  const d = freshAt10(path.join(dir, "portal.db"));
+  d.pragma("user_version = 10");
+  assert.equal(schemaFingerprint(d), V10_FINGERPRINT, "the schema of version 10");
+  const chat = d.prepare("INSERT INTO sessions (id, title, workspace, kind) VALUES (?, ?, ?, 'task')");
+  chat.run("c1", "Kites", "/w/site");
+  chat.run("c2", "Notes", "/w/notes");
+  d.close();
+  assert.deepEqual(upgradeCheck(path.join(dir, "portal.db")), { needed: true, from: 10 });
+  assert.match(await upgraded(dir), new RegExp(`upgrading the database from version 10 to ${SCHEMA_VERSION}`));
+  const backups = backupsIn(path.join(dir, "backups"));
+  assert.equal(backups.length, 1);
+  assert.match(path.basename(backups[0]), /^portal-v10-\d{8}-\d{6}\.db$/);
+
+  const now = new Database(path.join(dir, "portal.db"), { readonly: true });
+  assert.deepEqual([now.pragma("user_version", { simple: true }), schemaFingerprint(now)], [SCHEMA_VERSION, PINNED.fingerprint]);
+  now.close();
+  assert.deepEqual(modesIn(dir), { chats: [{ id: "c1", mode: null }, { id: "c2", mode: null }], made: [] });
 });

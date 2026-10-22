@@ -16,6 +16,7 @@ import { writeFileAtomic } from "./atomic-write.js";
 import { handoffRoot, leaveHandoff, moveFolderTo, moveTo } from "./handoff.js";
 import { RUNS_AS_PRIMARY } from "./pi/runs-as-primary.js";
 import { CODEMODE_TOOL } from "./pi/codemode.js";
+import { CORE_MODES, type ChatModeEntry } from "./chat-modes.js";
 import { SCHEMA_VERSION, dbFile } from "./schema-version.js";
 import { debugLog } from "./logs.js";
 import { filesOnOldCalls } from "./old-call-files.js";
@@ -77,6 +78,8 @@ export interface SessionRow {
   tools_off: string;
   /** And switched on against a default that has them off. */
   tools_on: string;
+  /** The mode it was started in (chat-modes.ts); null is Standard. */
+  mode: string | null;
 }
 
 /**
@@ -374,6 +377,25 @@ function schema(db: Database.Database): void {
       agent TEXT PRIMARY KEY,
       tools_off TEXT NOT NULL DEFAULT '',
       tools_on TEXT NOT NULL DEFAULT ''
+    );
+
+    -- The chat modes the person made (Settings → Modes): a chat in one stores "custom/<id>". Its tool layer is
+    -- exceptions to what the layers under it leave, as a project's are; codemode 1 has its chats work through the
+    -- code tool alone; instructions are said in its chats' system prompt; provider, model and thinking_level, where
+    -- set, are written into a chat as it is put in the mode.
+    CREATE TABLE IF NOT EXISTS chat_modes (
+      id TEXT PRIMARY KEY,
+      label TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      tools_off TEXT NOT NULL DEFAULT '',
+      tools_on TEXT NOT NULL DEFAULT '',
+      codemode INTEGER NOT NULL DEFAULT 0,
+      instructions TEXT NOT NULL DEFAULT '',
+      provider TEXT,
+      model TEXT,
+      thinking_level TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
     -- Background subagents started and not yet ended, kept as their events
@@ -992,6 +1014,8 @@ function migrate(d: Database.Database): void {
   if (!names.includes("reloads")) {
     d.exec("ALTER TABLE sessions ADD COLUMN reloads INTEGER NOT NULL DEFAULT 0");
   }
+  // The mode a chat works in (chat-modes.ts): NULL is Standard, which every chat before schema 11 was.
+  if (!names.includes("mode")) d.exec("ALTER TABLE sessions ADD COLUMN mode TEXT");
   // Versions kept before pi's file was kept as the part after a checked start:
   // one could not tell whether the conversation it would go back to was still
   // there. Only ever on a test deploy; and the reload markers stored then.
@@ -1302,6 +1326,7 @@ export function updateSession(
       | "pinned"
       | "auto_title"
       | "pi_session_file"
+      | "mode"
     >
   >
 ): void {
@@ -1424,6 +1449,23 @@ function placeOf(
   if (row.type !== "portal_prompt" || !(JSON.parse(row.payload) ?? {}).queued) return row.seq;
   return settled.taken.get(row.seq) ?? settled.unsent.get(row.seq) ?? Number.POSITIVE_INFINITY;
 }
+
+/** Whether a message or a command was ever sent in the chat: what fixes its mode. One whose messages were all removed has none again. */
+export function chatSaid(sessionId: string): boolean {
+  return Boolean(getDb().prepare("SELECT 1 FROM events WHERE session_id = ? AND type IN ('portal_prompt', 'portal_command') LIMIT 1").get(sessionId));
+}
+
+/** A chat's mode, as it stores it: none for Standard, and none for one that is not there now. */
+export function modeOf(stored: string | null | undefined): ChatModeEntry | undefined {
+  if (!stored) return undefined;
+  return CORE_MODES.find((mode) => mode.id === stored);
+}
+
+/** The tools off for a chat in `mode`, given those off under it: the mode's layer folded in, as each layer is. */
+const withMode = (off: string[], mode: string | null | undefined): string[] => {
+  const layer = modeOf(mode)?.tools;
+  return layer ? defaultsFor(off, layer) : off;
+};
 
 /** Whether the agent has answered in a chat: there is a conversation of its own to lose. */
 export function hasAnswer(sessionId: string): boolean {
@@ -2313,14 +2355,14 @@ function toolPolicy(names: string[]): ToolsPolicy {
 }
 
 /** Whether any of the policy's tools is on for a session; `exceptions` are the conversation's own, where the caller has them already. */
-export function toolsOnWith(session: Pick<SessionRow, "id" | "kind" | "routine_slug" | "workspace">, policy: ToolsPolicy, exceptions?: SessionTools): boolean {
+export function toolsOnWith(session: Pick<SessionRow, "id" | "kind" | "routine_slug" | "workspace" | "mode">, policy: ToolsPolicy, exceptions?: SessionTools): boolean {
   const routine = routineOf(session);
-  // Every layer under the conversation's own: its agent, its project, its routine (none where the routine is gone).
+  // Every layer under the conversation's own: its agent, its project, its routine (none where the routine is gone), its mode.
   // By what decides it, not by folder: the chats in one project's subfolders share it.
   const homes = (policy.homes ??= agentHomes());
-  const key = `${agentIdOf(session.workspace, homes) ?? ""}\u0000${projectOf(session.workspace) ?? ""}\u0000${routine ?? ""}`;
+  const key = `${agentIdOf(session.workspace, homes) ?? ""}\u0000${projectOf(session.workspace) ?? ""}\u0000${routine ?? ""}\u0000${session.mode ?? ""}`;
   let defaults = policy.projects.get(key);
-  if (!defaults) policy.projects.set(key, (defaults = toolDefaultsFor(session.workspace, routine, undefined, policy.defaultsOff, homes)));
+  if (!defaults) policy.projects.set(key, (defaults = withMode(toolDefaultsFor(session.workspace, routine, undefined, policy.defaultsOff, homes), session.mode)));
   const own = exceptions ?? sessionTools(session.id);
   return policy.names.some((name) => toolEnabled(name, defaults, own));
 }
@@ -2353,13 +2395,14 @@ export function toolExceptions(names: string[]): ToolsDiffer {
  *
  * Every one that says anything about tools is asked — not those whose switches
  * happen to mention one of the names, which misses the ones that differ through
- * their project or their agent.
+ * their project or their agent. And every one in a mode, which can differ through
+ * its mode's layer without having said anything itself.
  */
 function chatsDifferingWith(policy: ToolsPolicy, byDefault: boolean): SessionRow[] {
   const rows = getDb()
     .prepare(
       `SELECT * FROM sessions
-       WHERE COALESCE(tools_off, '') != '' OR COALESCE(tools_on, '') != ''
+       WHERE COALESCE(tools_off, '') != '' OR COALESCE(tools_on, '') != '' OR mode IS NOT NULL
        ORDER BY updated_at DESC`
     )
     .all() as SessionRow[];
@@ -2398,7 +2441,7 @@ function routinesDifferingWith(policy: ToolsPolicy): { slug: string; name: strin
   return rows.flatMap((row) => {
     // Where its runs work: its project's folder, or Home.
     const workspace = row.workspace ?? agentHomePath();
-    const allowed = toolsOnWith({ id: "", kind: "routine", routine_slug: row.slug, workspace }, policy, { off: [], on: [] });
+    const allowed = toolsOnWith({ id: "", kind: "routine", routine_slug: row.slug, workspace, mode: null }, policy, { off: [], on: [] });
     const unsaidOff = toolDefaultsFor(workspace, null, undefined, policy.defaultsOff, homes);
     const otherwise = policy.names.some((name) => toolEnabled(name, unsaidOff, { off: [], on: [] }));
     return allowed === otherwise ? [] : [{ slug: row.slug, name: row.name, allowed }];
@@ -2619,7 +2662,8 @@ export function setRoutineTools(slug: string, tools: SessionTools): SessionTools
  * 1. the portal-wide default (Settings → Tools);
  * 2. the agent whose home it is in, for its chats and its own runs;
  * 3. the project it is in;
- * 4. the routine, for its runs.
+ * 4. the routine, for its runs;
+ * 5. the chat's mode, for a chat (toolDefaultsForSession): a run has none.
  *
  * A chat's own switches are held against this, and stay the last word. An agent
  * and a project do not meet in practice — a project is under the workspace root,
@@ -2653,8 +2697,8 @@ export const routineOf = (session: Pick<SessionRow, "kind" | "routine_slug"> | u
   session?.kind === "routine" ? (session.routine_slug ?? null) : null;
 
 /** What a session starts with off, every layer under its own switches. */
-export function toolDefaultsForSession(session: Pick<SessionRow, "kind" | "routine_slug" | "workspace"> | undefined, homes?: AgentHome[]): string[] {
-  return toolDefaultsFor(session?.workspace, routineOf(session), undefined, undefined, homes);
+export function toolDefaultsForSession(session: Pick<SessionRow, "kind" | "routine_slug" | "workspace" | "mode"> | undefined, homes?: AgentHome[]): string[] {
+  return withMode(toolDefaultsFor(session?.workspace, routineOf(session), undefined, undefined, homes), session?.mode);
 }
 
 /**

@@ -19,6 +19,7 @@ import { dropMessage, SessionEditError, userTexts, type Scope } from "./pi/sessi
 import { AUDIO_MESSAGE_PREFIX } from "./pi/voice-first.js";
 import { isDialog, showsDialogs } from "./pi/ui-requests.js";
 import { ASK_QUESTION_TOOL, asksQuestions, describeAnswers, readAnswers, type Answers, type Question } from "./pi/ask-question.js";
+import { CODEMODE_TOOL } from "./pi/codemode.js";
 import { CHAT_QUESTION, CHAT_QUESTION_END, holdAnswers, openChatQuestion, openChatQuestions, takeHeldAnswers, type ChatQuestion, type QuestionOutcome } from "./questions.js";
 import { forgetTaint } from "./pi/guard.js";
 import { neutralise } from "./channels/framing.js";
@@ -58,6 +59,8 @@ import {
   sentMessage,
   sentMessages,
   hasAnswer,
+  chatSaid,
+  modeOf,
   unsettledMessages,
   unansweredCommands,
   chatModel,
@@ -1180,6 +1183,7 @@ class SessionManager extends EventEmitter {
       // each tool call, so a group conversation follows whoever is speaking.
       role: session.role,
       ...this.toolsFor(sessionId),
+      codemode: modeOf(session.mode)?.codemode ? "only" : undefined,
       subagentModel: () => sessionSubagentModel(sessionId) ?? undefined,
       // A chat that names no model is reopened on the model of its last answer,
       // and after a spoken turn on the voice model that would be the voice's.
@@ -2762,24 +2766,30 @@ class SessionManager extends EventEmitter {
     const exceptions = sessionTools(sessionId);
     const lazy = lazyMarks(view);
     const servers = view.servers;
+    // Where the chat works through the code tool and has it on, no tool is lazy (see lazyOf in pi/sdk-client.ts), but an
+    // MCP server's is still behind `mcp`. Read from the running pi where there is one: its presentation was fixed as it started.
+    const scripted = (client ? client.codemodeOnly : modeOf(session?.mode)?.codemode) && toolEnabled(CODEMODE_TOOL, defaults, exceptions);
     // An idle chat is shown what the portal has seen registered; the tool is not there for every kind of chat (see asksQuestions).
     const asks = session ? canAsk(session) : true;
     const shown: { name: string; source: string; package?: string | null; description?: string; inline?: true; cached?: true }[] = listed.length
       ? listed
       : shownTools(workspace, view).filter((tool) => asks || !(tool.name === ASK_QUESTION_TOOL && tool.inline));
     return {
-      tools: shown.map(({ name, source, package: pkg, description, inline, cached }) => ({
-        name,
-        ...(description !== undefined ? { description } : {}),
-        source: toolSource(name, source, servers),
-        // The portal's own tools are told from an extension's of the same name, so the page can group its code mode apart.
-        ...(inline ? { inline: true as const } : {}),
-        ...(cached ? { cached: true as const } : {}),
-        enabled: toolEnabled(name, defaults, exceptions),
-        defaultOn: !defaults.includes(name),
-        // Not offered one by one but found through the `tools` tool, or an MCP server's through `mcp`: the page says so beside the switch.
-        ...lazy({ name, source, package: pkg }),
-      })),
+      tools: shown.map(({ name, source, package: pkg, description, inline, cached }) => {
+        const mark = lazy({ name, source, package: pkg });
+        return {
+          name,
+          ...(description !== undefined ? { description } : {}),
+          source: toolSource(name, source, servers),
+          // The portal's own tools are told from an extension's of the same name, so the page can group its code mode apart.
+          ...(inline ? { inline: true as const } : {}),
+          ...(cached ? { cached: true as const } : {}),
+          enabled: toolEnabled(name, defaults, exceptions),
+          defaultOn: !defaults.includes(name),
+          // Not offered one by one but found through the `tools` tool, or an MCP server's through `mcp`: the page says so beside the switch.
+          ...(scripted && mark.mcp === undefined ? {} : mark),
+        };
+      }),
       live: Boolean(listed.length),
     };
   }
@@ -3036,6 +3046,26 @@ class SessionManager extends EventEmitter {
     } finally {
       if (this.releasing.get(sessionId) === release) this.releasing.delete(sessionId);
     }
+  }
+
+  /**
+   * Makes `change` to a chat that has not started, and lets its pi go if one is up or starting, so that the next start
+   * reads it: its tools, the server halves' factories and its prompt are all decided at a start. Nothing is lost: the
+   * chat has said nothing. False, with nothing changed, when a message or a command got there first.
+   *
+   * Held like an edit (withEdit): an edit of the chat's only message, or its undoing, can take that message's event
+   * away while it waits for pi to stop, and a change made then would stop the pi the edit relies on. Refused while an
+   * edit or a reload holds the chat (SessionEditError "busy"). A message or a start of pi that comes meanwhile waits
+   * for it (whenEditable), and so starts in what was changed.
+   */
+  async stopUnstarted(sessionId: string, change: () => void): Promise<boolean> {
+    return this.withEdit(sessionId, async () => {
+      await this.settleStart(sessionId);
+      if (chatSaid(sessionId) || this.isBusy(sessionId)) return false;
+      change();
+      await this.stop(sessionId);
+      return true;
+    });
   }
 
   /**

@@ -5,11 +5,13 @@
  * place and tested without either: a default that applies everywhere, and a
  * conversation that may disagree about any tool in either direction.
  *
- * There are three layers, each an exception to the one before it: the
- * portal-wide default, a project's exceptions to it, and a conversation's
- * exceptions to what the project leaves. The project's layer is folded into
- * the default with `defaultsFor`, so a conversation is judged against "what its
- * project starts it with" and nothing else here has to know projects exist.
+ * There are six layers, each an exception to the one before it: the
+ * portal-wide default, an agent's, a project's, a routine's for its runs, a
+ * chat's mode, and the conversation's own exceptions, which are the last word.
+ * All but the last are folded into one default with `defaultsFor`
+ * (`toolDefaultsFor` and `toolDefaultsForSession` in db.ts), so a conversation
+ * is judged against "what it starts with" and nothing else here has to know the
+ * layers exist.
  */
 
 /**

@@ -96,6 +96,7 @@ import { filesRouter } from "./api/files.js";
 import { holdsWork, unsavedRefusal, unsavedWork } from "./git.js";
 import { skillsRouter } from "./api/skills.js";
 import { featuresRouter } from "./api/features.js";
+import { modesRouter } from "./api/modes.js";
 import { modelLevels, modelRuntime, providersRouter } from "./api/providers.js";
 import { peopleRouter } from "./api/people.js";
 import { voiceRouter } from "./api/voice.js";
@@ -1727,6 +1728,7 @@ app.get("/api/sessions/:id/commands", async (req, res) => {
 app.use("/api", packagesRouter());
 app.use("/api", extensionsRouter());
 app.use("/api", featuresRouter());
+app.use("/api", modesRouter());
 app.use("/api", channelsRouter());
 app.use("/api", agentsRouter());
 app.use("/api", routinesRouter());

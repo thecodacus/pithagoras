@@ -28,3 +28,16 @@ test("so is a project's list, the write, and a project made with tools of its ow
   assert.equal(withTools.status, 400);
   assert.equal((await withTools.json()).code, "tools-unsupported");
 });
+
+test("a chat is offered no mode, and putting one in a mode is refused, when pi runs in a container", async () => {
+  const json = { "content-type": "application/json" };
+  const made = await fetch(`${base}/api/sessions`, { method: "POST", headers: json, body: JSON.stringify({}) });
+  assert.equal(made.status, 200, await made.clone().text());
+  const { id } = await made.json();
+  const list = await fetch(`${base}/api/sessions/${id}/modes`);
+  assert.equal(list.status, 200);
+  assert.deepEqual(await list.json(), { modes: [] });
+  const put = await fetch(`${base}/api/sessions/${id}/modes`, { method: "PUT", headers: json, body: JSON.stringify({ mode: "code" }) });
+  assert.equal(put.status, 409);
+  assert.deepEqual(await put.json(), { error: "Modes are for the chats you start on the portal's pages, where pi runs in the portal's own process." });
+});
