@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { createServer } from "node:http";
 import { mkdirSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import test, { mock } from "node:test";
@@ -7,9 +6,9 @@ import { fileURLToPath } from "node:url";
 import { inProcessHome } from "./server-harness.mjs";
 
 /**
- * Voice mode listens and speaks through an extension that offers it a place to (`portal.voice.provide`) where that one is
- * chosen, by the person or by the extension at their asking (`portal.voice.choose`): here the stand-in
- * tests/fixtures/extensions/speaker, which runs a recognition and a speech service of its own on loopback.
+ * Voice mode listens and speaks through the extension chosen as its source (`portal.voice.choose`), which offers it
+ * recognition, speech and its voices (`portal.voice.provide`): here the stand-in tests/fixtures/extensions/speaker,
+ * which answers in its own process.
  */
 const home = inProcessHome("voice-providers-");
 // The leases run out by the clock they are made with: one the tests can move on, set before they are made.
@@ -21,67 +20,41 @@ mock.timers.enable({ apis: ["setInterval"] });
 
 const { default: express } = await import("express");
 const host = await import("../dist/extension-host.js");
-const { voiceRouter, providerUse } = await import("../dist/api/voice.js");
-const { createSession, voiceSpeaks } = await import("../dist/db.js");
-const { createAgent, setVoice } = await import("../dist/agents.js");
+const { voiceRouter, providerUse, providerCall } = await import("../dist/api/voice.js");
+const { agentsRouter } = await import("../dist/api/agents.js");
+const { createSession, getSetting, putSetting, voiceSpeaks } = await import("../dist/db.js");
+const { createAgent } = await import("../dist/agents.js");
 
 const SPEAKER = fileURLToPath(new URL("../../../tests/fixtures/extensions/speaker/server.js", import.meta.url));
 let revs = 0;
 /** The stand-in's server half under a name, started anew each time it is given: another module, as an update would be. */
 const speaker = (name = "test-speaker") => ({ name, version: "0.1.0", file: SPEAKER, rev: `${statSync(SPEAKER).size.toString(36)}-${++revs}` });
 
-// The person's own addresses: a recognition service and a speech engine that say what reached them.
-const mine = [];
-const own = createServer((req, res) => {
-  const chunks = [];
-  req.on("data", (chunk) => chunks.push(chunk));
-  req.on("end", () => {
-    const body = Buffer.concat(chunks).toString("latin1");
-    const model = req.headers["content-type"] === "application/json" ? JSON.parse(body).model : body.match(/name="model"\r\n\r\n(.*)\r\n/)?.[1];
-    mine.push(`${req.url} ${model ?? ""}`.trim());
-    if (req.url === "/v1/audio/speech") {
-      res.setHeader("content-type", "audio/wav");
-      const wav = Buffer.alloc(48);
-      wav.write("RIFF"); wav.writeUInt32LE(40, 4); wav.write("WAVEfmt ", 8); wav.writeUInt32LE(16, 16); wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22);
-      wav.writeUInt32LE(24000, 24); wav.writeUInt32LE(48000, 28); wav.writeUInt16LE(2, 32); wav.writeUInt16LE(16, 34); wav.write("data", 36); wav.writeUInt32LE(4, 40);
-      return res.end(wav);
-    }
-    res.setHeader("content-type", "application/json");
-    res.end(JSON.stringify({ text: " Heard at home. " }));
-  });
-});
-await new Promise((resolve) => own.listen(0, "127.0.0.1", resolve));
-const MINE = `http://127.0.0.1:${own.address().port}`;
-
 const app = express();
 // As the portal does: one parser for everything but what reads its own.
 const json = express.json();
 app.use((req, res, next) => (req.path.startsWith("/api/x/") ? next() : json(req, res, next)));
 app.use("/api/x", host.extensionRoutes);
+app.use("/api", agentsRouter());
 app.use("/api", voiceRouter());
 const server = await new Promise((resolve) => {
   const s = app.listen(0, "127.0.0.1", () => resolve(s));
 });
 test.after(async () => {
   await host.stopServerHalves();
-  for (const s of [server, own]) {
-    s.closeAllConnections();
-    s.close();
-  }
+  server.closeAllConnections();
+  server.close();
   Date.now = realNow;
   mock.timers.reset();
 });
 const at = (p) => `http://127.0.0.1:${server.address().port}${p}`;
 const send = (method, p, body) => fetch(at(p), { method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
 const voice = async () => (await fetch(at("/api/voice"))).json();
-const saveVoice = async (patch) => {
-  const answer = await send("PUT", "/api/voice", { ...(await voice()), ...patch });
-  assert.equal(answer.status, 200, JSON.stringify(await answer.clone().json()));
-  return answer.json();
-};
 const asked = async (name = "test-speaker") => (await fetch(at(`/api/x/${name}/state`))).json();
 const set = (settings, name = "test-speaker") => send("PUT", `/api/x/${name}/settings`, settings);
 const choose = (chosen, name = "test-speaker") => send("POST", `/api/x/${name}/choose`, { chosen });
+const chosen = async (name = "test-speaker") => (await (await fetch(at(`/api/x/${name}/chosen`))).json()).chosen;
+const stopUsing = () => fetch(at("/api/voice/provider"), { method: "DELETE" });
 // A WAV of silence, as the page records one.
 const recording = () => {
   const wav = Buffer.alloc(76);
@@ -90,9 +63,12 @@ const recording = () => {
   return wav;
 };
 const transcribe = (query = "") => fetch(at(`/api/sessions/talk/voice/transcribe${query}`), { method: "POST", headers: { "content-type": "audio/wav" }, body: recording() });
-const speak = (session = "talk") => send("POST", `/api/sessions/${session}/voice/speech`, { text: "Hello there." });
+const speak = (session = "talk", signal) => fetch(at(`/api/sessions/${session}/voice/speech`), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: "Hello there." }), signal });
 const lease = (client, active) => send("POST", "/api/sessions/talk/voice/connection", { client, active });
-const NOT_RUNNING = "Voice mode listens and speaks through an extension that is not running: install or start it, or choose your own addresses in Settings → Add-ons → Voice";
+const agentVoice = (id, value) => send("PUT", `/api/agents/${id}/voice`, { voice: value });
+const NOT_RUNNING = "Voice mode listens and speaks through test-speaker, which is not running: install or start it in Settings → Extensions, or stop using it in Settings → Defaults → Voice mode";
+const NO_SOURCE = "Voice mode has no source: choose one on the page of an extension that provides it, in Settings → Extensions";
+const NOT_OFFERED = "Choose one of the voices voice mode's source offers now, or none";
 /** Waits for `ready`, and fails rather than waiting for ever. */
 async function until(ready, what) {
   for (let i = 0; !(await ready()); i++) {
@@ -100,149 +76,189 @@ async function until(ready, what) {
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
 }
+/** What console.error said while `work` ran, a line each. */
+async function logged(work) {
+  const lines = [];
+  const error = console.error;
+  console.error = (...args) => lines.push(args.map(String).join(" "));
+  try {
+    await work();
+  } finally {
+    console.error = error;
+  }
+  return lines;
+}
 
 const work = path.join(process.env.WORKSPACE_ROOT, "talk");
 mkdirSync(work, { recursive: true });
 createSession({ id: "talk", title: "Talk", workspace: work, executor: "host" });
-const OWN = { enabled: true, whisperUrl: `${MINE}/inference`, breezeUrl: `${MINE}/v1/audio/speech`, runtime: "kokoro", sttModel: "my-asr", instruction: "A calm voice." };
-assert.equal((await send("PUT", "/api/voice", OWN)).status, 200);
 await host.syncServerHalves([speaker()]);
 
-test("an extension offers voice mode a place to listen and speak, and it is used once chosen, with the person's own addresses as they were", async () => {
-  let shown = await voice();
-  assert.deepEqual([shown.provider, shown.providers], ["", [{ name: "test-speaker", label: "Speaker", ready: true, runtime: "kokoro" }]]);
-  assert.deepEqual(await (await transcribe()).json(), { text: "Heard at home." }, "not chosen: the person's own addresses");
-  assert.deepEqual(mine.splice(0), ["/inference my-asr"]);
-
-  await saveVoice({ enabled: false });
-  assert.equal((await choose(true)).status, 200);
-  shown = await voice();
-  // Chosen, and voice mode on; the addresses the person set up are kept as they were, for when they take voice mode back.
-  assert.deepEqual([shown.provider, shown.enabled, shown.speech], ["test-speaker", true, true]);
-  for (const [key, value] of Object.entries(OWN)) if (key !== "enabled") assert.equal(shown[key], value, key);
-  // A save answers as the settings are read, with the extensions there are to choose from.
-  assert.deepEqual(await saveVoice({}), shown);
-  assert.equal(voiceSpeaks(), true);
-
-  assert.deepEqual(await (await transcribe()).json(), { text: "Heard by the speaker." });
-  const spoken = await speak();
-  assert.equal(spoken.status, 200);
-  assert.equal(spoken.headers.get("content-type"), "audio/wav");
-  assert.deepEqual(await asked(), { uses: [], heard: ["speaker-asr"], spoken: ["kokoro"], voices: ["af_heart"] });
-  // The spoken error line is made with it too.
-  assert.equal((await send("POST", "/api/sessions/talk/voice/error-line", { text: "An error occurred." })).status, 200);
-  assert.deepEqual((await asked()).spoken, ["kokoro", "kokoro"]);
-  assert.equal((await fetch(at("/api/sessions/talk/voice/error-line?text=An%20error%20occurred."))).status, 200);
-  assert.deepEqual(mine, [], "nothing reached the person's own addresses");
-});
-
-test("dictation is the extension's too, unless the person set an address of their own for it, which keeps its model", async () => {
-  const heard = async () => (await asked()).heard.at(-1);
-  assert.deepEqual(await (await transcribe("?purpose=dictation")).json(), { text: "Heard by the speaker." });
-  assert.equal(await heard(), "speaker-asr");
-  // The recognition model the person named is for their own addresses: an extension that names none is sent none.
-  await set({ model: "" });
-  await transcribe();
-  assert.equal(await heard(), null);
-  await set({ model: "speaker-asr" });
-  // A model alone is for the person's own addresses: the extension is asked with its own.
-  await saveVoice({ dictationModel: "my-dictation" });
-  await transcribe("?purpose=dictation");
-  assert.equal(await heard(), "speaker-asr");
-  assert.deepEqual(mine, []);
-  // An address of their own for dictation is used for it, with the model named for it, or else the one they named for recognition.
-  await saveVoice({ dictationUrl: `${MINE}/dictation` });
-  assert.deepEqual(await (await transcribe("?purpose=dictation")).json(), { text: "Heard at home." });
-  await saveVoice({ dictationModel: "" });
-  await transcribe("?purpose=dictation");
-  assert.deepEqual(mine.splice(0), ["/dictation my-dictation", "/dictation my-asr"]);
-  // Voice mode itself still listens through the extension.
-  await transcribe();
-  assert.equal(await heard(), "speaker-asr");
-  await saveVoice({ dictationUrl: "" });
-});
-
-test("an extension that recognises speech alone: replies are not spoken, and dictation works", async () => {
-  await set({ speaks: "none" });
+test("with no source voice mode is off: a session's voice routes say so, and nothing speaks", async () => {
   const shown = await voice();
-  assert.deepEqual([shown.speech, shown.providers[0].runtime, shown.runtime], [false, "none", "kokoro"]);
-  const spoken = await speak();
-  assert.equal(spoken.status, 409);
-  assert.match((await spoken.json()).error, /Speech synthesis is not installed/);
-  assert.equal((await transcribe("?purpose=dictation")).status, 200);
-  // The rule for spoken replies is not in every conversation, though the person's own addresses speak.
+  assert.deepEqual([shown.provider, shown.label, shown.ready, shown.speech, shown.voices, shown.enabled], ["", undefined, false, true, [], false]);
+  for (const answer of [await transcribe(), await speak(), await lease("none", true)]) {
+    assert.equal(answer.status, 409);
+    assert.equal((await answer.json()).error, NO_SOURCE);
+  }
   assert.equal(voiceSpeaks(), false);
-  await set({ speaks: "kokoro" });
-  // And it is where the extension speaks, though the person's own addresses only listen.
-  await saveVoice({ runtime: "none", breezeUrl: "" });
-  assert.equal(voiceSpeaks(), true);
-  await saveVoice({ runtime: OWN.runtime, breezeUrl: OWN.breezeUrl });
+  assert.equal(await chosen(), false);
+  assert.deepEqual(await asked(), { uses: [], heard: [], spoken: [], aborted: 0, cancelled: 0 });
 });
 
-test("voice mode says that its extension is not running, rather than listen or speak at other addresses", async () => {
-  const refused = async (answer) => {
-    assert.equal(answer.status, 503);
-    assert.equal((await answer.json()).error, NOT_RUNNING);
+test("an extension makes itself the source and says whether it is; Stop using in Settings takes it away", async () => {
+  assert.equal((await choose(true)).status, 200);
+  const shown = await voice();
+  assert.deepEqual(
+    [shown.provider, shown.label, shown.ready, shown.speech, shown.voices, shown.enabled],
+    ["test-speaker", "Speaker", true, true, [{ id: "speaker-warm", name: "Warm" }], true],
+  );
+  assert.equal(await chosen(), true);
+  assert.equal(voiceSpeaks(), true);
+  const stopped = await stopUsing();
+  assert.equal(stopped.status, 200);
+  assert.deepEqual([(await stopped.json()).provider, await chosen(), voiceSpeaks()], ["", false, false]);
+  await choose(true);
+});
+
+test("a recording reaches the source with its purpose, and its words come back trimmed, timed as recognition", async () => {
+  const heard = await transcribe();
+  assert.deepEqual(await heard.json(), { text: "Heard by the speaker." });
+  assert.match(heard.headers.get("server-timing"), /^stt;dur=[\d.]+$/);
+  assert.equal((await transcribe("?purpose=dictation")).status, 200);
+  assert.deepEqual((await asked()).heard, [{ purpose: "voice", bytes: 76 }, { purpose: "dictation", bytes: 76 }]);
+  const bad = await fetch(at("/api/sessions/talk/voice/transcribe"), { method: "POST", headers: { "content-type": "audio/wav" }, body: "not a recording" });
+  assert.deepEqual([bad.status, (await bad.json()).error], [400, "A WAV recording is required"]);
+  assert.equal((await asked()).heard.length, 2, "and the source is not asked");
+});
+
+test("speech is passed on as 24 kHz PCM, as the source streams it or from the WAV it answers, in the agent's voice or the source's own choice", async () => {
+  const played = async (answer) => {
+    assert.equal(answer.status, 200);
+    assert.deepEqual(
+      ["content-type", "x-sample-rate", "x-sample-format", "cache-control", "x-voice-streaming"].map((name) => answer.headers.get(name)),
+      ["audio/pcm", "24000", "s16le", "no-store", null],
+    );
+    assert.match(answer.headers.get("server-timing"), /^tts_headers;dur=[\d.]+$/);
+    assert.deepEqual([...new Uint8Array(await answer.arrayBuffer())], [0, 0, 255, 127]);
   };
+  await played(await speak());
+  await set({ answer: "wav" });
+  await played(await speak());
+  await set({ answer: "pcm" });
+  assert.deepEqual((await asked()).spoken, [{ text: "Hello there.", voice: null }, { text: "Hello there.", voice: null }]);
+  // An agent's voice is the id it keeps, which the source is given.
+  const agent = createAgent({ name: "Speaker agent" });
+  assert.equal((await agentVoice(agent.id, "speaker-warm")).status, 200);
+  createSession({ id: "agent-talk", title: "Agent talk", workspace: agent.home, executor: "host" });
+  await played(await speak("agent-talk"));
+  assert.deepEqual((await asked()).spoken.at(-1), { text: "Hello there.", voice: "speaker-warm" });
+  assert.equal((await asked()).cancelled, 0, "nothing played is cancelled");
+});
+
+test("what voice mode cannot play is a 502 that names the source, and what it answered is let go of", async () => {
+  for (const [answer, error, cancels] of [
+    ["pcm48k", "Speaker answered audio at 48000 Hz: voice mode plays 24 kHz", 1],
+    ["wav22k", "Expected mono 24 kHz 16-bit audio from Speaker", 1],
+    ["text", "Speaker answered text/plain: voice mode plays audio/pcm or audio/wav", 1],
+    ["notOk", "Speaker answered HTTP 500", 1],
+    ["notResponse", "Speaker gave no audio", 0],
+    ["throws", "The speaker lost its voice", 0],
+  ]) {
+    await set({ answer });
+    const before = (await asked()).cancelled;
+    const refused = await speak();
+    assert.deepEqual([refused.status, (await refused.json()).error], [502, error], answer);
+    assert.equal((await asked()).cancelled - before, cancels, answer);
+  }
+  await set({ answer: "throws" });
+  const deaf = await transcribe();
+  assert.deepEqual([deaf.status, (await deaf.json()).error], [502, "The speaker could not hear"]);
+  await set({ answer: "pcm" });
+});
+
+test("a request that is closed ends the signal the source was given, and a source that does not answer is let go of after the limit", async () => {
+  await set({ answer: "hangs" });
+  const before = await asked();
+  const gone = new AbortController();
+  // Long enough for the signal to be seen to end by the close, and not so long that the test waits for the limit after.
+  providerCall.limitMs = 5000;
+  try {
+    const asking = speak("talk", gone.signal).catch(() => {});
+    await until(async () => (await asked()).spoken.length > before.spoken.length, "the phrase to be asked for");
+    gone.abort();
+    await asking;
+    await until(async () => (await asked()).aborted > before.aborted, "the signal to end");
+    providerCall.limitMs = 50;
+    const spoken = await speak();
+    assert.deepEqual([spoken.status, (await spoken.json()).error], [502, "It had not finished speaking after 0.05 seconds"]);
+    const heard = await transcribe();
+    assert.deepEqual([heard.status, (await heard.json()).error], [502, "It had not finished recognising speech after 0.05 seconds"]);
+  } finally {
+    providerCall.limitMs = 120_000;
+  }
+  await set({ answer: "pcm" });
+});
+
+test("a source that recognises speech alone: dictation works, and replies are not spoken", async () => {
+  await set({ speaks: false });
+  assert.equal((await voice()).speech, false);
+  assert.equal(voiceSpeaks(), false);
+  const spoken = await speak();
+  assert.deepEqual([spoken.status, (await spoken.json()).error], [409, "Voice mode's source recognises speech alone: replies are not spoken"]);
+  assert.equal((await transcribe("?purpose=dictation")).status, 200);
+  await set({ speaks: true });
+  assert.equal(voiceSpeaks(), true);
+});
+
+test("voice mode says that its source is not running, rather than use anything else; what it says it offers is checked", async () => {
   const check = async () => {
-    await refused(await transcribe());
-    await refused(await transcribe("?purpose=dictation"));
-    await refused(await speak());
-    await refused(await send("POST", "/api/sessions/talk/voice/error-line", { text: "An error occurred." }));
-    await refused(await fetch(at("/api/sessions/talk/voice/error-line?text=An%20error%20occurred.")));
-    await refused(await lease("waiting", true));
+    for (const answer of [await transcribe(), await transcribe("?purpose=dictation"), await speak(), await lease("waiting", true)]) {
+      assert.equal(answer.status, 503);
+      assert.equal((await answer.json()).error, NOT_RUNNING);
+    }
     // Voice mode is still offered: starting it says why it cannot. Nothing speaks meanwhile.
-    assert.equal((await voice()).speech, true);
+    const shown = await voice();
+    assert.deepEqual([shown.ready, shown.speech, shown.voices], [false, true, []]);
     assert.equal(voiceSpeaks(), false);
   };
-  // It cannot say where it is: the settings are read all the same, and what it said is logged.
-  const logged = [];
-  const error = console.error;
-  console.error = (...args) => logged.push(args.map(String).join(" "));
-  try {
-    await set({ throws: true });
-    const read = await fetch(at("/api/voice"));
-    assert.equal(read.status, 200);
-    assert.deepEqual((await read.json()).providers, [{ name: "test-speaker", label: "Speaker", ready: false }]);
-    await check();
-  } finally {
-    console.error = error;
+  // It cannot say what it offers: the settings are read all the same, and what it said is logged.
+  await set({ stateThrows: true });
+  let lines = await logged(check);
+  assert.ok(lines.some((line) => line.includes("[extension test-speaker] saying what it offers voice mode failed") && line.includes("The speaker lost track of its engines")), lines.join("\n"));
+  await set({ stateThrows: false });
+  // What it says is not an answer: the same, and what it said is logged.
+  for (const stateAnswers of [
+    { speaks: "yes", voices: [] },
+    { speaks: true },
+    { speaks: true, voices: [{ id: "", name: "Nameless" }] },
+    { speaks: true, voices: [{ id: "calm" }] },
+    { speaks: true, voices: [{ id: "calm", name: "Calm", builtIn: "yes" }] },
+    "here",
+  ]) {
+    await set({ stateAnswers });
+    lines = await logged(check);
+    assert.ok(lines.some((line) => line.includes("[extension test-speaker] saying what it offers voice mode failed") && line.includes(`state answered ${JSON.stringify(stateAnswers)}`)), lines.join("\n"));
   }
-  assert.ok(logged.some((line) => line.includes("[extension test-speaker] saying where voice mode listens and speaks failed") && line.includes("The speaker lost track of its services")), logged.join("\n"));
-  // What it says is not where it listens and speaks: the same, and what it said is logged.
-  console.error = (...args) => logged.push(args.map(String).join(" "));
-  try {
-    for (const answers of [{ speak: { url: `${MINE}/v1/audio/speech`, runtime: "kokoro" } }, { listen: { url: 5 } }, { listen: { url: `${MINE}/inference`, model: 5 } }, { listen: { url: `${MINE}/inference` }, speak: { url: `${MINE}/v1/audio/speech`, runtime: "wav" } }, "here"]) {
-      logged.length = 0;
-      await set({ throws: false, answers });
-      assert.deepEqual((await voice()).providers, [{ name: "test-speaker", label: "Speaker", ready: false }], JSON.stringify(answers));
-      await check();
-      assert.ok(logged.some((line) => line.includes("[extension test-speaker] saying where voice mode listens and speaks failed") && line.includes(`where answered ${JSON.stringify(answers)}`)), logged.join("\n"));
-    }
-  } finally {
-    console.error = error;
-  }
-  await set({ answers: null });
-  // Its services are down: it answers nothing for where.
-  await set({ throws: false, ready: false });
-  assert.deepEqual((await voice()).providers, [{ name: "test-speaker", label: "Speaker", ready: false }]);
+  // A voice of its own, which the portal shows in the source's own words, is said so; one the person named is not.
+  const offered = [{ id: "design", name: "Designed voice", builtIn: true }, { id: "calm", name: "Calm" }];
+  await set({ stateAnswers: { speaks: true, voices: offered } });
+  assert.deepEqual([(await voice()).ready, (await voice()).voices], [true, offered]);
+  await set({ stateAnswers: null });
+  // Its engines are down: it offers nothing.
+  await set({ ready: false });
   await check();
-  // Its server half is not running at all.
+  await set({ ready: true });
+  // Its server half is not running at all: it is still the source, by name.
   await host.syncServerHalves([]);
-  assert.deepEqual([(await voice()).provider, (await voice()).providers], ["test-speaker", []]);
+  assert.deepEqual([(await voice()).provider, (await voice()).label], ["test-speaker", undefined]);
   await check();
-  // A dictation address of the person's own does not need it.
-  await saveVoice({ dictationUrl: `${MINE}/dictation` });
-  assert.deepEqual(await (await transcribe("?purpose=dictation")).json(), { text: "Heard at home." });
-  assert.deepEqual(mine.splice(0), ["/dictation my-asr"], "and nothing else reached the person's addresses");
-  await saveVoice({ dictationUrl: "" });
   // Back, it is used again.
   await host.syncServerHalves([speaker()]);
   assert.equal((await transcribe()).status, 200);
-  assert.deepEqual(await asked(), { uses: [], heard: ["speaker-asr"], spoken: [], voices: [] });
 });
 
-test("the extension is told voice mode is in use at the first lease, and that it is not after the last, also one that ran out", async () => {
+test("the source is told voice mode is in use at the first lease, and that it is not after the last, also one that ran out", async () => {
   const uses = async () => (await asked()).uses;
   assert.deepEqual(await (await lease("a", true)).json(), { ok: true });
   assert.deepEqual(await uses(), [true]);
@@ -277,14 +293,12 @@ test("the extension is told voice mode is in use at the first lease, and that it
     const hung = await lease("e", true);
     assert.equal(hung.status, 503);
     assert.match((await hung.json()).error, /had not finished getting ready for voice mode/);
-    await choose(false);
-    assert.deepEqual(await (await lease("own", true)).json(), { ok: true });
-    assert.deepEqual(await (await lease("own", false)).json(), { ok: true });
   } finally {
     providerUse.limitMs = 120_000;
   }
   await set({ hangs: false });
-  await choose(true);
+  assert.deepEqual(await (await lease("e", true)).json(), { ok: true });
+  assert.deepEqual(await (await lease("e", false)).json(), { ok: true });
 });
 
 test("a server half started anew while voice mode is in use is told so again, and is the one told that it is no longer used", async () => {
@@ -305,37 +319,47 @@ test("a server half started anew while voice mode is in use is told so again, an
   assert.deepEqual(told, [`test-speaker#${first} true`, `test-speaker#${second} true`, `test-speaker#${second} false`, `test-speaker#${second} true`, `test-speaker#${third} false`]);
 });
 
-test("every voice session takes a lease, also at the person's own addresses, where nothing is loaded for it", async () => {
-  await choose(false);
-  assert.equal((await voice()).provider, "");
-  const before = (await asked()).uses;
-  assert.deepEqual(await (await lease("own", true)).json(), { ok: true });
-  assert.deepEqual(await (await lease("own", false)).json(), { ok: true });
-  assert.deepEqual((await asked()).uses, before, "the extension that is not chosen is told nothing");
-  assert.deepEqual(mine, []);
+test("a lease asked for while there was a source, and none by the time it is its turn, is refused and holds nothing", async () => {
+  // The first lease waits on the source getting ready; the second, asked for meanwhile, waits behind it.
+  await set({ hangs: true });
+  providerUse.limitMs = 300;
+  try {
+    const first = lease("r1", true);
+    const second = lease("r2", true);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.equal((await stopUsing()).status, 200);
+    assert.equal((await first).status, 503);
+    assert.equal((await second).status, 503);
+  } finally {
+    providerUse.limitMs = 120_000;
+  }
+  await set({ hangs: false });
+  await choose(true);
+  // Neither holds a lease: the last one now is the last one there is.
+  const before = (await asked()).uses.length;
+  await lease("r3", true);
+  await lease("r3", false);
+  assert.deepEqual((await asked()).uses.slice(before), [true, false]);
 });
 
-test("an extension gives voice mode back only where it is the source, and a person's choice of one that is not running stays", async () => {
+test("an extension stops being the source only where it is; a source that is not running stays chosen", async () => {
   await host.syncServerHalves([speaker(), speaker("other-speaker")]);
-  assert.deepEqual((await voice()).providers.map((p) => p.name).sort(), ["other-speaker", "test-speaker"]);
   await choose(true);
   await choose(false, "other-speaker");
-  assert.equal((await voice()).provider, "test-speaker");
+  assert.deepEqual([(await voice()).provider, await chosen(), await chosen("other-speaker")], ["test-speaker", true, false]);
   await choose(true, "other-speaker");
-  assert.equal((await voice()).provider, "other-speaker");
+  assert.deepEqual([(await voice()).provider, await chosen(), await chosen("other-speaker")], ["other-speaker", false, true]);
   await choose(false);
   assert.equal((await voice()).provider, "other-speaker");
   await choose(false, "other-speaker");
-  const shown = await voice();
-  // Back at the person's own addresses; voice mode is left as it was.
-  assert.deepEqual([shown.provider, shown.enabled, shown.whisperUrl], ["", true, OWN.whisperUrl]);
-  // The person chooses by name: any extension's, running or not, and nothing that is not a package's name.
-  assert.equal((await saveVoice({ provider: "@someone/voice" })).provider, "@someone/voice");
-  for (const provider of ["../voice", "two words", 42]) assert.equal((await send("PUT", "/api/voice", { ...(await voice()), provider })).status, 400, String(provider));
-  await saveVoice({ provider: "" });
+  assert.deepEqual([(await voice()).provider, (await voice()).enabled], ["", false]);
+  await choose(true, "other-speaker");
+  await host.syncServerHalves([speaker()]);
+  assert.deepEqual([(await voice()).provider, (await voice()).ready], ["other-speaker", false]);
+  await choose(true);
 });
 
-test("the source changing while voice mode is in use: the one before is told it is no longer used, whether another or the person's own addresses take over", async () => {
+test("the source changing while voice mode is in use: the one before is told it is no longer used, at the next heartbeat or when the lease runs out", async () => {
   const told = globalThis.speakerTold;
   const mainSpeaker = speaker();
   await host.syncServerHalves([mainSpeaker]);
@@ -352,43 +376,53 @@ test("the source changing while voice mode is in use: the one before is told it 
   await host.syncServerHalves([mainSpeaker, speaker("other-speaker")]);
   const again = globalThis.speakerInstances;
   await lease("x", true);
-  // The person's own addresses chosen meanwhile: the extension is told at the next heartbeat, not when voice mode ends.
-  await choose(false, "other-speaker");
-  await lease("x", true);
-  assert.deepEqual(told, [`test-speaker#${one} true`, `other-speaker#${other} true`, `test-speaker#${one} false`, `other-speaker#${again} true`, `other-speaker#${again} false`]);
-  await lease("x", false);
-  assert.equal(told.length, 5, "and nothing more as it ends");
+  assert.deepEqual(told, [`test-speaker#${one} true`, `other-speaker#${other} true`, `test-speaker#${one} false`, `other-speaker#${again} true`]);
+  // Stopped using meanwhile: the session's voice routes are closed, and the lease runs out.
+  await stopUsing();
+  assert.equal((await lease("x", true)).status, 409);
+  later += 76_000;
+  mock.timers.tick(30_000);
+  await until(() => told.length === 5, "the lease that ran out to be given back");
+  assert.equal(told[4], `other-speaker#${again} false`);
+  await choose(true);
 });
 
-test("an extension that speaks with Chatterbox, chosen, is given a language it speaks, and the settings are held to what it can speak with", async () => {
-  await set({ speaks: "chatterbox" });
-  await saveVoice({ language: "auto" });
+test("a save of voice mode's settings keeps the source and every setting it does not name, and Stop using does too", async () => {
+  const saved = () => JSON.parse(getSetting("voice"));
+  // As the upgrade keeps them where it could not leave them yet: fields voice mode does not read any more.
+  putSetting("voice", JSON.stringify({ ...saved(), whisperUrl: "http://kept.example.test/inference", enabled: true }));
+  const answer = await send("PUT", "/api/voice", { provider: "other-speaker", responseInstructions: "Answer briefly." });
+  assert.equal(answer.status, 200);
+  const shown = await answer.json();
+  assert.deepEqual([shown.provider, shown.responseInstructions, shown.whisperUrl], ["test-speaker", "Answer briefly.", undefined]);
+  assert.deepEqual([saved().provider, saved().responseInstructions, saved().whisperUrl, saved().enabled], ["test-speaker", "Answer briefly.", "http://kept.example.test/inference", true]);
+  const refused = await send("PUT", "/api/voice", { vad: { redemptionMs: 0 } });
+  assert.equal(refused.status, 400);
+  assert.equal(saved().responseInstructions, "Answer briefly.", "a refused save changes nothing");
+  await stopUsing();
+  assert.deepEqual([saved().provider, saved().whisperUrl], ["", "http://kept.example.test/inference"]);
+  putSetting("voice", JSON.stringify({ provider: "" }));
   await choose(true);
-  assert.deepEqual([(await voice()).language, (await voice()).provider], ["en", "test-speaker"]);
-  await saveVoice({ language: "de", provider: "" });
-  await choose(true);
-  assert.equal((await voice()).language, "de");
-  // Saved while it is the source, as at the person's own Chatterbox: a language it speaks, and a voice with a recording.
-  for (const [patch, error] of [[{ language: "auto" }, /needs an input language/], [{}, /reference clone/]]) {
-    const refused = await send("PUT", "/api/voice", { ...(await voice()), ...patch });
-    assert.equal(refused.status, 400);
-    assert.match((await refused.json()).error, error);
-  }
-  // The person's own addresses speak with Kokoro, which has neither rule.
-  await saveVoice({ provider: "" });
-  await set({ speaks: "kokoro" });
 });
 
-test("an agent's own Kokoro voice is spoken with where the extension speaks Kokoro, whatever the person's own addresses speak with", async () => {
-  await saveVoice({ runtime: "breeze" });
-  const agent = createAgent({ name: "Speaker agent" });
-  setVoice(agent.id, "am_onyx");
-  createSession({ id: "agent-talk", title: "Agent talk", workspace: agent.home, executor: "host" });
+test("an agent's voice is one its source offers now, or the source's own choice; any other is refused, also while there is no source or it is not running", async () => {
+  const agent = createAgent({ name: "Picky" });
+  const refused = async (value) => {
+    const answer = await agentVoice(agent.id, value);
+    assert.deepEqual([answer.status, (await answer.json()).error], [400, NOT_OFFERED], String(value));
+  };
+  assert.equal((await (await agentVoice(agent.id, "speaker-warm")).json()).voice, "speaker-warm");
+  await refused("elsewhere");
+  assert.equal((await (await agentVoice(agent.id, "")).json()).voice, "");
+  const wrong = await agentVoice(agent.id, 5);
+  assert.deepEqual([wrong.status, (await wrong.json()).error], [400, "Choose a voice"]);
+  await set({ ready: false });
+  await refused("speaker-warm");
+  await set({ ready: true });
+  await stopUsing();
+  await refused("speaker-warm");
+  assert.equal((await agentVoice(agent.id, "")).status, 200);
   await choose(true);
-  assert.equal((await speak("agent-talk")).status, 200);
-  assert.equal((await asked()).voices.at(-1), "am_onyx");
-  await choose(false);
-  await saveVoice({ runtime: OWN.runtime });
 });
 
 test("a server half is told what it got wrong", async () => {
@@ -397,12 +431,14 @@ test("a server half is told what it got wrong", async () => {
   const file = path.join(dir, "server.js");
   writeFileSync(file, `export default function (portal) {
     globalThis.refused = [];
-    for (const given of [undefined, {}, { label: "No where" }, { label: "Bad use", where: () => undefined, use: true }]) {
-      try { portal.voice.provide(given); } catch (e) { globalThis.refused.push(e.constructor.name); }
+    const offered = { label: "Wrong", state: () => undefined, transcribe: async () => "", speak: async () => new Response() };
+    for (const given of [undefined, {}, { label: "No state" }, { ...offered, state: undefined }, { ...offered, transcribe: undefined }, { ...offered, speak: undefined }, { ...offered, use: true }]) {
+      try { portal.voice.provide(given); } catch (e) { globalThis.refused.push(e.message); }
     }
-    try { portal.voice.choose("yes"); } catch (e) { globalThis.refused.push(e.constructor.name); }
+    try { portal.voice.choose("yes"); } catch (e) { globalThis.refused.push(e.message); }
   }\n`);
   await host.syncServerHalves([{ name: "wrong", version: "1.0.0", file, rev: "1" }]);
-  assert.deepEqual(globalThis.refused, ["TypeError", "TypeError", "TypeError", "TypeError", "TypeError"]);
-  assert.deepEqual((await voice()).providers, []);
+  const shape = "provide takes { label, state, transcribe, speak, use? }: what it is called, what it offers now, how it recognises and speaks, and what it is told as voice mode is used";
+  assert.deepEqual(globalThis.refused, [...Array(7).fill(shape), "choose takes true, to be voice mode's source, or false, to stop being it"]);
+  assert.deepEqual([...host.voiceProviders().keys()], []);
 });

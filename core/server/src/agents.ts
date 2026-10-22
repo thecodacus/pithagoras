@@ -8,8 +8,6 @@ import { agentHomePath } from "./agent-home.js";
 import { AGENT_NAME_FILE as NAME_FILE } from "./pi/context-files.js";
 import { isWithinText } from "./within.js";
 import { normalizeOrb, type OrbStyle } from "./orb-style.js";
-import { readVoice } from "./voice-presets.js";
-import { isKokoroVoice } from "./kokoro-voices.js";
 
 /**
  * The agents, each a home folder of its own with its own SOUL.md,
@@ -27,7 +25,7 @@ export interface Agent {
   home: string;
   /** Its avatar as stored: see orbOf. */
   orb: string | null;
-  /** The voice it speaks with: a voice library id or "design"; null is the one in the voice settings. */
+  /** The voice it speaks with: an id from the voices voice mode's source offers; null is the source's own choice. */
   voice: string | null;
   /** How often it looks around on its own, in minutes; null is never. See heartbeat.ts. */
   heartbeat_minutes: number | null;
@@ -221,20 +219,13 @@ export function setOrb(id: string, style: unknown): OrbStyle {
 }
 
 /**
- * The voice it speaks with in voice mode: "design", a voice in the library, or
- * "" for the one chosen in the voice settings.
+ * The voice it speaks with in voice mode: one of `offered`, the ids of the voices voice mode's source offers now
+ * (undefined while there is none, or it is not running), or "" for the source's own choice.
  */
-export function setVoice(id: string, voice: unknown): Agent {
+export function setVoice(id: string, voice: unknown, offered: readonly string[] | undefined): Agent {
   if (!getAgent(id)) throw new AgentError("No such agent", 404);
   if (typeof voice !== "string") throw new AgentError("Choose a voice", 400);
-  // One of Kokoro's own voices names no library entry.
-  if (voice && voice !== "design" && !isKokoroVoice(voice)) {
-    try {
-      readVoice(voice);
-    } catch {
-      throw new AgentError("That voice is not in the voice library", 400);
-    }
-  }
+  if (voice && !offered?.includes(voice)) throw new AgentError("Choose one of the voices voice mode's source offers now, or none", 400);
   getDb().prepare("UPDATE agents SET voice = ? WHERE id = ?").run(voice || null, id);
   return getAgent(id)!;
 }

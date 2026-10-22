@@ -6,13 +6,12 @@ import { CONTAINER } from "./service.mts";
 
 /**
  * Uninstalling the voice service from its page, against Docker's fake daemon: the container goes, the volume with the
- * downloads stays unless the person says it goes too, and voice mode goes back to the person's own addresses where it
- * listened and spoke through the service, which are as they were all along. No GPU, no image and no container of this
- * machine is touched.
+ * downloads stays unless the person says it goes too, and voice mode has no source where it listened and spoke through
+ * the service. No GPU, no image and no container of this machine is touched.
  */
 
 inProcessHome("pithagoras-voice-uninstall-");
-const { machine, at, api, docker: daemon } = await serveVoice();
+const { machine, at, api, db, docker: daemon } = await serveVoice();
 const { setting } = await import("../src/server/store.ts");
 
 const VOLUME = "pithagoras_voice-models";
@@ -20,13 +19,8 @@ const json = { "content-type": "application/json" };
 const state = async () => (await fetch(`${at}/state`)).json();
 const post = (route: string, body: unknown = {}) => fetch(`${at}${route}`, { method: "POST", headers: json, body: JSON.stringify(body) });
 const voice = async () => (await fetch(`${api}/voice`)).json();
-const saveVoice = async (patch: Record<string, unknown>) => {
-  const answer = await fetch(`${api}/voice`, { method: "PUT", headers: json, body: JSON.stringify({ ...(await voice()), ...patch }) });
-  assert.equal(answer.status, 200, JSON.stringify(await answer.clone().json()));
-};
-// A speech recognition server and a speech server the person runs themselves.
-const OWN = { enabled: true, whisperUrl: "http://stt.example.test:9000/inference", breezeUrl: "http://tts.example.test:9001/v1/audio/speech", instruction: "A calm voice.", runtime: "breeze", sttModel: "my-model", dictationModel: "my-dictation", dictationUrl: "http://dictate.example.test:9002/inference", voice: "design", language: "de" };
-const fields = (c: any) => ({ enabled: c.enabled, provider: c.provider, runtime: c.runtime, whisperUrl: c.whisperUrl, breezeUrl: c.breezeUrl, sttModel: c.sttModel, dictationModel: c.dictationModel, dictationUrl: c.dictationUrl });
+/** Voice mode's source, as its settings keep it. */
+const useSource = (provider: string) => db.putSetting("voice", JSON.stringify({ provider }));
 const RECOGNITION_ONLY = { tts: "none", asr: "whisper", asrModel: "base" };
 /** Installed from the page, recognition alone (no GPU needed), and up: voice mode then listens through it. */
 const install = async () => {
@@ -37,12 +31,12 @@ const install = async () => {
 const reset = async () => {
   machine.reset();
   machine.hostGpus(null);
-  await saveVoice({ ...OWN, provider: "" });
+  useSource("");
 };
 /** Whether the voice container, and the volume with the downloads, are gone. */
 const removed = () => ({ container: machine.voice() === undefined, volume: !daemon.volumes.some((v) => v.Name === VOLUME) });
 
-test("uninstall removes the container, keeps the downloads, and gives voice mode back to the person's own addresses as they were", async () => {
+test("uninstall removes the container, keeps the downloads, and voice mode has no source after", async () => {
   await reset();
   await install();
   assert.equal((await voice()).provider, "pithagoras-voice");
@@ -53,10 +47,7 @@ test("uninstall removes the container, keeps the downloads, and gives voice mode
   // A running container is stopped, then removed; the volume with the downloads is not touched.
   assert.equal(stops, 1);
   assert.deepEqual(removed(), { container: true, volume: false });
-  assert.deepEqual(fields(await voice()), { ...fields(OWN), provider: "" });
-  // The voice, the language and the speech detection are as they were: voice mode's own.
-  const back = await voice();
-  assert.deepEqual([back.voice, back.language, back.instruction], ["design", "de", "A calm voice."]);
+  assert.equal((await voice()).provider, "");
   // The page shows what a portal that never installed it shows, and Install works again.
   const now = await state();
   assert.deepEqual([now.available, now.state, now.busy, now.error], [true, "absent", false, ""]);
@@ -65,14 +56,14 @@ test("uninstall removes the container, keeps the downloads, and gives voice mode
   assert.equal((await voice()).provider, "pithagoras-voice");
 });
 
-test("voice mode at the person's own addresses, or at another extension, is not touched by an uninstall", async () => {
+test("voice mode with no source, or with another extension's, is not touched by an uninstall", async () => {
   await reset();
   await install();
-  await saveVoice({ provider: "" });
+  useSource("");
   assert.equal((await post("/uninstall")).status, 200);
-  assert.deepEqual(fields(await voice()), { ...fields(OWN), provider: "" });
+  assert.equal((await voice()).provider, "");
   await install();
-  await saveVoice({ provider: "test-speaker" });
+  useSource("test-speaker");
   assert.equal((await post("/uninstall")).status, 200);
   assert.equal((await voice()).provider, "test-speaker");
 });

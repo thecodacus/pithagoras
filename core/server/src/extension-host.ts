@@ -458,10 +458,10 @@ export function setChatBridge(bridge: { tell: typeof tellChat; offers: typeof to
   reloadChats = bridge.reload;
   liveModel = bridge.model;
 }
-/** How a server half makes itself voice mode's source (`voice.choose`): the voice settings are the voice routes', which import the host. */
-let chooseVoice: (name: string, chosen: boolean) => void = () => {};
-export function setVoiceChooser(choose: typeof chooseVoice): void {
-  chooseVoice = choose;
+/** How a server half chooses voice mode's source, and asks which it is: the voice settings are the voice routes', which import the host. */
+let voiceSource: { choose(name: string, chosen: boolean): void; chosen(): string } = { choose: () => {}, chosen: () => "" };
+export function setVoiceChooser(source: typeof voiceSource): void {
+  voiceSource = source;
 }
 
 function whoOf(chatId: string) {
@@ -540,16 +540,31 @@ function portalFor(ext: Running): ServerPortal {
     },
     voice: {
       provide(provider) {
-        if (typeof provider?.label !== "string" || typeof provider.where !== "function" || (provider.use !== undefined && typeof provider.use !== "function")) {
-          throw new TypeError("provide takes { label, where, use? }: what it is called, where it listens and speaks now, and what it is told as voice mode is used");
+        if (
+          typeof provider?.label !== "string" ||
+          typeof provider.state !== "function" ||
+          typeof provider.transcribe !== "function" ||
+          typeof provider.speak !== "function" ||
+          (provider.use !== undefined && typeof provider.use !== "function")
+        ) {
+          throw new TypeError(
+            "provide takes { label, state, transcribe, speak, use? }: what it is called, what it offers now, how it recognises and speaks, and what it is told as voice mode is used",
+          );
         }
         // Asked by voice mode as the extension's code.
-        ext.voice = { ...provider, where: () => scope.run(ext, () => provider.where()), use: async (inUse) => scope.run(ext, () => provider.use?.(inUse)) };
+        ext.voice = {
+          label: provider.label,
+          state: () => scope.run(ext, () => provider.state()),
+          transcribe: (wav, options) => scope.run(ext, () => provider.transcribe(wav, options)),
+          speak: (text, options) => scope.run(ext, () => provider.speak(text, options)),
+          use: async (inUse) => scope.run(ext, () => provider.use?.(inUse)),
+        };
       },
       choose(chosen) {
-        if (typeof chosen !== "boolean") throw new TypeError("choose takes true, to be voice mode's source, or false, to give it back");
-        chooseVoice(name, chosen);
+        if (typeof chosen !== "boolean") throw new TypeError("choose takes true, to be voice mode's source, or false, to stop being it");
+        voiceSource.choose(name, chosen);
       },
+      chosen: () => voiceSource.chosen() === name,
     },
     extensions: {
       use(of) {

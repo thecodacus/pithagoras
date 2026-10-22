@@ -2,75 +2,76 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { inProcessHome } from "../../../tests/helpers.mts";
 import { serveVoice } from "./portal.mts";
+import { KOKORO_VOICES } from "../src/kokoro-voices.ts";
 
 /**
- * The voice service as voice mode's source (`portal.voice.provide`): where it listens and speaks while it runs, its
- * speech model loaded while voice mode uses it, and the source chosen when the person asks for it on the service's page
- * or a setup they started has come up. Through the portal's own voice routes, as voice mode reaches it.
+ * The voice service as voice mode's source (`portal.voice.provide`): what it offers while it runs, its speech model
+ * loaded while voice mode uses it, and the source chosen when the person asks for it on the service's page or a setup
+ * they started has come up. Through the portal's own voice routes, as voice mode reaches it.
  */
 
 inProcessHome("pithagoras-voice-provider-");
 const { machine, at, api, db, host, halves } = await serveVoice();
-const { where, maintain } = await import("../src/server/provider.ts");
+const { state: offers, maintain } = await import("../src/server/provider.ts");
 const { putSettings, setting } = await import("../src/server/store.ts");
 
 const json = { "content-type": "application/json" };
 const state = async () => (await fetch(`${at}/state`)).json();
 const voice = async () => (await fetch(`${api}/voice`)).json();
-const saveVoice = async (patch: Record<string, unknown>) => {
-  const answer = await fetch(`${api}/voice`, { method: "PUT", headers: json, body: JSON.stringify({ ...(await voice()), ...patch }) });
-  assert.equal(answer.status, 200, JSON.stringify(await answer.clone().json()));
-};
+/** Voice mode's source, as its settings keep it. */
+const useSource = (provider: string) => db.putSetting("voice", JSON.stringify({ provider }));
 const lease = (client: string, active: boolean) => fetch(`${api}/sessions/talk/voice/connection`, { method: "POST", headers: json, body: JSON.stringify({ client, active }) });
 /** A voice container an earlier portal made for these engines, running on the portal's loopback. */
 const running = (recipe: string) => machine.putVoice({ Labels: { "pithagoras.addon": "voice", "pithagoras.voice-network": "shared-v1", "pithagoras.voice-recipe": recipe }, HostConfig: { NetworkMode: "container:portal-one" }, State: "running" });
 const models = () => machine.voiceProcesses.models.map(({ url, body }) => `${url.replace("http://127.0.0.1:", "")} ${(body as { id: string }).id}`);
-// The person's own addresses: a portal with nothing set up, and voice mode on.
-const OWN = { whisperUrl: "http://127.0.0.1:8178/inference", breezeUrl: "http://127.0.0.1:7860/v1/audio/speech", runtime: "breeze" };
 db.createSession({ id: "talk", title: "Talk", workspace: process.env.WORKSPACE_ROOT!, executor: "host" });
 const reset = async () => {
   machine.reset();
   machine.hostGpus(null);
-  await saveVoice({ enabled: true, instruction: "A calm voice.", language: "auto", provider: "", ...OWN });
+  useSource("");
 };
 
-test("where it listens and speaks follows the engines its container was built for, while it runs, and nothing otherwise", async () => {
+test("what it offers follows the engines its container was built for, while it runs, and nothing otherwise", async () => {
   await reset();
-  const offered = async () => (await voice()).providers;
-  for (const [recipe, at, runtime] of [
-    ["breeze+whisper:base", { listen: { url: "http://127.0.0.1:8188/inference" }, speak: { url: "http://127.0.0.1:7862/v1/audio/speech", runtime: "audio-cpp" } }, "audio-cpp"],
-    ["chatterbox+qwen3-asr:1.7b", { listen: { url: "http://127.0.0.1:7862/v1/audio/transcriptions", model: "qwen3-asr" }, speak: { url: "http://127.0.0.1:7862/v1/audio/speech", runtime: "chatterbox" } }, "chatterbox"],
-    ["kokoro@cpu+qwen3-asr:0.6b", { listen: { url: "http://127.0.0.1:7863/v1/audio/transcriptions", model: "qwen3-asr" }, speak: { url: "http://127.0.0.1:7863/v1/audio/speech", runtime: "kokoro" } }, "kokoro"],
-    ["none+whisper:small", { listen: { url: "http://127.0.0.1:8188/inference" } }, "none"],
+  useSource("pithagoras-voice");
+  const offered = async () => {
+    const { label, ready, speech } = await voice();
+    return { label, ready, speech };
+  };
+  const designed = [{ id: "design", name: "Designed voice", builtIn: true }];
+  for (const [recipe, speaks, voices] of [
+    ["breeze+whisper:base", true, designed],
+    ["chatterbox+qwen3-asr:1.7b", true, []],
+    ["kokoro@cpu+qwen3-asr:0.6b", true, KOKORO_VOICES.map((v) => ({ id: v.id, name: `${v.name} (${v.locale})`, builtIn: true }))],
+    ["none+whisper:small", false, []],
   ] as const) {
     running(recipe);
     assert.equal((await state()).state, "running", recipe);
-    assert.deepEqual(where(), at, recipe);
-    assert.deepEqual(await offered(), [{ name: "pithagoras-voice", label: "Voice service", ready: true, runtime }], recipe);
+    assert.deepEqual(offers(), { speaks, voices }, recipe);
+    assert.deepEqual(await offered(), { label: "Voice service", ready: true, speech: speaks }, recipe);
   }
   // A health check that is slow once, as an engine busy speaking may be, leaves it where it was found answering.
   machine.voiceProcesses.unhealthy = [":8188"];
   assert.equal((await state()).state, "starting");
-  assert.deepEqual(where(), { listen: { url: "http://127.0.0.1:8188/inference" } });
+  assert.deepEqual(offers(), { speaks: false, voices: [] });
   machine.voiceProcesses.unhealthy = [];
-  // Stopped, coming up again, or gone: nothing to listen and speak at, which voice mode then says.
+  // Stopped, coming up again, or gone: nothing to offer, which voice mode then says.
   machine.voice()!.State = "exited";
   assert.equal((await state()).state, "stopped");
-  assert.equal(where(), undefined);
-  assert.deepEqual(await offered(), [{ name: "pithagoras-voice", label: "Voice service", ready: false }]);
+  assert.equal(offers(), undefined);
+  assert.deepEqual(await offered(), { label: "Voice service", ready: false, speech: true });
   machine.voice()!.State = "running";
   machine.voiceProcesses.unhealthy = [":8188"];
   assert.equal((await state()).state, "starting");
-  assert.equal(where(), undefined);
+  assert.equal(offers(), undefined);
   machine.voiceProcesses.unhealthy = [];
   machine.dropVoice();
   assert.equal((await state()).state, "absent");
-  assert.equal(where(), undefined);
+  assert.equal(offers(), undefined);
 });
 
-test("Use for voice mode makes it the source once it runs, and voice mode on; the person's own addresses stay as they are", async () => {
+test("Use for voice mode makes it the source once it runs, and voice mode on", async () => {
   await reset();
-  await saveVoice({ enabled: false });
   running("breeze+whisper:base");
   machine.voice()!.State = "exited";
   const early = await fetch(`${at}/connect`, { method: "POST" });
@@ -80,13 +81,7 @@ test("Use for voice mode makes it the source once it runs, and voice mode on; th
   const answer = await fetch(`${at}/connect`, { method: "POST" });
   assert.deepEqual([answer.status, await answer.json()], [200, { ok: true }]);
   const now = await voice();
-  assert.deepEqual([now.provider, now.enabled, now.whisperUrl, now.breezeUrl, now.runtime], ["pithagoras-voice", true, OWN.whisperUrl, OWN.breezeUrl, OWN.runtime]);
-  // Chatterbox is told a language and has none to detect: one it speaks is given where auto-detect was set.
-  await saveVoice({ provider: "", language: "auto" });
-  running("chatterbox+whisper:base");
-  await state();
-  assert.equal((await fetch(`${at}/connect`, { method: "POST" })).status, 200);
-  assert.deepEqual([(await voice()).provider, (await voice()).language], ["pithagoras-voice", "en"]);
+  assert.deepEqual([now.provider, now.enabled], ["pithagoras-voice", true]);
 });
 
 test("a setup started on the page is the source once it has come up, once: asked after by the page or by the half on its own", async () => {
@@ -99,8 +94,8 @@ test("a setup started on the page is the source once it has come up, once: asked
   assert.equal((await voice()).provider, "", "not before it was seen to have come up");
   assert.equal((await state()).state, "running");
   assert.deepEqual([(await voice()).provider, (await voice()).speech, setting("setupPending")], ["pithagoras-voice", false, false]);
-  // Chosen once: the person's choice of their own addresses after it stands.
-  await saveVoice({ provider: "" });
+  // Chosen once: the person's choice of no source after it stands.
+  useSource("");
   await state();
   assert.equal((await voice()).provider, "");
   // The half itself sees to it, every 30 seconds, where nobody looks at the page; Stop is no setup to wait for.
@@ -115,7 +110,7 @@ test("its speech model is loaded as voice mode begins to use it, and let go of a
   await reset();
   running("breeze+whisper:base");
   await state();
-  await saveVoice({ provider: "pithagoras-voice" });
+  useSource("pithagoras-voice");
   assert.equal((await lease("a", true)).status, 200);
   // Loaded again by the half while voice mode uses it: the engines let go of a model after 90 seconds without use.
   await maintain();
@@ -156,7 +151,7 @@ test("a half started anew while voice mode is in use is told so again, and loads
   await reset();
   running("breeze+whisper:base");
   await state();
-  await saveVoice({ provider: "pithagoras-voice" });
+  useSource("pithagoras-voice");
   await lease("f", true);
   // Docker's update, say: both halves stop and start again, and the next renewal tells the new one.
   await host.stopServerHalves();
@@ -173,7 +168,7 @@ test("a half started after voice mode stopped using the one before, which nobody
   await reset();
   running("breeze+whisper:base");
   await state();
-  await saveVoice({ provider: "pithagoras-voice" });
+  useSource("pithagoras-voice");
   await lease("g", true);
   await host.stopServerHalves();
   await lease("g", false);
@@ -188,10 +183,10 @@ test("voice mode at the service while it does not run says so, and does not list
   await reset();
   running("breeze+whisper:base");
   await state();
-  await saveVoice({ provider: "pithagoras-voice" });
+  useSource("pithagoras-voice");
   machine.voice()!.State = "exited";
   await state();
   const refused = await lease("e", true);
   assert.equal(refused.status, 503);
-  assert.match((await refused.json()).error, /^Voice mode listens and speaks through an extension that is not running/);
+  assert.match((await refused.json()).error, /^Voice mode listens and speaks through pithagoras-voice, which is not running/);
 });

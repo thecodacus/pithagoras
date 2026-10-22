@@ -1,10 +1,8 @@
-import type { VoiceWhere } from "@pithagoras/extension-api/server";
-
 /**
  * The speech engines the voice service can run, in one place.
  *
  * The container spec, the setup script's environment, the health checks, the
- * addresses voice mode is offered and the choices the service's page in Settings
+ * addresses it listens and speaks at and the choices the service's page in Settings
  * offers all read this table, so an engine or a model size is added here once.
  * It has no node imports: both halves of the extension use it.
  *
@@ -288,13 +286,21 @@ export function cpuServerConfig(c: VoiceChoice, threads = 4) {
 /** Threads for what runs on the CPU: all the host has, up to the ones the speeds above were measured on, and not fewer than two. */
 export const cpuThreads = (cores: number) => Math.min(Math.max(Math.floor(cores) || 1, 2), MEASURED_THREADS);
 
-/** Where voice mode listens and speaks with the services of the choice: on the portal's loopback, which the container shares. */
-export function endpoints(c: VoiceChoice): VoiceWhere {
+/** Where the services of a choice listen and speak, and the speech engine that speaks there. */
+export interface Endpoints {
+  /** Speech recognition: Whisper.cpp's `/inference`, or audio.cpp's OpenAI transcription with the model it loaded. */
+  listen: { url: string; model?: string };
+  /** Speech synthesis. Without it, it recognises speech only: dictation works, and replies are not spoken. */
+  speak?: { url: string; engine: TtsEngine };
+}
+
+/** Where the services of the choice listen and speak: on the portal's loopback, which the container shares. */
+export function endpoints(c: VoiceChoice): Endpoints {
   return {
     // Whisper.cpp serves one model and is sent no model field; audio.cpp names the one it loaded.
     listen: c.asr === "whisper" ? { url: whisperUrl } : { url: `http://127.0.0.1:${asrDevice(c) === "cpu" ? CPU_PORT : SPEECH_PORT}/v1/audio/transcriptions`, model: "qwen3-asr" },
     // Without speech synthesis there is nothing to speak with: recognition alone.
-    ...(c.tts === "none" ? {} : { speak: { url: ttsDevice(c) === "cpu" ? cpuSpeechUrl : speechUrl, runtime: c.tts === "breeze" ? "audio-cpp" : c.tts } }),
+    ...(c.tts === "none" ? {} : { speak: { url: ttsDevice(c) === "cpu" ? cpuSpeechUrl : speechUrl, engine: c.tts } }),
   };
 }
 

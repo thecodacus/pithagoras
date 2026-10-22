@@ -1,12 +1,15 @@
-import type { VoiceProvider } from "@pithagoras/extension-api/server";
-import { CPU_PORT, SPEECH_PORT, endpoints, ttsDevice } from "../engines";
+import type { ProvidedVoice, VoiceProvider } from "@pithagoras/extension-api/server";
+import { CPU_PORT, SPEECH_PORT, ttsDevice, type TtsChoice } from "../engines";
+import { KOKORO_VOICES } from "../kokoro-voices";
 import { portal } from "./host";
 import * as service from "./service";
+import * as speech from "./speech";
 import { putSettings, setting } from "./store";
 
 /**
- * The voice service as voice mode is offered it (`portal.voice.provide`): where it listens and speaks while it runs,
- * and its speech model loaded while voice mode uses it, and let go of after, unless lazy loading is off.
+ * The voice service as voice mode is offered it (`portal.voice.provide`): what it offers while it runs, recognition and
+ * speech through the engines of its container (speech.ts), and its speech model loaded while voice mode uses it, and let
+ * go of after, unless lazy loading is off.
  */
 
 /** Voice mode uses the service now, as it last told it. */
@@ -22,10 +25,17 @@ async function speechModel(action: "load" | "unload"): Promise<void> {
   loaded = action === "load";
 }
 
-/** Where it listens and speaks: at the addresses of the engines its container was built for, while they serve (`service.serving`). */
-export function where() {
+/** The voices an agent's voice is chosen from, for the speech engine the container was built for. */
+function voicesFor(tts: TtsChoice): ProvidedVoice[] {
+  if (tts === "breeze") return [{ id: "design", name: "Designed voice", builtIn: true }];
+  if (tts === "kokoro") return KOKORO_VOICES.map((v) => ({ id: v.id, name: `${v.name} (${v.locale})`, builtIn: true }));
+  return [];
+}
+
+/** What it offers: the engines its container was built for, while they serve (`service.serving`), and nothing otherwise. */
+export function state() {
   const choice = service.serving();
-  return choice && endpoints(choice);
+  return choice && { speaks: choice.tts !== "none", voices: voicesFor(choice.tts) };
 }
 
 /**
@@ -37,7 +47,9 @@ export function provider(): VoiceProvider {
   loaded = false;
   return {
     label: "Voice service",
-    where,
+    state,
+    transcribe: (wav, { signal }) => speech.transcribe(wav, signal),
+    speak: (text, { voice, signal }) => speech.speak(text, voice, signal),
     async use(inUse) {
       used = inUse;
       if (inUse) await speechModel("load");

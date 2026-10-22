@@ -6,14 +6,14 @@ import { BUILT_IN_SET, PI_BUILT_IN_TOOLS, defaultsFor, lazyToolEntry, mcpServerO
 import { projectOf } from "./workspaces.js";
 import { dropMcpCache, mcpAdapter, mcpCachePath, mcpConfigPath, mcpServerNames, onMcpWritten, readMcpCache, readMcpFile, readableMcpConfig, serversAndBrowsers } from "./api/mcp.js";
 import { mcpCatalogue, mcpDirect, mcpOffer, unlisted, type McpOffer } from "./mcp-offer.js";
-import { existsSync, mkdirSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, rmSync, rmdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { isWithinText } from "./within.js";
 import { baseDir, fitBytes, makeFolder, saveNewFile } from "./workspace-files.js";
 import { agentHome, agentHomePath, homeAgentName } from "./agent-home.js";
 import { DATA_DIR } from "./data-dir.js";
 import { writeFileAtomic } from "./atomic-write.js";
-import { leaveHandoff, moveFolderTo, moveTo } from "./handoff.js";
+import { handoffRoot, leaveHandoff, moveFolderTo, moveTo } from "./handoff.js";
 import { RUNS_AS_PRIMARY } from "./pi/runs-as-primary.js";
 import { CODEMODE_TOOL } from "./pi/codemode.js";
 import { SCHEMA_VERSION, dbFile } from "./schema-version.js";
@@ -385,16 +385,6 @@ function schema(db: Database.Database): void {
       PRIMARY KEY (session_id, id)
     );
 
-    -- The voices saved in the settings, for speech to be told to sound like (see voice-presets.ts).
-    CREATE TABLE IF NOT EXISTS voice_presets (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      kind TEXT NOT NULL,
-      instruction TEXT NOT NULL,
-      transcript TEXT NOT NULL,
-      audio BLOB
-    );
-
     -- Logins signed out before they ran out, by the signature of their cookie.
     -- The cookie carries no state of its own, so without this a copy of one
     -- would go on working for the rest of its thirty days.
@@ -414,8 +404,8 @@ function schema(db: Database.Database): void {
       home TEXT NOT NULL UNIQUE,
       -- Its avatar, as JSON: NULL is the default orb.
       orb TEXT,
-      -- The voice it speaks with in voice mode: a voice library id or 'design';
-      -- NULL is the one chosen in the voice settings.
+      -- The voice it speaks with in voice mode: an id from the voices voice
+      -- mode's source offers; NULL is the source's own choice.
       voice TEXT,
       -- Its heartbeat: how often it looks around on its own, in minutes (NULL
       -- is never), the hours it keeps quiet ('HH:MM', both or neither), and how
@@ -737,76 +727,150 @@ function voiceServiceUrl(value: unknown): boolean {
   }
 }
 
+/** The keys of voice mode's settings that stay the portal's: how a spoken conversation goes, whatever listens and speaks for it. */
+const VOICE_MODE_KEYS = ["vad", "responseInstructions", "skipThinkingProviders", "voiceModel"];
+
 /**
- * The voice service is an extension's now (extensions/voice), with settings of its own, and voice mode listens and speaks
- * through it as through any extension that offers to (`provider` in the voice settings), never at addresses written over
- * the person's own. What the portal kept for the service is left for it in the data folder (see handoff.ts), and the
- * extension takes it up when it starts, which may be long after this, or never: the GPU chosen on its page, a setup
- * that had not come up yet, and whether its speech model was let go of once voice mode no longer used it (`lazyLoad` in
- * the voice settings). The settings go once it is left, and a try that fails keeps them for the next start.
+ * Voice mode listens and speaks through an extension now, the source, chosen on that extension's own page (`provider`
+ * in the voice settings), and core keeps only how a spoken conversation goes. Everything the portal kept of the voice
+ * service is the Voice extension's (pithagoras-voice), and the person's own speech servers are a small extension's
+ * (pithagoras-voice-servers). What the portal kept for each is left for it in the data folder (see handoff.ts), and the
+ * extension takes it up when it starts, which may be long after this, or never:
  *
- * Where voice mode listened or spoke at the service's addresses, the extension is made its source, where none was chosen
- * already, and the person's own addresses are put back as uninstalling the service did: what connecting it overwrote,
- * kept in `voice_before_managed`, or, where nothing was kept of a side, the addresses of a portal with nothing set up.
- * A dictation address of the service's goes as well. Whether voice mode is on stays as it is. This is done as the database
- * is brought to schema 9, or at a later start where a try that failed kept the settings: on a portal past it, addresses the
- * person gave voice mode are theirs, the service's among them. The container and its volume stay where they are: the
- * extension takes them over by their names. The database was backed up before this ran (db-upgrade.ts);
+ * - "voice-service": the voice library (each saved voice, a clone's recording as the bytes stored), the voice chosen,
+ *   the designed voice's description, the engine settings and the input language, and the service's own settings: the
+ *   GPU chosen on its page, a setup that had not come up yet, and whether its speech model was let go of once voice
+ *   mode no longer used it. Left wherever any of it is there.
+ * - "voice-addresses": the person's own addresses for recognition, speech and dictation, with their models, runtime,
+ *   language and Kokoro voice. Where the service's addresses were in use, a side of the person's own is what connecting
+ *   the service remembered of it (`voice_before_managed`), and a dictation address of their own beside the service's is
+ *   theirs. Left wherever any address of theirs is there, whether voice mode was on or off, as their addresses are never
+ *   overwritten.
+ *
+ * Leaving is not choosing. Voice mode that was on keeps the source chosen at version 8, or else takes the extension
+ * that does what it did: the service where the service's addresses were in use, the person's own servers where theirs
+ * were. Voice mode that was off has none. The voice settings then keep only `provider` and VOICE_MODE_KEYS.
+ *
+ * The step runs while the table of saved voices is there: it drops the table once all of it is left, so a database
+ * that is done, or fresh, has nothing to do. While the table is there, a folder at either name is an earlier try's that
+ * nothing has taken (a take moves it away first), and all of it is in the rows still: it is removed and left anew,
+ * with any voices added since. A try that fails keeps everything for the next start. The spoken error line the portal
+ * kept as a file goes, as voice mode asks the source for it as it starts. The container and its volume stay where they
+ * are: Voice takes them over by their names. The database was backed up before this ran (db-upgrade.ts);
  * docs/guide/upgrading.md says how to go back.
  */
 function handOffVoice(d: Database.Database): void {
-  let voice: Record<string, unknown> | undefined;
+  if (!d.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'voice_presets'").get()) return;
+  const stored = settingIn(d, "voice");
+  let voice: any;
+  let readable = stored !== undefined;
   try {
-    voice = JSON.parse(settingIn(d, "voice") ?? "null") ?? undefined;
+    voice = stored === undefined ? undefined : JSON.parse(stored);
   } catch {
-    // Not JSON: voice mode cannot read it either, and it stays as it is.
+    // Not JSON: voice mode could not read it either.
+    readable = false;
   }
   const gpu = settingIn(d, "voice_gpu");
   const pending = settingIn(d, "voice_setup_pending");
-  const remembered = settingIn(d, "voice_before_managed");
   let kept: Record<string, any> = {};
   try {
-    kept = JSON.parse(remembered ?? "{}") ?? {};
+    kept = JSON.parse(settingIn(d, "voice_before_managed") ?? "{}") ?? {};
   } catch {
-    // Not JSON: nothing was kept that can be put back.
+    // Not JSON: nothing was kept of the person's own.
   }
+  const voices = d.prepare("SELECT id, name, kind, instruction, transcript, audio FROM voice_presets ORDER BY rowid").all() as { id: string; name: string; kind: string; instruction: string; transcript: string; audio: Buffer | null }[];
+
+  // Which source voice mode takes: the one chosen, else the one its addresses were, and none where it was off.
+  const service = voiceServiceUrl(voice?.whisperUrl) || voiceServiceUrl(voice?.breezeUrl);
+  const chosen = typeof voice?.provider === "string" ? voice.provider.trim() : "";
+  const addresses = !service && typeof voice?.whisperUrl === "string" && voice.whisperUrl.trim() !== "";
+  const provider = voice?.enabled !== true ? "" : chosen || (service ? "pithagoras-voice" : addresses ? "pithagoras-voice-servers" : "");
+
+  // The person's own addresses, each side theirs: what connecting the service remembered where its addresses were in use.
   const listening = voiceServiceUrl(voice?.whisperUrl);
   // No speech address and the runtime none is the service's where a connect saved it. Where nothing says (a service connected by an older portal), it is when the recognition is.
-  const speaking = voiceServiceUrl(voice?.breezeUrl) || (voice?.runtime === "none" && !voice.breezeUrl && (typeof kept.noSpeech === "boolean" ? kept.noSpeech : listening));
+  const speaking = voiceServiceUrl(voice?.breezeUrl) || (voice?.runtime === "none" && !voice?.breezeUrl && (typeof kept.noSpeech === "boolean" ? kept.noSpeech : listening));
   const dictation = voiceServiceUrl(voice?.dictationUrl);
-  // What only a portal of version 8 wrote, which a try that failed keeps. Without it, and past the upgrade, the service's
-  // addresses in voice mode's settings are ones the person gave it, and stay as they are.
-  const leftover = gpu !== undefined || pending !== undefined || remembered !== undefined || (voice && "lazyLoad" in voice);
-  const upgrading = (d.pragma("user_version", { simple: true }) as number) < 9;
-  if (!leftover && !(upgrading && (listening || speaking || dictation))) return;
+  // A dictation address of the person's own beside the service's stays; one connecting the service remembered comes back; the service's own goes.
+  const ownDictation = typeof voice?.dictationUrl === "string" && voice.dictationUrl.trim() !== "" && !dictation;
+  const heard = listening ? kept.listening : voice;
+  const spoken = speaking ? kept.speaking : voice;
+  const dictated = ownDictation ? voice : listening ? kept.listening : dictation ? undefined : voice;
+  const text = (value: unknown) => (typeof value === "string" ? value : null);
+  const number = (value: unknown) => (typeof value === "number" ? value : null);
+  const own = {
+    whisperUrl: text(heard?.whisperUrl),
+    sttModel: text(heard?.sttModel),
+    breezeUrl: text(spoken?.breezeUrl),
+    runtime: text(spoken?.runtime),
+    dictationUrl: text(dictated?.dictationUrl),
+    dictationModel: text(dictated?.dictationModel),
+    language: text(voice?.language),
+    kokoroVoice: text(voice?.kokoroVoice),
+  };
+  const leaveAddresses = [own.whisperUrl, own.breezeUrl, own.dictationUrl].some((url) => !!url?.trim());
+  const leaveService = readable || voices.length > 0 || gpu !== undefined || pending !== undefined;
+
   try {
-    leaveHandoff("voice", (dir) => {
-      // Written last, and anew on each try, from the settings as they are.
-      writeFileAtomic(path.join(dir, "settings.json"), JSON.stringify({ gpu: gpu ?? null, setupPending: pending ?? null, lazyLoad: typeof voice?.lazyLoad === "boolean" ? voice.lazyLoad : null }), 0o600);
-      writeFileAtomic(path.join(dir, "handoff.json"), JSON.stringify({ format: 1, name: "voice", schema: 9, made: new Date().toISOString() }), 0o600);
-    });
+    for (const name of ["voice-service", "voice-addresses"]) rmSync(path.join(handoffRoot(), name), { recursive: true, force: true });
+    if (leaveService) {
+      leaveHandoff("voice-service", (dir) => {
+        // A clone's recording, as the bytes stored, named by its place in the list: no path is made of what is in the rows.
+        const index = voices.map(({ audio, ...row }, n) => {
+          if (!audio) return { ...row, audio: null };
+          mkdirSync(path.join(dir, "voices"), { recursive: true, mode: 0o700 });
+          writeFileAtomic(path.join(dir, "voices", `${n}.wav`), audio, 0o600);
+          return { ...row, audio: `voices/${n}.wav` };
+        });
+        writeFileAtomic(path.join(dir, "voices.json"), JSON.stringify(index), 0o600);
+        writeFileAtomic(
+          path.join(dir, "settings.json"),
+          JSON.stringify({
+            gpu: gpu ?? null,
+            setupPending: pending ?? null,
+            lazyLoad: typeof voice?.lazyLoad === "boolean" ? voice.lazyLoad : null,
+            voice: text(voice?.voice),
+            instruction: text(voice?.instruction),
+            cfgScale: number(voice?.cfgScale),
+            exaggeration: number(voice?.exaggeration),
+            kokoroVoice: text(voice?.kokoroVoice),
+            speed: number(voice?.speed),
+            language: text(voice?.language),
+          }),
+          0o600,
+        );
+        writeFileAtomic(path.join(dir, "handoff.json"), JSON.stringify({ format: 1, name: "voice-service", schema: 9, made: new Date().toISOString() }), 0o600);
+      });
+    }
+    if (leaveAddresses) {
+      leaveHandoff("voice-addresses", (dir) => {
+        writeFileAtomic(path.join(dir, "settings.json"), JSON.stringify(own), 0o600);
+        writeFileAtomic(path.join(dir, "handoff.json"), JSON.stringify({ format: 1, name: "voice-addresses", schema: 9, made: new Date().toISOString() }), 0o600);
+      });
+    }
   } catch (e) {
-    console.warn(`[portal] what the voice service kept could not be left for its extension, and is kept for the next start: ${(e as Error).message}`);
+    console.warn(`[portal] what voice mode kept could not be left for its extensions, and is kept for the next start: ${(e as Error).message}`);
     return;
   }
-  if (voice) {
-    const { lazyLoad: _lazyLoad, ...rest } = voice;
-    const text = (value: unknown) => (typeof value === "string" ? value : undefined);
-    // What was kept of each side: the recognition address with its models, the speech address with its runtime.
-    const heard = text(kept.listening?.whisperUrl) === undefined ? undefined : kept.listening;
-    const spoken = text(kept.speaking?.breezeUrl) === undefined || text(kept.speaking?.runtime) === undefined ? undefined : kept.speaking;
-    // A dictation address of the person's own stays with the model beside it.
-    const ownDictation = !!text(voice.dictationUrl)?.trim() && !dictation;
-    const back = {
-      ...(listening ? { whisperUrl: heard?.whisperUrl ?? "http://127.0.0.1:8178/inference", sttModel: text(heard?.sttModel) ?? "" } : {}),
-      ...(listening && !ownDictation ? { dictationModel: text(heard?.dictationModel) ?? "", dictationUrl: text(heard?.dictationUrl) ?? "" } : {}),
-      ...(!listening && dictation ? { dictationModel: "", dictationUrl: "" } : {}),
-      ...(speaking ? { breezeUrl: spoken?.breezeUrl ?? "http://127.0.0.1:7860/v1/audio/speech", runtime: spoken?.runtime ?? "breeze" } : {}),
-      ...(listening || speaking ? { provider: text(voice.provider) || "pithagoras-voice" } : {}),
-    };
-    d.prepare("UPDATE settings SET value = ? WHERE key = 'voice'").run(JSON.stringify({ ...rest, ...back }));
+  if (readable) {
+    d.prepare("UPDATE settings SET value = ? WHERE key = 'voice'").run(
+      JSON.stringify({ provider, ...Object.fromEntries(VOICE_MODE_KEYS.filter((key) => voice?.[key] !== undefined).map((key) => [key, voice[key]])) }),
+    );
+  } else if (stored !== undefined) {
+    // Voice mode could not read it before either, and a save needs one it can read; the backup has it.
+    d.prepare("DELETE FROM settings WHERE key = 'voice'").run();
   }
   d.prepare("DELETE FROM settings WHERE key IN ('voice_gpu', 'voice_setup_pending', 'voice_before_managed')").run();
+  d.exec("DROP TABLE voice_presets");
+  // The spoken error line, kept as a file of its own and as the file a write left half done: only those go, and the folder
+  // where nothing else is in it. A cache: what is left of it does no harm, and nothing about it stops the upgrade.
+  const lines = path.join(path.resolve(DATA_DIR), "voice");
+  try {
+    for (const name of readdirSync(lines)) if (/^\.?error-line-.+\.wav(\.[0-9a-f]{12}\.tmp)?$/.test(name)) rmSync(path.join(lines, name));
+    rmdirSync(lines);
+  } catch {
+    // Not there, or not removed: left as it is.
+  }
 }
 
 /** Understory's settings, when the portal ran it itself. Written out here, as an upgrade step does not change with the code after it. */
@@ -1834,8 +1898,8 @@ export function getVoiceModel(): { provider: string; modelId: string } | undefin
 }
 
 /**
- * Whether voice mode can speak: the add-on is on, with a speech engine where it listens and speaks now (not recognition
- * alone). Set by the voice routes, which know where that is, an extension's among it, and which this module cannot import.
+ * Whether voice mode can speak: voice mode has a source, and it can speak now (not recognition alone). Set by the voice
+ * routes, which know the source, and which this module cannot import.
  */
 let speaks: () => boolean = () => false;
 export function setVoiceSpeaks(read: typeof speaks): void {

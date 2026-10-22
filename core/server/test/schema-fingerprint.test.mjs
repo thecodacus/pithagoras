@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
@@ -17,17 +18,17 @@ import { freePort, inProcessHome } from "./server-harness.mjs";
 // src/schema-version.ts (once for the release, not once for each change),
 // pin the new version and fingerprint here, and have an upgrade test for what
 // changed (below) that starts from a database made before it.
-const PINNED = { version: 10, fingerprint: "982a767a077e0eab322a70464b8197f9ba0ad8dd57d8f83f989ed0994fde2e0a" };
-/** The schema of versions 7 to 9, the one pinned before: a project's switch for the agent's memory named for Understory. */
-const V9_FINGERPRINT = "409b5243d409e83047250a4c34dea217699b16f8e7ab13e861396938f3bf78ee";
+const PINNED = { version: 10, fingerprint: "155cf58f87a19f0a102c8475bdceee87a98d9169c400d887a37411107f0a5ccf" };
+/** The schema of version 9, the one pinned before: a project's switch for the agent's memory named for Understory. */
+const V9_FINGERPRINT = "656225d48b5a69bf29eefe05e4e51928df1e1a8f7baab4c60dd40723978dd419";
 
 const home = inProcessHome("pithagoras-schema-");
 
 const { SCHEMA_VERSION } = await import("../dist/schema-version.js");
 const { getDb } = await import("../dist/db.js");
 
-/** A fresh database copied to `file` as the schema stood before version 10, which named the project's switch for the agent's memory for Understory. */
-function freshBefore10(file) {
+/** A database of the schema of version 9 at `file`, open: a fresh one, with the project's switch for the agent's memory named for Understory. */
+function freshAt9(file) {
   getDb().exec(`VACUUM INTO '${file}'`);
   const d = new Database(file);
   d.exec("ALTER TABLE project_agent RENAME COLUMN memory_off TO understory_off");
@@ -85,11 +86,9 @@ function startUpgrade(dataDir, port) {
     const m = await import(${dist("db-upgrade.js")});
     await m.prepareDatabase();
     const db = await import(${dist("db.js")});
-    const voices = await import(${dist("voice-presets.js")});
     console.log("RESULT " + JSON.stringify({
       title: db.getSession("chat1")?.title,
       messages: db.sentMessages("chat1").map((x) => x.message),
-      voices: voices.listVoices().map((v) => v.name),
     }));`;
   const child = spawn(process.execPath, ["--input-type=module", "-e", script], {
     env: { ...process.env, DATA_DIR: dataDir, WORKSPACE_ROOT: path.join(dataDir, "ws"), AGENT_HOME: path.join(dataDir, "home"), PORT: String(port), PORTAL_PASSWORD: "", ALLOW_OPEN: "" },
@@ -174,14 +173,21 @@ test("a database at the schema before this one is checked and backed up, brought
   assert.deepEqual(left("videos.json"), { rows: [] }, "a portal of then had no clips");
   assert.deepEqual(left("settings.json"), { image_generation: null, video_generation: null });
   assert.equal(d.prepare("SELECT COUNT(*) AS n FROM events WHERE session_id = 'chat1'").get().n, 4);
-  assert.equal(d.prepare("SELECT COUNT(*) AS n FROM voice_presets").get().n, 1);
+  // The saved voice is left for Voice, with nothing else of voice mode, as there was none, and the table is gone.
+  assert.ok(!d.prepare("SELECT 1 FROM sqlite_master WHERE name = 'voice_presets'").get(), "the table is gone");
+  const voiceLeft = (file) => JSON.parse(readFileSync(path.join(dir, "handoff", "voice-service", file), "utf8"));
+  assert.deepEqual(voiceLeft("voices.json").map(({ id, name, kind, audio }) => ({ id, name, kind, audio })), [
+    { id: "voice-d36b934e-af12-462f-841c-5fad27aa6c39", name: "Calm", kind: "design", audio: null },
+  ]);
+  assert.deepEqual(Object.values(voiceLeft("settings.json")), Array(10).fill(null));
+  assert.equal(existsSync(path.join(dir, "handoff", "voice-addresses")), false);
   assert.deepEqual(d.prepare("SELECT id FROM tool_rules ORDER BY id").all(), [{ id: "r4" }], "what never applies is not left listed as a rule that does");
   assert.deepEqual(d.prepare("SELECT id, home FROM agents").all(), [{ id: "home", home: "/data/home" }], "the agent's folder is a neutral one");
   d.close();
 
   // And the portal reads it.
   const result = JSON.parse(/RESULT (.*)/.exec(run.output())[1]);
-  assert.deepEqual(result, { title: "A chat from the 2026-10-02 build", messages: ["Write the summary", "Shorter, please"], voices: ["Calm"] });
+  assert.deepEqual(result, { title: "A chat from the 2026-10-02 build", messages: ["Write the summary", "Shorter, please"] });
   assert.ok(!readdirSync(dir).some((f) => f.endsWith(".partial")));
   assert.equal(existsSync(path.join(dir, "backups")), true);
 });
@@ -292,9 +298,22 @@ test("the canvases a portal stored are written out as Markdown in their chat's f
   assert.equal(readFileSync(path.join(dir, "canvases", "Notes_2026_ draft_.md"), "utf8"), "Kept anyway.");
 });
 
+// Versions 7 and 8 had the schema of version 9 with the table of saved voices, which version 9 hands to Voice (see the
+// voice cases below): made here from one of version 9, and checked to be that by the fingerprint they were pinned with.
+const V8_FINGERPRINT = "409b5243d409e83047250a4c34dea217699b16f8e7ab13e861396938f3bf78ee";
+const V8_VOICE_PRESETS = `
+  CREATE TABLE voice_presets (id TEXT PRIMARY KEY, name TEXT NOT NULL, kind TEXT NOT NULL, instruction TEXT NOT NULL, transcript TEXT NOT NULL, audio BLOB);
+`;
+/** A database of the schema of versions 7 and 8 at `file`, open, of the version it says it is at. */
+function freshAt8(file) {
+  const d = freshAt9(file);
+  d.exec(V8_VOICE_PRESETS);
+  return d;
+}
+
 // Pictures and videos are an extension's from version 7 (extensions/media), with a store of its own. A database of version 6
-// is the schema of before version 10 with the two tables of the Media page: made here from a fresh one, and checked to be
-// that by the fingerprint version 6 was pinned with.
+// is the schema of version 8 with the two tables of the Media page: made here, and checked to be that by the fingerprint
+// version 6 was pinned with.
 const V6_FINGERPRINT = "06e47b6fe66c1c572ae81987761da0aad10656b2f72825fdff93f74f342ed6cc";
 const V6_MEDIA = `
   CREATE TABLE images (id TEXT PRIMARY KEY, origin TEXT NOT NULL, session_id TEXT, folder TEXT, path TEXT NOT NULL, kind TEXT NOT NULL, prompt TEXT NOT NULL DEFAULT '', params TEXT NOT NULL DEFAULT '{}', source_id TEXT, bytes INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL);
@@ -331,8 +350,7 @@ const ATTACHED = path.join("images", "c1", "3f2b8c1e-0a4d-4e6f-9b7a-1c2d3e4f5a6b
 function mediaOfV6(dir) {
   const site = path.join(dir, "ws", "site");
   mkdirSync(site, { recursive: true });
-  const file = path.join(dir, "portal.db");
-  const d = freshBefore10(file);
+  const d = freshAt8(path.join(dir, "portal.db"));
   d.exec(V6_MEDIA);
   d.pragma("user_version = 6");
   assert.equal(schemaFingerprint(d), V6_FINGERPRINT, "the schema of version 6");
@@ -568,10 +586,9 @@ const BROWSER_SEEN = [
  * Chrome's profile beside the database.
  */
 function browserOfV7(dir, adopted = "carry") {
-  const file = path.join(dir, "portal.db");
-  const d = freshBefore10(file);
+  const d = freshAt8(path.join(dir, "portal.db"));
   d.pragma("user_version = 7");
-  assert.equal(schemaFingerprint(d), V9_FINGERPRINT, "the schema of version 7");
+  assert.equal(schemaFingerprint(d), V8_FINGERPRINT, "the schema of version 7");
   const setting = d.prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value");
   for (const [key, value] of [
     ["browser_password", BROWSER_PASSWORD],
@@ -627,7 +644,7 @@ test("what the portal kept of its browser is left for its extension, the local p
 
   const now = browserIn(dir);
   assert.equal(now.version, SCHEMA_VERSION);
-  assert.equal(now.fingerprint, PINNED.fingerprint, "no table or column goes");
+  assert.equal(now.fingerprint, PINNED.fingerprint);
   for (const key of ["browser_user", "browser_password", "browser_port", "browser_https_port", "browser_cursor", "browser_tools"]) assert.equal(now.value(key), undefined, key);
   assert.equal(now.value("browser_allowlist"), "*.example.com");
   assert.equal(now.value("browser_tools_adopted"), "carry");
@@ -767,182 +784,301 @@ test("what the browser kept that cannot be left is kept for the next start, whic
   assert.equal(JSON.parse(after.value("tools_seen")).find((tool) => tool.name === "browser_navigate").source, "pithagoras-browser");
 });
 
-// The voice service is an extension's from version 9 (extensions/voice), with settings of its own, and voice mode listens
-// and speaks through it as a provider. A database of version 8 is made here from a fresh one, as the schema stood then,
-// with what the portal kept of its voice service.
-const SERVICE = { whisper: "http://127.0.0.1:8188/inference", speech: "http://127.0.0.1:7862/v1/audio/speech", qwen: "http://127.0.0.1:7862/v1/audio/transcriptions" };
-const OWN_DEFAULTS = { whisperUrl: "http://127.0.0.1:8178/inference", breezeUrl: "http://127.0.0.1:7860/v1/audio/speech" };
-/** Voice mode's settings as friday has them: on, at the service's addresses, with what is not the service's around them. */
+// Voice mode listens and speaks through an extension from version 9: what the portal kept of its voice service is Voice's
+// (extensions/voice), and the person's own speech servers are Voice servers' (extensions/voice-servers). A database of
+// version 8 is made here from a fresh one with the table of saved voices, and what the portal kept of voice mode.
+const SERVICE = { whisper: "http://127.0.0.1:8188/inference", speech: "http://127.0.0.1:7862/v1/audio/speech" };
+const OWN = { whisper: "http://stt.example.test:9000/inference", speech: "http://tts.example.test:9001/v1/audio/speech", dictation: "http://dictate.example.test:9002/inference" };
+const VAD = { positiveSpeechThreshold: 0.65, negativeSpeechThreshold: 0.35, minSpeechMs: 256, preSpeechPadMs: 320, redemptionMs: 1000 };
+const DEFAULT_INSTRUCTION = "A warm, clear English voice with a calm, conversational delivery.";
+/** Voice mode's settings as friday has them at version 8: on, at the service's addresses, speaking with Aria. */
 const FRIDAY_VOICE = {
-  voice: "voice-aria", language: "en", cfgScale: 4, vad: { positiveSpeechThreshold: 0.65, negativeSpeechThreshold: 0.35, minSpeechMs: 256, preSpeechPadMs: 320, redemptionMs: 1000 },
-  lazyLoad: true, runtime: "audio-cpp", sttModel: "", exaggeration: 0.5, kokoroVoice: "af_heart", speed: 1, responseInstructions: "",
-  enabled: true, whisperUrl: SERVICE.whisper, breezeUrl: SERVICE.speech, instruction: "A warm voice.",
+  voice: "voice-db42d4ce-9a43-4ce1-9dd2-cc8596d3305e", language: "en", cfgScale: 1, vad: VAD, lazyLoad: true,
+  runtime: "audio-cpp", sttModel: "", exaggeration: 0.5, kokoroVoice: "af_heart", speed: 1, responseInstructions: "",
+  enabled: true, whisperUrl: SERVICE.whisper, breezeUrl: SERVICE.speech, instruction: DEFAULT_INSTRUCTION,
 };
+/** A recording as a clone keeps it: mono, 16 kHz, 16-bit, `seconds` long, of samples that differ from one to the next. */
+function cloneWav(seconds = 1, seed = 1) {
+  const pcm = Buffer.alloc(32000 * seconds);
+  for (let i = 0; i < pcm.length; i += 2) pcm.writeInt16LE(((i * 7919 + seed * 104729) % 65536) - 32768, i);
+  const header = Buffer.alloc(44);
+  header.write("RIFF"); header.writeUInt32LE(36 + pcm.length, 4); header.write("WAVEfmt ", 8);
+  header.writeUInt32LE(16, 16); header.writeUInt16LE(1, 20); header.writeUInt16LE(1, 22);
+  header.writeUInt32LE(16000, 24); header.writeUInt32LE(32000, 28); header.writeUInt16LE(2, 32); header.writeUInt16LE(16, 34);
+  header.write("data", 36); header.writeUInt32LE(pcm.length, 40);
+  return Buffer.concat([header, pcm]);
+}
+/** Aria, as friday keeps her: a clone with a description of 28 characters and the words of her recording. */
+const ARIA = {
+  id: "voice-db42d4ce-9a43-4ce1-9dd2-cc8596d3305e", name: "Aria", kind: "clone", instruction: "Warm, bright and unhurried.",
+  transcript: "Hello, I am Aria. I read the news to you every morning, and I keep my sentences short so that they are easy to follow when you only half listen.",
+  audio: cloneWav(7),
+};
+const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 
-/** A data folder as version 8 (or `version`) left it, with the settings given (null for none) and nothing else of voice. */
-function voiceOfV8(dir, settings, version = 8) {
-  const file = path.join(dir, "portal.db");
-  const d = freshBefore10(file);
-  d.pragma(`user_version = ${version}`);
-  assert.equal(schemaFingerprint(d), V9_FINGERPRINT, `the schema of version ${version}`);
+/** A data folder as version 8 left it, with the settings given (null for none), the saved voices, and nothing else of voice. */
+function voiceOfV8(dir, settings, voices = []) {
+  mkdirSync(dir, { recursive: true });
+  const d = freshAt8(path.join(dir, "portal.db"));
+  d.pragma("user_version = 8");
+  assert.equal(schemaFingerprint(d), V8_FINGERPRINT, "the schema of version 8");
   const put = d.prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value");
   for (const [key, value] of Object.entries(settings)) if (value !== null) put.run(key, typeof value === "string" ? value : JSON.stringify(value));
+  const voice = d.prepare("INSERT INTO voice_presets (id, name, kind, instruction, transcript, audio) VALUES (?, ?, ?, ?, ?, ?)");
+  for (const v of voices) voice.run(v.id, v.name, v.kind, v.instruction, v.transcript, v.audio ?? null);
   d.close();
 }
 
-/** What the upgraded database holds of voice: its settings, `voice` read. */
+/** What the database holds of voice: its settings, `voice` read, and whether the table of saved voices is there. */
 function voiceIn(dir) {
   const d = new Database(path.join(dir, "portal.db"), { readonly: true });
   try {
     const settings = Object.fromEntries(d.prepare("SELECT key, value FROM settings").all().map((row) => [row.key, row.value]));
     const value = (key) => settings[key];
-    return { version: d.pragma("user_version", { simple: true }), fingerprint: schemaFingerprint(d), value, voice: JSON.parse(value("voice") ?? "null") };
+    return {
+      version: d.pragma("user_version", { simple: true }),
+      fingerprint: schemaFingerprint(d),
+      value,
+      voice: JSON.parse(value("voice") ?? "null"),
+      table: !!d.prepare("SELECT 1 FROM sqlite_master WHERE name = 'voice_presets'").get(),
+    };
   } finally {
     d.close();
   }
 }
-const voiceLeft = (dir, file) => JSON.parse(readFileSync(path.join(dir, "handoff", "voice", file), "utf8"));
+const voiceLeft = (dir, name, file) => JSON.parse(readFileSync(path.join(dir, "handoff", name, file), "utf8"));
+const leftAt = (dir) => (existsSync(path.join(dir, "handoff")) ? readdirSync(path.join(dir, "handoff")).sort() : []);
+/** The addresses voice-addresses carries, as `voice` holds them, each null where it has none. */
+const addressesOf = (voice) =>
+  Object.fromEntries(["whisperUrl", "sttModel", "breezeUrl", "runtime", "dictationUrl", "dictationModel", "language", "kokoroVoice"].map((key) => [key, voice[key] ?? null]));
+/** The settings voice-service carries of `voice`, the GPU and a setup still to come up. */
+const serviceOf = (voice, gpu = null, setupPending = null) => ({
+  gpu, setupPending, lazyLoad: voice.lazyLoad ?? null, voice: voice.voice ?? null, instruction: voice.instruction ?? null, cfgScale: voice.cfgScale ?? null,
+  exaggeration: voice.exaggeration ?? null, kokoroVoice: voice.kokoroVoice ?? null, speed: voice.speed ?? null, language: voice.language ?? null,
+});
+/** The spoken error line as the portal kept it, and the file a write of it left half done. */
+function errorLines(dir) {
+  mkdirSync(path.join(dir, "voice"), { recursive: true });
+  const line = path.join(dir, "voice", "error-line-0123456789abcdef0123456789abcdef.wav");
+  const half = path.join(dir, "voice", ".error-line-0123456789abcdef0123456789abcdef.wav.0a1b2c3d4e5f.tmp");
+  writeFileSync(line, cloneWav(1));
+  writeFileSync(half, "half");
+  return [line, half];
+}
 
-test("what the portal kept of its voice service is left for its extension, and voice mode at the service's addresses listens and speaks through it, with nothing remembered put back as a portal with nothing set up", async () => {
-  // Friday's shape: the service connected over a portal with nothing set up, so that nothing of the person's own was remembered.
+test("friday's voice mode at version 8 is left for Voice whole, Aria's recording as it was stored, and voice mode listens and speaks through it", async () => {
   const dir = path.join(home, "voice-friday");
-  mkdirSync(dir, { recursive: true });
-  voiceOfV8(dir, { voice: FRIDAY_VOICE, voice_gpu: "GPU-648bf6c5-346e-81f5-f155-dc8061172da3", voice_before_managed: { noSpeech: false } });
+  voiceOfV8(dir, { voice: FRIDAY_VOICE, voice_gpu: "GPU-648bf6c5-346e-81f5-f155-dc8061172da3", voice_before_managed: { noSpeech: false } }, [ARIA]);
+  errorLines(dir);
   assert.deepEqual(upgradeCheck(path.join(dir, "portal.db")), { needed: true, from: 8 });
   assert.match(await upgraded(dir), new RegExp(`upgrading the database from version 8 to ${SCHEMA_VERSION}`));
-  assert.match(path.basename(backupsIn(path.join(dir, "backups"))[0]), /^portal-v8-\d{8}-\d{6}\.db$/);
+  const backup = backupsIn(path.join(dir, "backups"))[0];
+  assert.match(path.basename(backup), /^portal-v8-\d{8}-\d{6}\.db$/);
 
   const now = voiceIn(dir);
   assert.equal(now.version, SCHEMA_VERSION);
-  assert.equal(now.fingerprint, PINNED.fingerprint, "no table or column goes");
+  assert.equal(now.fingerprint, PINNED.fingerprint);
+  assert.equal(now.table, false, "the table is gone");
   for (const key of ["voice_gpu", "voice_setup_pending", "voice_before_managed"]) assert.equal(now.value(key), undefined, key);
-  // The extension is the source; the person's own addresses are a portal's with nothing set up; voice mode stays on; lazyLoad is the extension's.
-  const { lazyLoad: _lazyLoad, ...rest } = FRIDAY_VOICE;
-  assert.deepEqual(now.voice, { ...rest, ...OWN_DEFAULTS, runtime: "breeze", sttModel: "", dictationModel: "", dictationUrl: "", provider: "pithagoras-voice" });
+  assert.deepEqual(now.voice, { provider: "pithagoras-voice", vad: VAD, responseInstructions: "" });
 
-  // Left whole, closed to all but the portal: the three settings as they were stored.
-  const left = path.join(dir, "handoff", "voice");
-  assert.deepEqual(readdirSync(path.join(dir, "handoff")), ["voice"], "nothing half done beside it");
-  assert.equal(modeOf(left), 0o700);
-  assert.deepEqual(readdirSync(left).sort(), ["handoff.json", "settings.json"]);
-  for (const json of ["handoff.json", "settings.json"]) assert.equal(modeOf(path.join(left, json)), 0o600, json);
-  const { made, ...about } = voiceLeft(dir, "handoff.json");
-  assert.deepEqual(about, { format: 1, name: "voice", schema: 9 });
+  // Left whole, closed to all but the portal; and nothing for Voice servers, as nothing of the person's own was kept.
+  assert.deepEqual(leftAt(dir), ["voice-service"], "nothing half done beside it");
+  const left = path.join(dir, "handoff", "voice-service");
+  for (const folder of [path.join(dir, "handoff"), left, path.join(left, "voices")]) assert.equal(modeOf(folder), 0o700, folder);
+  assert.deepEqual(readdirSync(left).sort(), ["handoff.json", "settings.json", "voices", "voices.json"]);
+  for (const file of ["handoff.json", "settings.json", "voices.json", "voices/0.wav"]) assert.equal(modeOf(path.join(left, file)), 0o600, file);
+  const { made, ...about } = voiceLeft(dir, "voice-service", "handoff.json");
+  assert.deepEqual(about, { format: 1, name: "voice-service", schema: 9 });
   assert.ok(Number.isFinite(Date.parse(made)));
-  assert.deepEqual(voiceLeft(dir, "settings.json"), { gpu: "GPU-648bf6c5-346e-81f5-f155-dc8061172da3", setupPending: null, lazyLoad: true });
+  assert.deepEqual(voiceLeft(dir, "voice-service", "settings.json"), {
+    gpu: "GPU-648bf6c5-346e-81f5-f155-dc8061172da3", setupPending: null, lazyLoad: true, voice: ARIA.id, instruction: DEFAULT_INSTRUCTION,
+    cfgScale: 1, exaggeration: 0.5, kokoroVoice: "af_heart", speed: 1, language: "en",
+  });
+  const { audio: _audio, ...aria } = ARIA;
+  assert.deepEqual(voiceLeft(dir, "voice-service", "voices.json"), [{ ...aria, audio: "voices/0.wav" }]);
+  // The recording is the bytes the backup holds.
+  const copy = new Database(backup, { readonly: true });
+  const stored = copy.prepare("SELECT audio FROM voice_presets WHERE id = ?").get(ARIA.id).audio;
+  copy.close();
+  assert.equal(sha256(readFileSync(path.join(left, "voices", "0.wav"))), sha256(stored));
+  assert.equal(stored.length, ARIA.audio.length);
+  // The spoken error line the portal kept is gone, and its folder with it.
+  assert.equal(existsSync(path.join(dir, "voice")), false);
 });
 
-test("the person's own voice addresses that connecting the service overwrote come back, each side as it was kept, and a setup still to come up is left with the rest", async () => {
-  const dir = path.join(home, "voice-kept");
-  mkdirSync(dir, { recursive: true });
-  const kept = {
-    listening: { whisperUrl: "http://stt.example.test:9000/inference", sttModel: "my-model", dictationModel: "my-dictation", dictationUrl: "http://dictate.example.test:9002/inference", enabled: true },
-    speaking: { breezeUrl: "http://tts.example.test:9001/v1/audio/speech", runtime: "chatterbox", enabled: true },
-    noSpeech: false,
-  };
-  // Qwen3-ASR and Chatterbox, Lazy load off, and voice switched off since.
-  const voice = { ...FRIDAY_VOICE, enabled: false, lazyLoad: false, runtime: "chatterbox", whisperUrl: SERVICE.qwen, sttModel: "qwen3-asr", breezeUrl: ` ${SERVICE.speech.replace("127.0.0.1", "localhost")}/ ` };
-  voiceOfV8(dir, { voice, voice_setup_pending: "1", voice_before_managed: kept });
+test("only the spoken error line goes of the folder it was kept in: anything else there stays, and the folder with it", async () => {
+  const dir = path.join(home, "voice-lines");
+  voiceOfV8(dir, { voice: FRIDAY_VOICE });
+  const lines = errorLines(dir);
+  const other = path.join(dir, "voice", "notes.txt");
+  writeFileSync(other, "not a line");
   await upgraded(dir);
-  const now = voiceIn(dir);
-  assert.deepEqual(
-    [now.voice.provider, now.voice.whisperUrl, now.voice.sttModel, now.voice.dictationUrl, now.voice.dictationModel, now.voice.breezeUrl, now.voice.runtime, now.voice.enabled, "lazyLoad" in now.voice],
-    ["pithagoras-voice", kept.listening.whisperUrl, "my-model", kept.listening.dictationUrl, "my-dictation", kept.speaking.breezeUrl, "chatterbox", false, false],
-  );
-  assert.deepEqual(voiceLeft(dir, "settings.json"), { gpu: null, setupPending: "1", lazyLoad: false });
-  assert.equal(now.value("voice_setup_pending"), undefined);
-  assert.equal(now.value("voice_before_managed"), undefined);
+  for (const line of lines) assert.equal(existsSync(line), false, line);
+  assert.equal(readFileSync(other, "utf8"), "not a line");
+});
 
-  // Recognition alone, with no speech address: the service's where a connect saved it so, and a dictation address of the
-  // person's own stays. An extension chosen since stays the source.
-  const alone = path.join(home, "voice-alone");
-  mkdirSync(alone, { recursive: true });
-  const own = { dictationUrl: "http://big.example.test:9100/v1/audio/transcriptions", dictationModel: "big-asr" };
-  voiceOfV8(alone, { voice: { ...FRIDAY_VOICE, runtime: "none", breezeUrl: "", ...own, provider: "test-speaker" }, voice_before_managed: { noSpeech: true } });
+test("the person's own addresses are left for Voice servers whether voice mode was on or off; it listens through them only where it was on", async () => {
+  const own = { ...FRIDAY_VOICE, whisperUrl: OWN.whisper, sttModel: "my-model", breezeUrl: OWN.speech, runtime: "kokoro", kokoroVoice: "am_onyx", dictationUrl: OWN.dictation, dictationModel: "my-dictation", language: "de" };
+  for (const [name, enabled, provider] of [["voice-own-on", true, "pithagoras-voice-servers"], ["voice-own-off", false, ""]]) {
+    const dir = path.join(home, name);
+    voiceOfV8(dir, { voice: { ...own, enabled } });
+    await upgraded(dir);
+    assert.deepEqual(leftAt(dir), ["voice-addresses", "voice-service"], name);
+    const { made, ...about } = voiceLeft(dir, "voice-addresses", "handoff.json");
+    assert.deepEqual(about, { format: 1, name: "voice-addresses", schema: 9 });
+    assert.ok(Number.isFinite(Date.parse(made)));
+    assert.equal(modeOf(path.join(dir, "handoff", "voice-addresses", "settings.json")), 0o600);
+    assert.deepEqual(voiceLeft(dir, "voice-addresses", "settings.json"), addressesOf(own), name);
+    assert.deepEqual(voiceLeft(dir, "voice-service", "settings.json"), serviceOf(own), name);
+    assert.deepEqual(voiceIn(dir).voice, { provider, vad: VAD, responseInstructions: "" }, name);
+  }
+});
+
+test("a source chosen at version 8 stays the source where voice mode was on, with the person's own addresses left beside it; voice mode that was off has none", async () => {
+  const chosen = path.join(home, "voice-chosen");
+  const speaker = { vad: VAD, enabled: true, provider: "test-speaker", whisperUrl: OWN.whisper, breezeUrl: OWN.speech, runtime: "breeze", voiceModel: "fast/small" };
+  voiceOfV8(chosen, { voice: speaker });
+  await upgraded(chosen);
+  assert.deepEqual(voiceIn(chosen).voice, { provider: "test-speaker", vad: VAD, voiceModel: "fast/small" });
+  assert.deepEqual(voiceLeft(chosen, "voice-addresses", "settings.json"), addressesOf(speaker));
+
+  const off = path.join(home, "voice-off");
+  voiceOfV8(off, { voice: { ...FRIDAY_VOICE, enabled: false }, voice_before_managed: { noSpeech: false } });
+  await upgraded(off);
+  assert.deepEqual(voiceIn(off).voice, { provider: "", vad: VAD, responseInstructions: "" });
+  assert.deepEqual(leftAt(off), ["voice-service"]);
+});
+
+test("where the service's addresses were in use, what connecting it remembered of the person's own is left for Voice servers, each side as it was kept", async () => {
+  // Recognition and dictation of their own, remembered.
+  const heard = path.join(home, "voice-kept-heard");
+  const listening = { whisperUrl: OWN.whisper, sttModel: "my-model", dictationUrl: OWN.dictation, dictationModel: "my-dictation", enabled: true };
+  voiceOfV8(heard, { voice: FRIDAY_VOICE, voice_before_managed: { listening, noSpeech: false } });
+  await upgraded(heard);
+  assert.deepEqual(voiceLeft(heard, "voice-addresses", "settings.json"), {
+    whisperUrl: OWN.whisper, sttModel: "my-model", breezeUrl: null, runtime: null, dictationUrl: OWN.dictation, dictationModel: "my-dictation", language: "en", kokoroVoice: "af_heart",
+  });
+  assert.equal(voiceIn(heard).voice.provider, "pithagoras-voice");
+
+  // A dictation address of their own beside the service's.
+  const dictated = path.join(home, "voice-own-dictation");
+  const big = { dictationUrl: "http://big.example.test:9100/v1/audio/transcriptions", dictationModel: "big-asr" };
+  voiceOfV8(dictated, { voice: { ...FRIDAY_VOICE, ...big }, voice_before_managed: { noSpeech: false } });
+  await upgraded(dictated);
+  assert.deepEqual(voiceLeft(dictated, "voice-addresses", "settings.json"), {
+    whisperUrl: null, sttModel: null, breezeUrl: null, runtime: null, ...big, language: "en", kokoroVoice: "af_heart",
+  });
+
+  // The service's recognition alone, connected so (no speech address, runtime none), and a speech server of their own remembered.
+  const alone = path.join(home, "voice-kept-speech");
+  const speaking = { breezeUrl: OWN.speech, runtime: "chatterbox", enabled: true };
+  voiceOfV8(alone, { voice: { ...FRIDAY_VOICE, runtime: "none", breezeUrl: "" }, voice_before_managed: { speaking, noSpeech: true } });
   await upgraded(alone);
-  const after = voiceIn(alone).voice;
-  assert.deepEqual([after.provider, after.whisperUrl, after.breezeUrl, after.runtime, after.dictationUrl, after.dictationModel], ["test-speaker", OWN_DEFAULTS.whisperUrl, OWN_DEFAULTS.breezeUrl, "breeze", own.dictationUrl, own.dictationModel]);
+  assert.deepEqual(voiceLeft(alone, "voice-addresses", "settings.json"), {
+    whisperUrl: null, sttModel: null, breezeUrl: OWN.speech, runtime: "chatterbox", dictationUrl: null, dictationModel: null, language: "en", kokoroVoice: "af_heart",
+  });
+  assert.equal(voiceIn(alone).voice.provider, "pithagoras-voice");
 });
 
-test("voice mode at the person's own addresses stays as it is: the service's settings are left for the extension, and its dictation address goes", async () => {
-  const dir = path.join(home, "voice-own");
-  mkdirSync(dir, { recursive: true });
-  const own = { ...FRIDAY_VOICE, whisperUrl: "http://stt.example.test:9000/inference", breezeUrl: "http://tts.example.test:9001/v1/audio/speech", runtime: "breeze", dictationUrl: `${SERVICE.whisper}`, dictationModel: "asr-x" };
-  voiceOfV8(dir, { voice: own, voice_gpu: "GPU-1", voice_before_managed: { noSpeech: false } });
-  await upgraded(dir);
-  const now = voiceIn(dir);
-  const { lazyLoad: _lazyLoad, ...rest } = own;
-  assert.deepEqual(now.voice, { ...rest, dictationUrl: "", dictationModel: "" }, "no provider, and only the service's dictation address goes");
-  assert.deepEqual(voiceLeft(dir, "settings.json"), { gpu: "GPU-1", setupPending: null, lazyLoad: true });
-  assert.equal(now.value("voice_before_managed"), undefined);
-
-  // Nothing of the service: nothing is left, and voice mode's settings are not written.
-  const none = path.join(home, "voice-none");
-  mkdirSync(none, { recursive: true });
-  const plain = JSON.stringify({ ...rest, dictationUrl: "", dictationModel: "" });
-  voiceOfV8(none, { voice: plain });
+test("with nothing of voice mode there, nothing is left and the table goes; settings voice mode cannot read go too", async () => {
+  const none = path.join(home, "voice-nothing");
+  voiceOfV8(none, {});
   await upgraded(none);
-  assert.equal(voiceIn(none).value("voice"), plain);
-  assert.equal(existsSync(path.join(none, "handoff")), false);
+  assert.deepEqual(leftAt(none), []);
+  assert.deepEqual([voiceIn(none).table, voiceIn(none).value("voice"), voiceIn(none).fingerprint], [false, undefined, PINNED.fingerprint]);
+
+  const unreadable = path.join(home, "voice-unreadable");
+  voiceOfV8(unreadable, { voice: "{not json", voice_gpu: "GPU-1" });
+  await upgraded(unreadable);
+  assert.equal(voiceIn(unreadable).value("voice"), undefined);
+  assert.deepEqual(voiceLeft(unreadable, "voice-service", "settings.json"), serviceOf({}, "GPU-1"));
+  assert.deepEqual(voiceLeft(unreadable, "voice-service", "voices.json"), []);
+  assert.deepEqual(leftAt(unreadable), ["voice-service"]);
 });
 
-test("what the voice service kept that cannot be left is kept for the next start, which leaves it; one left before the database rolled back is not left again", async () => {
+test("what voice mode kept that cannot be left is kept whole for the next start, a save meanwhile keeps it, and the next start leaves it", async () => {
   const dir = path.join(home, "voice-later");
-  mkdirSync(dir, { recursive: true });
-  voiceOfV8(dir, { voice: FRIDAY_VOICE, voice_gpu: "GPU-1", voice_before_managed: { noSpeech: false } });
+  const own = { ...FRIDAY_VOICE, whisperUrl: OWN.whisper, breezeUrl: OWN.speech, runtime: "kokoro" };
+  voiceOfV8(dir, { voice: own, voice_gpu: "GPU-1" }, [ARIA]);
+  const [line] = errorLines(dir);
   writeFileSync(path.join(dir, "handoff"), "not a folder");
-  assert.match(await upgraded(dir), /what the voice service kept could not be left for its extension, and is kept for the next start/);
+  assert.match(await upgraded(dir), /what voice mode kept could not be left for its extensions, and is kept for the next start/);
   let now = voiceIn(dir);
   assert.equal(now.version, SCHEMA_VERSION, "upgraded all the same");
-  assert.deepEqual([now.value("voice_gpu"), now.voice], ["GPU-1", FRIDAY_VOICE], "with all of it kept");
-  // Out of the way: the next start, which is no upgrade, leaves it.
+  assert.deepEqual([now.voice, now.value("voice_gpu"), now.table, existsSync(line)], [own, "GPU-1", true, true], "with all of it kept");
+
+  // Voice mode's settings saved meanwhile, as the page saves them: what the next start reads is kept.
+  const run = spawn(process.execPath, ["--input-type=module", "-e", `
+    const m = await import(${JSON.stringify(new URL("../dist/db-upgrade.js", import.meta.url).href)});
+    await m.prepareDatabase();
+    const { voiceRouter } = await import(${JSON.stringify(new URL("../dist/api/voice.js", import.meta.url).href)});
+    const { default: express } = await import(${JSON.stringify(import.meta.resolve("express"))});
+    const server = express().use(express.json()).use("/api", voiceRouter()).listen(0, "127.0.0.1", async () => {
+      const answer = await fetch("http://127.0.0.1:" + server.address().port + "/api/voice", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ responseInstructions: "Answer briefly." }) });
+      console.log("RESULT " + answer.status);
+      process.exit(0);
+    });`], {
+    env: { ...process.env, DATA_DIR: dir, WORKSPACE_ROOT: path.join(dir, "ws"), AGENT_HOME: path.join(dir, "home"), PORTAL_PASSWORD: "", ALLOW_OPEN: "" },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let out = "";
+  run.stdout.on("data", (c) => { out += c; });
+  run.stderr.on("data", (c) => { out += c; });
+  assert.equal(await new Promise((resolve) => run.on("exit", resolve)), 0, out);
+  assert.match(out, /RESULT 200/);
+  now = voiceIn(dir);
+  assert.deepEqual(now.voice, { ...own, provider: "", responseInstructions: "Answer briefly.", voiceModel: "" });
+
+  // Out of the way: the next start, which is no upgrade, leaves it, from what version 8 held.
   rmSync(path.join(dir, "handoff"));
   await upgraded(dir);
   now = voiceIn(dir);
-  assert.deepEqual([now.value("voice_gpu"), now.voice.provider, now.voice.whisperUrl], [undefined, "pithagoras-voice", OWN_DEFAULTS.whisperUrl]);
-  assert.equal(voiceLeft(dir, "settings.json").gpu, "GPU-1");
-
-  // A try that left it whole, and whose database rolled back: not filled again, and the settings go.
-  const rolled = path.join(home, "voice-left");
-  mkdirSync(rolled, { recursive: true });
-  voiceOfV8(rolled, { voice: FRIDAY_VOICE, voice_gpu: "GPU-2" });
-  const left = path.join(rolled, "handoff", "voice");
-  mkdirSync(left, { recursive: true });
-  const about = JSON.stringify({ format: 1, name: "voice", schema: 9, made: "2026-10-22T08:00:00.000Z" });
-  writeFileSync(path.join(left, "handoff.json"), about);
-  await upgraded(rolled);
-  assert.equal(readFileSync(path.join(left, "handoff.json"), "utf8"), about);
-  assert.equal(existsSync(path.join(left, "settings.json")), false);
-  const after = voiceIn(rolled);
-  assert.deepEqual([after.value("voice_gpu"), after.voice.provider], [undefined, "pithagoras-voice"]);
+  assert.deepEqual([now.voice, now.value("voice_gpu"), now.table, existsSync(line)], [{ provider: "pithagoras-voice-servers", vad: VAD, responseInstructions: "Answer briefly.", voiceModel: "" }, undefined, false, false]);
+  assert.deepEqual(voiceLeft(dir, "voice-service", "settings.json"), serviceOf(own, "GPU-1"));
+  assert.deepEqual(voiceLeft(dir, "voice-service", "voices.json").map((v) => v.name), ["Aria"]);
+  assert.deepEqual(voiceLeft(dir, "voice-addresses", "settings.json"), addressesOf(own));
 });
 
-test("past the upgrade, the service's addresses that the person gave voice mode are theirs: a start leaves them as they are, and leaves nothing for the extension", async () => {
-  const { lazyLoad: _lazyLoad, ...mine } = FRIDAY_VOICE;
-  for (const [name, voice] of [
-    // Recognition at the service, and dictation with Qwen3-ASR at its CPU process.
-    ["voice-mine", { ...mine, provider: "", whisperUrl: SERVICE.whisper, dictationUrl: "http://127.0.0.1:7863/v1/audio/transcriptions", dictationModel: "qwen3-asr" }],
-    // Speech at the service, recognition elsewhere.
-    ["voice-mine-speech", { ...mine, provider: "", whisperUrl: "http://stt.example.test:9000/inference" }],
-    // Recognition alone, with no speech address.
-    ["voice-mine-alone", { ...mine, provider: "", runtime: "none", breezeUrl: "" }],
-  ]) {
-    const dir = path.join(home, name);
-    mkdirSync(dir, { recursive: true });
-    voiceOfV8(dir, { voice }, 9);
-    const settings = () => {
-      const d = new Database(path.join(dir, "portal.db"), { readonly: true });
-      try {
-        return d.prepare("SELECT key, value FROM settings ORDER BY key").all();
-      } finally {
-        d.close();
-      }
-    };
-    const before = settings();
-    await upgraded(dir);
-    assert.deepEqual(settings(), before, name);
-    assert.equal(existsSync(path.join(dir, "handoff")), false, name);
-  }
+test("what an earlier try left that nothing took is left anew from the rows, with the voices added since; one that no longer applies goes", async () => {
+  const dir = path.join(home, "voice-again");
+  const calm = { id: "voice-5b1e0c9a-0d7e-4f3c-8a2b-6c4d2e1f0a9b", name: "Calm", kind: "clone", instruction: "Slow and low.", transcript: "A calm voice.", audio: cloneWav(2, 2) };
+  voiceOfV8(dir, { voice: FRIDAY_VOICE, voice_before_managed: { noSpeech: false } }, [ARIA, calm]);
+  // A try left Aria alone, and the person's own addresses of then, and its database rolled back; Calm was added after.
+  const earlier = path.join(dir, "handoff", "voice-service");
+  mkdirSync(path.join(earlier, "voices"), { recursive: true });
+  writeFileSync(path.join(earlier, "voices", "0.wav"), "an older recording");
+  writeFileSync(path.join(earlier, "voices.json"), JSON.stringify([{ ...ARIA, audio: "voices/0.wav" }]));
+  writeFileSync(path.join(earlier, "handoff.json"), JSON.stringify({ format: 1, name: "voice-service", schema: 9, made: "2026-10-22T06:00:00.000Z" }));
+  mkdirSync(path.join(dir, "handoff", "voice-addresses"));
+  writeFileSync(path.join(dir, "handoff", "voice-addresses", "handoff.json"), JSON.stringify({ format: 1, name: "voice-addresses", schema: 9, made: "2026-10-22T06:00:00.000Z" }));
+  await upgraded(dir);
+
+  assert.deepEqual(leftAt(dir), ["voice-service"], "the addresses of then are not the person's now");
+  assert.notEqual(voiceLeft(dir, "voice-service", "handoff.json").made, "2026-10-22T06:00:00.000Z");
+  const { audio: _aria, ...aria } = ARIA;
+  const { audio: _calm, ...rest } = calm;
+  assert.deepEqual(voiceLeft(dir, "voice-service", "voices.json"), [{ ...aria, audio: "voices/0.wav" }, { ...rest, audio: "voices/1.wav" }]);
+  assert.equal(sha256(readFileSync(path.join(earlier, "voices", "0.wav"))), sha256(ARIA.audio));
+  assert.equal(sha256(readFileSync(path.join(earlier, "voices", "1.wav"))), sha256(calm.audio));
+  assert.equal(voiceIn(dir).table, false);
+});
+
+test("a database at version 9 has nothing of voice mode to leave, and keeps what it holds", async () => {
+  const dir = path.join(home, "voice-fresh");
+  mkdirSync(dir, { recursive: true });
+  const d = freshAt9(path.join(dir, "portal.db"));
+  d.pragma("user_version = 9");
+  assert.equal(schemaFingerprint(d), V9_FINGERPRINT, "the schema of version 9");
+  d.prepare("INSERT INTO settings (key, value) VALUES ('voice', ?)").run(JSON.stringify({ provider: "test-speaker", responseInstructions: "Short." }));
+  d.close();
+  const [line] = errorLines(dir);
+  const before = voiceIn(dir);
+  await upgraded(dir);
+  const now = voiceIn(dir);
+  assert.deepEqual([now.version, now.fingerprint, now.value("voice")], [SCHEMA_VERSION, PINNED.fingerprint, before.value("voice")]);
+  assert.deepEqual(leftAt(dir), []);
+  assert.equal(existsSync(line), true, "the step did not run");
 });
 
 // The agent's memory in Understory is an extension's from version 10 (extensions/understory), with settings of its own,
@@ -959,7 +1095,7 @@ const UNDERSTORY_ENTRY = { understory: { url: "http://127.0.0.1:3800/mcp", lifec
 
 /** A data folder as version 9 left it, with the settings given (null for none) and projects that said something about the agent's memory. */
 function understoryOfV9(dir, settings) {
-  const d = freshBefore10(path.join(dir, "portal.db"));
+  const d = freshAt9(path.join(dir, "portal.db"));
   d.pragma("user_version = 9");
   assert.equal(schemaFingerprint(d), V9_FINGERPRINT, "the schema of version 9");
   const put = d.prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value");

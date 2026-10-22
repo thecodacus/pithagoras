@@ -266,27 +266,43 @@ export interface MemoryHolder {
   on(): boolean;
 }
 
-/**
- * How a speech service is spoken to, as voice mode knows it: `audio-cpp` (Breeze on audio.cpp, streamed), `kokoro` and
- * `chatterbox` (on audio.cpp, a WAV for each phrase) and `breeze` (Breeze's Python service). See "Speech runtimes" in
- * the voice guide.
- */
-export type SpeechRuntime = "audio-cpp" | "kokoro" | "chatterbox" | "breeze";
-
-/** Where a voice provider listens and speaks now: see `voice.provide`. */
-export interface VoiceWhere {
-  /** Speech recognition: an address that takes a WAV as Whisper.cpp's `/inference` or an OpenAI transcription does, and the model it is sent, where it names one. */
-  listen: { url: string; model?: string };
-  /** Speech synthesis, and how it is spoken to. Without it, it recognises speech only: dictation works, and replies are not spoken. */
-  speak?: { url: string; runtime: SpeechRuntime };
+/** A voice a voice provider speaks with: what an agent's voice is chosen from (see `VoiceProvider.state`). */
+export interface ProvidedVoice {
+  /** What `speak` is given, and what an agent keeps as its voice. */
+  id: string;
+  /** What the Agents page calls it: shown as it is, unless `builtIn`. */
+  name: string;
+  /**
+   * True for a voice the provider has of itself, whose name is its own text in English: the portal shows that name
+   * through the extension's translations. A voice the person added is shown by the name they gave it.
+   */
+  builtIn?: boolean;
 }
 
-/** What an extension offers voice mode: a place to listen and speak. */
+/** What an extension offers voice mode: speech recognition, speech synthesis, and the voices it speaks with. */
 export interface VoiceProvider {
-  /** What Settings → Add-ons → Voice calls it. */
+  /** What the portal calls it where it names voice mode's source, in English: shown through the extension's own translations. */
   label: string;
-  /** Where it listens and speaks now; nothing while it cannot be used. Asked at each request: keep it quick. */
-  where(): VoiceWhere | undefined;
+  /**
+   * What it offers now; nothing while it cannot be used, and voice mode then says that it is not running. `speaks`
+   * false: it recognises speech alone, so dictation works and replies are not spoken. `voices` is what an agent's voice
+   * is chosen from. Asked at each request and as each prompt is built: keep it quick, and give a value, not a promise.
+   */
+  state(): { speaks: boolean; voices: ProvidedVoice[] } | undefined;
+  /**
+   * The words said in `wav`: one recording, a 16 kHz mono 16-bit WAV of at most 12 MB. `purpose` is "dictation" for the
+   * message box's microphone and "voice" for voice mode. `signal` ends when the page gives up, or after two minutes.
+   * Throws with what the page should say.
+   */
+  transcribe(wav: Buffer, options: { purpose: "voice" | "dictation"; signal: AbortSignal }): Promise<string>;
+  /**
+   * One phrase of at most 600 characters, spoken in `voice`: an id from `state().voices`; undefined, or an id it no
+   * longer has, is its own choice. Answers an ok Response whose body is `audio/pcm` (mono, 24 kHz, signed 16-bit
+   * little-endian, passed on to the page as it arrives; an `x-sample-rate` header, where there is one, says 24000) or
+   * `audio/wav` (mono, 24 kHz, 16-bit PCM, read whole and checked). `signal` as for `transcribe`. Throws with what the
+   * page should say.
+   */
+  speak(text: string, options: { voice?: string; signal: AbortSignal }): Promise<globalThis.Response>;
   /**
    * Voice mode began (true) or stopped (false) being used anywhere. Awaited when it begins; a throw is the page's error.
    * Given 120 seconds: one that has not settled by then counts as failed.
@@ -431,22 +447,23 @@ export interface ServerPortal {
     hold(holder: MemoryHolder): void;
   };
   /**
-   * Voice mode's sources: the person chooses in Settings → Add-ons → Voice whether it listens and speaks at addresses of
-   * their own or through an extension that provides it. Their own addresses are never changed for an extension.
+   * Voice mode's source: the extension it listens and speaks through, chosen on that extension's own page. Voice mode
+   * is on while it has one; the person can stop using it in Settings → Defaults → Voice mode.
    */
   voice: {
     /**
-     * Offers voice mode a place to listen and speak, which the person can then choose. One for each package, the last
-     * given; it goes when this server half stops. Voice mode asks `where` at each request while it is the source, and
-     * where it answers nothing, voice mode says that the extension is not running rather than use other addresses.
+     * Offers voice mode speech recognition and synthesis. One for each package, the last given; it goes when this
+     * server half stops. While this one is the source and `state` answers nothing, voice mode says that it is not
+     * running, and uses nothing else.
      */
     provide(provider: VoiceProvider): void;
     /**
-     * Makes this extension voice mode's source (and voice mode on), or, with false, hands it back to the person's own
-     * addresses where it is the source now. For what the person asks for on the extension's own page, as installing
-     * it there: the source changes where the person's voice goes.
+     * Makes this extension voice mode's source, or, with false, stops it being that where it is now. For what the
+     * person asks for on the extension's own page: the source decides where the person's voice goes.
      */
     choose(chosen: boolean): void;
+    /** Whether this extension is voice mode's source now. */
+    chosen(): boolean;
   };
   /**
    * The package's own routes, at /api/x/<package>/…, behind the portal's
