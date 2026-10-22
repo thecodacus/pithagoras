@@ -1,8 +1,8 @@
-import { useEffect, useId, useState, type ReactNode } from "react";
-import { LuBot, LuMinus, LuPlus, LuRefreshCw } from "react-icons/lu";
+import { useEffect, useId, useState } from "react";
+import { LuMinus, LuPlus, LuRefreshCw } from "react-icons/lu";
 import { api, type AvailableModel, type SubagentMode } from "../api";
 import { Select } from "./Select";
-import { LoadFailed, SwitchRow } from "./SettingsUi";
+import { LoadFailed, Section, SwitchRow } from "./SettingsUi";
 import { msg, t, tp, tx } from "../i18n";
 
 /**
@@ -38,20 +38,6 @@ function reloadNote(waiting: number): string {
   return waiting
     ? tp(waiting, "Idle chats have it now; one busy chat has it from its next step.", "Idle chats have it now; {n} busy chats have it from their next step.")
     : t("Chats have it from now on.");
-}
-
-function Header({ Icon, title, children }: { Icon: typeof LuBot; title: string; children: ReactNode }) {
-  return (
-    <div className="flex items-start gap-2.5">
-      <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-accent/10 text-accent">
-        <Icon className="h-4 w-4" />
-      </div>
-      <div className="min-w-0 flex-1">
-        <p className="text-sm text-fg">{title}</p>
-        <p className="mt-0.5 text-[11px] text-fg-faint">{children}</p>
-      </div>
-    </div>
-  );
 }
 
 const MODES: { value: SubagentMode; label: string; detail: string }[] = [
@@ -102,95 +88,98 @@ export function SubagentSettings({ onError }: { onError: (e: string) => void }) 
   };
 
   return (
-    <div className="mt-4 space-y-3" data-setting={t("Subagents")}>
-      <div className="rounded-xl border border-line bg-raised/40 p-3">
-        <Header Icon={LuBot} title={t("Subagents")}>
-          {tx("A {tool} tool: the agent hands a self-contained task to a second agent with a context of its own, and gets its answer back. You can watch it beside the chat and give it instructions while it works.", { tool: <code>subagent</code> })}
-        </Header>
-      </div>
-      <SwitchRow
-        title={t("Subagent tool")}
-        detail={s.enabled ? t("Installed as a pi package ({source}).", { source: s.source ?? "" }) : t("Off: the agent has no subagent tool.")}
-        on={s.enabled}
-        onChange={(enabled) => void change({ enabled })}
-        disabled={busy || (!s.available && !s.installed)}
-        note={!s.available && !s.installed ? t("This install does not carry the subagent tool.") : undefined}
-      />
-      <fieldset className="rounded-xl border border-line bg-raised/40 p-3" disabled={busy}>
-        <legend className="px-1 text-xs text-fg-muted">{t("How a subagent runs against the agent")}</legend>
-        <div className="space-y-2">
-          {MODES.map((m) => (
-            <label key={m.value} className="flex cursor-pointer items-start gap-2.5 rounded-lg p-1.5 hover:bg-fg/5">
-              <input
-                type="radio"
-                name={name}
-                value={m.value}
-                checked={s.mode === m.value}
-                onChange={() => void change({ mode: m.value })}
-                className="mt-0.5 accent-current"
-              />
-              <span className="min-w-0 text-sm text-fg">
-                {t(m.label)}
-                <span className="mt-0.5 block text-xs text-fg-faint">{t(m.detail)}</span>
+    // Apart from the list of tools above it, as the sections of a page are.
+    <div className="mt-7">
+      <Section
+        title={t("Subagents")}
+        hint={tx("A {tool} tool: the agent hands a self-contained task to a second agent with a context of its own, and gets its answer back. You can watch it beside the chat and give it instructions while it works.", { tool: <code>subagent</code> })}
+      >
+        <div className="space-y-3">
+          <SwitchRow
+            title={t("Subagent tool")}
+            detail={s.enabled ? t("Installed as a pi package ({source}).", { source: s.source ?? "" }) : t("Off: the agent has no subagent tool.")}
+            on={s.enabled}
+            onChange={(enabled) => void change({ enabled })}
+            disabled={busy || (!s.available && !s.installed)}
+            note={!s.available && !s.installed ? t("This install does not carry the subagent tool.") : undefined}
+          />
+          <fieldset className="rounded-xl border border-line bg-raised/40 p-3" disabled={busy}>
+            <legend className="px-1 text-xs text-fg-muted">{t("How a subagent runs against the agent")}</legend>
+            <div className="space-y-2">
+              {MODES.map((m) => (
+                <label key={m.value} className="flex cursor-pointer items-start gap-2.5 rounded-lg p-1.5 hover:bg-fg/5">
+                  <input
+                    type="radio"
+                    name={name}
+                    value={m.value}
+                    checked={s.mode === m.value}
+                    onChange={() => void change({ mode: m.value })}
+                    className="mt-0.5 accent-current"
+                  />
+                  <span className="min-w-0 text-sm text-fg">
+                    {t(m.label)}
+                    <span className="mt-0.5 block text-xs text-fg-faint">{t(m.detail)}</span>
+                  </span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
+          <div className="rounded-xl border border-line bg-raised/40 p-3 text-sm text-fg">
+            {t("Model")}
+            <span className="mt-0.5 block text-xs text-fg-faint">
+              {t("What a subagent runs on unless its chat says otherwise (in the chat's model menu). The chat's own is the one already loaded, so no second model is started.")}
+            </span>
+            <Select
+              aria-label={t("Subagent model")}
+              size="sm"
+              className="mt-2 w-full"
+              value={s.model}
+              disabled={busy}
+              onChange={(model) => void change({ model })}
+              options={[
+                { value: "auto", label: t("Same as the chat"), hint: t("The model the chat is on when it starts one") },
+                ...(models.some((m) => `${m.provider}/${m.id}` === s.model) || s.model === "auto" ? [] : [{ value: s.model, label: s.model }]),
+                ...models.map((m) => ({ value: `${m.provider}/${m.id}`, label: m.name || m.id, hint: `${m.provider}/${m.id}` })),
+              ]}
+            />
+          </div>
+          <div className="flex items-start gap-3 rounded-xl border border-line bg-raised/40 p-3">
+            <div className="min-w-0 flex-1 text-sm text-fg">
+              {t("Subagents at once")}
+              <span className="mt-0.5 block text-xs text-fg-faint">
+                {t("Across every chat. One asked for beyond it waits for a free slot — its call waits in interrupt mode, and in the background it starts once another has finished. Each one is a model running.")}
               </span>
-            </label>
-          ))}
+            </div>
+            <div role="group" aria-label={t("Subagents at once")} className="flex shrink-0 items-center gap-1">
+              <button
+                type="button"
+                aria-label={t("Fewer at once")}
+                disabled={busy || s.maxParallel <= 1}
+                onClick={() => void change({ maxParallel: s.maxParallel - 1 })}
+                className="grid h-7 w-7 place-items-center rounded-lg bg-fg/5 text-fg-muted transition hover:bg-fg/10 disabled:opacity-40"
+              >
+                <LuMinus className="h-3.5 w-3.5" />
+              </button>
+              <output aria-live="polite" className="w-6 text-center text-sm tabular-nums text-fg">{s.maxParallel}</output>
+              <button
+                type="button"
+                aria-label={t("More at once")}
+                disabled={busy || s.maxParallel >= (s.maxParallelLimit ?? MAX_PARALLEL)}
+                onClick={() => void change({ maxParallel: s.maxParallel + 1 })}
+                className="grid h-7 w-7 place-items-center rounded-lg bg-fg/5 text-fg-muted transition hover:bg-fg/10 disabled:opacity-40"
+              >
+                <LuPlus className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </div>
+          {busy && (
+            <p className="flex items-center gap-2 text-xs text-fg-subtle">
+              <LuRefreshCw className="h-3.5 w-3.5 animate-spin" /> {t("Applying…")}
+            </p>
+          )}
+          {note && !busy && <p role="status" className="text-xs text-fg-muted">{note()}</p>}
         </div>
-      </fieldset>
-      <div className="rounded-xl border border-line bg-raised/40 p-3 text-sm text-fg">
-        {t("Model")}
-        <span className="mt-0.5 block text-xs text-fg-faint">
-          {t("What a subagent runs on unless its chat says otherwise (in the chat's model menu). The chat's own is the one already loaded, so no second model is started.")}
-        </span>
-        <Select
-          aria-label={t("Subagent model")}
-          size="sm"
-          className="mt-2 w-full"
-          value={s.model}
-          disabled={busy}
-          onChange={(model) => void change({ model })}
-          options={[
-            { value: "auto", label: t("Same as the chat"), hint: t("The model the chat is on when it starts one") },
-            ...(models.some((m) => `${m.provider}/${m.id}` === s.model) || s.model === "auto" ? [] : [{ value: s.model, label: s.model }]),
-            ...models.map((m) => ({ value: `${m.provider}/${m.id}`, label: m.name || m.id, hint: `${m.provider}/${m.id}` })),
-          ]}
-        />
-      </div>
-      <div className="flex items-start gap-3 rounded-xl border border-line bg-raised/40 p-3">
-        <div className="min-w-0 flex-1 text-sm text-fg">
-          {t("Subagents at once")}
-          <span className="mt-0.5 block text-xs text-fg-faint">
-            {t("Across every chat. One asked for beyond it waits for a free slot — its call waits in interrupt mode, and in the background it starts once another has finished. Each one is a model running.")}
-          </span>
-        </div>
-        <div role="group" aria-label={t("Subagents at once")} className="flex shrink-0 items-center gap-1">
-          <button
-            type="button"
-            aria-label={t("Fewer at once")}
-            disabled={busy || s.maxParallel <= 1}
-            onClick={() => void change({ maxParallel: s.maxParallel - 1 })}
-            className="grid h-7 w-7 place-items-center rounded-lg bg-fg/5 text-fg-muted transition hover:bg-fg/10 disabled:opacity-40"
-          >
-            <LuMinus className="h-3.5 w-3.5" />
-          </button>
-          <output aria-live="polite" className="w-6 text-center text-sm tabular-nums text-fg">{s.maxParallel}</output>
-          <button
-            type="button"
-            aria-label={t("More at once")}
-            disabled={busy || s.maxParallel >= (s.maxParallelLimit ?? MAX_PARALLEL)}
-            onClick={() => void change({ maxParallel: s.maxParallel + 1 })}
-            className="grid h-7 w-7 place-items-center rounded-lg bg-fg/5 text-fg-muted transition hover:bg-fg/10 disabled:opacity-40"
-          >
-            <LuPlus className="h-3.5 w-3.5" />
-          </button>
-        </div>
-      </div>
-      {busy && (
-        <p className="flex items-center gap-2 text-xs text-fg-subtle">
-          <LuRefreshCw className="h-3.5 w-3.5 animate-spin" /> {t("Applying…")}
-        </p>
-      )}
-      {note && !busy && <p role="status" className="text-xs text-fg-muted">{note()}</p>}
+      </Section>
     </div>
   );
 }
