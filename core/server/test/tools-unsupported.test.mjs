@@ -41,3 +41,9 @@ test("a chat is offered no mode, and putting one in a mode is refused, when pi r
   assert.equal(put.status, 409);
   assert.deepEqual(await put.json(), { error: "Modes are for the chats you start on the portal's pages, where pi runs in the portal's own process." });
 });
+
+test("so are the modes the person makes, which are tool layers too", async () => {
+  const res = await fetch(`${base}/api/chat-modes`);
+  assert.equal(res.status, 400);
+  assert.equal((await res.json()).code, "tools-unsupported");
+});

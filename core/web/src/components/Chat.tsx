@@ -20,7 +20,7 @@ import { Fragment, memo, useCallback, useEffect, useId, useLayoutEffect, useMemo
 import type { DiagramPlugin } from "streamdown";
 import { followPointer } from "../pointer-drag";
 import { LuGripVertical, LuMenu, LuBot, LuArrowDown, LuSquare, LuArrowUp, LuPaperclip, LuPuzzle, LuX } from "react-icons/lu";
-import { api, EXTENSIONS_CHANGED, type ChatMode, type PiCommand, type PortalEvent, type PromptOptions, type Session } from "../api";
+import { api, EXTENSIONS_CHANGED, MODES_CHANGED, type ChatMode, type PiCommand, type PortalEvent, type PromptOptions, type Session } from "../api";
 import { pending, refetchImage, sortFiles, uploadedNote, type Attachment } from "../attachments";
 import { activity, buildTranscript, keepItems, type Item, type SentImage } from "../transcript";
 import { HAS_MERMAID, loadMermaidPlugin } from "../mermaid";
@@ -1090,7 +1090,7 @@ export function Chat({
 
   // The modes the chat may be put in: for the picker before it has said anything, and after that to name its mode in
   // the header. One that cannot be read is no list, and no picker: the chat works as it is. Read again when what is
-  // installed changes: an extension's modes come and go with it.
+  // installed changes (an extension's modes come and go with it), and when the person's own change (Settings → Modes).
   const [modes, setModes] = useState<{ chat: string; list: ChatMode[] } | null>(null);
   const wantsModes = !loading && (!started || session.mode !== null);
   useEffect(() => {
@@ -1106,9 +1106,11 @@ export function Chat({
       );
     void read();
     window.addEventListener(EXTENSIONS_CHANGED, read);
+    window.addEventListener(MODES_CHANGED, read);
     return () => {
       live = false;
       window.removeEventListener(EXTENSIONS_CHANGED, read);
+      window.removeEventListener(MODES_CHANGED, read);
     };
   }, [session.id, wantsModes]);
   const modeList = modes?.chat === session.id ? modes.list : [];
@@ -2037,7 +2039,7 @@ export function Chat({
         {/* How the chat works, chosen before it has said anything: where there is a choice. */}
         {!loading && !started && modeList.length > 1 && (
           <div className="relative mx-auto mb-1.5 flex w-full max-w-3xl items-center gap-2">
-            <ModePicker current={currentMode} modes={modeList} onChoose={chooseMode} />
+            <ModePicker chat={session.id} current={currentMode} modes={modeList} onChoose={chooseMode} />
           </div>
         )}
         <div className="prompt-shell relative mx-auto w-full max-w-3xl">

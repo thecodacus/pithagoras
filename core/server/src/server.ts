@@ -2,7 +2,6 @@ import { bindHost, loginThrottle, portalSecurityHeaders, tlsFiles } from "./http
 import { eventsRouter } from "./api/events.js";
 import { serveWeb } from "./web-static.js";
 import { clampLevel } from "./pi/model-runtime.js";
-import { ASK_QUESTION_TOOL } from "./pi/ask-question.js";
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { createServer as createHttpServer } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
@@ -79,7 +78,7 @@ import { deleteNotesOf } from "./activity.js";
 import { EXECUTOR_KIND } from "./executor-kind.js";
 import { sessions, CommandFailed, IMAGE_ROOT } from "./session-manager.js";
 import { ImageError, MAX_IMAGE_BYTES, MAX_IMAGES, imagePath, mimeOf, parseImages, saveImages } from "./prompt-images.js";
-import { defaultsFor, exceptionsFor, heldOffUnshown, toolEnabled, toolSource } from "./tool-policy.js";
+import { defaultsFor, toolSource } from "./tool-policy.js";
 import { mcpRouter, mcpServerNames, onMcpWritten } from "./api/mcp.js";
 import { authMode, changePassword, checkPassword, isAuthed, issueCookie, passwordRefused, requireAuth, setUpPassword, shortPassword, signOut } from "./auth.js";
 import { activeSso, endSessionUrl, oidcRouter, providerFor, rememberProvider } from "./oidc-login.js";
@@ -97,6 +96,7 @@ import { holdsWork, unsavedRefusal, unsavedWork } from "./git.js";
 import { skillsRouter } from "./api/skills.js";
 import { featuresRouter } from "./api/features.js";
 import { modesRouter } from "./api/modes.js";
+import { isToolList, layerExceptions, layerTools, toolsUnsupported } from "./tool-layers.js";
 import { modelLevels, modelRuntime, providersRouter } from "./api/providers.js";
 import { peopleRouter } from "./api/people.js";
 import { voiceRouter } from "./api/voice.js";
@@ -471,9 +471,6 @@ app.get("/api/projects", (req, res) => {
   }
 });
 
-/** Whether a request's list of tools to switch off is one: a list of names. */
-const isToolList = (value: unknown): value is string[] => Array.isArray(value) && value.every((name) => typeof name === "string");
-
 /**
  * Stores what a project's chats start with, given the tools it wants off: the
  * difference from what the layers under it leave (the portal-wide default, and
@@ -664,38 +661,6 @@ app.put("/api/projects/:name/tools", async (req, res) => {
     projectFailure(res, e);
   }
 });
-
-/**
- * A layer's tools as its page shows them: what the portal has seen registered
- * where the layer's chats and runs work (`folder`), on or off by `below` — every
- * layer under this one — bent by what this one says. `defaultOn` is what the
- * layers under it say, which is what this one disagrees with. Shaped like a
- * project's and a chat's, so the page draws them all the same way.
- */
-function layerTools(folder: string, below: string[], exceptions: { off: string[]; on: string[] }, unwatched = false) {
-  const servers = mcpServerNames();
-  const lazy = lazyMarks();
-  return {
-    // A routine's runs have nobody to ask (see asksQuestions), so its page does not offer the tool.
-    tools: shownTools(folder).filter((tool) => !(unwatched && tool.name === ASK_QUESTION_TOOL && tool.inline)).map((tool) => ({
-      ...tool,
-      source: toolSource(tool.name, tool.source, servers),
-      enabled: toolEnabled(tool.name, below, exceptions),
-      defaultOn: !below.includes(tool.name),
-      ...lazy(tool),
-    })),
-    live: false,
-    names: toolGroupNames(),
-    off: defaultsFor(below, exceptions),
-  };
-}
-
-/** The exceptions to store for a layer, given what it wants off: as for a project. */
-function layerExceptions(folder: string, below: string[], held: { off: string[]; on: string[] }, off: string[]) {
-  const shown = shownTools(folder).map((t) => t.name);
-  const answered = [...shown, ...held.off, ...held.on];
-  return exceptionsFor(heldOffUnshown(off, shown, held), below, answered, held);
-}
 
 /**
  * An agent's tools: its exceptions to the portal-wide default, for every chat in
@@ -1232,16 +1197,6 @@ app.put("/api/sessions/:id/draft", (req, res) => {
   sessions.setDraft(session.id, text, start !== undefined && end !== undefined && start <= end ? { start, end } : undefined);
   res.json({ ok: true });
 });
-
-/**
- * A container session reaches pi over RPC, which has no tool registry to ask
- * and nothing to tell. Said plainly rather than answered with an empty list
- * and a switch that does nothing.
- */
-const TOOLS_UNSUPPORTED =
-  "Tools cannot be switched with EXECUTOR=container: pi runs inside the container and the portal never sees what it registered";
-/** With a `code`, so that the page tells this answer from any other failure of the same request by it, not by the sentence. */
-const toolsUnsupported = { error: TOOLS_UNSUPPORTED, code: "tools-unsupported" };
 
 /**
  * The tools this conversation could use, and which of them are on.

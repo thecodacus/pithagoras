@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
-import { LuCheck, LuChevronDown } from "react-icons/lu";
+import { LuCheck, LuChevronDown, LuPlus } from "react-icons/lu";
+import { useNavigate } from "react-router-dom";
 import type { ChatMode } from "../api";
 import { translate } from "../extensions/strings";
 import { labelOf, msg, t } from "../i18n";
@@ -38,12 +39,24 @@ function unavailable(stored: string): { label: string; title: string } {
 }
 
 /**
- * The chip above the message box of a chat that has said nothing yet, and its menu of the modes it may be put in. A
- * button with no type submits the form it is in, the message box's: every button here says it is a button, or
- * choosing a mode would send the draft as the first message, which fixes the mode. A mode that asks first (an
- * extension's `confirm`) is shown in the warning colour, and is chosen only after a yes to its text: `confirmed`.
+ * The chip above the message box of a chat that has said nothing yet, and its menu of the modes it may be put in, with
+ * the way to make one of your own last (Settings → Modes, over the chat). A button with no type submits the form it is
+ * in, the message box's: every button here says it is a button, or choosing a mode would send the draft as the first
+ * message, which fixes the mode. A mode that asks first (an extension's `confirm`) is shown in the warning colour, and
+ * is chosen only after a yes to its text: `confirmed`.
  */
-export function ModePicker({ current, modes, onChoose }: { current: string; modes: ChatMode[]; onChoose: (mode: string, confirmed?: boolean) => void }) {
+export function ModePicker({
+  chat,
+  current,
+  modes,
+  onChoose,
+}: {
+  chat: string;
+  current: string;
+  modes: ChatMode[];
+  onChoose: (mode: string, confirmed?: boolean) => void;
+}) {
+  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const button = useRef<HTMLButtonElement>(null);
   const menu = useRef<HTMLDivElement>(null);
@@ -55,7 +68,7 @@ export function ModePicker({ current, modes, onChoose }: { current: string; mode
   const gone = chosen ? undefined : unavailable(current);
   const label = chosen ? modeLabel(chosen) : gone!.label;
 
-  const entries = () => Array.from(menu.current?.querySelectorAll<HTMLElement>('[role="menuitemradio"]') ?? []);
+  const entries = () => Array.from(menu.current?.querySelectorAll<HTMLElement>('[role="menuitemradio"], [role="menuitem"]') ?? []);
   // Opened, the focus is on the mode the chat has, or on the first.
   useEffect(() => {
     if (!open) return;
@@ -146,6 +159,20 @@ export function ModePicker({ current, modes, onChoose }: { current: string; mode
               {mode.id === current && <LuCheck aria-hidden className="mt-0.5 h-3.5 w-3.5 shrink-0 text-accent" />}
             </button>
           ))}
+          <div className="my-1 border-t border-line" />
+          <button
+            type="button"
+            role="menuitem"
+            tabIndex={-1}
+            onClick={() => {
+              setOpen(false);
+              navigate(`/s/${chat}/settings/modes`);
+            }}
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-fg-muted hover:bg-fg/5 focus:bg-fg/[0.07] focus:outline-none"
+          >
+            <LuPlus aria-hidden className="h-3.5 w-3.5" />
+            {t("New mode…")}
+          </button>
         </div>
       )}
     </div>

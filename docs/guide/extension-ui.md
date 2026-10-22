@@ -1884,8 +1884,9 @@ portal.chats.extend((pi, chat) => {
   each time a chat's pi starts, and a chat's mode is fixed once it has said
   something, so it decides once, and a tool of the mode's needs no check at
   each call.
-- **Where it is offered.** The picker lists the portal's own modes first and
-  the extensions' last, in the order they were offered. Modes are offered in
+- **Where it is offered.** The picker lists the portal's own modes first, then
+  the ones the person made ([Modes you make](/guide/sessions#modes-you-make)),
+  and the extensions' last, in the order they were offered. Modes are offered in
   the chats the person starts on the portal's pages and the conversations on an
   agent's page, where pi runs in the portal's own process (`portal.executor` is
   `"host"`): not to a routine's run, a heartbeat, a chat that came through a

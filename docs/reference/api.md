@@ -57,7 +57,7 @@ them. See [Projects](/guide/projects).
 | `POST /api/sessions` | `{ workspace?, agent?, title? }` — `agent` starts it in that agent's home; neither means the agent picked for new chats, the first agent (Home) by default; no title means "New chat", replaced by the first message |
 | `GET /api/sessions/:id` | One session |
 | `PATCH /api/sessions/:id` | `{ title?, pinned? }` — a title is cut to 120 characters |
-| `GET /api/sessions/:id/modes` | `{ modes: [{ id, label, description, confirm?, extension? }] }` — the [modes](/guide/sessions#modes) the chat may be put in, the portal's own first and the extensions' last ([Chat modes](/guide/extension-ui#chat-modes)), whether or not it has started. An extension's `id` is `"<package>/<id>"`, which is what a chat in it stores, and it has `extension`, its package, and `confirm`, the warning it asks first with, where it has one; its texts are in English. None for a routine's run, a heartbeat, a chat that came through a channel, a colleague's chat, or any chat with `EXECUTOR=container`. Does not start pi |
+| `GET /api/sessions/:id/modes` | `{ modes: [{ id, label, description, confirm?, extension? }] }` — the [modes](/guide/sessions#modes) the chat may be put in, the portal's own first, then [the ones you made](#chat-modes) by their names, and the extensions' last ([Chat modes](/guide/extension-ui#chat-modes)), whether or not it has started. An extension's `id` is `"<package>/<id>"`, which is what a chat in it stores, and it has `extension`, its package, and `confirm`, the warning it asks first with, where it has one; its texts are in English. None for a routine's run, a heartbeat, a chat that came through a channel, a colleague's chat, or any chat with `EXECUTOR=container`. Does not start pi |
 | `PUT /api/sessions/:id/modes` | `{ mode, confirmed? }` — puts a chat that has said nothing yet in a mode, by its `id`; a pi that was started for it is let go, and the next message starts it in the mode. Answers `{ mode }`. A mode with `confirm` takes `confirmed: true`, sent once the person has said yes to its warning, and is then recorded in the audit log (`mode`); without it, 409 `{ error, confirm }`. `confirmed` is the caller's word, no proof that the warning was shown. 409 where the chat is offered no modes, once it has sent a message or a command, or while it is running; 409 `This conversation is already being edited.` while an edit or a reload holds it; 400 for a mode it is not offered |
 | `DELETE /api/sessions/:id` | Stops it if running, then deletes it, its events and pi's conversation file for it (in `SESSION_DIR`). The folder it worked in is left alone. |
 
@@ -82,7 +82,50 @@ A session:
 `status` is one of `idle`, `running`, `error`, `interrupted`. `live` is whether
 a pi process is up right now, which is not the same thing — an idle session can
 still be live. `mode` is the [mode](/guide/sessions#modes) the chat was started
-in: `null` for Standard, the portal's own by its name (`"code"`).
+in: `null` for Standard, the portal's own by its name (`"code"`), one you made
+as `"custom/<id>"` (see [Chat modes](#chat-modes)), an extension's as
+`"<package>/<id>"`.
+
+## Chat modes
+
+The [modes you make](/guide/sessions#modes-you-make), in Settings → Modes. A chat
+in one stores `custom/<id>`, and `GET /api/sessions/:id/modes` offers them after
+the portal's own and before the extensions', by their names. With `EXECUTOR=container` each of these
+answers 400 with `code: "tools-unsupported"`, as the tool routes do.
+
+| | |
+| --- | --- |
+| `GET /api/chat-modes` | `{ modes }`, by their names |
+| `POST /api/chat-modes` | `{ label, description? }` → the mode. Its `id` is a slug of the label that no mode has and no chat stores, numbered where it has to be (`research-2`); a new label later does not change it. 400 for a name that is empty, of more than one line, or longer than 60 characters |
+| `PUT /api/chat-modes/:id` | `{ label?, description?, instructions?, codemode?, provider?, model?, thinkingLevel? }` → the mode; what is not named stays. `codemode: true` switches the code tool on in the mode's tools too. The running chats in the mode are told its tools and its instructions at once; whether they work through the code tool, when each one's pi next starts. 404 for an unknown mode, 400 for a field it cannot take |
+| `DELETE /api/chat-modes/:id` | `{ ok: true }`. The chats in it keep `custom/<id>`, and lose its tools and instructions at once; it is offered to no chat |
+| `GET /api/chat-modes/:id/tools` | `{ tools, live, off, names }`, shaped as a project's: what every chat in the mode starts with, `defaultOn` the portal-wide default it is held against. `live` is always false |
+| `PUT /api/chat-modes/:id/tools` | `{ off: string[] }` — what is not named is on. Stored as the difference from the portal-wide default, and told to the running chats in the mode. Answers `{ off, applied }` |
+
+A mode:
+
+```json
+{
+  "id": "research",
+  "label": "Research",
+  "description": "Reads everything before it writes",
+  "codemode": false,
+  "instructions": "Cite the file and line of everything you claim.",
+  "provider": null,
+  "model": null,
+  "thinkingLevel": "high",
+  "createdAt": "…",
+  "updatedAt": "…"
+}
+```
+
+`label` and `description` are one line each, the description at most 200
+characters; `instructions` at most 8,000, said in the system prompt of its
+chats. `provider`, `model` and `thinkingLevel` are text or `null`, a blank is
+`null`: where a model is set, the mode writes it, with its provider, into a chat
+as the chat is put in it (`PUT /api/sessions/:id/modes`), and its
+`thinkingLevel` likewise. Another mode chosen before the chat's first message
+puts back what the mode wrote, unless the chat's own was changed since.
 
 ## Files
 

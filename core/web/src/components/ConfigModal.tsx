@@ -15,6 +15,7 @@ import {
   LuInfo,
   LuKeyRound,
   LuKeyboard,
+  LuLayers,
   LuMonitor,
   LuMoon,
   LuPlug,
@@ -29,7 +30,7 @@ import {
   LuTriangleAlert,
   LuUsers,
 } from "react-icons/lu";
-import { api, EXTENSIONS_CHANGED, SIGNED_OUT, type AvailableModel, type ExtensionInfo, type GlobalSettings, type ReportTarget, type ReportTo } from "../api";
+import { api, EXTENSIONS_CHANGED, SIGNED_OUT, type ExtensionInfo, type GlobalSettings, type ReportTarget, type ReportTo } from "../api";
 import { ChannelsPanel } from "./ChannelsPanel";
 import { SkillsPanel } from "./SkillsPanel";
 import { McpPanel } from "./McpPanel";
@@ -56,6 +57,8 @@ import { GuardSettings } from "./GuardSettings";
 import { isEnter } from "../shortcuts";
 import { KeyboardShortcuts } from "./KeyboardShortcuts";
 import { ProvidersPanel } from "./ProvidersPanel";
+import { ModelChoice } from "./ModelChoice";
+import { ModesPanel } from "./ModesPanel";
 import { EffortPicker, Empty, ErrorBanner, Field, LoadFailed, Section, Switch, SwitchRow, btnCls, inputCls, primaryCls } from "./SettingsUi";
 import { ExtensionsPanel } from "./ExtensionsPanel";
 import { webLink } from "../package-names";
@@ -68,7 +71,6 @@ import { usePalette, useTheme, type Theme } from "../theme";
 import { choose as chooseTheme, useThemes } from "../extensions/themes";
 import { humanKey, typed } from "../setting-values";
 import { effortLabel } from "../effort";
-import { modelTraits } from "../model-traits";
 import { languageChoice, languages, msg, setLanguage, t, tp, tx, useLanguage, type LanguageChoice } from "../i18n";
 import { ErrorBoundary, PartFailed } from "./ErrorBoundary";
 import { useSlot, type Registered } from "../extensions/slots";
@@ -111,6 +113,7 @@ const GROUPS: { label: string; tabs: TabDef[] }[] = [
     label: msg("Agent"),
     tabs: [
       { id: "tools", label: msg("Tools"), icon: <LuHammer />, hint: msg("What the agent may reach for, by default") },
+      { id: "modes", label: msg("Modes"), icon: <LuLayers />, hint: msg("Your own ways a chat can work, chosen above the message box") },
       { id: "sandbox", label: msg("Sandbox"), icon: <LuShieldCheck />, hint: msg("What the agent may read, change and run") },
       { id: "guard", label: msg("Guard"), icon: <LuShield />, hint: msg("What the agent is held to after it reads something untrusted") },
       { id: "skills", label: msg("Skills"), icon: <LuWrench />, hint: msg("Procedures the agent can reach for") },
@@ -353,6 +356,7 @@ export const ConfigModal = memo(function ConfigModal({
       {nav.kind === "tab" && nav.id === "channels" && <ChannelsPanel onError={setError} />}
       {nav.kind === "tab" && nav.id === "people" && <PeoplePanel onError={setError} />}
       {nav.kind === "tab" && nav.id === "tools" && <><ToolDefaults onError={setError} /><SubagentSettings onError={setError} /></>}
+      {nav.kind === "tab" && nav.id === "modes" && <ModesPanel onError={setError} />}
       {nav.kind === "tab" && nav.id === "sandbox" && <SandboxSettings onError={setError} />}
       {nav.kind === "tab" && nav.id === "guard" && <GuardSettings onError={setError} onOpen={(id) => setNav({ kind: "tab", id })} />}
       {nav.kind === "tab" && nav.id === "skills" && <SkillsPanel onError={setError} />}
@@ -881,11 +885,6 @@ function AboutDeployment({ onError }: { onError: (e: string) => void }) {
   );
 }
 
-/** What a model can do, said in a few words under its name. */
-function modelHint(m: AvailableModel): string {
-  return [m.name !== m.id ? m.id : "", ...modelTraits(m)].filter(Boolean).join(" · ");
-}
-
 function GeneralPanel({ onError, onProviders, onExtensions, onSource }: { onError: (e: string) => void; onProviders: () => void; onExtensions: () => void; onSource: (name: string) => void }) {
   // All three are fetched ahead and kept, and the page waits for all three:
   // drawn part by part, the model menus filled in and a warning pushed the
@@ -994,12 +993,6 @@ function GeneralPanel({ onError, onProviders, onExtensions, onSource }: { onErro
     }
   };
 
-  const byProvider = useMemo(() => {
-    const map = new Map<string, AvailableModel[]>();
-    for (const m of models?.models ?? []) map.set(m.provider, [...(map.get(m.provider) ?? []), m]);
-    return map;
-  }, [models]);
-
   const ready = stored && defaults && (models || modelsFailed) && (reports.value || reports.failed);
   // Without the settings there is nothing to show: no skeleton that never ends.
   if (!r && settings.failed) return <LoadFailed error={settings.failed} onRetry={settings.reload} />;
@@ -1028,24 +1021,6 @@ function GeneralPanel({ onError, onProviders, onExtensions, onSource }: { onErro
     }
   };
 
-  const provider = stored.provider || defaults.provider;
-  const providerName = (id: string) => models?.providers[id] ?? id;
-  const providerOptions = [
-    { value: "", label: defaults.provider ? t("pi's default — {name}", { name: providerName(defaults.provider) }) : t("pi's default"), hint: t("From pi's own settings.json") },
-    ...[...byProvider.entries()].map(([id, list]) => ({ value: id, label: providerName(id), hint: tp(list.length, "{n} model", "{n} models") })),
-    ...(stored.provider && !byProvider.has(stored.provider)
-      ? [{ value: stored.provider, label: stored.provider, hint: t("Not available now — no key, or not set up") }]
-      : []),
-  ];
-  const offered = byProvider.get(provider ?? "") ?? [];
-  const modelOptions = [
-    { value: "", label: defaults.model && (!stored.provider || stored.provider === defaults.provider) ? t("pi's default — {name}", { name: offered.find((m) => m.id === defaults.model)?.name ?? defaults.model }) : t("pi's default"), hint: t("Whatever pi picks for the provider") },
-    ...offered.map((m) => ({ value: m.id, label: m.name, text: `${m.name} ${m.id}`, hint: modelHint(m) || undefined })),
-    ...(stored.model && !offered.some((m) => m.id === stored.model)
-      ? [{ value: stored.model, label: stored.model, hint: t("Not offered by this provider now") }]
-      : []),
-  ];
-
   return (
     <>
       <Section
@@ -1061,43 +1036,20 @@ function GeneralPanel({ onError, onProviders, onExtensions, onSource }: { onErro
               <button type="button" onClick={onProviders} className="font-medium underline-offset-2 hover:underline">{t("Add a provider")}</button>
             </div>
           )}
-          <div className="grid gap-3 sm:grid-cols-2">
-            <label className="block">
-              <span className="text-xs text-fg-muted">{t("Provider")}</span>
-              {modelsFailed ? (
-                <input value={stored.provider ?? ""} onChange={(e) => setStored({ ...stored, provider: e.target.value })} onBlur={() => void save(stored)} placeholder={defaults.provider || t("inherit")} className={`${inputCls} mt-1 font-mono`} />
-              ) : (
-                <Select
-                  className="mt-1 w-full"
-                  aria-label={t("Default provider")}
-                  value={stored.provider ?? ""}
-                  options={providerOptions}
-                  disabled={!models}
-                  placeholder={t("Loading…")}
-                  onChange={(next) => {
-                    const keeps = (byProvider.get(next || defaults.provider) ?? []).some((m) => m.id === stored.model);
-                    void save({ ...stored, provider: next, model: keeps ? stored.model : "" });
-                  }}
-                />
-              )}
-            </label>
-            <label className="block">
-              <span className="text-xs text-fg-muted">{t("Model")}</span>
-              {modelsFailed ? (
-                <input value={stored.model ?? ""} onChange={(e) => setStored({ ...stored, model: e.target.value })} onBlur={() => void save(stored)} placeholder={defaults.model || t("pi decides")} className={`${inputCls} mt-1 font-mono`} />
-              ) : (
-                <Select
-                  className="mt-1 w-full"
-                  aria-label={t("Default model")}
-                  value={stored.model ?? ""}
-                  options={modelOptions}
-                  disabled={!models}
-                  placeholder={t("Loading…")}
-                  onChange={(next) => void save({ ...stored, model: next })}
-                />
-              )}
-            </label>
-          </div>
+          <ModelChoice
+            models={models}
+            failed={modelsFailed}
+            provider={stored.provider ?? ""}
+            model={stored.model ?? ""}
+            onChange={(next) => void save({ ...stored, ...next })}
+            labels={{ provider: t("Default provider"), model: t("Default model") }}
+            inherit={{
+              provider: defaults.provider,
+              model: defaults.model,
+              label: (name) => (name ? t("pi's default — {name}", { name }) : t("pi's default")),
+              hints: { provider: t("From pi's own settings.json"), model: t("Whatever pi picks for the provider") },
+            }}
+          />
           <div>
             <div className="flex items-baseline gap-2">
               <span className="text-xs text-fg-muted">{t("Effort")}</span>

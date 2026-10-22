@@ -7,10 +7,10 @@ import { fakeModel } from "./fake-model.mjs";
 import { inProcessHome } from "./server-harness.mjs";
 
 /**
- * Modes an extension offers (`portal.modes.provide`): listed after the portal's own for the chats that may choose, put
- * only after a yes where the mode asks first, with an audit row for it; what a mode does is the extension's, in its
- * `chats.extend` factory, which finds the chat's mode on `chat.mode` (in a stand-in pi, and in a chat's own pi with a
- * fake model); and a mode goes when its server half stops, while the chats started in it keep it.
+ * Modes an extension offers (`portal.modes.provide`): listed after the portal's own and the person's for the chats that
+ * may choose, put only after a yes where the mode asks first, with an audit row for it; what a mode does is the
+ * extension's, in its `chats.extend` factory, which finds the chat's mode on `chat.mode` (in a stand-in pi, and in a
+ * chat's own pi with a fake model); and a mode goes when its server half stops, while the chats started in it keep it.
  */
 const home = inProcessHome("extension-modes-");
 const said = [];
@@ -25,7 +25,7 @@ writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR, "models.json"), JSON.st
 
 const host = await import("../dist/extension-host.js");
 const { providedModes } = await import("../dist/chat-modes.js");
-const { createSession, getDb, getSession, getSettings, setSettings } = await import("../dist/db.js");
+const { createCustomMode, createSession, deleteCustomMode, getDb, getSession, getSettings, setSettings } = await import("../dist/db.js");
 const { sessions } = await import("../dist/session-manager.js");
 const { modesRouter } = await import("../dist/api/modes.js");
 const { default: express } = await import("express");
@@ -95,15 +95,17 @@ async function offered(id) {
   return (model.requests[asked].tools ?? []).map((tool) => tool.function?.name ?? tool.name);
 }
 
-test("an extension's modes come after the portal's own, with what they ask first and whose they are", async () => {
+test("an extension's modes come after the portal's own and the person's, with what they ask first and whose they are", async () => {
   await host.syncServerHalves([standIn()]);
   assert.equal(globalThis.focus, "stand-in/focus");
+  const mine = createCustomMode({ label: "Research", description: "" });
   const { modes } = await get(chat());
-  assert.deepEqual(ids(modes), ["standard", "code", "stand-in/focus", "stand-in/plain"]);
-  assert.deepEqual(modes[2], { id: "stand-in/focus", label: "Focus mode", description: "Works with the focus tool.", confirm: WARNING, extension: "stand-in" });
-  assert.deepEqual(modes[3], { id: "stand-in/plain", label: "Plain mode", description: "Asks nothing first.", extension: "stand-in" });
-  // The portal's own say neither.
-  assert.equal("confirm" in modes[1] || "extension" in modes[1], false);
+  deleteCustomMode(mine.id);
+  assert.deepEqual(ids(modes), ["standard", "code", `custom/${mine.id}`, "stand-in/focus", "stand-in/plain"]);
+  assert.deepEqual(modes[3], { id: "stand-in/focus", label: "Focus mode", description: "Works with the focus tool.", confirm: WARNING, extension: "stand-in" });
+  assert.deepEqual(modes[4], { id: "stand-in/plain", label: "Plain mode", description: "Asks nothing first.", extension: "stand-in" });
+  // The portal's own and the person's say neither.
+  for (const mode of modes.slice(0, 3)) assert.equal("confirm" in mode || "extension" in mode, false);
 });
 
 test("a mode that asks first is put only with the person's yes, which is in the audit log; one that does not ask writes no row", async () => {

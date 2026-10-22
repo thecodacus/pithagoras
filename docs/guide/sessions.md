@@ -112,8 +112,9 @@ checked. Choose before the first message: from then on the chat keeps it.
   makes as it holds the model's own. Switching `codemode` off in the chat's
   tools has the chat work as in Standard mode, though its header still says
   Code mode.
-- **An extension's modes** come after the portal's own: an installed extension
-  can offer modes of its own, and what such a mode does is the extension's
+- **An extension's modes** come last, after the portal's own and
+  [yours](#modes-you-make): an installed extension can offer modes of its own,
+  and what such a mode does is the extension's
   ([Chat modes](/guide/extension-ui#chat-modes)). One that asks first is shown
   in the warning colour, and is chosen only after you say yes to its warning,
   which [Audit](#audit) keeps as *Mode chosen*. A chat in the mode of an
@@ -139,6 +140,51 @@ Once the chat has started, the chip goes, and the chat's header shows its mode,
 with its line when you point at it. Standard mode shows nothing there. A mode
 that is not offered now is named by the last part of what the chat stores, and
 says it is not available now when you point at it.
+
+### Modes you make
+
+You can make modes of your own in **Settings → Modes**, or with **New mode…**,
+the last row of the menu above the message box, which opens that page over the
+chat. The menu offers yours after Standard and Code mode, by their names. A
+chat in one stores `custom/` and the id the mode was given from its first name;
+naming it again later keeps the id.
+
+A mode of yours has:
+
+- **Name** and **Description**: what the menu shows. **Instructions**: said to
+  the agent in the system prompt of every chat in the mode, after the portal's
+  own rules. The three are saved with **Save**.
+- **Model** and **Effort**: written into a chat as it is put in the mode, so the
+  chat starts on them; the chat can still change them with the pills under the
+  message box. The provider and the model are written together, once a model is
+  chosen; left as **As the chat would have it**, nothing is written. Choosing
+  another mode before the first message puts back what the mode wrote, unless
+  you changed it in the chat since.
+- **Work through the code tool**: its chats work as in Code mode, the code tool
+  alone offered to the model. Switching it on switches the code tool on in the
+  mode's tools too. Switching it off leaves the tools as they are: the code tool
+  stays on there, offered beside the others, until you switch it off in the list.
+- **Tools**: what every chat in the mode starts with, one more tool layer. It is
+  held against [Settings → Tools](/guide/extensions#and-what-every-chat-starts-with)
+  and comes above a chat's agent, project and routine, so a tool the mode leaves
+  as Settings → Tools has it is still decided by them: a mode cannot switch on,
+  over a project, a tool that Settings → Tools has on. A chat's own switches are
+  still the last word.
+
+These are saved as they are changed, except the texts.
+
+An edit reaches the chats already in the mode as follows: its tools and its
+instructions at once, from their next message; whether it works through the
+code tool when each chat's pi next starts, since which tools are offered one by
+one is fixed then; its model and effort never, as they were written into each
+chat when it was put in the mode.
+
+Deleting a mode asks first. Its chats keep it, and their header says it is not
+available now; they work as in Standard mode from their next message. A new mode
+of the same name gets another id, so it does not take them over.
+
+With `EXECUTOR=container`, Settings → Modes says that tools cannot be switched,
+as Settings → Tools does.
 
 ## Questions from the agent
 

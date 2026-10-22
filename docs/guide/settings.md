@@ -7,7 +7,7 @@ German. Navigation runs down the left edge, in four groups:
 | Group | Pages |
 | --- | --- |
 | **Models** | **Providers** — where models come from, see [Models and providers](/guide/models); **Defaults** — model, effort and context for new chats |
-| **Agent** | **Tools**, **Skills**, **MCP**, **Extensions** |
+| **Agent** | **Tools**, **Modes**, **Skills**, **MCP**, **Extensions** |
 | **Reach** | **Channels**, **People** |
 | **Portal** | **This browser**, **Authentication**, **Shortcuts**, **Logs**, **About** (with **Update** and **Restart**), **Advanced** |
 
@@ -129,6 +129,17 @@ limit, the disk limit, and the switch for **Video generation**, see
 [Opt-in features](/guide/features#video-generation). The switch turns the feature on or off as a whole: the
 [Media page](/guide/media) and the existence of the tools. Whether a chat's agent gets the tools, `generate_video` and
 `show_video`, is set only in the Tools list, in the same group.
+
+## Modes
+
+Your own [chat modes](/guide/sessions#modes-you-make): the ways a chat can work
+that the menu above the message box of a new chat offers after Standard and
+Code mode. The page lists them, and **New mode** makes one from a name and a
+description and opens it. A mode's page has its name, description and
+instructions, saved with **Save**; the model and effort a chat put in it starts
+on, which use the same menus as **Defaults**; whether its chats work through
+the code tool; and its tools, the same list as a project's. Each of those is
+saved as it is changed. The bin at the top deletes the mode, after asking.
 
 ## Channels
 

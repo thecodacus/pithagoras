@@ -340,6 +340,31 @@ const changesExtensions = <T>(request: Promise<T>): Promise<T> =>
     return result;
   });
 
+/** Fired when the person's own modes changed (Settings → Modes), so that a chat's picker lists them as they are now. */
+export const MODES_CHANGED = "pithagoras:modes-changed";
+const changesModes = <T>(request: Promise<T>): Promise<T> =>
+  request.then((result) => {
+    window.dispatchEvent(new Event(MODES_CHANGED));
+    return result;
+  });
+
+/** A mode the person made, as Settings → Modes edits it: `id` is what follows "custom/" on a chat in it. */
+export interface CustomMode {
+  id: string;
+  label: string;
+  description: string;
+  /** Its chats work through the code tool alone. */
+  codemode: boolean;
+  /** Said in its chats' system prompt. */
+  instructions: string;
+  /** What a chat is put on as it is put in the mode: none leaves it as the chat would have it. */
+  provider: string | null;
+  model: string | null;
+  thinkingLevel: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 /** How a server half crashed, with the lines it said last, as a log file has them: as GET /api/extension-ui gives it. */
 export interface ServerCrash {
   name: string;
@@ -624,6 +649,19 @@ export const api = {
   /** Puts a chat that has said nothing yet in a mode; `confirmed`, for one that asks first, once the person said yes. */
   setMode: (id: string, mode: string, confirmed?: boolean) =>
     json<{ mode: string }>(`/api/sessions/${id}/modes`, { method: "PUT", body: JSON.stringify({ mode, ...(confirmed ? { confirmed: true } : {}) }) }),
+  /** The modes the person made, by their names. */
+  customModes: () => json<{ modes: CustomMode[] }>("/api/chat-modes"),
+  createMode: (fields: { label: string; description: string }) =>
+    changesModes(json<CustomMode>("/api/chat-modes", { method: "POST", body: JSON.stringify(fields) })),
+  /** Changes what a mode says: only what `patch` names. */
+  updateMode: (id: string, patch: Partial<Omit<CustomMode, "id" | "createdAt" | "updatedAt">>) =>
+    changesModes(json<CustomMode>(`/api/chat-modes/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify(patch) })),
+  deleteMode: (id: string) => changesModes(json<{ ok: true }>(`/api/chat-modes/${encodeURIComponent(id)}`, { method: "DELETE" })),
+  /** What every chat in a mode starts with: its exceptions to Settings → Tools, `live` always false. */
+  modeTools: (id: string) =>
+    json<{ tools: PortalTool[]; live: boolean; off: string[]; names: Record<string, string> }>(`/api/chat-modes/${encodeURIComponent(id)}/tools`),
+  setModeTools: (id: string, off: string[]) =>
+    changesModes(json<{ off: string[]; applied: number }>(`/api/chat-modes/${encodeURIComponent(id)}/tools`, { method: "PUT", body: JSON.stringify({ off }) })),
   deleteSession: (id: string) => json<{ ok: true }>(`/api/sessions/${id}`, { method: "DELETE" }),
   prompt: (id: string, message: string, options?: PromptOptions) =>
     json<{ ok: true }>(`/api/sessions/${id}/prompt`, {

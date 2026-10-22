@@ -2,18 +2,21 @@ import { type Page } from '@playwright/test';
 import { test, expect, mockPortal } from './portal-mock';
 
 /**
- * A chat mode an extension offers, which asks first: listed after the portal's own in the warning colour, chosen only
- * after a yes in the portal's dialog, named in the extension's own translations, and in the header and the audit log
- * once chosen. The extension is a stand-in whose browser half gives the mode's texts in German; the server's answers
- * are the spec's.
+ * A chat mode an extension offers, which asks first: listed after the portal's own and the person's in the warning
+ * colour, chosen only after a yes in the portal's dialog, named in the extension's own translations, and in the header
+ * and the audit log once chosen. The extension is a stand-in whose browser half gives the mode's texts in German; the
+ * server's answers are the spec's.
  */
 test.use({ installed: ['tests/fixtures/extensions/modes'] });
 
 const WARNING = 'The agent can install and remove extensions in this chat. Use it only with what you would install yourself.';
 const FOCUS = { id: 'test-modes/focus', label: 'Focus mode', description: 'Works with the focus tool alone.', confirm: WARNING, extension: 'test-modes' };
+/** A mode the person made (Settings → Modes). */
+const MINE = { id: 'custom/research', label: 'Research', description: 'Reads first.' };
 const MODES = [
   { id: 'standard', label: 'Standard mode', description: 'The agent as this chat would have it anyway: the tools that Settings → Tools, its agent and its project switch on.' },
   { id: 'code', label: 'Code mode', description: "The model works through one tool: it writes a short JavaScript script that calls the chat's tools, and is given only what the script puts out." },
+  MINE,
   FOCUS,
 ];
 const config = {
@@ -64,11 +67,11 @@ const menu = (page: Page) => page.getByRole('menu');
 const row = (page: Page, label: string) => menu(page).getByRole('menuitemradio', { name: new RegExp(`^${label}`) });
 const asked = (page: Page, title: string) => page.getByRole('alertdialog', { name: title });
 
-test("an extension's mode is listed after the portal's own, in the warning colour, with its line", async ({ page }) => {
+test("an extension's mode is listed after the portal's own and the person's, in the warning colour, with its line", async ({ page }) => {
   await portal(page);
   await chip(page).click();
-  await expect(menu(page).getByRole('menuitemradio')).toHaveCount(3);
-  await expect(menu(page).getByRole('menuitemradio').nth(2)).toHaveAccessibleName(/^Focus mode/);
+  await expect(menu(page).getByRole('menuitemradio')).toHaveText([/^Standard mode/, /^Code mode/, /^Research/, /^Focus mode/]);
+  await expect(menu(page).locator('[role^="menuitem"]').last()).toHaveAccessibleName('New mode…');
   await expect(row(page, 'Focus mode').getByText('Focus mode', { exact: true })).toHaveClass(/text-warn/);
   await expect(row(page, 'Code mode').getByText('Code mode', { exact: true })).not.toHaveClass(/text-warn/);
   await expect(row(page, 'Focus mode').getByText(FOCUS.description, { exact: true })).toBeVisible();

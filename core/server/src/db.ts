@@ -16,7 +16,8 @@ import { writeFileAtomic } from "./atomic-write.js";
 import { handoffRoot, leaveHandoff, moveFolderTo, moveTo } from "./handoff.js";
 import { RUNS_AS_PRIMARY } from "./pi/runs-as-primary.js";
 import { CODEMODE_TOOL } from "./pi/codemode.js";
-import { CORE_MODES, type ChatModeEntry } from "./chat-modes.js";
+import { CORE_MODES, CUSTOM, type ChatModeEntry } from "./chat-modes.js";
+import { freeSlug } from "./slug.js";
 import { SCHEMA_VERSION, dbFile } from "./schema-version.js";
 import { debugLog } from "./logs.js";
 import { filesOnOldCalls } from "./old-call-files.js";
@@ -1455,9 +1456,105 @@ export function chatSaid(sessionId: string): boolean {
   return Boolean(getDb().prepare("SELECT 1 FROM events WHERE session_id = ? AND type IN ('portal_prompt', 'portal_command') LIMIT 1").get(sessionId));
 }
 
+/** A mode the person made (Settings → Modes), as chat_modes keeps it: a chat in it stores "custom/<id>". */
+export interface ChatModeRow {
+  /** A slug of the label it was made with: a new label does not change it. */
+  id: string;
+  label: string;
+  description: string;
+  /** Its tool layer: exceptions to what the layers under it leave, one name a line, as a project's. */
+  tools_off: string;
+  tools_on: string;
+  /** 1 where its chats work through the code tool alone. */
+  codemode: number;
+  /** Said in its chats' system prompt. */
+  instructions: string;
+  /** What a chat is put on as it is put in the mode, where set. */
+  provider: string | null;
+  model: string | null;
+  thinking_level: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** The modes the person made, by their labels. */
+export const customModes = (): ChatModeRow[] => getDb().prepare("SELECT * FROM chat_modes ORDER BY label COLLATE NOCASE").all() as ChatModeRow[];
+
+export const customMode = (id: string): ChatModeRow | undefined => getDb().prepare("SELECT * FROM chat_modes WHERE id = ?").get(id) as ChatModeRow | undefined;
+
+/**
+ * Makes a mode, its id a slug of its label that no mode has, and no chat still stores: a chat keeps the mode of one
+ * that was deleted, which a new mode of that name would take over. A slug and not a random id, so that such a chat
+ * is said to be in "research", not in a code.
+ */
+export function createCustomMode(fields: { label: string; description: string }): ChatModeRow {
+  const d = getDb();
+  const made = d.prepare("SELECT id FROM chat_modes").all() as { id: string }[];
+  const kept = d.prepare("SELECT DISTINCT substr(mode, ?) AS id FROM sessions WHERE mode LIKE ?").all(CUSTOM.length + 1, `${CUSTOM}%`) as { id: string }[];
+  const id = freeSlug(fields.label, [...made, ...kept].map((row) => row.id), "mode");
+  d.prepare("INSERT INTO chat_modes (id, label, description) VALUES (?, ?, ?)").run(id, fields.label, fields.description);
+  return customMode(id)!;
+}
+
+/**
+ * Changes what a mode says. Made to work through the code tool, it has that tool on in its layer too, where it had
+ * it off: the mode works through it. Switched off in the mode's tools after that, it is the person's word, as in a chat.
+ */
+export function updateCustomMode(
+  id: string,
+  fields: Partial<Pick<ChatModeRow, "label" | "description" | "codemode" | "instructions" | "provider" | "model" | "thinking_level">>,
+): ChatModeRow | undefined {
+  const d = getDb();
+  d.transaction(() => {
+    const said = Object.entries(fields);
+    d.prepare(`UPDATE chat_modes SET ${said.map(([name]) => `${name} = ?, `).join("")}updated_at = datetime('now') WHERE id = ?`).run(...said.map(([, value]) => value), id);
+    if (fields.codemode === 1) {
+      const tools = customModeTools(id);
+      setCustomModeTools(id, { off: tools.off.filter((name) => name !== CODEMODE_TOOL), on: [...tools.on, CODEMODE_TOOL] });
+    }
+  })();
+  return customMode(id);
+}
+
+/** What a mode says about tools, as exceptions to what the layers under it leave. */
+export function customModeTools(id: string): SessionTools {
+  const row = getDb().prepare("SELECT tools_off, tools_on FROM chat_modes WHERE id = ?").get(id) as { tools_off: string; tools_on: string } | undefined;
+  return { off: parseToolsOff(row?.tools_off), on: parseToolsOff(row?.tools_on) };
+}
+
+export function setCustomModeTools(id: string, tools: SessionTools): SessionTools {
+  const stored = { off: clean(tools.off), on: clean(tools.on) };
+  getDb()
+    .prepare("UPDATE chat_modes SET tools_off = ?, tools_on = ?, updated_at = datetime('now') WHERE id = ?")
+    .run(stored.off.join("\n"), stored.on.join("\n"), id);
+  return stored;
+}
+
+/** Deletes a mode. The chats in it keep what they store, and are in a mode that is not there now. */
+export function deleteCustomMode(id: string): boolean {
+  return getDb().prepare("DELETE FROM chat_modes WHERE id = ?").run(id).changes > 0;
+}
+
+/** A mode the person made, as the modes are listed. */
+export const customEntry = (row: ChatModeRow): ChatModeEntry => ({
+  id: CUSTOM + row.id,
+  label: row.label,
+  description: row.description,
+  tools: { off: parseToolsOff(row.tools_off), on: parseToolsOff(row.tools_on) },
+  codemode: row.codemode === 1,
+  ...(row.instructions ? { instructions: row.instructions } : {}),
+  ...(row.provider ? { provider: row.provider } : {}),
+  ...(row.model ? { model: row.model } : {}),
+  ...(row.thinking_level ? { thinkingLevel: row.thinking_level } : {}),
+});
+
 /** A chat's mode, as it stores it: none for Standard, and none for one that is not there now. */
 export function modeOf(stored: string | null | undefined): ChatModeEntry | undefined {
   if (!stored) return undefined;
+  if (stored.startsWith(CUSTOM)) {
+    const row = customMode(stored.slice(CUSTOM.length));
+    return row && customEntry(row);
+  }
   return CORE_MODES.find((mode) => mode.id === stored);
 }
 
