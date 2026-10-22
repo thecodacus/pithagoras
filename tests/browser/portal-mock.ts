@@ -98,7 +98,7 @@ export function extensionOnDisk(dir: string) {
 
 /**
  * What every portal says unless a test says otherwise: signed in without a password, no chats, and the things the
- * shell asks of every page (the add-on flags, the voice add-on, which extensions draw in it, the places for a new chat) and of
+ * shell asks of every page (the add-on flags, voice mode with no source, which extensions draw in it, the places for a new chat) and of
  * every chat (what runs in the background, what came before), with nothing set up.
  */
 const portalBase = ({ path, method, url }: Ask): Answer => {
@@ -106,7 +106,7 @@ const portalBase = ({ path, method, url }: Ask): Answer => {
   if (path === '/api/auth/status') return { authed: true, authRequired: false };
   if (path === '/api/sessions') return { sessions: [], executor: 'host' };
   if (path === '/api/features/flags') return { subagent: { enabled: false }, understory: { enabled: false } };
-  if (path === '/api/voice') return { enabled: false };
+  if (path === '/api/voice') return { provider: '', ready: false, speech: true, voices: [], enabled: false };
   // A portal that is not run from a checkout: nothing to update, no notice.
   if (path === '/api/update') return { kind: 'none', boot: 'boot-a' };
   if (/^\/api\/sessions\/[^/]+\/background$/.test(path)) return { supported: true, jobs: [], statuses: [], widgets: [] };
