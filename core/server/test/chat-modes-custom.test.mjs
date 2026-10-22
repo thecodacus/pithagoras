@@ -41,7 +41,7 @@ const model = await fakeModel((request) => {
 });
 writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR, "models.json"), JSON.stringify(model.models()));
 
-const { createSession, getSession, getSettings, rememberTools, sessionTools, setLazyToolSets, setSessionTools, setSettings, updateSession } = await import("../dist/db.js");
+const { createSession, getSession, getSettings, rememberTools, sessionTools, setLazyToolSets, setSessionTools, setSettings, setToolDefaultsOff, toolDefaultsOff, updateSession } = await import("../dist/db.js");
 const { lazyToolEntry } = await import("../dist/tool-policy.js");
 const { CodemodeHeld, sessions } = await import("../dist/session-manager.js");
 const { modesRouter } = await import("../dist/api/modes.js");
@@ -295,6 +295,33 @@ test("a started chat whose own switches have the code tool off is held once its 
   await assert.rejects(sessions.setTools(id, ["codemode"]), CodemodeHeld);
   assert.ok(!sessions.live.get(id).client.switchedOff.has("codemode"), "the running chat was told");
   assert.ok(declared((await say(id, "Again")).requests[0]).includes("codemode"));
+});
+
+test("a running chat's own code-tool off stays through another switch saved while its mode holds the tool, and counts again once the mode lets it go", async () => {
+  // The code tool on under the mode, so that what keeps it off once the mode lets it go is the chat's own off.
+  const defaults = toolDefaultsOff();
+  setToolDefaultsOff(defaults.filter((name) => name !== "codemode"));
+  try {
+    const mode = await made("Held a while");
+    const id = chat();
+    await choose(id, `custom/${mode}`);
+    await say(id, "Hello");
+    await sessions.setTools(id, ["codemode"]);
+    assert.equal((await tool(id, "codemode")).enabled, false);
+
+    assert.equal((await call("PUT", `/chat-modes/${mode}`, { codemode: true })).status, 200);
+    assert.equal((await tool(id, "codemode")).byMode, true);
+    await sessions.setTools(id, ["bash"]);
+    assert.equal(getSession(id).tools_off, "bash\ncodemode", "the page's list said nothing of the code tool");
+
+    assert.equal((await call("PUT", `/chat-modes/${mode}`, { codemode: false })).status, 200);
+    const codemode = await tool(id, "codemode");
+    assert.deepEqual([codemode.enabled, codemode.byMode], [false, undefined]);
+    const names = declared((await say(id, "Again")).requests[0]);
+    for (const name of ["codemode", "bash"]) assert.ok(!names.includes(name), name);
+  } finally {
+    setToolDefaultsOff(defaults);
+  }
 });
 
 test("a chat in a mode made to work through the code tool, whose tools then switch it off, has its tools declared, and its lazy tools lazy again", async () => {
