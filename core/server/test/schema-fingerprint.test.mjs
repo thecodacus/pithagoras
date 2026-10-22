@@ -970,6 +970,13 @@ test("where the service's addresses were in use, what connecting it remembered o
     whisperUrl: null, sttModel: null, breezeUrl: OWN.speech, runtime: "chatterbox", dictationUrl: null, dictationModel: null, language: "en", kokoroVoice: "af_heart",
   });
   assert.equal(voiceIn(alone).voice.provider, "pithagoras-voice");
+
+  // The same row with speech switched off by hand after connecting: the speech server remembered was not in use, and is not left.
+  const off = path.join(home, "voice-speech-off");
+  voiceOfV8(off, { voice: { ...FRIDAY_VOICE, runtime: "none", breezeUrl: "" }, voice_before_managed: { speaking, noSpeech: false } });
+  await upgraded(off);
+  assert.deepEqual(leftAt(off), ["voice-service"]);
+  assert.equal(voiceIn(off).voice.provider, "pithagoras-voice");
 });
 
 test("with nothing of voice mode there, nothing is left and the table goes; settings voice mode cannot read go too", async () => {
