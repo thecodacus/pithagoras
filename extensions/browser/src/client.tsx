@@ -62,7 +62,7 @@ export default function browser(given: Portal) {
     search: [
       {
         title: msg("Browser"),
-        words: "browser add-on addon chromium chrome container docker install remove start stop password profile logins image download installieren entfernen starten anhalten passwort profil anmeldungen",
+        words: "browser chromium chrome container docker install remove start stop password profile logins image download installieren entfernen starten anhalten passwort profil anmeldungen",
       },
     ],
     component: () => (

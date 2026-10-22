@@ -196,7 +196,7 @@ money at a hosted endpoint.
 
 An `edit_image` tool: the agent changes a picture that is in the chat's folder
 as it is told, and the result appears in the chat, and in voice mode's picture
-window, as a generated one does. It is the same add-on and the same endpoint
+window, as a generated one does. It is the same feature and the same endpoint
 rules, with a switch of its own: an endpoint that makes pictures does not always
 change them, so editing is opt-in apart from generation and says whether it is
 available. While it is off, or has no address, the agent has no `edit_image`

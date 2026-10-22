@@ -132,18 +132,18 @@ test('a poll that finds the chats as they were does not draw the sidebar again',
   expect(await measured(page)).toBe(before);
 });
 
-test('going from chat to chat does not ask for the list and the add-ons again', async ({ page }) => {
+test('going from chat to chat does not ask for the list and the feature flags again', async ({ page }) => {
   const { asked } = await portal(page);
   await page.goto('/s/a');
   const side = page.getByRole('complementary', { name: 'Sidebar' });
   await expect(side.getByText('Chat B')).toBeVisible();
   await expect.poll(() => asked['/api/features/flags']).toBeGreaterThan(0);
-  const [addons, list] = [asked['/api/features/flags'], asked['/api/sessions']];
+  const [flags, list] = [asked['/api/features/flags'], asked['/api/sessions']];
   for (const name of ['Chat B', 'Chat C', 'Chat D']) {
     await side.getByText(name).click();
     await expect(page.getByRole('heading', { name })).toBeVisible();
   }
-  expect([asked['/api/features/flags'], asked['/api/sessions']]).toEqual([addons, list]);
+  expect([asked['/api/features/flags'], asked['/api/sessions']]).toEqual([flags, list]);
 });
 
 test('a chat the portal has none of says so, and is not retried as a lost connection', async ({ page }) => {
