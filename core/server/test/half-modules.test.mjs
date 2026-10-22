@@ -35,6 +35,7 @@ write("half/node_modules/dep/index.js", 'export const url = import.meta.url;\nex
 write("half/node_modules/dep/own.js", "export const url = import.meta.url;\n");
 write("outside/x.js", 'export const url = import.meta.url;\nexport { url as near } from "./near.js";\n');
 write("outside/near.js", "export const url = import.meta.url;\n");
+write("outside/into.js", 'export { url } from "../half/sub/deep.js";\n');
 
 underRevision(path.join(root, "half"));
 const under = (file, rev) => {
@@ -69,4 +70,7 @@ test("what a half imports by a bare name, or from outside its folder, is the mod
 test("a module outside any half's folder is left alone, even under an address that carries a revision", async () => {
   const outside = await import(under("outside/x.js", "r4"));
   assert.equal(outside.near, url("outside/near.js"));
+  // Nor a file of a half's folder it imports: only a module of that folder gives its files its revision.
+  const into = await import(under("outside/into.js", "r5"));
+  assert.equal(into.url, url("half/sub/deep.js"));
 });

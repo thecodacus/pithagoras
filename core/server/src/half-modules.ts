@@ -12,8 +12,10 @@ import { pathToFileURL } from "node:url";
  * extension-ui.ts), carries the same revision, and a new revision of the half evaluates all of its files again.
  *
  * Only a relative address (`./`, `../`) or a `file:` URL: what a half imports by a bare name (a dependency in its
- * `node_modules`, `node:fs`) is the module Node already has. Nor what a half loads with `require()`, which is not
- * imported by an address. Nothing else in the process is touched: no other module's address carries the parameter.
+ * `node_modules`, `node:fs`) is the module Node already has. Nor a CommonJS file (a `.cjs` file, a `.js` file where the
+ * package is not `"type": "module"`, or anything loaded with `require()`), imported or required: Node keeps those by
+ * their file, whatever the address. Nothing else in the process is touched: no other module's address carries the
+ * parameter.
  */
 export const REVISION = "pithagoras-rev";
 
@@ -25,7 +27,7 @@ const folders = new Set<string>();
  * calls it for every module the process resolves, the portal's own included: one imported by a module whose address
  * carries no revision is passed on as Node resolved it, after a look at that address.
  */
-export const resolve: ResolveHookSync = (specifier, context, next) => {
+const resolve: ResolveHookSync = (specifier, context, next) => {
   const resolved = next(specifier, context);
   const parent = context.parentURL;
   if (!parent?.includes(`${REVISION}=`) || !/^(?:\.\.?\/|file:)/.test(specifier)) return resolved;
