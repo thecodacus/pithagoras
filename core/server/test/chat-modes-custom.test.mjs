@@ -41,7 +41,7 @@ const model = await fakeModel((request) => {
 });
 writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR, "models.json"), JSON.stringify(model.models()));
 
-const { createSession, getSession, getSettings, rememberTools, sessionTools, setLazyToolSets, setSettings, updateSession } = await import("../dist/db.js");
+const { createSession, getSession, getSettings, rememberTools, sessionTools, setLazyToolSets, setSessionTools, setSettings, updateSession } = await import("../dist/db.js");
 const { lazyToolEntry } = await import("../dist/tool-policy.js");
 const { CodemodeHeld, sessions } = await import("../dist/session-manager.js");
 const { modesRouter } = await import("../dist/api/modes.js");
@@ -278,6 +278,38 @@ test("in a mode of the person's whose tools switch the code tool on, a chat's sw
   assert.equal((await tool(id, "codemode")).enabled, true);
   await sessions.setTools(id, ["codemode"]);
   assert.equal((await tool(id, "codemode")).enabled, false);
+});
+
+test("a started chat whose own switches have the code tool off is held once its mode is changed to work through it", async () => {
+  const mode = await made("Later scripted");
+  const id = chat();
+  await choose(id, `custom/${mode}`);
+  // Switched off in the chat, as a chat stores it where a layer under it has it on.
+  setSessionTools(id, { off: ["codemode"], on: [] });
+  await say(id, "Hello");
+  assert.equal((await tool(id, "codemode")).enabled, false);
+
+  assert.equal((await call("PUT", `/chat-modes/${mode}`, { codemode: true })).status, 200);
+  const held = await tool(id, "codemode");
+  assert.deepEqual([held.enabled, held.byMode], [true, true]);
+  await assert.rejects(sessions.setTools(id, ["codemode"]), CodemodeHeld);
+  assert.ok(!sessions.live.get(id).client.switchedOff.has("codemode"), "the running chat was told");
+  assert.ok(declared((await say(id, "Again")).requests[0]).includes("codemode"));
+});
+
+test("a chat in a mode made to work through the code tool, whose tools then switch it off, has its tools declared, and its lazy tools lazy again", async () => {
+  const mode = await made("Unscripted", { codemode: true });
+  const layer = (await call("GET", `/chat-modes/${mode}/tools`)).body;
+  await call("PUT", `/chat-modes/${mode}/tools`, { off: [...layer.off, "codemode"] });
+  const id = chat();
+  await choose(id, `custom/${mode}`);
+  const { requests } = await say(id, "Hello");
+  assert.equal(sessions.live.get(id).client.codemodeOnly, true, "started in pi's `only` presentation");
+  const names = declared(requests[0]);
+  for (const name of ["bash", "tools"]) assert.ok(names.includes(name), name);
+  for (const name of ["codemode", "lazy_one"]) assert.ok(!names.includes(name), name);
+  assert.equal((await tool(id, "lazy_one")).lazy, true);
+  assert.equal((await tool(id, "codemode")).byMode, undefined);
 });
 
 test("the code-tool switch of a mode reaches a running chat at its next start; the code tool in its layer at once", async () => {
