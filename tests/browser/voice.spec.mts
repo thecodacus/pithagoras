@@ -148,6 +148,51 @@ test('voice pipelines next-sentence synthesis during PCM playback and cancels on
   expect(failures).toEqual([]);
 });
 
+for (const pipelineMode of ['parallel', 'sequential'] as const) {
+  test(`a phrase is played ${pipelineMode === 'parallel' ? 'before the rest of its PCM has come, in the streaming pipeline' : 'only once all its PCM has come, one phrase after another'}`, async ({ page }) => {
+    // A phrase answered with 0.7 s of 24 kHz PCM at once, and the rest once the test lets go; each buffer of a phrase started is counted.
+    await page.addInitScript(() => {
+      const w = window as any;
+      w.started = 0;
+      w.held = [] as (() => void)[];
+      w.letGo = () => { w.free = true; w.held.forEach((release: () => void) => release()); };
+      const start = AudioBufferSourceNode.prototype.start;
+      AudioBufferSourceNode.prototype.start = function (...args: Parameters<typeof start>) { w.started++; return start.apply(this, args); };
+      const real = window.fetch;
+      window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+        // The spoken error line, asked for as voice mode starts, is not a phrase of the reply.
+        if (!String(input).endsWith('/voice/speech') || JSON.parse(String(init?.body)).text === 'An error occurred.') return real(input, init);
+        const body = new ReadableStream<Uint8Array>({
+          start(c) {
+            const rest = () => { c.enqueue(new Uint8Array(48000)); c.close(); };
+            c.enqueue(new Uint8Array(33600));
+            if (w.free) rest(); else w.held.push(rest);
+          },
+        });
+        return new Response(body, { headers: { 'content-type': 'audio/pcm', 'x-sample-rate': '24000' } });
+      }) as typeof fetch;
+    });
+    await page.route('**/api/voice', route => route.fulfill({ json: { enabled: true, pipelineMode } }));
+    await page.route('**/voice/speech', route => route.fulfill(speech));
+    await page.goto('/tests/voice.html');
+    await page.getByRole('button', { name: 'Turn on hands-free voice' }).click();
+    await expect(page.getByRole('status')).toHaveText('Listening', { timeout: 25000 });
+    await page.getByRole('button', { name: 'Stream reply', exact: true }).click();
+    await page.getByRole('button', { name: 'Finish reply', exact: true }).click();
+    await expect.poll(() => page.evaluate(() => (window as any).held.length)).toBeGreaterThan(0);
+    const started = () => page.evaluate(() => (window as any).started);
+    if (pipelineMode === 'parallel') {
+      await expect.poll(started).toBeGreaterThan(0);
+    } else {
+      await page.waitForTimeout(1000);
+      expect(await started()).toBe(0);
+    }
+    await page.evaluate(() => (window as any).letGo());
+    await expect.poll(started).toBeGreaterThan(0);
+    await page.getByRole('button', { name: 'End voice mode' }).click();
+  });
+}
+
 test('slow PCM chunks become one uninterrupted buffer, including split samples', async ({ page }) => {
   await page.goto('/tests/voice.html');
   const result = await page.evaluate(async () => {
