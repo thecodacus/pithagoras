@@ -31,6 +31,10 @@ export interface ChatMode {
   id: string;
   label: string;
   description: string;
+  /** Asked, with a yes or no, before a chat is put in it. */
+  confirm?: string;
+  /** The package that offers it, whose translations its texts are shown through. */
+  extension?: string;
 }
 
 /** A set of instructions the agent pulls in when the description matches. */
@@ -617,8 +621,9 @@ export const api = {
     json<Session>(`/api/sessions/${id}`, { method: "PATCH", body: JSON.stringify({ title }) }),
   /** The modes the chat may be put in: none where it may not choose one. */
   chatModes: (id: string) => json<{ modes: ChatMode[] }>(`/api/sessions/${id}/modes`),
-  /** Puts a chat that has said nothing yet in a mode. */
-  setMode: (id: string, mode: string) => json<{ mode: string }>(`/api/sessions/${id}/modes`, { method: "PUT", body: JSON.stringify({ mode }) }),
+  /** Puts a chat that has said nothing yet in a mode; `confirmed`, for one that asks first, once the person said yes. */
+  setMode: (id: string, mode: string, confirmed?: boolean) =>
+    json<{ mode: string }>(`/api/sessions/${id}/modes`, { method: "PUT", body: JSON.stringify({ mode, ...(confirmed ? { confirmed: true } : {}) }) }),
   deleteSession: (id: string) => json<{ ok: true }>(`/api/sessions/${id}`, { method: "DELETE" }),
   prompt: (id: string, message: string, options?: PromptOptions) =>
     json<{ ok: true }>(`/api/sessions/${id}/prompt`, {

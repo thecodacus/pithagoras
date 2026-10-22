@@ -178,6 +178,7 @@ const de: Locale = {
     "Server logs": "Server-Protokoll",
     "The server has printed nothing yet.": "Der Server hat noch nichts ausgegeben.",
     // components/AuditPanel.tsx
+    "Mode chosen": "Modus gewählt",
     "Clear the log": "Das Log leeren",
     "Nothing matches this filter.": "Nichts passt zu diesem Filter.",
     "Which decisions to show": "Welche Entscheidungen angezeigt werden",
@@ -1018,6 +1019,9 @@ const de: Locale = {
     // components/Modal.tsx
     "Close": "Schließen",
     "What you changed here has not been saved.": "Was du hier geändert hast, ist nicht gespeichert.",
+    // components/ModePicker.tsx (modes that ask first)
+    "Use {mode}?": "{mode} verwenden?",
+    "Use {mode}": "{mode} verwenden",
     // components/ModePicker.tsx
     "Standard mode": "Standardmodus",
     "The agent as this chat would have it anyway: the tools that Settings → Tools, its agent and its project switch on.": "Der Agent, wie dieser Chat ihn ohnehin hätte: mit den Tools, die Einstellungen → Tools, sein Agent und sein Projekt einschalten.",

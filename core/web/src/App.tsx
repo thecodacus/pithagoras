@@ -806,8 +806,8 @@ function Shell({
               await api.renameSession(active.id, title);
               await refreshSessions();
             }}
-            onSetMode={async (mode) => {
-              await api.setMode(active.id, mode);
+            onSetMode={async (mode, confirmed) => {
+              await api.setMode(active.id, mode, confirmed);
               await refreshSessions();
             }}
             onOpenNavigation={() => setMobileNav(true)}

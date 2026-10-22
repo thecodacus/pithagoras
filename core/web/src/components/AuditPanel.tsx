@@ -30,6 +30,8 @@ const KIND: Record<string, { label: string; icon: JSX.Element; tone: string }> =
   "allowed-by-exemption": { label: msg("Allowed: routine exempt"), icon: <LuShield className="h-3.5 w-3.5" />, tone: "text-warn" },
   untrusted: { label: msg("You took trust back"), icon: <LuShieldAlert className="h-3.5 w-3.5" />, tone: "text-fg-muted" },
   revoked: { label: msg("Approval taken back"), icon: <LuKeyRound className="h-3.5 w-3.5" />, tone: "text-fg-muted" },
+  // A chat put in a mode that asks first, after a yes to its warning (see ModePicker.tsx).
+  mode: { label: msg("Mode chosen"), icon: <LuShieldAlert className="h-3.5 w-3.5" />, tone: "text-warn" },
 };
 
 const FILTERS = [

@@ -1,0 +1,10 @@
+{
+  "name": "test-modes",
+  "version": "0.1.0",
+  "description": "The portal's tests' stand-in for an extension that offers a chat mode which asks first, with the mode's texts in German, so that no spec of the portal's own needs one the portal ships",
+  "type": "module",
+  "keywords": ["pi-package"],
+  "pi": {},
+  "pithagoras": { "client": "./web/client.js" },
+  "license": "Apache-2.0"
+}

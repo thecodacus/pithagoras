@@ -20,7 +20,7 @@ import { Fragment, memo, useCallback, useEffect, useId, useLayoutEffect, useMemo
 import type { DiagramPlugin } from "streamdown";
 import { followPointer } from "../pointer-drag";
 import { LuGripVertical, LuMenu, LuBot, LuArrowDown, LuSquare, LuArrowUp, LuPaperclip, LuPuzzle, LuX } from "react-icons/lu";
-import { api, type ChatMode, type PiCommand, type PortalEvent, type PromptOptions, type Session } from "../api";
+import { api, EXTENSIONS_CHANGED, type ChatMode, type PiCommand, type PortalEvent, type PromptOptions, type Session } from "../api";
 import { pending, refetchImage, sortFiles, uploadedNote, type Attachment } from "../attachments";
 import { activity, buildTranscript, keepItems, type Item, type SentImage } from "../transcript";
 import { HAS_MERMAID, loadMermaidPlugin } from "../mermaid";
@@ -215,8 +215,8 @@ export function Chat({
   onClientCommand: (name: string, args: string) => void | Promise<void>;
   /** Give the chat another name, from its header. */
   onRename: (title: string) => Promise<void>;
-  /** Put the chat, which has said nothing yet, in a mode (see ModePicker). */
-  onSetMode: (mode: string) => Promise<void>;
+  /** Put the chat, which has said nothing yet, in a mode (see ModePicker); `confirmed` for one that asks first. */
+  onSetMode: (mode: string, confirmed?: boolean) => Promise<void>;
   /** On a phone, where the sidebar is a drawer: opens it. */
   onOpenNavigation?: () => void;
   /**
@@ -1089,21 +1089,26 @@ export function Chat({
   useEffect(() => setHeard(null), [session.id]);
 
   // The modes the chat may be put in: for the picker before it has said anything, and after that to name its mode in
-  // the header. One that cannot be read is no list, and no picker: the chat works as it is.
+  // the header. One that cannot be read is no list, and no picker: the chat works as it is. Read again when what is
+  // installed changes: an extension's modes come and go with it.
   const [modes, setModes] = useState<{ chat: string; list: ChatMode[] } | null>(null);
   const wantsModes = !loading && (!started || session.mode !== null);
   useEffect(() => {
     if (!wantsModes) return;
     const id = session.id;
     let live = true;
-    api.chatModes(id).then(
-      (r) => {
-        if (live) setModes({ chat: id, list: r.modes });
-      },
-      () => undefined,
-    );
+    const read = () =>
+      api.chatModes(id).then(
+        (r) => {
+          if (live) setModes({ chat: id, list: r.modes });
+        },
+        () => undefined,
+      );
+    void read();
+    window.addEventListener(EXTENSIONS_CHANGED, read);
     return () => {
       live = false;
+      window.removeEventListener(EXTENSIONS_CHANGED, read);
     };
   }, [session.id, wantsModes]);
   const modeList = modes?.chat === session.id ? modes.list : [];
@@ -1389,14 +1394,14 @@ export function Chat({
   };
 
   /** Puts the chat in `mode`: shown at once, and back as it was if it is not saved. */
-  const chooseMode = (mode: string) => {
+  const chooseMode = (mode: string, confirmed?: boolean) => {
     const chat = session.id;
     setChosenHere({ chat, mode });
     const saved = (async () => {
       let done = false;
       await attempt(async () => {
         try {
-          await onSetMode(mode);
+          await onSetMode(mode, confirmed);
         } catch (e) {
           setChosenHere(null);
           throw e;
