@@ -47,11 +47,11 @@ export function missingDependencies(dir = HERE, { dev = false } = {}) {
 }
 
 /**
- * One install at a time per folder, and one for as long as the portal runs:
- * this module is read once, while the server half is started again with each
- * switch of the package.
+ * One install at a time per folder, for as long as the portal runs: kept for
+ * the process, since this module is read again with each revision of the
+ * server half, and an install a revision before started goes on after it.
  */
-const installs = new Map();
+const installs = (globalThis[Symbol.for("pithagoras-docs/installs")] ??= new Map());
 
 /**
  * Installs what is missing or out of date with npm, as the lock file says, and says so in the
