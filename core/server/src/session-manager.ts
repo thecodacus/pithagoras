@@ -63,6 +63,7 @@ import {
   chatSaid,
   modeOf,
   modeHoldsCodemode,
+  parseToolsOff,
   unsettledMessages,
   unansweredCommands,
   chatModel,
@@ -2833,7 +2834,8 @@ class SessionManager extends EventEmitter {
     const session = getSession(sessionId);
     const held = sessionTools(sessionId);
     const defaults = toolDefaultsForSession(session);
-    if (wantedOff.includes(CODEMODE_TOOL) && modeHoldsCodemode(session?.mode)) throw new CodemodeHeld();
+    const holds = modeHoldsCodemode(session?.mode);
+    if (wantedOff.includes(CODEMODE_TOOL) && holds) throw new CodemodeHeld();
     const workspace = session?.workspace;
     const view = mcpView();
     // Not what the adapter no longer registers: the page did not show it, so it said nothing about it.
@@ -2855,7 +2857,11 @@ class SessionManager extends EventEmitter {
     // Against the project's default: an exception here is to what the chat would
     // otherwise have, so a project that switches a tool off needs no entry for it
     // in every chat, and one that is switched back on in the chat needs one.
-    setSessionTools(sessionId, exceptionsFor(heldOffUnshown(wantedOff, shown, held), defaults, answered, held));
+    const own = exceptionsFor(heldOffUnshown(wantedOff, shown, held), defaults, answered, held);
+    // The chat's own off for the code tool, which does not count while its mode holds the tool on (sessionTools), is
+    // kept for when the mode no longer does: this list said nothing about it.
+    const kept = holds && parseToolsOff(session?.tools_off).includes(CODEMODE_TOOL) ? [CODEMODE_TOOL] : [];
+    setSessionTools(sessionId, { off: [...own.off, ...kept], on: own.on });
     const off = this.offFor(sessionId, listed.map((t) => t.name), view.known().keys());
     const piOff = this.piOff(sessionId, reported, view);
     await client?.setToolsOff?.(piOff, this.piLazy(piOff));
