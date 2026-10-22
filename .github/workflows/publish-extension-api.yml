@@ -1,0 +1,50 @@
+name: Publish extension API
+
+# Publishes @pithagoras/extension-api (packages/extension-api) to npm from the portal's release tag v<version>, the tag
+# docker.yml builds the image from. The package's version is the portal's: the tag has to be v<version> of the root
+# package.json and of packages/extension-api/package.json both, or the job stops before publishing. Run by hand, it is
+# run on such a tag. npm's trusted publishing signs in with this workflow's identity, so there is no token, and npm adds
+# provenance, as it does for a public package published from a public repository. Releasing, and the first version,
+# which is published by hand, are described in docs/guide/extension-ui.md.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  # Nothing is published that the tests have not passed, as for the image in docker.yml.
+  test:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/test.yml
+
+  publish:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      # Nothing is installed: the package is published as its files are, and no dependency's script runs where the
+      # identity that can publish it is.
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      # Trusted publishing needs npm 11.5.1 or later, which Node 24 comes with and Node 22 does not.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - name: The tag is the portal's version and the package's
+        run: |
+          portal=$(node -p 'require("./package.json").version')
+          package=$(node -p 'require("./packages/extension-api/package.json").version')
+          if [ "$GITHUB_REF" != "refs/tags/v$portal" ]; then
+            echo "::error::$GITHUB_REF is not refs/tags/v$portal: package.json says $portal"
+            exit 1
+          fi
+          if [ "$GITHUB_REF" != "refs/tags/v$package" ]; then
+            echo "::error::$GITHUB_REF is not refs/tags/v$package: packages/extension-api/package.json says $package"
+            exit 1
+          fi
+      - run: npm publish -w packages/extension-api

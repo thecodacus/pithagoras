@@ -4,7 +4,7 @@
  * components drawn in them. The portal implements exactly this, and is
  * checked against it when it is built.
  *
- * See docs/guide/extension-ui.md, "Building an extension".
+ * See "Building an extension": https://thecodacus.github.io/pithagoras/guide/extension-ui
  */
 import type { ComponentType, KeyboardEvent, LazyExoticComponent, ReactNode } from "react";
 import type * as ReactNamespace from "react";

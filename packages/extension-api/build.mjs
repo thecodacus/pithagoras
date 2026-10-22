@@ -81,7 +81,8 @@ export async function buildExtension({ dir, entry = "src/client.tsx", outdir = "
   if (!dir) throw new Error("buildExtension needs the extension's folder: { dir }");
   const { build } = await import("esbuild");
   const out = path.resolve(dir, outdir);
-  for (const owned of ["chunks", "assets"]) rmSync(path.join(out, owned), { recursive: true, force: true });
+  // client.css as well: when the code imports no stylesheet, esbuild writes none, and the utilities would go after the last build's.
+  for (const owned of ["client.css", "chunks", "assets"]) rmSync(path.join(out, owned), { recursive: true, force: true });
   const client = await build({
     entryPoints: { client: path.resolve(dir, entry) },
     outdir: out,

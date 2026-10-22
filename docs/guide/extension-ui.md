@@ -196,8 +196,8 @@ await buildExtension({ dir: import.meta.dirname });
 {
   "pi": {},
   "pithagoras": { "client": "./web/client.js", "style": "./web/client.css" },
-  "scripts": { "build": "tsc --noEmit && node build.mjs" },
-  "devDependencies": { "@pithagoras/extension-api": "*", "esbuild": "*" }
+  "scripts": { "build": "node build.mjs" },
+  "devDependencies": { "@pithagoras/extension-api": "^0.2.0", "esbuild": "*" }
 }
 ```
 
@@ -219,8 +219,14 @@ export default function (portal: Portal) {
 The bundle has no React of its own. `react`, `react/jsx-runtime` and
 `react-dom` are the portal's: it hands them to every extension before it loads
 any extension's module, and the build points those imports there. Any other
-package the code imports is bundled into it. What the build makes is not kept
-in git: the package is built where it is installed from, or published built.
+package the code imports is bundled into it. The build drops the types
+without checking them: `tsc --noEmit`, run before `node build.mjs`, checks
+them, with the TypeScript, type packages and `tsconfig.json` that
+[Extensions in their own repository](#extensions-in-their-own-repository)
+gives. What the build makes is not kept in this repository's git: the
+portal's own build makes it. An extension of your own is built in the folder
+it is installed from, published built, or committed built to be installed
+from git, as that section shows.
 
 A part that is large and not always needed goes in a chunk of its own, fetched
 when it is first drawn. Load it with `portal.ui.lazy`, not React's `lazy`: a
@@ -2275,6 +2281,91 @@ from the portal, and what gives the same to an extension:
 | Letting go of what it kept for a chat when a routine's run is over | `chats.on("finished")` |
 | A slash command | `pi.registerCommand` in the pi extension, and the channel for what it does in the page |
 | The colours of everything | [A theme](#themes) |
+
+## Extensions in their own repository
+
+An extension is a package of its own, and it can have a repository of its own
+too. `@pithagoras/extension-api` is published on npm: the types,
+`buildExtension` and the portal's Tailwind preset that the extensions in this
+repository are built with.
+
+```sh
+npm install --save-dev @pithagoras/extension-api esbuild typescript @types/react@18 @types/node @types/express@5
+```
+
+Code that imports `react-dom` needs `@types/react-dom@18` as well, and
+`tailwind: true` needs `tailwindcss@3` and `postcss`. They are peers of the
+package: it builds with the versions the extension installs. TypeScript 6 and
+later want types for a stylesheet the code imports; with
+`"noUncheckedSideEffectImports": false` in `tsconfig.json` it is left to the
+build. The package's
+[README](https://github.com/thecodacus/pithagoras/tree/main/packages/extension-api)
+is a whole extension: its `package.json`, `tsconfig.json` and `build.mjs`, a
+browser half and a server half.
+
+It is installed by name in Settings → Extensions → Discover:
+
+| From | Spec | It has to be |
+| --- | --- | --- |
+| npm | `npm:<name>` | Published built: `"files": ["web", "server.js"]` and `"prepack": "npm run build"` in its `package.json` |
+| git | `git:github.com/<owner>/<repo>@<tag>`, or its `https://` URL | Committed built: pi clones it and installs its `dependencies`, not its `devDependencies`, and does not build it |
+| A folder on the server | Its path | Built there |
+
+The package is released with the portal and has its version: 0.2.0 is what
+Pithagoras 0.2.0 gives an extension. The portal stays on 0.x while this
+interface still changes, and a 0.x minor version may break an extension, so an
+extension depends on `"^0.2.0"`, which takes 0.2.1 and not 0.3.0. `version` on
+the `portal` an extension is given, `1`, is not the package's version: it is
+the version of the interface the portal loads an extension with, raised only
+when something an extension relies on changes.
+
+### Releasing @pithagoras/extension-api
+
+For the maintainers of this repository. The package is released with the
+portal, from the portal's tag:
+
+1. In a pull request, raise `version` to the release's in `package.json` and
+   `packages/extension-api/package.json`, and in `package-lock.json` its
+   `version` and the entries `""` and `packages/extension-api`, and merge it.
+2. Tag the merged commit `v<version>` and push the tag:
+
+   ```sh
+   git fetch origin
+   git tag v0.3.0 origin/main
+   git push origin v0.3.0
+   ```
+
+The tag builds the image (`.github/workflows/docker.yml`) and publishes the
+package (`.github/workflows/publish-extension-api.yml`) with npm's trusted
+publishing: no token, and with provenance. The workflow stops before
+publishing when the tag is not the version in both `package.json` files, and
+`tests/extension-api-package.test.mts` fails while they, or the lock, differ.
+Run by hand, the workflow is run on the tag.
+
+npm links a trusted publisher only to a package that exists, so the first
+version, 0.2.0, is published by hand, from a clean checkout of the tag `v0.2.0`
+once that release is cut:
+
+```sh
+git clone --branch v0.2.0 https://github.com/thecodacus/pithagoras.git
+cd pithagoras
+npm publish --provenance=false -w packages/extension-api
+```
+
+Provenance is made only in CI. The workflow's own run on `v0.2.0` fails at
+`npm publish`, as npm has no trusted publisher for the package yet; the image
+is built all the same.
+
+The trusted publisher is added when the next release after it is cut, between
+steps 1 and 2: on npmjs.com, the package's **Settings → Trusted Publisher**
+takes GitHub Actions, with the organization or user `thecodacus`, the
+repository `pithagoras`, the workflow filename `publish-extension-api.yml`, no
+environment name, and `npm publish` selected under **Allowed actions**
+(`npm dist-tag` stays off). Without it, a new trusted publisher allows only
+`npm stage publish`, and npm refuses the workflow's `npm publish`. A new
+trusted publisher expires when no publish goes through it within 2 days: push
+the tag within 2 days of adding it, and if it expires, delete it and add it
+again.
 
 ## Troubleshooting
 
