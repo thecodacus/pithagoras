@@ -46,6 +46,8 @@ export interface LaunchOptions {
   lazySets?: string[];
   /** The code tool's presentation in a chat whose mode works through it: see codemode.ts. */
   codemode?: "only";
+  /** Said after the portal's rules each time the prompt is built: the chat's mode's instructions. */
+  modeLines?: () => string[];
   /** What its subagents run on, when it says: asked each time one starts. */
   subagentModel?: () => string | undefined;
   /** The agent whose heartbeat this session is, when it is one: gives it the note tool. */
@@ -114,6 +116,7 @@ export class HostExecutor implements Executor {
       toolsLazy: opts.toolsLazy,
       lazySets: opts.lazySets,
       codemode: opts.codemode,
+      modeLines: opts.modeLines,
       subagentModel: opts.subagentModel,
       heartbeatAgent: opts.heartbeatAgent,
       rememberChatModel: opts.rememberChatModel,

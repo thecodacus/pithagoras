@@ -18,10 +18,18 @@ export interface ChatModeEntry {
   tools?: ToolExceptions;
   /** Its chats work through the code tool alone, in pi's `only` presentation (see codemode.ts). */
   codemode?: boolean;
+  /** Said in its chats' system prompt, after the portal's own rules (a mode the person made). */
+  instructions?: string;
+  /** What a chat is put on as it is put in the mode (a mode the person made). */
+  provider?: string;
+  model?: string;
+  thinkingLevel?: string;
 }
 
 /** What a chat is when it says nothing about its mode. Stored as NULL. */
 export const STANDARD = "standard";
+/** What a chat in a mode the person made stores before the mode's id (Settings → Modes). */
+export const CUSTOM = "custom/";
 
 /** The portal's own modes, first in the picker. The page has the same English in its table (ModePicker.tsx). */
 export const CORE_MODES: readonly ChatModeEntry[] = [

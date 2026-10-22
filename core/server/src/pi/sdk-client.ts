@@ -497,6 +497,8 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     lazySets?: string[];
     /** The code tool's presentation in a chat whose mode works through it: see codemode.ts. */
     codemode?: "only";
+    /** Said after the portal's rules each time the prompt is built: the chat's mode's instructions. */
+    modeLines?: () => string[];
     /** The portal's session id, for tools that record against it. */
     sessionId?: string;
     /** The taint rules a run may act against after it read something untrusted, read at each call — see guardExtension. */
@@ -638,6 +640,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
         ...(skillsOf && (!opts.role || opts.role === "primary") && !opts.heartbeatAgent ? [skillsLine(skillsOf)] : []),
         ...memoryRule(opts.cwd, opts.role),
         ...outsideLines(),
+        ...(opts.modeLines?.() ?? []),
       ],
       // What the installed extensions' server halves add to the chat's pi, each under its package's name, as they are
       // at each load: see extension-host.ts.
