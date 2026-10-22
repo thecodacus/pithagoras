@@ -8,7 +8,8 @@
  * stopped and held off until another version is installed or it is switched off
  * and on, and the portal goes on.
  *
- * See docs/guide/extension-ui.md, "The server half" and "When the server half crashes".
+ * See "The server half" and "When the server half crashes" in "Building an extension":
+ * https://thecodacus.github.io/pithagoras/guide/extension-ui
  */
 import type { IncomingMessage } from "node:http";
 import type { Duplex } from "node:stream";
