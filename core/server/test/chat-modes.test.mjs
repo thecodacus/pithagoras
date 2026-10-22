@@ -244,6 +244,10 @@ test("in Code mode the code tool is on as the mode's layer, the chat is listed a
   await sessions.client(id);
   const codemode = (await sessions.getTools(id)).tools.find((t) => t.name === "codemode");
   assert.deepEqual([codemode.enabled, codemode.defaultOn], [true, true]);
+  // A Standard chat in the same folder that says something about tools, asked first (the newest): what it starts
+  // with is not what the Code-mode chat starts with.
+  getDb().prepare("UPDATE sessions SET tools_off = 'bash', updated_at = '2099-01-01 00:00:00' WHERE id = ?").run(plain);
+  getDb().prepare("UPDATE sessions SET updated_at = '2000-01-01 00:00:00' WHERE id = ?").run(id);
   const differ = toolExceptions(["codemode"]).chats.map((row) => row.id);
   assert.ok(differ.includes(id));
   assert.ok(!differ.includes(plain));

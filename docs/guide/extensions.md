@@ -398,7 +398,9 @@ the tool one by one again. The button of a tool that is switched off by default 
 group's while every tool in it is off: a tool that is off is not offered to the model, lazy or not, so
 a mark on it changes nothing in the chats where it stays off. The mark is the portal's and not one of an
 agent's, project's, routine's or chat's, so where one of those switches the tool on, the mark still
-applies. To set or take away such a mark, switch the tool on by default for a moment. A mark that was
+applies. In a chat in Code mode the marks do not apply: every tool that is on is in a script's reach,
+found with `searchTools`, and the `tools` tool is not offered. An MCP server's tools still stay behind
+`mcp`, which a script calls like any other tool (see [Modes](/guide/sessions#modes)). To set or take away such a mark, switch the tool on by default for a moment. A mark that was
 set stays as it is.
 
 Any tool can be made lazy except pi's own built-in ones (`read`, `bash`, `edit`, `write`, `grep`, `find`
