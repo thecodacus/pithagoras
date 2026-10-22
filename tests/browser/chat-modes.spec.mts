@@ -1,0 +1,220 @@
+import { type Page } from '@playwright/test';
+import { test, expect, mockPortal, reply } from './portal-mock';
+
+/**
+ * Chat modes: the picker above the message box of a chat that has said nothing, what choosing a mode sends, what a
+ * first message waits for, and the mode in the header once the chat has started.
+ */
+const MODES = [
+  { id: 'standard', label: 'Standard mode', description: 'The agent as this chat would have it anyway: the tools that Settings → Tools, its agent and its project switch on.' },
+  { id: 'code', label: 'Code mode', description: "The model works through one tool: it writes a short JavaScript script that calls the chat's tools, and is given only what the script puts out." },
+];
+const config = {
+  live: false, state: { model: { id: 'model-a', name: 'Model A', provider: 'llama-swap' }, thinkingLevel: 'medium' }, stats: null,
+  thinking: { levels: ['off', 'medium'] }, models: { models: [] }, named: { provider: null, model: null },
+};
+
+interface Portal {
+  /** What each PUT of the mode sent. */
+  puts: unknown[];
+  /** What each message sent. */
+  prompts: string[];
+  /** Holds the PUT's answer until it is settled. */
+  hold: Promise<void> | null;
+  /** The PUT fails with this. */
+  fail: string | null;
+}
+
+/** A chat, `a`, in the stored `mode`, with a message in it where it has `said` something, offered `modes`. */
+async function portal(page: Page, { mode = null as string | null, said = false, modes = MODES } = {}): Promise<Portal> {
+  const state: Portal & { mode: string | null } = { puts: [], prompts: [], hold: null, fail: null, mode };
+  const at = new Date().toISOString();
+  const session = () => ({ id: 'a', title: 'A chat', workspace: '/w/site', status: 'idle', kind: 'task', pinned: false, updated_at: at, provider: null, model: null, thinking_level: null, mode: state.mode });
+  await mockPortal(page, async ({ path: p, method, json }) => {
+    if (p === '/api/sessions') return { sessions: [session()], executor: 'host' };
+    if (p === '/api/sessions/a') return session();
+    if (p === '/api/sessions/a/modes' && method === 'GET') return { modes };
+    if (p === '/api/sessions/a/modes' && method === 'PUT') {
+      const { mode: chosen } = json();
+      state.puts.push(json());
+      await state.hold;
+      if (state.fail) return reply(409, { error: state.fail });
+      state.mode = chosen === 'standard' ? null : chosen;
+      return { mode: chosen };
+    }
+    if (p === '/api/sessions/a/prompt') {
+      state.prompts.push(json().message);
+      return { ok: true };
+    }
+    if (p === '/api/sessions/a/config' || p === '/api/sessions/a/models') return config;
+    if (p === '/api/workspaces') return { root: '/w', workspaces: [] };
+    if (p === '/api/models') return { models: [], providers: {} };
+  }, { streams: 'open', settings: true });
+  // Out of the way, so the sidebar's chat is not what the test reaches for.
+  await page.addInitScript(() => localStorage.setItem('sidebarCollapsed', 'true'));
+  await page.goto('/s/a');
+  await expect.poll(() => page.evaluate(() => (window as any).streams.some((s: any) => !s.closed))).toBe(true);
+  await page.evaluate((said) => {
+    const s = (window as any).streams.find((s: any) => !s.closed);
+    if (said) s.emit('message', { seq: 1, type: 'portal_prompt', payload: { message: 'Hello there' } });
+    s.emit('caught-up', { seq: said ? 1 : 0 });
+  }, said);
+  return state;
+}
+
+/** Held until the returned function is called. */
+function held(): [Promise<void>, () => void] {
+  let release!: () => void;
+  return [new Promise<void>((resolve) => (release = resolve)), () => release()];
+}
+
+const chip = (page: Page) => page.getByRole('button', { name: /^Mode: / });
+const menu = (page: Page) => page.getByRole('menu', { name: 'Modes' });
+const row = (page: Page, label: string) => menu(page).getByRole('menuitemradio', { name: new RegExp(`^${label}`) });
+const box = (page: Page) => page.getByLabel('Message', { exact: true });
+
+test('a new chat offers Standard, chosen, and Code mode, each with its whole line; choosing Standard again is no change', async ({ page }) => {
+  const state = await portal(page);
+  await expect(chip(page)).toHaveText('Standard mode');
+  await expect(chip(page)).toHaveAccessibleName('Mode: Standard mode');
+  await expect(chip(page)).toHaveAttribute('aria-haspopup', 'menu');
+  await chip(page).click();
+  await expect(chip(page)).toHaveAttribute('aria-expanded', 'true');
+  await expect(menu(page).getByText('How this chat works. It is fixed once the chat has started.')).toBeVisible();
+  await expect(row(page, 'Standard mode')).toHaveAttribute('aria-checked', 'true');
+  await expect(row(page, 'Code mode')).toHaveAttribute('aria-checked', 'false');
+  for (const mode of MODES) {
+    const line = menu(page).getByText(mode.description, { exact: true });
+    await expect(line).toBeVisible();
+    // Wrapped, not cut: the line is as wide as it is shown.
+    expect(await line.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+  }
+  await row(page, 'Standard mode').click();
+  await expect(menu(page)).toHaveCount(0);
+  await page.waitForTimeout(300);
+  expect(state.puts).toEqual([]);
+});
+
+test('choosing Code mode saves it, shows it at once, and a message sent meanwhile goes after the save', async ({ page }) => {
+  const state = await portal(page);
+  const [hold, release] = held();
+  state.hold = hold;
+  await chip(page).click();
+  await row(page, 'Code mode').click();
+  await expect(menu(page)).toHaveCount(0);
+  await expect(chip(page)).toHaveText('Code mode');
+  await expect.poll(() => state.puts).toEqual([{ mode: 'code' }]);
+  await box(page).fill('Count the lines');
+  await box(page).press('Enter');
+  await page.waitForTimeout(300);
+  expect(state.prompts).toEqual([]);
+  release();
+  await expect.poll(() => state.prompts).toEqual(['Count the lines']);
+});
+
+test('a save that fails puts the chip back and says why, and a message sent meanwhile is not sent and stays in the box', async ({ page }) => {
+  const state = await portal(page);
+  state.fail = 'This chat has started, and its mode is fixed: start a new chat for another one.';
+  await chip(page).click();
+  await row(page, 'Code mode').click();
+  await expect(page.getByText(state.fail)).toBeVisible();
+  await expect(chip(page)).toHaveText('Standard mode');
+
+  const [hold, release] = held();
+  state.hold = hold;
+  await chip(page).click();
+  await row(page, 'Code mode').click();
+  await expect.poll(() => state.puts.length).toBe(2);
+  await box(page).fill('Count the lines');
+  await box(page).press('Enter');
+  release();
+  await expect(page.getByText(state.fail)).toBeVisible();
+  await expect(chip(page)).toHaveText('Standard mode');
+  await page.waitForTimeout(300);
+  expect(state.prompts).toEqual([]);
+  await expect(box(page)).toHaveValue('Count the lines');
+});
+
+test('a chat that has started has no chip, and its mode in the header; Standard says nothing, and a mode not offered now says so', async ({ page }) => {
+  await portal(page, { mode: 'code', said: true });
+  await expect(page.getByText('Hello there')).toBeVisible();
+  await expect(chip(page)).toHaveCount(0);
+  const pill = page.locator('.chat-header').getByText('Code mode', { exact: true });
+  await expect(pill).toBeVisible();
+  await expect(pill).toHaveAttribute('title', MODES[1].description);
+});
+
+test('a started chat in Standard has no mode in its header', async ({ page }) => {
+  await portal(page, { said: true });
+  await expect(page.getByText('Hello there')).toBeVisible();
+  await expect(chip(page)).toHaveCount(0);
+  await expect(page.locator('.chat-header').getByText('Standard mode')).toHaveCount(0);
+});
+
+test('a started chat whose mode is not offered now names it, and says it is not available', async ({ page }) => {
+  await portal(page, { mode: 'x/gone', said: true });
+  await expect(page.getByText('Hello there')).toBeVisible();
+  const pill = page.locator('.chat-header').getByText('gone', { exact: true });
+  await expect(pill).toBeVisible();
+  await expect(pill).toHaveAttribute('title', 'gone is not available now');
+});
+
+test('a chat offered no modes draws no chip', async ({ page }) => {
+  await portal(page, { modes: [] });
+  await expect(box(page)).toBeVisible();
+  await expect(chip(page)).toHaveCount(0);
+});
+
+test('the keys open the menu, move in it, and close it back onto the chip', async ({ page }) => {
+  await portal(page);
+  await chip(page).focus();
+  await page.keyboard.press('ArrowDown');
+  await expect(menu(page)).toBeVisible();
+  await expect(row(page, 'Standard mode')).toBeFocused();
+  await page.keyboard.press('ArrowDown');
+  await expect(row(page, 'Code mode')).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(menu(page)).toHaveCount(0);
+  await expect(chip(page)).toBeFocused();
+});
+
+test('the picker speaks German', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('pithagoras.language', 'de'));
+  await portal(page);
+  await expect(page.getByRole('button', { name: 'Modus: Standardmodus' })).toHaveText('Standardmodus');
+  await page.getByRole('button', { name: 'Modus: Standardmodus' }).click();
+  await expect(page.getByRole('menu', { name: 'Modi' }).getByText('Wie dieser Chat arbeitet. Das steht fest, sobald der Chat begonnen hat.')).toBeVisible();
+  await expect(page.getByRole('menuitemradio', { name: /^Code-Modus/ })).toBeVisible();
+});
+
+test('choosing a mode with words in the box sends nothing, by a click or by Enter, and the words stay', async ({ page }) => {
+  const state = await portal(page);
+  await box(page).fill('Not yet');
+  await chip(page).click();
+  await row(page, 'Code mode').click();
+  await expect.poll(() => state.puts).toEqual([{ mode: 'code' }]);
+  await chip(page).click();
+  await row(page, 'Standard mode').focus();
+  await page.keyboard.press('Enter');
+  await expect.poll(() => state.puts).toEqual([{ mode: 'code' }, { mode: 'standard' }]);
+  await page.waitForTimeout(300);
+  expect(state.prompts).toEqual([]);
+  await expect(box(page)).toHaveValue('Not yet');
+});
+
+test('a chat that has said nothing in a mode not offered now names it on the chip, and is put in one offered; the mode it has is no change', async ({ page }) => {
+  const state = await portal(page, { mode: 'x/gone' });
+  await expect(chip(page)).toHaveText('gone');
+  await expect(chip(page)).toHaveAttribute('title', 'gone is not available now');
+  await chip(page).click();
+  await expect(menu(page).getByRole('menuitemradio', { checked: true })).toHaveCount(0);
+  await row(page, 'Code mode').click();
+  await expect.poll(() => state.puts).toEqual([{ mode: 'code' }]);
+  await expect(chip(page)).toHaveText('Code mode');
+
+  await chip(page).click();
+  await row(page, 'Code mode').click();
+  await expect(menu(page)).toHaveCount(0);
+  await page.waitForTimeout(300);
+  expect(state.puts).toEqual([{ mode: 'code' }]);
+});

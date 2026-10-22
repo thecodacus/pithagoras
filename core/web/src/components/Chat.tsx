@@ -20,12 +20,13 @@ import { Fragment, memo, useCallback, useEffect, useId, useLayoutEffect, useMemo
 import type { DiagramPlugin } from "streamdown";
 import { followPointer } from "../pointer-drag";
 import { LuGripVertical, LuMenu, LuBot, LuArrowDown, LuSquare, LuArrowUp, LuPaperclip, LuPuzzle, LuX } from "react-icons/lu";
-import { api, type PiCommand, type PortalEvent, type PromptOptions, type Session } from "../api";
+import { api, type ChatMode, type PiCommand, type PortalEvent, type PromptOptions, type Session } from "../api";
 import { pending, refetchImage, sortFiles, uploadedNote, type Attachment } from "../attachments";
 import { activity, buildTranscript, keepItems, type Item, type SentImage } from "../transcript";
 import { HAS_MERMAID, loadMermaidPlugin } from "../mermaid";
 import { useResolvedTheme } from "../theme";
 import { ComposerBar } from "./ComposerBar";
+import { ModePicker, ModePill } from "./ModePicker";
 import { QuestionCard } from "./QuestionCard";
 import { useChatPictures } from "./ChatPictures";
 import { confirmDialog } from "./ConfirmDialog";
@@ -185,6 +186,7 @@ export function Chat({
   onAbort,
   onClientCommand,
   onRename,
+  onSetMode,
   onOpenNavigation,
   versions = {},
   loading,
@@ -213,6 +215,8 @@ export function Chat({
   onClientCommand: (name: string, args: string) => void | Promise<void>;
   /** Give the chat another name, from its header. */
   onRename: (title: string) => Promise<void>;
+  /** Put the chat, which has said nothing yet, in a mode (see ModePicker). */
+  onSetMode: (mode: string) => Promise<void>;
   /** On a phone, where the sidebar is a drawer: opens it. */
   onOpenNavigation?: () => void;
   /**
@@ -1083,6 +1087,32 @@ export function Chat({
     return () => clearTimeout(timer);
   }, [heard]);
   useEffect(() => setHeard(null), [session.id]);
+
+  // The modes the chat may be put in: for the picker before it has said anything, and after that to name its mode in
+  // the header. One that cannot be read is no list, and no picker: the chat works as it is.
+  const [modes, setModes] = useState<{ chat: string; list: ChatMode[] } | null>(null);
+  const wantsModes = !loading && (!started || session.mode !== null);
+  useEffect(() => {
+    if (!wantsModes) return;
+    const id = session.id;
+    let live = true;
+    api.chatModes(id).then(
+      (r) => {
+        if (live) setModes({ chat: id, list: r.modes });
+      },
+      () => undefined,
+    );
+    return () => {
+      live = false;
+    };
+  }, [session.id, wantsModes]);
+  const modeList = modes?.chat === session.id ? modes.list : [];
+  // A mode chosen here, shown at once, before the chat's row says so.
+  const [chosenHere, setChosenHere] = useState<{ chat: string; mode: string } | null>(null);
+  const currentMode = (chosenHere?.chat === session.id ? chosenHere.mode : null) ?? session.mode ?? "standard";
+  // The save of the mode chosen, while it is on its way: true once it was saved, false once it failed and said why.
+  // A first message waits for it (see submit).
+  const modeSave = useRef<{ chat: string; saved: Promise<boolean> } | null>(null);
   const wasRunning = useRef({ id: session.id, running });
   useEffect(() => {
     const before = wasRunning.current;
@@ -1229,6 +1259,10 @@ export function Chat({
    * get there. Throws, for the caller to say what went wrong.
    */
   const submit = async (msg: string, fromBox: boolean): Promise<void> => {
+    // Not before the mode chosen is saved, which the first message fixes; nor at all after it failed: the chat would
+    // be fixed in a mode the person did not choose. What was typed stays in the box.
+    const saving = modeSave.current;
+    if (saving?.chat === session.id && !(await saving.saved)) return;
     const sent = session.id;
     const typed = typedCommand(msg, trigger);
     // pi is told "/name" whatever character the command was typed with, so the
@@ -1352,6 +1386,30 @@ export function Chat({
       // What was asked may be answered when another chat is open: the complaint is not for that one.
       if (currentSession.current === id) setActionError((e as Error).message);
     }
+  };
+
+  /** Puts the chat in `mode`: shown at once, and back as it was if it is not saved. */
+  const chooseMode = (mode: string) => {
+    const chat = session.id;
+    setChosenHere({ chat, mode });
+    const saved = (async () => {
+      let done = false;
+      await attempt(async () => {
+        try {
+          await onSetMode(mode);
+        } catch (e) {
+          setChosenHere(null);
+          throw e;
+        }
+        done = true;
+      });
+      return done;
+    })();
+    const saving = { chat, saved };
+    modeSave.current = saving;
+    void saved.then(() => {
+      if (modeSave.current === saving) modeSave.current = null;
+    });
   };
 
   // What the rows can do. Rows are drawn only when what they show changes, so they are handed one object
@@ -1818,6 +1876,8 @@ export function Chat({
               {t("interrupted — send a message to resume")}
             </span>
           )}
+          {/* The mode the chat was started in, once it has started; Standard says nothing. Named from the list, once it is here. */}
+          {started && session.mode && modes?.chat === session.id && <ModePill stored={session.mode} modes={modeList} />}
           {/* The installed extensions' own controls. One that fails to draw is left out, and the header stays. */}
           {extensionParts(headerActions)}
           {agents.length > 0 && (
@@ -1969,6 +2029,12 @@ export function Chat({
         }}
         className="px-4 pb-4 pt-2 sm:px-6 sm:pb-5"
       >
+        {/* How the chat works, chosen before it has said anything: where there is a choice. */}
+        {!loading && !started && modeList.length > 1 && (
+          <div className="relative mx-auto mb-1.5 flex w-full max-w-3xl items-center gap-2">
+            <ModePicker current={currentMode} modes={modeList} onChoose={chooseMode} />
+          </div>
+        )}
         <div className="prompt-shell relative mx-auto w-full max-w-3xl">
         {/* Scrolled up to read, the way back to the end is one click rather
             than a long drag — and during a run, where the new output is. */}

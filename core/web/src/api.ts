@@ -22,6 +22,15 @@ export interface Session {
   thinking_level: string | null;
   /** How the session came to exist. */
   kind?: "task" | "agent" | "routine" | "heartbeat";
+  /** The mode it was started in; null is Standard. */
+  mode: string | null;
+}
+
+/** A mode a chat can be put in, as the portal offers it to that chat. */
+export interface ChatMode {
+  id: string;
+  label: string;
+  description: string;
 }
 
 /** A set of instructions the agent pulls in when the description matches. */
@@ -606,6 +615,10 @@ export const api = {
     }),
   renameSession: (id: string, title: string) =>
     json<Session>(`/api/sessions/${id}`, { method: "PATCH", body: JSON.stringify({ title }) }),
+  /** The modes the chat may be put in: none where it may not choose one. */
+  chatModes: (id: string) => json<{ modes: ChatMode[] }>(`/api/sessions/${id}/modes`),
+  /** Puts a chat that has said nothing yet in a mode. */
+  setMode: (id: string, mode: string) => json<{ mode: string }>(`/api/sessions/${id}/modes`, { method: "PUT", body: JSON.stringify({ mode }) }),
   deleteSession: (id: string) => json<{ ok: true }>(`/api/sessions/${id}`, { method: "DELETE" }),
   prompt: (id: string, message: string, options?: PromptOptions) =>
     json<{ ok: true }>(`/api/sessions/${id}/prompt`, {

@@ -29,6 +29,6 @@ const noop = async () => {};
 function Fixture() {
   const [shown, setShown] = React.useState(events);
   (window as any).emit = (type: string, payload: any) => setShown((list) => [...list, { seq: ++seq, type, at: Date.now(), payload }]);
-  return <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}><div style={{ flex: 1, minHeight: 0 }}><Chat session={session} events={shown} onSend={noop} onEditMessage={noop} onDeleteMessage={noop} onTakeBackQueued={noop} onSendQueuedNow={noop} onAbort={noop} onClientCommand={noop} onRename={noop} loading={false} /></div></div>;
+  return <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}><div style={{ flex: 1, minHeight: 0 }}><Chat session={session} events={shown} onSend={noop} onEditMessage={noop} onDeleteMessage={noop} onTakeBackQueued={noop} onSendQueuedNow={noop} onAbort={noop} onClientCommand={noop} onRename={noop} onSetMode={noop} loading={false} /></div></div>;
 }
 createRoot(document.getElementById('root')!).render(<BrowserRouter><Fixture /><ConfirmHost /></BrowserRouter>);

@@ -806,6 +806,10 @@ function Shell({
               await api.renameSession(active.id, title);
               await refreshSessions();
             }}
+            onSetMode={async (mode) => {
+              await api.setMode(active.id, mode);
+              await refreshSessions();
+            }}
             onOpenNavigation={() => setMobileNav(true)}
             onClientCommand={async (name, args) => {
               if (name === "settings") {

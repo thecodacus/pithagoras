@@ -28,10 +28,10 @@ function Fixture() {
     { seq: 3, type: 'message_end', payload: {} },
   ]);
   const [running, setRunning] = useState(false);
-  const session: Session = { id: 'test', title: 'A little room to think', workspace: '/workspaces/pithagoras', executor: 'host', status: running ? 'running' : 'idle', created_at: '', updated_at: '', last_error: null, pinned: false, provider: 'llama-server', model: 'Model A', thinking_level: 'medium' };
+  const session: Session = { id: 'test', title: 'A little room to think', workspace: '/workspaces/pithagoras', executor: 'host', status: running ? 'running' : 'idle', created_at: '', updated_at: '', last_error: null, pinned: false, provider: 'llama-server', model: 'Model A', thinking_level: 'medium', mode: null };
   return <>
     <main data-testid="workspace" style={{ maxWidth: 980, height: 'calc(100vh - 96px)', minHeight: 540, margin: '16px auto 0' }}>
-      <Chat session={session} events={events} onClientCommand={() => {}} onEditMessage={async () => {}} onDeleteMessage={async () => {}} onTakeBackQueued={async () => {}} onSendQueuedNow={async () => {}} onRename={async () => {}} onAbort={async () => setRunning(false)} onSend={async () => {}} />
+      <Chat session={session} events={events} onClientCommand={() => {}} onEditMessage={async () => {}} onDeleteMessage={async () => {}} onTakeBackQueued={async () => {}} onSendQueuedNow={async () => {}} onRename={async () => {}} onSetMode={async () => {}} onAbort={async () => setRunning(false)} onSend={async () => {}} />
     </main>
     <aside style={{ display: 'flex', flexWrap: 'wrap', gap: 10, fontSize: 10, padding: 8 }}>
       <button onClick={() => setEvents(previous => [...previous,

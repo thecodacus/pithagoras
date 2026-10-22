@@ -99,7 +99,7 @@ export function extensionOnDisk(dir: string) {
 /**
  * What every portal says unless a test says otherwise: signed in without a password, no chats, and the things the
  * shell asks of every page (the feature flags, voice mode with no source, which extensions draw in it, the places for a new
- * chat) and of every chat (what runs in the background, what came before), with nothing set up.
+ * chat) and of every chat (what runs in the background, what came before, the modes it may be put in), with nothing set up.
  */
 const portalBase = ({ path, method, url }: Ask): Answer => {
   if (method !== 'GET') return undefined;
@@ -111,6 +111,8 @@ const portalBase = ({ path, method, url }: Ask): Answer => {
   if (path === '/api/update') return { kind: 'none', boot: 'boot-a' };
   if (/^\/api\/sessions\/[^/]+\/background$/.test(path)) return { supported: true, jobs: [], statuses: [], widgets: [] };
   if (/^\/api\/sessions\/[^/]+\/events\/before$/.test(path)) return { events: [], more: false };
+  // No modes to choose from: a chat draws no picker unless a test offers some.
+  if (/^\/api\/sessions\/[^/]+\/modes$/.test(path)) return { modes: [] };
   if (path === '/api/projects' && url.searchParams.has('bare')) return { root: '/w', home: '/h', projects: [] };
   return undefined;
 };
