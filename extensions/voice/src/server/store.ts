@@ -22,15 +22,12 @@ export interface Settings extends Partial<Speech> {
   lazyLoad?: boolean;
 }
 
-/** How the designed voice sounds where nothing else is said. */
-export const DEFAULT_INSTRUCTION = "A warm, clear English voice with a calm, conversational delivery.";
-
 /** How it speaks, as set on the page (Your voice), each as it is where nothing is said. */
 const SPEECH = {
   /** Its own choice of voice for Breeze and Chatterbox: "design", or a voice of the library. */
   voice: "design",
   /** How the designed voice sounds, 1–1000 characters. */
-  instruction: DEFAULT_INSTRUCTION,
+  instruction: "A warm, clear English voice with a calm, conversational delivery.",
   /** Breeze's voice guidance: 1, fast, or 4, expressive. */
   cfgScale: 4,
   /** Chatterbox's expressiveness, 0–2. */
@@ -60,7 +57,7 @@ export function openStore(dir: string): void {
 
 export const setting = <K extends keyof Settings>(key: K): Settings[K] => kept[key];
 
-/** `data` as `file`, for Voice's owner alone (0600), put in place at once: a reader finds the old file or the new one. */
+/** `data` as `target`, for Voice's owner alone (0600), put in place at once: a reader finds the old file or the new one. */
 export function writePrivately(target: string, data: string | Buffer): void {
   writeFileSync(`${target}.tmp`, data, { mode: 0o600 });
   renameSync(`${target}.tmp`, target);
