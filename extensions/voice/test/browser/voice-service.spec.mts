@@ -3,8 +3,8 @@ import { test, expect, mockPortal } from '../../../../tests/browser/portal-mock'
 
 /**
  * The voice service's page in Settings (src/web/VoiceService.tsx), over what its server half would answer: installing,
- * starting, stopping and removing it, the engines it is built for and the GPU it runs on, and whether its speech model
- * is let go of once voice mode no longer uses it.
+ * starting, stopping and removing it, Use for voice mode and Stop using, the engines it is built for and the GPU it runs
+ * on, and whether its speech model is let go of once voice mode no longer uses it. How it speaks is your-voice.spec's.
  */
 test.use({ installed: ['extensions/docker', 'extensions/voice'] });
 
@@ -14,7 +14,7 @@ const BASE = '**/api/x/pithagoras-voice';
 const SERVICE = /\/api\/x\/pithagoras-voice\/(state|install)$/;
 
 // Settings lists Voice, and Docker, which it requires, as the portal has them installed; a test's own routes come after
-// this and win. The GPU is not read unless a test says.
+// this and win. The GPU is not read unless a test says, and how it speaks is as nothing was set, with no voice added.
 test.beforeEach(async ({ page }) => {
   await mockPortal(page, ({ path, method }) => {
     if (method === 'GET' && path === '/api/extensions') return { settingsPath: '/a/settings.json', extensions: [
@@ -22,6 +22,8 @@ test.beforeEach(async ({ page }) => {
       { spec: 'extensions/voice', name: 'pithagoras-voice', version: '0.1.0', settings: [] },
     ] };
     if (method === 'GET' && path === '/api/x/pithagoras-voice/hardware') return { gpus: [], source: 'none', error: '', checked: false, cpuOnly: false, host: { totalMiB: 16384, freeMiB: 12000, threads: 8 }, selected: null, reserveMiB: 0, suggestion: { tts: 'breeze', asr: 'whisper', asrModel: 'base' } };
+    if (method === 'GET' && path === '/api/x/pithagoras-voice/speech') return { voice: 'design', instruction: 'A warm, clear English voice with a calm, conversational delivery.', cfgScale: 4, exaggeration: 0.5, kokoroVoice: 'af_heart', speed: 1, language: 'auto' };
+    if (method === 'GET' && path === '/api/x/pithagoras-voice/voices') return [];
     return undefined;
   }, { settings: true });
 });
@@ -33,46 +35,76 @@ const open = async (page: Page) => {
 };
 const badge = (page: Page, text: string) => page.getByRole('dialog', { name: 'Settings' }).getByText(text, { exact: true });
 
-test('install progress, ready, use for voice mode, and stop', async ({ page }) => {
-  let state = 'absent'; const actions: string[] = [];
+test('install progress, ready, use for voice mode, stop using it, and stop', async ({ page }) => {
+  let state = 'absent', chosen = false; const actions: string[] = [];
   await page.route(SERVICE, r => {
     if (r.request().method() === 'POST') { actions.push('install'); state = 'starting'; return r.fulfill({ json: { ok: true } }); }
-    return r.fulfill({ json: { available: true, state, busy: false, progress: state === 'starting' ? 'Quantizing Breeze to Q8_0 on CPU' : '', error: '', lazyLoad: true } });
+    return r.fulfill({ json: { available: true, state, busy: false, progress: state === 'starting' ? 'Quantizing Breeze to Q8_0 on CPU' : '', error: '', lazyLoad: true, chosen } });
   });
   await page.route(`${BASE}/stop`, r => { actions.push('stop'); state = 'stopped'; return r.fulfill({ json: { ok: true } }); });
-  await page.route(`${BASE}/connect`, r => { actions.push('connect'); return r.fulfill({ json: { ok: true } }); });
+  await page.route(`${BASE}/chosen`, r => { chosen = r.request().postDataJSON().chosen; actions.push(`chosen ${chosen}`); return r.fulfill({ json: { chosen } }); });
   await open(page);
+  const use = page.getByRole('button', { name: 'Use for voice mode' }), stopUsing = page.getByRole('button', { name: 'Stop using' });
+  const inUse = page.getByRole('status').filter({ hasText: 'In use for voice mode' });
   await expect(badge(page, 'Not installed')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Use for voice mode' })).toHaveCount(0);
+  await expect(use).toHaveCount(0);
   await page.getByRole('button', { name: 'Install voice', exact: true }).click();
   await expect(page.getByLabel('Voice setup log')).toContainText('Quantizing');
   await expect(page.getByRole('button', { name: 'Start voice', exact: true })).toBeDisabled();
+  await expect(use).toHaveCount(0);
   state = 'running';
   await expect(badge(page, 'Ready')).toBeVisible({ timeout: 8000 });
   // Voice mode listens and speaks through it once the setup is done, which the server half sees to; and at once, when asked.
-  const now = page.getByRole('status').filter({ hasText: 'Voice mode listens and speaks through the voice service now.' });
-  await expect(now).toHaveCount(0);
-  await page.getByRole('button', { name: 'Use for voice mode' }).click();
-  await expect.poll(() => actions).toEqual(['install', 'connect']);
-  await expect(now).toBeVisible();
+  await expect(inUse).toHaveCount(0);
+  await expect(stopUsing).toHaveCount(0);
+  await use.click();
+  await expect.poll(() => actions).toEqual(['install', 'chosen true']);
+  await expect(inUse).toBeVisible();
+  await expect(use).toHaveCount(0);
+  // Stop using is offered while it is the source, running or not.
   await page.getByRole('button', { name: 'Stop · release VRAM' }).click();
   await expect(page.getByRole('button', { name: 'Start voice', exact: true })).toBeEnabled();
-  expect(actions).toEqual(['install', 'connect', 'stop']);
-  await expect(now).toHaveCount(0);
+  await expect(inUse).toBeVisible();
+  await stopUsing.click();
+  await expect.poll(() => actions).toEqual(['install', 'chosen true', 'stop', 'chosen false']);
+  await expect(inUse).toHaveCount(0);
+  await expect(stopUsing).toHaveCount(0);
+  // Stopped, it is not offered for voice mode.
+  await expect(use).toHaveCount(0);
+});
+
+test('Use for voice mode refused says why, and the page stays as it was', async ({ page }) => {
+  await page.route(SERVICE, r => r.fulfill({ json: { available: true, state: 'running', busy: false, progress: '', error: '', lazyLoad: true, chosen: false } }));
+  await page.route(`${BASE}/chosen`, r => r.fulfill({ status: 400, json: { error: 'Wait for voice setup to finish before using it for voice mode' } }));
+  await open(page);
+  await page.getByRole('button', { name: 'Use for voice mode' }).click();
+  await expect(page.getByRole('alert').filter({ hasText: 'Wait for voice setup to finish before using it for voice mode' })).toBeVisible();
+  await expect(page.getByRole('status').filter({ hasText: 'In use for voice mode' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Use for voice mode' })).toBeEnabled();
 });
 
 test.describe('in a browser set to German', () => {
   test.use({ locale: 'de-DE' });
 
-  test("the page says a setup under way in its own words, and voice mode names the service as Voice does", async ({ page }) => {
-    await page.route(SERVICE, r => r.fulfill({ json: { available: true, state: 'installing', busy: true, progress: 'Preparing voice setup', error: '', lazyLoad: true } }));
+  test("the page says a setup under way and its use for voice mode in its own words, and voice mode names the service as Voice does", async ({ page }) => {
+    await page.route(SERVICE, r => r.fulfill({ json: { available: true, state: 'installing', busy: true, progress: 'Preparing voice setup', error: '', lazyLoad: true, chosen: true } }));
     await page.goto('/settings/x/pithagoras-voice');
-    await expect(page.getByRole('dialog', { name: 'Einstellungen' }).getByText('wird installiert', { exact: true })).toBeVisible();
-    // Voice mode's source in Settings → Add-ons → Voice: Voice's label, in Voice's German.
-    await page.route('**/api/voice/presets', r => r.fulfill({ json: [] }));
-    await page.route('**/api/voice', r => r.fulfill({ json: { enabled: true, whisperUrl: 'http://127.0.0.1:8178/inference', breezeUrl: 'http://127.0.0.1:7860/v1/audio/speech', instruction: 'Clear speech', voice: 'design', runtime: 'breeze', language: 'auto', cfgScale: 4, provider: 'pithagoras-voice', providers: [{ name: 'pithagoras-voice', label: 'Voice service', ready: true, runtime: 'audio-cpp' }] } }));
-    await page.goto('/settings/add-ons');
-    await expect(page.getByRole('combobox', { name: 'Zuhören und sprechen über' })).toContainText('Sprachdienst');
+    const settings = page.getByRole('dialog', { name: 'Einstellungen' });
+    await expect(settings.getByText('wird installiert', { exact: true })).toBeVisible();
+    await expect(settings.getByRole('status').filter({ hasText: 'Wird für den Sprachmodus verwendet' })).toBeVisible();
+    await expect(settings.getByRole('button', { name: 'Nicht mehr verwenden' })).toBeVisible();
+    await expect(settings.getByText('Die übrigen Einstellungen des Sprachmodus, etwa Spracherkennung und Sprechanweisungen, stehen unter Einstellungen → Standards → Sprachmodus.')).toBeVisible();
+    // Voice mode's source in Settings → Defaults → Voice mode: Voice's label, in Voice's German.
+    await page.route('**/api/voice', r => r.fulfill({ json: { provider: 'pithagoras-voice', label: 'Voice service', ready: true, speech: true, voices: [], enabled: true, responseInstructions: '', defaultResponseInstructions: '', responseInstructionsOff: false, skipThinkingProviders: [], defaultSkipThinkingProviders: [], voiceModel: '' } }));
+    await page.goto('/settings/general');
+    await expect(settings.getByText('Hört zu und spricht über Sprachdienst')).toBeVisible();
+  });
+
+  test('the uninstall question says in German that the voices are kept', async ({ page }) => {
+    await page.route(SERVICE, r => r.fulfill({ json: { available: true, state: 'stopped', busy: false, progress: '', error: '', lazyLoad: true } }));
+    await page.goto('/settings/x/pithagoras-voice');
+    await page.getByRole('button', { name: 'Deinstallieren', exact: true }).click();
+    await expect(page.getByRole('alertdialog')).toContainText('Der Sprachcontainer wird gestoppt und entfernt. Deine Stimmen bleiben erhalten. Der Sprachmodus hat dann keine Quelle, bis eine ausgewählt wird.');
   });
 });
 
@@ -96,8 +128,7 @@ test('uninstall asks first and says what goes, keeps the downloads unless told, 
   const dialog = page.getByRole('alertdialog');
   await uninstall.click();
   await expect(dialog.getByRole('heading', { name: 'Uninstall voice?' })).toBeVisible();
-  await expect(dialog).toContainText('The voice container is stopped and removed');
-  await expect(dialog).toContainText('it goes back to your own addresses, which stay as they are');
+  await expect(dialog).toContainText('The voice container is stopped and removed. Your voices are kept. Voice mode then has no source until one is chosen.');
   // Keeping the downloads is the default: a new install is then quick.
   await expect(dialog.getByRole('checkbox', { name: /Also delete the downloaded engines and models/ })).not.toBeChecked();
   await dialog.getByRole('button', { name: 'Cancel' }).click();

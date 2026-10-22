@@ -5,15 +5,18 @@ import { serveVoice } from "./portal.mts";
 import { KOKORO_VOICES } from "../src/kokoro-voices.ts";
 
 /**
- * The voice service as voice mode's source (`portal.voice.provide`): what it offers while it runs, its speech model
- * loaded while voice mode uses it, and the source chosen when the person asks for it on the service's page or a setup
- * they started has come up. Through the portal's own voice routes, as voice mode reaches it.
+ * The voice service as voice mode's source (`portal.voice.provide`): what it offers while it runs, the voices with it,
+ * what it hears and says through the engines of its container, its speech model loaded while voice mode uses it, and
+ * the source chosen when a setup the person started has come up. Through the portal's own voice routes, as voice mode
+ * reaches it.
  */
 
 inProcessHome("pithagoras-voice-provider-");
 const { machine, at, api, db, host, halves } = await serveVoice();
 const { state: offers, maintain } = await import("../src/server/provider.ts");
 const { putSettings, setting } = await import("../src/server/store.ts");
+const { addVoice } = await import("../src/server/voices.ts");
+const { samplesWav } = await import("../src/web/audio.ts");
 
 const json = { "content-type": "application/json" };
 const state = async () => (await fetch(`${at}/state`)).json();
@@ -31,24 +34,28 @@ const reset = async () => {
   useSource("");
 };
 
-test("what it offers follows the engines its container was built for, while it runs, and nothing otherwise", async () => {
+test("what it offers follows the engines its container was built for, while it runs, with the voices of the library each speaks with, and nothing otherwise", async () => {
   await reset();
   useSource("pithagoras-voice");
   const offered = async () => {
-    const { label, ready, speech } = await voice();
-    return { label, ready, speech };
+    const { label, ready, speech, voices } = await voice();
+    return { label, ready, speech, voices };
   };
-  const designed = [{ id: "design", name: "Designed voice", builtIn: true }];
+  const audio = Buffer.from(await samplesWav(new Float32Array(16000)).arrayBuffer()).toString("base64");
+  const calm = addVoice({ name: "Calm", kind: "design", instruction: "A calm voice." });
+  const aria = addVoice({ name: "Aria", kind: "clone", instruction: "Warm.", transcript: "Hello there.", audio });
+  // The names of the voices the person added are theirs, and are shown as they are: not one of them is built in.
+  const library = [{ id: aria.id, name: "Aria" }, { id: calm.id, name: "Calm" }];
   for (const [recipe, speaks, voices] of [
-    ["breeze+whisper:base", true, designed],
-    ["chatterbox+qwen3-asr:1.7b", true, []],
+    ["breeze+whisper:base", true, [{ id: "design", name: "Designed voice", builtIn: true }, ...library]],
+    ["chatterbox+qwen3-asr:1.7b", true, [{ id: aria.id, name: "Aria" }]],
     ["kokoro@cpu+qwen3-asr:0.6b", true, KOKORO_VOICES.map((v) => ({ id: v.id, name: `${v.name} (${v.locale})`, builtIn: true }))],
     ["none+whisper:small", false, []],
   ] as const) {
     running(recipe);
     assert.equal((await state()).state, "running", recipe);
     assert.deepEqual(offers(), { speaks, voices }, recipe);
-    assert.deepEqual(await offered(), { label: "Voice service", ready: true, speech: speaks }, recipe);
+    assert.deepEqual(await offered(), { label: "Voice service", ready: true, speech: speaks, voices }, recipe);
   }
   // A health check that is slow once, as an engine busy speaking may be, leaves it where it was found answering.
   machine.voiceProcesses.unhealthy = [":8188"];
@@ -59,7 +66,7 @@ test("what it offers follows the engines its container was built for, while it r
   machine.voice()!.State = "exited";
   assert.equal((await state()).state, "stopped");
   assert.equal(offers(), undefined);
-  assert.deepEqual(await offered(), { label: "Voice service", ready: false, speech: true });
+  assert.deepEqual(await offered(), { label: "Voice service", ready: false, speech: true, voices: [] });
   machine.voice()!.State = "running";
   machine.voiceProcesses.unhealthy = [":8188"];
   assert.equal((await state()).state, "starting");
@@ -70,18 +77,27 @@ test("what it offers follows the engines its container was built for, while it r
   assert.equal(offers(), undefined);
 });
 
-test("Use for voice mode makes it the source once it runs, and voice mode on", async () => {
+test("voice mode hears through the engines of its container, and speaks through them where it has a speech engine", async () => {
   await reset();
   running("breeze+whisper:base");
-  machine.voice()!.State = "exited";
-  const early = await fetch(`${at}/connect`, { method: "POST" });
-  assert.deepEqual([early.status, (await early.json()).error], [400, "Wait for voice setup to finish before connecting"]);
-  assert.equal((await voice()).provider, "");
-  machine.voice()!.State = "running";
-  const answer = await fetch(`${at}/connect`, { method: "POST" });
-  assert.deepEqual([answer.status, await answer.json()], [200, { ok: true }]);
-  const now = await voice();
-  assert.deepEqual([now.provider, now.enabled], ["pithagoras-voice", true]);
+  await state();
+  useSource("pithagoras-voice");
+  const wav = new Uint8Array(Buffer.concat([Buffer.from("RIFF"), Buffer.alloc(40)]));
+  const transcribe = () => fetch(`${api}/sessions/talk/voice/transcribe`, { method: "POST", headers: { "content-type": "audio/wav" }, body: wav });
+  const speak = () => fetch(`${api}/sessions/talk/voice/speech`, { method: "POST", headers: json, body: JSON.stringify({ text: "Hello." }) });
+  let answer = await transcribe();
+  assert.deepEqual([answer.status, await answer.json()], [200, { text: "Heard you." }]);
+  answer = await speak();
+  assert.deepEqual([answer.status, answer.headers.get("content-type"), Buffer.from(await answer.arrayBuffer())], [200, "audio/pcm", Buffer.from([0, 0, 255, 127])]);
+  assert.equal(machine.voiceProcesses.spoken.length, 1);
+  // Recognition alone: dictation is heard, and replies are not spoken.
+  running("none+whisper:base");
+  await state();
+  answer = await transcribe();
+  assert.equal(answer.status, 200);
+  answer = await speak();
+  assert.deepEqual([answer.status, (await answer.json()).error], [409, "Voice mode's source recognises speech alone: replies are not spoken"]);
+  assert.equal(machine.voiceProcesses.spoken.length, 1);
 });
 
 test("a setup started on the page is the source once it has come up, once: asked after by the page or by the half on its own", async () => {

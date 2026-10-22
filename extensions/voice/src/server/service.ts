@@ -1,9 +1,10 @@
 import { readFile } from 'node:fs/promises';
 import { setTimeout as delay } from 'node:timers/promises';
 import { asrDevice, ttsDevice, choiceFromKey, choiceKey, cpuServerConfig, cpuThreads, DEFAULT_CHOICE, healthUrls, parseChoice, pickGpu, sameChoice, serverConfig, SPEECH_PORT, suggestChoice, suggestCpuChoice, ttsModel, usesGpu, type Gpu, type Host, type TtsEngine, type VoiceChoice } from '../engines';
+import { CHATTERBOX_LANGUAGES } from '../languages';
 import { NoGpu, askedCard, cardOf, decide, detectGpus, deviceId, explain, holds, hostProbe, isNoGpu, readHost, SMI_ARGS, type Card, type Detected, type Probe } from './gpu';
 import { docker, portal } from './host';
-import { setting } from './store';
+import { putSettings, setting, speech } from './store';
 
 /**
  * The voice service: speech recognition and speech synthesis, built and run in a container of their own. Docker runs
@@ -328,6 +329,8 @@ export async function install(requested?: VoiceChoice) {
       const final = choice ?? DEFAULT_CHOICE;
       // What runs on the CPU gets the threads the host has, up to the ones its speeds were measured on; what is on the GPU keeps its four.
       if (!usesGpu(final) || (final.asr === 'qwen3-asr' && asrDevice(final) === 'cpu') || ttsDevice(final) === 'cpu') plan.threads = cpuThreads(hostReader.read().threads);
+      // Chatterbox is told a language or it refuses, and has no detection mode: one it does not speak becomes English.
+      if (final.tts === 'chatterbox' && !CHATTERBOX_LANGUAGES.includes(speech().language)) putSettings({ language: 'en' });
       await ensureContainer(script, final, plan);
     } catch (e) { error = explain((e as Error).message); }
     finally { pending = false; }
