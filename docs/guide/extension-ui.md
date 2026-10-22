@@ -197,7 +197,7 @@ await buildExtension({ dir: import.meta.dirname });
   "pi": {},
   "pithagoras": { "client": "./web/client.js", "style": "./web/client.css" },
   "scripts": { "build": "tsc --noEmit && node build.mjs" },
-  "devDependencies": { "@pithagoras/extension-api": "*", "esbuild": "*" }
+  "devDependencies": { "@pithagoras/extension-api": "^1.0.0", "esbuild": "*" }
 }
 ```
 
@@ -220,7 +220,10 @@ The bundle has no React of its own. `react`, `react/jsx-runtime` and
 `react-dom` are the portal's: it hands them to every extension before it loads
 any extension's module, and the build points those imports there. Any other
 package the code imports is bundled into it. What the build makes is not kept
-in git: the package is built where it is installed from, or published built.
+in this repository's git: the portal's own build makes it. An extension of
+your own is built in the folder it is installed from, published built, or
+committed built to be installed from git: see
+[Extensions in their own repository](#extensions-in-their-own-repository).
 
 A part that is large and not always needed goes in a chunk of its own, fetched
 when it is first drawn. Load it with `portal.ui.lazy`, not React's `lazy`: a
@@ -2275,6 +2278,69 @@ from the portal, and what gives the same to an extension:
 | Letting go of what it kept for a chat when a routine's run is over | `chats.on("finished")` |
 | A slash command | `pi.registerCommand` in the pi extension, and the channel for what it does in the page |
 | The colours of everything | [A theme](#themes) |
+
+## Extensions in their own repository
+
+An extension is a package of its own, and it can have a repository of its own
+too. `@pithagoras/extension-api` is published on npm: the types,
+`buildExtension` and the portal's Tailwind preset that the extensions in this
+repository are built with.
+
+```sh
+npm install --save-dev @pithagoras/extension-api esbuild typescript @types/react@18
+```
+
+A server half written in TypeScript needs `@types/node` and `@types/express@5`
+as well, code that imports `react-dom` needs `@types/react-dom@18`, and
+`tailwind: true` needs `tailwindcss@3` and `postcss`. They are peers of the
+package: it builds with the versions the extension installs. TypeScript 6 and
+later want types for a stylesheet the code imports; with
+`"noUncheckedSideEffectImports": false` in `tsconfig.json` it is left to the
+build. The package's
+[README](https://github.com/thecodacus/pithagoras/tree/main/packages/extension-api)
+is a whole extension: its `package.json`, `tsconfig.json` and `build.mjs`, a
+browser half and a server half.
+
+It is installed by name in Settings → Extensions → Discover:
+
+| From | Spec | It has to be |
+| --- | --- | --- |
+| npm | `npm:<name>` | Published built: `"files": ["web", "server.js"]` and `"prepack": "npm run build"` in its `package.json` |
+| git | `git:github.com/<owner>/<repo>@<tag>`, or its `https://` URL | Committed built: pi clones it and installs its `dependencies`, not its `devDependencies`, and does not build it |
+| A folder on the server | Its path | Built there |
+
+`version` on the `portal` an extension is given is the version of the
+interface, `1`, and the package's major version is the same number: it is
+raised when something an extension relies on changes.
+
+### Releasing @pithagoras/extension-api
+
+For the maintainers of this repository.
+`.github/workflows/publish-extension-api.yml` publishes
+`packages/extension-api` with npm's trusted publishing: no token, and with
+provenance.
+
+1. Raise `version` in `packages/extension-api/package.json` in a pull
+   request, and merge it.
+2. Tag the merged commit `extension-api-v<version>` and push the tag:
+
+   ```sh
+   git fetch origin
+   git tag extension-api-v1.0.1 origin/main
+   git push origin extension-api-v1.0.1
+   ```
+
+The workflow stops when the tag is not the version in that `package.json`.
+Run by hand, it is run on the tag.
+
+npm links a trusted publisher only to a package that exists, so the first
+version is published by hand, from a clean checkout of main:
+`npm publish --provenance=false -w packages/extension-api`. Provenance is made
+only in CI, and the package's `publishConfig` asks for it. Then, on
+npmjs.com, the package's **Settings → Trusted Publisher** takes GitHub
+Actions, with the organization or user `thecodacus`, the repository
+`pithagoras`, the workflow filename `publish-extension-api.yml`, and no
+environment name.
 
 ## Troubleshooting
 
