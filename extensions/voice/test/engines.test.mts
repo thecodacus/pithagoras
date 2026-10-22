@@ -151,7 +151,7 @@ test('the original combination makes the server config the setup script has alwa
   const script = readFileSync(new URL('../setup.sh', import.meta.url), 'utf8');
   const legacy = /<<'JSON'\n(.*)\nJSON\n/.exec(script)![1];
   assert.equal(JSON.stringify(serverConfig(DEFAULT_CHOICE)), legacy);
-  assert.deepEqual(endpoints(DEFAULT_CHOICE), { listen: { url: 'http://127.0.0.1:8188/inference' }, speak: { url: 'http://127.0.0.1:7862/v1/audio/speech', runtime: 'audio-cpp' } });
+  assert.deepEqual(endpoints(DEFAULT_CHOICE), { listen: { url: 'http://127.0.0.1:8188/inference' }, speak: { url: 'http://127.0.0.1:7862/v1/audio/speech', engine: 'breeze' } });
   assert.deepEqual(healthUrls(DEFAULT_CHOICE), ['http://127.0.0.1:8188/health', 'http://127.0.0.1:7862/health']);
 });
 
@@ -165,7 +165,7 @@ test('Chatterbox and Qwen3-ASR run in the one audio.cpp process, loaded together
   assert.equal(serverConfig({ tts: 'breeze', asr: 'qwen3-asr', asrModel: '1.7b' })!.models[1].path, '/voice/models/qwen3-asr-1.7b-q8_0.gguf');
   // A choice with Whisper has one audio.cpp model, so one is loaded at a time, as before.
   assert.equal(serverConfig({ tts: 'chatterbox', asr: 'whisper', asrModel: 'small' })!.max_loaded_models, 1);
-  assert.deepEqual(endpoints({ tts: 'chatterbox', asr: 'qwen3-asr', asrModel: '1.7b' }), { listen: { url: 'http://127.0.0.1:7862/v1/audio/transcriptions', model: 'qwen3-asr' }, speak: { url: 'http://127.0.0.1:7862/v1/audio/speech', runtime: 'chatterbox' } });
+  assert.deepEqual(endpoints({ tts: 'chatterbox', asr: 'qwen3-asr', asrModel: '1.7b' }), { listen: { url: 'http://127.0.0.1:7862/v1/audio/transcriptions', model: 'qwen3-asr' }, speak: { url: 'http://127.0.0.1:7862/v1/audio/speech', engine: 'chatterbox' } });
   assert.deepEqual(healthUrls({ tts: 'breeze', asr: 'qwen3-asr', asrModel: '0.6b' }), ['http://127.0.0.1:7862/health']);
   // The load request and the server config describe a model the same way.
   assert.deepEqual(ttsModel('chatterbox'), config.models[0]);
@@ -175,7 +175,7 @@ test('Kokoro is a speech model of its own, spoken to at its own runtime, and the
   const config = serverConfig({ tts: 'kokoro', asr: 'qwen3-asr', asrModel: '0.6b' })!;
   assert.deepEqual(config.models[0], { id: 'kokoro', family: 'kokoro_tts', path: '/voice/models/kokoro-82m-q8_0.gguf', task: 'tts', mode: 'offline' });
   assert.deepEqual(ttsModel('kokoro'), config.models[0]);
-  assert.deepEqual(endpoints({ tts: 'kokoro', asr: 'whisper', asrModel: 'base' }), { listen: { url: 'http://127.0.0.1:8188/inference' }, speak: { url: 'http://127.0.0.1:7862/v1/audio/speech', runtime: 'kokoro' } });
+  assert.deepEqual(endpoints({ tts: 'kokoro', asr: 'whisper', asrModel: 'base' }), { listen: { url: 'http://127.0.0.1:8188/inference' }, speak: { url: 'http://127.0.0.1:7862/v1/audio/speech', engine: 'kokoro' } });
   assert.equal(choiceKey({ tts: 'kokoro', asr: 'whisper', asrModel: 'base' }), 'kokoro+whisper:base');
   assert.deepEqual(LEAN_CHOICE, { tts: 'kokoro', asr: 'whisper', asrModel: 'base' });
 });
@@ -199,7 +199,7 @@ test('Kokoro can be put on the CPU: it then shares the CPU process with recognit
   assert.equal('ui_management' in cpuServerConfig({ tts: 'none', asr: 'qwen3-asr', asrModel: '0.6b' })!, false, 'recognition alone is never loaded by the portal');
   assert.deepEqual(config.models.map(m => m.id), ['kokoro', 'qwen3-asr']);
   assert.deepEqual(cpuServerConfig({ tts: 'kokoro', ttsDevice: 'cpu', asr: 'whisper', asrModel: 'base' })!.models.map(m => m.id), ['kokoro']);
-  assert.deepEqual(endpoints(cpu), { listen: { url: 'http://127.0.0.1:7863/v1/audio/transcriptions', model: 'qwen3-asr' }, speak: { url: 'http://127.0.0.1:7863/v1/audio/speech', runtime: 'kokoro' } });
+  assert.deepEqual(endpoints(cpu), { listen: { url: 'http://127.0.0.1:7863/v1/audio/transcriptions', model: 'qwen3-asr' }, speak: { url: 'http://127.0.0.1:7863/v1/audio/speech', engine: 'kokoro' } });
   assert.deepEqual(healthUrls({ tts: 'kokoro', ttsDevice: 'cpu', asr: 'whisper', asrModel: 'base' }), ['http://127.0.0.1:8188/health', 'http://127.0.0.1:7863/health']);
   // Its memory is the host's, not the card's.
   assert.deepEqual([vramNeeded(cpu), ramNeeded(cpu)], [0, TTS_ENGINES.kokoro.ramMiB! + 1600]);
@@ -344,7 +344,7 @@ test('the processes of a choice: a GPU server for the speech engine, a CPU one f
   assert.equal(cpuServerConfig({ tts: 'breeze', asr: 'qwen3-asr', asrModel: '0.6b' }), undefined);
   assert.equal(cpuServerConfig(DEFAULT_CHOICE), undefined);
   // Where the portal looks.
-  assert.deepEqual(endpoints(onCpu), { listen: { url: 'http://127.0.0.1:7863/v1/audio/transcriptions', model: 'qwen3-asr' }, speak: { url: 'http://127.0.0.1:7862/v1/audio/speech', runtime: 'audio-cpp' } });
+  assert.deepEqual(endpoints(onCpu), { listen: { url: 'http://127.0.0.1:7863/v1/audio/transcriptions', model: 'qwen3-asr' }, speak: { url: 'http://127.0.0.1:7862/v1/audio/speech', engine: 'breeze' } });
   assert.deepEqual(endpoints(NONE('whisper', 'small')), { listen: { url: 'http://127.0.0.1:8188/inference' } });
   assert.deepEqual(endpoints(NONE('qwen3-asr', '0.6b')), { listen: { url: 'http://127.0.0.1:7863/v1/audio/transcriptions', model: 'qwen3-asr' } });
   // What has to answer: only what the choice runs.

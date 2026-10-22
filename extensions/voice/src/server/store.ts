@@ -16,7 +16,24 @@ export interface Settings {
   setupPending?: boolean;
   /** Whether the speech model is let go of once voice mode no longer uses it: on unless set false. */
   lazyLoad?: boolean;
+  /** Its own choice of voice for Breeze and Chatterbox: "design", or a voice of the library; "design" unless set. */
+  voice?: string;
+  /** How the designed voice sounds, 1–1000 characters; DEFAULT_INSTRUCTION unless set. */
+  instruction?: string;
+  /** Breeze's voice guidance: 1, fast, or 4, expressive; 4 unless set. */
+  cfgScale?: number;
+  /** Chatterbox's expressiveness, 0–2; 0.5 unless set. */
+  exaggeration?: number;
+  /** Its own choice of voice for Kokoro, one of KOKORO_VOICES; DEFAULT_KOKORO_VOICE unless set. */
+  kokoroVoice?: string;
+  /** Kokoro's speed, one of KOKORO_SPEEDS; 1 unless set. */
+  speed?: number;
+  /** The language spoken to it, a code of INPUT_LANGUAGES; "auto", which detects it, unless set. */
+  language?: string;
 }
+
+/** How the designed voice sounds where nothing else is said. */
+export const DEFAULT_INSTRUCTION = "A warm, clear English voice with a calm, conversational delivery.";
 
 let file: string | undefined;
 let kept: Settings = {};

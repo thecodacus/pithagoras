@@ -212,13 +212,12 @@ test("each agent has an avatar of its own, and voice mode shows its chat's agent
   assert.equal((await call("PUT", "/api/agents/ops/orb", [])).status, 400);
 });
 
-test("an agent speaks with a voice of its own, or the one in the voice settings", async () => {
+test("an agent speaks with a voice its voice mode's source offers, or the source's own choice", async () => {
   await call("POST", "/api/agents", { name: "Herald" });
   assert.equal((await call("GET", "/api/agents")).body.agents.find((a) => a.id === "herald").voice, "");
-  const designed = await call("PUT", "/api/agents/herald/voice", { voice: "design" });
-  assert.equal(designed.status, 200);
-  assert.equal(designed.body.voice, "design");
-  assert.equal((await call("PUT", "/api/agents/herald/voice", { voice: "voice-missing" })).status, 400);
+  // With no source, no voice is offered (voice-providers.test.mjs has one that offers some).
+  const refused = await call("PUT", "/api/agents/herald/voice", { voice: "design" });
+  assert.deepEqual([refused.status, refused.body.error], [400, "Choose one of the voices voice mode's source offers now, or none"]);
   assert.equal((await call("PUT", "/api/agents/herald/voice", { voice: "" })).body.voice, "");
   assert.equal((await call("PUT", "/api/agents/nobody/voice", { voice: "" })).status, 404);
 });

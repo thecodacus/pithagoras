@@ -65,8 +65,8 @@ export class AudioRule {
     /** Asked with the instructions, each time the rule is turned on. */
     private readonly extra: () => string = () => '',
     /**
-     * Whether the rule is in every conversation, spoken in or not: while the
-     * voice add-on can speak. The first spoken message then leaves the prompt as
+     * Whether the rule is in every conversation, spoken in or not: while
+     * voice mode can speak. The first spoken message then leaves the prompt as
      * it was, and a local model does not read the whole conversation again for it.
      */
     private readonly always: () => boolean = () => false,

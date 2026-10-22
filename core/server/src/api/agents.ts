@@ -13,6 +13,7 @@ import { FileError } from "../workspace-files.js";
 import { CONTEXT_FILES } from "../pi/context-files.js";
 import { fail } from "./files.js";
 import { userFor } from "../sandbox/identity.js";
+import { sourceVoices } from "./voice.js";
 
 /**
  * The agents: listing them, making one, naming it, and its own files and setup.
@@ -124,10 +125,10 @@ export function agentsRouter(): Router {
     }
   });
 
-  /** `{ voice }`: "design", a voice library id, one of Kokoro's voices, or "" for the one in the voice settings. */
+  /** `{ voice }`: an id from the voices voice mode's source offers, or "" for its own choice. */
   router.put("/agents/:id/voice", (req, res) => {
     try {
-      res.json(agentToApi(setVoice(req.params.id, req.body?.voice)));
+      res.json(agentToApi(setVoice(req.params.id, req.body?.voice, sourceVoices()?.map((v) => v.id))));
     } catch (e) {
       failed(res, e);
     }

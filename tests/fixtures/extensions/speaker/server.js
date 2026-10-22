@@ -1,84 +1,117 @@
 /**
- * The Speaker extension's server half: a voice provider for the portal's tests. It runs a speech recognition and a
- * speech synthesis service of its own on a loopback port it opens as it starts, and offers them to voice mode with
- * `portal.voice.provide`. Its routes say what it was asked and told, and change what it answers, as a real one's
- * services coming and going would:
+ * The Speaker extension's server half: a voice provider for the portal's tests. It recognises and speaks in its own
+ * process, with no service behind it, and offers that to voice mode with `portal.voice.provide`. Its routes say what it
+ * was asked and told, and change what it answers, as a real one's engines coming and going would:
  *
- *   GET  /api/x/test-speaker/state      { uses, heard, spoken, voices }: each `use` it was told, the model each
- *                                       recognition named (null for none), and the model and the voice (null for
- *                                       none) each phrase was asked with
- *   PUT  /api/x/test-speaker/settings   { ready?, speaks?, model?, fails?, hangs?, throws?, answers? }: whether
- *                                       `where` answers, how it speaks ("kokoro", "chatterbox", or "none" for
- *                                       recognition alone), the recognition model it names (empty for none), whether
- *                                       `use(true)` fails or never settles, whether `where` throws, and what it answers
- *                                       in place of its own addresses (null for its own)
+ *   GET  /api/x/test-speaker/state      { uses, heard, spoken, aborted, cancelled }: each `use` it was told, each
+ *                                       recording heard ({ purpose, bytes }), each phrase asked for ({ text, voice },
+ *                                       voice null for none), the signals it was given that ended, and the answers
+ *                                       whose body was cancelled
+ *   PUT  /api/x/test-speaker/settings   { ready?, speaks?, voices?, answer?, stateThrows?, stateAnswers?, fails?, hangs? }:
+ *                                       whether `state` answers, whether it speaks, the voices it offers, what `speak`
+ *                                       answers ("pcm", "pcm48k", "wav", "wav22k", "text", "notOk", "notResponse",
+ *                                       "throws", or "hangs", which `transcribe` does too), whether `state` throws, what
+ *                                       it answers in place of its own (null for its own), and whether `use(true)` fails
+ *                                       or never settles
  *   POST /api/x/test-speaker/choose     { chosen }: `portal.voice.choose`
+ *   GET  /api/x/test-speaker/chosen     { chosen }: `portal.voice.chosen`
  *
  * Each `use` it was told is also kept in `globalThis.speakerTold`, as "<package>#<instance> <inUse>", where the
  * instance counts the server halves started in the process: so that what a half that has stopped since was told can
  * still be read.
  */
-import { createServer } from "node:http";
 
-/** A phrase as a speech engine that answers with a WAV gives it: mono, 24 kHz, 16-bit, two samples. */
-function wav() {
-  const pcm = Buffer.from([0, 0, 255, 127]);
+/** Two samples of mono 16-bit PCM. */
+const PCM = Buffer.from([0, 0, 255, 127]);
+
+/** A phrase as a speech engine that answers with a WAV gives it: mono, 16-bit, two samples, at `rate`. */
+function wav(rate) {
   const header = Buffer.alloc(44);
   header.write("RIFF");
-  header.writeUInt32LE(36 + pcm.length, 4);
+  header.writeUInt32LE(36 + PCM.length, 4);
   header.write("WAVEfmt ", 8);
   header.writeUInt32LE(16, 16);
   header.writeUInt16LE(1, 20);
   header.writeUInt16LE(1, 22);
-  header.writeUInt32LE(24000, 24);
-  header.writeUInt32LE(48000, 28);
+  header.writeUInt32LE(rate, 24);
+  header.writeUInt32LE(rate * 2, 28);
   header.writeUInt16LE(2, 32);
   header.writeUInt16LE(16, 34);
   header.write("data", 36);
-  header.writeUInt32LE(pcm.length, 40);
-  return Buffer.concat([header, pcm]);
+  header.writeUInt32LE(PCM.length, 40);
+  return Buffer.concat([header, PCM]);
 }
 
-export default async function (portal) {
+export default function (portal) {
   const instance = (globalThis.speakerInstances = (globalThis.speakerInstances ?? 0) + 1);
   const told = (globalThis.speakerTold ??= []);
-  const asked = { uses: [], heard: [], spoken: [], voices: [] };
-  const settings = { ready: true, speaks: "kokoro", model: "speaker-asr", fails: false, hangs: false, throws: false, answers: null };
-  const service = createServer((req, res) => {
-    const chunks = [];
-    req.on("data", (chunk) => chunks.push(chunk));
-    req.on("end", () => {
-      const body = Buffer.concat(chunks).toString("latin1");
-      if (req.method === "POST" && req.url === "/v1/audio/transcriptions") {
-        asked.heard.push(body.match(/name="model"\r\n\r\n(.*)\r\n/)?.[1] ?? null);
-        res.setHeader("content-type", "application/json");
-        return res.end(JSON.stringify({ text: " Heard by the speaker. " }));
-      }
-      if (req.method === "POST" && req.url === "/v1/audio/speech") {
-        const { model, voice } = JSON.parse(body);
-        asked.spoken.push(model);
-        asked.voices.push(voice ?? null);
-        res.setHeader("content-type", "audio/wav");
-        return res.end(wav());
-      }
-      res.statusCode = 404;
-      res.end();
+  const asked = { uses: [], heard: [], spoken: [], aborted: 0, cancelled: 0 };
+  const settings = {
+    ready: true,
+    speaks: true,
+    voices: [{ id: "speaker-warm", name: "Warm" }],
+    answer: "pcm",
+    stateThrows: false,
+    stateAnswers: null,
+    fails: false,
+    hangs: false,
+  };
+  /** A body whose cancelling is counted. */
+  const body = (bytes) => {
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(new Uint8Array(bytes));
+        controller.close();
+      },
     });
-  });
-  await new Promise((resolve) => service.listen(0, "127.0.0.1", resolve));
-  const at = `http://127.0.0.1:${service.address().port}`;
+    const cancel = stream.cancel.bind(stream);
+    stream.cancel = (reason) => {
+      asked.cancelled++;
+      return cancel(reason);
+    };
+    return stream;
+  };
+  /** The signal of a call, counted when it ends. */
+  const watch = (signal) => signal.addEventListener("abort", () => asked.aborted++, { once: true });
 
   portal.voice.provide({
     label: "Speaker",
-    where() {
-      if (settings.throws) throw new Error("The speaker lost track of its services");
-      if (settings.answers) return settings.answers;
-      return settings.ready
-        ? {
-            listen: { url: `${at}/v1/audio/transcriptions`, ...(settings.model ? { model: settings.model } : {}) },
-            ...(settings.speaks === "none" ? {} : { speak: { url: `${at}/v1/audio/speech`, runtime: settings.speaks } }),
-          }
-        : undefined;
+    state() {
+      if (settings.stateThrows) throw new Error("The speaker lost track of its engines");
+      if (settings.stateAnswers !== null) return settings.stateAnswers;
+      return settings.ready ? { speaks: settings.speaks, voices: settings.voices } : undefined;
+    },
+    async transcribe(recording, { purpose, signal }) {
+      watch(signal);
+      asked.heard.push({ purpose, bytes: recording.length });
+      if (settings.answer === "throws") throw new Error("The speaker could not hear");
+      if (settings.answer === "hangs") return new Promise(() => {});
+      return " Heard by the speaker. ";
+    },
+    async speak(text, { voice, signal }) {
+      watch(signal);
+      asked.spoken.push({ text, voice: voice ?? null });
+      const audio = (type, bytes, more = {}) => new Response(body(bytes), { headers: { "content-type": type, ...more } });
+      switch (settings.answer) {
+        case "pcm":
+          return audio("audio/pcm", PCM, { "x-sample-rate": "24000" });
+        case "pcm48k":
+          return audio("audio/pcm", PCM, { "x-sample-rate": "48000" });
+        case "wav":
+          return audio("audio/wav", wav(24000));
+        case "wav22k":
+          return audio("audio/wav", wav(22050));
+        case "text":
+          return audio("text/plain", Buffer.from("not audio"));
+        case "notOk":
+          return new Response(body(Buffer.from("busy")), { status: 500 });
+        case "notResponse":
+          return { ok: true, body: PCM };
+        case "throws":
+          throw new Error("The speaker lost its voice");
+        case "hangs":
+          return new Promise(() => {});
+      }
     },
     async use(inUse) {
       if (inUse && settings.fails) throw new Error("The speaker could not load its model");
@@ -94,9 +127,5 @@ export default async function (portal) {
     portal.voice.choose(req.body.chosen);
     res.json({ ok: true });
   });
-  return () =>
-    new Promise((resolve) => {
-      service.closeAllConnections();
-      service.close(resolve);
-    });
+  portal.router.get("/chosen", (_req, res) => res.json({ chosen: portal.voice.chosen() }));
 }

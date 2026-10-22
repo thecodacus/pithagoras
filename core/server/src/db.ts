@@ -414,8 +414,8 @@ function schema(db: Database.Database): void {
       home TEXT NOT NULL UNIQUE,
       -- Its avatar, as JSON: NULL is the default orb.
       orb TEXT,
-      -- The voice it speaks with in voice mode: a voice library id or 'design';
-      -- NULL is the one chosen in the voice settings.
+      -- The voice it speaks with in voice mode: an id from the voices voice
+      -- mode's source offers; NULL is the source's own choice.
       voice TEXT,
       -- Its heartbeat: how often it looks around on its own, in minutes (NULL
       -- is never), the hours it keeps quiet ('HH:MM', both or neither), and how
@@ -1789,8 +1789,8 @@ export function getVoiceModel(): { provider: string; modelId: string } | undefin
 }
 
 /**
- * Whether voice mode can speak: the add-on is on, with a speech engine where it listens and speaks now (not recognition
- * alone). Set by the voice routes, which know where that is, an extension's among it, and which this module cannot import.
+ * Whether voice mode can speak: voice mode has a source, and it can speak now (not recognition alone). Set by the voice
+ * routes, which know the source, and which this module cannot import.
  */
 let speaks: () => boolean = () => false;
 export function setVoiceSpeaks(read: typeof speaks): void {
