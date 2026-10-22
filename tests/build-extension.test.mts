@@ -51,3 +51,17 @@ export default function (portal: { log(text: string): void }) {
   assert.deepEqual(said, ['42function']);
   assert.match(readFileSync(path.join(dir, 'server.js'), 'utf8'), /from "node:fs"/);
 });
+
+test('an extension whose code imports no stylesheet is built again with the same utilities, not with them twice', async () => {
+  const dir = scratch('build-extension-');
+  mkdirSync(path.join(dir, 'src'));
+  writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'panel', type: 'module' }));
+  writeFileSync(path.join(dir, 'src', 'client.tsx'), `export default function (portal: any) {
+  portal.slots.register("chat.panel", { id: "p", title: "P", component: () => <div className="bg-surface">hello</div> });
+}
+`);
+  await buildExtension({ dir, tailwind: true });
+  const first = readFileSync(path.join(dir, 'web', 'client.css'), 'utf8');
+  await buildExtension({ dir, tailwind: true });
+  assert.equal(readFileSync(path.join(dir, 'web', 'client.css'), 'utf8'), first);
+});
