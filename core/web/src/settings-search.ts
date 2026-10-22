@@ -31,6 +31,7 @@ export const SETTINGS_INDEX: SettingEntry[] = [
   { tab: "general", section: msg("Context"), title: msg("Context window"), words: "tokens ctx context window size length kontext fenster" },
   { tab: "general", section: msg("Context"), title: msg("Kept when compacting"), words: "compaction compact keep recent summary kompaktieren zusammenfassung" },
   { tab: "general", section: msg("Routine reports"), title: msg("Routine reports"), words: "routine schedule cron report destination channel bericht" },
+  { tab: "general", section: msg("Voice mode"), title: msg("Voice mode"), words: "voice speech speak source vad detection silence threshold speaking instructions model thinking stimme sprache sprachmodus quelle" },
   { tab: "tools", title: msg("Default tools"), words: "tools enable disable default on off werkzeuge" },
   { tab: "tools", title: msg("Questions from the agent"), words: "ask_question question questions wait timeout answer fragen frage warten antwort" },
   { tab: "skills", title: msg("Skills"), words: "skill procedure import repository fähigkeiten" },
@@ -59,7 +60,7 @@ export const SETTINGS_INDEX: SettingEntry[] = [
   { tab: "authentication", section: msg("Single sign-on"), title: msg("Single sign-on"), words: "sso oidc openid connect provider authentik keycloak entra google login sign in anmeldung einmalanmeldung authentication authentifizierung" },
   // The section that opens and closes, which is in view whether it is open or not: the search opens it.
   { tab: "authentication", section: msg("Single sign-on"), title: msg("OIDC only"), words: "sso oidc only password off passwort aus nur" },
-  { tab: "add-ons", title: msg("Add-ons"), words: "portal addon optional voice terminal" },
+  { tab: "add-ons", title: msg("Add-ons"), words: "portal addon optional terminal" },
   { tab: "shortcuts", section: msg("Chat"), title: msg("Keyboard shortcuts"), words: "keys hotkey keybinding shortcut tastenkürzel tastatur" },
   { tab: "shortcuts", section: msg("Voice mode"), title: msg("Voice mode shortcuts"), words: "voice speak microphone push to talk sprache" },
   { tab: "logs", title: msg("Logs"), words: "log logs error errors warning console output stream download audit debug level verbose server protokoll fehler" },

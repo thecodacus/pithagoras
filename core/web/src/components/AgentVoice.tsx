@@ -1,52 +1,31 @@
 import { useEffect, useState } from "react";
-import { LuPlus } from "react-icons/lu";
-import { api, speakingRuntime, type VoiceConfig } from "../api";
+import { Link } from "react-router-dom";
+import { api, type VoiceConfig } from "../api";
 import { Select } from "./Select";
-import { AddVoiceForm, kokoroVoiceOptions, voicePresets, type Preset } from "./VoiceLibrary";
-import { DEFAULT_KOKORO_VOICE, KOKORO_VOICES } from "../../../server/src/kokoro-voices";
+import { translate } from "../extensions/strings";
 import { t } from "../i18n";
 
-/** Picked in the voice menu to add a voice rather than choose one. */
-const ADD_VOICE = "\u0000add";
-
 /**
- * The voice an agent speaks with in voice mode: the one in the voice settings
- * (""), the designed voice, or one from the library. The last entry adds a
- * voice to the library, in place, and picks it. With Kokoro speaking, its own
- * voices instead, which is all it can speak with. Nothing at all without the
- * voice add-on installed and speaking.
+ * The voice an agent speaks with in voice mode: one of the voices voice mode's
+ * source offers, or "" for the source's own choice. A voice it no longer offers
+ * is shown as it is, not changed. Voices are added on the source's own page,
+ * which the link under the menu opens. Nothing at all while voice mode has no
+ * source, or one that only listens.
  */
 export function VoicePicker({ value, onChange }: { value: string; onChange: (voice: string) => void }) {
   const [config, setConfig] = useState<VoiceConfig | null>(null);
-  const [voices, setVoices] = useState<Preset[]>([]);
-  const [adding, setAdding] = useState(false);
-  const [error, setError] = useState("");
 
+  // Read again as Settings closes, so that a voice added there is listed.
   useEffect(() => {
-    api.voice().then(setConfig, () => {});
-    voicePresets().then(setVoices, () => {});
+    const read = () => void api.voice().then(setConfig, () => {});
+    read();
+    window.addEventListener("voice-config-changed", read);
+    return () => window.removeEventListener("voice-config-changed", read);
   }, []);
 
   if (!config?.enabled || config.speech === false) return null;
 
-  const named = (id: string | undefined) => (!id || id === "design" ? t("Designed voice") : (voices.find((v) => v.id === id)?.name ?? id));
-
-  if (speakingRuntime(config) === "kokoro") {
-    const own = config.kokoroVoice ?? DEFAULT_KOKORO_VOICE;
-    return (
-      <div className="mt-4 text-xs text-fg-muted">
-        {t("Voice")}
-        <Select
-          className="mt-1 w-full"
-          aria-label={t("Voice")}
-          // A library voice the agent was given before Kokoro is not one Kokoro has: it speaks as in the settings.
-          value={KOKORO_VOICES.some((v) => v.id === value) ? value : ""}
-          onChange={onChange}
-          options={[{ value: "", label: t("As in the voice settings"), hint: KOKORO_VOICES.find((v) => v.id === own)?.name ?? own }, ...kokoroVoiceOptions()]}
-        />
-      </div>
-    );
-  }
+  const source = config.label ? translate(config.provider, config.label) : config.provider;
 
   return (
     <div className="mt-4">
@@ -55,37 +34,21 @@ export function VoicePicker({ value, onChange }: { value: string; onChange: (voi
         <Select
           className="mt-1 w-full"
           aria-label={t("Voice")}
-          // A Kokoro voice the agent was given is not one the other engines have: it speaks as in the settings.
-          value={KOKORO_VOICES.some((v) => v.id === value) ? "" : value}
-          onChange={(v) => (v === ADD_VOICE ? setAdding(true) : onChange(v))}
+          value={value}
+          onChange={onChange}
           options={[
-            { value: "", label: t("As in the voice settings"), hint: named(config.voice) },
-            { value: "design", label: t("Designed voice") },
-            ...voices.map((v) => ({ value: v.id, label: v.name, text: v.name, hint: v.kind === "clone" ? t("Reference clone") : t("Designed") })),
-            {
-              value: ADD_VOICE,
-              label: <span className="inline-flex items-center gap-1.5 text-accent"><LuPlus className="h-3.5 w-3.5" />{t("Add voice")}</span>,
-              text: t("Add voice"),
-            },
+            { value: "", label: t("As {source} chooses", { source }) },
+            // Only the source's own voices are named in its translations: one the person named is shown as they named it.
+            ...config.voices.map((v) => ({ value: v.id, label: v.builtIn ? translate(config.provider, v.name) : v.name, text: v.name })),
+            ...(value && !config.voices.some((v) => v.id === value) ? [{ value, label: value, hint: t("Not offered now") }] : []),
           ]}
         />
       </div>
-      {error && <p role="alert" className="mt-1 text-xs text-danger">{error}</p>}
-      {adding && (
-        <div className="mt-2 rounded-lg border border-line bg-surface p-3">
-          <AddVoiceForm
-            onError={setError}
-            onAdded={(voice) => {
-              setVoices((v) => [...v, voice]);
-              setAdding(false);
-              setError("");
-              onChange(voice.id);
-            }}
-          />
-          <button type="button" onClick={() => setAdding(false)} className="mt-2 text-xs text-fg-muted hover:text-fg">
-            {t("Cancel")}
-          </button>
-        </div>
+      {/* Its page is there while its server half runs. */}
+      {config.label && (
+        <Link to={`/settings/x/${encodeURIComponent(config.provider)}`} className="mt-1.5 inline-block text-xs text-accent hover:underline">
+          {t("Add a voice in {source}", { source })}
+        </Link>
       )}
     </div>
   );
