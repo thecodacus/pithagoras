@@ -12,7 +12,14 @@ on:
   workflow_dispatch:
 
 jobs:
+  # Nothing is published that the tests have not passed, as for the image in docker.yml.
+  test:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/test.yml
+
   publish:
+    needs: test
     runs-on: ubuntu-latest
     permissions:
       contents: read
