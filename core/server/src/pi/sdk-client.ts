@@ -19,7 +19,7 @@ import type { ImageContent } from "../prompt-images.js";
 import { routineTools } from "./routine-tools.js";
 import { reportTool, reportToFor } from "./report-tool.js";
 import { OUTSIDE_CONTENT_GUIDELINE, declaredFiles, declaredGuard, guardExtension, type DeclaredGuard } from "./guard.js";
-import { CODEMODE_TOOLS, codemodeExtension } from "./codemode.js";
+import { CODEMODE_TOOL, CODEMODE_TOOLS, codemodeExtension } from "./codemode.js";
 import { findSessionFile } from "./session-file.js";
 import { CONTEXT_FILES, SHARED_FILES } from "./context-files.js";
 import { heartbeatTool } from "./heartbeat-tool.js";
@@ -495,6 +495,8 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     toolsLazy?: string[];
     /** What the lazy tools are called as sets, for the one line that tells the model they exist. */
     lazySets?: string[];
+    /** The code tool's presentation in a chat whose mode works through it: see codemode.ts. */
+    codemode?: "only";
     /** The portal's session id, for tools that record against it. */
     sessionId?: string;
     /** The taint rules a run may act against after it read something untrusted, read at each call — see guardExtension. */
@@ -542,7 +544,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     let toolVoiceLines: () => string[] = () => [];
     const audioRule = new AudioRule(getVoiceInstructions, () => toolVoiceLines().filter(Boolean).join(" "), voiceSpeaks);
     // Code mode, active from the start and switched like any other tool: off by default (see codemode.ts).
-    const codemode = codemodeExtension(pi);
+    const codemode = codemodeExtension(pi, opts.codemode);
     try {
       // Both are required: the constructor resolves each and throws on
       // undefined, which previously left every session with no extensions.
@@ -763,8 +765,9 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     // command that asks the user something silently does nothing.
 
     client.toolsSeen = opts.toolsSeen;
+    client.codemodeOnly = opts.codemode === "only";
     client.switchedOff = new Set([...(opts.toolsOff ?? []), ...client.unseenOff()]);
-    client.lazy = new Set((opts.toolsLazy ?? []).filter((name) => !client.switchedOff.has(name)));
+    client.lazy = client.lazyOf(opts.toolsLazy ?? []);
     client.gateway = gateway;
     try {
       await session.bindExtensions({
@@ -1461,6 +1464,21 @@ export class SdkPiClient extends EventEmitter implements PiClient {
    */
   lazy = new Set<string>();
 
+  /** Its chat works through the code tool alone, in pi's `only` presentation: set as it is created, as pi fixes that then. */
+  codemodeOnly = false;
+
+  /**
+   * Of the tools marked lazy, the ones this chat keeps lazy. None where it works through the code tool and has it on:
+   * every tool that is on is active there, hidden from the model by pi's `only` presentation, and a script finds it
+   * with searchTools. pi lets a script call only an active tool, so one kept lazy would be out of a script's reach;
+   * and with no lazy tool the `tools` tool is not offered (keptOut). Switched off in the chat, the code tool hides
+   * nothing, and the marks hold.
+   */
+  private lazyOf(tools: readonly string[]): Set<string> {
+    if (this.codemodeOnly && !this.switchedOff.has(CODEMODE_TOOL)) return new Set();
+    return new Set(tools.filter((name) => !this.switchedOff.has(name)));
+  }
+
   /** The `tools` tool of this session, which is told what the lazy tools are called. */
   gateway?: ToolsGateway;
 
@@ -1736,7 +1754,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
   async setToolsOff(names: string[], lazy: { tools: string[]; sets: string[] } = { tools: [], sets: [] }): Promise<void> {
     // The portal's switches name a tool that is off until switched on only once it has seen it: until then it stays off.
     this.switchedOff = new Set([...names, ...this.unseenOff()]);
-    this.lazy = new Set(lazy.tools.filter((name) => !this.switchedOff.has(name)));
+    this.lazy = this.lazyOf(lazy.tools);
     this.applyToolsOff();
     // After the switches: registering the tool again has pi set its active tools, and by then the
     // tools that are wanted again must be active already, or they are dropped from what is wanted.

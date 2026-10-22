@@ -86,6 +86,8 @@ export interface PiCommand {
  */
 export interface PiClient extends EventEmitter {
   readonly running: boolean;
+  /** Its chat works through the code tool alone, in pi's "only" presentation, fixed as pi starts: see codemode.ts. */
+  readonly codemodeOnly?: boolean;
   /**
    * Set where the open chats were reloaded while this one was working (see
    * reloadIdle): it is loaded again at its next step, where the executor can

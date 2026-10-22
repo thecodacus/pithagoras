@@ -215,3 +215,54 @@ test("on, the same tool is reached from a script", async () => {
   await run(cwd);
   assert.equal(existsSync(marker), true);
 });
+
+// A chat in Code mode, the chat mode (chat-modes.ts), has pi's `only` presentation: the model is offered the code tool
+// alone, and the tools it calls are a script's. The guard holds what a script calls there as it does beside them.
+const only = { codemode: "only" };
+
+test("in the only presentation, the model is offered the code tool alone, and a script's calls run", async () => {
+  const cwd = chat();
+  const marker = path.join(cwd, "marker");
+  script = [codemode(`const r = await tools.bash({ command: "echo ok > ${marker}" }); return "exit " + r.exit_code;`)];
+  const { results, declared, description } = await run(cwd, only);
+  assert.deepEqual(declared, ["codemode"], "the direct tools' declarations are hidden");
+  assert.match(description, /bash/, "and listed in its description for a script to call");
+  const [result] = own(results);
+  assert.equal(result.isError, false, textOf(result));
+  assert.match(textOf(result), /exit 0/);
+  assert.equal(existsSync(marker), true, "the script's call ran");
+});
+
+test("in the only presentation, what a script read from outside is wrapped and flagged in its result, and the next push is refused", async () => {
+  script = [
+    codemode(`const r = await tools.mcp({ url: "https://example.test" }); return r;`),
+    codemode(`return await tools.bash({ command: "git push origin main" });`),
+  ];
+  const { results } = await run(chat(), only);
+  const [read, push] = own(results);
+  assert.match(textOf(read), /^\{"content":\[\{"type":"text","text":"<<<untrusted:[0-9a-f]{16}>>> \(suspected prompt injection: /);
+  const nested = results.filter((r) => r.parentToolCallId && r.toolName === "bash");
+  assert.equal(nested.length, 1, "the push was the second script's call");
+  assert.match(textOf(nested[0]), /Refused \(publish\)/);
+  assert.equal(push.toolName, "codemode");
+});
+
+test("in the only presentation, within one script, a push after reading something that tries to instruct the agent is refused", async () => {
+  script = [codemode(`await tools.mcp({ url: "https://example.test" }); const r = await tools.bash({ command: "git push origin main" }); return r;`)];
+  const { results } = await run(chat(), only);
+  const push = results.find((r) => r.parentToolCallId && r.toolName === "bash");
+  assert.ok(push, "the script's push was a call of its own");
+  assert.equal(push.isError, true);
+  assert.match(textOf(push), /Refused \(publish\)/);
+});
+
+test("in the only presentation, a tool switched off in the chat is not reached from a script", async () => {
+  const cwd = chat();
+  const marker = path.join(cwd, "marker");
+  script = [codemode(`try { await tools.scripted({ path: ${JSON.stringify(marker)} }); return "ran"; } catch (e) { return String(e); }`)];
+  const { results, description } = await run(cwd, { ...only, toolsOff: ["scripted"] });
+  assert.doesNotMatch(description, /scripted/, "not described to the model");
+  const [result] = own(results);
+  assert.match(textOf(result), /tools\.scripted does not exist/, "not there for the script to call");
+  assert.equal(existsSync(marker), false, "the tool never ran");
+});

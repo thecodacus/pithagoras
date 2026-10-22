@@ -44,6 +44,8 @@ export interface LaunchOptions {
   toolsLazy?: string[];
   /** What those tools are called as sets, for the hint to the model. */
   lazySets?: string[];
+  /** The code tool's presentation in a chat whose mode works through it: see codemode.ts. */
+  codemode?: "only";
   /** What its subagents run on, when it says: asked each time one starts. */
   subagentModel?: () => string | undefined;
   /** The agent whose heartbeat this session is, when it is one: gives it the note tool. */
@@ -111,6 +113,7 @@ export class HostExecutor implements Executor {
       toolsSeen: opts.toolsSeen,
       toolsLazy: opts.toolsLazy,
       lazySets: opts.lazySets,
+      codemode: opts.codemode,
       subagentModel: opts.subagentModel,
       heartbeatAgent: opts.heartbeatAgent,
       rememberChatModel: opts.rememberChatModel,

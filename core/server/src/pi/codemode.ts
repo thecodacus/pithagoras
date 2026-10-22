@@ -30,8 +30,12 @@ export const CODEMODE_TOOLS = [`+${CODEMODE_TOOL}`];
  * that hold those. A script reaches a model only through a tool. Replaceable,
  * as pi's own built-in one is: an installed extension with a `codemode` tool of
  * its own is loaded in its place rather than beside it with a conflict.
+ *
+ * `"only"` is for a chat whose mode works through the code tool (chat-modes.ts):
+ * the direct tools' declarations are hidden from the model, and a script calls
+ * them. Without it pi's setting decides, `on` by default, as for the switch.
  */
-export function codemodeExtension(pi: any): { name: string; factory: (pi: any) => void; replaceable: true } | undefined {
+export function codemodeExtension(pi: any, mode?: "only"): { name: string; factory: (pi: any) => void; replaceable: true } | undefined {
   if (typeof pi?.createCodemodeExtension !== "function") return undefined;
-  return { name: CODEMODE_SOURCE, factory: pi.createCodemodeExtension({ models: false }), replaceable: true };
+  return { name: CODEMODE_SOURCE, factory: pi.createCodemodeExtension({ models: false, ...(mode ? { mode } : {}) }), replaceable: true };
 }
