@@ -197,7 +197,7 @@ await buildExtension({ dir: import.meta.dirname });
   "pi": {},
   "pithagoras": { "client": "./web/client.js", "style": "./web/client.css" },
   "scripts": { "build": "node build.mjs" },
-  "devDependencies": { "@pithagoras/extension-api": "^1.0.0", "esbuild": "*" }
+  "devDependencies": { "@pithagoras/extension-api": "^0.2.0", "esbuild": "*" }
 }
 ```
 
@@ -2311,43 +2311,61 @@ It is installed by name in Settings → Extensions → Discover:
 | git | `git:github.com/<owner>/<repo>@<tag>`, or its `https://` URL | Committed built: pi clones it and installs its `dependencies`, not its `devDependencies`, and does not build it |
 | A folder on the server | Its path | Built there |
 
-`version` on the `portal` an extension is given is the version of the
-interface, `1`, and the package's major version is the same number: it is
-raised when something an extension relies on changes.
+The package is released with the portal and has its version: 0.2.0 is what
+Pithagoras 0.2.0 gives an extension. The portal stays on 0.x while this
+interface still changes, and a 0.x minor version may break an extension, so an
+extension depends on `"^0.2.0"`, which takes 0.2.1 and not 0.3.0. `version` on
+the `portal` an extension is given, `1`, is not the package's version: it is
+the version of the interface the portal loads an extension with, raised only
+when something an extension relies on changes.
 
 ### Releasing @pithagoras/extension-api
 
-For the maintainers of this repository.
-`.github/workflows/publish-extension-api.yml` publishes
-`packages/extension-api` with npm's trusted publishing: no token, and with
-provenance.
+For the maintainers of this repository. The package is released with the
+portal, from the portal's tag:
 
-1. Raise `version` in `packages/extension-api/package.json`, and in the
-   entry `packages/extension-api` of `package-lock.json`, in a pull request,
-   and merge it.
-2. Tag the merged commit `extension-api-v<version>` and push the tag:
+1. In a pull request, raise `version` to the release's in `package.json` and
+   `packages/extension-api/package.json`, and in `package-lock.json` its
+   `version` and the entries `""` and `packages/extension-api`, and merge it.
+2. Tag the merged commit `v<version>` and push the tag:
 
    ```sh
    git fetch origin
-   git tag extension-api-v1.0.1 origin/main
-   git push origin extension-api-v1.0.1
+   git tag v0.3.0 origin/main
+   git push origin v0.3.0
    ```
 
-The workflow stops when the tag is not the version in that `package.json`.
-Run by hand, it is run on the tag.
+The tag builds the image (`.github/workflows/docker.yml`) and publishes the
+package (`.github/workflows/publish-extension-api.yml`) with npm's trusted
+publishing: no token, and with provenance. The workflow stops before
+publishing when the tag is not the version in both `package.json` files, and
+`tests/extension-api-package.test.mts` fails while they, or the lock, differ.
+Run by hand, the workflow is run on the tag.
 
 npm links a trusted publisher only to a package that exists, so the first
-version is published by hand, from a clean checkout of main:
-`npm publish -w packages/extension-api`. The trusted publisher is added when
-the next version is released, between steps 1 and 2: on npmjs.com, the
-package's **Settings → Trusted Publisher** takes GitHub Actions, with the
-organization or user `thecodacus`, the repository `pithagoras`, the workflow
-filename `publish-extension-api.yml`, no environment name, and `npm publish`
-selected under **Allowed actions** (`npm dist-tag` stays off). Without it, a
-new trusted publisher allows only `npm stage publish`, and npm refuses the
-workflow's `npm publish`. A new trusted publisher expires when no publish goes
-through it within 2 days: push the tag within 2 days of adding it, and if it
-expires, delete it and add it again.
+version, 0.2.0, is published by hand, from a clean checkout of the tag `v0.2.0`
+once that release is cut:
+
+```sh
+git clone --branch v0.2.0 https://github.com/thecodacus/pithagoras.git
+cd pithagoras
+npm publish --provenance=false -w packages/extension-api
+```
+
+Provenance is made only in CI. The workflow's own run on `v0.2.0` fails at
+`npm publish`, as npm has no trusted publisher for the package yet; the image
+is built all the same.
+
+The trusted publisher is added when the next release after it is cut, between
+steps 1 and 2: on npmjs.com, the package's **Settings → Trusted Publisher**
+takes GitHub Actions, with the organization or user `thecodacus`, the
+repository `pithagoras`, the workflow filename `publish-extension-api.yml`, no
+environment name, and `npm publish` selected under **Allowed actions**
+(`npm dist-tag` stays off). Without it, a new trusted publisher allows only
+`npm stage publish`, and npm refuses the workflow's `npm publish`. A new
+trusted publisher expires when no publish goes through it within 2 days: push
+the tag within 2 days of adding it, and if it expires, delete it and add it
+again.
 
 ## Troubleshooting
 

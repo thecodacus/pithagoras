@@ -23,3 +23,18 @@ test('the published extension API has the files its exports name, its readme, it
   assert.equal(readFileSync(path.join(dir, 'LICENSE'), 'utf8'), readFileSync(path.join(root, 'LICENSE'), 'utf8'), "the package's licence is the repository's");
   assert.equal(readFileSync(path.join(dir, 'NOTICE'), 'utf8'), readFileSync(path.join(root, 'NOTICE'), 'utf8'), "the package's NOTICE is the repository's");
 });
+
+/**
+ * The package is released with the portal, from the portal's tag v<version>, and has the portal's version: a release
+ * raises both, and the lock's entries with them, or the workflow that publishes it stops at the tag.
+ */
+test("the extension API's version is the portal's, in package.json and in the lock", () => {
+  const version = (file: string) => JSON.parse(readFileSync(path.join(root, file), 'utf8')).version;
+  const portal = version('package.json');
+  assert.equal(version('packages/extension-api/package.json'), portal, "packages/extension-api/package.json has the root package.json's version");
+
+  const lock = JSON.parse(readFileSync(path.join(root, 'package-lock.json'), 'utf8'));
+  assert.equal(lock.version, portal, "the lock's version is the root package.json's");
+  assert.equal(lock.packages[''].version, portal, "the lock's root entry has the root package.json's version");
+  assert.equal(lock.packages['packages/extension-api'].version, portal, "the lock's packages/extension-api entry has the root package.json's version");
+});

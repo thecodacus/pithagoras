@@ -1,13 +1,14 @@
 name: Publish extension API
 
-# Publishes @pithagoras/extension-api (packages/extension-api) to npm when a tag extension-api-v<version> is pushed.
-# npm's trusted publishing signs in with this workflow's identity, so there is no token, and npm adds provenance, as it
-# does for a public package published from a public repository. Run by hand, it is run on such a tag: on anything else
-# it stops before publishing. Releasing, and the first version, which is published by hand, are described in
-# docs/guide/extension-ui.md.
+# Publishes @pithagoras/extension-api (packages/extension-api) to npm from the portal's release tag v<version>, the tag
+# docker.yml builds the image from. The package's version is the portal's: the tag has to be v<version> of the root
+# package.json and of packages/extension-api/package.json both, or the job stops before publishing. Run by hand, it is
+# run on such a tag. npm's trusted publishing signs in with this workflow's identity, so there is no token, and npm adds
+# provenance, as it does for a public package published from a public repository. Releasing, and the first version,
+# which is published by hand, are described in docs/guide/extension-ui.md.
 on:
   push:
-    tags: ["extension-api-v*"]
+    tags: ["v*"]
   workflow_dispatch:
 
 jobs:
@@ -27,11 +28,16 @@ jobs:
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
-      - name: The tag is the version in package.json
+      - name: The tag is the portal's version and the package's
         run: |
-          version=$(node -p 'require("./packages/extension-api/package.json").version')
-          if [ "$GITHUB_REF" != "refs/tags/extension-api-v$version" ]; then
-            echo "::error::$GITHUB_REF is not refs/tags/extension-api-v$version: packages/extension-api/package.json says $version"
+          portal=$(node -p 'require("./package.json").version')
+          package=$(node -p 'require("./packages/extension-api/package.json").version')
+          if [ "$GITHUB_REF" != "refs/tags/v$portal" ]; then
+            echo "::error::$GITHUB_REF is not refs/tags/v$portal: package.json says $portal"
+            exit 1
+          fi
+          if [ "$GITHUB_REF" != "refs/tags/v$package" ]; then
+            echo "::error::$GITHUB_REF is not refs/tags/v$package: packages/extension-api/package.json says $package"
             exit 1
           fi
       - run: npm publish -w packages/extension-api

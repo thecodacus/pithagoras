@@ -123,6 +123,9 @@ In Settings → Extensions → Discover → **Install by name**:
 
 ## Versions
 
-`version` on `Portal` and `ServerPortal` is the version of the interface, `1`, and the major version of this package is
-the same number: it is raised when something an extension relies on changes. What is added to the interface comes in a
-minor version.
+This package is released with Pithagoras and has its version: 0.2.0 is what Pithagoras 0.2.0 gives an extension.
+Pithagoras stays on 0.x while this interface still changes, and a 0.x minor version may break an extension, so an
+extension depends on `"^0.2.0"`, which takes 0.2.1 and not 0.3.0.
+
+`version` on `Portal` and `ServerPortal`, `1`, is not this package's version: it is the version of the interface the
+portal loads an extension with, raised only when something an extension relies on changes.
