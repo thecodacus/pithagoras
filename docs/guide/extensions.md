@@ -301,6 +301,15 @@ lazy: the model is not offered the one, and the other is how it makes many
 calls in one. Code mode is offered in chats that run on the host; the
 container executor has no tool switches.
 
+Code mode is also a [chat mode](/guide/sessions#modes), chosen above the
+message box before a chat's first message. The mode switches `codemode` on as
+a layer of its own, above the chat's agent and project and below the chat's own
+switch, and has pi hide the other tools' declarations (its `only`
+presentation), so the model works through the code tool alone. The switch
+alone, in a chat in Standard mode, keeps pi's own setting for that, which is
+`on` unless pi's `settings.json` says otherwise: the code tool beside the
+others.
+
 Before a chat has started, and in Settings → Tools, the list is what the portal
 has seen registered. The tools of a package that is switched off, narrowed to
 none of its extensions, or uninstalled are left out of it, since nothing

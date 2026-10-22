@@ -57,6 +57,8 @@ them. See [Projects](/guide/projects).
 | `POST /api/sessions` | `{ workspace?, agent?, title? }` — `agent` starts it in that agent's home; neither means the agent picked for new chats, the first agent (Home) by default; no title means "New chat", replaced by the first message |
 | `GET /api/sessions/:id` | One session |
 | `PATCH /api/sessions/:id` | `{ title?, pinned? }` — a title is cut to 120 characters |
+| `GET /api/sessions/:id/modes` | `{ modes: [{ id, label, description }] }` — the [modes](/guide/sessions#modes) the chat may be put in, Standard first, whether or not it has started; none for a routine's run, a heartbeat, a chat that came through a channel, a colleague's chat, or any chat with `EXECUTOR=container`. Does not start pi |
+| `PUT /api/sessions/:id/modes` | `{ mode }` — puts a chat that has said nothing yet in a mode, by its `id`; a pi that was started for it is let go, and the next message starts it in the mode. Answers `{ mode }`. 409 where the chat is offered no modes, once it has sent a message or a command, or while it is running; 409 `This conversation is already being edited.` while an edit or a reload holds it; 400 for a mode it is not offered |
 | `DELETE /api/sessions/:id` | Stops it if running, then deletes it, its events and pi's conversation file for it (in `SESSION_DIR`). The folder it worked in is left alone. |
 
 A session:
@@ -72,13 +74,15 @@ A session:
   "live": true,
   "created_at": "…",
   "updated_at": "…",
-  "last_error": null
+  "last_error": null,
+  "mode": null
 }
 ```
 
 `status` is one of `idle`, `running`, `error`, `interrupted`. `live` is whether
 a pi process is up right now, which is not the same thing — an idle session can
-still be live.
+still be live. `mode` is the [mode](/guide/sessions#modes) the chat was started
+in: `null` for Standard, the portal's own by its name (`"code"`).
 
 ## Files
 

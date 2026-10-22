@@ -677,14 +677,15 @@ makes it again on the portal's network where it has to. A GPU chosen on the
 service's page after the upgrade is in Voice's folder, not in the backup: choose
 it again in the older version's Settings → Add-ons → Voice.
 
-**Which backup, and which steps.** The version that makes Understory an
-extension (schema 10) follows this one with no release between them, so a
-portal takes both in one start, from 8 to 10, and its backup is
-`portal-v8-….db`. With that backup, do these steps and
+**Which backup, and which steps.** The versions that make Understory an
+extension (schema 10) and give chats a mode (schema 11) follow this one with no
+release between them, so a portal takes all three in one start, to 11, and its
+backup is named after the version it came from: `portal-v8-….db` from 8. With
+that backup, chats lose their mode, and the modes the person made go. Do these steps and
 [Understory's](#going-back-to-a-version-before-understory-was-an-extension)
 together, with the commands at the end of that section: before you stop the
 portal, remove Voice, Voice servers and Understory under Settings → Extensions
-(Docker stays); put the v8 backup back; move aside `handoff/voice-service`,
+(Docker stays); put the backup back; move aside `handoff/voice-service`,
 `handoff/voice-addresses` and `handoff/understory` with their `.<name>.*`
 folders, and `extension-data/pithagoras-voice`, `pithagoras-voice-servers` and
 `pithagoras-understory`; then run the version before both. With a `portal-v9-….db`, which only a portal that ran this version
@@ -798,9 +799,11 @@ The same upgrade also:
 
 ### Going back to a version before Understory was an extension
 
-**Which backup.** No release came between schema 9 and 10, so a portal at
-version 8, or an older one, went to 10 in one start, and the backup the upgrade
-made in `backups/` is `portal-v8-….db`:
+**Which backup.** No release came between schema 9 and 11, so a portal at
+version 8, or an older one, went to 11 in one start, and the backup the upgrade
+made in `backups/` is named after the version it came from: `portal-v8-….db`
+from 8. With that backup, chats lose their mode, and the modes the person made
+go ([Chats have a mode](#chats-have-a-mode)):
 
 - **With `portal-v8-….db`**, go back from both upgrades at once, to the version
   before Voice was an extension. Before you stop the portal, remove Voice, Voice
@@ -812,7 +815,7 @@ made in `backups/` is `portal-v8-….db`:
   section. Then run the older version. What both sections say of the containers,
   and of what was changed after the upgrade, holds for it too.
 - **With `portal-v9-….db`**, from a portal that stopped at version 9 and went on
-  to 10 later, the steps of this section take it back to 9. From there, those of
+  later, the steps of this section take it back to 9. From there, those of
   [Going back to a version before Voice was an extension](#going-back-to-a-version-before-voice-was-an-extension)
   take it to 8.
 
@@ -891,6 +894,25 @@ for d in handoff/voice-service handoff/.voice-service.* handoff/voice-addresses 
   if [ -e "$d" ]; then mv "$d" "backups/handoff-$stamp/"; fi
 done'
 ```
+
+## Chats have a mode
+
+A chat has a [mode](/guide/sessions#modes) now, chosen above the message box
+before its first message: Standard mode, or Code mode. The upgrade (schema 11)
+puts every chat in Standard mode, which is how every chat worked before, and
+makes an empty table for the modes the person makes. Nothing is left for an
+extension, and nothing needs doing.
+
+**Going back.** The backup is named after the version the database was at,
+`portal-v<version>-….db`: from v0.1.0 (schema 3) it is `portal-v3-….db`, and a
+build of the main branch can have left any version from 3 to 10. Going back
+from `portal-v10-….db`, which a portal that ran a build with schema 10 has, is
+only putting the backup in as under [Going back](#going-back): chats lose their
+mode, and the modes the person made go with the table. An older backup also
+needs the steps that
+[Voice's section](#going-back-to-a-version-before-voice-was-an-extension)
+and [Understory's](#going-back-to-a-version-before-understory-was-an-extension)
+give for it.
 
 ## Upgrading from the first release
 

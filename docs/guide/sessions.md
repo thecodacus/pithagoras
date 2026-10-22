@@ -87,6 +87,51 @@ Two keys work from anywhere on the page:
 | `/` | Jump to the message box with the command list open. Not while you are typing somewhere else, where it is a character. It is the [command character](/guide/commands#the-command-character), so it is another key if you chose one |
 | `Esc` | In the message box, **stop the run**, whatever is typed: the words stay in the box, so it costs you nothing. Not while an input method is composing a word, and not while the command list is open, where it closes the list |
 
+## Modes
+
+A mode is how a chat works. A chat that has said nothing yet shows its mode
+on a chip above the message box, where it is offered more than one; the chip
+opens a menu with each mode and a line on what it does, and the chosen one is
+checked. Choose before the first message: from then on the chat keeps it.
+
+- **Standard mode** is the agent as the chat would have it anyway: the tools
+  that [Settings → Tools](/guide/extensions#and-what-every-chat-starts-with), its agent and its project
+  switch on. Every chat starts in it.
+- **Code mode** gives the model one tool, `codemode`, pi's
+  [code mode](/guide/extensions#code-mode): it writes a short JavaScript script
+  that calls the chat's tools, and is given only what the script puts out. The
+  other tools are not offered to the model one by one (pi's `only`
+  presentation): the code tool's description lists them, and a script calls
+  them. Every tool that is on in the chat is in a script's reach. Lazy marks do
+  not apply here, since nothing is offered one by one anyway: a script finds the
+  tools that do not fit in the description with `searchTools`, and the `tools`
+  tool is not offered. An MCP server whose tools are not registered one by one
+  stays behind the adapter's `mcp` tool, which a script calls like any other.
+  A script has no time limit; **Stop** ends it. The
+  [guard](/guide/security#marking-untrusted-output) holds each call a script
+  makes as it holds the model's own. Switching `codemode` off in the chat's
+  tools has the chat work as in Standard mode, though its header still says
+  Code mode.
+
+The mode is fixed once the chat has said something: its first message, or a
+command sent to pi. Leaving a mode means starting a new chat; `/new` and
+`/clear` start one in Standard mode. A chat whose every message was removed has
+said nothing again, and its mode can be chosen again. Changing it before then
+lets the chat's pi go if one was started (opening the model menu starts it), so
+that the first message starts it again in the mode chosen; nothing is lost, as
+the chat has said nothing. A subagent the chat starts does not take its mode.
+
+Modes are offered in the chats you start on the portal's pages, and in the
+conversations started on an agent's page, where pi runs in the portal's own
+process. A routine's run, a heartbeat, a chat that came through a channel and
+a chat a colleague speaks in have none, and a portal started with
+`EXECUTOR=container` offers none.
+
+Once the chat has started, the chip goes, and the chat's header shows its mode,
+with its line when you point at it. Standard mode shows nothing there. A mode
+that is not offered now is named by the last part of what the chat stores, and
+says it is not available now when you point at it.
+
 ## Questions from the agent
 
 When the agent cannot go on without a decision or a fact only you have, it uses

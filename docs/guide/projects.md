@@ -144,11 +144,13 @@ every chat in the project starts with. "The research project never goes online" 
 "the dev project always has the shell tools" are then said once, not at the start of
 every chat.
 
-There are three layers for a chat in a project, each an exception to the one before it:
+There are four layers for a chat in a project, each an exception to the one before it:
 
 1. **Settings → Tools** is the default for every conversation.
 2. **The project** switches tools on or off against that default, for every chat in it.
-3. **A chat** switches tools on or off against what its project leaves, from the blocks
+3. **The chat's mode** can switch tools for every chat started in it
+   ([Modes](/guide/sessions#modes)): Code mode switches `codemode` on.
+4. **A chat** switches tools on or off against what its mode leaves, from the blocks
    icon beside the composer.
 
 An agent's own switches ([Agents](/guide/agents#tools)) are for the chats in its home,

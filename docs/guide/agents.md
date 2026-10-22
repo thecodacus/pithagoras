@@ -128,7 +128,7 @@ agent that should never run shell commands switches `bash` off here, without
 touching any other agent.
 
 A project and a routine come after the agent and can switch a tool again for their
-own; a chat's own switch has the last word. Chats in a project are not in any agent's
+own, and so does a chat's [mode](/guide/sessions#modes); a chat's own switch has the last word. Chats in a project are not in any agent's
 home, and follow the project, also where it works with an agent: that agent's soul, user
 and memory are used, but not its tool switches. See [Routines](/guide/routines#tools) for the order of
 all the layers.
