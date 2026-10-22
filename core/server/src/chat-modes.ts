@@ -14,6 +14,10 @@ export interface ChatModeEntry {
   label: string;
   /** The line under the label, in English. */
   description: string;
+  /** Asked, with a yes or no, before a chat is put in it (an extension's). */
+  confirm?: string;
+  /** The package that offers it. */
+  extension?: string;
   /** Its tool layer, between a routine's and the chat's own switches (see toolDefaultsForSession). */
   tools?: ToolExceptions;
   /** Its chats work through the code tool alone, in pi's `only` presentation (see codemode.ts). */
@@ -34,3 +38,22 @@ export const CORE_MODES: readonly ChatModeEntry[] = [
     codemode: true,
   },
 ];
+
+const provided: ChatModeEntry[] = [];
+
+/**
+ * `extension` offers `mode` (see portal.modes.provide): a chat in it stores "<extension>/<id>". Returns what takes it
+ * away again. Throws for an id the package offers already.
+ */
+export function provideMode(extension: string, mode: { id: string; label: string; description: string; confirm?: string }): () => void {
+  const entry: ChatModeEntry = { ...mode, id: `${extension}/${mode.id}`, extension };
+  if (provided.some((one) => one.id === entry.id)) throw new TypeError(`${extension} offers the mode "${mode.id}" already`);
+  provided.push(entry);
+  return () => {
+    const at = provided.indexOf(entry);
+    if (at >= 0) provided.splice(at, 1);
+  };
+}
+
+/** The extensions' modes there are now, in the order they were offered. */
+export const providedModes = (): readonly ChatModeEntry[] => provided;

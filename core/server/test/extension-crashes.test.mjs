@@ -165,6 +165,15 @@ test("what a half's routes had not answered when it crashed is answered then", a
   assert.match(result.streamed.cut, /terminated/);
 });
 
+test("a chat mode offered by one that crashes goes with it, and the chat started in it keeps it", async () => {
+  const { code, err, result } = await scenario("mode");
+  assert.equal(code, 0, err);
+  assert.deepEqual(result.before, ["focuser/focus"]);
+  assert.equal(result.crash, "Error: thrown after it offered a mode");
+  assert.deepEqual(result.after, []);
+  assert.equal(result.stored, "focuser/focus");
+});
+
 test("an error that is no extension's ends the process as Node does: thrown, or a rejection nobody heard", async () => {
   for (const [name, message] of [["ownException", "the portal's own failure"], ["ownRejection", "the portal's own rejection"]]) {
     const { code, err, result } = await scenario(name);

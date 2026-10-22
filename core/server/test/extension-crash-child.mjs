@@ -13,7 +13,8 @@ import { pathToFileURL } from "node:url";
 const { installLogCapture } = await import("../dist/logs.js");
 installLogCapture();
 const host = await import("../dist/extension-host.js");
-const { createSession } = await import("../dist/db.js");
+const { createSession, getSession, updateSession } = await import("../dist/db.js");
+const { providedModes } = await import("../dist/chat-modes.js");
 const { default: express } = await import("express");
 host.catchExtensionCrashes();
 host.setLimits(5_000, 1_000);
@@ -357,6 +358,20 @@ const scenarios = {
     await host.syncServerHalves([half("tooly", tool(`return { content: [{ type: "text", text: "done" }], details: {} };`))]);
     const fixed = await chatPi("c").tools[0].execute("3", {}, undefined, undefined, {});
     return { pending, handling: await handling, took, later, laterHandler: laterHandler ?? null, laterCommand, calls, held, fixed };
+  },
+
+  /** One that offers a chat mode and then crashes: its mode goes with it, and a chat started in it keeps it. */
+  async mode() {
+    createSession({ id: "c", title: "A chat", workspace: path.join(process.env.WORKSPACE_ROOT, "c"), executor: "host" });
+    updateSession("c", { mode: "focuser/focus" });
+    await host.syncServerHalves([half("focuser", `
+      portal.modes.provide({ id: "focus", label: "Focus mode", description: "Works with the focus tool." });
+      setTimeout(() => { throw new Error("thrown after it offered a mode"); }, 100);
+    `)]);
+    const before = providedModes().map((mode) => mode.id);
+    await until(() => !host.isServing("focuser"), "it crashed");
+    await host.serversSettled();
+    return { before, after: providedModes().map((mode) => mode.id), stored: getSession("c").mode, crash: status("focuser").crash.error };
   },
 
   /** An error of the process's own, thrown: Node's end, as without the portal's handling. */

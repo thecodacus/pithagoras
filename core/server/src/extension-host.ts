@@ -27,6 +27,7 @@ import { handoffDone, takeHandoff } from "./handoff.js";
 import { modelEndpoint, modelOf, modelProviders, type LiveModel } from "./models.js";
 import { mcpServer } from "./api/mcp.js";
 import { holdMemory } from "./memory-holder.js";
+import { provideMode } from "./chat-modes.js";
 import { logFileLine, onLogLine, scrubSecrets, type LogLine } from "./logs.js";
 import type { Chat, ChatLife as Life, Ran, ServerPortal, Upgrade, VoiceProvider } from "@pithagoras/extension-api/server";
 
@@ -262,7 +263,8 @@ const crashes = new Map<string, ServerHalfCrash>();
 export const pagePushes = new EventEmitter();
 pagePushes.setMaxListeners(0);
 
-const chatOf = (row: SessionRow): Chat => ({ id: row.id, title: row.title, workspace: row.workspace, status: row.status });
+// No `mode` key for a chat in Standard, rather than one that is undefined.
+const chatOf = (row: SessionRow): Chat => ({ id: row.id, title: row.title, workspace: row.workspace, status: row.status, ...(row.mode ? { mode: row.mode } : {}) });
 const say = (name: string, text: string) => console.log(`[extension ${name}] ${text}`);
 /**
  * An extension's handler failing is the extension's: said, and nothing of the
@@ -613,6 +615,25 @@ function portalFor(ext: Running): ServerPortal {
         }
         // Let go when the half stops. What it says of itself is the extension's: one that fails, or does not answer true, holds nothing.
         ext.stops.push(holdMemory(name, { label, rule, on: () => guarded(ext, "saying whether it holds the agent's memory", () => holder.on()) === true }));
+      },
+    },
+    modes: {
+      provide(mode) {
+        const { id, label, description, confirm } = mode ?? {};
+        const text = (value: unknown) => typeof value === "string" && value.trim() !== "";
+        if (typeof id !== "string" || !/^[a-z0-9][a-z0-9-]*$/.test(id) || !text(label) || !text(description) || (confirm !== undefined && !text(confirm))) {
+          throw new TypeError('provide takes { id, label, description, confirm? }: an id of lower-case letters, digits and "-", and texts');
+        }
+        // "custom/<id>" is what a chat stores for a mode the person made.
+        if (name === "custom") throw new TypeError('A package called "custom" cannot offer modes: its modes would be taken for the person\'s own');
+        const stored = `${name}/${id}`;
+        // Its module still running after its half stopped, or failed to start: what it offers now would never go.
+        if (ext.stopped) {
+          say(name, `cannot offer the mode ${id}: its server half is not running`);
+          return stored;
+        }
+        ext.stops.push(provideMode(name, { id, label, description, ...(confirm !== undefined ? { confirm } : {}) }));
+        return stored;
       },
     },
     router: ext.router,

@@ -24,6 +24,11 @@ export interface Chat {
   /** The folder the chat works in, as the chat names it. */
   workspace: string;
   status: "idle" | "running" | "error" | "interrupted";
+  /**
+   * The mode it was started in, as it stores it: "<package>/<id>" for an extension's (`modes.provide`), "custom/<id>"
+   * for one the person made, the portal's own by name ("code"). Not there for Standard.
+   */
+  mode?: string;
 }
 
 /**
@@ -310,6 +315,21 @@ export interface VoiceProvider {
   use?(inUse: boolean): Promise<void>;
 }
 
+/** A mode a chat can be started in, which an extension offers: see `modes.provide`. */
+export interface ChatMode {
+  /** Its name among the package's modes: lower-case letters, digits and "-". A chat in it stores "<package>/<id>". */
+  id: string;
+  /** What the picker above the message box calls it, in English: shown through the extension's own translations. */
+  label: string;
+  /** The line under the label, in English, translated the same way. */
+  description: string;
+  /**
+   * Shown, with a yes or no, before a chat is put in it, in English, translated the same way. A yes is in the audit
+   * log. It warns the person; it is no gate against code that has their login, such as a browser half.
+   */
+  confirm?: string;
+}
+
 export interface ServerPortal {
   /** Of this interface: raised when something an extension relies on changes. */
   version: 1;
@@ -380,10 +400,10 @@ export interface ServerPortal {
     /**
      * Where these tools are not what the default says, as the portal works it out now: `byDefault`, whether a chat
      * that has never said anything about them has any of them on; the chats that have them otherwise, by their own
-     * switches or by their agent's or project's (newest first), each the opposite of `byDefault`; and the routines
-     * whose own switches give their runs another answer than a routine that sets nothing would have in the same place
-     * (by name), each with its runs' answer (`allowed`). A routine that sets nothing has each tool as a chat in its
-     * place has it. For a page that says who may use them.
+     * switches or by their agent's, project's or mode's (newest first), each the opposite of `byDefault`; and the
+     * routines whose own switches give their runs another answer than a routine that sets nothing would have in the
+     * same place (by name), each with its runs' answer (`allowed`). A routine that sets nothing has each tool as a
+     * chat in its place has it. For a page that says who may use them.
      */
     exceptions(names: string[]): { byDefault: boolean; chats: { id: string; title: string; kind: ChatKind }[]; routines: { slug: string; name: string; allowed: boolean }[] };
   };
@@ -464,6 +484,19 @@ export interface ServerPortal {
     choose(chosen: boolean): void;
     /** Whether this extension is voice mode's source now. */
     chosen(): boolean;
+  };
+  /**
+   * Chat modes: how a chat works, chosen above the message box before its first message and fixed once it has one.
+   * Offered to the chats with the person on the portal's pages, where pi runs in the portal's own process.
+   */
+  modes: {
+    /**
+     * Offers a mode. Returns what a chat in it stores, "<package>/<id>", which this package's `chats.extend` factory
+     * finds as `chat.mode`: what the mode does is the extension's to do there. It goes when this server half stops; a
+     * chat started in it keeps it, and has it again when the extension does. Throws for a wrong shape, or an id this
+     * extension offers already.
+     */
+    provide(mode: ChatMode): string;
   };
   /**
    * The package's own routes, at /api/x/<package>/…, behind the portal's
@@ -554,7 +587,9 @@ export interface ServerPortal {
     /**
      * How a chat's model is offered a tool now: by its own name ("direct"), through the `tools` tool where the
      * tool is lazy ("lazy"), or not at all: switched off, out of reach, or the chat's pi is not running here. A
-     * call of a tool by a name it is not offered under is refused and never runs.
+     * call of a tool by a name it is not offered under is refused and never runs. In a chat whose mode works through
+     * the code tool (Code mode), "direct" means that a script calls the tool by its name, with no streamed arguments
+     * of its own.
      */
     offers(chatId: string, tool: string): "direct" | "lazy" | undefined;
     /** Keeps a chat's pi from being let go, or reloaded, while work of the package's goes on. Returns what lets it go again. */
