@@ -13,15 +13,6 @@ one written in TypeScript and JSX.
 The portal implements exactly these types and is checked against them when it is built. The guide is
 [Building an extension](https://thecodacus.github.io/pithagoras/guide/extension-ui).
 
-## Install
-
-```sh
-npm install --save-dev @pithagoras/extension-api esbuild typescript @types/react@18
-```
-
-A server half written in TypeScript needs `@types/node` and `@types/express@5` as well, and `tailwind: true` needs
-`tailwindcss@3` and `postcss`. They are peers of this package: it uses the versions the extension installs.
-
 ## An extension in its own repository
 
 ```
@@ -52,6 +43,15 @@ pithagoras-hello/
   the key is there even when it brings pi nothing.
 - `pithagoras`: its browser half, its stylesheet and its server half, as the build makes them.
 - `files` and `prepack`: what is published is built first, and is only what the build made.
+
+Run in the extension's folder, this adds what it is built with to its `package.json` as `devDependencies`:
+
+```sh
+npm install --save-dev @pithagoras/extension-api esbuild typescript @types/react@18 @types/node @types/express@5
+```
+
+Code that imports `react-dom` needs `@types/react-dom@18` as well, and `tailwind: true` needs `tailwindcss@3` and
+`postcss`. They are peers of this package: it uses the versions the extension installs.
 
 ```js
 // build.mjs

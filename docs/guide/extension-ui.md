@@ -196,7 +196,7 @@ await buildExtension({ dir: import.meta.dirname });
 {
   "pi": {},
   "pithagoras": { "client": "./web/client.js", "style": "./web/client.css" },
-  "scripts": { "build": "tsc --noEmit && node build.mjs" },
+  "scripts": { "build": "node build.mjs" },
   "devDependencies": { "@pithagoras/extension-api": "^1.0.0", "esbuild": "*" }
 }
 ```
@@ -219,11 +219,14 @@ export default function (portal: Portal) {
 The bundle has no React of its own. `react`, `react/jsx-runtime` and
 `react-dom` are the portal's: it hands them to every extension before it loads
 any extension's module, and the build points those imports there. Any other
-package the code imports is bundled into it. What the build makes is not kept
-in this repository's git: the portal's own build makes it. An extension of
-your own is built in the folder it is installed from, published built, or
-committed built to be installed from git: see
-[Extensions in their own repository](#extensions-in-their-own-repository).
+package the code imports is bundled into it. The build drops the types
+without checking them: `tsc --noEmit`, run before `node build.mjs`, checks
+them, with the TypeScript, type packages and `tsconfig.json` that
+[Extensions in their own repository](#extensions-in-their-own-repository)
+gives. What the build makes is not kept in this repository's git: the
+portal's own build makes it. An extension of your own is built in the folder
+it is installed from, published built, or committed built to be installed
+from git, as that section shows.
 
 A part that is large and not always needed goes in a chunk of its own, fetched
 when it is first drawn. Load it with `portal.ui.lazy`, not React's `lazy`: a
@@ -2287,11 +2290,10 @@ too. `@pithagoras/extension-api` is published on npm: the types,
 repository are built with.
 
 ```sh
-npm install --save-dev @pithagoras/extension-api esbuild typescript @types/react@18
+npm install --save-dev @pithagoras/extension-api esbuild typescript @types/react@18 @types/node @types/express@5
 ```
 
-A server half written in TypeScript needs `@types/node` and `@types/express@5`
-as well, code that imports `react-dom` needs `@types/react-dom@18`, and
+Code that imports `react-dom` needs `@types/react-dom@18` as well, and
 `tailwind: true` needs `tailwindcss@3` and `postcss`. They are peers of the
 package: it builds with the versions the extension installs. TypeScript 6 and
 later want types for a stylesheet the code imports; with
