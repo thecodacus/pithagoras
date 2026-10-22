@@ -3,13 +3,14 @@ import { once } from "node:events";
 import { mkdirSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
+import { fakeModel } from "./fake-model.mjs";
 import { inProcessHome } from "./server-harness.mjs";
 
 /**
  * Modes an extension offers (`portal.modes.provide`): listed after the portal's own for the chats that may choose, put
  * only after a yes where the mode asks first, with an audit row for it; what a mode does is the extension's, in its
- * `chats.extend` factory, which finds the chat's mode on `chat.mode`; and a mode goes when its server half stops, while
- * the chats started in it keep it.
+ * `chats.extend` factory, which finds the chat's mode on `chat.mode` (in a stand-in pi, and in a chat's own pi with a
+ * fake model); and a mode goes when its server half stops, while the chats started in it keep it.
  */
 const home = inProcessHome("extension-modes-");
 const said = [];
@@ -19,13 +20,20 @@ console.log = (...args) => {
   log(...args);
 };
 test.after(() => (console.log = log));
+const model = await fakeModel();
+writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR, "models.json"), JSON.stringify(model.models()));
 
 const host = await import("../dist/extension-host.js");
 const { providedModes } = await import("../dist/chat-modes.js");
-const { createSession, getDb, getSession } = await import("../dist/db.js");
+const { createSession, getDb, getSession, getSettings, setSettings } = await import("../dist/db.js");
+const { sessions } = await import("../dist/session-manager.js");
 const { modesRouter } = await import("../dist/api/modes.js");
 const { default: express } = await import("express");
+setSettings({ ...getSettings(), provider: "fake", model: "m" });
 test.after(() => host.stopServerHalves());
+test.after(() => {
+  for (const id of [...sessions.live.keys()]) sessions.live.get(id).client.dispose();
+});
 
 // As server.ts has it: JSON parsed for every route.
 const server = express().use(express.json()).use("/api", modesRouter()).listen(0, "127.0.0.1");
@@ -76,6 +84,16 @@ function registered(chatId) {
   return tools;
 }
 const audit = () => getDb().prepare("SELECT kind, subject, reason, session_id FROM audit WHERE kind = 'mode' ORDER BY id").all();
+/** The names of the tools the model was offered in the request a message in the chat made. */
+async function offered(id) {
+  const asked = model.requests.length;
+  await sessions.prompt(id, "Hello");
+  for (let i = 0; getSession(id).status === "running"; i++) {
+    assert.ok(i < 1500, "timed out waiting for the run to end");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  return (model.requests[asked].tools ?? []).map((tool) => tool.function?.name ?? tool.name);
+}
 
 test("an extension's modes come after the portal's own, with what they ask first and whose they are", async () => {
   await host.syncServerHalves([standIn()]);
@@ -123,6 +141,16 @@ test("the extension's factory finds the chat's mode, and gives its tool only to 
   assert.equal(portal.chats.get(focused).mode, "stand-in/focus");
   assert.equal("mode" in portal.chats.get(plain), false);
   assert.equal(portal.chats.list().find((one) => one.id === focused).mode, "stand-in/focus");
+});
+
+test("in a chat's pi, the model is offered the extension's tool in a chat in its mode, and not in another", async () => {
+  const focused = chat();
+  const plain = chat();
+  await put(focused, { mode: "stand-in/focus", confirmed: true });
+  assert.ok((await offered(focused)).includes("focus_only"));
+  const standard = await offered(plain);
+  assert.ok(standard.includes("bash"));
+  assert.ok(!standard.includes("focus_only"));
 });
 
 test("a mode goes when its server half stops, and the chats in it keep it; started again, it is offered again", async () => {
