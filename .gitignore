@@ -12,7 +12,7 @@ data/
 docs/.vitepress/dist
 docs/.vitepress/cache
 
-# Optional voice runtime checkouts and model weights
+# Voice runtime checkouts and model weights an older version's Compose overlay used
 voice-runtime/
 
 # Generated, version-matched VAD model and WebAssembly assets

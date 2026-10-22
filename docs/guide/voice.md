@@ -280,36 +280,14 @@ voice with every phrase.
 ## Speech servers you run
 
 [Voice servers](/guide/voice-servers) listens and speaks at the addresses you
-give it, and runs nothing itself. Do not run speech servers of your own and the
-voice service on the same GPU unless it has the memory for both: the service's
-page shows what each combination needs, and its installer reads the GPU before
-it installs.
-
-### The Compose overlay
-
-`docker-compose.voice.yml` starts speech servers on the same Linux host as the
-portal, built from source checkouts and models in `voice-runtime/`, and only
-some of them have a source that speaks to them:
-
-| Service | Profile | Address on the host | What reaches it |
-| --- | --- | --- | --- |
-| `whisper`: whisper.cpp | `voice` | `127.0.0.1:8178` | Voice servers, with `http://127.0.0.1:8178/inference` as its speech recognition URL and no model |
-| `breeze`: Breeze-TTS-2's Python service | `voice` | `127.0.0.1:7860` | Nothing: no source sends its own request form |
-| `audiocpp`: audio.cpp with Chatterbox and Qwen3-ASR, configured by `deploy/voice-multilingual/server.json` | `voice-multilingual` | `127.0.0.1:7871` | Voice servers listens to its Qwen3-ASR, at `http://127.0.0.1:7871/v1/audio/transcriptions` with the model `qwen3-asr`. Nothing speaks to its Chatterbox, which needs a recording with every phrase |
-
-The voice service runs Breeze and Chatterbox itself, with your voices. The
-whisper.cpp server, for example, is built with CUDA from a checkout and a model:
-
-```sh
-mkdir -p voice-runtime
-git clone https://github.com/ggml-org/whisper.cpp voice-runtime/whisper.cpp
-bash voice-runtime/whisper.cpp/models/download-ggml-model.sh base voice-runtime/whisper.cpp/models
-docker compose -f docker-compose.voice.yml --profile voice up -d --build whisper
-```
-
-`deploy/voice-multilingual/` also holds a systemd unit for a native audio.cpp
-build that reads the same `server.json`. The services' ports are bound to the
-host's loopback only, and the portal reaches them there with host networking.
+give it, and runs nothing itself: a speech server of your own that takes
+OpenAI's audio requests, or whisper.cpp's server for recognition (see
+[Servers it reaches](/guide/voice-servers#servers-it-reaches)). For speech
+engines the portal builds and runs for you, with your voices, install
+[the voice service](/guide/voice-service) (Voice). Do not run speech servers of
+your own and the voice service on the same GPU unless it has the memory for
+both: the service's page shows what each combination needs, and its installer
+reads the GPU before it installs.
 
 ### Behind llama-swap
 
