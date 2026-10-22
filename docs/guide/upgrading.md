@@ -532,6 +532,15 @@ With Voice not installed the hand-off waits, nothing of it lost, until it is.
 
 ### Going back to a version before Voice was an extension
 
+**Which backup.** No release came between schema 9 and 10, so a portal at
+version 8, or an older one, went to 10 in one start, and its backup is
+`portal-v8-….db`. Go back from both upgrades at once with it, as
+[Going back to a version before Understory was an extension](#going-back-to-a-version-before-understory-was-an-extension)
+says for that backup: Voice, Voice servers and Understory are removed, and all
+three hand-offs and folders moved aside. What follows here alone is for a portal
+that stopped at version 9; one that went on to 10 later has a `portal-v9-….db`
+from that upgrade, and the Understory section's steps take it back to 9 first.
+
 The backup the upgrade made in `backups/` (`portal-v8-….db` from the version
 before) has the voice settings as they were, the GPU chosen and what connecting
 the service kept among them. Put it back as under [Going back](#going-back).
@@ -601,7 +610,8 @@ the same, under new names and addresses:
   keeps the memory and when it tidies up, and switching it on as the agent's
   memory are its page in Settings, under **Extension settings → Memory**, at
   `/settings/x/pithagoras-understory`, where **Settings → Add-ons → Memory**
-  was. Add-ons keeps Voice and Subagents.
+  was. The Add-ons tab is gone with it: **Subagents** is in **Settings → Tools**,
+  and voice mode's settings are at the end of **Settings → Defaults**.
 - **The Memory page** is in the sidebar's **Extensions** group, at
   `/x/pithagoras-understory/memory`, with the same `?note=` and `?view=` as
   before. A link to `/memory` no longer opens it.
@@ -675,10 +685,26 @@ The same upgrade also:
 
 ### Going back to a version before Understory was an extension
 
-The backup the upgrade made in `backups/` (`portal-v9-….db` from the version
-before, or an older version's where the portal skipped it) has Understory's
-settings as they were, and each project's switch under
-its old name. Put it back as under [Going back](#going-back). Before you stop the
+**Which backup.** No release came between schema 9 and 10, so a portal at
+version 8, or an older one, went to 10 in one start, and the backup the upgrade
+made in `backups/` is `portal-v8-….db`:
+
+- **With `portal-v8-….db`**, go back from both upgrades at once, to the version
+  before Voice was an extension. Before you stop the portal, remove Voice, Voice
+  servers and Understory under Settings → Extensions (Docker stays). Put the
+  backup in as under [Going back](#going-back). With the portal stopped, move
+  `handoff/voice-service`, `handoff/voice-addresses` and `handoff/understory`
+  aside, each with the `.<name>.*` folders beside it, and Voice's, Voice
+  servers' and Understory's folders in `extension-data/`, as at the end of this
+  section. Then run the older version. What both sections say of the containers,
+  and of what was changed after the upgrade, holds for it too.
+- **With `portal-v9-….db`**, from a portal that stopped at version 9 and went on
+  to 10 later, the steps of this section take it back to 9. From there, those of
+  [Going back to a version before Voice was an extension](#going-back-to-a-version-before-voice-was-an-extension)
+  take it to 8.
+
+Either backup has Understory's settings as they were, and each project's switch
+under its old name. Put it back as under [Going back](#going-back). Before you stop the
 portal, remove Understory under Settings → Extensions: the older version has no
 such extension (Docker stays). What was changed on Understory's page after the
 upgrade, and what a later pass came to, are in Understory's folder, not in the
@@ -719,6 +745,39 @@ which does no harm. Left in place, `handoff/understory` would be taken by the
 next upgrade for one it had left already, and Understory's folder would keep its
 own settings over the ones changed in the older version. Delete the folder set
 aside in `backups/` once you are sure you do not want it.
+
+With `portal-v8-….db`, these take the place of the commands above: Voice's and
+Voice servers' hand-offs and folders go aside as well, all of them moved, none
+deleted. Voices added after the upgrade are only in Voice's folder
+(`voices/<id>.wav`, with their words in `voices.json`), and can be added again
+in the older version from there. In the data folder, with the portal stopped:
+
+```sh
+cd /path/to/data
+stamp=$(date +%Y%m%d-%H%M%S)
+mkdir -p "backups/handoff-$stamp"
+for d in handoff/voice-service handoff/.voice-service.* handoff/voice-addresses handoff/.voice-addresses.* \
+         handoff/understory handoff/.understory.* \
+         extension-data/pithagoras-voice extension-data/pithagoras-voice-servers extension-data/pithagoras-understory; do
+  if [ -e "$d" ]; then mv "$d" "backups/handoff-$stamp/"; fi
+done
+```
+
+In a container, run the same with the portal container's own mounts:
+
+```sh
+docker stop pithagoras
+
+docker run --rm --volumes-from pithagoras alpine sh -c '
+cd /data
+stamp=$(date +%Y%m%d-%H%M%S)
+mkdir -p "backups/handoff-$stamp"
+for d in handoff/voice-service handoff/.voice-service.* handoff/voice-addresses handoff/.voice-addresses.* \
+         handoff/understory handoff/.understory.* \
+         extension-data/pithagoras-voice extension-data/pithagoras-voice-servers extension-data/pithagoras-understory; do
+  if [ -e "$d" ]; then mv "$d" "backups/handoff-$stamp/"; fi
+done'
+```
 
 ## Upgrading from the first release
 
