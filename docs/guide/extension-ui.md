@@ -2320,8 +2320,9 @@ For the maintainers of this repository.
 `packages/extension-api` with npm's trusted publishing: no token, and with
 provenance.
 
-1. Raise `version` in `packages/extension-api/package.json` in a pull
-   request, and merge it.
+1. Raise `version` in `packages/extension-api/package.json`, and in the
+   entry `packages/extension-api` of `package-lock.json`, in a pull request,
+   and merge it.
 2. Tag the merged commit `extension-api-v<version>` and push the tag:
 
    ```sh
