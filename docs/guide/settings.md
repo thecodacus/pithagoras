@@ -46,6 +46,13 @@ What new chats start with: provider, model, effort, the context window, how much
 is kept when a chat is compacted, and where routines report. The fields are
 described in [Models and providers](/guide/models#defaults).
 
+At the end of the page, **Voice mode** holds what voice mode does whatever
+listens and speaks for it: speech detection, the speaking instructions, the
+model that answers spoken messages and the providers that reply without
+thinking first, each saved as it is changed. It names voice mode's source too,
+says whether it is running, and has a button to its page and **Stop using**:
+see [Voice mode's settings](/guide/voice#voice-mode-s-settings).
+
 The fields show **only your explicit overrides**. Leave one empty and it
 inherits, with the inherited value shown as the placeholder. Clearing a field
 hands the setting back to pi; clicking the active effort level again unsets it.
@@ -260,11 +267,13 @@ and the settings, after asking. Wrong passwords here are counted like those of
 
 ## Add-ons
 
-The optional parts of the portal itself: voice mode's settings (Voice), and
-Subagents and Memory, see [Voice control](/guide/voice) and
-[Opt-in features](/guide/features). The voice service and the agent's browser
-are extensions, each with its own page under **Extension settings**: see
-[The voice service](/guide/voice-service) and [The agent's browser](/guide/browser).
+The optional parts of the portal itself: Subagents and Memory, see
+[Opt-in features](/guide/features). Voice mode's settings are at the end of
+[Defaults](#defaults). What voice mode listens and speaks through is an
+extension, the voice service or Voice servers, and so is the agent's browser,
+each with its own page under **Extension settings**: see
+[Voice control](/guide/voice), [The voice service](/guide/voice-service),
+[Voice servers](/guide/voice-servers) and [The agent's browser](/guide/browser).
 
 ## Logs
 

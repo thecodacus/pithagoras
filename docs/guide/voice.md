@@ -1,20 +1,16 @@
 # Voice control
 
-::: tip Install the voice service with Docker
-Install **Voice** from **Settings → Extensions → Discover**, then **Install voice** on its page, **Settings → Extension settings → Voice service**. Voice mode then listens and speaks through it.
+::: tip Give voice mode a source
+Voice mode listens and speaks through an extension. **Voice**, the voice service, builds and runs speech engines in a container of its own: install it from **Settings → Extensions → Discover**, then **Install voice** on its page, **Settings → Extension settings → Voice service**, and voice mode listens and speaks through it once it is up. [The voice service](/guide/voice-service) covers GPU prerequisites, automatic Q8 setup, your voices, service controls and cleanup.
 
-[The voice service](/guide/voice-service) covers GPU prerequisites, automatic Q8 setup, service controls and cleanup.
+For speech servers you run yourself, install **Voice servers** instead and give it their addresses: see [Voice servers](/guide/voice-servers).
 :::
 
-::: info Already installed?
-Start with the controls below. A manual Compose setup and a native audio.cpp unit are alternative deployments; do not run them alongside the voice service.
-:::
-
-Enable **Voice** under **Settings → Add-ons** to talk to any open session.
-Click the **microphone icon** beside Send once, then speak naturally. The browser
-uses Silero V5 to detect speech and submits your turn after about one second of
-silence. Whisper's transcript becomes a normal session message, and streaming
-assistant text is spoken with **BreezeBlue/Breeze-TTS-2**.
+With a source chosen (see [Where voice mode listens and speaks](#where-voice-mode-listens-and-speaks)),
+click the **microphone icon** beside Send in any open session once, then speak
+naturally. The browser uses Silero V5 to detect speech and submits your turn
+after about one second of silence. The transcript becomes a normal session
+message, and streaming assistant text is spoken by the source.
 
 The microphone stays open while the session works and speaks. Start talking to
 interrupt: after roughly 256 ms of detected speech, playback and queued audio
@@ -26,12 +22,12 @@ audio is still picked up by your microphone.
 
 VAD runs locally in your browser. Its pinned model and WebAssembly runtime are
 served by Pithagoras, with no CDN dependency or extra GPU allocation.
-Whisper receives rolling snapshots while you speak (roughly every two seconds),
-and a fresh snapshot after about 200 ms of silence. The voice screen shows the
-latest partial transcript. At turn end, Pithagoras reuses a result only when it
-covers the last detected speech; otherwise it transcribes the final recording.
-This overlaps recognition with the silence window instead of starting all work
-after it. The current Whisper API remains clip-based, so this is speculative
+Speech recognition receives rolling snapshots while you speak (roughly every two
+seconds), and a fresh snapshot after about 200 ms of silence. The voice screen
+shows the latest partial transcript. At turn end, Pithagoras reuses a result
+only when it covers the last detected speech; otherwise it transcribes the final
+recording. This overlaps recognition with the silence window instead of starting
+all work after it. Recognition takes whole recordings, so this is speculative
 transcription rather than a token-streaming ASR model. Long turns are segmented
 at 60 seconds and listening resumes automatically.
 
@@ -50,9 +46,9 @@ look is set on the **Agents** page: open an agent and use the palette on its
 avatar, which opens a dialog with a live preview you can try in each state
 (idle, listening, speaking, muted). Choose a personality (how it moves), a colour
 palette and a colour for each state, the surface (glossy or plush, and a pattern),
-the motion speed, reactivity and glow, eyes, a hat and a prop. With voice
-installed, the dialog also has the **Voice** the agent speaks with. **Save
-avatar** stores both for that agent, and every device shows it the next time
+the motion speed, reactivity and glow, eyes, a hat and a prop. While voice mode
+has a source that speaks, the dialog also has the [**Voice**](/guide/agents#its-voice)
+the agent speaks with. **Save avatar** stores both for that agent, and every device shows it the next time
 voice mode starts. **Reset to default** puts the plain orb back in the dialog; it
 only becomes the saved avatar once you press **Save avatar**. Voice mode shows
 the avatar of the agent the chat is with, the first agent's for a chat in a
@@ -177,8 +173,10 @@ and what you say is transcribed and typed in; the agent never speaks back and a
 run in progress is not interrupted.
 
 It listens the same way voice mode does, with the same in-browser speech
-detection and the same recognition service, so it works as soon as Voice is
-enabled. Speech synthesis is not used and nothing is loaded onto the GPU for it.
+detection and the same source, so it works as soon as voice mode has one, also a
+source that recognises speech alone. The source may send it elsewhere:
+[Voice servers](/guide/voice-servers) has a dictation endpoint and model of its
+own. Speech synthesis is not used and nothing is loaded onto the GPU for it.
 While you talk, a line above the box shows whether you are being heard and the
 words recognised so far. Pausing for about a second ends a phrase, and the next
 phrase follows it.
@@ -194,197 +192,133 @@ Stopping dictation still delivers a sentence you were in the middle of. Starting
 voice mode turns dictation off, since both use the microphone, and leaving the
 session drops anything not yet transcribed instead of sending it elsewhere: a
 sentence you are still saying when you open another chat is not sent to that one.
-Whisper's placeholders for silence, such as `[BLANK_AUDIO]`, are not typed.
+What speech recognition writes for silence, such as whisper.cpp's `[BLANK_AUDIO]`,
+is not typed.
 
 Messages sent by dictation are ordinary text messages. Unlike voice-mode turns
 they are not marked as audio and the agent is not asked to reply in speakable
 style.
 
-## Alternative: manually managed Python services
+## Where voice mode listens and speaks
 
-::: details Show alternative deployment details
-The optional Compose overlay starts Whisper.cpp and the official Breeze runtime
-on the same Linux host. Install Docker Compose with GPU support and NVIDIA
-Container Toolkit first. Breeze recommends at least 12 GB GPU memory for eager
-inference; allow additional memory for Whisper and any session model sharing the
-GPU. The overlay uses eager inference. Its default Flash Attention architecture
-is `86` (consumer Ampere, such as an RTX 3060); use `FLASH_ATTN_CUDA_ARCHS=80`
-for A100 or `90` for Hopper. Match the build to your GPU
-and ensure the NVIDIA driver supports the upstream containers' CUDA versions.
+Voice mode has one source: an extension that recognises speech for it, speaks
+its replies and names the voices it speaks with (a
+[voice provider](/guide/extension-ui#voice-providers)). Two come with
+Pithagoras:
 
-From the Pithagoras repository on that host:
+| | |
+| --- | --- |
+| [The voice service](/guide/voice-service) (Voice) | Builds and runs speech engines in a container of its own: Breeze, Chatterbox or Kokoro to speak, Whisper or Qwen3-ASR to listen, on the GPU or the CPU. It keeps your voices, clones of a recording among them. |
+| [Voice servers](/guide/voice-servers) | Speech servers you run yourself, spoken to as OpenAI's audio API is: an address to listen at, one to speak at, and the voices that server has. |
+
+A source is chosen on its own page with **Use for voice mode**, and let go with
+**Stop using**; the page says **In use for voice mode** while it is the source.
+The one chosen last is the source. The voice service chooses itself once an
+install or a start you began on its page is up. Voice mode is on while it has a
+source: with none, the microphone buttons of voice mode and dictation are not
+shown.
+
+**Settings → Defaults → Voice mode** names the source and says how it is:
+**Running**, **Recognition only** (dictation works, and replies are not spoken)
+or **Not running**. **Open its page** goes to the source's page (**Open
+Extensions** while its server half does not run), and **Stop using** leaves
+voice mode with no source. A source removed in Settings → Extensions without its
+page's own **Stop using** stays chosen until then.
+
+Nothing else is used while the source is not running: dictation and voice mode
+answer *Voice mode listens and speaks through `<name>`, which is not running:
+install or start it in Settings → Extensions, or stop using it in Settings →
+Defaults → Voice mode*. A source that recognises speech alone (the voice
+service installed without speech synthesis, or Voice servers without a speech
+synthesis address) keeps dictation working; voice mode, which speaks the
+replies, is not offered then.
+
+Every voice session holds a lease on the source: it is asked for before the
+microphone begins to listen, each tab renews it every 25 seconds, and the source
+is told when voice mode starts and stops being used anywhere, so that it can
+load its model for the first session and let it go after the last. A source
+chosen or let go while Settings is open reaches the voice controls that are open
+when Settings closes.
+
+Each agent speaks with one of the source's voices, chosen on the **Agents**
+page, or with the source's own choice (see [Its voice](/guide/agents#its-voice)).
+
+### Voice mode's settings
+
+What does not depend on the source is at the end of **Settings → Defaults**, in
+**Voice mode**. Each change is saved as it is made: a slider when you let go of
+it, a text field when you leave it, and the page says **Saved**.
+
+| | |
+| --- | --- |
+| **Voice model** | The model that answers spoken messages (see [First spoken response](#first-spoken-response)) |
+| **Reply without thinking first on** | The providers whose first answer to a spoken message skips thinking |
+| **Speaking instructions** | How the agent is told to talk (see [Speaking instructions](#speaking-instructions)) |
+| **Speech detection** | When a turn starts and ends: the silence that ends a turn, the speech-start and speech-end thresholds, the shortest sound that counts and the audio kept from before speech. Restart voice mode to apply them. Shorter silence responds faster but can cut off pauses. **Reset speech detection** puts back the defaults. |
+
+The first three are not shown while the source recognises speech alone. Speech
+detection holds for dictation too.
+
+## Other languages: Chatterbox and Qwen3-ASR
+
+Breeze speaks English and Chinese. For another language the voice service builds
+**Chatterbox Multilingual** for speech and **Qwen3-ASR** for recognition: pick
+them under **Speech engines** on its page (see
+[The voice service](/guide/voice-service#engines-devices-and-memory)).
+Chatterbox speaks Arabic, Danish, Dutch, English, Finnish, French, German,
+Greek, Hindi, Italian, Korean, Malay, Norwegian, Polish, Portuguese, Spanish,
+Swahili, Swedish and Turkish, always in a voice cloned from a recording;
+Qwen3-ASR recognises those and more. Both are MIT/Apache-2.0 licensed, unlike
+Breeze's research-only weights. What Chatterbox needs, a language and a voice
+with a recording, is in [Chatterbox](/guide/voice-service#chatterbox) on the
+voice service's page.
+
+A Qwen3-ASR of your own listens through [Voice servers](/guide/voice-servers)
+as well. Voice servers does not speak Chatterbox, which needs a recording of the
+voice with every phrase.
+
+## Speech servers you run
+
+[Voice servers](/guide/voice-servers) listens and speaks at the addresses you
+give it, and runs nothing itself. Do not run speech servers of your own and the
+voice service on the same GPU unless it has the memory for both: the service's
+page shows what each combination needs, and its installer reads the GPU before
+it installs.
+
+### The Compose overlay
+
+`docker-compose.voice.yml` starts speech servers on the same Linux host as the
+portal, built from source checkouts and models in `voice-runtime/`, and only
+some of them have a source that speaks to them:
+
+| Service | Profile | Address on the host | What reaches it |
+| --- | --- | --- | --- |
+| `whisper`: whisper.cpp | `voice` | `127.0.0.1:8178` | Voice servers, with `http://127.0.0.1:8178/inference` as its speech recognition URL and no model |
+| `breeze`: Breeze-TTS-2's Python service | `voice` | `127.0.0.1:7860` | Nothing: no source sends its own request form |
+| `audiocpp`: audio.cpp with Chatterbox and Qwen3-ASR, configured by `deploy/voice-multilingual/server.json` | `voice-multilingual` | `127.0.0.1:7871` | Voice servers listens to its Qwen3-ASR, at `http://127.0.0.1:7871/v1/audio/transcriptions` with the model `qwen3-asr`. Nothing speaks to its Chatterbox, which needs a recording with every phrase |
+
+The voice service runs Breeze and Chatterbox itself, with your voices. The
+whisper.cpp server, for example, is built with CUDA from a checkout and a model:
 
 ```sh
 mkdir -p voice-runtime
 git clone https://github.com/ggml-org/whisper.cpp voice-runtime/whisper.cpp
-git clone https://github.com/breezeblue-ai/breeze-tts voice-runtime/breeze-tts
 bash voice-runtime/whisper.cpp/models/download-ggml-model.sh base voice-runtime/whisper.cpp/models
-uvx --from huggingface-hub hf download BreezeBlue/Breeze-TTS-2 --local-dir voice-runtime/Breeze-TTS-2
-docker compose -f docker-compose.voice.yml --profile voice up -d --build whisper breeze
+docker compose -f docker-compose.voice.yml --profile voice up -d --build whisper
 ```
-
-The source checkouts are retained locally, so subsequent builds use those same
-revisions until you update them. Downloading models and compiling the images
-can take a while. Inspect startup with:
-
-```sh
-docker compose -f docker-compose.voice.yml --profile voice logs -f whisper breeze
-curl --fail http://127.0.0.1:7860/health
-```
-
-Open **Settings → Add-ons → Voice**, leave these defaults and enable voice:
-
-| Setting | Value |
-| --- | --- |
-| Whisper inference URL | `http://127.0.0.1:8178/inference` |
-| Breeze speech URL | `http://127.0.0.1:7860/v1/audio/speech` |
-
-The main Compose file uses host networking, so the portal reaches both services
-at these loopback addresses. The service ports are bound only to host loopback;
-the web client talks through the portal's authenticated API. For another
-container network, configure addresses reachable from the portal container.
-The URLs must point to the full endpoints shown above. Whisper uses the
-Whisper.cpp multipart API; Breeze uses its native multipart API, not an
-OpenAI-compatible JSON speech endpoint.
-
-To speak in a voice of your own, add a reference clone with **Add voice**: a
-recording and the exact words spoken in it. Choose it under **Speaking voice**,
-and the portal sends the recording and its transcript to Breeze. Recordings are
-kept in the portal's database on the persistent data volume and are never served
-as public assets. A voice that is missing produces an error rather than silently
-switching voices.
-
-Choose **Designed voice** to generate a voice without a reference.
-**Describe the speaking voice** controls delivery in either mode. Breeze supports English and Chinese speech.
-Model weights and self-hosted outputs have a research/non-commercial license;
-see the [model card](https://huggingface.co/BreezeBlue/Breeze-TTS-2).
-:::
-
-## Other languages: Chatterbox and Qwen3-ASR
-
-Breeze speaks English and Chinese, and the voice service pairs it with
-Whisper by default. For another language, run [audio.cpp](https://github.com/0xShug0/audio.cpp)
-with **Chatterbox Multilingual** for speech and **Qwen3-ASR** for recognition.
-One process serves both, on one GPU, so the session model can keep the other.
-
-Chatterbox speaks Arabic, Danish, Dutch, English, Finnish, French, German, Greek,
-Hindi, Italian, Korean, Malay, Norwegian, Polish, Portuguese, Spanish, Swahili,
-Swedish and Turkish. Qwen3-ASR covers those and more. Both are MIT/Apache-2.0
-licensed, unlike Breeze's research-only weights.
-
-The [voice service](/guide/voice-service)'s **Install voice** builds this combination for
-you: pick **Chatterbox** and **Qwen3-ASR** under **Speech engines** (see
-[The voice service](/guide/voice-service#engines-devices-and-memory)), and the installer
-downloads both models, sets up the one audio.cpp process, and voice mode listens
-and speaks through it. The rest of this section is the alternative: running audio.cpp yourself,
-as a separate deployment. It does not replace Breeze or the voice service,
-and both keep working unchanged.
-
-### Download the models
-
-```sh
-mkdir -p voice-runtime/audio-cpp
-hf download audio-cpp/audio.cpp-gguf \
-  Chatterbox-GGUF/chatterbox-q8_0.gguf \
-  Qwen3-ASR-1.7B-GGUF/qwen3-asr-1.7b-q8_0.gguf \
-  --local-dir voice-runtime/audio-cpp
-```
-
-About 4.5 GB. Together the two models occupy roughly 5.5 GB of GPU memory while
-both are loaded.
-
-### Start the runtime
-
-With Compose:
-
-```sh
-docker compose -f docker-compose.voice.yml \
-  --profile voice-multilingual up -d audiocpp
-curl --fail http://127.0.0.1:7871/health
-```
-
-`VOICE_GPU` is the index of the GPU the service runs on, as `nvidia-smi` lists
-them, and it is `0` when unset: on a host with one GPU, leave it alone. With
-more than one, name the card the session model does not use, in front of the
-command or in `.env`: `VOICE_GPU=<index> docker compose …`.
-
-`server.json` binds loopback, and Compose publishes the container's port on
-`127.0.0.1:7871`: the service has no authentication, so nothing should reach it
-from the network. The Chatterbox entry declares `"task": "clon"`, which is
-audio.cpp's own name for voice cloning — not a truncated `"clone"`.
 
 `deploy/voice-multilingual/` also holds a systemd unit for a native audio.cpp
-build. It reads the same `server.json`, so point `/models` at your GGUF
-directory — a symlink is enough — or edit the two paths in that file. Build the
-server where the unit's `ExecStart` expects it:
-
-```sh
-cd /opt/audio.cpp
-scripts/build_linux.sh --backend cuda --target audiocpp_server
-```
-
-The unit uses GPU 0 unless `/etc/default/pithagoras-audio-cpp-multilingual`
-sets another with `VOICE_GPU=<index>`, which is what a host with two GPUs does to
-leave the first to the session model.
-
-### Point the portal at it
-
-Open **Settings → Add-ons → Voice → Advanced connection** and set:
-
-| Setting | Value |
-| --- | --- |
-| Speech runtime | **Chatterbox audio.cpp · multilingual** |
-| Speech recognition URL | `http://127.0.0.1:7871/v1/audio/transcriptions` |
-| Speech synthesis URL | `http://127.0.0.1:7871/v1/audio/speech` |
-| Speech recognition model | `qwen3-asr` |
-
-Then choose your **Input language** — it selects the spoken language too — and a
-**Speaking voice**. Chatterbox has no detection mode, so **Auto-detect** is not
-offered for it and the dropdown lists only the nineteen languages above.
-Chatterbox always clones a reference recording: choose or add a voice with
-a recording in the language you want to hear. A designed voice is refused when
-you save, not silently replaced. Use a clean 10-second reference.
-
-**Speech delivery** replaces Breeze's Fast/Expressive choice. It sets
-Chatterbox's emotion exaggeration: calm, natural, or expressive.
-
-Numbers are written out before synthesis for languages that have a pack
-(currently German and English), because Chatterbox otherwise reads digit groups
-unreliably — "4070" came back from recognition as "70". The transcript keeps the
-digits; only synthesis sees the words. Each pack knows how its language groups
-thousands, so German "100.000" is spoken as one number rather than as a decimal.
-Dates, clock times, version strings, ranges and anything with a leading zero
-keep their digits: reading them as quantities would be worse than leaving them.
-So do the digits of a name such as `v20.11` or `Qwen3.5`, which are not spoken
-as a number of their own.
-Adding a language is one entry in `core/server/src/voice-numbers.ts`; a language
-without a pack keeps its digits, and the add-on says so under the language.
-
-Chatterbox has no streaming mode in audio.cpp, so each phrase arrives as one
-complete WAV instead of a PCM stream. Playback is unchanged, because the browser
-buffers each phrase before playing it either way, but the first audio of a reply
-waits for its whole first sentence. Measured on an RTX 3060 with a German
-reference: a short sentence took 1.25 s, and 14 s of speech took 5.7 s
-(about 0.4× real time). Qwen3-ASR transcribed 3-second German clips in about
-0.3 s. These are sample measurements, not guarantees.
-
-Recognition uses the OpenAI transcription API, which needs the model name that
-`server.json` gives it. Whisper.cpp has a single model and ignores the field, so
-leaving **Speech recognition model** empty keeps the existing Whisper setup
-byte for byte.
-
-Do not run this deployment and the voice service on the same GPU unless it has
-the memory for both: the service's page shows what each combination needs, and its
-installer reads the GPU before it installs.
+build that reads the same `server.json`. The services' ports are bound to the
+host's loopback only, and the portal reaches them there with host networking.
 
 ### Behind llama-swap
 
 With [llama-swap](https://github.com/mostlygeek/llama-swap) as the only gateway
-on the host, audio.cpp does not need a port of its own: llama-swap starts it on
-the first speech request and routes `/v1/audio/speech` and
-`/v1/audio/transcriptions` to it by the request's `model`. One llama-swap entry
-serves both models, with the two model ids as aliases, so the request reaches
-audio.cpp with `chatterbox` or `qwen3-asr` unchanged:
+on the host, an [audio.cpp](https://github.com/0xShug0/audio.cpp) you run does
+not need a port of its own: llama-swap starts it on the first request and routes
+`/v1/audio/transcriptions` and `/v1/audio/speech` to it by the request's
+`model`. One llama-swap entry serves its models, with their ids as aliases, so
+the request reaches audio.cpp with `qwen3-asr` or `kokoro` unchanged:
 
 ```yaml
 models:
@@ -394,32 +328,31 @@ models:
       --host 127.0.0.1 --port ${PORT}
     # The GPU for speech, as nvidia-smi lists them; leave both lines out with one GPU.
     env: ["CUDA_DEVICE_ORDER=PCI_BUS_ID", "CUDA_VISIBLE_DEVICES=<index>"]
-    aliases: [chatterbox, qwen3-asr]
+    aliases: [qwen3-asr, kokoro]
     ttl: 900          # stop the process after 15 quiet minutes
     unlisted: true    # not a chat model, so keep it out of /v1/models
 ```
 
-Breeze, the English voice, is a third model in the same `server.json`, with
-`breeze` added to the aliases:
+`server.json` is audio.cpp's own list of models, each with the `id` a request
+names, its `family`, the `path` of its GGUF file, its `task` and its `mode`.
+Kokoro, which speaks the request Voice servers sends, is one entry:
 
 ```json
 {
-  "id": "breeze",
-  "family": "breeze_tts",
-  "path": "/models/Breeze-TTS-2-GGUF/breeze-tts-2-q8_0.gguf",
+  "id": "kokoro",
+  "family": "kokoro_tts",
+  "path": "/models/kokoro-82m-q8_0.gguf",
   "task": "tts",
-  "mode": "streaming"
+  "mode": "offline"
 }
 ```
 
-Choose **Breeze audio.cpp · streaming** as the speech runtime in the portal and
-it sends `model: breeze`. The audio.cpp build has to include the family: a build made with
-`--model-set custom --models chatterbox,qwen3_asr` cannot load it, so add
-`breeze_tts` to `--models` and rebuild. With `"max_loaded_models": 2` the server
-keeps Qwen3-ASR and whichever speaking voice was used last resident, and
-unloads the other. The Q8 file is published as
-`Breeze-TTS-2-GGUF/breeze-tts-2-q8_0.gguf` in `audio-cpp/audio.cpp-gguf`
-on Hugging Face, so no local quantizing step is needed.
+The audio.cpp build has to include each family: `--model-set custom --models
+qwen3_asr,kokoro_tts`. Kokoro turns text into phonemes with eSpeak NG, which
+audio.cpp loads from the system. The Q8 files are published in
+`audio-cpp/audio.cpp-gguf` on Hugging Face, as
+`Qwen3-ASR-1.7B-GGUF/qwen3-asr-1.7b-q8_0.gguf` and
+`Kokoro-82M-GGUF/kokoro-82m-q8_0.gguf`.
 
 audio.cpp loads lazily on its own: with `"lazy_load": true` in `server.json` a
 model is read on the first request that names it, and `"idle_unload_ms"` frees
@@ -432,9 +365,9 @@ The gateway runs one model at a time unless told otherwise, so without a
 audio entry in a matrix set with the LLM that leaves its GPU free. In this
 example speech lives on the second of two GPUs, so it goes next to a model pinned
 to the first, and a model split across both stays alone. With one GPU, the audio
-entry can share a set with a model only if that model leaves the roughly 5.5 GB
-the two speech models need; otherwise leave it out of the sets and the gateway
-swaps them:
+entry can share a set with a model only if that model leaves the memory the
+speech models need (the voice service's page lists each model's); otherwise
+leave it out of the sets and the gateway swaps them:
 
 ```yaml
 routing:
@@ -448,10 +381,11 @@ routing:
           split: "q"
 ```
 
-In the portal, use the gateway for all three URLs. **Speech recognition URL**
-is `http://127.0.0.1:8080/v1/audio/transcriptions` and **Speech synthesis URL**
-is `http://127.0.0.1:8080/v1/audio/speech`; the model names stay `qwen3-asr` and
-`chatterbox`.
+In [Voice servers](/guide/voice-servers), use the gateway for both addresses:
+**Speech recognition URL** `http://127.0.0.1:8080/v1/audio/transcriptions` with
+the model `qwen3-asr`, and **Speech synthesis URL**
+`http://127.0.0.1:8080/v1/audio/speech` with the model `kokoro` and Kokoro's
+voice ids, such as `af_heart`, as its voices.
 
 The language model is a plain provider in pi's `models.json`, not the
 `pi-llama-cpp` package. That package asks `/props?model=<id>` about every model,
@@ -482,8 +416,8 @@ latest user message begins with `[Audio mode]`. The portal adds that prefix to
 microphone submissions and typed requests sent in voice mode. The rule is part
 of the prompt pi builds, so it stays when tools come and go.
 
-While voice is switched on with a speech engine where it listens and speaks now
-(not recognition alone, and not an extension that is not running), the rule is
+While voice mode has a source that can speak now (not one that recognises
+speech alone, and not one that is not running), the rule is
 in the system prompt of every conversation, spoken in or not. A local model
 keeps a cache of the prompt it has already read, and that cache starts at the
 system prompt: with the rule there from the start, the first spoken message in a
@@ -492,8 +426,8 @@ the first spoken reply. The rule says plainly that it describes the marker and
 that a message is spoken only when its own text begins with it, so typed
 messages keep normal chat formatting.
 
-With voice switched off, or left with recognition alone, the rule is only in a
-conversation that has had voice. It comes in with the first spoken message,
+With no source, or one that recognises speech alone or is not running, the
+rule is only in a conversation that has had voice. It comes in with the first spoken message,
 including one sent while a typed run is still going, and typing again does not
 take it out. It is left out again when a spoken message never reached the
 conversation (refused, or taken by an extension) and no other spoken one is
@@ -509,7 +443,7 @@ preferences are unchanged. This skips initial
 reasoning latency, but prompt processing and sentence synthesis still take time.
 Other providers and the container executor retain their normal thinking behavior.
 
-**Settings → Add-ons → Voice → Voice model** names the model that answers
+**Settings → Defaults → Voice mode → Voice model** names the model that answers
 spoken messages, for when the chat is on a slow model and voice mode needs a
 fast one. A spoken message that starts a run is answered by that model, and the
 chat is back on its own once the run is over; the chat's model picker is not
@@ -520,7 +454,7 @@ In rare cases, a spoken message sent just as the run before it is winding down
 (an extension is still finishing its work) may be answered by the chat's model.
 This applies to chats the portal runs itself, not to the container executor.
 
-**Settings → Add-ons → Voice → Reply without thinking first on** names the
+**Settings → Defaults → Voice mode → Reply without thinking first on** names the
 providers instead, as the model menu shows them, separated by commas. Switching
 thinking off goes through the llama.cpp chat template, so only llama.cpp servers
 and the gateways in front of them, such as llama-swap, follow it. Until a list
@@ -541,10 +475,10 @@ is part of the rule above. What a tool says of itself for a spoken turn follows
 that block while the chat has the tool, and is not part of the text: long
 reports in a canvas while it has the canvas tools, pictures through
 `show_image` while it has [Media](/guide/media)'s.
-**Settings → Add-ons → Voice → Speaking instructions** shows the text in
+**Settings → Defaults → Voice mode → Speaking instructions** shows the text in
 use and lets you change it: shorter or longer replies, another tone, no
-announcing before tools. Save, and it applies from the next spoken message,
-also in conversations that are already open; typed messages keep the prompt they
+announcing before tools. It is saved when you leave the field, and applies from
+the next spoken message, also in conversations that are already open; typed messages keep the prompt they
 had. A local model reads the conversation again once after a change, as it
 does at the first spoken message.
 
@@ -591,15 +525,13 @@ never spoken. The lines below are given in English.
   Conversation window opens with the error written in it. This line is spoken
   whatever the settings below say, since otherwise a failure would pass unnoticed
   with the chat put away. It is not made when the error happens, when the speech
-  model may be the very thing that is down: the portal makes it as voice mode
-  starts, in the language of the interface and with the voice of the agent, and keeps it
-  as a file in the `voice` folder of its data directory. A new voice, speech engine
-  or interface language makes a new one at the next start. If the line is missing
-  (the speech model was not ready when voice mode started), the error is shown in
+  model may be the very thing that is down: the page asks the source to speak it
+  as voice mode starts, in the language of the interface and with the voice of
+  the agent, and keeps it until voice mode ends. If the line is missing (the
+  speech model was not ready when voice mode started), the error is shown in
   writing only, and voice mode says so. A start that finds the speech model not
-  ready tries three times, about a second and then three seconds apart, and writes
-  one line per failed try to the portal's log. If it still fails, the next time voice
-  mode starts tries again, however long that is, without waiting for an error.
+  ready tries three times, about a second and then three seconds apart, and the
+  next start of voice mode asks again.
 - **Talking during compaction.** What you say while it compacts is dropped, not
   sent: the agent cannot take it in until the compaction is over. The portal says
   "I'm still compacting our conversation. Please wait a moment; I'll let you know
@@ -610,102 +542,40 @@ and `VOICE_STATUS_SPEECH=false` on the portal turns them off everywhere. Only th
 lines go: what you say during compaction is still dropped, with nothing said about
 it.
 
-## Speech runtimes
-
-**Settings → Add-ons → Voice → Speech runtime** selects how speech is made, and
-each runtime has its own address:
-
-| Runtime | For | Notes |
-| --- | --- | --- |
-| `breeze` | A Python Breeze-TTS-2 service | Designed or cloned voices |
-| `audio-cpp` | Breeze on audio.cpp, streaming — what the voice service runs for Breeze | Whisper on CPU |
-| `chatterbox` | Speech in another language, on audio.cpp | Needs an input language (not auto-detect) and a reference clone — a voice with a recording; see above |
-| `kokoro` | Kokoro 82M on audio.cpp: small, fast, eight languages | Speaks with one of its own voices, chosen in **Speaking voice**; see [Kokoro's voices](#kokoro-s-voices) |
-
-Recognition is Whisper by default. **Speech recognition model** takes another
-model id (letters, digits, `.`, `:`, `-`, `_`), such as `qwen3-asr` behind
-llama-swap. The speech-detection thresholds are saved with the rest by **Save
-voice settings**.
-
-**Dictation model** and **Dictation endpoint** name the model and the address
-the microphone button of the message box transcribes with, where they should
-differ from voice mode's: a conversation wants the quick model, while a message
-you dictate can wait for a more accurate one, perhaps on another service. Set
-only the model and both use the same **Speech recognition URL**, so that service
-has to serve both models (llama-swap loads the one that is asked for). Left
-empty, dictation uses **Speech recognition model** and **Speech recognition
-URL**, like voice mode. With an extension chosen to listen and speak through,
-dictation goes there too, unless you set a **Dictation endpoint** of your own.
-
-## Listening and speaking through an extension
-
-An extension can offer voice mode a place to listen and speak: a recognition
-and a speech service it runs itself. Where one does, **Settings → Add-ons →
-Voice → Listen and speak through** chooses between **Your own addresses**, the
-ones under **Advanced connection**, and each such extension. The extension's
-own page may choose itself there too, when you ask it to, after installing it
-for example. Voice mode then listens and speaks at the extension's addresses,
-in the way it speaks (Kokoro with its own voices, say), and the page shows the
-voice options for that; dictation goes there as well, unless you set a
-**Dictation endpoint** of your own, which is used with its **Dictation model**
-either way.
-
-Your own addresses are never changed for an extension. Choose **Your own
-addresses** again and they are used as they were. An extension's own page may
-hand voice mode back to them, as its uninstall there can. Removing the
-extension leaves it chosen, and voice mode says it is not running until you
-choose again.
-
-An extension that is chosen and not running, or not ready, is said under the
-choice. Voice mode does not fall back to your own addresses meanwhile: dictation
-and voice mode answer *Voice mode listens and speaks through an extension that
-is not running: install or start it, or choose your own addresses in Settings →
-Add-ons → Voice*.
-
-Every voice session holds a lease on what voice mode listens and speaks
-through, whichever it is: it is asked for before the microphone begins to
-listen, each tab renews it every 25 seconds, and the extension is told when
-voice mode starts and stops being used anywhere, so that it can load its model
-for the first session and let it go after the last. A choice made in Settings
-reaches the voice controls that are open when Settings closes.
-[Voice providers](/guide/extension-ui#voice-providers) is how an extension
-offers this.
-
-## Speech speed
-
-**Speech generation → Fast** uses CFG 1, avoiding the extra guidance branch.
-**Expressive** uses CFG 4 for stronger voice direction. Fast can change delivery
-and voice similarity, so compare using the same reference.
-
 ## Input language and accuracy
 
-Select **Settings → Add-ons → Voice → Input language** and save. Choosing your
-spoken language sends an explicit language hint to Whisper on every turn, avoiding
-automatic language guessing on short clips. Auto-detect remains available when
-switching languages. Use a multilingual Whisper model for languages other than
-English; the voice service runs multilingual `base` on the CPU by default. A larger model can
-improve recognition but adds processing time, so benchmark before switching.
-Language selection does not translate speech or change Breeze’s supported output
-languages.
+The spoken language is the source's setting: **Input language** under
+[Your voice](/guide/voice-service#your-voice) on the voice service's page, or
+on the [Voice servers](/guide/voice-servers) page. Choosing your spoken language
+sends an explicit language hint on every turn, avoiding automatic language
+guessing on short clips. Auto-detect remains available when switching languages,
+except with Chatterbox, which has no detection mode. Use a multilingual
+recognition model for languages other than English; the voice service runs
+multilingual Whisper `base` on the CPU by default. A larger model can improve
+recognition but adds processing time, so benchmark before switching. The input
+language does not translate speech or change the languages a speech engine
+speaks.
 
 ## Playback and troubleshooting
 
-Audio is not stored by the portal. The browser encodes detected speech
-as mono 16 kHz WAV for Whisper. Browser playback receives Breeze’s 24 kHz PCM
-stream; clients that do not request PCM still receive a buffered WAV.
+Audio is not stored by the portal. The browser encodes detected speech as mono
+16 kHz WAV for recognition. Spoken replies reach the browser as 24 kHz mono
+PCM: a source that streams, as the voice service's Breeze does, is passed on as
+it arrives, and a phrase that comes back as one WAV (Chatterbox, Kokoro, Voice
+servers) is checked and sent on as PCM in one piece.
 
 Long responses are split into chunks of at most 600 characters and
 played sequentially. Fragments under 20 spoken characters are grouped with the
 next phrase; a final short reply is always flushed. Complete sentences and bounded phrases are queued as the
-assistant text arrives, without waiting for the full reply. The portal forwards
-Breeze’s PCM stream. The browser buffers each spoken sentence or bounded phrase
-before playing it as one continuous buffer.
+assistant text arrives, without waiting for the full reply. The browser buffers
+each spoken sentence or bounded phrase before playing it as one continuous
+buffer.
 
 This avoids interruptions within
-words when Breeze generates slower than playback. The full text response does
+words when speech is generated slower than playback. The full text response does
 not need to finish.
 
-Text, synthesis and playback have independent queues: Breeze
+Text, synthesis and playback have independent queues: the source
 generates the next phrase while the current one plays, and newly arriving text
 joins the synthesis queue immediately. One synthesis request runs at a time, with
 at most two completed phrases waiting for playback.
@@ -717,7 +587,7 @@ Voice prompt submission returns at SDK
 acceptance so the HTTP request does not hold playback until model completion.
 
 Pauses can still occur when synthesis
-is slower than playback. Barge-in cancels both queued audio and the upstream request.
+is slower than playback. Barge-in cancels both queued audio and the request to the source.
 The first sentence still needs model synthesis time before audio is available.
 
 Code blocks are
@@ -726,26 +596,23 @@ read out; the portal's own [status lines](#status-lines-while-it-works) are the
 only thing spoken besides the reply.
 
 If transcription or sending fails, the error appears beside the controls; a
-failed send leaves the recognized text visible for copying. If Breeze reports
-HTTP 409, another request owns its single-concurrency runtime. End voice in the
-other tab or wait for it to finish. Keep one active voice conversation per GPU
-service. Disabling the add-on hides controls; stop its containers separately:
-
-```sh
-docker compose -f docker-compose.voice.yml --profile voice stop whisper breeze
-```
+failed send leaves the recognized text visible for copying. The voice service's
+engines make one phrase at a time, so a phrase asked for while another tab's is
+being made waits for it: keep one active voice conversation per GPU service.
+**Stop using** in Settings → Defaults → Voice mode hides the controls; what the
+source runs is stopped on its own page.
 
 ## Development checks
 
 ```sh
 npm run build
-node --import tsx --test tests/voice.test.mts tests/voice-numbers.test.mts tests/hands-free.test.mts tests/live-transcription.test.mts tests/speech-pipeline.test.mts tests/voice-first.test.mts
+node --import tsx --test tests/voice.test.mts tests/voice-leases.test.mts tests/hands-free.test.mts tests/live-transcription.test.mts tests/speech-pipeline.test.mts tests/voice-first.test.mts extensions/voice/test/*.test.mts extensions/voice-servers/test/*.test.mts
 npx playwright test
 ```
 
-The tests run local simulated services to check multipart requests, session
-validation, opt-in behavior, WAV output and speech chunking. They do not test
-model inference or microphone hardware.
+The tests run simulated sources and speech servers to check session validation,
+the requests a source sends, WAV and PCM output and speech chunking. They do not
+test model inference or microphone hardware.
 
 Runtime references: [Breeze](https://github.com/breezeblue-ai/breeze-tts),
 [Whisper.cpp server](https://github.com/ggml-org/whisper.cpp/tree/master/examples/server).
@@ -771,76 +638,3 @@ acceleration, not conversation history.
 The permanent audio rule and persisted user-message markers keep the prefix
 stable across voice/text switches. A newly installed rule requires one initial
 prefill; subsequent turns can reuse it. No custom chat template is needed.
-
-## The voice service
-
-On a Linux host with Docker, the [voice service](/guide/voice-service) (the
-Voice extension) builds and runs speech recognition and speech synthesis in a
-container of its own, `pithagoras-voice`, and voice mode listens and speaks
-through it once it is up: under **Speech engines** on its page you choose the
-speech synthesis engine (Breeze, Chatterbox or Kokoro) and the speech
-recognition model (Whisper base or small, Qwen3-ASR 0.6B or 1.7B), or leave the
-choice to the installer, which reads the GPU and its free memory and picks the
-best combination that fits. Without a GPU it puts Kokoro and recognition on the
-CPU, or recognition alone. Its guide says what each needs, how it is installed,
-started, stopped and removed, and where it listens and speaks.
-
-It is chosen in **Listen and speak through** like any extension that offers
-voice mode a place to listen and speak (see
-[Listening and speaking through an extension](#listening-and-speaking-through-an-extension)),
-and chooses itself there when you install or start it from its page. Your own
-addresses are never changed for it. Each voice session's lease tells it when
-voice mode begins and stops being used: it loads its speech model for the first
-session and, with **Lazy load** on (on its page), lets it go after the last.
-Existing voice choices and saved voices are preserved. A reference clone still
-needs a voice with a recording, as described above.
-
-Stop TTS services you set up by hand before using the voice service, to avoid
-loading two copies into VRAM.
-
-### Add your own voices
-
-Open **Settings → Add-ons → Voice → Add voice**. Give the voice a name and choose
-**Reference clone** or **Designed voice**. For a clone, upload a clear recording
-of 1–30 seconds (up to 20 MB) and enter the exact words spoken. The browser converts
-supported audio files to mono 16 kHz WAV. For a designed voice, describe the voice
-instead. Each preset stores its own voice description.
-
-Click **Save new voice**, then **Save voice settings** to activate the selected
-voice. Saved voices appear in the Speaking voice dropdown. Clones include a
-reference preview and transcript.
-
-To change a saved voice's description later, select the voice, edit **Voice
-description** and click **Save description**. The change is stored at once and
-applies from the next phrase spoken, for a clone as well as a designed voice;
-the recording and its transcript stay as they are. **Save voice settings** also
-saves a description you edited and have not saved yet, and stops with an error,
-without saving the other settings, if the description cannot be saved. Breeze is
-the engine that reads the description. Chatterbox takes no description: it speaks
-from the recording alone, so editing the description of a voice used with
-Chatterbox changes nothing you can hear.
-
-### Kokoro's voices
-
-Kokoro cannot clone a recording or follow a description: it speaks with one of
-the voices that come with it. With **Kokoro audio.cpp** as the speech runtime,
-**Speaking voice** lists those voices instead of your library, each with its
-language: American and British English, Spanish, French, Hindi, Italian,
-Brazilian Portuguese and Mandarin Chinese. Kokoro reads the text in the language
-of the voice, whatever the input language is set to. Its Japanese voices are
-not offered: they need a dictionary the packaged model does not carry.
-**Speaking speed** (slower, normal, faster) takes the place of **Speech
-generation**.
-
-Your library voice stays selected for the other engines, so switching the
-runtime back brings it back. An agent can have a Kokoro voice of its own, from
-the voice menu under its avatar; with another engine it speaks as in the voice
-settings, and a library voice given to an agent is not used while Kokoro speaks.
-
-Kokoro has no streaming mode in audio.cpp: each phrase comes back as one WAV, as
-with Chatterbox, which Kokoro's size makes quick.
-
-Delete voice removes the preset and falls back
-to the default designed voice if it was active; an [agent](/guide/agents#its-voice) that had it speaks as the voice settings say again. Presets and recordings persist in
-the portal's SQLite database; they are shared across sessions and require portal
-authentication to access. Adding a voice does not retrain or download another model.

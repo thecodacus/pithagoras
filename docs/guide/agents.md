@@ -53,16 +53,24 @@ A file that is a link is left alone: it is neither shown nor written through, no
 
 ## Its voice
 
-With the voice add-on installed, the avatar customizer (the palette on the
-agent's avatar) has a **Voice** menu under the preview: the voice the agent
-speaks with in voice mode, saved with **Save avatar**. **As in the voice settings** follows the
-voice chosen in Settings; a designed voice or one from the voice library is the
-agent's own. **Add voice** at the end of the menu adds a voice to the library,
-a clone from a recording or one designed from a description, and gives it to
-the agent. A chat in a project shows the avatar of the agent the project works with and
-speaks with its voice, the first agent's where the project works with none.
-A library voice that is deleted is no longer any agent's, and those
-that had it speak as the voice settings say again.
+While voice mode has a source that speaks (see
+[Where voice mode listens and speaks](/guide/voice#where-voice-mode-listens-and-speaks)),
+the avatar customizer (the palette on the agent's avatar) has a **Voice** menu
+under the preview: the voice the agent speaks with in voice mode, saved with
+**Save avatar**. It lists the voices the source offers now: with
+[the voice service](/guide/voice-service#your-voice), the designed voice and
+your voices, or Kokoro's own voices while Kokoro speaks; with
+[Voice servers](/guide/voice-servers), the voices on its page. **As Voice
+service chooses** (named after the source) is the source's own choice, the
+voice set on its page. Under the menu, **Add a voice in Voice service** opens
+the source's page, where voices are added; the menu lists a new one when
+Settings closes. A chat in a project shows the avatar of the agent the project
+works with and speaks with its voice, the first agent's where the project works
+with none.
+
+An agent's voice that the source does not offer now, one that was deleted or
+one of another engine's, is kept and shown as **Not offered now**, and the
+agent speaks with the source's own choice until it is offered again.
 
 ## Its heartbeat
 

@@ -249,7 +249,8 @@ mounted at `/workspaces`, and has to be set. Keep the portal's
 ## Installing add-ons
 
 To install the voice service through the Voice and Docker extensions, or the
-agent's browser through the Browser and Docker extensions:
+agent's browser through the Browser and Docker extensions (Voice servers, for
+speech servers you run yourself, needs neither):
 
 - Keep the **Docker socket mount** and **host networking**.
 - For voice service engines on an NVIDIA GPU, configure **NVIDIA Container
@@ -257,7 +258,8 @@ agent's browser through the Browser and Docker extensions:
   GPU or the toolkit ([GPU access for Voice](/guide/voice-service#gpu-access-for-voice)).
 
 Follow [The voice service](/guide/voice-service) for its installation, controls,
-storage and cleanup, and [The agent's browser](/guide/browser) for the browser's.
+storage and cleanup, [Voice servers](/guide/voice-servers) for your own speech
+servers, and [The agent's browser](/guide/browser) for the browser's.
 
 ## The runner image
 

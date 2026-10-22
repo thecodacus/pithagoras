@@ -4,8 +4,8 @@ Four capabilities ship with Pithagoras and are **off** until you switch them on
 in **Settings**: a **subagent tool** and **Understory** as the agent's memory
 under **Add-ons**, and **image generation and editing** and **video generation** under
 **Extension settings → Media**. A fresh
-install has none of them. (The Add-ons page also holds [voice mode](/guide/voice)'s settings;
-the [voice service](/guide/voice-service) and the agent's [browser](/guide/browser) are extensions.) Switching on
+install has none of them. ([Voice mode](/guide/voice)'s settings are in Settings → Defaults; the
+[voice service](/guide/voice-service), [Voice servers](/guide/voice-servers) and the agent's [browser](/guide/browser) are extensions.) Switching on
 the first two writes them into pi's own configuration — a package, an MCP
 server — so they can also be seen, and undone, from Settings → Extensions and
 Settings → MCP. Switching one off removes it. Image and video generation are
