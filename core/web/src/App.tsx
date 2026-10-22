@@ -165,7 +165,7 @@ function Shell({
   // What follows /x/ in the address: `<extension>/<page id>` of a page an extension brought, or `<extension>` of its page in Settings.
   const { sessionId, tab, "*": extensionPart = "" } = useParams<{ sessionId?: string; tab?: string; "*"?: string }>();
   const navigate = useNavigate();
-  const { pathname, search } = useLocation();
+  const { pathname, search, state } = useLocation();
   // What the installed extensions draw in the portal: see extensions/loader.ts.
   useEffect(() => {
     setNavigate(navigate);
@@ -666,7 +666,8 @@ function Shell({
   });
   const onOpenSettings = useStable(() => navigate(sessionId ? `/s/${sessionId}/settings/general` : "/settings/general"));
   const openUpdate = useStable(() => navigate(sessionId ? `/s/${sessionId}/settings/about` : "/settings/about"));
-  const closeSettings = useStable(() => navigate(active ? `/s/${active.id}` : "/"));
+  // Back to the page that opened Settings where it said which (`state.from`), else to the chat.
+  const closeSettings = useStable(() => navigate((state as { from?: string } | null)?.from ?? (active ? `/s/${active.id}` : "/")));
   const setUpModel = useStable(() => {
     navigate(active ? `/s/${active.id}` : "/");
     setSetup(true);
