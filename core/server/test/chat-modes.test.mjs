@@ -299,10 +299,13 @@ test("a chat whose own switches had the code tool off before Code mode was chose
   assert.ok(!sessions.piOff(id).includes("codemode"));
   await assert.rejects(sessions.setTools(id, ["codemode", "bash"]), CodemodeHeld);
   assert.equal(getDb().prepare("SELECT tools_off FROM sessions WHERE id = ?").get(id).tools_off, "codemode", "kept, and nothing of the list written");
+  // Another switch saved while the mode holds the code tool: the page's list says nothing of it, and the stored off stays.
+  await sessions.setTools(id, ["bash"]);
+  assert.equal(getDb().prepare("SELECT tools_off FROM sessions WHERE id = ?").get(id).tools_off, "bash\ncodemode");
 
   // Standard chosen before the first message: the mode holds it no more, and the chat's own off counts again.
   await put(id, "standard");
-  assert.deepEqual(sessionTools(id), { off: ["codemode"], on: [] });
+  assert.deepEqual(sessionTools(id), { off: ["bash", "codemode"], on: [] });
   assert.equal((await codemodeOf(id)).byMode, undefined);
 
   // In Code mode again, the model is offered the code tool alone.
