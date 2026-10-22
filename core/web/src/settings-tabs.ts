@@ -9,6 +9,7 @@ export const TAB_IDS = [
   "channels",
   "people",
   "tools",
+  "modes",
   "sandbox",
   "guard",
   "skills",

@@ -283,6 +283,8 @@ export function ComposerBar({
 
   /** Whether the chat had started when last looked at — see the effect on `started`. */
   const wasStarted = useRef(started);
+  /** The chat's mode when last looked at — see the effect on it. */
+  const modeWas = useRef(session.mode);
   useEffect(() => {
     levelsFor.current = levelsModel(session.provider, session.model);
     setCfg(seed(session));
@@ -291,10 +293,19 @@ export function ComposerBar({
     setLevelError(null);
     setBusy(false);
     setDragEffort(null);
-    // Another chat, loaded here: its having started already is no change.
+    // Another chat, loaded here: its having started already is no change, nor is its mode.
     wasStarted.current = started;
+    modeWas.current = session.mode;
     load();
   }, [sessionId]);
+
+  // A mode can write the chat's model and effort as the chat is put in it (Settings → Modes): the pills read them again.
+  useEffect(() => {
+    if (modeWas.current === session.mode) return;
+    modeWas.current = session.mode;
+    setCfg(seed(session));
+    load();
+  }, [session.mode]);
 
   const refreshCatalogue = () => {
     const asked = sessionId;
