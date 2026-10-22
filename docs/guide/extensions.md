@@ -303,9 +303,9 @@ container executor has no tool switches.
 
 Code mode is also a [chat mode](/guide/sessions#modes), chosen above the
 message box before a chat's first message. The mode switches `codemode` on as
-a layer of its own, above the chat's agent and project and below the chat's own
-switch, and has pi hide the other tools' declarations (its `only`
-presentation), so the model works through the code tool alone. The switch
+a layer of its own, above the chat's agent and project, where the chat's own
+switch cannot turn it off, and has pi hide the other tools' declarations (its
+`only` presentation), so the model works through the code tool alone. The switch
 alone, in a chat in Standard mode, keeps pi's own setting for that, which is
 `on` unless pi's `settings.json` says otherwise: the code tool beside the
 others.

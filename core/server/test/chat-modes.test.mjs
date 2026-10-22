@@ -41,10 +41,10 @@ const model = await fakeModel((request) => {
 });
 writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR, "models.json"), JSON.stringify(model.models()));
 
-const { appendEvent, createSession, getDb, getSession, getSettings, rememberTools, sessionTools, setLazyToolSets, setSettings, toolExceptions, updateSession } = await import("../dist/db.js");
+const { appendEvent, createSession, getDb, getSession, getSettings, rememberTools, sessionTools, setLazyToolSets, setSessionTools, setSettings, toolExceptions, updateSession } = await import("../dist/db.js");
 const { lazyToolEntry } = await import("../dist/tool-policy.js");
 const { SdkPiClient } = await import("../dist/pi/sdk-client.js");
-const { sessions } = await import("../dist/session-manager.js");
+const { CodemodeHeld, sessions } = await import("../dist/session-manager.js");
 const { modesRouter } = await import("../dist/api/modes.js");
 setSettings({ ...getSettings(), provider: "fake", model: "m" });
 rememberTools([{ name: "lazy_one", source: "lazy", package: null }]);
@@ -128,6 +128,7 @@ async function say(id, message) {
   return { requests: model.requests.slice(asked), results };
 }
 const lazyOf = async (id) => (await sessions.getTools(id)).tools.find((t) => t.name === "lazy_one");
+const codemodeOf = async (id) => (await sessions.getTools(id)).tools.find((t) => t.name === "codemode");
 
 test("a chat with the person on the portal's pages is offered Standard and Code mode, and no other chat is offered any", async () => {
   const task = chat();
@@ -237,13 +238,13 @@ test("a change of mode is held like an edit: refused beside one, and a message s
   assert.deepEqual(launches.slice(first).map((opts) => opts.codemode), [undefined, "only"], "the pi let go, and the message's in Code mode");
 });
 
-test("in Code mode the code tool is on as the mode's layer, the chat is listed as one that differs, and its own switch has the last word", async () => {
+test("in Code mode the code tool is on as the mode's layer, the chat is listed as one that differs, and its own switch cannot turn it off", async () => {
   const id = chat();
   const plain = chat();
   await put(id, "code");
   await sessions.client(id);
-  const codemode = (await sessions.getTools(id)).tools.find((t) => t.name === "codemode");
-  assert.deepEqual([codemode.enabled, codemode.defaultOn], [true, true]);
+  const codemode = await codemodeOf(id);
+  assert.deepEqual([codemode.enabled, codemode.defaultOn, codemode.byMode], [true, true, true]);
   // A Standard chat in the same folder that says something about tools, asked first (the newest): what it starts
   // with is not what the Code-mode chat starts with.
   getDb().prepare("UPDATE sessions SET tools_off = 'bash', updated_at = '2099-01-01 00:00:00' WHERE id = ?").run(plain);
@@ -251,10 +252,10 @@ test("in Code mode the code tool is on as the mode's layer, the chat is listed a
   const differ = toolExceptions(["codemode"]).chats.map((row) => row.id);
   assert.ok(differ.includes(id));
   assert.ok(!differ.includes(plain));
-  const off = await sessions.setTools(id, ["codemode"]);
-  assert.ok(off.includes("codemode"));
-  assert.deepEqual(sessionTools(id), { off: ["codemode"], on: [] });
-  assert.equal((await sessions.getTools(id)).tools.find((t) => t.name === "codemode").enabled, false);
+  await assert.rejects(sessions.setTools(id, ["codemode"]), CodemodeHeld);
+  assert.deepEqual(sessionTools(id), { off: [], on: [] });
+  assert.equal((await codemodeOf(id)).enabled, true);
+  assert.ok(!sessions.piOff(id).includes("codemode"), "pi still has it");
 });
 
 test("in Code mode only the code tool is declared, and a script reaches a lazy tool, also after a reload; in Standard the lazy tool is behind the tools tool", async () => {
@@ -288,9 +289,10 @@ test("in Code mode only the code tool is declared, and a script reaches a lazy t
 
 test("a Code-mode chat with the code tool switched off has its tools declared, and its lazy tools lazy again", async () => {
   const id = chat();
+  // Switched off in the chat before it was put in the mode, where Settings → Tools has it on: the mode's layer is under it.
+  setSessionTools(id, { off: ["codemode"], on: [] });
   await put(id, "code");
   await sessions.client(id);
-  await sessions.setTools(id, ["codemode"]);
   const { requests } = await say(id, "Hello");
   const names = declared(requests[0]);
   assert.ok(names.includes("bash"));
@@ -298,4 +300,10 @@ test("a Code-mode chat with the code tool switched off has its tools declared, a
   assert.ok(!names.includes("lazy_one"));
   assert.ok(!names.includes("codemode"));
   assert.equal((await lazyOf(id)).lazy, true);
+  // Off, it is not held: the chat's switches still save with it off, and switch it on, which holds it.
+  assert.equal((await codemodeOf(id)).byMode, undefined);
+  await sessions.setTools(id, ["codemode", "bash"]);
+  await sessions.setTools(id, []);
+  assert.equal((await codemodeOf(id)).byMode, true);
+  await assert.rejects(sessions.setTools(id, ["codemode"]), CodemodeHeld);
 });

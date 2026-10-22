@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { LuChevronDown, LuChevronRight } from "react-icons/lu";
 import type { PortalTool } from "../api";
-import { displayName, groupSummary, groupTools, sourceName, toolTitle, type ToolGroup } from "../tool-groups";
+import { CODEMODE_HELD, displayName, groupSummary, groupTools, sourceName, toolTitle, type ToolGroup } from "../tool-groups";
 import { useOpenGroups } from "../use-open-groups";
 import { t } from "../i18n";
 
@@ -44,6 +44,9 @@ export function ToolGroupList({
       {groupTools(tools).map((group) => {
         const open = groups.isOpen(group.source);
         const editing = naming?.(group);
+        // What the group's switch flips: not a tool the chat's mode holds on.
+        const free = group.tools.filter((tool) => !tool.byMode);
+        const freeOff = free.every((tool) => !tool.enabled);
         return (
           <div key={group.source} className={`border-b last:border-0 ${roomy ? "border-line" : "border-line/60"}`}>
             <div className={`flex items-center gap-1 px-1.5 py-1.5 ${roomy ? "bg-raised/40" : ""}`}>
@@ -66,14 +69,16 @@ export function ToolGroupList({
                     <span className={`shrink-0 text-fg-faint ${roomy ? "text-[11px]" : "text-[10px]"}`}>{groupSummary(group)}</span>
                   </button>
                   {beside?.(group)}
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => onFlip(group.tools.map((tool) => tool.name), group.allOff)}
-                    className="shrink-0 rounded px-1.5 py-0.5 text-[11px] text-fg-subtle transition hover:bg-fg/5 hover:text-fg disabled:opacity-50"
-                  >
-                    {group.allOff ? t("all on") : t("all off")}
-                  </button>
+                  {free.length > 0 && (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => onFlip(free.map((tool) => tool.name), freeOff)}
+                      className="shrink-0 rounded px-1.5 py-0.5 text-[11px] text-fg-subtle transition hover:bg-fg/5 hover:text-fg disabled:opacity-50"
+                    >
+                      {freeOff ? t("all on") : t("all off")}
+                    </button>
+                  )}
                 </>
               )}
             </div>
@@ -84,7 +89,7 @@ export function ToolGroupList({
                     <input
                       type="checkbox"
                       checked={tool.enabled}
-                      disabled={busy}
+                      disabled={busy || tool.byMode}
                       onChange={(e) => onFlip([tool.name], e.target.checked)}
                       className="h-3 w-3 shrink-0 accent-accent"
                     />
@@ -136,6 +141,7 @@ export function ToolGroupList({
                       <span className="shrink-0 text-[10px] text-fg-faint">{tool.defaultOn ? t("default on") : t("default off")}</span>
                     )}
                   </label>
+                  {tool.byMode && <p className="px-3 pb-1 pl-8 text-[10px] text-fg-faint">{t(CODEMODE_HELD)}</p>}
                 </li>
               ))}
             </ul>
