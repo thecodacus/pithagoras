@@ -1,4 +1,4 @@
-import { readFileSync, renameSync, writeFileSync } from "node:fs";
+import { closeSync, fsyncSync, openSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 /** A voice the speech server speaks with: what it is sent as (`id`), and what the person calls it. */
@@ -47,10 +47,20 @@ export function openStore(dir: string): void {
 
 export const settings = (): Settings => kept;
 
-/** Keeps `next` as the settings, the whole file put in place at once. */
+/**
+ * Keeps `next` as the settings, the whole file put in place at once. It is on disk before it is put in place, so a crash
+ * after leaves the new file and not an empty one: the take-up of the hand-off removes the only other copy once it is
+ * saved.
+ */
 export function saveSettings(next: Settings): void {
   if (!file) throw new Error("Voice servers' settings have not been read");
-  writeFileSync(`${file}.tmp`, JSON.stringify(next, null, 2), { mode: 0o600 });
+  const fd = openSync(`${file}.tmp`, "w", 0o600);
+  try {
+    writeFileSync(fd, JSON.stringify(next, null, 2));
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
   renameSync(`${file}.tmp`, file);
   kept = next;
 }

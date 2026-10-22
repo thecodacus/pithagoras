@@ -1,4 +1,4 @@
-import { readFileSync, renameSync, writeFileSync } from "node:fs";
+import { closeSync, fsyncSync, openSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import type { TtsChoice } from "../engines";
 import { DEFAULT_KOKORO_VOICE, isKokoroVoice, KOKORO_SPEEDS } from "../kokoro-voices";
@@ -57,9 +57,19 @@ export function openStore(dir: string): void {
 
 export const setting = <K extends keyof Settings>(key: K): Settings[K] => kept[key];
 
-/** `data` as `target`, for Voice's owner alone (0600), put in place at once: a reader finds the old file or the new one. */
+/**
+ * `data` as `target`, for Voice's owner alone (0600), put in place at once: a reader finds the old file or the new one.
+ * It is on disk before it is put in place, so a crash after leaves the new file and not an empty one: the take-up of
+ * the hand-off removes the only other copy once its files are written.
+ */
 export function writePrivately(target: string, data: string | Buffer): void {
-  writeFileSync(`${target}.tmp`, data, { mode: 0o600 });
+  const fd = openSync(`${target}.tmp`, "w", 0o600);
+  try {
+    writeFileSync(fd, data);
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
   renameSync(`${target}.tmp`, target);
 }
 
