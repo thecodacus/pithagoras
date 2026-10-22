@@ -1041,6 +1041,7 @@ const de: Locale = {
     "As the chat would have it": "Wie der Chat es ohnehin hätte",
     "Effort for this mode": "Aufwand für diesen Modus",
     "Written into a chat as it is put in this mode; the chat can still change it.": "Wird in einen Chat übernommen, wenn er diesen Modus bekommt; der Chat kann es danach noch ändern.",
+    "Choose a model too: a provider alone is not written into a chat.": "Wähle auch ein Modell: Ein Anbieter allein wird nicht in einen Chat übernommen.",
     "Work through the code tool": "Über das Code-Tool arbeiten",
     "The model writes a short script that calls the chat's tools, and is given only what it puts out; the tools are not offered one by one.": "Das Modell schreibt ein kurzes Skript, das die Tools des Chats aufruft, und bekommt nur, was es ausgibt; die Tools werden nicht einzeln angeboten.",
     // components/PackageCatalog.tsx

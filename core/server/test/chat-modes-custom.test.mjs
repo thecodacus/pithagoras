@@ -155,12 +155,13 @@ test("a mode is made with an id from its name that no mode has and no chat store
 });
 
 test("a chat is offered the portal's modes, then the person's by their names, and stores one of theirs as custom/<id>", async () => {
-  const zeta = await made("zeta");
-  const alpha = await made("Alpha", { description: "First of mine" });
+  // Byte order would put "Zeta" first.
+  const zeta = await made("Zeta");
+  const alpha = await made("alpha", { description: "First of mine" });
   const id = chat();
   const { body } = await call("GET", `/sessions/${id}/modes`);
   assert.deepEqual(body.modes.map((m) => m.id), ["standard", "code", "custom/alpha", "custom/zeta"]);
-  assert.deepEqual(body.modes[2], { id: "custom/alpha", label: "Alpha", description: "First of mine" });
+  assert.deepEqual(body.modes[2], { id: "custom/alpha", label: "alpha", description: "First of mine" });
   assert.deepEqual(await choose(id, `custom/${alpha}`), { status: 200, body: { mode: "custom/alpha" } });
   assert.equal(getSession(id).mode, "custom/alpha");
   await call("DELETE", `/chat-modes/${zeta}`);
@@ -240,6 +241,7 @@ test("a mode made to work through the code tool has it on in its layer, and its 
   const tools = (await call("GET", `/chat-modes/${mode}/tools`)).body;
   assert.ok(!tools.off.includes("codemode"));
   assert.equal(tools.tools.find((t) => t.name === "codemode").enabled, true);
+  assert.equal(tools.tools.find((t) => t.name === "lazy_one").lazy, undefined, "not called lazy on the mode's page, as in its chats");
   const id = chat();
   await choose(id, `custom/${mode}`);
   const ran = globalThis.lazyOneRan ?? 0;
@@ -251,17 +253,20 @@ test("a mode made to work through the code tool has it on in its layer, and its 
 });
 
 test("the code-tool switch of a mode reaches a running chat at its next start; the code tool in its layer at once", async () => {
-  // Started with the switch on, then off: the pi that runs keeps its presentation, and every tool active.
+  // Started with the switch on, then off: the code tool goes from the mode's layer, as Settings → Tools has it (off),
+  // and the running chat works as in Standard mode at once.
   const on = await made("Was scripted", { codemode: true });
   const a = chat();
   await choose(a, `custom/${on}`);
   await say(a, "Hello");
   assert.equal((await call("PUT", `/chat-modes/${on}`, { codemode: false })).status, 200);
-  const ran = globalThis.lazyOneRan ?? 0;
-  const still = await say(a, SCRIPT);
-  assert.deepEqual(declared(still.requests[0]), ["codemode"]);
-  assert.equal(still.results.find((r) => r.toolName === "lazy_one")?.isError, false);
-  assert.equal(globalThis.lazyOneRan, ran + 1);
+  const layer = (await call("GET", `/chat-modes/${on}/tools`)).body;
+  assert.ok(layer.off.includes("codemode"));
+  assert.equal(layer.tools.find((t) => t.name === "lazy_one").lazy, true);
+  assert.equal((await tool(a, "lazy_one")).lazy, true, "lazy again, with the code tool off");
+  const plain = declared((await say(a, "Hello")).requests[0]);
+  for (const name of ["tools", "bash"]) assert.ok(plain.includes(name), name);
+  for (const name of ["codemode", "lazy_one"]) assert.ok(!plain.includes(name), name);
 
   // Started with it off, then on: the code tool is beside the others now, by the layer, and the lazy tool still lazy.
   const off = await made("Will be scripted");
@@ -272,6 +277,7 @@ test("the code-tool switch of a mode reaches a running chat at its next start; t
   assert.ok(!declared(before.requests[0]).includes("lazy_one"));
   assert.ok(!declared(before.requests[0]).includes("codemode"));
   assert.equal((await call("PUT", `/chat-modes/${off}`, { codemode: true })).status, 200);
+  assert.equal((await tool(b, "lazy_one")).lazy, true, "its pi was started with every tool offered one by one");
   const after = await say(b, "Hello");
   for (const name of ["tools", "bash", "codemode"]) assert.ok(declared(after.requests[0]).includes(name), name);
   assert.ok(!declared(after.requests[0]).includes("lazy_one"));
@@ -280,8 +286,8 @@ test("the code-tool switch of a mode reaches a running chat at its next start; t
   await sessions.stop(a);
   await sessions.stop(b);
   const a2 = declared((await say(a, "Hello")).requests[0]);
-  for (const name of ["tools", "bash", "codemode"]) assert.ok(a2.includes(name), `${name}: the code tool stays on in the layer, beside the others`);
-  assert.ok(!a2.includes("lazy_one"));
+  for (const name of ["tools", "bash"]) assert.ok(a2.includes(name), name);
+  for (const name of ["codemode", "lazy_one"]) assert.ok(!a2.includes(name), name);
   assert.deepEqual(declared((await say(b, "Hello")).requests[0]), ["codemode"]);
 });
 

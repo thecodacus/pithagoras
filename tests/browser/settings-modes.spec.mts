@@ -79,8 +79,8 @@ async function portal(page: Page, { modes = [] as Mode[], refuse = false } = {})
     if (one && method === 'PUT') {
       const i = state.modes.findIndex((m) => m.id === one[1]);
       state.modes[i] = { ...state.modes[i], ...json() };
-      // As the server does: the mode works through the code tool, so it has it on.
-      if (json().codemode === true) state.off[one[1]] = offOf(one[1]).filter((name) => name !== 'codemode');
+      // As the server does: the mode works through the code tool, so it has it on; and not, it has it as the default (off).
+      if (json().codemode !== undefined) state.off[one[1]] = [...offOf(one[1]).filter((name) => name !== 'codemode'), ...(json().codemode ? [] : ['codemode'])];
       return state.modes[i];
     }
     if (one && method === 'DELETE') {
@@ -159,6 +159,10 @@ test('a mode is made, its texts saved, its code tool, model and tools switched a
   expect(writes(state).at(-1)).toBe('PUT /api/chat-modes/focus {"codemode":true}');
   await expect(dialog(page).getByRole('checkbox', { name: 'codemode' })).toBeChecked();
   expect(state.toolReads).toBeGreaterThan(reads);
+  // And switched off, the code tool is off in them again.
+  await dialog(page).getByRole('switch', { name: 'Work through the code tool' }).click();
+  expect(writes(state).at(-1)).toBe('PUT /api/chat-modes/focus {"codemode":false}');
+  await expect(dialog(page).getByRole('checkbox', { name: 'codemode' })).not.toBeChecked();
 
   await expect(dialog(page).getByRole('combobox', { name: 'Provider for this mode' })).toContainText('As the chat would have it');
   await dialog(page).getByRole('combobox', { name: 'Model for this mode' }).click();
@@ -170,7 +174,7 @@ test('a mode is made, its texts saved, its code tool, model and tools switched a
 
   await dialog(page).getByRole('button', { name: /^pi-web-access/ }).click();
   await dialog(page).getByRole('checkbox', { name: 'web_search' }).uncheck();
-  await expect.poll(() => writes(state).at(-1)).toBe('PUT /api/chat-modes/focus/tools {"off":["web_search"]}');
+  await expect.poll(() => writes(state).at(-1)).toBe('PUT /api/chat-modes/focus/tools {"off":["codemode","web_search"]}');
   await expect(dialog(page).getByText('what every chat in this mode starts with')).toBeVisible();
 
   await dialog(page).getByRole('button', { name: 'Delete' }).click();
@@ -181,6 +185,23 @@ test('a mode is made, its texts saved, its code tool, model and tools switched a
   await expect(dialog(page).getByRole('button', { name: /^Research/ })).toBeVisible();
   await expect(dialog(page).getByRole('button', { name: /^Focus/ })).toHaveCount(0);
   expect(writes(state).at(-1)).toBe('DELETE /api/chat-modes/focus');
+});
+
+test('a provider chosen without a model says that a model is needed too, until one is chosen', async ({ page }) => {
+  const state = await portal(page, { modes: [mode('Research')] });
+  await page.goto('/settings/modes');
+  await dialog(page).getByRole('button', { name: /^Research/ }).click();
+  const needed = dialog(page).getByText('Choose a model too: a provider alone is not written into a chat.');
+  await expect(dialog(page).getByRole('combobox', { name: 'Model for this mode' })).toContainText('As the chat would have it');
+  await expect(needed).toHaveCount(0);
+  await dialog(page).getByRole('combobox', { name: 'Provider for this mode' }).click();
+  await page.getByRole('option', { name: /^llama-swap/ }).click();
+  await expect.poll(() => writes(state).at(-1)).toBe('PUT /api/chat-modes/research {"provider":"llama-swap","model":null}');
+  await expect(needed).toBeVisible();
+  await dialog(page).getByRole('combobox', { name: 'Model for this mode' }).click();
+  await page.getByRole('option', { name: /^Model B/ }).click();
+  await expect.poll(() => writes(state).at(-1)).toBe('PUT /api/chat-modes/research {"provider":"llama-swap","model":"model-b"}');
+  await expect(needed).toHaveCount(0);
 });
 
 test('a text the server refuses is said, and the page keeps what was typed', async ({ page }) => {

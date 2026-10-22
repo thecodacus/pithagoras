@@ -1499,6 +1499,7 @@ export function createCustomMode(fields: { label: string; description: string })
 /**
  * Changes what a mode says. Made to work through the code tool, it has that tool on in its layer too, where it had
  * it off: the mode works through it. Switched off in the mode's tools after that, it is the person's word, as in a chat.
+ * Made not to, its layer no longer switches the tool on, which is then as the layers under the mode leave it.
  */
 export function updateCustomMode(
   id: string,
@@ -1508,9 +1509,10 @@ export function updateCustomMode(
   d.transaction(() => {
     const said = Object.entries(fields);
     d.prepare(`UPDATE chat_modes SET ${said.map(([name]) => `${name} = ?, `).join("")}updated_at = datetime('now') WHERE id = ?`).run(...said.map(([, value]) => value), id);
-    if (fields.codemode === 1) {
+    if (fields.codemode !== undefined) {
       const tools = customModeTools(id);
-      setCustomModeTools(id, { off: tools.off.filter((name) => name !== CODEMODE_TOOL), on: [...tools.on, CODEMODE_TOOL] });
+      const on = tools.on.filter((name) => name !== CODEMODE_TOOL);
+      setCustomModeTools(id, fields.codemode === 1 ? { off: tools.off.filter((name) => name !== CODEMODE_TOOL), on: [...on, CODEMODE_TOOL] } : { off: tools.off, on });
     }
   })();
   return customMode(id);

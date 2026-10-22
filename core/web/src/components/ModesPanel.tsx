@@ -288,6 +288,7 @@ function ModeEditor({
               />
             </div>
           </div>
+          {mode.provider && !mode.model && <p className="text-[11px] text-warn">{t("Choose a model too: a provider alone is not written into a chat.")}</p>}
           <p className="text-[11px] text-fg-faint">{t("Written into a chat as it is put in this mode; the chat can still change it.")}</p>
         </div>
       </Section>
@@ -301,7 +302,7 @@ function ModeEditor({
             onChange={(on) => void change({ codemode: on })}
           />
           <div className="rounded-xl border border-line bg-raised/40">
-            {/* Read again once the switch above is saved: the server switches the code tool on in the mode's layer then. */}
+            {/* Read again once the switch above is saved: the server switches the code tool in the mode's layer with it. */}
             <ToolSwitches key={`${mode.id}:${mode.codemode}`} mode={mode.id} />
           </div>
         </div>
