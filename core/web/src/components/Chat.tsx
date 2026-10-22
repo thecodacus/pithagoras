@@ -1392,13 +1392,18 @@ export function Chat({
   const chooseMode = (mode: string) => {
     const chat = session.id;
     setChosenHere({ chat, mode });
+    // One save at a time in a chat: a choice made while the last one is on its way is sent after it, so that the
+    // server is not asked to change the mode while it is still changing it, and the choice made last is the one kept.
+    const before = modeSave.current?.chat === chat ? modeSave.current.saved : undefined;
     const saved = (async () => {
+      await before;
       let done = false;
       await attempt(async () => {
         try {
           await onSetMode(mode);
         } catch (e) {
-          setChosenHere(null);
+          // Shown back as it was, unless another choice was made since: that one is shown.
+          if (modeSave.current === saving) setChosenHere(null);
           throw e;
         }
         done = true;

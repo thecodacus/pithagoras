@@ -143,7 +143,7 @@ export function ModePill({ stored, modes }: { stored: string; modes: ChatMode[] 
   const mode = modes.find((one) => one.id === stored);
   const gone = mode ? undefined : unavailable(stored);
   return (
-    <span title={mode ? modeDescription(mode) : gone!.title} className="max-w-[12rem] truncate rounded-md bg-fg/5 px-2 py-0.5 text-[11px] text-fg-subtle">
+    <span title={mode ? modeDescription(mode) : gone!.title} className="max-w-[12rem] truncate rounded-md bg-fg/5 px-2 py-0.5 text-[11px] text-fg-subtle max-md:max-w-[6rem]">
       {mode ? modeLabel(mode) : gone!.label}
     </span>
   );
