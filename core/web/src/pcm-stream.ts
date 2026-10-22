@@ -38,7 +38,7 @@ function pcmDecoder() {
 }
 
 /** Whatever engine made the audio: nothing here knows which one it was. */
-const incompleteAudio = () => new Error(t("The voice service returned incomplete audio"));
+const incompleteAudio = () => new Error(t("Voice mode's source returned incomplete audio"));
 
 /** A buffer holding `samples`, or none for none: a zero-length AudioBuffer is an error. */
 export function bufferOf(audio: BaseAudioContext, samples: Float32Array, sampleRate = 24000): AudioBuffer | undefined {

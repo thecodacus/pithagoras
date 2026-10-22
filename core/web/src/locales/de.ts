@@ -1938,7 +1938,7 @@ const de: Locale = {
     "New line in the message": "Neue Zeile in der Nachricht",
     "Stop the run": "Den Lauf stoppen",
     // pcm-stream.ts
-    "The voice service returned incomplete audio": "Der Sprachdienst hat unvollständiges Audio geliefert",
+    "Voice mode's source returned incomplete audio": "Die Quelle des Sprachmodus hat unvollständiges Audio geliefert",
     // session-folders.ts
     "Elsewhere": "Anderswo",
     // settings-search.ts

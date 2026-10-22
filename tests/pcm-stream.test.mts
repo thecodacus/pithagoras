@@ -89,8 +89,8 @@ test('audio that stops short is reported without naming an engine, in the portal
       speech.completed.then(() => '', (e: Error) => e.message),
     ]);
   };
-  addLocale({ code: 'xx', name: 'Test', strings: { 'The voice service returned incomplete audio': 'xx: incomplete audio' } });
-  assert.deepEqual(await reasons(), ['The voice service returned incomplete audio', 'The voice service returned incomplete audio']);
+  addLocale({ code: 'xx', name: 'Test', strings: { "Voice mode's source returned incomplete audio": 'xx: incomplete audio' } });
+  assert.deepEqual(await reasons(), ["Voice mode's source returned incomplete audio", "Voice mode's source returned incomplete audio"]);
   setLanguage('xx');
   try {
     assert.deepEqual(await reasons(), ['xx: incomplete audio', 'xx: incomplete audio']);
