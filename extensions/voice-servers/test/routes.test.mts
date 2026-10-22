@@ -1,6 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { once } from "node:events";
 import { readFileSync, statSync } from "node:fs";
+import http from "node:http";
+import type { AddressInfo } from "node:net";
 import path from "node:path";
 import { inProcessHome } from "../../../tests/helpers.mts";
 import { serveVoiceServers, speechServer } from "./portal.mts";
@@ -120,6 +123,20 @@ test("an address that does not end in /audio/speech, a list this page does not r
   }
   upstream.answers.delete("/odd/audio/voices");
   assert.deepEqual(await said(await read(`${upstream.at}/odd/audio/speech`)), [502, `Could not read ${upstream.at}/odd/audio/voices: HTTP 404`]);
+});
+
+test("a server that takes the connection and does not answer is given up on after 10 seconds", async () => {
+  const silent = http.createServer(() => {});
+  silent.listen(0, "127.0.0.1");
+  await once(silent, "listening");
+  const where = `http://127.0.0.1:${(silent.address() as AddressInfo).port}`;
+  try {
+    const answer = await fetch(`${at}/server-voices`, { method: "POST", headers: json, body: JSON.stringify({ ttsUrl: `${where}/v1/audio/speech` }) });
+    assert.deepEqual(await said(answer), [502, `Could not read ${where}/v1/audio/voices: The operation was aborted due to timeout`]);
+  } finally {
+    silent.closeAllConnections();
+    silent.close();
+  }
 });
 
 test("voice mode listens and speaks through these servers once there is a recognition address saved, until it is stopped", async () => {

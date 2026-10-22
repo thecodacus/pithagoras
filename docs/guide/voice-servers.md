@@ -26,7 +26,7 @@ it: see [Upgrading](/guide/upgrading#voice-s-service-is-an-extension).
 | **Speech synthesis URL** | Where a reply is sent to be spoken: an OpenAI-style `…/v1/audio/speech`. Empty: recognition alone, so dictation works and replies are not spoken. |
 | **Speech synthesis model** | Sent as `model` where it is set, such as `kokoro`. |
 | **Voices** | The voices the speech server has, one per line: its id, or `id = Name`. These are what an agent's voice is chosen from on the Agents page. |
-| **Read voices from the server** | Fills **Voices** from the list the speech server gives at `…/audio/voices`, beside a speech synthesis URL that ends in `/audio/speech` (the shape Kokoro-FastAPI answers, `{ voices: [...] }`). The list is shown, not saved, until you save. |
+| **Read voices from the server** | Fills **Voices** from the list the speech server gives at `…/audio/voices`, beside a speech synthesis URL that ends in `/audio/speech` (the shape Kokoro-FastAPI answers, `{ voices: [...] }`). The list is shown, not saved, until you save. A server that has not answered within 10 seconds is said to have failed. |
 | **Voice** | Its own choice: what an agent speaks with that has no voice of its own, or one this list no longer has. Empty, no voice is sent and the server picks. |
 
 **Save** keeps them all. Leaving the page with changes not saved asks first.

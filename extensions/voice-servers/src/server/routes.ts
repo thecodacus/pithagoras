@@ -20,7 +20,8 @@ function listed(answer: unknown): ServerVoice[] | undefined {
  *   GET  /settings       the addresses, models, language and voices, and whether voice mode listens and speaks through
  *                        these servers now (`chosen`)
  *   PUT  /settings       the same, all of them: what is empty is left out
- *   POST /server-voices  {ttsUrl}: the voices the speech server lists beside that address, which need not be saved yet
+ *   POST /server-voices  {ttsUrl}: the voices the speech server lists beside that address, which need not be saved yet,
+ *                        as it answers within 10 seconds
  *   PUT  /chosen         {chosen}: voice mode listens and speaks through these servers from now on, or no longer
  */
 export function routes(router: Router): void {
@@ -46,7 +47,8 @@ export function routes(router: Router): void {
       return res.status(400).json({ error: (e as Error).message });
     }
     try {
-      const answer = await fetch(at, { redirect: "error" });
+      // Not the portal's 30-minute wait: a server that takes the connection and does not answer keeps the page busy.
+      const answer = await fetch(at, { redirect: "error", signal: AbortSignal.timeout(10_000) });
       if (!answer.ok) throw new Error(`HTTP ${answer.status}`);
       const voices = listed(await answer.json().catch(() => undefined));
       if (!voices) return res.status(400).json({ error: "The server's list of voices is not one this page reads" });
