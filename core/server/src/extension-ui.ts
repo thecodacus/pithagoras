@@ -119,7 +119,14 @@ function revOf(dir: string, ...files: string[]): string {
     hash.update(`${at}\0${stat.mtimeMs}\0${stat.size}\n`);
     return true;
   };
-  for (const file of files) add(file, file);
+  for (const file of files) {
+    try {
+      add(file, file);
+    } catch {
+      // Gone since the half was found: another revision, and the next look finds the half without it.
+      hash.update(`${file}\0gone\n`);
+    }
+  }
   let left = REV_FILES;
   const walk = (folder: string, at: string) => {
     let entries;

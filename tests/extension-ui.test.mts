@@ -141,6 +141,18 @@ test("a folder of more files than a revision looks at: the first by their path c
   assert.notEqual(rev(), before, 'the stylesheet');
 });
 
+test("a half whose module or stylesheet is gone by the time its revision is read has another revision, and reading it does not throw", () => {
+  const dir = pkg({ client: './web/client.js', style: './web/client.css', server: './server.js' }, ['server.js', 'web/client.js', 'web/client.css']);
+  const client = clientHalf(dir)!, server = serverHalf(dir)!;
+  const before = [clientHalf(dir)!.rev, serverHalf(dir)!.rev];
+  // Found before, read after: as a sync that waits for the one before it reads them.
+  rmSync(path.join(dir, 'web/client.css'));
+  rmSync(path.join(dir, 'server.js'));
+  assert.notEqual(client.rev, before[0], 'the stylesheet gone');
+  assert.notEqual(server.rev, before[1], 'the module gone');
+  assert.equal(serverHalf(dir), undefined, 'and looked for again, the half is not there');
+});
+
 test('a package with no browser half, or one it cannot have, has none', () => {
   assert.equal(clientHalf(pkg(undefined, ['index.ts'])), undefined, 'declares none');
   assert.equal(clientHalf(pkg({ client: './web/client.js' }, ['index.ts'])), undefined, 'names a file that is not there');
