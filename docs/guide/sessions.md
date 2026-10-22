@@ -162,8 +162,8 @@ A mode of yours has:
   you changed it in the chat since.
 - **Work through the code tool**: its chats work as in Code mode, the code tool
   alone offered to the model. Switching it on switches the code tool on in the
-  mode's tools too. Switching it off leaves the tools as they are: the code tool
-  stays on there, offered beside the others, until you switch it off in the list.
+  mode's tools too, and switching it off takes that back: the code tool is then
+  as Settings → Tools, the chat's agent and its project leave it.
 - **Tools**: what every chat in the mode starts with, one more tool layer. It is
   held against [Settings → Tools](/guide/extensions#and-what-every-chat-starts-with)
   and comes above a chat's agent, project and routine, so a tool the mode leaves
@@ -177,7 +177,9 @@ An edit reaches the chats already in the mode as follows: its tools and its
 instructions at once, from their next message; whether it works through the
 code tool when each chat's pi next starts, since which tools are offered one by
 one is fixed then; its model and effort never, as they were written into each
-chat when it was put in the mode.
+chat when it was put in the mode. The code tool that switch also switches is one
+of the mode's tools, so it reaches the running chats at once: where it goes off,
+a chat that worked through it works as in Standard mode from its next message.
 
 Deleting a mode asks first. Its chats keep it, and their header says it is not
 available now; they work as in Standard mode from their next message. A new mode

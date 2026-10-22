@@ -189,7 +189,7 @@ export function ModePill({ stored, modes }: { stored: string; modes: ChatMode[] 
   return (
     <span
       title={mode ? modeDescription(mode) : gone!.title}
-      className={`max-w-[12rem] truncate rounded-md px-2 py-0.5 text-[11px] ${mode?.confirm ? "bg-warn/10 text-warn" : "bg-fg/5 text-fg-subtle"}`}
+      className={`max-w-[12rem] truncate rounded-md px-2 py-0.5 text-[11px] max-md:max-w-[6rem] ${mode?.confirm ? "bg-warn/10 text-warn" : "bg-fg/5 text-fg-subtle"}`}
     >
       {mode ? modeLabel(mode) : gone!.label}
     </span>

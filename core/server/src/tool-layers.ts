@@ -12,14 +12,23 @@ import { defaultsFor, exceptionsFor, heldOffUnshown, toolEnabled, toolSource } f
 export const isToolList = (value: unknown): value is string[] => Array.isArray(value) && value.every((name) => typeof name === "string");
 
 /**
+ * A tool's lazy mark as a page shows it, where the chats it is shown for work through the code tool alone (`scripted`):
+ * there no tool is lazy (see lazyOf in pi/sdk-client.ts), as nothing is offered one by one and a script reaches every
+ * tool that is on, but an MCP server's tool is still behind `mcp`.
+ */
+export const scriptedMark = (mark: { lazy?: true; mcp?: string }, scripted?: boolean): { lazy?: true; mcp?: string } =>
+  scripted && mark.mcp === undefined ? {} : mark;
+
+/**
  * A layer's tools as its page shows them: what the portal has seen registered
  * where the layer's chats and runs work (`folder`; everywhere for a layer that
  * has no folder, a mode's), on or off by `below` — every layer under this one —
  * bent by what this one says. `defaultOn` is what the layers under it say, which
  * is what this one disagrees with. Shaped like a project's and a chat's, so the
- * page draws them all the same way.
+ * page draws them all the same way. `scripted`: the layer's chats work through
+ * the code tool alone (see scriptedMark).
  */
-export function layerTools(folder: string | undefined, below: string[], exceptions: { off: string[]; on: string[] }, unwatched = false) {
+export function layerTools(folder: string | undefined, below: string[], exceptions: { off: string[]; on: string[] }, unwatched = false, scripted = false) {
   const servers = mcpServerNames();
   const lazy = lazyMarks();
   return {
@@ -29,7 +38,7 @@ export function layerTools(folder: string | undefined, below: string[], exceptio
       source: toolSource(tool.name, tool.source, servers),
       enabled: toolEnabled(tool.name, below, exceptions),
       defaultOn: !below.includes(tool.name),
-      ...lazy(tool),
+      ...scriptedMark(lazy(tool), scripted),
     })),
     live: false,
     names: toolGroupNames(),

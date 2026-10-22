@@ -12,6 +12,7 @@ import { HEARTBEAT_ROLE } from "./pi/heartbeat-names.js";
 import path from "node:path";
 import type { Draft, PiClient, PiTool, PromptTaken } from "./pi/types.js";
 import { effectiveOff, exceptionsFor, heldOffUnshown, toolEnabled, toolSource } from "./tool-policy.js";
+import { scriptedMark } from "./tool-layers.js";
 import { unlisted } from "./mcp-offer.js";
 import { projectOf } from "./workspaces.js";
 import { findServerBuiltin, picturesRefused, runBuiltin } from "./pi/builtins.js";
@@ -2794,7 +2795,7 @@ class SessionManager extends EventEmitter {
           enabled: toolEnabled(name, defaults, exceptions),
           defaultOn: !defaults.includes(name),
           // Not offered one by one but found through the `tools` tool, or an MCP server's through `mcp`: the page says so beside the switch.
-          ...(scripted && mark.mcp === undefined ? {} : mark),
+          ...scriptedMark(mark, scripted),
         };
       }),
       live: Boolean(listed.length),
