@@ -115,6 +115,11 @@ export function recordLog(level: LogLevel, text: string): LogLine {
   return line;
 }
 
+/** `listener` is called with each line as it is kept, in the code that printed it: what an extension printed is kept apart for it (extension-host.ts). */
+export function onLogLine(listener: (line: LogLine) => void): void {
+  listeners.add(listener);
+}
+
 const RANK: Record<LogLevel, number> = { debug: 0, info: 1, warn: 2, error: 3 };
 
 /**
@@ -248,7 +253,8 @@ const NODE_WARNING = /^\(node:\d+\) (?:\[[A-Z0-9_]+\] )?\w*Warning:/;
  * `console.error`, so they arrive here by that way (a `process.on("warning")`
  * listener would record each a second time); they are warnings, not errors, and
  * are filed as such. An uncaught exception is not recorded: it ends the process
- * and the list with it, so what it printed is only in the host's log.
+ * and the list with it, so what it printed is only in the host's log. One of an
+ * extension's server half does not end it: it is said, and kept (extension-host.ts).
  */
 export function installLogCapture() {
   if (installed) return;

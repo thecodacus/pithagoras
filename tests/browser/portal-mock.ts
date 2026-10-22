@@ -81,7 +81,7 @@ export function extensionOnDisk(dir: string) {
     name: meta.name,
     version: meta.version,
     ...(Array.isArray(declared.themes) ? { themes: declared.themes } : {}),
-    ...(client ? { entry: `${prefix}${path.basename(client)}?v=test` } : {}),
+    ...(client ? { rev: 'test', entry: `${prefix}${path.basename(client)}?v=test` } : {}),
     ...(client && typeof declared.style === 'string' ? { style: `${prefix}${path.relative(served!, path.resolve(dir, declared.style)).split(path.sep).join('/')}?v=test` } : {}),
     ...(typeof declared.server === 'string' ? { server: `/api/x/${meta.name}` } : {}),
   };

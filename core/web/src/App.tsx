@@ -16,6 +16,7 @@ import { lazyComponent } from "./lazy";
 import { ThemeSwitcher } from "./components/ThemeSwitcher";
 import { ConfirmHost } from "./components/ConfirmDialog";
 import { UpdateNotice } from "./components/UpdateNotice";
+import { ExtensionsLeftBehind } from "./components/ExtensionsLeftBehind";
 import { ErrorBanner, ghostCls } from "./components/SettingsUi";
 import { pollWhileVisible, reconnectDelay } from "./poll";
 import { APP_NAME, finishedRuns, tabTitle } from "./attention";
@@ -27,7 +28,7 @@ import { reconcile } from "./reconcile";
 import { useStable } from "./use-stable";
 import { useDialogFocus } from "./dialog-focus";
 import { t, useLanguage } from "./i18n";
-import { Here, setNavigate, startExtensions } from "./extensions/loader";
+import { followInstalled, Here, setNavigate, startExtensions } from "./extensions/loader";
 import { extensionMessage } from "./extensions/channel";
 import { serverPush, setChatOnScreen } from "./extensions/server-feed";
 import { titleOf, useSlot } from "./extensions/slots";
@@ -259,6 +260,8 @@ function Shell({
 
   const refreshSessions = useCallback(async () => {
     const r = await api.sessions();
+    // What is installed changed since the page last went through it, wherever it was changed: it goes through it again.
+    followInstalled(r.extensions);
     // Kept as it was when it says the same: a list asked for every few seconds is
     // mostly unchanged, and a new array is a draw of the portal for nothing.
     setSessions((prev) => reconcile(prev, r.sessions));
@@ -722,6 +725,7 @@ function Shell({
           <span className="truncate text-sm text-fg">{(extensionPage && titleOf(extensionPage)) || active?.title || "Pithagoras"}</span>
         </header>
         <UpdateNotice onDetails={openUpdate} />
+        <ExtensionsLeftBehind />
         {error && <ErrorBanner className="mx-4 mt-2" onClose={() => setError(null)}>{error}</ErrorBanner>}
         {/* Not for the first miss: a server restarting, or a wifi that blinked,
             is back before it can be read. Two in a row is an outage. */}

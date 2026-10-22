@@ -8,7 +8,7 @@ import { useSlot } from "../extensions/slots";
 import { useCached } from "../settings-cache";
 import { isEnter } from "../shortcuts";
 import { tabKeys } from "../tab-keys";
-import { msg, t, tp } from "../i18n";
+import { formatDateTime, msg, t, tp } from "../i18n";
 import { confirmDialog } from "./ConfirmDialog";
 import { InstallProgress, installExtension, type InstallStep } from "./ExtensionInstall";
 import { PackageCatalog } from "./PackageCatalog";
@@ -132,8 +132,9 @@ export function ExtensionsPanel({
   const [busy, setBusy] = useState<string | null>(null);
   // Which package an install of more than one has come to.
   const [step, setStep] = useState<InstallStep | null>(null);
-  // Why a package's interface is not in the page, or its server half not running, where it brings one: see extensions/loader.ts.
-  const { failures, serverFailures } = useExtensions();
+  // Why a package's interface is not in the page, or failed in a page (this one or another), or its server half is not
+  // running, where it brings one: see extensions/loader.ts.
+  const { failures, clientFailures, serverFailures, serverCrashes } = useExtensions();
   const ownPages = useSlot("settings.page");
   // The same, readable by a second Enter that comes before the draw.
   const busyRef = useRef(false);
@@ -335,15 +336,40 @@ export function ExtensionsPanel({
                       )}
                       {/* Said where it is not the usual one: a package a project brings has no switch here, and this is why. */}
                       {ext.scope && !/^user/i.test(ext.scope) && <span className={pillCls}>{ext.scope}</span>}
-                      {failures[ext.name] && (
+                      {failures[ext.name] ? (
                         <p role="alert" className="basis-full break-words text-xs text-warn">
                           {t("Its interface could not be loaded: {reason}", { reason: failures[ext.name] })}
                         </p>
+                      ) : (
+                        clientFailures[ext.name] && (
+                          <p role="alert" className="basis-full break-words text-xs text-warn">
+                            {t("Its interface failed in a page: {reason}", { reason: clientFailures[ext.name] })}
+                          </p>
+                        )
                       )}
-                      {serverFailures[ext.name] && (
-                        <p role="alert" className="basis-full break-words text-xs text-warn">
-                          {t("Its server half could not be started: {reason}", { reason: serverFailures[ext.name] })}
-                        </p>
+                      {serverCrashes[ext.name] ? (
+                        <div role="alert" className="basis-full text-xs text-warn">
+                          <p className="break-words">
+                            {t("Its server half crashed at {time}, and is off until another version of it is installed, or it is switched off and on: {error}", {
+                              time: formatDateTime(serverCrashes[ext.name].at),
+                              error: serverCrashes[ext.name].error,
+                            })}
+                          </p>
+                          {serverCrashes[ext.name].lines.length > 0 && (
+                            <details className="mt-1">
+                              <summary className="cursor-pointer text-fg-subtle">{t("What it said last")}</summary>
+                              <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-md bg-fg/5 p-2 font-mono text-[10px] leading-4 text-fg-muted">
+                                {serverCrashes[ext.name].lines.join("\n")}
+                              </pre>
+                            </details>
+                          )}
+                        </div>
+                      ) : (
+                        serverFailures[ext.name] && (
+                          <p role="alert" className="basis-full break-words text-xs text-warn">
+                            {t("Its server half could not be started: {reason}", { reason: serverFailures[ext.name] })}
+                          </p>
+                        )
                       )}
                     </Card>
                   );

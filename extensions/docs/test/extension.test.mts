@@ -500,6 +500,18 @@ test('the Documents extension installs what it needs to run when it is missing, 
   assert.equal(log.length, 2);
 });
 
+test('a new revision of the server half asking while the revision before installs is one install', async () => {
+  const { dir, npm, asked } = packageNeeding(`sleep 0.3; ${INSTALLS}`);
+  // The module read again, as the portal loads it under another revision of the half.
+  const next: typeof import('../deps.js') = await import(`${new URL('../deps.js', import.meta.url).href}?revision=next`);
+  assert.notEqual(next.ensureDependencies, ensureDependencies);
+  const log: string[] = [];
+  const first = ensureDependencies((line: string) => log.push(line), { dir, npm });
+  const second = next.ensureDependencies((line: string) => log.push(line), { dir, npm });
+  assert.deepEqual(await Promise.all([first, second]), [true, true]);
+  assert.deepEqual(asked(), ['ci --omit=dev --ignore-scripts --no-audit --no-fund']);
+});
+
 test('a dependency at another version than the lock names is installed again, one it brings along as well', async () => {
   const { dir, npm, asked } = packageNeeding(INSTALLS);
   // What an older lock installed: a later commit moved `a` on, and `a` brings another `d`.
