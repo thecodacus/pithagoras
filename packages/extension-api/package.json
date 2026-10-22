@@ -29,7 +29,8 @@
     "server.d.ts",
     "build.mjs",
     "tailwind.mjs",
-    "README.md"
+    "README.md",
+    "NOTICE"
   ],
   "peerDependencies": {
     "@types/express": "^5",
