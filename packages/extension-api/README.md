@@ -47,11 +47,12 @@ pithagoras-hello/
 Run in the extension's folder, this adds what it is built with to its `package.json` as `devDependencies`:
 
 ```sh
-npm install --save-dev @pithagoras/extension-api esbuild typescript @types/react@18 @types/node @types/express@5
+npm install --save-dev @pithagoras/extension-api esbuild typescript tailwindcss@3 postcss @types/react@18 @types/node @types/express@5
 ```
 
-Code that imports `react-dom` needs `@types/react-dom@18` as well, and `tailwind: true` needs `tailwindcss@3` and
-`postcss`. They are peers of this package: it uses the versions the extension installs.
+`tailwindcss` and `postcss` are for `tailwind: true`, as the build below uses; leave them out for a build without
+it. Code that imports `react-dom` needs `@types/react-dom@18` as well. They are peers of this package: it uses the
+versions the extension installs.
 
 ```js
 // build.mjs
