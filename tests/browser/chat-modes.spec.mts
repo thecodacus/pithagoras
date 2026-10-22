@@ -3,7 +3,8 @@ import { test, expect, mockPortal, reply } from './portal-mock';
 
 /**
  * Chat modes: the picker above the message box of a chat that has said nothing, what choosing a mode sends, what a
- * first message waits for, and the mode in the header once the chat has started.
+ * first message waits for, the mode in the header once the chat has started, and the code tool in the tools of a chat
+ * in Code mode, which its switch cannot turn off.
  */
 const MODES = [
   { id: 'standard', label: 'Standard mode', description: 'The agent as this chat would have it anyway: the tools that Settings → Tools, its agent and its project switch on.' },
@@ -23,6 +24,10 @@ interface Portal {
   hold: Promise<void> | null;
   /** The PUT fails with this. */
   fail: string | null;
+  /** What each PUT of the chat's tools sent. */
+  toolPuts: string[][];
+  /** The PUT of the tools is refused with this. */
+  toolsFail: unknown;
 }
 
 /**
@@ -30,7 +35,7 @@ interface Portal {
  * `b`, in Standard, that has said nothing.
  */
 async function portal(page: Page, { mode = null as string | null, said = false, modes = MODES } = {}): Promise<Portal> {
-  const state: Portal & { mode: string | null } = { puts: [], prompts: [], hold: null, fail: null, mode };
+  const state: Portal & { mode: string | null; off: string[] } = { puts: [], prompts: [], hold: null, fail: null, toolPuts: [], toolsFail: null, mode, off: [] };
   const at = new Date().toISOString();
   const session = (id: string) => ({
     id, title: id === 'a' ? 'A chat' : 'Another chat', workspace: '/w/site', status: 'idle', kind: 'task', pinned: false, updated_at: at,
@@ -57,6 +62,17 @@ async function portal(page: Page, { mode = null as string | null, said = false, 
       return { ok: true };
     }
     if (rest === '/config' || rest === '/models') return config;
+    if (rest === '/tools' && method === 'PUT') {
+      state.toolPuts.push(json().off);
+      if (state.toolsFail) return reply(409, state.toolsFail);
+      state.off = json().off;
+      return { off: state.off };
+    }
+    // The code tool on, as Code mode has it; held there, as the server says of a mode that switches it on.
+    if (rest === '/tools') return { live: false, off: state.off, names: {}, tools: [
+      { name: 'bash', source: 'built in', enabled: !state.off.includes('bash'), defaultOn: true },
+      { name: 'codemode', source: 'codemode', inline: true, enabled: !state.off.includes('codemode'), defaultOn: true, ...(id === 'a' && state.mode === 'code' ? { byMode: true } : {}) },
+    ] };
   }, { streams: 'open', settings: true });
   // Out of the way, so the sidebar's chat is not what the test reaches for.
   await page.addInitScript(() => localStorage.setItem('sidebarCollapsed', 'true'));
@@ -282,4 +298,55 @@ test('a chat that has said nothing in a mode not offered now names it on the chi
   await expect(menu(page)).toHaveCount(0);
   await page.waitForTimeout(300);
   expect(state.puts).toEqual([{ mode: 'code' }]);
+});
+
+/** The chat's tools, opened, with every group open. */
+async function tools(page: Page) {
+  await page.getByRole('button', { name: /^(Which tools this conversation may use|Welche Tools)/ }).click();
+  const list = page.locator('.composer-menu');
+  await expect(list.getByRole('button', { name: /^(Code mode|Code-Modus)/ })).toBeVisible();
+  const shut = list.locator('button[aria-expanded="false"]');
+  while (await shut.count()) await shut.first().click();
+  return list;
+}
+const HELD = "This chat's mode works through the code tool, so it stays on: start a chat in Standard mode to work without it.";
+
+test("in a chat in Code mode the code tool's switch is on and cannot be flipped, and says why; the other switches are as before", async ({ page }) => {
+  const state = await portal(page, { mode: 'code' });
+  const list = await tools(page);
+  const tick = list.getByRole('checkbox', { name: 'codemode' });
+  await expect(tick).toBeChecked();
+  await expect(tick).toBeDisabled();
+  await expect(list.getByText(HELD, { exact: true })).toBeVisible();
+  // Its group has no switch for all of it: nothing in it can be switched.
+  await expect(list.getByRole('button', { name: /^all (on|off)$/ })).toHaveCount(1);
+  await list.getByText('codemode', { exact: true }).click({ force: true });
+  await page.waitForTimeout(300);
+  expect(state.toolPuts).toEqual([]);
+  await expect(tick).toBeChecked();
+  await list.getByRole('checkbox', { name: 'bash' }).uncheck();
+  await expect.poll(() => state.toolPuts).toEqual([['bash']]);
+});
+
+test('a Standard chat switches the code tool like any other, and says why in German when the server holds it on', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('pithagoras.language', 'de'));
+  const state = await portal(page);
+  // Put in Code mode from another tab after this list was drawn: the server refuses, with its code.
+  state.toolsFail = { error: HELD, code: 'codemode-held' };
+  const list = await tools(page);
+  const tick = list.getByRole('checkbox', { name: 'codemode' });
+  await expect(tick).toBeEnabled();
+  await expect(list.getByText('Der Modus dieses Chats', { exact: false })).toHaveCount(0);
+  await tick.uncheck();
+  await expect.poll(() => state.toolPuts).toEqual([['codemode']]);
+  await expect(list.getByRole('alert')).toHaveText('Dieser Schalter wurde nicht gespeichert: Der Modus dieses Chats arbeitet über das Code-Tool, daher bleibt es an: Starte einen Chat im Standardmodus, um ohne es zu arbeiten.');
+  await expect(tick).toBeChecked();
+});
+
+test('the reason beside the held switch is in German too', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('pithagoras.language', 'de'));
+  await portal(page, { mode: 'code' });
+  const list = await tools(page);
+  await expect(list.getByRole('checkbox', { name: 'codemode' })).toBeDisabled();
+  await expect(list.getByText('Der Modus dieses Chats arbeitet über das Code-Tool, daher bleibt es an: Starte einen Chat im Standardmodus, um ohne es zu arbeiten.', { exact: true })).toBeVisible();
 });

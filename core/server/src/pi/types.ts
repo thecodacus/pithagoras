@@ -49,6 +49,8 @@ export interface PiTool {
   enabled: boolean;
   /** Whether it is on by default, so the page can say where a chat disagrees. */
   defaultOn?: boolean;
+  /** The code tool, on in a chat whose mode switches it on: the chat's own switch cannot turn it off (see setTools). */
+  byMode?: true;
   /** Not offered one by one but found through the `tools` tool: a tool marked lazy. It is on, and switched like any other. */
   lazy?: true;
 }

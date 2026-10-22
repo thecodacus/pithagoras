@@ -109,9 +109,10 @@ checked. Choose before the first message: from then on the chat keeps it.
   stays behind the adapter's `mcp` tool, which a script calls like any other.
   A script has no time limit; **Stop** ends it. The
   [guard](/guide/security#marking-untrusted-output) holds each call a script
-  makes as it holds the model's own. Switching `codemode` off in the chat's
-  tools has the chat work as in Standard mode, though its header still says
-  Code mode.
+  makes as it holds the model's own. In the chat's tools, `codemode` is on and
+  its switch cannot turn it off, with a line that says why: to work without the
+  code tool, start a chat in Standard mode. The other switches work as in any
+  chat.
 - **An extension's modes** come last, after the portal's own and
   [yours](#modes-you-make): an installed extension can offer modes of its own,
   and what such a mode does is the extension's
@@ -169,7 +170,8 @@ A mode of yours has:
   and comes above a chat's agent, project and routine, so a tool the mode leaves
   as Settings → Tools has it is still decided by them: a mode cannot switch on,
   over a project, a tool that Settings → Tools has on. A chat's own switches are
-  still the last word.
+  still the last word, but where the mode switches the code tool on, they cannot
+  switch it off, as in Code mode.
 
 These are saved as they are changed, except the texts.
 

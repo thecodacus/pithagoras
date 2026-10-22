@@ -9,7 +9,8 @@ import { freePort, inProcessHome, runToEnd, scratch, serverEnv, startServer, wit
 /**
  * Code mode as a switch of a chat, against the whole server: off unless a
  * chat says otherwise, the chat's choice stored with the chat, and a default
- * the operator can change like any other.
+ * the operator can change like any other. Held on in a chat whose mode works
+ * through it.
  */
 const home = inProcessHome("pithagoras-codemode-switch-");
 mkdirSync(process.env.PI_CODING_AGENT_DIR, { recursive: true });
@@ -58,6 +59,34 @@ test("switched on in one chat, it is that chat's, kept with it, and the others k
   // And off again: what the default says, so nothing is left written down.
   await json(`/api/sessions/${chat.id}/tools`, "PUT", { off: ["codemode"] });
   assert.equal(codemodeOf(await json(`/api/sessions/${chat.id}/tools`)).enabled, false);
+});
+
+test("in a chat whose mode works through the code tool, its switch cannot turn the code tool off; a Standard chat's can", async () => {
+  const chat = await json("/api/sessions", "POST", {});
+  await json(`/api/sessions/${chat.id}/modes`, "PUT", { mode: "code" });
+  const shown = codemodeOf(await json(`/api/sessions/${chat.id}/tools`));
+  assert.deepEqual([shown.enabled, shown.byMode], [true, true]);
+  const res = await send(`/api/sessions/${chat.id}/tools`, "PUT", { off: ["bash", "codemode"] });
+  assert.equal(res.status, 409);
+  assert.deepEqual(await res.json(), {
+    error: "This chat's mode works through the code tool, so it stays on: start a chat in Standard mode to work without it.",
+    code: "codemode-held",
+  });
+  // Nothing of the list was written, bash included.
+  assert.deepEqual(db.sessionTools(chat.id), { off: [], on: [] });
+  const after = await json(`/api/sessions/${chat.id}/tools`);
+  assert.equal(codemodeOf(after).enabled, true);
+  assert.equal(after.tools.find((t) => t.name === "bash").enabled, true);
+  // Every other switch is the chat's as before.
+  const saved = await json(`/api/sessions/${chat.id}/tools`, "PUT", { off: ["bash"] });
+  assert.ok(saved.off.includes("bash") && !saved.off.includes("codemode"));
+  assert.deepEqual(db.sessionTools(chat.id), { off: ["bash"], on: [] });
+
+  const plain = await json("/api/sessions", "POST", {});
+  await json(`/api/sessions/${plain.id}/tools`, "PUT", { off: [] });
+  assert.equal(codemodeOf(await json(`/api/sessions/${plain.id}/tools`)).byMode, undefined);
+  await json(`/api/sessions/${plain.id}/tools`, "PUT", { off: ["codemode"] });
+  assert.equal(codemodeOf(await json(`/api/sessions/${plain.id}/tools`)).enabled, false);
 });
 
 test("code mode cannot be marked lazy: its row says so, and a mark that names it is refused", async () => {
