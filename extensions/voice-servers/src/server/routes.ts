@@ -6,7 +6,11 @@ import { checkSettings, checkUrl, saveSettings, settings, type ServerVoice } fro
 function listed(answer: unknown): ServerVoice[] | undefined {
   const voices = (answer as { voices?: unknown } | undefined)?.voices;
   if (!Array.isArray(voices)) return undefined;
-  const read = voices.map((v) => (typeof v === "string" ? { id: v, name: v } : typeof v?.id === "string" && (v.name === undefined || typeof v.name === "string") ? { id: v.id, name: v.name ?? v.id } : undefined));
+  const read = voices.map((v) => {
+    if (typeof v === "string") return { id: v, name: v };
+    if (typeof v?.id === "string" && (v.name === undefined || typeof v.name === "string")) return { id: v.id, name: v.name || v.id };
+    return undefined;
+  });
   return read.every((v) => v !== undefined) ? read : undefined;
 }
 

@@ -97,9 +97,9 @@ test("the voices are read beside the speech address, in either shape a server li
   assert.deepEqual(await names.json(), { voices: [{ id: "af_heart", name: "af_heart" }, { id: "bm_george", name: "bm_george" }] });
   const asked = upstream.heard.at(-1)!;
   assert.deepEqual([asked.method, asked.path, "authorization" in asked.headers], ["GET", "/v1/audio/voices", false]);
-  upstream.answers.set("/kokoro/v1/audio/voices", { type: "application/json", body: JSON.stringify({ voices: [{ id: "af_heart", name: "Heart" }, { id: "bm_george" }] }) });
+  upstream.answers.set("/kokoro/v1/audio/voices", { type: "application/json", body: JSON.stringify({ voices: [{ id: "af_heart", name: "Heart" }, { id: "bm_george" }, { id: "am_adam", name: "" }] }) });
   const entries = await read(` ${upstream.at}/kokoro/v1/audio/speech `);
-  assert.deepEqual(await entries.json(), { voices: [{ id: "af_heart", name: "Heart" }, { id: "bm_george", name: "bm_george" }] });
+  assert.deepEqual(await entries.json(), { voices: [{ id: "af_heart", name: "Heart" }, { id: "bm_george", name: "bm_george" }, { id: "am_adam", name: "am_adam" }] });
   assert.deepEqual(await shown(), { sttUrl: RECOGNITION, chosen: false });
 });
 
