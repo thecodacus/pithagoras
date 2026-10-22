@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { inProcessHome } from "./server-harness.mjs";
 
 /**
@@ -88,15 +88,17 @@ test("a folder installed again runs every file of its halves as they are now, wi
     writeFileSync(path.join(dir, file), text);
   };
   write("package.json", JSON.stringify({ name: "in-place", version: "1.0.0", type: "module", keywords: ["pi-package"], pi: {}, pithagoras: { server: "./server.js", client: "./web/client.js" } }));
-  // Its module answers with what it says itself and what a file it imports says; each revision stopped is counted.
-  const server = (said) => `import { said as lib } from "./lib.js";
+  // Its module answers with what it says itself, and with what a file it imports says and holds; each revision stopped
+  // is counted.
+  const server = (said) => `import { said as lib, marks } from "./lib.js";
 export default function (portal) {
-  portal.router.get("/said", (req, res) => res.json({ server: ${JSON.stringify(said)}, lib }));
+  portal.router.get("/said", (req, res) => res.json({ server: ${JSON.stringify(said)}, lib, marks }));
   return () => { globalThis.inPlaceStops = (globalThis.inPlaceStops ?? 0) + 1; };
 }
 `;
+  const lib = (said) => `export const said = ${JSON.stringify(said)};\nexport const marks = [];\n`;
   write("server.js", server("first"));
-  write("lib.js", 'export const said = "first";\n');
+  write("lib.js", lib("first"));
   write("web/client.js", 'import { part } from "./part.js";\nexport default function () { return part; }\n');
   write("web/part.js", 'export const part = "first";\n');
   const said = async () => {
@@ -106,20 +108,25 @@ export default function (portal) {
   const listed = async () => (await (await fetch(`${base}/extension-ui`)).json()).extensions.find((e) => e.name === "in-place");
 
   await send("/packages", "POST", { spec: dir });
-  assert.deepEqual(await said(), { server: "first", lib: "first" });
+  // The first revision the portal starts imports its files as anything else in the process does: one lib.js.
+  const plain = await import(pathToFileURL(path.join(dir, "lib.js")).href);
+  plain.marks.push("the test's");
+  assert.deepEqual(await said(), { server: "first", lib: "first", marks: ["the test's"] });
   const first = await listed();
 
-  // Only the file its module imports changed: that is what answers now.
-  write("lib.js", 'export const said = "second, and longer";\n');
+  // Only the file its module imports changed: that is what answers now, a lib.js of its revision's own, and what
+  // imported lib.js itself keeps the first one.
+  write("lib.js", lib("second, and longer"));
   await send("/packages", "POST", { spec: dir });
-  assert.deepEqual(await said(), { server: "first", lib: "second, and longer" });
+  assert.deepEqual(await said(), { server: "first", lib: "second, and longer", marks: [] });
+  assert.equal(plain.said, "first");
   assert.equal(globalThis.inPlaceStops, 1, "the revision before was stopped");
   assert.equal((await listed()).rev, first.rev, "a file outside the web folder is not the browser half's");
 
   // Its module changed.
   write("server.js", server("third, the longest"));
   await send("/packages", "POST", { spec: dir });
-  assert.deepEqual(await said(), { server: "third, the longest", lib: "second, and longer" });
+  assert.deepEqual(await said(), { server: "third, the longest", lib: "second, and longer", marks: [] });
 
   // A file the browser half's module imports changed: another revision of it, under which a page fetches that file as
   // it is now. The web folder is in the server half's folder here, so that half is started again too.

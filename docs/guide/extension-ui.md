@@ -773,10 +773,13 @@ given up on, with the reason beside the package in Settings → Extensions, and
 nothing else waits for it. One that crashes, an error of its code that nothing
 catches or a call of `process.exit()`, is stopped and held off, and the portal
 and its chats go on: see [When the server half crashes](#when-the-server-half-crashes).
-Each time it is started at another revision, after a file of it changed (see
-[What is loaded, and when](#what-is-loaded-and-when)), its files are read
-again: its module, and every file of its module's folder that it imports by a
-relative address (`./`, `../`) or a `file:` URL, as far down as the imports go.
+The first time the portal starts it, its files are loaded as Node loads
+modules: anything else in the portal's process that imports one of them has the
+same module. Each time it is started at another revision after that, after a
+file of it changed (see [What is loaded, and when](#what-is-loaded-and-when)),
+its files are read again, as modules of that revision's own: its module, and
+every file of its module's folder that it imports by a relative address (`./`,
+`../`) or a `file:` URL, as far down as the imports go.
 Started again at the same revision (switched off and on, or after what it
 builds on started again), it runs the modules already loaded: its default export
 is called again, and what its modules keep at their top level is as it was.
@@ -2025,6 +2028,16 @@ from the rest of the package, outside its folder (a file both halves use), is
 outside its revision and loaded once. Node keeps every module it has loaded, so
 each revision a server half was started at stays in the portal's memory until
 the portal restarts.
+
+The first revision of a server half that the portal starts is loaded as Node
+loads any module, so until the half is started at another, a file of its folder
+that something else in the portal's process imports (a test, or the package's
+pi extension where pi leaves the file to Node, see below) is the same module
+the half has. After that, what imported it keeps the first revision's module,
+beside the half's new one, each with what it holds. So share what the halves
+hold through [`chats.extend`](#tools-that-share-the-server-half-s-state), whose
+tools are made in the server half, or what `chats.tell` and `chats.onEvent`
+carry, not through a module both import.
 
 A new revision of a server half that cannot start is off, with the reason
 beside the package in Settings → Extensions; the revision before it is not
