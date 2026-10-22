@@ -344,6 +344,26 @@ test('Escape that follows a voice description as soon as it is typed asks, as fo
   await expect(description).toHaveValue('Warm and slow.');
 });
 
+test('Escape over a voice description that its own button saved does not ask, and over one that was not saved does', async ({ page }) => {
+  let voice = designed('v1', 'Night narrator', 'Warm delivery');
+  const sent: string[] = [];
+  await servicePage(page, { speech: { voice: 'v1' }, voices: [voice] });
+  await page.route(`${BASE}/voices/v1`, r => {
+    const body = r.request().postDataJSON(); sent.push(`${r.request().method()} ${JSON.stringify(body)}`);
+    voice = { ...voice, instruction: body.instruction.trim() }; return r.fulfill({ json: voice });
+  });
+  const description = settings(page).getByLabel('Voice description');
+  await description.fill('Warm and slow.');
+  await asksBeforeClosing(page, description, 'Warm and slow.');
+
+  await settings(page).getByRole('button', { name: 'Save description', exact: true }).click();
+  await expect(settings(page).getByRole('button', { name: 'Save description', exact: true })).toBeDisabled();
+  expect(sent).toEqual(['PATCH {"instruction":"Warm and slow."}']);
+  // Stored: nothing is left of it to lose.
+  await page.keyboard.press('Escape');
+  await expect(settings(page)).toBeHidden();
+});
+
 test('Escape over the settings that were changed asks first, and over ones that were saved does not', async ({ page }) => {
   await servicePage(page);
   const description = settings(page).getByLabel('Describe the speaking voice');
