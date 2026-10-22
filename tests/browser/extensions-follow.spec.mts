@@ -146,21 +146,32 @@ test('an old version that cannot be taken out cleanly as another comes in says s
   await expect(destinations(page).getByRole('button', { name: 'Notes' })).toBeVisible();
   await expect(leftBehind(page)).toHaveCount(0);
 
-  state.module = 'export default function (portal) { portal.slots.register("nav.page", { id: "notes", title: "Notes again", component: () => "second" }); }';
+  // Its second version cannot be taken out cleanly either.
+  state.module = 'export default function (portal) { portal.slots.register("nav.page", { id: "notes", title: "Notes again", component: () => "second" }); return () => { throw new Error("could not stop its timer either"); }; }';
   state.rev = 'r2';
   await page.clock.runFor(5500);
   // The new one is in all the same, and the page says what it could not do.
   await expect(destinations(page).getByRole('button', { name: 'Notes again' })).toBeVisible();
+  const said = `This page could not take out the old version of ${NAME} cleanly. Reload it to run what is installed now.`;
   await expect(leftBehind(page)).toHaveCount(1);
-  await expect(leftBehind(page)).toContainText(`This page could not take out the old version of ${NAME} cleanly. Reload it to run what is installed now.`);
+  await expect(leftBehind(page).getByText(said, { exact: true })).toBeVisible();
 
-  // Another change that goes in cleanly adds nothing to it.
+  // The same extension again: still one line, that names it once.
+  state.module = 'export default function (portal) { portal.slots.register("nav.page", { id: "notes", title: "Notes third", component: () => "third" }); }';
   state.rev = 'r3';
   await page.clock.runFor(5500);
+  await expect(destinations(page).getByRole('button', { name: 'Notes third' })).toBeVisible();
   await expect(leftBehind(page)).toHaveCount(1);
+  await expect(leftBehind(page).getByText(said, { exact: true })).toBeVisible();
+
+  // Another change that goes in cleanly adds nothing to it.
+  state.rev = 'r4';
+  await page.clock.runFor(5500);
+  await expect(leftBehind(page)).toHaveCount(1);
+  await expect(leftBehind(page).getByText(said, { exact: true })).toBeVisible();
 
   await leftBehind(page).getByRole('button', { name: 'Reload' }).click();
-  await expect(destinations(page).getByRole('button', { name: 'Notes again' })).toBeVisible();
+  await expect(destinations(page).getByRole('button', { name: 'Notes third' })).toBeVisible();
   await expect(leftBehind(page)).toHaveCount(0);
 });
 
