@@ -125,6 +125,8 @@ export const FilesPanel = memo(function FilesPanel({
   // A save that failed, shown above the editor: the text stays, and so does the button, to try again.
   const [saveError, setSaveError] = useState<string | null>(null);
   const [changed, setChanged] = useState(false);
+  // The open file being read again where it is (rereadFile), which Refresh turns for, as it does for the folder.
+  const [rereading, setRereading] = useState(false);
   // The agent's next file would take an edit away from the screen: it follows only when nothing was left open.
   const [following, setFollowing] = useState(!left);
   const [showHidden, setShowHidden] = useState(savedShowHidden);
@@ -253,6 +255,52 @@ export const FilesPanel = memo(function FilesPanel({
     [sessionId],
   );
 
+  /**
+   * The file that is open, read again where it is: for Refresh, and for the
+   * agent's write or edit of it. Unlike opening it, the text on screen stays
+   * until the new text is here, and so does the view it is shown in, the
+   * source or the page.
+   *
+   * Changes not saved are not replaced. When the file is not what they were
+   * made from any more, the bar about a changed file says so, as a save would,
+   * and the person chooses; so does a read that fails, as it does for an edit
+   * brought back. Without such changes, a read that fails shows its error
+   * where the text was, as opening the file would.
+   */
+  const rereadFile = useCallback(
+    (path: string) => {
+      const ask = ++fileAsk.current;
+      // What is shown is then the file as it is now, so neither the bar nor an earlier save's error is about it any more.
+      const show = (open: Open, text: string) => {
+        setFile(open);
+        setDraft(text);
+        setChanged(false);
+        setSaveError(null);
+      };
+      setRereading(true);
+      return api
+        .readFile(sessionId, path)
+        .then((r) => {
+          if (ask !== fileAsk.current) return;
+          if (dirtyRef.current) {
+            if (r.mtime !== fileRef.current?.mtime) setChanged(true);
+            return;
+          }
+          const text = r.binary ? "" : r.content;
+          show({ path, loading: false, binary: r.binary, size: r.size, mtime: r.mtime, saved: text }, text);
+          // Emptied, it is shown as the source, as an empty file opens: a blank page cannot be typed into.
+          if (!r.binary && !text) setWriting(true);
+        })
+        .catch((e) => {
+          if (ask !== fileAsk.current) return;
+          if (dirtyRef.current) return setChanged(true);
+          show({ path, loading: false, error: (e as Error).message, binary: false, size: 0, mtime: 0, saved: "" }, "");
+        })
+        .finally(() => setRereading(false));
+    },
+    [sessionId],
+  );
+
   /** True to go on: nothing is lost, or the person said it may be. */
   const mayLeave = async () =>
     !dirtyRef.current ||
@@ -264,6 +312,8 @@ export const FilesPanel = memo(function FilesPanel({
     handled.current = activity.seq;
     // What the agent did may have added to a folder, wherever the panel is looking.
     void loadDir(dir);
+    // It changed the file that is open: that shows, followed or not, read again where it is. An edit in the way is asked about, not replaced.
+    if (activity.tool !== "read" && activity.path === fileRef.current?.path) return void rereadFile(activity.path);
     if (!following) return;
     if (dirtyRef.current) return;
     setDir(parentOf(activity.path));
@@ -563,13 +613,14 @@ export const FilesPanel = memo(function FilesPanel({
         >
           {showHidden ? <LuEye aria-hidden className="h-3.5 w-3.5" /> : <LuEyeOff aria-hidden className="h-3.5 w-3.5" />}
         </button>
+        {/* What is on screen: the open file when there is one, which is drawn instead of the folder. */}
         <button
-          onClick={() => void loadDir(dir)}
+          onClick={() => void (file ? rereadFile(file.path) : loadDir(dir))}
           title={t("Refresh")}
           aria-label={t("Refresh")}
           className="shrink-0 rounded p-1 text-fg-faint transition hover:bg-fg/5 hover:text-fg"
         >
-          <LuRefreshCw aria-hidden className={`h-3.5 w-3.5 ${listing ? "animate-spin" : ""}`} />
+          <LuRefreshCw aria-hidden className={`h-3.5 w-3.5 ${listing || rereading ? "animate-spin" : ""}`} />
         </button>
         <a
           href={api.archiveDownloadUrl(sessionId, dir)}
