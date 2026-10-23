@@ -63,8 +63,13 @@ async function inspected(): Promise<Inspected | undefined> {
   }
   const detail = (await d.containers.inspect(CONTAINER)) as Inspected | undefined;
   // Changed in place, not made again: Docker does not restart it for that, its downloads and its setup stay as they are,
-  // and one the person stopped stays stopped. One removed since it was looked at has nothing to change.
-  if (detail && detail.HostConfig?.RestartPolicy?.Name !== RESTART.Name) await d.containers.update(CONTAINER, { RestartPolicy: RESTART }).catch(absent);
+  // and one the person stopped stays stopped. One removed since it was looked at has nothing to change. One Docker will
+  // not change now (one being removed, say) is changed at the next look: reading it, stopping it or removing it does not
+  // wait on that.
+  if (detail && detail.HostConfig?.RestartPolicy?.Name !== RESTART.Name)
+    await d.containers.update(CONTAINER, { RestartPolicy: RESTART }).catch((e) => {
+      if ((e as { status?: number }).status !== 404) portal().log(`could not give the voice container the ${RESTART.Name} restart policy: ${(e as Error).message}`);
+    });
   return detail;
 }
 /**
@@ -75,7 +80,7 @@ async function inspected(): Promise<Inspected | undefined> {
 let answered: string | undefined;
 /**
  * Docker is starting the container again by itself, after its setup or a service exited (`RESTART`), and goes on doing
- * so, waiting longer between tries while they fail: it is running to Docker while it waits for the next try
+ * so, with the wait between the tries that Docker sets: it is running to Docker while it waits for the next try
  * (`Restarting`), and in a try it is a run Docker began (`RestartCount`, from none again at each start it is asked for,
  * and at the one it makes itself as the host starts) that its services have not answered in (`answered`). One they
  * answered in came back: a health check that is slow once after that is not a try of Docker's. A stop ends the tries.
