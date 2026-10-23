@@ -23,6 +23,8 @@ COPY scripts scripts
 COPY extensions extensions
 # The web build copies it next to the voice files it covers (core/web/scripts/copy-vad-assets.mjs).
 COPY THIRD_PARTY_NOTICES.md ./
+# Creator mode's build copies the extension guide into its skill's reference (extensions/creator/build.mjs).
+COPY docs/guide/extension-ui.md docs/guide/extension-ui.md
 RUN npm run build
 
 FROM node:22-slim
