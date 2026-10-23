@@ -5,7 +5,7 @@ import { GUARD_RULE_NAMES } from "./pi/guard-rule-names.js";
 import { BUILT_IN_SET, PI_BUILT_IN_TOOLS, defaultsFor, lazyToolEntry, mcpServerOf, toolEnabled, toolSetOf } from "./tool-policy.js";
 import { projectOf } from "./workspaces.js";
 import { dropMcpCache, mcpAdapter, mcpCachePath, mcpConfigPath, mcpServerNames, onMcpWritten, readMcpCache, readMcpFile, readableMcpConfig, serversAndBrowsers } from "./api/mcp.js";
-import { mcpCatalogue, mcpDirect, mcpOffer, unlisted, type McpOffer } from "./mcp-offer.js";
+import { ADAPTER_TOOLS, mcpCatalogue, mcpDirect, mcpOffer, unlisted, type McpOffer } from "./mcp-offer.js";
 import { existsSync, mkdirSync, readdirSync, rmSync, rmdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { isWithinText } from "./within.js";
@@ -3282,7 +3282,7 @@ const ADAPTER_LABEL = "pi-mcp-adapter";
  * is not the tool of a server called `browser`.
  */
 const noServerOf = (tool: { name: string; inline?: boolean }): boolean =>
-  tool.inline === true || tool.name === "mcp" || tool.name === "mcp_script" || tool.name === "mcpScript";
+  tool.inline === true || ADAPTER_TOOLS.includes(tool.name) || tool.name === "mcpScript";
 
 /** Does the MCP adapter register this tool? By its package where it is recorded, by the label it is filed under where it is not. */
 export function adapterTool(t: Pick<KnownTool, "source" | "package">): boolean {
