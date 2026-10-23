@@ -77,6 +77,11 @@ export interface ServerHalf {
   requires?: Record<string, string>;
   /** Those it uses when they are there, and starts without (`pithagoras.optional`). */
   optional?: Record<string, string>;
+  /**
+   * It runs in a process of its own (`pithagoras.isolated`, or installed from an extension's data folder): see
+   * isolated-half.ts.
+   */
+  isolated?: true;
 }
 
 /** What a package says it builds on: extensions by name, each with a version range. What is not that is not read. */
@@ -325,6 +330,7 @@ export function serverHalf(packageDir: string): ServerHalf | undefined {
     },
     ...(requires ? { requires } : {}),
     ...(optional ? { optional } : {}),
+    ...(meta.pithagoras.isolated === true ? { isolated: true as const } : {}),
   };
 }
 

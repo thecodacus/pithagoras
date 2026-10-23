@@ -225,9 +225,9 @@ test("a page that opens a chat is told where things stand, then each thing a ser
   // What could not be written (the second thing it says first, and this) was left out: the stream went on, as above.
   portal.chats.send("a", { cycle: (() => { const o = {}; o.self = o; return o; })() });
   // A browser half that came into the page later asks for the same, as it would be said now.
-  assert.deepEqual(host.openingFor("a", NAME), [{ type: "state", for: "a" }]);
-  assert.deepEqual(host.openingFor("quiet", NAME), []);
-  assert.deepEqual(host.openingFor("a", "someone-else"), []);
+  assert.deepEqual(await host.openingFor("a", NAME), [{ type: "state", for: "a" }]);
+  assert.deepEqual(await host.openingFor("quiet", NAME), []);
+  assert.deepEqual(await host.openingFor("a", "someone-else"), []);
   // Nothing to say first to this one: only what is sent.
   assert.deepEqual(await heard("quiet", 1, () => portal.chats.send("quiet", "hi")), [{ extension: NAME, data: "hi" }]);
 });

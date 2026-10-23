@@ -92,7 +92,7 @@ export function eventsRouter(): Router {
     // stand first, then each thing as it is said. See extension-host.ts.
     const writePush = (message: string) => res.write(`event: extension\ndata: ${message}\n\n`);
     pagePushes.on(session.id, writePush);
-    for (const push of openingPushes(session.id)) writePush(push);
+    openingPushes(session.id, writePush);
 
     // How often this chat's events were put back under seqs a page had read
     // past (see bumpReloads): a page that last saw another count missed one, and

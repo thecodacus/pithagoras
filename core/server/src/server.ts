@@ -1387,12 +1387,12 @@ app.post("/api/sessions/:id/subagents/:agent/stop", (req, res) => {
 
 // What an extension's server half tells a page that opens this chat, asked for by a browser half that came into the
 // page after the chat's stream had opened: see extension-host.ts.
-app.get("/api/sessions/:id/extension-ui", (req, res) => {
+app.get("/api/sessions/:id/extension-ui", async (req, res) => {
   const session = getSession(req.params.id);
   if (!session) return res.status(404).json({ error: "Not found" });
   const extension = typeof req.query.extension === "string" ? req.query.extension : "";
   if (!extension) return res.status(400).json({ error: "Which extension it is for is missing" });
-  res.json({ pushes: openingFor(session.id, extension) });
+  res.json({ pushes: await openingFor(session.id, extension) });
 });
 
 // What an extension's browser half says to its own half in this chat: see extension-ui.ts.

@@ -13,6 +13,7 @@ import { getSession, getSetting, listSessions, putSetting, sessionsByWorkspace, 
 import { EXECUTOR_KIND } from "./executor-kind.js";
 import { takes, type ServerHalf } from "./extension-ui.js";
 import { moduleAt } from "./half-modules.js";
+import { spawnHalf, type IsolatedChild } from "./isolated-half.js";
 import { asAgent, runAsAgent, sandboxEnv } from "./sandbox/exec.js";
 import { identityOf } from "./sandbox/identity.js";
 import { sandboxOn, sandboxSupport } from "./sandbox/policy.js";
@@ -54,6 +55,12 @@ import type { Chat, ChatLife as Life, Ran, ServerPortal, Upgrade, VoiceProvider 
  *
  * The module is plain JavaScript, loaded as it is. It runs with the portal's
  * own rights, as the package's pi extension does on the host.
+ *
+ * Or in a process of its own (`"isolated": true` beside `"server"`, and every
+ * package installed from an extension's data folder): the same `portal`, its
+ * calls made across to this one (isolated-half.ts), where a loop that never
+ * yields or a heap that grows without end ends that process, and not the
+ * portal's.
  */
 
 // What a server half is given is the public contract, @pithagoras/extension-api/server: the portal implements it here.
@@ -70,7 +77,7 @@ export { folderFiles };
  */
 let sandboxIsOn = { at: 0, on: false };
 const agentAccess = new Map<string, { at: number; access: AgentAccess }>();
-setAgentAccess((chats, ids) => {
+export function agentAccessFor(chats: readonly string[], ids: readonly string[]): AgentAccess[] | undefined {
   const now = Date.now();
   if (now - sandboxIsOn.at > 1000) sandboxIsOn = { at: now, on: sandboxOn() };
   if (!sandboxIsOn.on) return undefined;
@@ -98,7 +105,8 @@ setAgentAccess((chats, ids) => {
     add(agent);
   }
   return [...found.values()];
-});
+}
+setAgentAccess(agentAccessFor);
 
 interface Running {
   half: ServerHalf;
@@ -138,6 +146,8 @@ interface Running {
   waiting: Set<(error: Error) => void>;
   /** The answers of its routes that are still open: answered should it crash (see crashed). */
   responses: Set<Response>;
+  /** Its process, where it runs in one of its own (`isolated`): what its `portal` there calls is applied to this one's. */
+  child?: IsolatedChild;
 }
 
 /** How a server half crashed: an error of its code reached the process, or its code called `process.exit()`. */
@@ -334,7 +344,9 @@ function whose(error: unknown): Running | undefined {
   const own = scope.getStore();
   const stack = (error as { stack?: unknown } | null | undefined)?.stack;
   if (own || typeof stack !== "string") return own;
-  const through = (ext: Running) => ext.where.some((at) => stack.includes(at));
+  // Its frames alone: a stack starts with the error's message, which may name any folder (a package's, in what pi install said).
+  const frames = stack.split("\n").filter((line) => line.trimStart().startsWith("at "));
+  const through = (ext: Running) => ext.where.some((at) => frames.some((frame) => frame.includes(at)));
   return [...live].find(through) ?? [...left.values()].find(through);
 }
 
@@ -424,10 +436,22 @@ export function catchExtensionCrashes(): void {
 /** How long a server half may take to start, and to stop: one that hangs must not hold up every other, or the portal's own stop. */
 let START_MS = 15_000;
 let STOP_MS = 5_000;
+/**
+ * What ends a server half that runs in a process of its own: its process not answering for this long, its heap over
+ * this (V8 aborts it), and its memory over this, where the system says it (Linux).
+ */
+let HANG_MS = 10_000;
+let HEAP_MB = 512;
+let RSS_MB = 1024;
+/** How long a page that opens a chat waits for what such a half tells it first. */
+const OPEN_MS = 2_000;
 /** Other limits, for a test that cannot wait that long. */
-export function setLimits(start: number, stop: number): void {
+export function setLimits(start: number, stop: number, more: { hang?: number; heapMb?: number; rssMb?: number } = {}): void {
   START_MS = start;
   STOP_MS = stop;
+  HANG_MS = more.hang ?? HANG_MS;
+  HEAP_MB = more.heapMb ?? HEAP_MB;
+  RSS_MB = more.rssMb ?? RSS_MB;
 }
 
 /** `work`, or a rejection once it has taken longer than `ms`. */
@@ -722,6 +746,8 @@ function portalFor(ext: Running): ServerPortal {
 async function stop(ext: Running): Promise<void> {
   running.delete(ext.half.name);
   ext.stopped = true;
+  // Its process ends with its stops: a call into it from a chat not loaded again since is answered at once.
+  if (ext.child) ext.answer ??= new Error("Its server half was stopped; the chat has the new one at its next step");
   for (const fn of ext.stops.reverse()) await guarded(ext, "stopping", () => within(STOP_MS, Promise.resolve().then(fn), "stopping"));
   ext.life.removeAllListeners();
   live.delete(ext);
@@ -738,15 +764,17 @@ async function start(half: ServerHalf, sig: string, uses: Set<string>): Promise<
     ext.where = [folder + sep, `${pathToFileURL(folder).href}/`];
     live.add(ext);
     // By its revision, after its first, and so is every file of its folder it imports: the same files changed are other
-    // modules, and the ones already loaded are not served again (half-modules.ts). As its own code, and given up on at
-    // once should it crash meanwhile.
+    // modules, and the ones already loaded are not served again (half-modules.ts). Or in a process of its own, which
+    // imports it as it is. As its own code, and given up on at once should it crash meanwhile.
     const stopper = await within(
       START_MS,
       callInto(ext, () =>
-        import(moduleAt(file, half.rev)).then((module: any) => {
-          if (typeof module.default !== "function") throw new Error("Its module has no default export to call");
-          return module.default(portalFor(ext));
-        }),
+        half.isolated
+          ? startApart(ext, file)
+          : import(moduleAt(file, half.rev)).then((module: any) => {
+              if (typeof module.default !== "function") throw new Error("Its module has no default export to call");
+              return module.default(portalFor(ext));
+            }),
       ).catch((e) => {
         throw ext.crash ? new Error(`It crashed as it started: ${ext.crash.error}`) : e;
       }),
@@ -765,6 +793,38 @@ async function start(half: ServerHalf, sig: string, uses: Set<string>): Promise<
     failures.set(half.name, (e as Error)?.message || String(e));
     console.error(`[extension ${half.name}] its server half could not be started:`, e);
   }
+}
+
+/**
+ * Starts a half in a process of its own, with the `portal` a half in this process would have, which what it calls
+ * there is applied to: what stops it, where its default export returned that.
+ */
+async function startApart(ext: Running, file: string): Promise<(() => unknown) | undefined> {
+  // Outside its code: what its process says is the portal's to handle, not the half's (see scope).
+  const child = scope.exit(() =>
+    spawnHalf(file, {
+      name: ext.half.name,
+      executor: EXECUTOR_KIND,
+      portal: portalFor(ext),
+      limits: { stop: STOP_MS, hang: HANG_MS, heapMb: HEAP_MB, rssMb: RSS_MB },
+      crashed: (reason) => crashed(ext, reason),
+      crash: () => ext.crash?.error,
+      answer: () => ext.answer,
+      // Its own lines, as a line its code printed here would be (see said): one cannot write into another's by naming it.
+      print: (stream, line) => scope.run(ext, () => (stream === "out" ? console.log(line) : console.error(line))),
+      callAs: (of, call) => {
+        const provider = running.get(of);
+        return provider ? callInto(provider, call) : Promise.reject(new Error(`${of} is not running`));
+      },
+      agentAccess: agentAccessFor,
+      life: ext.life,
+    }),
+  );
+  ext.child = child;
+  // The first of its stops, so it runs last: what it registered is let go of before its process ends.
+  ext.stops.push(() => child.stop());
+  const { stops } = await child.ready;
+  return stops ? () => child.ask("stop", {}) : undefined;
 }
 
 /**
@@ -795,12 +855,13 @@ function plan(halves: ServerHalf[]): { order: ServerHalf[]; blocked: Map<string,
       if (!semver.validRange(range)) why ??= `It asks for ${dep} at "${range}", which is not a version range`;
       else if (!provider) why ??= `It needs ${dep} (${range}), which is not installed, or is switched off`;
       else if (!takes(range, provider.version)) why ??= `It needs ${dep} ${range}, and ${dep} ${provider.version ?? "with no version"} is installed`;
+      else if (provider.isolated) why ??= `It needs ${dep}, whose server half runs in a process of its own and gives nothing to build on`;
       else if (!visit(provider)) why ??= `It needs ${dep}, which cannot start: ${blocked.get(dep) ?? "it builds on itself"}`;
       else using.add(dep);
     }
     for (const [dep, range] of Object.entries(half.optional ?? {})) {
       const provider = byName.get(dep);
-      if (provider && takes(range, provider.version) && visit(provider)) using.add(dep);
+      if (provider && !provider.isolated && takes(range, provider.version) && visit(provider)) using.add(dep);
     }
     visiting.pop();
     // Blocked by a circle met while looking at what it builds on.
@@ -818,13 +879,14 @@ function plan(halves: ServerHalf[]): { order: ServerHalf[]; blocked: Map<string,
 }
 
 /**
- * An extension's signature as things are now: its revision, and for each it builds on that one's signature, or that it
- * is not running. One whose signature is no longer the one it started with holds what a provider that changed, came or
- * went gave it, or nothing where there is something now, and is started anew.
+ * An extension's signature as things are now: its revision, whether it runs in a process of its own, and for each it
+ * builds on that one's signature, or that it is not running. One whose signature is no longer the one it started with
+ * holds what a provider that changed, came or went gave it, or nothing where there is something now, or runs where it
+ * is no longer to run, and is started anew.
  */
 function signature(half: ServerHalf, uses: Set<string>): string {
   const of = (dep: string) => `${dep}=${(uses.has(dep) && running.get(dep)?.sig) || "-"}`;
-  return [half.rev, ...Object.keys(half.requires ?? {}).map(of), ...Object.keys(half.optional ?? {}).map(of)].join(" ");
+  return [half.rev, half.isolated ? "isolated" : "", ...Object.keys(half.requires ?? {}).map(of), ...Object.keys(half.optional ?? {}).map(of)].join(" ");
 }
 
 /** Stops an extension, and before it those that build on it, theirs first. */
@@ -964,11 +1026,14 @@ export const extensionRoutes: RequestHandler = (req: Request, res: Response, nex
     unwatch();
     ext.responses.delete(res);
   });
-  // The package's routes are written from its own root, whatever it is called. They run as its code, and so do the
-  // listeners it puts on the request and the answer; what the portal does when they hand the request on is not.
+  // The package's routes are written from its own root, whatever it is called.
+  req.url = found.rest + (at === -1 ? "" : was.slice(at));
+  // In its own process, which answers it whole: what it does not take is its own 404.
+  if (ext.child) return ext.child.proxy(req, res);
+  // They run as its code, and so do the listeners it puts on the request and the answer; what the portal does when
+  // they hand the request on is not.
   heardAs(ext, req);
   heardAs(ext, res);
-  req.url = found.rest + (at === -1 ? "" : was.slice(at));
   scope.run(ext, () =>
     ext.router(req, res, (error?: unknown) => {
       req.url = was;
@@ -987,6 +1052,13 @@ export function extensionUpgrade(url: string | undefined): Upgrade | undefined {
   const found = owner((at === -1 ? url : url.slice(0, at)).slice("/api/x".length));
   const handler = found?.ext.upgrade;
   if (!found || !handler) return undefined;
+  // In its own process: the stream is joined to it there, and is none of the portal's code.
+  if (found.ext.child) {
+    return (req, socket, head) => {
+      req.url = found.rest + (at === -1 ? "" : url.slice(at));
+      handler(req, socket, head);
+    };
+  }
   return (req, socket, head) => {
     req.url = found.rest + (at === -1 ? "" : url.slice(at));
     // The stream is the half's from here: what its socket says later runs as its code.
@@ -995,17 +1067,32 @@ export function extensionUpgrade(url: string | undefined): Upgrade | undefined {
   };
 }
 
-/** What each server half tells a page that opens a chat, each as it goes on the wire. */
-export function openingPushes(chatId: string): string[] {
-  const out: string[] = [];
+/** What one handler of `ext`'s says a page that opens `chatId` is told first; asked of its process, where it has one. */
+function opening(ext: Running, handler: (chatId: string) => unknown, chatId: string): unknown {
+  const data = guarded(ext, "what a page is told first", () => handler(chatId));
+  if (!ext.child) return data;
+  // The answer comes in time, or is nothing.
+  return within(OPEN_MS, Promise.resolve(data), "saying what a page is told first").catch((e) => console.error(`[extension ${ext.half.name}]`, e.message));
+}
+
+/**
+ * What each server half tells a page that opens a chat, each as it goes on the wire, written by `write` (the stream's
+ * writer, which hears pagePushes while the stream is open). A half in the portal's process is written at once; one in
+ * a process of its own when its answer comes, if the stream is still open then. Its answer and what it sends later
+ * come by one channel, so the page never has an answer older than a push it already has.
+ */
+export function openingPushes(chatId: string, write: (text: string) => void): void {
   for (const ext of running.values()) {
     for (const handler of ext.opens) {
-      const data = guarded(ext, "what a page is told first", () => handler(chatId));
-      const text = data !== undefined && !(data instanceof Promise) ? wire(ext.half.name, data) : undefined;
-      if (text) out.push(text);
+      const data = opening(ext, handler, chatId);
+      const say = (said: unknown) => {
+        const text = said !== undefined && !(said instanceof Promise) ? wire(ext.half.name, said) : undefined;
+        if (text) write(text);
+      };
+      if (ext.child) void (data as Promise<unknown>).then((said) => pagePushes.listeners(chatId).includes(write) && say(said));
+      else say(data);
     }
   }
-  return out;
 }
 
 /**
@@ -1013,12 +1100,13 @@ export function openingPushes(chatId: string): string[] {
  * say it now: for a browser half that came into the page after the chat's
  * stream had opened, and so was not there to be told.
  */
-export function openingFor(chatId: string, name: string): unknown[] {
+export async function openingFor(chatId: string, name: string): Promise<unknown[]> {
   const ext = running.get(name);
   if (!ext) return [];
-  return ext.opens
-    .map((handler) => guarded(ext, "what a page is told first", () => handler(chatId)))
-    .filter((data) => data !== undefined && !(data instanceof Promise) && wire(name, data) !== undefined);
+  const said = ext.opens.map((handler) => opening(ext, handler, chatId));
+  // Asked of its process: each answer as it comes, in time.
+  const data = ext.child ? await Promise.all(said) : said;
+  return data.filter((one) => one !== undefined && !(one instanceof Promise) && wire(name, one) !== undefined);
 }
 
 /** A chat's pi started or stopped, the chat was deleted, or the run it was started for is over (finished). */
@@ -1071,6 +1159,9 @@ export function hostExtensions(chatId: string): { name: string; factory: (pi: an
           sendMessage: { value: (...args: unknown[]) => scope.exit(() => pi.sendMessage(...args)) },
           sendUserMessage: { value: (...args: unknown[]) => scope.exit(() => pi.sendUserMessage(...args)) },
         });
+        // In its own process: its one factory here asks it there, and registers on `own` what its factories registered.
+        // pi waits for that, and keeps its failure as the chat's load error.
+        if (ext.child) return ext.factories[0](own, chatOf(row));
         for (const factory of ext.factories) {
           let added: unknown;
           try {
