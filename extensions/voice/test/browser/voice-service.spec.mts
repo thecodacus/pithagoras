@@ -73,6 +73,20 @@ test('install progress, ready, use for voice mode, stop using it, and stop', asy
   await expect(use).toHaveCount(0);
 });
 
+test('a failed setup Docker is starting again is stopped from the page, which ends its tries; one that has exited has nothing to stop', async ({ page }) => {
+  let retrying = true; const actions: string[] = [];
+  await page.route(SERVICE, r => r.fulfill({ json: { available: true, state: 'failed', busy: false, progress: 'VOICE_SETUP_ERROR: setup or service failed (line 98)', error: retrying ? 'Voice setup or service exited, and Docker is starting it again. Review the log, or retry now.' : 'Voice setup or service exited. Review the log, then retry.', choice: { tts: 'breeze', asr: 'whisper', asrModel: 'base' }, lazyLoad: true, retrying } }));
+  await page.route(`${BASE}/stop`, r => { actions.push('stop'); retrying = false; return r.fulfill({ json: { ok: true } }); });
+  await open(page);
+  const stop = page.getByRole('button', { name: 'Stop · release VRAM' }), retry = page.getByRole('button', { name: 'Retry setup', exact: true });
+  await expect(badge(page, 'failed')).toBeVisible();
+  await expect(retry).toBeEnabled();
+  await stop.click();
+  await expect.poll(() => actions).toEqual(['stop']);
+  await expect(stop).toHaveCount(0);
+  await expect(retry).toBeEnabled();
+});
+
 test('Use for voice mode refused says why, and the page stays as it was', async ({ page }) => {
   await page.route(SERVICE, r => r.fulfill({ json: { available: true, state: 'running', busy: false, progress: '', error: '', lazyLoad: true, chosen: false } }));
   await page.route(`${BASE}/chosen`, r => r.fulfill({ status: 400, json: { error: 'Wait for voice setup to finish before using it for voice mode' } }));

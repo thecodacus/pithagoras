@@ -81,7 +81,7 @@ test("a setup that keeps failing shows the failure and its log while Docker star
   machine.reset();
   voiceIs({ State: "restarting", code: 1, restarts: 3, out: "VOICE_STAGE: Building audio.cpp\nVOICE_SETUP_ERROR: setup or service failed (line 98)\n", HostConfig: UNLESS_STOPPED });
   const between = await state();
-  assert.deepEqual([between.state, between.busy, between.error], ["failed", false, "Voice setup or service exited, and Docker is starting it again. Review the log, or retry now."]);
+  assert.deepEqual([between.state, between.busy, between.error, between.retrying], ["failed", false, "Voice setup or service exited, and Docker is starting it again. Review the log, or retry now.", true]);
   assert.match(between.progress, /VOICE_SETUP_ERROR: setup or service failed \(line 98\)/);
   // Docker's next try, which does not answer yet: still the failure, not Starting, so the page does not flicker with each try.
   dockersTry();
@@ -120,7 +120,7 @@ test("one Docker brought back is no failure once its services answered: a check 
   assert.equal((await state()).state, "running");
   machine.voiceProcesses.unhealthy = ["8188"];
   const slow = await state();
-  assert.deepEqual([slow.state, slow.error], ["starting", ""]);
+  assert.deepEqual([slow.state, slow.error, slow.retrying], ["starting", "", false]);
   assert.ok(offers(), "voice mode still listens and speaks through it");
 
   const said = asked();
@@ -163,5 +163,5 @@ test("the person's Stop is Docker's stop, which unless-stopped keeps: it stays s
   assert.equal((await post("/stop")).status, 200);
   const now = await state();
   assert.deepEqual([ended.stops, machine.voice()!.State, ended.starts()], [1, "exited", 0]);
-  assert.deepEqual([now.state, now.error], ["failed", "Voice setup or service exited. Review the log, then retry."]);
+  assert.deepEqual([now.state, now.error, now.retrying], ["failed", "Voice setup or service exited. Review the log, then retry.", false]);
 });

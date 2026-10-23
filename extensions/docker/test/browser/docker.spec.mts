@@ -83,6 +83,14 @@ test('each extension\'s containers are listed under it, and are stopped, started
   await expect.poll(() => asked.at(-1)).toBe('DELETE /containers/voice-tts');
 });
 
+test('one Docker is waiting to start again is stopped from here, which ends the wait: a start would do nothing', async ({ page }) => {
+  const { dialog, asked } = await open(page, { ...REACHED, containers: [container({ name: 'pithagoras-voice', owner: 'pithagoras-voice', state: 'restarting', status: 'Restarting (1) 4 seconds ago' })] });
+  const voice = dialog.getByRole('listitem').filter({ hasText: 'pithagoras-voice' }).filter({ hasText: 'Restarting' });
+  await expect(voice.getByRole('button', { name: 'Start' })).toHaveCount(0);
+  await voice.getByRole('button', { name: 'Stop' }).click();
+  await expect.poll(() => asked).toEqual(['POST /containers/pithagoras-voice/stop']);
+});
+
 test('a volume is deleted only once the person says so, being what an extension keeps', async ({ page }) => {
   const { dialog, asked } = await open(page, REACHED);
   const volume = dialog.getByRole('listitem').filter({ hasText: 'pithagoras_browser-profile' });

@@ -126,7 +126,8 @@ function DockerPage() {
                       <span className="dk-docker-name">{container.name}</span>
                       <span className="dk-docker-meta">{`${container.image} · ${container.status}`}</span>
                     </div>
-                    {container.state === "running" ? (
+                    {/* One Docker waits to start again is running to it, and a stop ends the wait; a start would do nothing. */}
+                    {container.state === "running" || container.state === "restarting" ? (
                       <button type="button" className={ui.classes.ghost} disabled={busy !== null} onClick={() => void act(`stop ${container.name}`, at(`/containers/${name(container.name)}/stop`), "POST")}>
                         {t("Stop")}
                       </button>

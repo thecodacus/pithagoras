@@ -81,7 +81,7 @@ let answered: string | undefined;
  * answered in came back: a health check that is slow once after that is not a try of Docker's. A stop ends the tries.
  */
 const retrying = (found: Inspected | undefined) => found?.State?.Running === true && Boolean(found.State.Restarting || (found.RestartCount && found.State.StartedAt !== answered));
-export interface ServiceStatus { available: boolean; state: string; busy: boolean; progress: string; error: string; /** The engines the container is built for, once there is one. */ choice?: VoiceChoice }
+export interface ServiceStatus { available: boolean; state: string; busy: boolean; progress: string; error: string; /** The engines the container is built for, once there is one. */ choice?: VoiceChoice; /** Docker is starting it again after it failed (`retrying`), which a stop ends. */ retrying?: boolean }
 /**
  * The engines of the running container, from when they were first found answering until the container is found stopped,
  * gone or being made again, as `status` last found: where voice mode listens and speaks is asked at each of its requests,
@@ -125,7 +125,7 @@ async function statusNow(): Promise<ServiceStatus> {
   // failure's only between the tries, as Docker clears it when each begins.
   const retried = retrying(detail);
   const failed = !ready && (retried || (!running && Boolean(detail?.State?.ExitCode)));
-  return { available: true, state: pending ? 'installing' : ready ? 'running' : failed ? 'failed' : running ? 'starting' : detail ? 'stopped' : 'absent', busy: pending, progress: pending ? progress : logs, error: error || (failed ? explain(detail?.State?.Error || (retried ? 'Voice setup or service exited, and Docker is starting it again. Review the log, or retry now.' : 'Voice setup or service exited. Review the log, then retry.')) : ''), choice };
+  return { available: true, state: pending ? 'installing' : ready ? 'running' : failed ? 'failed' : running ? 'starting' : detail ? 'stopped' : 'absent', busy: pending, progress: pending ? progress : logs, error: error || (failed ? explain(detail?.State?.Error || (retried ? 'Voice setup or service exited, and Docker is starting it again. Review the log, or retry now.' : 'Voice setup or service exited. Review the log, then retry.')) : ''), choice, retrying: retried };
 }
 /** What a container is set up with besides its engines: the card, the threads of recognition on the CPU, and what the check found. */
 interface Plan { card?: Card; note?: string; threads?: number }
