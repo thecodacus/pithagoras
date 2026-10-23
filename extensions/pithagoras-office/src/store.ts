@@ -316,6 +316,27 @@ export function sweepTrash(root = dataDir()): number {
   return removed;
 }
 
+/** The settleKept half of index-vs-disk reconciliation (server.ts calls it at boot and on the interval): drop the
+ * index entries whose library file is gone from disk -- someone deleted a docs/<docId>/ dir out-of-band, or its bytes
+ * were lost. The index is the source of truth in BOTH directions: a docs/<id>/ dir with NO index entry is NOT added
+ * (an orphan sweep is not v1). Returns the dropped docIds; writes nothing when nothing is missing. */
+export function pruneMissingDocs(root = dataDir()): string[] {
+  const rootDir = root ?? dataDir();
+  const index = readIndex(rootDir);
+  const kept: DocMeta[] = [];
+  const dropped: string[] = [];
+  for (const doc of index.docs) {
+    try {
+      fs.accessSync(docPath(doc, rootDir));
+      kept.push(doc);
+    } catch {
+      dropped.push(doc.docId);
+    }
+  }
+  if (dropped.length) writeIndex(rootDir, { version: 1, docs: kept });
+  return dropped;
+}
+
 /** Import an existing .docx/.xlsx from an absolute path into the library (copy, never move -- the source stays).
  * The extension comes from the basename (case-insensitive) and anything else throws {code:"unsupported_format"};
  * a missing/unreadable source throws {code:"not_found"}. title defaults to the basename without its extension;
