@@ -341,7 +341,7 @@ test("what it starts in a chat's folder is no job of the chat's agent (Linux, wh
     assert.ok(jobs.some((one) => one.pids.includes(job.pid)), "an agent's job is listed");
     assert.deepEqual(jobs.filter((one) => one.pids.includes(sleeper)), []);
     await host.syncServerHalves([]);
-    assert.equal(ended(sleeper), true);
+    await until(() => ended(sleeper), "the half's own job ended with its process");
   } finally {
     job.kill("SIGKILL");
     delete process.env.PITHAGORAS_AGENT;
@@ -393,7 +393,8 @@ test("a loop that never ends ends its process: its request is answered with the 
 });
 
 test("a heap that grows without end ends its process (SIGABRT), in each shape, and the portal goes on", async () => {
-  host.setLimits(10_000, 1_000, { heapMb: 64 });
+  // A heap near its limit can keep a process busy collecting for seconds on a slow machine: the hang check must not end it first.
+  host.setLimits(10_000, 1_000, { heapMb: 64, hang: 60_000 });
   const shapes = {
     grows: `const a = []; for (let i = 0; ; i++) a[i] = i;`,
     parses: `const text = "[" + "1.5,".repeat(2 ** 24) + "1]"; portal.log("parsed " + JSON.parse(text).length);`,
@@ -412,6 +413,7 @@ test("a heap that grows without end ends its process (SIGABRT), in each shape, a
     assert.ok(lines.some((line) => /heap out of memory|Allocation failed|invalid table size|invalid array length/i.test(line)), `${h.name}: V8 said why\n${lines.join("\n")}`);
   }
   assert.deepEqual(await get("/api/x/nobody/"), { status: 404, body: { error: "No such API route: GET /api/x/nobody/" } }, "the portal answers");
+  host.setLimits(10_000, 1_000, { hang: HANG });
 });
 
 test("its memory over the limit ends its process (Linux, where the system says it)", { skip: !LINUX && "only Linux says a process's memory in /proc" }, async () => {
