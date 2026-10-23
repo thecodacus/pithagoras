@@ -194,6 +194,7 @@ test("importFile: copies a real docx in (title from basename by default), record
   const stored = fs.readFileSync(docFile(root, meta));
   assert.deepEqual(stored, template);
   assert.equal(parseDocx(stored).text, "New document");
+  assert.deepEqual(meta.importedBaseline, []); // parseable source without comments -> empty baseline stamped at import time
   assert.equal(meta.sizeBytes, template.length);
 
   // explicit title + owner override the defaults

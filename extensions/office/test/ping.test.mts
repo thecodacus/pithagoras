@@ -136,26 +136,30 @@ test("imported doc, first save: its existing comments are baselined WITHOUT wake
   ]) }));
   const meta = importFile(src, { title: "Carried Over" }, root); // sync
   assert.equal(meta.imported, true);
-  persistWith(root, meta.docId, meta.title, meta.ext, [
-    { id: "7", author: "Cara", text: "carry-over note" },
-    { id: "8", author: "Dan", text: "old @agent mention" },
-  ]);
-  assert.deepEqual(seen.tells, []); // its history is baselined on the first save, never re-woken
-  assert.deepEqual(seen.records, []);
-  const state = JSON.parse(fs.readFileSync(stateFile(root, meta.docId), "utf8")) as { ids: string[] };
-  assert.deepEqual(state.ids.sort(), ["7", "8"]);
-  assert.equal(getDoc(meta.docId, root)?.grants?.length ?? 0, 0);
+  assert.deepEqual(meta.importedBaseline, ["7", "8"]); // stamped from the file at IMPORT time (review 4364810146)
 
-  // ...and a NEW mention after the import DOES wake (the baseline only covered the imported history)
+  // A mention added AFTER the import but BEFORE the first save is NEW to this library (not in importedBaseline) -> it IS
+  // processed on save #1; the imported history (7, 8) baselines silently.
   persistWith(root, meta.docId, meta.title, meta.ext, [
     { id: "7", author: "Cara", text: "carry-over note" },
     { id: "8", author: "Dan", text: "old @agent mention" },
     { id: "9", author: "Eli", text: "@project:acme please take over this doc" },
   ]);
-  assert.deepEqual(seen.tells, [["chat-acme-home", { type: "ping" }]]);
+  assert.deepEqual(seen.tells, [["chat-acme-home", { type: "ping" }]]); // only the post-import mention wakes
+  assert.equal(seen.records.length, 1);
+  const state = JSON.parse(fs.readFileSync(stateFile(root, meta.docId), "utf8")) as { ids: string[] };
+  assert.deepEqual(state.ids.sort(), ["7", "8", "9"]);
   const grants = getDoc(meta.docId, root)?.grants ?? [];
   assert.equal(grants.length, 1);
   assert.equal(grants[0].commentId, "9");
+
+  // ...and a plain re-send of the same set adds nothing (pure id diff)
+  persistWith(root, meta.docId, meta.title, meta.ext, [
+    { id: "7", author: "Cara", text: "carry-over note" },
+    { id: "8", author: "Dan", text: "old @agent mention" },
+    { id: "9", author: "Eli", text: "@project:acme please take over this doc" },
+  ]);
+  assert.deepEqual(seen.tells, [["chat-acme-home", { type: "ping" }]]); // still just the one wake from save #1
 });
 
 test("second persist: @agent wakes the owner; @project:<name> matches case-insensitively, grant + wake queued; re-send dedupes", async () => {

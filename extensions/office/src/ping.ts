@@ -9,11 +9,13 @@
  * target's pi extension drains the queue off its UI_RECEIVE bell (drain side = T-TOOLS' factory,
  * plan 5.4 step 4; this module only QUEUES). The seen set is written back AFTER processing.
  *
- * First-save decision (plan leaves it open): an IMPORTED document arrives with its own comment history -- a persist
- * with NO prior state file baselines that whole set WITHOUT resolving mentions (those mentions predate this
- * library and must not ring bells). A CREATED blank document gets no baseline: its seen set starts empty, so an
- * @mention typed during the very first editing session is processed on its first save like any later one.
- * (store.ts marks imported documents with DocMeta.imported; see importFile.)
+ * First-save decision (plan leaves it open): an IMPORTED document arrives with its own comment history -- importFile records
+ * the file's comment ids in DocMeta.importedBaseline AT IMPORT TIME, and a persist with NO prior state file baselines exactly
+ * those ids WITHOUT resolving mentions (they predate this library and must not ring bells). A comment that appears AFTER the
+ * import but BEFORE the first save is NEW to this library and IS processed on that first save, so its wake is not lost. When
+ * the source did not parse at import the field is absent and we fall back to baselining whatever the first save holds.
+ * A CREATED blank document gets no baseline: its seen set starts empty, so an @mention typed during the very first editing
+ * session is processed on its first save like any later one. (store.ts marks imported documents with DocMeta.imported; see importFile.)
  * Corrupt/undecodable state file: logged, previous set treated as EMPTY (every current comment is
  * then "new", its mentions processed once; the immediately-following write restores a sane file).
  * Erring toward notifying beats silently dropping a mention after a corruption event. A re-send of
@@ -230,8 +232,23 @@ export function handlePersisted(docId: string, buffer: Buffer): void {
     if (meta.ext !== "docx") return; // v1: docx only, xlsx comments deferred to M4
     const { comments } = parseDocx(buffer);
     const prev = readSeen(rootDir, docId);
-    if (prev === null && meta.imported) { // imported with its own comment history: baseline it all, no wakes --
-      writeSeen(rootDir, docId, comments.map((c) => c.id)); // those mentions predate this library (module header)
+    if (prev === null && meta.imported) { // imported with its own comment history: baseline what importFile recorded at IMPORT time --
+      // an id NOT in that set appeared AFTER the file was imported (e.g. a mention added before the first save): it is new to
+      // this library and gets processed so its wake is not lost; only if processing succeeds does it become seen (retry rule as
+      // below). When the field is absent (unparseable source) we fall back to baselining everything this save holds.
+      const known = meta.importedBaseline !== undefined;
+      const preExisting = new Set(known ? meta.importedBaseline : comments.map((c) => c.id));
+      const seen = new Set(preExisting);
+      for (const c of comments) {
+        if (!known || preExisting.has(c.id)) continue; // fallback or imported history: baselined, never woken
+        try {
+          processComment(docId, meta.title, meta.owner, c);
+          seen.add(c.id);
+        } catch (err) {
+          logLine("office ping: comment " + c.id + " of " + docId + " could not be processed and stays unseen for retry: " + ((err as Error)?.message ?? err));
+        }
+      }
+      writeSeen(rootDir, docId, [...seen]);
       return;
     }
     // Write the seen set AFTER processing and only with ids handled successfully: a comment whose wake failed

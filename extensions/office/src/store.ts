@@ -16,6 +16,7 @@ import path from "node:path";
 import { randomInt } from "node:crypto";
 import JSZip from "jszip";
 import { dataDir } from "./host";
+import { parseDocx } from "./ooxml"; // importFile baselines the source file's comment ids at import time (ping.ts first-save rule)
 
 export type DocMeta = {
   docId: string;
@@ -28,8 +29,10 @@ export type DocMeta = {
   owner: string | null;
   grants: { chatId: string; commentId: string; at: number }[];
   createdBy?: string;
-  /** Set for importFile only. ping.ts uses it as the first-save rule: an imported doc's existing comments are baselined without wakes; a created (blank) doc gets no such baseline. */
+  /** Set for importFile only. ping.ts uses it as the first-save rule: an imported doc's imported comments are baselined without wakes; a created (blank) doc gets no such baseline. */
   imported?: boolean;
+  /** Comment ids present in the file at IMPORT time (stamped by importFile). The first-save baseline for imported docs: any id NOT listed here appeared after the import and is still processed normally. Absent when the source did not parse as docx. */
+  importedBaseline?: string[];
 };
 
 type IndexFile = { version: 1; docs: DocMeta[] };
@@ -373,6 +376,16 @@ export function importFile(absPath: string, meta: { title?: string; owner?: stri
   if (!st.isFile()) throw Object.assign(new Error(`${absPath} is not a regular file`), { code: "unsupported_format" });
   const title = meta.title ?? base.slice(0, dot);
   assertSafeTitle(title); // the imported file lands in the library as <title>.<ext> -- same rules as created titles
+  // Baseline AT IMPORT TIME (review 4364810146): record which comment ids this file carries NOW, so a mention added to it
+  // before its first save is still NEW at first save and can wake; only the history that came in WITH the file baselines.
+  let importedBaseline: string[] | undefined;
+  if (extRaw === "docx") {
+    try {
+      importedBaseline = parseDocx(fs.readFileSync(absPath)).comments.map((c) => c.id);
+    } catch {
+      // source does not parse as docx: leave the baseline unknown -- ping.ts then falls back to baselining whatever the first save holds
+    }
+  }
   const index = readIndex(rootDir);
   const now = Date.now();
   const doc: DocMeta = {
@@ -385,7 +398,8 @@ export function importFile(absPath: string, meta: { title?: string; owner?: stri
     mtimeMs: 0,
     owner: meta.owner ?? null,
     grants: [],
-    imported: true, // ping.ts first-save rule: these comments are baselined, never woken
+    imported: true, // ping.ts first-save rule: the import-time baseline below is what gets baselined, never woken
+    importedBaseline,
   };
   const dir = path.join(rootDir, "docs", doc.docId);
   fs.mkdirSync(dir, { recursive: true });
