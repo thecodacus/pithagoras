@@ -23,3 +23,23 @@ test('a long refused command can be read whole: in the title, and by opening it'
   await expect(subject).toHaveCSS('white-space', 'pre-wrap');
   expect(await subject.evaluate((el) => el.scrollHeight <= el.clientHeight)).toBe(true);
 });
+
+test.describe("an extension's rows", () => {
+  // A stand-in whose browser half gives its reason in German; the rows are the spec's.
+  test.use({ installed: ['tests/fixtures/extensions/recorder'] });
+
+  test("an extension's row has its kind, and its reason in the extension's words", async ({ page }) => {
+    const subject = 'moon 0.1.0 · 0123456789ab · extensions/moon';
+    await portal(page, [{ id: 2, at: '2026-10-01T09:00:00Z', kind: 'extension', tool: 'test-recorder', subject, reason: 'Installed', person_key: null, person_name: null, session_id: 'a' }]);
+    await page.goto('/audit');
+    const row = page.getByRole('listitem').filter({ hasText: subject });
+    await expect(row.getByText('Extension', { exact: true })).toHaveClass(/text-accent/);
+    await expect(row.getByRole('button', { name: `test-recorder: ${subject}` })).toBeVisible();
+    await expect(row.getByText('Installed', { exact: true })).toBeVisible();
+
+    await page.evaluate(() => localStorage.setItem('pithagoras.language', 'de'));
+    await page.reload();
+    await expect(row.getByText('Erweiterung', { exact: true })).toBeVisible();
+    await expect(row.getByText('Installiert', { exact: true })).toBeVisible();
+  });
+});
