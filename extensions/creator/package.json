@@ -1,0 +1,18 @@
+{
+  "name": "pithagoras-creator",
+  "version": "0.1.0",
+  "description": "Creator mode for Pithagoras: a chat mode in which the agent writes extensions for the portal, installs them, and calls their tools in the same chat, each installed from a copy of its own and run in a process of its own",
+  "type": "module",
+  "keywords": ["pi-package"],
+  "pi": {},
+  "pithagoras": {
+    "client": "./web/client.js",
+    "style": "./web/client.css",
+    "server": "./server.js"
+  },
+  "scripts": { "build": "node build.mjs && tsc --noEmit -p ." },
+  "devDependencies": {
+    "react-icons": "5.7.0"
+  },
+  "license": "Apache-2.0"
+}
