@@ -56,8 +56,10 @@ test('the data folder PORTAL_DATA_DIR names is mounted by both Compose files, an
 
 test('the upgrade guide warns a Portainer stack that sets PORTAL_DATA_DIR, which the first release ignored', () => {
   const guide = read('docs/guide/upgrading.md');
-  const section = guide.slice(guide.indexOf('## Upgrading from the first release'));
-  assert.match(section, /Portainer stack[\s\S]*PORTAL_DATA_DIR[\s\S]*<stack>_pithagoras-data/, 'the first-release section names the stack, the variable and the old volume');
+  const from = guide.indexOf('## Upgrading to 0.1.0 from an earlier build');
+  assert.ok(from >= 0, 'the guide has a section for builds from before 0.1.0');
+  const section = guide.slice(from);
+  assert.match(section, /Portainer stack[\s\S]*PORTAL_DATA_DIR[\s\S]*<stack>_pithagoras-data/, 'the section for builds from before 0.1.0 names the stack, the variable and the old volume');
   // The old home of the data is what the warning tells people to copy from.
   assert.match(read('docker-compose.portainer.yml'), /\$\{PORTAL_DATA_DIR:-pithagoras-data\}:\/data/);
 });

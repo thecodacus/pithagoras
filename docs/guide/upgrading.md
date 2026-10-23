@@ -63,6 +63,125 @@ mv portal.db portal-damaged.db && rm -f portal.db-wal portal.db-shm && mv portal
 
 The portal checks the recovered database before upgrading it. Rows on damaged pages can't be recovered, which usually means part of the event history of some conversations. Once you're happy with the result, delete `portal-damaged.db`.
 
+## From 0.1.0 to 0.2.0
+
+A portal at 0.1.0 takes every step of this release in its first start. The
+database goes from schema 3 to 11 in one transaction, after one check and one
+backup, `backups/portal-v3-<date>-<time>.db`. The steps run in this order, and
+each has a section below:
+
+| Schema | What changes | Section |
+| --- | --- | --- |
+| 4 | Agents and routines get tool lists of their own, and a project can work with an agent | [Agents and routines have tools of their own](#agents-and-routines-have-tools-of-their-own) |
+| 5 | The canvases stored in the database are written out as Markdown files, and their table is dropped | [Canvases are an extension](#canvases-are-an-extension) |
+| 6 | The ends of picture and clip calls kept in the chats are given the files they showed | [A tool's files are shown under its card](#a-tool-s-files-are-shown-under-its-card) |
+| 7 | What the Images page kept is left for Media | [Media is an extension](#media-is-an-extension) |
+| 8 | What the browser kept is left for Browser, and who may drive it becomes the tools' switches | [Browser is an extension](#browser-is-an-extension) |
+| 9 | Voice mode's settings, voices and addresses are left for Voice and Voice servers | [Voice's service is an extension](#voice-s-service-is-an-extension) |
+| 10 | Understory's settings are left for Understory, and its MCP server is trusted where no list was set | [Understory is an extension](#understory-is-an-extension) |
+| 11 | Every chat is in Standard mode, and there is a table for the modes you make | [Chats have a mode](#chats-have-a-mode) |
+
+The same start moves the password into the database, installs the six
+[extensions a portal starts with](#the-extensions-a-portal-starts-with), puts
+code mode in the tool defaults as off, and removes the rules that no longer
+apply. The rest of the sections say what else is different.
+
+What you do:
+
+- **Take `PORTAL_PASSWORD` out** of `.env`, the Compose environment or the
+  Portainer stack once the portal is up. It is read once and then ignored
+  ([The password moves into the database](#the-password-moves-into-the-database)).
+- **Install what you used** from Settings → Extensions → Discover → Comes with
+  Pithagoras: Browser for the agent's browser, Voice for the voice service,
+  Voice servers for speech servers of your own, and Understory for the agent's
+  memory. The upgrade installs none of them. Browser, Voice and Understory
+  require Docker for extensions, which the question before the install lists
+  and installs first. Until then, what 0.1.0 kept for each waits in `handoff/`
+  in the data folder, nothing of it lost, and their containers and volumes stay
+  where they are.
+- **Reload the portal's open tabs.** A tab that was open before the upgrade
+  still runs the old page.
+- **Change scripts and bookmarks** that use an address that moved (see the
+  table below). The old addresses have no aliases.
+- **If you use Azure**, rename its provider ([pi is 1.1](#pi-is-1-1)).
+
+### Pages, settings and routes that moved
+
+| In 0.1.0 | In 0.2.0 |
+| --- | --- |
+| Settings → Agent → Images, `/settings/images` | Media's page under Extension settings, `/settings/x/pithagoras-media` |
+| The Images page, `/images` | The Media page, `/x/pithagoras-media/media` |
+| Settings → Add-ons, `/settings/add-ons`: Browser, Voice, Subagents and Memory | Browser's, Voice's, Voice servers' and Memory's pages under Extension settings; Subagents in Settings → Tools; voice mode at the end of Settings → Defaults |
+| The Browser page, `/browser`, with the allowlist | `/x/pithagoras-browser/browser`; the allowlist in Settings → Guard → Sites the agent's tools may reach |
+| The Memory page, `/memory` | `/x/pithagoras-understory/memory` |
+| `/api/terminal…` | `/api/x/pithagoras-terminal/terminal…` |
+| `/api/sessions/:id/git…` | `/api/x/pithagoras-git/chats/:id…` |
+| `/api/sessions/:id/canvases…` | `/api/x/pithagoras-canvas/chats/:id/canvases…` |
+| `/api/sessions/:id/files`, `file`, `folder`, `unsaved` and `archive` | `/api/x/pithagoras-files/chats/:id/…` |
+| `/api/images…`, `/api/features/images` | `/api/x/pithagoras-media/images…`, `/api/x/pithagoras-media/settings/images` |
+| `/api/browser…`, `/browser-ui/` | `/api/x/pithagoras-browser/…`, `/api/x/pithagoras-browser/ui/` |
+| `PUT /api/browser/allowlist` | `PUT /api/guard/allowlist`; the list is in `GET /api/guard` |
+| `/api/voice/install`, `hardware`, `gpu`, `start`, `stop`, `uninstall`, `/api/voice/presets…` | `/api/x/pithagoras-voice/…` |
+| `/api/features/understory…`, `/api/memory/…` | `/api/x/pithagoras-understory/…` |
+
+`/settings/images` and `/settings/add-ons` open Settings → Defaults. The
+sections below give each move in full, and the
+[API reference](/reference/api) has the new routes.
+
+### New environment variables
+
+None of them has to be set: unset, each keeps what 0.1.0 did, except
+`BROWSER_BIND`, whose default keeps a new browser container off the network.
+See [Configuration](/reference/configuration#environment).
+
+| Variable | What it sets |
+| --- | --- |
+| `BROWSER_BIND` | The address the browser's own ports listen on: `127.0.0.1` unless set; 0.1.0 opened them on every interface ([Browser is an extension](#browser-is-an-extension)) |
+| `PORTAL_DEFAULT_EXTENSIONS` | `off` installs none of the extensions a portal starts with |
+| `UNDERSTORY_LLM_PORT` | The loopback port through which Understory reaches the chat's model, `3801` |
+| `UNDERSTORY_LLM_HEADERS_TIMEOUT_MS`, `UNDERSTORY_LLM_BODY_TIMEOUT_MS` | How long the model Understory thinks with may take |
+| `PORTAL_FETCH_HEADERS_TIMEOUT_MS`, `PORTAL_FETCH_BODY_TIMEOUT_MS` | How long a fetch of the portal's process, an MCP call among them, may wait: 30 minutes, where Node cut one off after five |
+| `PITHAGORAS_LOG_LEVEL`, `PITHAGORAS_LOG_LINES`, `PITHAGORAS_LOG_CHARS` | What Settings → Logs keeps |
+| `PORTAL_UPDATE_CHECK`, `PORTAL_UPDATE_RESTART` | The Update and Restart buttons in Settings → About, for a portal run from a checkout |
+| `FFMPEG_PATH` | The `ffmpeg` Media makes posters and playable copies of clips with |
+
+No variable that 0.1.0 read is gone. `PORTAL_PASSWORD` is read only to move it
+into the database.
+
+### What does not carry over
+
+- **A chat 0.1.0's guard held is not held any more**: see [The guard](#the-guard).
+- **A key chosen** for the terminal (<kbd>T</kbd>), canvases (<kbd>D</kbd>),
+  files (<kbd>F</kbd>) or the browser (<kbd>B</kbd>) in voice mode is back at
+  its default, and the terminal's, Git's, Canvases', Files' and the browser's
+  panels beside a chat start at the default place once.
+- **Stored canvases** are Markdown files in their chats' folders, not canvases.
+- **The logins** made before the upgrade are asked for the password once more.
+- **Breeze Python** has no source in voice mode, and speech at an address of
+  your own carries over only where it spoke Kokoro
+  ([Voice's service is an extension](#voice-s-service-is-an-extension)).
+
+## Agents and routines have tools of their own
+
+An agent and a routine each have a **Tools** list now, as a chat and a project
+do ([Agents](/guide/agents#tools), [Routines](/guide/routines#tools)). The
+layers, each an exception to the one before, are Settings → Tools, the agent,
+the project, the routine and the chat. The upgrade (schema 4) gives every agent
+and routine an empty list, so every chat, project, agent and routine has the
+tools it had. A
+routine's **Browser** switch is written into its own list later, at schema 8
+(see [Browser is an extension](#browser-is-an-extension)). A project can also
+work with an agent now ([Projects](/guide/projects)); one from 0.1.0 works with
+none, as before.
+
+## Code mode is a tool, off by default
+
+Code mode, pi's `codemode` tool, is in the tool lists as a group of its own
+([Code mode](/guide/extensions#code-mode)). The first start puts it in the
+default of Settings → Tools as off, beside what you had switched off there, so
+no chat has it until it is switched on for a chat, a project, an agent or every
+chat. A later start does not undo what you choose.
+
 ## The password moves into the database
 
 A portal used to take its password from `PORTAL_PASSWORD`. It now keeps it, hashed, in its database, chosen in the browser and changed under Settings → Authentication (see [The password](/guide/deploying#the-password)). What the first start after the upgrade does:
@@ -86,6 +205,69 @@ that file, and `reset-password.js` and `sso-only-off.js` beside it, as small
 files that load the same ones from `core/server/dist`. Change the command when
 it suits you.
 
+## The extensions a portal starts with
+
+The first start after the upgrade installs, once, the extensions a new portal
+starts with, from the portal's own `extensions/` folder. Settings → Extensions →
+Installed then lists:
+
+| Package | What it brings |
+| --- | --- |
+| `pithagoras-terminal` | The [terminal](/guide/terminal) panel beside a chat, and its window in voice mode |
+| `pithagoras-git` | The [Git](/guide/git) panel |
+| `pithagoras-files` | The [Files](/guide/files) panel, and its window in voice mode |
+| `pithagoras-canvas` | [Canvases](/guide/canvases) and the agent's canvas tools |
+| `pithagoras-media` | [Media](/guide/media): the agent's picture and video tools, the Media page and its settings |
+| `pithagoras-themes` | Seven colour themes, chosen under Settings → This browser |
+
+They are ordinary packages from then on
+([What a portal starts with](/guide/extensions#what-a-portal-starts-with)): one
+you switch off or remove stays so, and a later start does not put it back. With
+`PORTAL_DEFAULT_EXTENSIONS=off` none of them is installed: the portal then has
+no terminal, Git or Files panel, no canvases and no picture tools until you
+install them, and what 0.1.0 kept of the Images page waits for Media.
+
+The others that come with the portal are not installed by the upgrade. They are
+listed under Settings → Extensions → Discover → Comes with Pithagoras: Browser
+(`pithagoras-browser`), Docker for extensions (`pithagoras-docker`), Voice
+(`pithagoras-voice`), Voice servers (`pithagoras-voice-servers`), Understory
+(`pithagoras-understory`), Documents (`pithagoras-docs`), Kanban
+(`pithagoras-kanban`) and Creator mode (`pithagoras-creator`). The sections
+below say which of them a portal that used 0.1.0's add-ons needs.
+
+## The terminal is an extension
+
+The terminal is the `pithagoras-terminal` extension now
+([Terminal](/guide/terminal)), installed on the first start. The button in a
+chat's header, the panel and its tabs, and its window in voice mode are the
+same. Background jobs and subagents stay the portal's own.
+
+- **Its routes moved:** what was `/api/terminal…` is now
+  `/api/x/pithagoras-terminal/terminal…` (see
+  [Terminal](/reference/api#terminal-background-jobs-and-subagents)). A script
+  that used the old addresses needs the new ones.
+- **Once:** a key chosen for "Show or hide the terminal" under Settings →
+  Shortcuts is <kbd>T</kbd> again, and where the terminal's panel beside a chat
+  had a place or a size set by hand, it starts at the place the panels have by
+  default, and keeps what it is given from then on.
+
+## Git is an extension
+
+Git is the `pithagoras-git` extension now ([Git](/guide/git)), installed on
+the first start. The button in a chat's header and the panel are the same, and
+it has a picker for the repositories inside a chat's folder. A commit message or
+a pull request's text that was being written is kept under the same name in the
+tab's session storage, so a tab that stays open through the upgrade still has it
+after the reload.
+
+- **Its routes moved:** what was `/api/sessions/:id/git…` is now
+  `/api/x/pithagoras-git/chats/:id…`, with `?repo=` for a repository inside the
+  folder (see [Git](/reference/api#git)). A script that used the old addresses
+  needs the new ones.
+- **Once:** where Git's panel beside a chat had a place or a size set by hand, it
+  starts at the place the panels have by default, and keeps what it is given from
+  then on.
+
 ## Canvases are an extension
 
 Canvases are the `pithagoras-canvas` extension now, installed on the first
@@ -97,6 +279,15 @@ whose folder is gone has its canvases written to `canvases/` in the data
 folder, beside `backups/`; the log says where each one went. They are files
 now, to open in Files or ask the agent to read, not canvases. The database was
 backed up before, as for any upgrade.
+
+The button in a chat's header, the panel and its window in voice mode are the
+same. Its routes moved with it: what was `/api/sessions/:id/canvases…` is now
+`/api/x/pithagoras-canvas/chats/:id/canvases…` (see
+[Canvases](/reference/api#canvases)), answered the same way. A script that used
+the old addresses needs the new ones. Once, a key chosen for "Show or hide
+canvases" under Settings → Shortcuts is <kbd>D</kbd> again, and where the
+canvases' panel beside a chat had a place or a size set by hand, it starts at
+the place the panels have by default, and keeps what it is given from then on.
 
 ## Files is an extension
 
@@ -121,6 +312,18 @@ Dusk and Warm were extensions of their own (`pithagoras-theme-dusk` and `pithago
 
 Reload the portal's open tabs after the upgrade. A tab that was open before it still runs the old page, which does not know the pack's themes and gives up the Dusk or Warm choice the first time it asks the server for the extensions.
 
+A portal at 0.1.0 had neither package: for it, the pack is one of the [extensions a portal starts with](#the-extensions-a-portal-starts-with).
+
+## A tool's files are shown under its card
+
+A tool gives the person a file by saying so at the end of its call now
+([Files a tool gives](/guide/extension-ui#files-a-tool-gives)), and the chat,
+voice mode and the channels show what it says, for any tool. Before, only the
+portal's own picture and clip tools could, each in a shape of its own. The
+upgrade (schema 6) gives the ends of those calls kept in the chats, and in the
+earlier versions of a message, the files they showed, so the pictures and clips
+in older chats are shown as they were. Nothing else in a conversation is changed.
+
 ## Media is an extension
 
 Media is the `pithagoras-media` extension now, installed on the first start
@@ -133,13 +336,15 @@ under new names and addresses:
   `/media`, `/images` and `/videos` are gone; a link to one of them needs the
   new address.
 - **The settings** are Media's page in Settings, under **Extension settings**,
-  at `/settings/x/pithagoras-media`, where **Settings → Agent → Media** was.
-  `/settings/media` is gone. What was set there, the keys included, is carried
-  over.
+  at `/settings/x/pithagoras-media`, where **Settings → Agent → Images** was in
+  0.1.0, at `/settings/images`, and **Settings → Agent → Media** in the builds
+  after it, at `/settings/media`. Both addresses open Settings → Defaults now.
+  What was set there, the keys included, is carried over.
 - **The tools** are the extension's, in its group, `pithagoras-media`, in the
-  tool lists, where the **Media** group was. A lazy mark on the Media group, or
-  a name given to it, moves to the new group; a tool switched on or off by its
-  name, for a chat, a project, an agent or a routine, stays as it was.
+  tool lists, where the **Media** group was (**Images** in 0.1.0). A lazy mark on
+  the group, or a name given to it, in 0.1.0 as well, moves to the new group; a
+  tool switched on or off by its name, for a chat, a project, an agent or a
+  routine, stays as it was.
 - **`show_image` comes with Media.** It is no longer the portal's own: with
   Media switched off or removed the agent has no `show_image`, and the voice
   rule no longer tells it to show pictures with it.
@@ -304,8 +509,10 @@ addresses:
   carried into the switches, is written into the tools' switches by the upgrade,
   once (see below). A routine's `browser` field is gone, and so is
   `PUT /api/sessions/:id/browser`.
-- **The allowlist** stays where it was, Settings → Guard → Sites the agent's
-  tools may reach.
+- **The allowlist** is in Settings → Guard → Sites the agent's tools may
+  reach, with what it held. In 0.1.0 it was on the Browser page:
+  `PUT /api/browser/allowlist` is now `PUT /api/guard/allowlist`, and the list
+  is in `GET /api/guard`, no longer in what the browser's state answers.
 - **The routes moved:** what was `/api/browser…` is now under
   `/api/x/pithagoras-browser/…` (`/state`, `/install`, `/start`, `/stop`,
   `/config`, `/suggest-password`, `/connect` and `/cursor`, see
@@ -531,8 +738,20 @@ portal's container is made again, as a Compose update does: Voice makes it again
 once, on the portal's new one, with the engines it was built for and the GPU it
 was given, and the volume is kept, so nothing is downloaded again; the system
 packages the setup installs in the container are installed again, as on every
-remake. Until Voice is installed, they belong to no extension, and Settings →
-Docker does not show them.
+remake. Until Voice is installed, they belong to no extension: Settings → Docker
+does not show them, and nothing makes the container again, a rebuild of the
+portal included.
+
+**The container comes back after the host restarts.** 0.1.0 made it with no
+restart policy, so it stayed stopped after a restart until it was started on its
+page. Voice makes its container `unless-stopped`, and gives one made before the
+same policy in place the first time it finds it, as its server half starts,
+without making it again or restarting it: a container that is stopped stays
+stopped, and Docker starts it again after the host restarts. That needs Docker
+for extensions 1.2.0, which this release ships and Voice requires; installing
+Voice installs it, or says that the one installed is too old. A container you
+stop on Voice's page, or in Settings → Docker, stays stopped until you start it
+(see [The voice service](/guide/voice-service)).
 
 **What the portal kept of voice mode is handed over**, not lost. The first start
 after the upgrade, which raises the schema to 9, moves it out of the portal into
@@ -914,16 +1133,73 @@ needs the steps that
 and [Understory's](#going-back-to-a-version-before-understory-was-an-extension)
 give for it.
 
-## Upgrading from the first release
+## The guard
 
-What the first start after an install of version 0.1.0, or of any build made before this one, shows and needs:
+What the guard holds a chat to changed in this release
+([Prompt injection](/guide/security#suspected-prompt-injection)). For a portal
+upgraded from 0.1.0:
 
-- **The Upgrading page.** The database is checked, backed up and upgraded, as above. The schema version was raised for this release, so an install made before it goes through this once.
-- **A voice add-on.** The container of a voice add-on that an older version made is made again, with the engines and the card it had, the next time it is started or installed from the voice service's page (see [Voice's service is an extension](#voice-s-service-is-an-extension)); the models and builds in its volume are kept. Rebuilding the portal does not touch it until then.
+- **A chat that read something from outside is not held for it any more.** 0.1.0
+  held every chat that had read a result from outside (mail, the web, an MCP
+  server, the browser), and read that back from the conversation at each start.
+  Now only a result that looks like a prompt injection holds a chat, and 0.1.0
+  never marked one, so after the upgrade no chat is held until such a result
+  comes. A call it holds then is asked of you where you are there to answer,
+  and refused, as before, in a routine's run, a heartbeat, a channel's chat, and
+  a conversation in which somebody else is speaking
+  ([Asked or refused](/guide/security#asked-or-refused)).
+- **What an MCP server returns is outside content**, however the tool is called,
+  unless the server is trusted in Settings → Guard. Where Understory was in use,
+  the upgrade trusts `understory` (see
+  [Understory is an extension](#understory-is-an-extension)).
+- **A heartbeat's rules** for `subagent`, `routine_create`, `routine_update` and
+  `routine_run` are removed from Settings → People, as 0.1.0 removed everybody
+  else's: a heartbeat may not run those tools now.
+- **A routine's Injection guard switch** is a set of exemptions, one for each
+  rule, in Settings → Guard
+  ([The injection guard](/guide/routines#the-injection-guard)). A routine whose
+  switch was off is exempt from every rule, as it was, until you switch some back
+  on there. The `guard` field of a routine in the API still means all the rules
+  or none.
+
+## MCP servers taken out of mcp.json by hand
+
+The portal now notices a server taken out of pi's `mcp.json` outside it, by
+hand or by a script, and forgets its tools as it does for one removed in
+Settings → MCP ([Disabling](/guide/mcp#disabling)). To tell what was taken out,
+it keeps the servers it last saw in the file, in a new setting,
+`mcp_configured`. That is filled the first time the portal looks at the file
+after the upgrade, and nothing is judged then: a tool left behind by a server
+taken out by hand before the upgrade stays listed in Settings → Tools. To be rid
+of it, add the server again under its name in Settings → MCP, with any entry,
+and remove it there.
+
+The tools of a server whose name has a dot, such as `docs.v2`, belong to it now:
+they are grouped under it, go with it when it is switched off or removed, and are
+trusted with it where it is trusted in Settings → Guard. Before, they belonged to
+no server. Those of a dotted server removed before the upgrade stay listed under
+`pi-mcp-adapter`; the same add and remove takes them out.
+
+## pi is 1.1
+
+The portal's pi, and the `pi` in the image, move from 0.82 to 1.1. The
+extensions and packages you installed stay at their versions; one written for an
+older pi may need an update of its own, as pi 1.0 changed parts of its extension
+and provider interfaces. `pi-mcp-adapter` 2.18.0, which the portal installs,
+works as before. pi now reads `AGENTS.override.md` before `AGENTS.md` in a
+folder. If you use Azure, its provider is renamed from `azure-openai-responses`
+to `azure`: rename it in pi's `auth.json`, `models.json` and `settings.json`, or
+sign in again. A portal run from a checkout needs Node 22.19 or later.
+
+## Upgrading to 0.1.0 from an earlier build
+
+A portal at 0.1.0 has all of this already. What a build made before 0.1.0 meets
+on its first start after the upgrade, as 0.1.0's own release notes gave it:
+
+- **The Upgrading page.** The database is checked, backed up and upgraded, as above. The schema version was raised for 0.1.0, so an install made before it goes through this once.
 - **`WORKSPACES_DIR` is required.** An install whose `.env` never set it was mounting the folder `/root/repos` of the host, and Compose now stops until the variable is set. Set it to the folder your repositories are in; for an install that relied on the old default, that is `/root/repos`. The Portainer stack asks for it too.
-- **The password.** It is kept in the portal's database now, no longer read from `PORTAL_PASSWORD`; see [The password moves into the database](#the-password-moves-into-the-database). A `PORTAL_PASSWORD` that is still `change-me`, the example of the first release's `.env.example`, is not taken as the password.
 - **The Portainer stack's data folder.** The first release's Portainer stack ignored `PORTAL_DATA_DIR` and always kept its data in the volume `<stack>_pithagoras-data`. It now mounts the folder that variable names, as `docker-compose.yml` does. If your stack's environment sets `PORTAL_DATA_DIR`, the update would start the portal on that folder, empty if it did not exist, and everything you had would look gone. Either remove the variable to stay on the volume, or stop the stack first and copy the volume into the folder: `docker run --rm -v <stack>_pithagoras-data:/from:ro -v /that/folder:/to alpine cp -a /from/. /to/`.
-- **Rules for `subagent` and the routine tools.** `subagent`, `routine_create`, `routine_update` and `routine_run` run what a person writes with your rights, so no rule or approval opens them for anybody else now (see [roles](/people/roles#what-a-colleague-may-do)). A rule the first release let you or an approval make for one of them could never apply, so the upgrade removes it from Settings → People, a heartbeat's own excepted. A colleague who was allowed to delegate with `subagent` is not any more.
+- **Rules for `subagent` and the routine tools.** `subagent`, `routine_create`, `routine_update` and `routine_run` run what a person writes with your rights, so no rule or approval opens them for anybody else now (see [roles](/people/roles#what-a-colleague-may-do)). A rule the first release let you or an approval make for one of them could never apply, so the upgrade removes it from Settings → People; 0.1.0 kept a heartbeat's, and 0.2.0 removes those too (see [The guard](#the-guard)). A colleague who was allowed to delegate with `subagent` is not any more.
 - **Channel packages.** A third-party channel has to say who sent each message (`from` in `ctx.ask`, with the sender's id as a string), or once a primary user is named its messages are turned away like a stranger's. See [Writing a channel](/channels/writing-a-channel).
 - **Webhooks without a sender.** A webhook message that names nobody, by `from` in its body or the channel's `senderId`, is answered as a stranger's once a primary user is named. A cron job, CI step or home automation that posted without one ran as you before; give it a sender. The answer is an ordinary reply, not an HTTP error, so a script that only checks the status does not notice.
 - **Approvals.** Only `approve` and `always` approve an action now. "yes", "ok" or "go ahead" answer the question without approving anything, and the agent asks again.
@@ -932,8 +1208,11 @@ What the first start after an install of version 0.1.0, or of any build made bef
 - **Deleting.** Deleting an agent with its folder deletes its routines as well; the sessions of their runs are kept. Deleting an agent or a project stops the background jobs started in its folder.
 - **Pictures from other sites** in replies, notes and pull requests are not loaded; the chat says which site the picture was from. The portal's own pictures load as before.
 - **The `pi` in the image** is the one the lock names, as the portal's own, instead of the newest published. `pi install` and the Terminal use it.
-- **pi is 1.1.** The portal's pi, and the `pi` in the image, move from 0.82 to 1.1. The extensions and packages you installed stay at their versions; one written for an older pi may need an update of its own, as pi 1.0 changed parts of its extension and provider interfaces. `pi-mcp-adapter` 2.18.0, which the portal installs, works as before. pi now reads `AGENTS.override.md` before `AGENTS.md` in a folder. If you use Azure, its provider is renamed from `azure-openai-responses` to `azure`: rename it in pi's `auth.json`, `models.json` and `settings.json`, or sign in again.
 - **`deploy/cortex-voice` is gone** from the repository. A machine set up from those files keeps running; keep a copy of them if you set one up again.
+
+Such a build then goes on to 0.2.0 as a portal at 0.1.0 does: see
+[From 0.1.0 to 0.2.0](#from-0-1-0-to-0-2-0). The password, pi 1.1 and the voice
+container are 0.2.0's changes, in their own sections.
 
 ## Pin a version
 
@@ -958,5 +1237,87 @@ Going back to a version from before Media was an extension also needs Media's fi
 Going back to a version from before Browser was an extension needs Browser removed first, and a local Chrome's profile moved back, and what is left of its hand-off and its folder out of the way, before step 3: see [Browser is an extension](#going-back-to-a-version-before-browser-was-an-extension).
 Going back to a version from before Voice's service was an extension needs Voice and Voice servers removed first, and what is left of their hand-offs and their folders moved aside, before step 3: see [Voice's service is an extension](#going-back-to-a-version-before-voice-was-an-extension).
 Going back to a version from before Understory was an extension needs Understory removed first, and what is left of its hand-off and its folder out of the way, before step 3, and its container made again from the older version afterwards: see [Understory is an extension](#going-back-to-a-version-before-understory-was-an-extension).
+Going back from 0.2.0 to 0.1.0 needs all of these at once, in one order: see [Going back to 0.1.0](#going-back-to-0-1-0).
 
 From this version on, an older version does not start on a newer database: it stops at the page described above, because a newer version may have renamed or dropped columns, not only added them. Versions before this one open it anyway and run against it, so put the backup back before you start one of them. The backup from `backups/` is the database as it was before the newer version changed it, which is why going back means putting it back.
+
+### Going back to 0.1.0
+
+0.1.0 does not open a database that 0.2.0 has upgraded: it shows the page that
+says the database is at a newer version. Going back is putting back
+`backups/portal-v3-….db`, the copy the upgrade made, and moving what the upgrade
+took out of the database back to where 0.1.0 looks for it. Everything written to
+the database since the upgrade is lost, as with any restore.
+
+1. **Remove the extensions 0.1.0 does not have**, while 0.2.0 still runs, under
+   Settings → Extensions: the six it started with (Terminal, Git, Files,
+   Canvases, Media and the theme pack), and Browser, Docker for extensions,
+   Voice, Voice servers, Understory, Documents, Kanban and Creator mode where
+   you installed them. pi's `settings.json` lists each by its folder in the
+   image, and 0.1.0's image has none of those folders. Removing one keeps its
+   folder in `extension-data/`, and the containers keep running.
+2. **Stop the portal.**
+3. **Put the backup back:** `backups/portal-v3-….db` as `portal.db`, with
+   `portal.db-wal` and `portal.db-shm` beside it removed.
+4. **Move back what the upgrade moved**, with the portal stopped. In the data
+   folder:
+
+   ```sh
+   cd /path/to/data
+   # The Images page's own pictures, where 0.1.0 keeps them.
+   mkdir -p images
+   for from in extension-data/pithagoras-media handoff/media handoff/.media.*; do
+     [ -d "$from" ] || continue
+     find "$from" -type f \( -path "*/images/*" -o -path "*/.images.partial/*" \) \
+       ! -path "*.copy/*" ! -name "*.copy" -exec mv {} images/ \;
+   done
+   # A local Chrome's profile, where 0.1.0 keeps it.
+   for from in extension-data/pithagoras-browser/profile \
+     extension-data/pithagoras-browser/handoff-browser/profile \
+     handoff/browser/profile handoff/.browser.*/profile handoff/.browser.*/.profile.partial; do
+     [ -d "$from" ] || continue
+     mkdir -p browser-profile
+     find "$from" -mindepth 1 -maxdepth 1 -exec mv {} browser-profile/ \;
+   done
+   # The rest of what 0.2.0 kept, set aside where nothing reads it.
+   stamp=$(date +%Y%m%d-%H%M%S)
+   mkdir -p "backups/0.2.0-$stamp"
+   for d in extension-data handoff; do
+     if [ -e "$d" ]; then mv "$d" "backups/0.2.0-$stamp/"; fi
+   done
+   ```
+
+   In a container, run the same with the portal container's own mounts, as
+   `docker run --rm --volumes-from pithagoras alpine sh -c '…'` with `cd /data`
+   first (see [Media's section](#going-back-to-a-version-before-it)).
+5. **Set `PORTAL_PASSWORD` again**, to the password: 0.1.0 reads it from there,
+   not from the database.
+6. **Start 0.1.0:** `PITHAGORAS_VERSION=0.1.0` in the Portainer stack, or the
+   image you kept (see [Going back](#going-back)).
+7. **Make Understory's container again**, if you used Understory, from 0.1.0's
+   Settings → Add-ons → Memory: choose the model it thinks with once more and
+   press **Save and restart Understory**. Understory made the container to reach
+   the chat's model at a server 0.1.0 does not run. The memory in its volume is
+   kept.
+
+What the backup cannot hold stays with 0.2.0's folders in
+`backups/0.2.0-<date>-<time>`: settings changed on an extension's page after the
+upgrade, voices added to Voice (`extension-data/pithagoras-voice/voices/`, with
+their words in `voices.json`), and what the Media page made since. Delete the
+folder once you are sure you do not want it. Left in place, `handoff/` would be
+taken by the next upgrade for what it had left already, and each extension's
+folder would keep its own settings over what 0.1.0 changed.
+
+Also:
+
+- **The canvases** the upgrade wrote out as Markdown stay in the chats' folders.
+  The backup has them as canvases, so each is there twice.
+- **pi goes back to 0.82** with the image. A package installed after the upgrade
+  that needs pi 1.x does not load, and an Azure provider renamed to `azure`
+  needs its old name, `azure-openai-responses`.
+- **The voice container** keeps the `unless-stopped` policy Voice gave it, so
+  Docker starts it after the host restarts. 0.1.0 manages it by its name, as
+  before.
+- **A chat's mode, the modes you made, and a routine's exemptions** set in
+  Settings → Guard are not in the backup. A routine has the Injection guard
+  switch it had.
