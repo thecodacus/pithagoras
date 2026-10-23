@@ -2,7 +2,8 @@ import type { Plural } from "@pithagoras/extension-api";
 
 /**
  * Creator mode's texts in German, each by what the code says in English: the mode's, which the picker above the
- * message box shows; and the reasons of its rows in Settings → Audit.
+ * message box shows; the reasons of its rows in Settings → Audit; and its page in Settings. Those the portal says the
+ * same way are here as well, as the portal has them.
  */
 export const de: Record<string, string | Plural> = {
   "Creator mode": "Creator-Modus",
@@ -13,4 +14,18 @@ export const de: Record<string, string | Plural> = {
   "Installed": "Installiert",
   "Installed again": "Erneut installiert",
   "Removed": "Entfernt",
+  "What agents made in Creator mode chats, newest first. Each is installed for the whole portal: switch it off or remove it in Settings → Extensions.":
+    "Was Agenten in Chats im Creator-Modus erstellt haben, das Neueste zuerst. Jede Erweiterung ist für das ganze Portal installiert: Schalte sie unter Einstellungen → Erweiterungen aus oder entferne sie dort.",
+  "Nothing made yet. Start a chat in Creator mode: what its agent installs is listed here.":
+    "Noch nichts erstellt. Starte einen Chat im Creator-Modus: Was sein Agent installiert, steht dann hier.",
+  "On": "An",
+  "Off": "Aus",
+  "Not installed": "Nicht installiert",
+  "Made in {chat}": "Erstellt in {chat}",
+  "Made in a chat that was deleted": "Erstellt in einem Chat, der gelöscht wurde",
+  "Forget": "Vergessen",
+  "Forget {name}?": "{name} vergessen?",
+  "Its copy is deleted from Creator mode's folder. It is not installed, so nothing else changes.":
+    "Ihre Kopie wird aus dem Ordner des Creator-Modus gelöscht. Sie ist nicht installiert, also ändert sich sonst nichts.",
+  "Loading…": "Wird geladen…",
 };
