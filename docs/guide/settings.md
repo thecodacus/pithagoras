@@ -167,6 +167,12 @@ address (`/settings/extensions?extensions=off`): it loads no extension's
 interface, and the package can be switched off or removed here. See
 [What is loaded, and when](/guide/extension-ui#what-is-loaded-and-when).
 
+A package in an extension's own data folder says **From** that extension: one
+the extension installed itself ([Extensions it installs](/guide/extension-ui#extensions-it-installs)),
+or one installed from there by its path. Where the extension installed it, the
+note it gave is under it, as the extension wrote it, and pointing at the pill
+says when.
+
 ::: warning Recovered, not declared
 pi publishes no schema for extension settings — extensions simply read keys off
 the settings object. The portal recovers them by reading the package source,

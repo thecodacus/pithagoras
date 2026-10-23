@@ -826,7 +826,9 @@ restart the portal.
 | `models.of(chatId?)`, `models.endpoint(provider, id)`, `models.list()` | [The models the chats use](#models): the one a chat is on, where a model is asked and with which key, and the providers set up by their address |
 | `mcp.get(name)`, `mcp.set(name, entry, options?)` | [An MCP server](#mcp-servers) in pi's mcp.json, and whether the chats have its tools now |
 | `memory.hold({ label, rule, on })` | [Holding the agent's memory](#the-agent-s-memory) in place of its MEMORY.md |
+| `audit.record(entry)` | [A row in Audit](#a-row-in-audit) for something it did, under its name |
 | `provide(factory)`, `extensions.use(name)` | [Building on another extension](#building-on-another-extension): what it gives the extensions that build on it, and what one it builds on gives it |
+| `extensions.install(folder, options?)`, `extensions.remove(name)`, `extensions.status(name, options?)` | [Extensions it installs](#extensions-it-installs) from its own data folder, loads again and removes; and where an installed extension stands |
 | `voice.provide(provider)`, `voice.choose(chosen)`, `voice.chosen()` | [Voice providers](#voice-providers): recognising and speaking for voice mode, with the voices it has; making it voice mode's source, and whether it is |
 | `modes.provide(mode)` | [A chat mode](#chat-modes) the person can start a chat in |
 | `log(text)`, `extension`, `executor`, `version` | A line in the portal's log; the package's name; how pi is run here; `1` |
@@ -1651,6 +1653,29 @@ portal.memory.hold({
 Understory (`extensions/understory`) holds the memory so, while its server is
 on.
 
+### A row in Audit
+
+An extension that does something the person should be able to look back on, such
+as installing code, writes it into **Audit**, beside the guard's decisions, with
+`portal.audit.record`:
+
+```js
+portal.audit.record({ subject: "moon 0.1.0 · 3f2a9c41d0be · extensions/moon", reason: "Installed", chatId: chat.id });
+```
+
+- The row is of the kind **Extension**, and names the extension, by its
+  package's name, as the tool. The kind is fixed: an extension cannot write a
+  row that reads as one of the guard's (`refused`, `allowed-by-approval`,
+  `trusted`).
+- `subject` is what it was done to, a name or a path, shown as it is. An empty
+  one is a TypeError. It is cut at 2,000 characters, as every row's subject is.
+- `reason` is a short text in English. Audit shows it through the extension's
+  own translations (`portal.locale.add` in its browser half), as it does a
+  mode's texts.
+- `chatId` is the chat it was done for, kept as it is given. The chat is not
+  looked up, so one deleted since is still named by its id, as the guard's rows
+  name one.
+
 ### Building on another extension
 
 An extension can give others something to build on, as a library does: a
@@ -1744,6 +1769,80 @@ or a folder of the server's is read only once it is installed: nothing is
 installed with it, and it waits as above until what it requires is there.
 Before anything is installed, Discover says what one that comes with the portal
 requires ("Needs pithagoras-docker").
+
+### Extensions it installs
+
+An extension can install a package it wrote itself, load it again after a
+change, and remove it: a mode in which the agent makes extensions, say, takes a
+copy of what the agent wrote into a folder of its own, and installs the copy.
+`portal.extensions.install`, `remove` and `status` do what Settings →
+Extensions does, for a folder in the extension's own data folder.
+
+```js
+const copy = path.join(portal.dataDir(), "made", "moon");
+// … the package written into `copy`, and checked …
+const installed = await portal.extensions.install(copy, { note: "Moon phases · extensions/moon" });
+if (installed.server && !installed.server.running) portal.log(`moon: ${installed.server.crash?.error ?? installed.server.failure}`);
+
+// Later: where it stands, with the lines it said since the last look, and what a chat could not load of it.
+const status = await portal.extensions.status("moon", { chatId, since });
+
+await portal.extensions.remove("moon");
+```
+
+- **Only from its own `dataDir()`.** The folder must be inside it, followed
+  through links: a folder anywhere else, or a link in `dataDir()` that leads out
+  of it, is refused with a TypeError, and so is a folder with no package.json or
+  no valid npm name in it. The portal loads only what no agent can write, and
+  `dataDir()` is the portal's alone (0700). A folder an agent can write,
+  installed as it is, would let any chat that can write there change code that
+  runs in the portal, with no install in between. So an extension copies what it
+  is given into its own folder, checks the copy, and installs that.
+- **A name of its own.** A name that one of the portal's own extensions has
+  (those in its `extensions` folder, the subagent tool included) is refused, and
+  so is one that a package installed from another folder has. Of two packages of
+  one name, the portal loads the first: the second would be installed and never
+  run.
+- **One at a time.** Installs and removals made through these calls, by every
+  extension, run one after another, each whole, from its checks to the end. An
+  install in Settings is not one of them, and checks no names.
+- **The same folder again is the reload.** Installed again after its files
+  changed, it stays one package, and each of its halves is loaded again at its
+  new revision, as installing the same folder in Settings does (see
+  [What is loaded, and when](#what-is-loaded-and-when)). After every install the
+  open chats are loaded again, an idle one at once and one that is working at
+  its next step: the model's next request has the new tools.
+- **An off switch stays off.** A package the person switched off in Settings
+  stays off when it is installed again: `enabled` says so, and its server half
+  does not start.
+- **What `install` answers** is what `status` says once it is installed, with
+  how many open chats were loaded again (`reloaded`) and how many are working and
+  take it at their next step (`waiting`).
+- **What `status` says** (`ExtensionStatus`): its name, version and spec;
+  whether it is switched on; where it came from (`installedFrom`); for its server
+  half, whether it runs, why not, the crash it is held off for (see
+  [When the server half crashes](#when-the-server-half-crashes)), and its latest
+  lines, up to 200, oldest first, with what looks like a secret taken out; what a
+  page said last failed of its browser half; and, asked with `chatId`, what that
+  chat could not load of it at its last load (`loadErrors`: a factory of its
+  server half that threw, a tool whose name another had), which is empty while
+  that chat's pi is not running. Each line has an `id`: give the last one as
+  `since` to have only the lines after it. Nothing for a name that is not
+  installed. It answers for any installed extension, not only for one this
+  extension installed.
+- **In Settings → Extensions** a package in an extension's data folder says
+  **From** that extension, however it was installed: with this call, or by its
+  path in Settings. Where the extension installed it itself, the note it gave is
+  under it, shown as it is, and pointing at the pill says when.
+- **`remove`** takes only a package whose folder is in this extension's own data
+  folder, and is what Remove in Settings does: the open chats are loaded again.
+  The files stay; they are the extension's, in its folder. Removing it in
+  Settings drops its note as well.
+- **Not while it starts, nor once it stopped.** `install` and `remove` reject at
+  once when they are called before the half's default export has returned, or
+  after its server half stopped: the server halves follow an install, and they
+  would wait for this one. Call them from a route, a tool or a timer. `status`
+  can be asked at any time.
 
 ### Voice providers
 
