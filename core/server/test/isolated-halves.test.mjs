@@ -25,6 +25,7 @@ const { eventsRouter } = await import("../dist/api/events.js");
 const { extensionsRouter, followPackages } = await import("../dist/api/extensions.js");
 const { packagesRouter } = await import("../dist/api/packages.js");
 const { serverHalf } = await import("../dist/extension-ui.js");
+const { listJobs } = await import("../dist/background.js");
 const { default: express } = await import("express");
 const HANG = 3_000;
 host.setLimits(10_000, 1_000, { hang: HANG });
@@ -219,11 +220,12 @@ test("chats.extend: its tools in its mode's chat alone, with their guard; a call
   assert.equal(await aborted, "it was aborted");
 });
 
-test("what a factory of chats.extend cannot do is the chat's load error: a throw, the time running out, and a function pi would be given", async () => {
+test("what a factory of chats.extend cannot do is the chat's load error: a throw, the time running out, a function pi would be given, and a name of pi's own", async () => {
   await host.syncServerHalves([
     half("thrower", `portal.chats.extend(() => { throw new Error("no tools today"); });`),
     half("slow", `portal.chats.extend(() => new Promise(() => {}));`),
     half("preparer", `portal.chats.extend((pi) => pi.registerTool({ name: "p", label: "p", description: "p", parameters: {}, prepareArguments: (args) => args, async execute() { return { content: [] }; } }));`),
+    half("shadow", `portal.chats.extend((pi) => pi.registerTool({ name: "find", label: "find", description: "Finds.", parameters: {}, async execute() { return { content: [] }; } }));`),
     half("fine", `portal.chats.extend((pi) => pi.registerTool({ name: "fine", label: "fine", description: "Fine.", parameters: {}, async execute() { return { content: [] }; } }));`),
   ]);
   const { tools, errors } = await chatPi("a");
@@ -232,7 +234,106 @@ test("what a factory of chats.extend cannot do is the chat's load error: a throw
     "thrower: Error: no tools today",
     "slow: Error: It had not finished adding to a chat's pi after 5 seconds",
     "preparer: TypeError: A tool's prepareArguments is a function, which a server half in a process of its own cannot give pi",
+    `shadow: TypeError: "find" is one of pi's own tools: give the tool another name`,
   ]);
+  await host.syncServerHalves([]);
+});
+
+test("a chat's pi that stops, or a chat deleted, lets go of what the half gave that pi, there and in its process", async () => {
+  await host.syncServerHalves([
+    half("keeper", `
+      const kept = new Map();
+      portal.chats.extend((pi, chat) => {
+        kept.set(chat.id, pi);
+        pi.registerTool({ name: "kept", label: "kept", description: "Kept.", parameters: {}, async execute() { return { content: [{ type: "text", text: "here" }] }; } });
+      });
+      portal.router.post("/say/:id", (req, res) => { kept.get(req.params.id).sendMessage({ customType: "said", content: "to " + req.params.id, display: true }); res.json({}); });
+    `),
+  ]);
+  const said = { a: [], m: [] };
+  const load = async (chatId) => {
+    const tools = [];
+    for (const { factory } of host.hostExtensions(chatId)) await factory({ registerTool: (t) => tools.push(t), on() {}, registerCommand() {}, sendMessage: (message) => said[chatId].push(message.content) });
+    return tools;
+  };
+  const [inA] = await load("a");
+  const [inM] = await load("m");
+  assert.deepEqual(await inA.execute("1", {}, undefined, undefined, {}), { content: [{ type: "text", text: "here" }] });
+  await get("/api/x/keeper/say/a", { method: "POST" });
+  await until(() => said.a.length === 1, "a's pi was asked for a turn");
+  host.chatLife("stopped", "a");
+  host.chatLife("deleted", "m");
+  const gone = "Nothing of this server half answers to it any more: the chat has what the half gives now at its next step";
+  await assert.rejects(inA.execute("2", {}, undefined, undefined, {}), { message: gone });
+  await assert.rejects(inM.execute("3", {}, undefined, undefined, {}), { message: gone });
+  // What it asks of a pi let go of is not done; asked of m's pi loaded again, it is, and by one channel in order.
+  await get("/api/x/keeper/say/a", { method: "POST" });
+  await load("m");
+  await get("/api/x/keeper/say/m", { method: "POST" });
+  await until(() => said.m.length === 1, "m's pi loaded again was asked for a turn");
+  assert.deepEqual(said, { a: ["to a"], m: ["to m"] });
+  await host.syncServerHalves([]);
+});
+
+test("a chat that kept its tools from before a restart is answered at once that the half was stopped; so is a call it was waiting on, which is no crash", async () => {
+  const body = (n) => `portal.chats.extend((pi) => {
+    pi.registerTool({ name: "n", label: "n", description: "Says its revision.", parameters: {}, async execute() { return { content: [{ type: "text", text: "${n}" }] }; } });
+    pi.registerTool({ name: "wait", label: "wait", description: "Waits.", parameters: {}, execute: () => new Promise(() => {}) });
+  });`;
+  await host.syncServerHalves([half("restarts", body(1))]);
+  const before = (await chatPi("a")).tools;
+  const waiting = before.find((tool) => tool.name === "wait").execute("1", {}, undefined, undefined, {}).then(() => "resolved", (e) => e.message);
+  await host.syncServerHalves([half("restarts", body(2))]);
+  const stopped = "Its server half was stopped; the chat has the new one at its next step";
+  assert.equal(await waiting, stopped);
+  const at = Date.now();
+  await assert.rejects(before.find((tool) => tool.name === "n").execute("2", {}, undefined, undefined, {}), { message: stopped });
+  assert.ok(Date.now() - at < 500, "at once");
+  assert.deepEqual(await (await chatPi("a")).tools.find((tool) => tool.name === "n").execute("3", {}, undefined, undefined, {}), { content: [{ type: "text", text: "2" }] });
+  assert.equal(status("restarts").crash, undefined);
+  await host.syncServerHalves([]);
+});
+
+test("a start that never yields is ended once its process stops answering, as its crash, and held", async () => {
+  const stuck = half("stuck", `portal.log("stuck"); for (;;) {}`);
+  const at = Date.now();
+  await host.syncServerHalves([stuck]);
+  const took = Date.now() - at;
+  assert.ok(took > HANG - 1000 && took < HANG + 3000, `ended once the time it was given was up, not its time to start: ${took} ms`);
+  const { running, crash, failure } = status("stuck");
+  assert.equal(running, false);
+  assert.equal(crash.error, HUNG);
+  assert.equal(failure, `It crashed as it started: ${HUNG}`);
+  const again = Date.now();
+  await host.syncServerHalves([stuck]);
+  assert.equal(host.isServing("stuck"), false);
+  assert.ok(Date.now() - again < 1000, `held, not started again: ${Date.now() - again} ms`);
+  assert.equal(HELD.exec(status("stuck").failure)?.[1], HUNG);
+  await host.syncServerHalves([]);
+});
+
+test("what it prints with no line break is kept to a line's length, and what follows that line is read", async () => {
+  await host.syncServerHalves([half("chatty", `portal.router.get("/say", (req, res) => { process.stdout.write("#".repeat(20000)); process.stdout.write("$".repeat(20000) + "tail\\nafter\\n"); res.json({}); });`)]);
+  await get("/api/x/chatty/say");
+  await until(() => status("chatty").lines.includes("after"), "the line after it was read");
+  const { lines } = status("chatty");
+  assert.equal(lines[lines.indexOf("after") - 1], "#".repeat(8000));
+  await host.syncServerHalves([]);
+});
+
+test("what it starts in a chat's folder is no job of the chat's agent (Linux, where the jobs are read)", { skip: !LINUX && "only Linux lists an agent's jobs" }, async () => {
+  await host.syncServerHalves([
+    half("spawner", `
+      const { spawn } = await import("node:child_process");
+      const sleeper = spawn("sleep", ["300"], { cwd: portal.chats.folder("a"), stdio: "ignore" });
+      portal.router.get("/pid", (req, res) => res.json({ sleeper: sleeper.pid }));
+    `),
+  ]);
+  const { sleeper } = (await get("/api/x/spawner/pid")).body;
+  assert.equal(ended(sleeper), false);
+  assert.deepEqual((await listJobs(work, false, true)).filter((job) => job.pids.includes(sleeper)), []);
+  await host.syncServerHalves([]);
+  assert.equal(ended(sleeper), true);
 });
 
 test("a loop that never ends ends its process: its request is answered with the crash, the rest answers on, and it is held until switched off and on", async () => {
@@ -403,6 +504,7 @@ test("it builds on an extension in the portal's process: a callback and an error
       fail: async () => { throw Object.assign(new Error("not today"), { status: 418 }); },
       nested: { deep: async () => 42 },
       gives: async () => ({ stop() {} }),
+      keys: async (value) => Object.keys(value),
     }));`, { isolated: false });
   const consumer = half("consumer", `
     const api = portal.extensions.use("provider");
@@ -412,7 +514,20 @@ test("it builds on an extension in the portal's process: a callback and an error
       const greeting = await api.greet("you", (step) => steps.push(step));
       const failed = await api.fail().catch((e) => ({ message: e.message, status: e.status }));
       const refused = await api.gives().catch((e) => e.name + ": " + e.message);
-      res.json({ greeting, steps, failed, deep: await api.nested.deep(), refused });
+      // A key "__proto__" in what it passes is a key, not a prototype.
+      const keys = await api.keys(JSON.parse('{"__proto__": {"x": 1}, "a": 1}'));
+      res.json({ greeting, steps, failed, deep: await api.nested.deep(), refused, keys });
+    });
+    // Asked by hand for what every object has, not what the provider gave: refused.
+    portal.router.get("/inherited", (req, res) => {
+      const id = 1e9;
+      const heard = (message) => {
+        if (message.t !== "result" || message.id !== id) return;
+        process.off("message", heard);
+        res.json(message.error ? { error: message.error.name + ": " + message.error.message } : { value: message.value });
+      };
+      process.on("message", heard);
+      process.send({ t: "api", id, of: "provider", path: ["__proto__", "__defineGetter__"], args: ["polluted", 1] });
     });
   `, { requires: { provider: "^1.0.0" } });
   const lone = half("lone", `portal.log("up");`);
@@ -425,7 +540,10 @@ test("it builds on an extension in the portal's process: a callback and an error
     failed: { message: "not today", status: 418 },
     deep: 42,
     refused: "TypeError: What gives of provider answered has a function at stop, which a server half in a process of its own cannot be given",
+    keys: ["__proto__", "a"],
   });
+  assert.deepEqual((await get("/api/x/consumer/inherited")).body, { error: "TypeError: What provider gives has no function at __proto__.__defineGetter__" });
+  assert.equal(Object.hasOwn(Object.prototype, "polluted"), false);
   await host.syncServerHalves([provider(2), consumer, lone, needs, likes]);
   assert.deepEqual(status("consumer").lines.filter((line) => line.startsWith("[extension consumer] started")), ["[extension consumer] started with provider 1", "[extension consumer] started with provider 2"]);
   assert.equal(host.serverFailure("needs-lone"), "It needs lone, whose server half runs in a process of its own and gives nothing to build on");

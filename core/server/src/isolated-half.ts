@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import type { Request, Response } from "express";
 import type { Chat, ServerPortal } from "@pithagoras/extension-api/server";
 import { API_FN, CHILD_FN, PARENT_FN, errorIn, errorOut, swapped, type CrossedError, type FnUse } from "./half-wire.js";
+import { LOG_LINE_MAX } from "./logs.js";
 
 /**
  * A server half in a process of its own: the portal's side of it (half-runtime.ts is the half's). The half is given a
@@ -117,14 +118,30 @@ function member(portal: ServerPortal, path: string): (...args: unknown[]) => unk
 /** What the half works out itself and the portal reads (`tools.offer`, `memory.hold`'s `on`). */
 const mirrored = (value: unknown) => (value as Record<string, unknown> | null)?.[CHILD_FN] !== undefined && (value as { use?: unknown }).use === "mirror";
 
-/** Each line `stream` gives, as it comes; the last one too, without its line break. */
-function lines(stream: Readable, each: (line: string) => void): void {
+/**
+ * Each line `stream` gives, as it comes; the last one too, without its line break. Each part is looked through once, as
+ * it comes. With `max`, a line that grows past it is given in its first `max` characters, and what follows of it, up to
+ * its line break, is left out: the half's output may have no line break at all (a progress meter that only goes back
+ * to the line's start), and would fill the portal's memory.
+ */
+function lines(stream: Readable, each: (line: string) => void, max = Infinity): void {
   let rest = "";
+  let cut = false;
   stream.setEncoding("utf8");
   stream.on("data", (text: string) => {
-    const parts = (rest + text).split("\n");
-    rest = parts.pop()!;
-    for (const part of parts) each(part);
+    let from = 0;
+    for (let end = text.indexOf("\n"); end !== -1; end = text.indexOf("\n", from)) {
+      if (!cut) each(rest + text.slice(from, end));
+      rest = "";
+      cut = false;
+      from = end + 1;
+    }
+    if (cut) return;
+    rest += text.slice(from);
+    if (rest.length <= max) return;
+    each(rest.slice(0, max));
+    rest = "";
+    cut = true;
   });
   stream.on("end", () => rest && each(rest));
   stream.on("error", () => {});
@@ -151,6 +168,15 @@ process.on("exit", () => {
   for (const child of live) child.killGroup();
 });
 
+/**
+ * The Unix sessions of the halves' processes, each of which leads one of its own (it is started `detached`): what a
+ * half starts is its own, as what a half in the portal's process starts is the portal's, and no agent's job in the
+ * chat it runs in (see background.ts).
+ */
+export function halfSessions(): Set<number> {
+  return new Set([...live].flatMap((child) => child.pid ?? []));
+}
+
 type Ask = { resolve: (value: any) => void; reject: (error: Error) => void; onUpdate?: (value: unknown) => void };
 
 export class IsolatedChild {
@@ -173,6 +199,8 @@ export class IsolatedChild {
   private readonly byChat = new Map<string, number>();
   private lastId = 0;
   private started = false;
+  /** It has answered a ping: from then on, it is ended should it stop answering (see the check). */
+  private answered = false;
   private failed = false;
   private stopping = false;
   private extended = false;
@@ -183,7 +211,7 @@ export class IsolatedChild {
   private over = false;
   private lastPong = Date.now();
   private readonly check: ReturnType<typeof setInterval>;
-  private ping?: ReturnType<typeof setInterval>;
+  private readonly ping: ReturnType<typeof setInterval>;
   private settle!: { resolve: (value: { stops: boolean }) => void; reject: (error: Error) => void };
   /** Its process has ended, and that is handled. */
   readonly ended: Promise<void>;
@@ -209,8 +237,12 @@ export class IsolatedChild {
     if (pid) setPriority(pid, 10);
     this.child.on("error", (e) => console.error(`[extension ${host.name}] its process:`, e));
     this.child.on("message", (message) => this.told(message));
-    lines(this.child.stdout!, (line) => host.print("out", line));
-    lines(this.child.stderr!, (line) => host.print("err", line));
+    // A chat's pi that stops, or a chat deleted: what that pi was given of the half is let go of, here and there.
+    host.life.on("stopped", (chatId: string) => this.dropChat(chatId));
+    host.life.on("deleted", (chatId: string) => this.dropChat(chatId));
+    // A line is kept to LOG_LINE_MAX characters in the log anyway (logs.ts).
+    lines(this.child.stdout!, (line) => host.print("out", line), LOG_LINE_MAX);
+    lines(this.child.stderr!, (line) => host.print("err", line), LOG_LINE_MAX);
     const [, , , , requests, answers] = this.child.stdio as unknown as [unknown, unknown, unknown, unknown, Readable, Writable];
     lines(requests, (line) => this.heard(line));
     this.answers = answers.on("error", () => {});
@@ -223,13 +255,20 @@ export class IsolatedChild {
       this.killGroup();
       void Promise.race([read, new Promise((resolve) => setTimeout(resolve, CLOSE_MS).unref())]).then(() => this.ending());
     });
+    // Asked from the spawn on, and once before it is told to start: it answers from its own code (half-runtime.ts) once
+    // that is loaded, before the half's module is, and also while the half's start awaits. From that first answer a
+    // half that stops answering is ended, while it starts too: a start that never yields would otherwise run until
+    // START_MS, be no crash, and be started again at every sync.
+    this.post({ t: "ping" });
+    this.ping = setInterval(() => this.post({ t: "ping" }), PING_MS);
+    this.ping.unref();
     let lastCheck = Date.now();
     this.check = setInterval(() => {
       const now = Date.now();
       // The portal's own process stalled: the half's answers wait in the channel, and are not late.
       if (now - lastCheck > 2 * CHECK_MS) this.lastPong += now - lastCheck;
       lastCheck = now;
-      if (this.started && now - this.lastPong > hang) {
+      if (this.answered && now - this.lastPong > hang) {
         return this.kill(said(`It did not let its process answer for ${hang / 1000} seconds (a loop that never ends, or a long synchronous call), so its process was ended`));
       }
       // From the start: a start is bounded in time, not in memory.
@@ -237,6 +276,11 @@ export class IsolatedChild {
     }, CHECK_MS);
     this.check.unref();
     this.post({ t: "init", version: 1, name: host.name, executor: host.executor, file, socket: this.socket });
+  }
+
+  /** Its process's id, which is also its Unix session's. */
+  get pid(): number | undefined {
+    return this.child.pid;
   }
 
   /** Told to the half, with no answer; nothing once its process has ended. */
@@ -342,15 +386,13 @@ export class IsolatedChild {
     switch (message.t) {
       case "started":
         this.started = true;
-        this.lastPong = Date.now();
-        this.ping = setInterval(() => this.post({ t: "ping" }), PING_MS);
-        this.ping.unref();
         return this.settle.resolve({ stops: message.stops });
       case "failed":
         this.failed = true;
         // As an import that throws in the portal's process fails: with what it threw.
         return this.settle.reject(reported(message.error) as Error);
       case "pong":
+        this.answered = true;
         this.lastPong = Date.now();
         return;
       case "answer":
@@ -437,8 +479,10 @@ export class IsolatedChild {
       let holder: any;
       let fn: any = this.host.portal.extensions.use(of);
       for (const key of path) {
+        // What it gives, by its own members only (the paths it was handed, see now): never into what every object has.
+        if (fn == null || !Object.hasOwn(fn, key)) throw new TypeError(`What ${of} gives has no function at ${path.join(".")}`);
         holder = fn;
-        fn = fn?.[key];
+        fn = fn[key];
       }
       if (typeof fn !== "function") throw new TypeError(`What ${of} gives has no function at ${path.join(".")}`);
       const given = this.unmarked(args, handles) as unknown[];

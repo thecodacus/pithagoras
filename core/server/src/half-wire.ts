@@ -82,7 +82,8 @@ export function swapped(value: unknown, swap: (fn: Function, path: string[]) => 
     }
     const out: Record<string, unknown> | unknown[] = Array.isArray(part) ? [] : {};
     seen.set(part, out);
-    for (const [key, inner] of Object.entries(part)) (out as Record<string, unknown>)[key] = walk(inner, [...path, key]);
+    // Each as a key of its own: `__proto__` from the other side is one, and set as `out.__proto__` it would be out's prototype.
+    for (const [key, inner] of Object.entries(part)) Object.defineProperty(out, key, { value: walk(inner, [...path, key]), enumerable: true, writable: true, configurable: true });
     return out;
   };
   return walk(value, []);
