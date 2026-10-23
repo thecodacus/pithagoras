@@ -1322,3 +1322,113 @@ test("a database of version 10 is backed up and given chat modes: every chat is 
   now.close();
   assert.deepEqual(modesIn(dir), { chats: [{ id: "c1", mode: null }, { id: "c2", mode: null }], made: [] });
 });
+
+// A data folder of v0.1.0 that used every part an extension holds now, each kept as v0.1.0 kept it, on fixtures/portal-v3.db:
+// a chat with a canvas, a picture of the Media page with its file, the image endpoint, voice mode on at the voice service's
+// addresses with the person's own remembered as connecting it kept them, a designed voice and a clone, the GPU chosen,
+// Understory's four settings and its MCP entry, the browser's six settings and the local Chrome's profile, the allowlist,
+// a heartbeat's rule for a tool that runs as the primary user, the tools as a chat reported them, and names given to the
+// pictures' and the browser's sets. One start takes it to this version, with one backup, and leaves each part for its
+// extension; what the extensions do with it is in their own tests.
+test("a data folder of v0.1.0 that used every part is brought to this version in one start, with one backup, and each part left for its extension", async () => {
+  const dir = path.join(home, "everything-from-v3");
+  const site = path.join(dir, "ws", "site");
+  mkdirSync(site, { recursive: true });
+  const file = path.join(dir, "portal.db");
+  copyFileSync(new URL("./fixtures/portal-v3.db", import.meta.url), file);
+  const before = new Database(file);
+  before.prepare("INSERT INTO sessions (id, title, workspace, kind) VALUES ('c1', 'Kites', ?, 'task')").run(site);
+  before.prepare("INSERT INTO canvases (id, session_id, title, content) VALUES ('k1', 'c1', 'Plan', '# Plan\n\nFly it.')").run();
+  before.prepare(`INSERT INTO images (${IMAGE_COLUMNS}) VALUES (${IMAGE_COLUMNS.map(() => "?")})`).run(["aaaaaaaaaaa1", "page", null, null, "aaaaaaaaaaa1.png", "generated", "a red kite", "{}", null, 14, 1000]);
+  const calm = { id: "voice-5b1e0c9a-0d7e-4f3c-8a2b-6c4d2e1f0a9b", name: "Calm", kind: "design", instruction: "Slow and low.", transcript: "", audio: null };
+  const voice = before.prepare("INSERT INTO voice_presets (id, name, kind, instruction, transcript, audio) VALUES (?, ?, ?, ?, ?, ?)");
+  for (const v of [calm, ARIA]) voice.run(v.id, v.name, v.kind, v.instruction, v.transcript, v.audio);
+  const rule = before.prepare("INSERT INTO tool_rules (id, role, tool, pattern, note, person_key) VALUES (?, ?, ?, ?, '', NULL)");
+  rule.run("r3", "heartbeat", "routine_update", "{*");
+  rule.run("r4", "colleague", "bash", "echo up-*");
+  // Voice mode as v0.1.0 saved it once the voice service was connected (api/voice.ts there).
+  const voiceMode = {
+    vad: VAD, lazyLoad: true, runtime: "audio-cpp", voice: ARIA.id, language: "en", cfgScale: 1, sttModel: "", exaggeration: 0.5, kokoroVoice: "af_heart", speed: 1,
+    responseInstructions: "", skipThinkingProviders: ["llama-swap"], enabled: true, whisperUrl: SERVICE.whisper, breezeUrl: SERVICE.speech, instruction: DEFAULT_INSTRUCTION,
+  };
+  const remembered = { listening: { whisperUrl: OWN.whisper, sttModel: "", enabled: true }, speaking: { breezeUrl: OWN.speech, runtime: "kokoro", enabled: true }, noSpeech: false };
+  const browserKept = { browser_user: "agent", browser_password: BROWSER_PASSWORD, browser_port: "3010", browser_https_port: "3011", browser_cursor: "0", browser_tools: "1" };
+  const seen = [
+    { name: "browser_navigate", source: "browser", package: null, inline: true },
+    { name: "show_image", source: "pictures", package: null, inline: true },
+    { name: "web_fetch", source: "pi-web-access", package: "npm:pi-web-access", inline: false },
+  ];
+  const setting = before.prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value");
+  for (const [key, value] of Object.entries({
+    voice: JSON.stringify(voiceMode),
+    voice_gpu: "GPU-648bf6c5-346e-81f5-f155-dc8061172da3",
+    voice_before_managed: JSON.stringify(remembered),
+    image_generation: IMAGE_SETTINGS,
+    ...UNDERSTORY_KEPT,
+    ...browserKept,
+    browser_allowlist: "*.example.com",
+    tools_seen: JSON.stringify(seen),
+    // v0.1.0 filed its picture tools as "<portal:images>" (web/src/tool-groups.ts there).
+    tool_group_names: JSON.stringify({ "<portal:images>": "Pictures", browser: "Web browser", "pi-web-access": "Web" }),
+  })) setting.run(key, value);
+  before.close();
+  mkdirSync(path.join(dir, "images"), { recursive: true });
+  writeFileSync(path.join(dir, "images", "aaaaaaaaaaa1.png"), "the page's kite");
+  mkdirSync(path.join(dir, "browser-profile", "Default"), { recursive: true });
+  writeFileSync(path.join(dir, "browser-profile", "Default", "Cookies"), "the agent's logins");
+  assert.deepEqual(upgradeCheck(file), { needed: true, from: 3 });
+
+  assert.match(await upgradedWith(dir, UNDERSTORY_ENTRY), new RegExp(`upgrading the database from version 3 to ${SCHEMA_VERSION}`));
+  const backups = backupsIn(path.join(dir, "backups"));
+  assert.equal(backups.length, 1, "one backup, of version 3");
+  assert.match(path.basename(backups[0]), /^portal-v3-\d{8}-\d{6}\.db$/);
+  const copy = new Database(backups[0], { readonly: true });
+  assert.deepEqual(
+    ["canvases", "images", "voice_presets", "settings"].map((table) => copy.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n),
+    [1, 1, 2, 2 + 3 + 1 + 4 + 6 + 3],
+    "the copy from before holds all of it",
+  );
+  copy.close();
+
+  const d = new Database(file, { readonly: true });
+  assert.deepEqual([d.pragma("user_version", { simple: true }), schemaFingerprint(d)], [SCHEMA_VERSION, PINNED.fingerprint]);
+  for (const table of ["canvases", "images", "voice_presets"]) assert.ok(!d.prepare("SELECT 1 FROM sqlite_master WHERE name = ?").get(table), `${table} is gone`);
+  const settings = Object.fromEntries(d.prepare("SELECT key, value FROM settings").all().map((row) => [row.key, row.value]));
+  for (const key of ["voice_gpu", "voice_before_managed", "image_generation", ...Object.keys(UNDERSTORY_KEPT), ...Object.keys(browserKept)]) assert.equal(settings[key], undefined, key);
+  assert.deepEqual(JSON.parse(settings.voice), { provider: "pithagoras-voice", vad: VAD, responseInstructions: "", skipThinkingProviders: ["llama-swap"] });
+  assert.equal(settings.browser_allowlist, "*.example.com", "the allowlist stays the guard's");
+  assert.equal(settings.guard_trusted_mcp_servers, JSON.stringify(["understory"]));
+  assert.equal(settings.tools_off_default, "codemode\nweb_search");
+  assert.deepEqual(JSON.parse(settings.tool_group_names), { "pithagoras-media": "Pictures", "pithagoras-browser": "Web browser", "pi-web-access": "Web" });
+  assert.deepEqual(JSON.parse(settings.tools_seen), [
+    { ...seen[0], source: "pithagoras-browser" },
+    { ...seen[1], source: "pithagoras-media" },
+    seen[2],
+  ]);
+  assert.deepEqual(d.prepare("SELECT id FROM tool_rules ORDER BY id").all(), [{ id: "r4" }], "a heartbeat's rule for a tool that runs as the primary user goes too");
+  d.close();
+  assert.deepEqual(modesIn(dir), { chats: [{ id: "c1", mode: null }], made: [] });
+  assert.equal(readFileSync(path.join(site, "canvases", "Plan.md"), "utf8"), "# Plan\n\nFly it.");
+
+  // Each part left for its extension, at the schema that left it.
+  assert.deepEqual(leftAt(dir), ["browser", "media", "understory", "voice-addresses", "voice-service"], "nothing half done beside them");
+  for (const [name, schema] of [["media", 7], ["browser", 8], ["voice-service", 9], ["voice-addresses", 9], ["understory", 10]]) {
+    const { made: _made, ...about } = JSON.parse(readFileSync(path.join(dir, "handoff", name, "handoff.json"), "utf8"));
+    assert.deepEqual(about, { format: 1, name, schema }, name);
+  }
+  const left = (name, rel) => readFileSync(path.join(dir, "handoff", name, rel), "utf8");
+  assert.deepEqual(JSON.parse(left("media", "settings.json")), { image_generation: IMAGE_SETTINGS, video_generation: null });
+  assert.deepEqual(JSON.parse(left("media", "images.json")).rows.map((row) => row.id), ["aaaaaaaaaaa1"]);
+  assert.equal(left("media", "files/images/aaaaaaaaaaa1.png"), "the page's kite");
+  assert.deepEqual(JSON.parse(left("browser", "settings.json")), browserKept);
+  assert.equal(left("browser", "profile/Default/Cookies"), "the agent's logins");
+  assert.equal(existsSync(path.join(dir, "browser-profile")), false);
+  assert.deepEqual(voiceLeft(dir, "voice-service", "settings.json"), serviceOf(voiceMode, "GPU-648bf6c5-346e-81f5-f155-dc8061172da3"));
+  const { audio: _audio, ...aria } = ARIA;
+  assert.deepEqual(voiceLeft(dir, "voice-service", "voices.json"), [calm, { ...aria, audio: "voices/1.wav" }]);
+  assert.equal(sha256(readFileSync(path.join(dir, "handoff", "voice-service", "voices", "1.wav"))), sha256(ARIA.audio));
+  assert.deepEqual(voiceLeft(dir, "voice-addresses", "settings.json"), {
+    whisperUrl: OWN.whisper, sttModel: "", breezeUrl: OWN.speech, runtime: "kokoro", dictationUrl: null, dictationModel: null, language: "en", kokoroVoice: "af_heart",
+  });
+  assert.deepEqual(understoryLeft(dir, "settings.json"), UNDERSTORY_KEPT);
+});

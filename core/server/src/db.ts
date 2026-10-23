@@ -559,8 +559,10 @@ function handOffMedia(d: Database.Database): void {
   d.prepare("DELETE FROM settings WHERE key IN ('image_generation', 'video_generation')").run();
   d.exec("DROP TABLE images");
   d.exec("DROP TABLE IF EXISTS videos");
-  // Core filed its picture and video tools as one set of their own.
+  // Core filed its picture and video tools as one set of their own: "<portal:media>", and in v0.1.0, before there were
+  // videos, "<portal:images>". A name given to the newer one wins.
   setMoved(d, "<portal:media>", "pithagoras-media");
+  setMoved(d, "<portal:images>", "pithagoras-media");
   mediaToolsSeenMoved(d);
   mediaToldOfRemovals(d);
 }
