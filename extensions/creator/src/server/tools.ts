@@ -2,21 +2,80 @@ import { rmSync } from "node:fs";
 import type { Chat } from "@pithagoras/extension-api/server";
 import { DONE } from "../mode";
 import { copyOf, listMade, oneAtATime, records, saveRecords, subjectOf, type Run } from "./made";
+import { snapshot } from "./snapshot";
 
 /** A tool's answer: its result as JSON, for the model, and as itself, for the page. */
 const answer = (result: object) => ({ content: [{ type: "text", text: JSON.stringify(result, null, 2) }], details: result });
+
+/** When an install's tools are in the chat (the reload at the next step waits while a subagent works in the background). */
+const NEXT =
+  "This chat loads it before your next step, or once this run ends while a subagent of this chat is still working in the background: its tools are there then. It stays switched off where the person switched it off in Settings.";
 
 /** What `extension_status` gives of an extension's lines: the last 50, and of those no more than 8,000 characters. */
 const LINES = { count: 50, chars: 8_000 };
 
 /**
- * Creator mode's tools, in a chat in the mode: say where a made extension stands, and remove one. Each throws with its
- * reason where it refuses, which pi gives the model as the call's error. After a suspected prompt injection the guard
- * asks the person before a removal (`acts: ["persist"]`); what a made extension says of itself is outside content
- * (`outside`).
+ * Creator mode's tools, in a chat in the mode: install a draft of the chat's folder into the portal (again, after a
+ * change), say where a made extension stands, and remove one. Each throws with its reason where it refuses, which pi
+ * gives the model as the call's error. After a suspected prompt injection the guard asks the person before an install
+ * or a removal (`acts: ["persist"]`); what a made extension says of itself is outside content (`outside`).
  */
 export function registerTools(run: Run, pi: any, chat: Chat): void {
   const { portal } = run;
+
+  pi.registerTool({
+    name: "extension_install",
+    label: "Install extension",
+    description:
+      "Installs the extension in the folder `path` (relative to this chat's folder) into the portal, or installs it again after a change: a copy of it is taken and loaded. Its tools are in this chat from your next step.",
+    promptGuidelines: [
+      "After extension_install, read what it says of the server half. If it names a failure or a crash, call extension_status and fix the code before calling the new tools.",
+      "Install again after every change; nothing reloads by itself.",
+    ],
+    parameters: {
+      type: "object",
+      properties: { path: { type: "string", description: "The extension's folder, relative to this chat's folder: extensions/<name>" } },
+      required: ["path"],
+      additionalProperties: false,
+    },
+    guard: { acts: ["persist"], outside: true },
+    execute: (_id: string, params: { path: string }) =>
+      oneAtATime(async () => {
+        const draft = params.path;
+        const copy = await snapshot(run, chat, draft);
+        const made = records(run);
+        const first = !made.has(copy.name);
+        let installed;
+        try {
+          installed = await portal.extensions.install(copy.folder, { note: `${portal.chats.get(chat.id)?.title ?? chat.title} · ${draft}` });
+        } catch (e) {
+          // Nothing of a first install is left; a reinstall keeps its copy, which pi lists already.
+          if (first) rmSync(copy.folder, { recursive: true, force: true });
+          throw e;
+        }
+        const record = { ...(copy.version ? { version: copy.version } : {}), chat: chat.id, draft, digest: copy.digest, at: new Date().toISOString() };
+        made.set(copy.name, record);
+        saveRecords(run, made);
+        portal.audit.record({ subject: subjectOf(copy.name, record), reason: first ? DONE.installed : DONE.again, chatId: chat.id });
+        // Its lines are extension_status's, which hands them over as outside content.
+        const { enabled, server, client, loadErrors, reloaded, waiting } = installed;
+        return answer({
+          name: copy.name,
+          version: copy.version,
+          digest: copy.digest,
+          files: copy.files,
+          bytes: copy.bytes,
+          left: copy.left,
+          enabled,
+          server: server && { running: server.running, failure: server.failure, crash: server.crash },
+          client,
+          loadErrors,
+          reloaded,
+          waiting,
+          next: NEXT,
+        });
+      }),
+  });
 
   pi.registerTool({
     name: "extension_status",
