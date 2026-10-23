@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { once } from "node:events";
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { connect } from "node:net";
@@ -49,6 +50,21 @@ function status(name) {
 async function until(done, what, ms = 15_000) {
   for (const end = Date.now() + ms; !(await done()); await new Promise((resolve) => setTimeout(resolve, 20))) {
     if (Date.now() > end) throw new Error(`timed out waiting until ${what}`);
+  }
+}
+
+/**
+ * Whether a process has ended: it is gone, or it is a zombie its new parent has not reaped (a test's container can have
+ * no init that reaps what is left to it, where the portal's has one: Compose's `init: true`).
+ */
+function ended(pid) {
+  try {
+    if (LINUX) return /^\d+ \(.*\) Z/.test(readFileSync(`/proc/${pid}/stat`, "utf8"));
+    process.kill(pid, 0);
+    return execFileSync("ps", ["-o", "stat=", "-p", String(pid)], { encoding: "utf8" }).trim().startsWith("Z");
+  } catch {
+    // Gone.
+    return true;
   }
 }
 
@@ -332,9 +348,9 @@ test("stopping it ends what it started; a CommonJS file it requires is read agai
   await host.syncServerHalves([half("starter", body, helper(1))]);
   const first = (await get("/api/x/starter/now")).body;
   assert.equal(first.helper, 1);
-  assert.doesNotThrow(() => process.kill(first.sleeper, 0), "its sleep runs");
+  assert.equal(ended(first.sleeper), false, "its sleep runs");
   await host.syncServerHalves([half("starter", body, helper(2))]);
-  assert.throws(() => process.kill(first.sleeper, 0), { code: "ESRCH" }, "its sleep was ended with it");
+  assert.equal(ended(first.sleeper), true, "its sleep was ended with it");
   assert.equal((await get("/api/x/starter/now")).body.helper, 2, "its CommonJS file changed is the one it runs");
   await host.syncServerHalves([]);
 });
@@ -468,6 +484,26 @@ test("a row in Audit, at once with its TypeError, and an install and where an ex
   await host.syncServerHalves([]);
 });
 
+test("a command run as a chat's agent, from its process: its input and output as bytes, and an abort", async () => {
+  await host.syncServerHalves([
+    half("runner", `
+      portal.router.get("/run", async (req, res) => {
+        const ran = await portal.sandbox.run("a", ["cat"], { input: Buffer.from("bytes in") });
+        const going = new AbortController();
+        const at = Date.now();
+        const slept = portal.sandbox.run("a", ["sleep", "10"], { signal: going.signal });
+        setTimeout(() => going.abort(), 100);
+        const stopped = await slept;
+        res.json({ out: ran.stdout.toString(), buffer: Buffer.isBuffer(ran.stdout), code: ran.code, aborted: stopped.code !== 0, took: Date.now() - at });
+      });
+    `),
+  ]);
+  const { body } = await get("/api/x/runner/run");
+  assert.deepEqual({ ...body, took: undefined }, { out: "bytes in", buffer: true, code: 0, aborted: true, took: undefined });
+  assert.ok(body.took < 5000, `the sleep was ended by the abort: ${body.took} ms`);
+  await host.syncServerHalves([]);
+});
+
 test("a portal that stalls does not end the halves whose answers waited for it", async () => {
   await host.syncServerHalves([half("patient", `portal.router.get("/hello", (req, res) => res.json({ hello: true }));`)]);
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, HANG + 1500);
@@ -517,14 +553,7 @@ test("an error of the portal's own whose message names a half's folder is not th
 test("the portal's process ending ends every half's process, and what each started", async () => {
   const { code, err, result } = await scenario("portalEnds");
   assert.equal(code, 0, err);
-  await until(() => [result.child, result.sleeper].every((pid) => {
-    try {
-      process.kill(pid, 0);
-      return false;
-    } catch {
-      return true;
-    }
-  }), "both are gone", 5_000);
+  await until(() => ended(result.child) && ended(result.sleeper), "both ended", 5_000);
 });
 
 /**
