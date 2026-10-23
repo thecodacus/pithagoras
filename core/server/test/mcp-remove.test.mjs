@@ -130,6 +130,27 @@ test("a server with a hyphen in its name loses its tools: the adapter writes the
   assert.deepEqual(Object.keys(cache().servers).sort(), ["brave", "jira"]);
 });
 
+test("a server with a dot in its name loses its tools: the adapter keeps the dot, and the server its name starts like keeps its own", async () => {
+  // `docs.v2` registers `docs.v2_search` (getServerPrefix); `docs_v2_search` is `docs`' tool `v2.search`.
+  const seedDocs = () => {
+    write({ docs: { command: "d" }, "docs.v2": { command: "d2" }, jira: { command: "jira-mcp" } });
+    db.putSetting("tools_seen", "[]");
+    db.rememberTools([adapter("docs.v2_search"), adapter("docs_v2_search"), adapter("docs_open"), adapter("jira_search")]);
+    writeFileSync(cacheFile, JSON.stringify({ version: 1, servers: { docs: { tools: [] }, "docs.v2": { tools: [] }, jira: { tools: [] } } }));
+  };
+  seedDocs();
+  assert.equal((await del("docs.v2")).status, 200);
+  assert.deepEqual(names(), ["docs_open", "docs_v2_search", "jira_search"]);
+  assert.deepEqual(Object.keys(cache().servers).sort(), ["docs", "jira"]);
+  db.rememberTools([adapter("docs.v2_search")]);
+  assert.ok(!names().includes("docs.v2_search"), "a chat still running with it does not bring it back");
+
+  seedDocs();
+  assert.equal((await del("docs")).status, 200);
+  assert.deepEqual(names(), ["docs.v2_search", "jira_search"], "docs_v2_search goes with docs");
+  assert.deepEqual(Object.keys(cache().servers).sort(), ["docs.v2", "jira"]);
+});
+
 test("another package's tool is kept when a removed server's name starts it", async () => {
   write({ web: { command: "web-mcp" }, jira: { command: "jira-mcp" } });
   db.putSetting("tools_seen", "[]");

@@ -19,7 +19,7 @@ import type { ImageContent } from "../prompt-images.js";
 import { routineTools } from "./routine-tools.js";
 import { reportTool, reportToFor } from "./report-tool.js";
 import { OUTSIDE_CONTENT_GUIDELINE, declaredFiles, declaredGuard, guardExtension, type DeclaredGuard } from "./guard.js";
-import { CODEMODE_SOURCE, CODEMODE_TOOL, CODEMODE_TOOLS, codemodeExtension } from "./codemode.js";
+import { CODEMODE_TOOL, CODEMODE_TOOLS, codemodeExtension } from "./codemode.js";
 import { findSessionFile } from "./session-file.js";
 import { CONTEXT_FILES, SHARED_FILES } from "./context-files.js";
 import { heartbeatTool } from "./heartbeat-tool.js";
@@ -27,6 +27,7 @@ import { ToolsGateway } from "./tools-gateway.js";
 import { CALLED_TOOL_KEY, GATEWAY_TOOL, calledThrough } from "./tools-gateway-names.js";
 import { askPrimaryTool } from "./ask-primary.js";
 import { ASK_QUESTION_SOURCE, askQuestionTool } from "./ask-question.js";
+import { SANDBOX } from "./inline-extensions.js";
 import { proxyBaseUrl } from "../llama-progress.js";
 import { bridgeSubagents, SUBAGENT_INPUT, SUBAGENT_STOP, type Bridge } from "../subagent-protocol.js";
 import { bridgeExtensionUi, UI_RECEIVE } from "../extension-ui.js";
@@ -46,28 +47,6 @@ interface Handoff {
   /** Its words as pi queued them, once it has. */
   queued?: string;
 }
-
-/** The portal's own extension that gives pi's tools again, run as the chat's agent, while the sandbox is on. */
-const SANDBOX = "sandbox";
-
-/**
- * The names of the portal's own inline extensions in a chat's pi (see the factories in create), which pi files what each
- * registers under as `<inline:name>`. A server half's factory is filed by its package's name the same way
- * (hostExtensions in extension-host.ts), so a package of one of these names would pass for the portal's own.
- */
-export const INLINE_EXTENSIONS: readonly string[] = [
-  "voice-first",
-  "cross-model-thinking",
-  "guard",
-  "tools-gateway",
-  SANDBOX,
-  "routines",
-  ASK_QUESTION_SOURCE,
-  "ask-primary",
-  "report",
-  CODEMODE_SOURCE,
-  "heartbeat",
-];
 
 /** One failure of a load, told from another: the same failure at the next load is not new. */
 const failureKey = (failure: LoadError) => `${failure.path}\n${failure.error}`;

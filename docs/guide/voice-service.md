@@ -272,8 +272,8 @@ The service can be healthy while the TTS model is unloaded. GPU memory is alloca
 | **Mute** in a voice session | Stops listening; keeps the voice session and spoken replies active. |
 | **End** in a voice session | Releases that tab's connection; does not stop an accepted agent task. With lazy loading, the last released connection allows the speech model to unload. |
 | **Start voice** | Starts the existing container, reusing its models; voice mode listens and speaks through it once it is up. |
-| **Retry setup** | Restarts a failed container and its setup script; retained downloads/builds are reused where the script can reuse them. |
-| **Stop · release VRAM** | Stops the voice processes in the container, releasing their GPU allocations. Keeps model files. |
+| **Retry setup** | Restarts a failed container and its setup script; retained downloads/builds are reused where the script can reuse them. A container Docker is starting again after a failure is stopped first, so the setup runs now rather than at Docker's next try. |
+| **Stop · release VRAM** | Stops the voice processes in the container, releasing their GPU allocations. Keeps model files. Also shown for a failed setup Docker is starting again, whose tries it ends. |
 | **Use for voice mode** | Makes the running service voice mode's source, and voice mode on. |
 | **Stop using** | Shown while the service is voice mode's source: voice mode has no source until one is chosen, and its controls are hidden. The service stays as it is. |
 | **Uninstall** | Asks first, then stops and removes the `pithagoras-voice` container; where voice mode listened through the service, it has no source until one is chosen (see [Remove Voice](#remove-voice)). Your voices are kept. Keeps the downloaded engines and models unless you tick the box in the question. |
@@ -289,8 +289,8 @@ Every voice session holds a lease, and the service is told when voice mode begin
 
  Do not expect a crashed tab to release memory instantly. While voice mode uses it, and always with lazy loading off, the service asks every 30 seconds that the model stay loaded, so that audio.cpp's idle unload does not let it go in a pause of a conversation. Switched on again, lazy loading lets go of a model kept while voice mode is not in use. Ending one tab does not release a model still used by another active tab.
 
-::: warning After a reboot or service exit
-The voice container has **no automatic Docker restart policy**. After a host reboot or service exit, use **Start voice** or **Retry setup**. Activating the microphone loads a model in a running service; it does not install or restart a stopped service.
+::: tip After a reboot or service exit
+The voice container uses Docker's `unless-stopped` restart policy ([When the machine restarts](/guide/docker#when-the-machine-restarts)). After the host restarts, Docker starts it again and its setup runs, reusing the downloads and builds; voice mode listens and speaks through it once its services answer, and with lazy loading on its speech model is loaded only when voice mode is used. It shares the portal's network, so Docker has to start it after the portal's container, which Docker 29 and later do. Older Docker starts both at once, and the voice container can stay stopped after a restart, with `cannot join network namespace of a non running container`: the page then says **failed**, and **Retry setup** starts it. Docker also starts it again when its setup or one of its services exits: at once after a run of ten seconds or more, as a setup usually is, and after a wait that doubles up to a minute while it fails sooner than that: the page then says **failed**, with the setup log, until the services answer, **Retry setup** runs the setup at once, and **Stop · release VRAM** ends the tries. A container you stopped (**Stop · release VRAM**, or **Stop** in **Settings → Docker**) stays stopped, after a restart too, until you use **Start voice**. A voice container an earlier version made, with no restart policy, is given this one as Voice starts, without being made again or restarted. Activating the microphone loads a model in a running service; it does not install or restart a stopped service.
 :::
 
 ## Your voice
@@ -424,6 +424,10 @@ Run the CUDA `docker run --gpus all` check. Fix host driver, toolkit or passthro
 
 ::: details Setup stays at Starting
 Expand Setup log or run `docker logs --tail 100 -f pithagoras-voice`; compilation and quantization happen after container startup.
+:::
+
+::: details Setup failed, and Docker keeps starting it again
+The page says **failed** while Docker starts the container again after its setup or a service exited. Expand Setup log for the line that failed (`VOICE_SETUP_ERROR`), fix what it names, then use **Retry setup**. To stop the tries, use **Stop · release VRAM** on the page, or **Stop** in **Settings → Docker**: it then stays stopped until **Retry setup** or **Start voice**.
 :::
 
 ::: details Port already allocated

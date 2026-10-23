@@ -6,6 +6,8 @@ import {
   effectiveOff,
   exceptionsFor,
   mcpServerOf,
+  mcpClaims,
+  mcpPrefixAs,
   toolSource,
 } from "../dist/tool-policy.js";
 
@@ -90,6 +92,31 @@ test("a server with hyphens is found by the underscored name the adapter gives i
   assert.equal(mcpServerOf("brave_news", servers), "brave");
   assert.equal(toolSource("brave_search_brave_web_search", "pi-mcp-adapter", servers), "brave-search");
   assert.equal(mcpServerOf("playwright_mcp_click", ["playwright-mcp"]), "playwright-mcp");
+});
+
+test("a server with a dot keeps it in the names of its tools, as the adapter writes them, and is told from the server its name starts like", () => {
+  // pi-mcp-adapter 2.18.0 (getServerPrefix, formatToolName): a server's hyphens are underscores and its dots stay, a
+  // tool's own dots are underscores. `docs.v2` registers `docs.v2_search`; `docs_v2_search` is `docs`' `v2.search`.
+  const servers = ["docs", "docs.v2"];
+  assert.equal(mcpServerOf("docs.v2_search", servers), "docs.v2");
+  assert.equal(mcpServerOf("docs_v2_search", servers), "docs");
+  assert.equal(mcpServerOf("docs_open", servers), "docs");
+  assert.equal(toolSource("docs.v2_search", "pi-mcp-adapter", servers), "docs.v2");
+  assert.equal(toolSource("docs_v2_search", "pi-mcp-adapter", servers), "docs");
+  assert.equal(mcpServerOf("docs_v2_search", ["docs.v2"]), undefined, "no name the adapter gives a tool of docs.v2");
+  assert.equal(mcpServerOf("docs.v2_search", ["docs"]), undefined, "nor one it gives a tool of docs");
+  assert.equal(mcpServerOf("my_docs.v2_search", ["my-docs.v2", "my"]), "my-docs.v2", "hyphens and a dot together");
+});
+
+test("the adapter's other namings: short leaves out a closing mcp, mcp puts mcp__ first, none names a tool by its own name", () => {
+  assert.equal(mcpPrefixAs("docs.v2-mcp", "short"), "docs.v2");
+  assert.equal(mcpPrefixAs("brave-search-MCP", "short"), "brave_search");
+  assert.equal(mcpPrefixAs("mcp", "short"), "mcp", "nothing left is mcp");
+  assert.equal(mcpPrefixAs("docs-v2", "mcp"), "mcp__docs_v2");
+  assert.equal(mcpPrefixAs("docs.v2", "server"), "docs.v2");
+  assert.equal(mcpClaims("docs.v2-mcp", "docs.v2_search", "short"), true);
+  assert.equal(mcpClaims("docs.v2-mcp", "docs.v2_search"), false, "not in the default naming");
+  assert.equal(mcpClaims("misc", "jira_get_issue", "none"), true, "any name could be one of its tools'");
 });
 
 test("a default-off tool nobody was shown is left alone, not switched on", () => {

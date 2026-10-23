@@ -217,6 +217,11 @@ export function dockerFor(dataDir: string) {
         },
         // Docker's whole answer: how it was made, and how it stands.
         inspect: (name) => own(who, name),
+        async update(name, changes) {
+          const found = await own(who, name);
+          if (!found) throw new DockerError(`There is no container ${name}`, 404);
+          await checked("POST", `/containers/${encodeURIComponent(found.Id)}/update`, changes);
+        },
         async exec(name, cmd, options = {}) {
           const found = await own(who, name);
           if (!found) throw new DockerError(`There is no container ${name}`, 404);

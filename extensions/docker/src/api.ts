@@ -2,8 +2,8 @@
  * What Docker gives an extension that builds on it: name `pithagoras-docker` in `pithagoras.requires` (or `optional`)
  * in its package.json, and ask for it with `portal.extensions.use<Docker>("pithagoras-docker")`.
  *
- * Each extension has its own: the containers and volumes it makes carry its name, and it may start, stop, remove, read
- * and run commands in only those, and the ones it took over (`adopt`). Another extension's are not its to touch, and
+ * Each extension has its own: the containers and volumes it makes carry its name, and it may start, stop, change, remove,
+ * read and run commands in only those, and the ones it took over (`adopt`). Another extension's are not its to touch, and
  * neither is a container nobody made through here until one takes it over. The person sees all of them in Settings →
  * Docker, by the extension that runs each, and may stop or remove any.
  *
@@ -49,6 +49,12 @@ export interface VolumeInfo {
  * `HostConfig`, …), as the extension writes it. Its labels are kept, with the one that says whose it is added.
  */
 export type ContainerSpec = { Image: string } & Record<string, unknown>;
+
+/**
+ * What a container that is there is changed with: Docker's own update body (the Engine API's ContainerUpdate:
+ * `RestartPolicy`, and the resources, `Memory`, `NanoCpus`, …), as the extension writes it. What it does not name stays.
+ */
+export type ContainerChanges = Record<string, unknown>;
 
 /** How a command is run in a container (`containers.exec`). */
 export interface ExecOptions {
@@ -118,6 +124,12 @@ export interface Docker {
      * `start` is for one that is another's, or nobody's.
      */
     inspect(name: string): Promise<Record<string, unknown> | undefined>;
+    /**
+     * One of this extension's containers changed as it is (`changes`), running or not: Docker neither makes it again nor
+     * restarts it, so what it runs and what it keeps go on as they were. Refused as `start` is for one that is another's,
+     * or nobody's, and for one there is none of.
+     */
+    update(name: string, changes: ContainerChanges): Promise<void>;
     /**
      * `cmd` run in one of this extension's containers, which has to be running, to its end or until `timeoutMs`. Given up
      * on, it is not a failure: `timedOut` says so.

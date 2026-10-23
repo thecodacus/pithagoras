@@ -9,7 +9,7 @@
     "client": "./web/client.js",
     "style": "./web/client.css",
     "server": "./server.js",
-    "requires": { "pithagoras-docker": "^1.1.0" }
+    "requires": { "pithagoras-docker": "^1.2.0" }
   },
   "scripts": { "build": "node build.mjs && tsc --noEmit -p ." },
   "devDependencies": {

@@ -138,6 +138,26 @@ test("an extension reads how its own containers were made and how they stand, an
   await voice.containers.remove("dk-inspect");
 });
 
+test("an extension changes its own container as it is, running, without its being made again or restarted; not another's, nor one there is none of", async () => {
+  const { forExtension } = dockerFor(dataDir());
+  const voice = forExtension("pithagoras-voice"), other = forExtension("someone-else");
+  await voice.containers.create("dk-update", { Image: "voice:1", HostConfig: { NetworkMode: "container:portal", RestartPolicy: { Name: "no" } } });
+  await voice.containers.start("dk-update");
+  const [made, started] = [docker.created.length, docker.starts.length];
+  await voice.containers.update("dk-update", { RestartPolicy: { Name: "unless-stopped" } });
+  assert.deepEqual(docker.updates.at(-1), { name: "dk-update", changes: { RestartPolicy: { Name: "unless-stopped" } } }, "Docker's own update, with the body as it was given");
+  const changed = (await voice.containers.inspect("dk-update")) as any;
+  assert.deepEqual(changed.HostConfig.RestartPolicy, { Name: "unless-stopped" });
+  assert.equal(changed.HostConfig.NetworkMode, "container:portal", "what the change does not name stays");
+  assert.equal(changed.State.Running, true);
+  assert.deepEqual([docker.created.length, docker.starts.length], [made, started], "neither made again nor started again");
+  const updates = docker.updates.length;
+  await assert.rejects(other.containers.update("dk-update", { RestartPolicy: { Name: "no" } }), { status: 403, message: /dk-update is pithagoras-voice's container, not someone-else's/ });
+  await assert.rejects(voice.containers.update("dk-none", { RestartPolicy: { Name: "no" } }), { status: 404, message: /There is no container dk-none/ });
+  assert.equal(docker.updates.length, updates, "neither reached Docker");
+  await voice.containers.remove("dk-update");
+});
+
 test("an extension runs a command in its own running container, with the environment, folder and terminal asked for, and reads what it wrote and its exit code; not in another's, nor in one that is not running", async () => {
   const { forExtension } = dockerFor(dataDir());
   const own = forExtension("pithagoras-understory"), other = forExtension("someone-else");

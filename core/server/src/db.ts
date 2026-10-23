@@ -5,7 +5,7 @@ import { GUARD_RULE_NAMES } from "./pi/guard-rule-names.js";
 import { BUILT_IN_SET, PI_BUILT_IN_TOOLS, defaultsFor, lazyToolEntry, mcpServerOf, toolEnabled, toolSetOf } from "./tool-policy.js";
 import { projectOf } from "./workspaces.js";
 import { dropMcpCache, mcpAdapter, mcpCachePath, mcpConfigPath, mcpServerNames, mcpWritten, onMcpWritten, readMcpCache, readMcpFile, readableMcpConfig, serversAndBrowsers } from "./api/mcp.js";
-import { mcpCatalogue, mcpDirect, mcpOffer, unlisted, type McpOffer } from "./mcp-offer.js";
+import { mcpCatalogue, mcpDirect, mcpOffer, namingOf, unlisted, type McpOffer } from "./mcp-offer.js";
 import { existsSync, mkdirSync, readdirSync, rmSync, rmdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { isWithinText } from "./within.js";
@@ -16,6 +16,7 @@ import { writeFileAtomic } from "./atomic-write.js";
 import { handoffRoot, leaveHandoff, moveFolderTo, moveTo } from "./handoff.js";
 import { RUNS_AS_PRIMARY } from "./pi/runs-as-primary.js";
 import { CODEMODE_TOOL } from "./pi/codemode.js";
+import { INLINE_EXTENSIONS } from "./pi/inline-extensions.js";
 import { CORE_MODES, CUSTOM, type ChatModeEntry } from "./chat-modes.js";
 import { freeSlug } from "./slug.js";
 import { SCHEMA_VERSION, dbFile } from "./schema-version.js";
@@ -3160,6 +3161,16 @@ export function setServerHalfOffers(read: typeof serverHalfOffers): void {
   serverHalfOffers = read;
 }
 
+/**
+ * The names of the server halves the extension host was last asked to run (askedHalves): of the installed packages,
+ * those switched on that have one, running or not. Undefined until it has been asked once. Set by the extension host,
+ * which this module cannot import.
+ */
+let serverHalvesAsked: () => ReadonlySet<string> | undefined = () => undefined;
+export function setServerHalvesAsked(read: typeof serverHalvesAsked): void {
+  serverHalvesAsked = read;
+}
+
 export function shownTools(folder?: string, view: McpView = mcpView()): (Omit<KnownTool, "package" | "inline"> & { inline?: true; cached?: true })[] {
   const user = readPiSettings().packages;
   const project = folder ? readProjectPiSettings(folder).packages : undefined;
@@ -3176,7 +3187,14 @@ export function shownTools(folder?: string, view: McpView = mcpView()): (Omit<Kn
   // the portal files them under as an inline extension's.
   const halves = serverHalfOffers();
   const offered = (tool: KnownTool) => !(tool.inline === true && halves.has(tool.source)) || halves.get(tool.source)!.some((t) => t.name === tool.name);
-  const remembered = [...known, ...catalogue.filter((t) => !seen.has(t.name))].filter(toolAvailability(user, project)).filter(offered);
+  // A server half's tool, which is an inline extension's that is not the portal's own, is listed while its package is
+  // installed and switched on, whether the half runs, crashed or failed to start: one switched off or uninstalled
+  // registers none, as a package's own tools are not listed then (toolAvailability). What was switched for it is kept,
+  // for when it is switched on again. Before the halves have been asked for once, as the portal starts, nothing is
+  // judged: hiding a tool on a guess is worse than showing a dead one.
+  const asked = serverHalvesAsked();
+  const halfOn = (tool: KnownTool) => !asked || tool.inline !== true || INLINE_EXTENSIONS.includes(tool.source) || asked.has(tool.source);
+  const remembered = [...known, ...catalogue.filter((t) => !seen.has(t.name))].filter(toolAvailability(user, project)).filter(halfOn).filter(offered);
   const listed = new Set(remembered.map((t) => t.name));
   const fromHalves: KnownTool[] = [...halves].flatMap(([source, tools]) =>
     tools.filter((t) => !listed.has(t.name)).map((t) => ({ name: t.name, source, package: null, inline: true, ...(t.description ? { description: t.description } : {}) })),
@@ -3339,6 +3357,8 @@ export interface McpView {
   catalogue: KnownTool[];
   serverTool: (name: string) => boolean;
   servers: string[];
+  /** The naming the adapter gives each configured server's tools (`toolPrefix`, see mcpPrefixAs). */
+  naming: (server: string) => string;
   gone: string[];
   /** What the portal remembers of every tool, read when first asked for. */
   known: () => Map<string, KnownTool>;
@@ -3425,7 +3445,7 @@ function readMcpView(): McpView {
   let known: Map<string, KnownTool> | undefined;
   const knownNow = () => (known ??= new Map(knownTools().map((t) => [t.name, t])));
   if (!config) {
-    return { offers: () => undefined, direct: () => undefined, catalogue: [], serverTool: () => false, servers: [], gone: [], known: knownNow };
+    return { offers: () => undefined, direct: () => undefined, catalogue: [], serverTool: () => false, servers: [], naming: () => "server", gone: [], known: knownNow };
   }
   const cache = readMcpCache();
   const offer = mcpOffer(config, cache);
@@ -3452,7 +3472,7 @@ function readMcpView(): McpView {
   };
   const servers = Object.keys(config.mcpServers ?? {});
   const gone = removedMcpServers().filter((name) => !servers.includes(name));
-  return { offers, direct, catalogue, serverTool, servers, gone, known: knownNow };
+  return { offers, direct, catalogue, serverTool, servers, naming: (server: string) => namingOf(config, server), gone, known: knownNow };
 }
 
 /**

@@ -9,7 +9,7 @@ import { serverHalf, validName } from "./extension-ui.js";
 import { SUBAGENT_PACKAGE, piPackageArg } from "./features.js";
 import { scrubSecrets } from "./logs.js";
 import { oneAtATime } from "./one-at-a-time.js";
-import { INLINE_EXTENSIONS } from "./pi/sdk-client.js";
+import { INLINE_EXTENSIONS } from "./pi/inline-extensions.js";
 import { readPiSettings } from "./pi-settings.js";
 import { sessions } from "./session-manager.js";
 import { realPath } from "./within.js";

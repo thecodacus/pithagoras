@@ -152,7 +152,7 @@ const docker = portal.extensions.use("pithagoras-docker");
 if (await docker.available()) {
   await docker.images.ensure("redis:7", (state) => portal.log(state.line));
   await docker.volumes.create("my-redis-data");
-  await docker.containers.create("my-redis", { Image: "redis:7", HostConfig: { Binds: ["my-redis-data:/data"] } });
+  await docker.containers.create("my-redis", { Image: "redis:7", HostConfig: { Binds: ["my-redis-data:/data"], RestartPolicy: { Name: "unless-stopped" } } });
   await docker.containers.start("my-redis");
 }
 ```
@@ -171,19 +171,21 @@ What it gives (`extensions/docker/src/api.ts`, with its types):
 | `containers.list()`, `containers.get(name)` | Your containers; a container by name, with `owner` saying whose it is and `labels` the labels it was made with |
 | `containers.create(name, spec)` | Makes one, not started, from Docker's own create body (`Image`, `Env`, `Cmd`, `HostConfig`, …). One of yours by that name is removed first |
 | `containers.inspect(name)` | How your container was made and how it stands: Docker's own inspect body (`Config`, `HostConfig`, `State`, …), as `create` takes Docker's own create body. Nothing where there is none |
+| `containers.update(name, changes)` | Changes your container as it is, running or not, from Docker's own update body (`RestartPolicy`, and the resources: `Memory`, `NanoCpus`, …): it is neither made again nor restarted, and what the change does not name stays ([below](#when-the-machine-restarts)) |
 | `containers.exec(name, cmd, options?)` | Runs a command in your running container, and gives what it wrote and how it ended ([below](#running-a-command-in-a-container)) |
 | `containers.start`, `stop`, `remove`, `logs(name, { tail })` | Your container's life, and the end of what it wrote |
 | `containers.adopt(name)` | Takes over a container that carries no extension's name: one made before your app was an extension, so that what it kept is kept. Browser takes over the `pithagoras-browser` container and its profile volume this way each time it starts, Voice the `pithagoras-voice` container (where it is labelled as the voice service) and its models volume, and Understory the `pithagoras-understory` container (where it is labelled as the portal's Understory) and its memory volume |
 | `volumes.list`, `create`, `remove`, `adopt` | The same for volumes |
 
 `sharedNetwork`, `containers.inspect` and `containers.exec` came with Docker
-1.1.0: an extension that uses them requires `^1.1.0`.
+1.1.0: an extension that uses them requires `^1.1.0`. `containers.update` came
+with 1.2.0, and requires `^1.2.0`.
 
 Each extension has its own. What it makes carries its name (the label
-`pithagoras.extension`), and it may start, stop, remove, read and run commands
-in only those, and the ones it took over: another extension's, or a container
-nobody made through Docker, is refused until it is taken over. Which ones it
-took over is kept in Docker's own folder in the portal's data folder.
+`pithagoras.extension`), and it may start, stop, change, remove, read and run
+commands in only those, and the ones it took over: another extension's, or a
+container nobody made through Docker, is refused until it is taken over. Which
+ones it took over is kept in Docker's own folder in the portal's data folder.
 
 ### Running a command in a container
 
@@ -231,6 +233,47 @@ with `sharedNetwork()`, and make the container again where they differ. The
 voice service does this as it starts and every 30 seconds for a running
 container, keeping its engines and the GPU it was given, and Understory the
 same, keeping its memory and its token.
+
+### When the machine restarts
+
+A container that runs your extension's service, as Browser's, Voice's and
+Understory's do, is made with Docker's `unless-stopped` restart policy:
+`HostConfig: { RestartPolicy: { Name: "unless-stopped" } }`. Docker then
+starts it again after the machine, or Docker itself, restarts, and after it
+exits on its own, but not once the person has stopped it, on your page or with
+**Stop** on Docker's page: it stays stopped until it is started again. A
+container you made before with another policy is given it in place, with
+`containers.update(name, { RestartPolicy: { Name: "unless-stopped" } })`, which
+neither makes it again nor restarts it: Voice does this as it starts, and
+wherever it finds its container.
+
+A container on the portal's network that is given `container:<id>`
+([above](#a-container-on-the-portal-s-network)), as Voice's and Understory's
+are, needs the portal's container running before it can start. As the machine
+starts, Docker 29 and later wait up to five seconds for the portal's to start
+first; older Docker starts them all at once, and one it starts before the
+portal's is running stays stopped, with `cannot join network namespace of a
+non running container` in `State.Error`, until it is started again. Voice's
+page then shows it as failed, and **Retry setup** starts it.
+
+A container that keeps failing is started again by Docker each time, after a
+wait that doubles up to a minute (and starts again from a tenth of a second
+once it has run for ten seconds). `containers.inspect` shows that:
+`State.Restarting` is `true` while Docker waits for the next try, with the
+last try's code in `State.ExitCode`, and `State.StartedAt` is when the run
+under way began, at each try anew. `RestartCount` counts Docker's own starts
+since it was last started by a call (`start`), or by Docker as the machine
+started, and Docker keeps that count for as long as a run it began goes on:
+a container that came back after one failure still has `1`, so the count alone
+does not say a try is under way. While it waits, Docker counts it as running,
+so `start` leaves it to Docker's next try; `stop` ends the tries, and `stop`
+and then `start` runs it now. Voice's page shows such a container as failed,
+with its log and **Stop · release VRAM**, until its services answer in the run
+Docker began.
+
+What the agent runs with its [tools](#the-agent-s-tools) is not an extension's
+service: a Dockerfile's container has no restart policy, and a compose file's
+has the one the file gives it.
 
 ### When a call fails
 

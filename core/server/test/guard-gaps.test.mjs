@@ -79,11 +79,14 @@ test("a server's own tools are outside content however they are called, a server
     for (const [tool, input] of [["mcp", {}], ["mcp_script", { code: "" }], ["browser_browser_snapshot", {}], ["mcp", { tool: "browser_browser_snapshot" }]]) {
       assert.equal(wrapped(read(trusting, tool, input)), true, `${tool} ${JSON.stringify(input)}: never trusted`);
     }
-    // A dotted server is its own, and not the trusted one its name starts like.
+    // A dotted server is its own, and not the trusted one its name starts like. The adapter keeps a server's dots
+    // (getServerPrefix): `github.public` registers `github.public_get_issue`, and `github_public_get_issue` is
+    // `github`'s own tool `public_get_issue`.
     setTrustedMcpServers(["github"]);
-    const dotted = guardAs({ adapter: ["github_public_get_issue", "github_get_issue"] });
+    const dotted = guardAs({ adapter: ["github.public_get_issue", "github_public_get_issue", "github_get_issue"] });
     assert.equal(wrapped(read(dotted, "mcp", { tool: "github.public_get_issue" })), true);
-    assert.equal(wrapped(read(dotted, "github_public_get_issue")), true);
+    assert.equal(wrapped(read(dotted, "github.public_get_issue")), true);
+    assert.equal(wrapped(read(dotted, "github_public_get_issue")), false, "github's public_get_issue");
     assert.equal(wrapped(read(dotted, "github_get_issue")), false);
   } finally {
     setTrustedMcpServers([]);
