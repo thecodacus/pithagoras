@@ -55,6 +55,7 @@ function readZip(buf: Buffer): ZipEntry[] {
   const cdOffset = buf.readUInt32LE(eocd + 16);
   if (count === 0xffff || cdSize === ZIP64 || cdOffset === ZIP64) throw ooxmlError("zip64 archives are not supported", "invalid_zip");
   const entries: ZipEntry[] = [];
+  let totalUncompressed = 0; // running sum of the ADVERTISED expansion of every entry (archive cap below)
   let p = cdOffset;
   for (let n = 0; n < count; n++) {
     if (p + 46 > buf.length || buf.readUInt32LE(p) !== CD_SIG) throw ooxmlError("corrupt zip central directory", "invalid_zip");
@@ -62,6 +63,8 @@ function readZip(buf: Buffer): ZipEntry[] {
     const csize = buf.readUInt32LE(p + 20);
     const usize = buf.readUInt32LE(p + 24);
     if (method === ZIP64 || csize === ZIP64 || usize === ZIP64) throw ooxmlError("zip64 archives are not supported", "invalid_zip");
+    totalUncompressed += usize; // BEFORE the entry is retained, so a hostile central directory cannot accumulate unbounded expansion
+    if (totalUncompressed > MAX_TOTAL_BYTES) throw ooxmlError(`combined uncompressed size exceeds the ${MAX_TOTAL_BYTES / (1024 * 1024)} MiB archive cap`, "invalid_zip");
     const nameLen = buf.readUInt16LE(p + 28);
     const extraLen = buf.readUInt16LE(p + 30);
     const commentLen = buf.readUInt16LE(p + 32);
@@ -85,6 +88,12 @@ function readZip(buf: Buffer): ZipEntry[] {
 // otherwise advertise a multi-GB expansion (stored or deflated) that the portal would commit into memory.
 // 256 MiB is far above anything real in docx/xlsx parts we ever read back.
 const MAX_ENTRY_BYTES = 256 * 1024 * 1024;
+
+// Same guard at the archive level: readZipParts retains EVERY central-directory entry, so a hostile archive could
+// advertise several just-under-cap entries -- or thousands of small ones -- whose combined uncompressed size is far
+// beyond anything a docx/xlsx reader would ever touch. 1 GiB total is still far beyond real files; reject the whole
+// archive when the advertised sum crosses it (checked in readZip, before any entry is retained).
+const MAX_TOTAL_BYTES = 1024 * 1024 * 1024;
 
 /** Uncompressed payload of one entry (payload length comes from the central directory, so local data descriptors are fine). */
 function readEntryData(buf: Buffer, e: ZipEntry): Buffer {

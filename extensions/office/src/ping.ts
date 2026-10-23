@@ -9,9 +9,11 @@
  * target's pi extension drains the queue off its UI_RECEIVE bell (drain side = T-TOOLS' factory,
  * plan 5.4 step 4; this module only QUEUES). The seen set is written back AFTER processing.
  *
- * First-save decision (plan leaves it open): a persist with NO prior state file records the whole
- * comment set as baseline WITHOUT resolving mentions -- a freshly created document's comments carry
- * no user intent to wake anyone, and pinging them would ring a bell on the doc's own creator.
+ * First-save decision (plan leaves it open): an IMPORTED document arrives with its own comment history -- a persist
+ * with NO prior state file baselines that whole set WITHOUT resolving mentions (those mentions predate this
+ * library and must not ring bells). A CREATED blank document gets no baseline: its seen set starts empty, so an
+ * @mention typed during the very first editing session is processed on its first save like any later one.
+ * (store.ts marks imported documents with DocMeta.imported; see importFile.)
  * Corrupt/undecodable state file: logged, previous set treated as EMPTY (every current comment is
  * then "new", its mentions processed once; the immediately-following write restores a sane file).
  * Erring toward notifying beats silently dropping a mention after a corruption event. A re-send of
@@ -228,15 +230,17 @@ export function handlePersisted(docId: string, buffer: Buffer): void {
     if (meta.ext !== "docx") return; // v1: docx only, xlsx comments deferred to M4
     const { comments } = parseDocx(buffer);
     const prev = readSeen(rootDir, docId);
-    if (prev === null) { // first save: baseline recorded, no wakes (module header)
-      writeSeen(rootDir, docId, comments.map((c) => c.id));
+    if (prev === null && meta.imported) { // imported with its own comment history: baseline it all, no wakes --
+      writeSeen(rootDir, docId, comments.map((c) => c.id)); // those mentions predate this library (module header)
       return;
     }
     // Write the seen set AFTER processing and only with ids handled successfully: a comment whose wake failed
     // stays unseen and is re-reported by diffComments on the next persist (retry), while one later failure must
     // not leave earlier comments permanently unseen either.
-    const added = diffComments([...prev.ids].map((id): Comment => ({ id, author: "", text: "" })), comments).added;
-    const seen = new Set(prev.ids);
+    // prev === null here means a created doc on its very first save (imported docs returned above): the seen set
+    // starts EMPTY, so every current comment -- including mentions typed during the first editing session -- is processed.
+    const added = diffComments([...(prev ? prev.ids : [])].map((id): Comment => ({ id, author: "", text: "" })), comments).added;
+    const seen = new Set(prev ? prev.ids : []);
     for (const c of added) {
       try {
         processComment(docId, meta.title, meta.owner, c);

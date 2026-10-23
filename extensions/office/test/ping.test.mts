@@ -19,7 +19,7 @@ import {
   type PingAuditEntry,
   type WakeEntry,
 } from "../src/ping";
-import { createDoc, getDoc } from "../src/store";
+import { createDoc, getDoc, importFile, templateDocx } from "../src/store";
 import { rewriteZip, parseDocx } from "../src/ooxml";
 
 /* ------------------------------------------------------------------ */
@@ -109,18 +109,53 @@ test("officeWakeMessage renders the exact plan 5.4 template", () => {
 /* persist behavior                                                    */
 /* ------------------------------------------------------------------ */
 
-test("first persist: state file written, ids recorded, NO pings", async () => {
+test("created doc, first save: a mention IS processed (no baseline swallows first-session intent)", async () => {
   const { root, seen } = setup();
   const meta = await makeDoc(root, "Budget", { owner: "chat-atlas-home" });
   persistWith(root, meta.docId, meta.title, meta.ext, [
-    { id: "1", author: "Alice", text: "@agent please review this" }, // would ping -- but it is the FIRST save
+    { id: "1", author: "Alice", text: "@agent please review this" }, // created docs get NO baseline: the mention wakes on save #1
     { id: "2", author: "Bob", text: "notes for later" },
   ]);
-  assert.deepEqual(seen.tells, []); // first save carries no wake intent (documented decision)
-  assert.deepEqual(seen.records, []);
+  assert.deepEqual(seen.tells, [["chat-atlas-home", { type: "ping" }]]);
+  assert.equal(seen.records.length, 1);
   const state = JSON.parse(fs.readFileSync(stateFile(root, meta.docId), "utf8")) as { ids: string[] };
   assert.deepEqual(state.ids.sort(), ["1", "2"]);
-  assert.deepEqual(getDoc(meta.docId, root)?.grants, []);
+  const grants = getDoc(meta.docId, root)?.grants ?? [];
+  assert.equal(grants.length, 1);
+  assert.equal(grants[0].chatId, "chat-atlas-home");
+  assert.equal(grants[0].commentId, "1");
+});
+
+test("imported doc, first save: its existing comments are baselined WITHOUT wakes", async () => {
+  const { root, seen } = setup();
+  // A file with comment history that predates this library -- the whole point of importFile(imported:true).
+  const src = path.join(root, "src-import.docx");
+  fs.writeFileSync(src, rewriteZip(await templateDocx(), { "word/comments.xml": commentsXml([
+    { id: "7", author: "Cara", text: "carry-over note" },
+    { id: "8", author: "Dan", text: "old @agent mention" },
+  ]) }));
+  const meta = importFile(src, { title: "Carried Over" }, root); // sync
+  assert.equal(meta.imported, true);
+  persistWith(root, meta.docId, meta.title, meta.ext, [
+    { id: "7", author: "Cara", text: "carry-over note" },
+    { id: "8", author: "Dan", text: "old @agent mention" },
+  ]);
+  assert.deepEqual(seen.tells, []); // its history is baselined on the first save, never re-woken
+  assert.deepEqual(seen.records, []);
+  const state = JSON.parse(fs.readFileSync(stateFile(root, meta.docId), "utf8")) as { ids: string[] };
+  assert.deepEqual(state.ids.sort(), ["7", "8"]);
+  assert.equal(getDoc(meta.docId, root)?.grants?.length ?? 0, 0);
+
+  // ...and a NEW mention after the import DOES wake (the baseline only covered the imported history)
+  persistWith(root, meta.docId, meta.title, meta.ext, [
+    { id: "7", author: "Cara", text: "carry-over note" },
+    { id: "8", author: "Dan", text: "old @agent mention" },
+    { id: "9", author: "Eli", text: "@project:acme please take over this doc" },
+  ]);
+  assert.deepEqual(seen.tells, [["chat-acme-home", { type: "ping" }]]);
+  const grants = getDoc(meta.docId, root)?.grants ?? [];
+  assert.equal(grants.length, 1);
+  assert.equal(grants[0].commentId, "9");
 });
 
 test("second persist: @agent wakes the owner; @project:<name> matches case-insensitively, grant + wake queued; re-send dedupes", async () => {
@@ -229,15 +264,17 @@ test("xlsx persist is a no-op (v1 wakes docx only)", async () => {
 test("corrupt state file: logged, previous set treated as empty, mentions processed once, state restored", async () => {
   const { root, seen } = setup();
   const meta = await makeDoc(root, "Ledger", { owner: "chat-atlas-home" });
-  persistWith(root, meta.docId, meta.title, meta.ext, [{ id: "1", author: "A", text: "@agent baseline ask" }]); // first save: recorded only
+  persistWith(root, meta.docId, meta.title, meta.ext, [{ id: "1", author: "A", text: "@agent baseline ask" }]); // created doc: the @agent mention IS processed on its very first save (no baseline)
   fs.writeFileSync(stateFile(root, meta.docId), "{ this is not json");
 
   persistWith(root, meta.docId, meta.title, meta.ext, [
-    { id: "1", author: "A", text: "@agent baseline ask" }, // now "new" again -- re-wake accepted (see module docs)
+    { id: "1", author: "A", text: "@agent baseline ask" }, // corrupt state -> empty seen set: "new" again -- re-wake accepted (see module docs)
     { id: "2", author: "B", text: "@agent second ask" },
   ]);
   assert.match(seen.logs.join("\n"), /state file .* corrupt/);
+  // one ping from the first save, then BOTH comments re-process after the corruption (queue dedupes per comment, but the tell fires each pass)
   assert.deepEqual(seen.tells, [
+    ["chat-atlas-home", { type: "ping" }],
     ["chat-atlas-home", { type: "ping" }],
     ["chat-atlas-home", { type: "ping" }],
   ]);

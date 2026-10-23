@@ -554,17 +554,17 @@ test("settleKept: stale index entries are pruned, orphan dirs stay, fresh trash 
   assert.ok(fs.existsSync(path.join(root, ".trash", "not-a-timestamp")), "non-deleteDoc entries are untouched");
 });
 
-test("makeForcesaveHook: no-op without open sessions; one audit line per session group while somebody is in it", async () => {
+test("makeForcesaveHook: confirms (true) without open sessions; refuses (false) + one audit line while somebody is in it", async () => {
   const b = await boot();
   const doc = await store.createDoc({ title: "Hooked", type: "word" }, b.root);
   const hook = makeForcesaveHook();
 
   const auditsBefore = b.audits.length;
-  await hook(doc.docId); // nobody open
+  assert.equal(await hook(doc.docId), true, "nobody open -> nothing to flush -> confirmed (pure no-op)");
   assert.equal(b.audits.length, auditsBefore, "no audit line when no session is open");
 
   live.setUser(doc.docId, { id: "u-ada", name: "Ada" }, true);
-  await hook(doc.docId);
+  assert.equal(await hook(doc.docId), false, "a session is open and v1 cannot confirm a force-save -> office_edit must refuse (error:session_open)");
   assert.equal(b.audits.length, auditsBefore + 1);
   const last = b.audits[b.audits.length - 1];
   assert.equal(last.subject, doc.docId);

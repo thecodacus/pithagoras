@@ -202,3 +202,29 @@ test("diffComments reports only ids that are new", () => {
   assert.deepEqual(diffComments(next, prev).added, []);
   assert.deepEqual(diffComments([], []).added, []);
 });
+
+/* ---------------- readZip archive-level expansion cap ---------------- */
+
+test("readZip refuses an archive whose COMBINED advertised expansion exceeds the 1 GiB archive cap", () => {
+  // Hand-crafted zip with NO payload bytes: 6 central-directory records each advertising 200 MiB (deflate method) --
+  // every entry stays UNDER the 256 MiB per-entry cap on purpose; 1.2 GiB total crosses the 1 GiB archive cap.
+  // readZip trips in its CD loop before any payload is read, so the buffer never needs real data.
+  const N = 6;
+  const rec = 46 + 8; // central-directory record (fixed part) + name "part.xml"
+  const cdSize = N * rec;
+  const buf = Buffer.alloc(cdSize + 22);
+  for (let i = 0; i < N; i++) {
+    const p = i * rec;
+    buf.writeUInt32LE(0x02014b50, p); // central directory file header signature
+    buf.writeUInt16LE(8, p + 10); // compression method (deflate)
+    buf.writeUInt32LE(200 * 1024 * 1024, p + 24); // uncompressed size -- under the per-entry cap ON PURPOSE
+    buf.writeUInt16LE(8, p + 28); // file name length
+    buf.write("part.xml", p + 46);
+  }
+  const eocd = cdSize;
+  buf.writeUInt32LE(0x06054b50, eocd); // end of central directory signature
+  buf.writeUInt16LE(N, eocd + 10); // total number of entries
+  buf.writeUInt32LE(cdSize, eocd + 12); // size of the central directory
+  buf.writeUInt32LE(0, eocd + 16); // offset of the central directory
+  assert.throws(() => parseDocx(buf), /archive cap/);
+});

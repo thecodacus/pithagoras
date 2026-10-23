@@ -73,11 +73,15 @@ export type ToolsDeps = {
 };
 
 let cfg: ToolsDeps = {};
-/** The forcesave-first hook (plan 5.7): T-WIRE registers the real one (the DS status-6 command for a dirty session). Until then -- or after setForcesaveHook(null) -- an edit with an open session logs and goes on without a forced save. */
-let forcesaveHook: ((docId: string) => Promise<void>) | null = null;
+/** The forcesave-first hook (plan 5.7): resolves TRUE only when a force-save was actually issued for the open
+ * session(s) AND its save landed on disk; office_edit then re-gates on the fresh meta before writing. T-WIRE registers
+ * the real one (the DS status-6 command). Anything less than confirmed completion -- no hook at all, or a result that
+ * is not true -- makes office_edit REFUSE with error:session_open: an unsaved human buffer must never be clobbered
+ * silently. */
+let forcesaveHook: ((docId: string) => Promise<boolean>) | null = null;
 
-/** Install the forcesave-first hook, or pass null to go back to the no-op (logged) default. */
-export function setForcesaveHook(fn: ((docId: string) => Promise<void>) | null): void {
+/** Install the forcesave-first hook, or pass null to go back to the refusing default. */
+export function setForcesaveHook(fn: ((docId: string) => Promise<boolean>) | null): void {
   forcesaveHook = fn ?? null;
 }
 
@@ -308,14 +312,17 @@ function installTools(pi: unknown, home: string): void {
       }
       let said = `"${doc.title}" (id ${doc.docId}, docx, revision ${doc.mtimeMs})${lock}\n\n${parsed.text}${comments}`;
       if (said.length > MAX_READ_CHARS) said = said.slice(0, MAX_READ_CHARS) + "\n\n[output truncated by office_read: it exceeds 200,000 characters]";
-      return text(said, { action: "read", id: doc.docId, ext: doc.ext, mtimeMs: doc.mtimeMs, comments: parsed.comments });
+      // details lands in the portal tool-event store and the web transcript -- MAX_READ_CHARS caps only the text above,
+      // so bound the comments HERE too (100 at 500 chars each, worst case ~50 KB); commentCount keeps the true total.
+      const detailComments = parsed.comments.slice(0, 100).map((c) => ({ id: c.id, author: c.author, date: c.date, text: c.text.slice(0, 500) }));
+      return text(said, { action: "read", id: doc.docId, ext: doc.ext, mtimeMs: doc.mtimeMs, comments: detailComments, commentCount: parsed.comments.length });
     }),
   });
 
   p.registerTool({
     name: "office_edit",
     label: "Edit an office document",
-    description: `Change a Word document of your library by replacing quoted text, as office_read shows it. Each op is {quote, replacement}: the quote must appear in the extracted text (empty replacement removes it), ops apply one after another. baseRevision is the mtimeMs you read (or that your last edit returned): if the document moved on since, NOTHING is written and you are told the fresh revision -- re-read and redo. If a human has the editor open, their dirty session is force-saved first and the gate re-checked; you never overwrite an unread save. Spreadsheets cannot be edited in v1 (a later milestone). All ops are made or none.`,
+    description: `Change a Word document of your library by replacing quoted text, as office_read shows it. Each op is {quote, replacement}: the quote must appear in the extracted text (empty replacement removes it), ops apply one after another. baseRevision is the mtimeMs you read (or that your last edit returned): if the document moved on since, NOTHING is written and you are told the fresh revision -- re-read and redo. If a human has the editor open, the edit proceeds only once their unsaved changes are flushed by a COMPLETED force-save -- refused with error:session_open if that cannot be confirmed -- and re-checks the revision afterwards; you never overwrite an unsaved buffer. Spreadsheets cannot be edited in v1 (a later milestone). All ops are made or none.`,
     promptSnippet: "Edit a Word document: quoted replacements on the revision you read",
     executionMode: "sequential",
     parameters: {
@@ -357,12 +364,14 @@ function installTools(pi: unknown, home: string): void {
         new Refusal("revision_mismatch", `"${fresh.title}" is at revision ${fresh.mtimeMs}, not ${base}: it changed since you read it. Nothing was written. Read it again with office_read, then redo the edit with baseRevision ${fresh.mtimeMs}.`);
       if (Math.abs(meta.mtimeMs - base) > 1) throw stale(meta);
 
-      // Plan 5.7 (co-editing default ON): an open human session is NOT a refusal -- forcesave-first ordering.
-      // The hook (T-WIRE: the DS status-6 command for this doc's dirty session) is AWAITED, and because it
-      // itself saves the file the gate is re-checked on the FRESH meta before anything below is written.
+      // Plan 5.7 (co-editing default ON): an open human session is flushed BEFORE anything may be written over it --
+      // the hook must confirm a COMPLETED force-save (true) before we proceed, and because that save moves the file
+      // the gate is re-checked on the FRESH meta afterwards. No hook wired, or a round-trip without confirmation:
+      // REFUSE with error:session_open -- an unsaved buffer must never be clobbered silently.
       if (loadSettings(rootDir()).coEdit && usersOf(doc.docId).length > 0) {
-        if (forcesaveHook) await forcesaveHook(doc.docId);
-        else logLine(`office edit of ${doc.docId}: an editor session is open and coEdit is on, but no forcesave hook is registered yet -- continuing without a forced save`);
+        if (!forcesaveHook) throw new Refusal("session_open", `"${doc.title}" is open in an editor with possibly unsaved changes, and no force-save is available to flush them first: have the editor save (or close), then retry this edit`);
+        const flushed = await forcesaveHook(doc.docId); // a hook that THROWS propagates as a tool failure via guarded()
+        if (!flushed) throw new Refusal("session_open", `"${doc.title}" is open in an editor and its unsaved changes could not be force-saved: have the editor save (or close), then retry this edit`);
         meta = getDoc(doc.docId, rootDir());
         if (!meta) throw new Refusal("not_found", `"${doc.title}" vanished from the library between list and edit`);
         if (Math.abs(meta.mtimeMs - base) > 1) throw stale(meta);

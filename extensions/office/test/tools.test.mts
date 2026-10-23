@@ -303,6 +303,7 @@ test("office_edit forcesave-first: coEdit + open session -> hook awaited before 
     order.push("hook");
     bumpedTo = Date.now() + 5000; // guaranteed >1 ms ahead of base
     bumpRevision(s.root, docId, bumpedTo);
+    return true; // the forcesave "completed": only its mid-flight persist moves the revision
   });
   const baseA = getDoc(doc.docId, s.root)!.mtimeMs;
   const refusedMsg = await refused(tool(s, "office_edit").execute("f1", { id: doc.docId, ops: [{ quote: "New document", replacement: "late" }], baseRevision: baseA }), "mid-flight bump");
@@ -316,6 +317,7 @@ test("office_edit forcesave-first: coEdit + open session -> hook awaited before 
   setUser(doc2.docId, { id: "human-2" }, true);
   setForcesaveHook(async () => {
     order.push("hook2");
+    return true; // nothing dirty to flush -> confirmed, the edit proceeds
   });
   const ok = (await tool(s, "office_edit").execute("f2", { id: doc2.docId, ops: [{ quote: "New document", replacement: "Saved after forcesave" }], baseRevision: getDoc(doc2.docId, s.root)!.mtimeMs })) as ToolResult;
   assert.deepEqual(order.slice(-1), ["hook2"], "the hook ran before the edit was allowed on");
@@ -331,15 +333,14 @@ test("office_edit forcesave-first: coEdit + open session -> hook awaited before 
   assert.ok(!ok3.content[0].text.startsWith("error:"), ok3.content[0].text);
   assert.equal(order.length, 0, "with coEdit off the forcesave hook must not run");
 
-  // Case D: no hook registered yet (T-WIRE has not wired it) -> logged no-op default, then the edit still proceeds after re-gating
+  // Case D: no hook registered yet (T-WIRE has not wired it) -> the edit is REFUSED (error:session_open), nothing written
   fs.writeFileSync(path.join(s.root, "settings.json"), JSON.stringify({ enabled: true, imageTag: "onlyoffice/documentserver:10.0", coEdit: true })); // case C turned coEdit off in this root
   setForcesaveHook(null);
   const doc4 = await createDoc({ title: "No Hook Yet", type: "word", owner: "chat-atlas-home" }, s.root);
   setUser(doc4.docId, { id: "human-4" }, true);
-  const before = s.seen.logs.length;
-  const ok4 = (await tool(s, "office_edit").execute("f4", { id: doc4.docId, ops: [{ quote: "New document", replacement: "Default path" }], baseRevision: getDoc(doc4.docId, s.root)!.mtimeMs })) as ToolResult;
-  assert.ok(!ok4.content[0].text.startsWith("error:"), ok4.content[0].text);
-  assert.ok(s.seen.logs.slice(before).some((l) => l.includes("no forcesave hook is registered")));
+  const refusedD = await refused(tool(s, "office_edit").execute("f4", { id: doc4.docId, ops: [{ quote: "New document", replacement: "Default path" }], baseRevision: getDoc(doc4.docId, s.root)!.mtimeMs }), "no hook + open session must refuse");
+  assert.match(refusedD, /^error:session_open /);
+  assert.equal(parseDocx(readDocBytes(s.root, doc4.docId)).text, "New document"); // NOTHING written
 });
 
 /* ------------------------------------------------------------------ */

@@ -270,6 +270,7 @@ IT("office_edit with a live session: the forcesave hook is AWAITED before the ed
     hookSawOriginalBytes = parseDocx(fs.readFileSync(fileA)).text.includes("New document"); // still the pre-edit content while the hook runs
     await new Promise((r) => setTimeout(r, 25)); // a slow status-6 round-trip to DS, simulated
     eventsA.push("hook:end");
+    return true; // the (simulated) forcesave completed and persisted -> confirmed
   });
   await tools2.office_edit.execute(null, { id: docA.docId, ops: [{ quote: "New document", replacement: "Edited by the agent" }], baseRevision: docA.mtimeMs });
   setForcesaveHook(null);
@@ -290,6 +291,7 @@ IT("office_edit with a live session: the forcesave hook is AWAITED before the ed
     store.persistBytes(store.getDoc(d, root)!, SAVED_DOCX, root); // the DS forcesave lands a NEWER revision under our feet
     await new Promise((r) => setTimeout(r, 10)); // >1 ms apart so mtime-as-revision actually moves (the gate's threshold)
     eventsB.push("hook:persisted-newer-revision");
+    return true; // confirmed: the forcesave DID land -- office_edit must now be refused by the RE-GATE, not the hook
   });
   let thrown: unknown;
   try {

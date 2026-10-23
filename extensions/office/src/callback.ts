@@ -297,7 +297,15 @@ async function handleDispatch(
   const headerToken = req.headers["x-auth-token"];
   let token = typeof headerToken === "string" ? headerToken : Array.isArray(headerToken) ? headerToken[0] : undefined;
   if (token === undefined && typeof body.token === "string") token = body.token;
-  if (token === undefined || verifyJwt(token, secret) === null) {
+  // Verify the token ONCE and keep its claims: a second verifyJwt call below would add nothing except a race --
+  // a token that expires in between makes that call return null and the envelope binding blow up as a 500.
+  if (token === undefined) {
+    log("rejected callback: missing or invalid JWT");
+    respond(res, 401, 1);
+    return;
+  }
+  const verified = verifyJwt(token, secret);
+  if (verified === null) {
     log("rejected callback: missing or invalid JWT");
     respond(res, 401, 1);
     return;
@@ -308,7 +316,7 @@ async function handleDispatch(
   // document. DS carries the callback envelope in the JWT payload (possibly wrapped under a 'payload' key);
   // our own non-callback tokens (editor config, fetch) carry no envelope and are rejected below. The body is
   // ignored from here on.
-  const claims = verifyJwt(token, secret)!;
+  const claims = verified; // the verification made above -- exactly once per request
   const signed = (claims.payload && typeof claims.payload === "object" && !Array.isArray(claims.payload))
     ? claims.payload as Record<string, unknown>
     : claims;

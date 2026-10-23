@@ -130,18 +130,19 @@ export function settleKept(root?: string): { sweptTrash: number; prunedDocs: str
 }
 
 /** The real forcesave-first hook (plan 5.7 tier-1): what an office_edit does BEFORE it may write over a doc that a
- * human has open in DS. v1 reality, documented where the plan defers: there is no server-side REST command that
- * forces a dirty DS session to persist -- "if the session reports unsaved state (appstate), trigger forcesave first
- * and apply after its status-6 persists" is delivered as a browser-side DocsAPI command on the editor page, which is
- * M0/client-tier work. So: nobody open -> no-op; somebody open -> one audit+log line naming the sessions, then
- * proceed under the revision gate (persistBytes' mtime check still refuses to clobber a persisted change, and the
- * callback's stale-key refusal still guards the disk -- at the plan-accepted cost that an UNsaved buffer may be
- * lost if the edit lands first). */
-export function makeForcesaveHook(): (docId: string) => Promise<void> {
-  return async (docId: string): Promise<void> => {
+ * human has open in DS. It resolves TRUE only when a force-save for every open session completed AND persisted to
+ * disk; anything less must make the edit refuse, so v1 -- which has no server-side command that forces a dirty DS
+ * session to persist (the plan delivers "if the session reports unsaved state (appstate), trigger forcesave first and
+ * apply after its status-6 persists" as a browser-side DocsAPI command on the editor page, M0/client-tier work) --
+ * resolves FALSE with one audit line naming the sessions. office_edit then answers error:session_open instead of
+ * risking an unsaved buffer (the earlier proceed-under-the-revision-gate acceptance is retracted: the review demanded
+ * fail-closed). Nobody open -> true, a pure no-op that leaves the revision gate to decide. */
+export function makeForcesaveHook(): (docId: string) => Promise<boolean> {
+  return async (docId: string): Promise<boolean> => {
     const users = live.usersOf(docId);
-    if (!users.length) return; // nobody open any more -- the revision gate is all we need
-    recordAudit({ subject: docId, reason: `forcesave requested while ${users.length} editor session(s) are open; the browser-side force-save command is M0/client-tier (plan 5.7) -- proceeding under the revision gate` });
+    if (!users.length) return true; // nobody open any more -- the revision gate is all we need
+    recordAudit({ subject: docId, reason: `forcesave requested while ${users.length} editor session(s) are open; the browser-side force-save command is M0/client-tier (plan 5.7) -- NOT confirmed, so the edit is refused (error:session_open)` });
+    return false;
   };
 }
 

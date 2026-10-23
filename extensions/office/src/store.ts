@@ -28,6 +28,8 @@ export type DocMeta = {
   owner: string | null;
   grants: { chatId: string; commentId: string; at: number }[];
   createdBy?: string;
+  /** Set for importFile only. ping.ts uses it as the first-save rule: an imported doc's existing comments are baselined without wakes; a created (blank) doc gets no such baseline. */
+  imported?: boolean;
 };
 
 type IndexFile = { version: 1; docs: DocMeta[] };
@@ -383,6 +385,7 @@ export function importFile(absPath: string, meta: { title?: string; owner?: stri
     mtimeMs: 0,
     owner: meta.owner ?? null,
     grants: [],
+    imported: true, // ping.ts first-save rule: these comments are baselined, never woken
   };
   const dir = path.join(rootDir, "docs", doc.docId);
   fs.mkdirSync(dir, { recursive: true });
