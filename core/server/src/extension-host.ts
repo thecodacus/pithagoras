@@ -9,7 +9,7 @@ import semver from "semver";
 import express, { type NextFunction, type Request, type RequestHandler, type Response, type Router } from "express";
 import { agentOf, defaultAgent, listAgents } from "./agents.js";
 import { dataDirOf } from "./extension-data.js";
-import { getSession, getSetting, listSessions, putSetting, recordAudit, sessionsByWorkspace, setServerHalfOffers, setTrustedMcpServers, toolExceptions, trustedMcpServers, untrustMcpServer, type SessionRow } from "./db.js";
+import { getSession, getSetting, listSessions, putSetting, recordAudit, sessionsByWorkspace, setServerHalfOffers, setServerHalvesAsked, setTrustedMcpServers, toolExceptions, trustedMcpServers, untrustMcpServer, type SessionRow } from "./db.js";
 import { EXECUTOR_KIND } from "./executor-kind.js";
 import { takes, type ServerHalf } from "./extension-ui.js";
 import { moduleAt } from "./half-modules.js";
@@ -373,7 +373,7 @@ function crashed(ext: Running, error: unknown): void {
     crashes.set(name, crash);
     console.error(`[extension ${name}] its server half crashed.${held}`, error);
     // Outside its code: what is stopped and started now is not the crashed half's doing.
-    scope.exit(() => syncServerHalves(asked).catch((e) => console.error(`[extensions] could not stop ${name} and what builds on it after it crashed:`, e)));
+    scope.exit(() => syncServerHalves(asked!).catch((e) => console.error(`[extensions] could not stop ${name} and what builds on it after it crashed:`, e)));
     // Once what runs now is done: a route whose code called process.exit() is answered as one that threw.
     setImmediate(() => {
       for (const res of ext.responses) {
@@ -927,8 +927,16 @@ async function stopWithDependents(ext: Running): Promise<void> {
   await stop(ext);
 }
 
-/** What was last asked to run: what a crash brings the halves in line with again (see crashed). */
-let asked: ServerHalf[] = [];
+/** What was last asked to run: what a crash brings the halves in line with again (see crashed). None before the first ask. */
+let asked: ServerHalf[] | undefined;
+/**
+ * The names of the server halves the last bringing in line asked for: of the installed packages, those switched on that
+ * have one, whether it runs, crashed, waits on one it builds on or failed to start. The tools lists read it (shownTools):
+ * the tools a half registers are listed while it is one of these. Undefined before the first, as the portal starts,
+ * when which are installed and switched on is not known here yet.
+ */
+export const askedHalves = (): Set<string> | undefined => asked && new Set(asked.map((half) => half.name));
+setServerHalvesAsked(askedHalves);
 /**
  * Where the halves stand, as the last bringing in line left them: of each asked to run, whether it runs, and why not.
  * Each change of that is made by one, whoever asked for it (an install, a switch, a crash: see crashed), a hold lifted

@@ -20,8 +20,9 @@ db.rememberTools([
   { name: "web_search", source: "pi-web-access" },
   { name: "web_fetch", source: "pi-web-access" },
   { name: "bash", source: "built in", package: null },
-  // A package's tool, named as a browser's: switched as any tool is.
-  { name: "browser_navigate", source: "pithagoras-browser", package: null, inline: true },
+  // A tool named as a browser's: switched as any tool is. Not a server half's (inline), which is listed only while its
+  // package is installed and switched on, and none is installed here.
+  { name: "browser_navigate", source: "pithagoras-browser", package: null },
 ]);
 
 let base;

@@ -314,7 +314,11 @@ Before a chat has started, and in Settings → Tools, the list is what the porta
 has seen registered. The tools of a package that is switched off, narrowed to
 none of its extensions, or uninstalled are left out of it, since nothing
 registers them any more. A switched-off package's are remembered and come back
-with it; an uninstalled one's are forgotten. MCP servers' tools go with
+with it; an uninstalled one's are forgotten. The tools an extension's
+[server half](/guide/extension-ui#tools-that-share-the-server-half-s-state) adds
+to every chat are left out while its package is switched off or uninstalled, and
+come back with it, with what was switched for them; while it is switched on they
+are listed, even when its server half has crashed or could not start. MCP servers' tools go with
 `pi-mcp-adapter` when it is off or gone, but are remembered even when it is
 uninstalled, since the servers are configured apart from it. A package is the
 same package at any version, so updating one keeps its tools. One narrowed to

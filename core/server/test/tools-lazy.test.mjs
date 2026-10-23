@@ -285,21 +285,23 @@ test("pi's built-in tools stay out of reach of lazy when the sandbox registers t
 });
 
 test("a tool the portal registers itself can be lazy, on its own and with the rest of its set", async () => {
+  // The portal's own routine tools: an inline extension's tool under any other name is a server half's, listed only
+  // while its package is switched on (extension-tools-switched.test.mjs).
   db.rememberTools([
-    { name: "board_list", source: "boards", package: null, inline: true },
-    { name: "board_write", source: "boards", package: null, inline: true },
+    { name: "routines_list", source: "routines", package: null, inline: true },
+    { name: "routine_run", source: "routines", package: null, inline: true },
   ]);
-  assert.equal(db.lazyAllowed({ name: "board_write", source: "boards", package: null, inline: true }), true);
+  assert.equal(db.lazyAllowed({ name: "routine_run", source: "routines", package: null, inline: true }), true);
   // On its own, and with its set: the mark is taken.
-  assert.deepEqual((await json("/api/tools/lazy", "PUT", { lazy: [lazyToolEntry("board_write")] })).lazy, ["<tool>board_write"]);
-  assert.deepEqual([...db.lazyToolNames()], ["board_write"]);
-  assert.deepEqual((await json("/api/tools/lazy", "PUT", { lazy: ["boards"] })).lazy, ["boards"]);
-  assert.deepEqual([...db.lazyToolNames()].sort(), ["board_list", "board_write"]);
+  assert.deepEqual((await json("/api/tools/lazy", "PUT", { lazy: [lazyToolEntry("routine_run")] })).lazy, ["<tool>routine_run"]);
+  assert.deepEqual([...db.lazyToolNames()], ["routine_run"]);
+  assert.deepEqual((await json("/api/tools/lazy", "PUT", { lazy: ["routines"] })).lazy, ["routines"]);
+  assert.deepEqual([...db.lazyToolNames()].sort(), ["routine_run", "routines_list"]);
   const page = await json("/api/tools");
-  assert.deepEqual(lazyOf(page), ["board_list", "board_write"]);
+  assert.deepEqual(lazyOf(page), ["routine_run", "routines_list"]);
   assert.deepEqual(page.tools.filter((t) => t.noLazy).map((t) => t.name), []);
   const chat = await json("/api/sessions", "POST", {});
-  assert.deepEqual(sessions.piLazy(sessions.piOff(chat.id)).tools, ["board_list", "board_write"]);
+  assert.deepEqual(sessions.piLazy(sessions.piOff(chat.id)).tools, ["routine_run", "routines_list"]);
 });
 
 const adapter = (...names) => names.map((name) => ({ name, source: "pi-mcp-adapter", package: null }));

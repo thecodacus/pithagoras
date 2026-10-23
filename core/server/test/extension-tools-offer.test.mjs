@@ -24,6 +24,12 @@ function half(name, body) {
 }
 const names = () => db.shownTools().map((t) => t.name).filter((n) => ["paint", "sketch", "fresh", "plain", "loud"].includes(n)).sort();
 
+test("before the halves have been asked for once, as the portal starts, a server half's remembered tools are listed", () => {
+  db.rememberTools([db.remembered({ name: "loud", source: "shouter", inline: true })]);
+  assert.equal(host.askedHalves(), undefined);
+  assert.deepEqual(names(), ["loud"], "which packages are switched on is not known yet: nothing is judged");
+});
+
 test("what a server half offers now is listed, before a chat has reported it, and what it remembers and does not offer is not", async () => {
   globalThis.offering = ["paint"];
   await host.syncServerHalves([
@@ -49,9 +55,13 @@ test("what a server half offers now is listed, before a chat has reported it, an
   // One that cannot say is listed as it is remembered.
   await host.syncServerHalves([half("painter", `portal.tools.offer(() => { throw new Error("no settings"); });`), half("plain", "")]);
   assert.deepEqual(names(), ["paint", "plain", "sketch"]);
-  // Nor is anything taken away for one that is not running.
-  await host.syncServerHalves([]);
+  // Nor is anything taken away for one that is asked for and not running: its start failed.
+  await host.syncServerHalves([half("painter", `throw new Error("not today");`), half("plain", "")]);
+  assert.equal(host.isServing("painter"), false);
   assert.deepEqual(names(), ["paint", "plain", "sketch"]);
+  // One no longer asked for, switched off or uninstalled, registers nothing: none of it is listed.
+  await host.syncServerHalves([]);
+  assert.deepEqual(names(), []);
 });
 
 test("a server half has the open chats loaded again, through the portal's own reload", async () => {
