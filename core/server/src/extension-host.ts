@@ -2,13 +2,13 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { closeSync, mkdirSync, realpathSync } from "node:fs";
-import { dirname, join, resolve as resolvePath, sep } from "node:path";
+import { dirname, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { inspect } from "node:util";
 import semver from "semver";
 import express, { type NextFunction, type Request, type RequestHandler, type Response, type Router } from "express";
 import { agentOf, defaultAgent, listAgents } from "./agents.js";
-import { DATA_DIR } from "./data-dir.js";
+import { dataDirOf } from "./extension-data.js";
 import { getSession, getSetting, listSessions, putSetting, recordAudit, sessionsByWorkspace, setServerHalfOffers, setTrustedMcpServers, toolExceptions, trustedMcpServers, untrustMcpServer, type SessionRow } from "./db.js";
 import { EXECUTOR_KIND } from "./executor-kind.js";
 import { takes, type ServerHalf } from "./extension-ui.js";
@@ -498,8 +498,7 @@ function portalFor(ext: Running): ServerPortal {
     return baseDir(row.workspace);
   };
   const dataDir = () => {
-    // One folder for each package, by its name written as one part of a path (a scoped name has a slash, and a dot name is no step up).
-    const dir = join(resolvePath(DATA_DIR), "extension-data", encodeURIComponent(name).replace(/^\./, "%2E"));
+    const dir = dataDirOf(name);
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     // Where it really is, as `files` take a base: the data folder can be reached through a link.
     return realpathSync(dir);
@@ -590,6 +589,25 @@ function portalFor(ext: Running): ServerPortal {
         // Made by the one it builds on, as that one's code.
         if (!ext.apis.has(of)) ext.apis.set(of, scope.run(provider, () => provider.provider!({ name })));
         return ext.apis.get(of) as never;
+      },
+      // The portal's own work, which it asks for: not its code (see scope). Imported when first asked: it installs
+      // through what starts and stops these halves, which imports this module. Not while this half starts, nor once it
+      // stopped: an install waits for the server halves to follow it, which would wait for this one.
+      install(folder, options) {
+        if (typeof folder !== "string" || (options?.note !== undefined && typeof options.note !== "string")) {
+          throw new TypeError("install takes a folder in this extension's dataDir(), and { note? }: a text");
+        }
+        if (running.get(name) !== ext) return Promise.reject(new Error("extensions.install is not available while its server half is starting or stopped"));
+        return scope.exit(async () => (await import("./extension-installs.js")).installFor(dataDir(), folder, options?.note));
+      },
+      remove(of) {
+        if (typeof of !== "string") throw new TypeError("remove takes the name of a package");
+        if (running.get(name) !== ext) return Promise.reject(new Error("extensions.remove is not available while its server half is starting or stopped"));
+        return scope.exit(async () => (await import("./extension-installs.js")).removeFor(name, of));
+      },
+      status(of, options) {
+        if (typeof of !== "string") throw new TypeError("status takes the name of a package");
+        return scope.exit(async () => (await import("./extension-installs.js")).statusOf(of, options));
       },
     },
     models: {
