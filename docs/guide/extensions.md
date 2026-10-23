@@ -31,7 +31,7 @@ packages** and **Install by name**.
 
 **Comes with Pithagoras** lists the extensions shipped with the portal itself
 (a pack of seven themes, the terminal, Git, Files, Canvases, [Media](/guide/media), [Documents](/guide/documents),
-[Docker for extensions](/guide/docker), [Kanban](/guide/kanban), the agent's [Browser](/guide/browser), the [voice service](/guide/voice-service), [Voice servers](/guide/voice-servers) and [Understory](/guide/features#memory-understory), the agent's memory), each installed from the portal's own folder with one click.
+[Docker for extensions](/guide/docker), [Kanban](/guide/kanban), the agent's [Browser](/guide/browser), the [voice service](/guide/voice-service), [Voice servers](/guide/voice-servers), [Understory](/guide/features#memory-understory), the agent's memory, and [Creator mode](/guide/creator-mode), a chat mode in which the agent writes and installs extensions), each installed from the portal's own folder with one click.
 
 **Find packages** searches the npm registry for packages published for pi — by
 keyword, with a separate search for packages that bring a model provider — and

@@ -196,6 +196,42 @@ server's tools, where an empty list is any site; see [Where it may go](/guide/br
 yet spent (with **Revoke**), the flagged results you trusted (with **Un-trust**, which
 holds their chat back again), and what is always on and why.
 
+## Creator mode
+
+[Creator mode](/guide/creator-mode), an extension that comes with the portal, is
+a chat mode in which the agent writes extensions and installs them into the
+portal. Choosing it grants a lot, and its warning says so:
+
+- **It installs without asking**, except after the chat has read something that
+  looks like a prompt injection.
+- **What it installs has the portal's own rights**, outside the sandbox. In the
+  image the portal is root, and where Compose gives it the Docker socket and the
+  host's network, that is control of the host.
+- **Its tools are offered in every chat and run there without asking.** The
+  guard holds them only where they declare what they do (`acts`, `outside`), as
+  it holds any extension's: a tool that runs code needs no further install.
+- **Its pages run in every browser signed in to the portal**, with that
+  sign-in, so they can call any route the portal has.
+
+**The ask rests on the detector.** `extension_install` and `extension_remove`
+declare `acts: ["persist"]`, so after a [suspected prompt injection](#suspected-prompt-injection)
+each call is [asked about](#asked-or-refused). An injection worded around the
+signs is wrapped as data, does not taint, and asks nothing: Creator mode is for
+work you would do yourself, in chats that read what you trust.
+
+**Its own process contains accidents.** Every extension Creator installs runs its
+server half in a process of its own: a loop that never ends, a heap or memory
+that grows without end, or a crash ends that process and not the portal. It does
+not contain intent: the process is the portal's user, with the portal's
+environment and what the portal reaches. The browser half runs in your pages,
+and Creator refuses a pi half, which would run in every chat's pi.
+
+**With the sandbox off** (the default), the agent already runs as the portal's
+user. It can change the copies in Creator's data folder directly, which load at
+the next change of what is installed, and run `pi install` itself, with no ask and
+no row in Audit. Creator mode adds the structure, the marks and the audit, not a
+wall: the [sandbox](/guide/sandbox) is what closes Creator's folder to the agent.
+
 ## What this does not do
 
 These are heuristics, and the rules are public. An injection worded around the

@@ -149,6 +149,10 @@ A trusted command must not print its own key: what it prints, the agent reads.
 - **MCP servers** that pi starts, and **an extension's own tools** that start
   programs, run as the portal's user.
 - **The Terminal panel** is yours, not the agent's, and is not sandboxed.
+- **What [Creator mode](/guide/creator-mode) installs** runs outside the sandbox
+  by design, as the portal's user, its server half in a process of its own. The
+  sandbox decides what of the agent's draft the install may read, and keeps the
+  agent out of the copy that is installed.
 - **The network.** What the agent can read, it can still send. Limiting where
   it may connect is a separate step.
 

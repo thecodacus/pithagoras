@@ -121,7 +121,8 @@ checked. Choose before the first message: from then on the chat keeps it.
   which [Audit](#audit) keeps as *Mode chosen*. A chat in the mode of an
   extension that is switched off or removed keeps its mode, shown as not
   available, and works without what the extension gave it until the extension
-  is back.
+  is back. [Creator mode](/guide/creator-mode), which comes with the portal, is
+  one that asks first: in it the agent writes extensions and installs them.
 
 The mode is fixed once the chat has said something: its first message, or a
 command sent to pi. Leaving a mode means starting a new chat; `/new` and

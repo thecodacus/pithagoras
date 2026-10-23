@@ -578,6 +578,18 @@ change answers with the board as it is after it, and is put down in a card's act
 | `POST …/cards/:card/archive` · `…/restore` · `…/notes` | Archive it; restore it to the bottom of its column; `{ text }`, a note in its activity |
 | `GET …/chats/:chat/board` | `{ board }`: the id of the board the chat's agent last worked on with a kanban tool, or `null` |
 
+## Creator mode
+
+The [Creator mode](/guide/creator-mode) extension's routes (`extensions/creator`), while it is installed, under
+`/api/x/pithagoras-creator`: what agents made in Creator mode chats. The mode itself is chosen with
+`PUT /api/sessions/:id/modes` ([Chat modes](#chat-modes)), as `pithagoras-creator/creator` with `confirmed: true`. A
+refusal is `{ error }` with the status given.
+
+| | |
+| --- | --- |
+| `GET /api/x/pithagoras-creator/made` | `{ made }`, the one installed last first, each `{ name, version?, digest, at, chat, draft, installed, enabled? }`: the copy's sha256, when it was last installed, the chat it was made in now (`{ id, title }`, or `null` for one that was deleted), its folder in that chat's folder, whether its copy in Creator's folder is installed now, and, where it is, whether it is switched on |
+| `DELETE …/made/:name` | Forgets one that is not installed: its copy and its entry go. `{ forgotten: name }`; **404** for a name Creator made nothing of, **409** while it is installed (remove it with `DELETE /api/packages` first). It waits for an install of that name that is running |
+
 ## Channels
 
 | | |

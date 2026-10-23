@@ -2111,6 +2111,11 @@ portal.chats.extend((pi, chat) => {
   English with a `msg()` of your own so that your texts' check finds it, as
   for a panel's title.
 
+[Creator mode](/guide/creator-mode), which comes with the portal, is a mode
+worked out this way: its tools and its skill (given through pi's
+`resources_discover`) only in its chats, and its texts in German
+(`extensions/creator/src`).
+
 ## Panels and commands
 
 `portal.panels` is the panels of the chat on screen, any of them, by name:
