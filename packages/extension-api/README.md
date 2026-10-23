@@ -42,6 +42,8 @@ pithagoras-hello/
 - `pi`: what the package brings pi (extensions, skills, prompts, themes). A Pithagoras extension is a pi package, so
   the key is there even when it brings pi nothing.
 - `pithagoras`: its browser half, its stylesheet and its server half, as the build makes them.
+- `pithagoras.isolated`: `true` runs the server half in a process of its own: see
+  [A server half in a process of its own](https://thecodacus.github.io/pithagoras/guide/extension-ui#a-server-half-in-a-process-of-its-own).
 - `files` and `prepack`: what is published is built first, and is only what the build made.
 
 Run in the extension's folder, this adds what it is built with to its `package.json` as `devDependencies`:

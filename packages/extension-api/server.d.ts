@@ -8,7 +8,16 @@
  * stopped and held off until another version is installed or it is switched off
  * and on, and the portal goes on.
  *
- * See "The server half" and "When the server half crashes" in "Building an extension":
+ * Or in a process of its own: `"isolated": true` beside `"server"` in its
+ * package.json, and always for a package installed from an extension's data
+ * folder. The same `portal`, its calls made in the portal's process; a loop
+ * that never yields (10 s), a heap over 512 MB, memory over 1 GB (Linux), a
+ * native crash or an exit end that process, as its crash. What it cannot have
+ * there is said on the members it touches: `provide`, `extensions.use`,
+ * `voice`, `chats.extend`.
+ *
+ * See "The server half", "A server half in a process of its own" and "When the
+ * server half crashes" in "Building an extension":
  * https://thecodacus.github.io/pithagoras/guide/extension-ui
  */
 import type { IncomingMessage } from "node:http";
@@ -392,6 +401,7 @@ export interface ServerPortal {
    * `pithagoras.optional` in their package.json. `factory` is called once for each of them, with its name, when it first
    * asks (`extensions.use`), and what it returns is what that one gets: one for each lets an extension keep apart what each
    * does with it. Those that build on it start after it, and are stopped before it and started again whenever it is.
+   * Throws in a server half in a process of its own: nothing builds on that (one that requires it does not start).
    */
   provide(factory: (consumer: { name: string }) => unknown): void;
   /**
@@ -460,7 +470,10 @@ export interface ServerPortal {
      * What an extension this one builds on gives it (see `provide`): one its package.json names in `pithagoras.requires`,
      * which is always there (without it this one does not start, and Settings → Extensions says why), or in
      * `pithagoras.optional`, which may not be: nothing then, or while it is not in a version this one takes. This one is
-     * started again when such an extension comes or goes. Naming one that is in neither is an error.
+     * started again when such an extension comes or goes. Naming one that is in neither is an error. In a server half in
+     * a process of its own, of an extension in the portal's process: the same object, its data copied, each of its
+     * functions one that returns a promise and runs as that extension's code; a function given to one (a callback) is
+     * called across, and one in what it answers cannot cross. One in a process of its own gives nothing to use.
      */
     use<T = unknown>(name: string): T | undefined;
     /**
@@ -468,6 +481,7 @@ export interface ServerPortal {
      * as an install in Settings does: its server half started, the pages given its browser half, the open chats loaded
      * again (an idle one at once, a working one at its next step). The same folder installed again is loaded again in
      * place, every half at its new revision. Settings → Extensions shows that it came from this extension, with `note`.
+     * Its server half runs in a process of its own, as every package from an extension's data folder does.
      * Rejects for a folder outside `dataDir()`, one with no package.json or no valid name, and a name that one of the
      * portal's own extensions has or that a package installed from elsewhere has. Installs and removals of every extension
      * run one at a time. Rejects at once while this half is starting, or once it stopped: the server halves follow an
@@ -535,7 +549,8 @@ export interface ServerPortal {
   };
   /**
    * Voice mode's source: the extension it listens and speaks through, chosen on that extension's own page. Voice mode
-   * is on while it has one; the person can stop using it in Settings → Defaults → Voice mode.
+   * is on while it has one; the person can stop using it in Settings → Defaults → Voice mode. Not in a server half in a
+   * process of its own: each member throws there.
    */
   voice: {
     /**
@@ -650,7 +665,12 @@ export interface ServerPortal {
      * ends at once with an error that says so, with the half's last lines;
      * its handlers are not called after that. A turn it asks the chat's pi
      * for (`pi.sendMessage`, `pi.sendUserMessage`) is the chat's, not this
-     * module's code.
+     * module's code. In a server half in a process of its own, `pi` has
+     * `registerTool`, `on`, `registerCommand`, `sendMessage` and
+     * `sendUserMessage` alone, taken while the factory runs, whose promise is
+     * waited for (five seconds at most); a tool's `execute`, a handler and a
+     * command are given no `ctx`, `renderCall` and `renderResult` are left
+     * out, and a tool with any other function in it is refused.
      */
     extend(factory: (pi: any, chat: Chat) => void): void;
     /**

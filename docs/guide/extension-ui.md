@@ -20,7 +20,7 @@ A package can have any of these. Each is optional.
 | --- | --- | --- | --- | --- |
 | pi extension | `pi.extensions` | Inside a chat's pi | One per chat, while the chat's agent is up | Tools, commands, what is kept with the conversation |
 | Browser half | `pithagoras.client` | In the portal's page | While the page is open | Everything drawn |
-| Server half | `pithagoras.server` | In the portal's own process | Once, for all chats | Routes, processes, what must be there when no chat is running |
+| Server half | `pithagoras.server` | In the portal's own process, or a process of its own ([`isolated`](#a-server-half-in-a-process-of-its-own)) | Once, for all chats | Routes, processes, what must be there when no chat is running |
 
 Which one a piece of work belongs in follows from when it has to be there. A
 chat left alone for twenty minutes has its agent let go, and where pi runs in a
@@ -131,6 +131,11 @@ portal, is in [What is loaded, and when](#what-is-loaded-and-when).
   and a heavy part can be loaded when first needed with `import("./big.js")`.
 - **`style`**, in the same folder, is a stylesheet loaded with it.
 - **`server`** is a JavaScript module for Node, anywhere in the package.
+- **`isolated`**, `true`, runs the server half in a process of its own, where
+  a loop that never ends or memory that grows without end ends that process
+  and not the portal's. A package installed from an extension's data folder
+  always runs so, however it was installed: see
+  [A server half in a process of its own](#a-server-half-in-a-process-of-its-own).
 - **`themes`** are [colours in place of the portal's own](#themes), with no
   code at all.
 
@@ -832,6 +837,94 @@ restart the portal.
 | `voice.provide(provider)`, `voice.choose(chosen)`, `voice.chosen()` | [Voice providers](#voice-providers): recognising and speaking for voice mode, with the voices it has; making it voice mode's source, and whether it is |
 | `modes.provide(mode)` | [A chat mode](#chat-modes) the person can start a chat in |
 | `log(text)`, `extension`, `executor`, `version` | A line in the portal's log; the package's name; how pi is run here; `1` |
+
+### A server half in a process of its own
+
+```json
+"pithagoras": { "server": "./server.js", "isolated": true }
+```
+
+With `"isolated": true` the server half runs in a Node process of its own,
+started for it by the portal. It is given the same `portal`, and each call it
+makes that needs the portal (`chats.get`, `chats.send`, `modes.provide`, a
+registration) is made in the portal's process, with the portal's own checks.
+Its routes, upgrades and tools are handed on to its process and answered
+there; `files`, `git` and `http.send` work in its process.
+
+A package installed from an extension's own data folder (`dataDir()`) always
+runs so, whether the extension installed it ([`extensions.install`](#extensions-it-installs))
+or the person installed that folder by its path in Settings: an extension
+writes such a package, maybe for an agent, and what it runs must not be able to
+stop the portal.
+
+What it protects the portal from:
+
+- Code that never yields. The portal asks the process every second whether it
+  can answer; one that has not answered for 10 seconds (a loop that never ends,
+  a long synchronous call) is ended. A process that is busy but yields answers,
+  and is never ended for being busy.
+- Memory that grows without end. Its heap is capped at 512 MB (V8 ends a process
+  that goes over), and on Linux one whose memory, as the system counts it, goes
+  over 1 GB is ended. The kernel ends it, and what it started, first should the
+  machine run out of memory.
+- A crash of its own: an uncaught error, a rejection nobody heard, a call of
+  `process.exit()`, a native addon that crashes, a signal.
+- What it started: its process is a group of its own, and the whole group is
+  ended with it.
+
+Each of these is its crash, held as [any server half's](#when-the-server-half-crashes):
+a request its routes had not answered is answered with `503` and the crash, a
+tool's call that was pending answers at once with the crash and the half's last
+lines, and it stays off until another revision is installed or it is switched
+off and on. Its process is given a lower priority than the portal's, so a busy
+half leaves the portal its share. A half that starts again at any revision is a
+new process, which reads all of its files anew: see
+[What is loaded, and when](#what-is-loaded-and-when).
+
+What it cannot have, or has otherwise:
+
+1. `provide`, and `voice.provide`, `voice.choose` and `voice.chosen`, throw.
+   Nothing can build on such a half: one that requires it does not start,
+   and one that has it as `optional` starts without it. It may build on an
+   extension in the portal's process: `extensions.use` gives it the same
+   object, whose functions each return a promise. A function it passes them
+   (a callback) is called across; one in what they answer cannot cross.
+2. In `chats.extend`, the `pi` a factory is given has `registerTool`, `on`,
+   `registerCommand`, `sendMessage` and `sendUserMessage`, and nothing else of
+   pi. It registers only while the factory runs, and the factory's promise is
+   waited for, for five seconds at most: one that throws or takes longer is
+   that chat's load error. A tool's `execute` is given no `ctx`, nor are its
+   handlers and commands. A tool's definition is data: `renderCall` and
+   `renderResult` are left out, and any other function in it
+   (`prepareArguments`, say) is refused by name. An event or an argument that
+   cannot be copied fails that call.
+3. What the portal asks of it at any moment, the tools it offers now
+   (`tools.offer`) and whether it holds the agent's memory (`memory.hold`'s
+   `on`), is worked out in its process and can be a second behind.
+4. What a page that opens a chat is told first (`chats.onOpen`) reaches the
+   page after the stream's first events, within two seconds or not at all.
+5. A request's `req.socket`, `req.ip`, `req.secure` and `req.protocol` are
+   those of the local connection the portal hands it on by.
+6. After it is started again, a chat that has not loaded since still has its
+   tools of the process before: a call of one fails until that chat's next
+   step, which has the new ones.
+7. `extensions.install`, `remove` and `status`, and every call answered later,
+   reject for a wrong argument where the half in the portal's process would
+   throw.
+
+It is no security boundary. The process is the portal's user, with the
+portal's environment, and reaches what the portal reaches: it keeps an
+accident from stopping the portal, not code that means to. Only the server half
+runs apart: the browser half runs in the person's page, and a pi extension
+(`pi.extensions`) in every chat's pi, in the portal's process. Outside Docker,
+a process stuck in a loop can outlive a portal that was itself killed with
+`SIGKILL`; under Compose (`init: true`) it goes with the container.
+
+Each such half costs about 20 MB of memory of its own while it is idle (about
+55 MB as the system counts a process, with what it shares with every Node
+process), about 100 ms more to start, about 0.3 ms more for each request to its
+routes, and about 30 µs more for each call that is answered at once, such as
+`chats.get` (measured on Linux, Node 22).
 
 ### Routes
 
@@ -2244,7 +2337,10 @@ Node loads once, for as long as the portal runs, what it imports by a bare name
 (a dependency in `node_modules`, `node:fs`), a file outside its module's
 folder, and a CommonJS file (a `.cjs` file, a `.js` file of a package that is
 not `"type": "module"`, or anything loaded with `require()`), whether imported
-or required: a change to those needs a restart of the portal. A server half
+or required: a change to those needs a restart of the portal. A server half in
+[a process of its own](#a-server-half-in-a-process-of-its-own) is a new process
+at each start, which reads every file it loads anew, CommonJS files and
+`node_modules` included; its revision still covers only its folder. A server half
 whose module is at the package's root has all of the package as its folder,
 the web folder too, so a change to the browser half starts it again as well. A
 module in a folder of its own keeps the two apart, but what it then imports
@@ -2587,7 +2683,11 @@ extension (`pi.extensions`) kept there as well, whose uncaught error is then
 counted as the server half's crash. An error that is no extension's ends the
 portal, as it always has, and so does one of a pi extension kept elsewhere.
 
-What this cannot stop:
+Only the frames of a stack count, not the error's message: an error of the
+portal's own that names a half's folder in its message (a file of it not found,
+say) is not that half's.
+
+What this cannot stop, for a server half in the portal's process:
 
 - Code that never yields, a loop or a long synchronous call, holds the whole
   portal, and code that takes all the memory ends it: both run in the
@@ -2598,6 +2698,15 @@ What this cannot stop:
   stopped, goes on until the portal restarts. Each of its errors is said in
   the log, and nothing more is done. One known only by its stack is counted
   as the running half's of that folder, where there is one.
+
+A server half in [a process of its own](#a-server-half-in-a-process-of-its-own)
+has none of these limits: a loop, memory that grows without end, a native crash
+and what it left going all end with its process, which is said as its crash
+("It did not let its process answer for 10 seconds…", "Its process used more
+than 1024 MB of memory…", "Its process ended by SIGABRT" with V8's own words
+among its last lines). A pi extension kept in its folder runs in the portal's
+process all the same, and its uncaught error is the server half's crash, as
+above.
 
 ## The example
 
