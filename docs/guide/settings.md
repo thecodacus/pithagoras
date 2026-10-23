@@ -7,7 +7,7 @@ German. Navigation runs down the left edge, in four groups:
 | Group | Pages |
 | --- | --- |
 | **Models** | **Providers** — where models come from, see [Models and providers](/guide/models); **Defaults** — model, effort and context for new chats |
-| **Agent** | **Tools**, **Modes**, **Skills**, **MCP**, **Extensions** |
+| **Agent** | **Tools**, **Modes**, **Sandbox**, **Guard**, **Skills**, **MCP**, **Extensions** |
 | **Reach** | **Channels**, **People** |
 | **Portal** | **This browser**, **Authentication**, **Shortcuts**, **Logs**, **About** (with **Update** and **Restart**), **Advanced** |
 
