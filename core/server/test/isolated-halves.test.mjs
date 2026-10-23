@@ -321,6 +321,16 @@ test("what it prints with no line break is kept to a line's length, and what fol
   await host.syncServerHalves([]);
 });
 
+test("a line longer than that which comes whole, with its line break, is kept to a line's length too", async () => {
+  // One write: the line and its break are read together, as two writes can be on a slow machine.
+  await host.syncServerHalves([half("whole", `portal.router.get("/say", (req, res) => { process.stdout.write("#".repeat(20000) + "tail\\nafter\\n"); res.json({}); });`)]);
+  await get("/api/x/whole/say");
+  await until(() => status("whole").lines.includes("after"), "the line after it was read");
+  const { lines } = status("whole");
+  assert.equal(lines[lines.indexOf("after") - 1], "#".repeat(8000));
+  await host.syncServerHalves([]);
+});
+
 test("what it starts in a chat's folder is no job of the chat's agent (Linux, where the jobs are read)", { skip: !LINUX && "only Linux lists an agent's jobs" }, async () => {
   // As the portal runs (server.ts): what it starts is marked as the agents' work, the half's process too.
   process.env.PITHAGORAS_AGENT = "1";

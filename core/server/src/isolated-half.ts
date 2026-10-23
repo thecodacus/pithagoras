@@ -131,7 +131,7 @@ function lines(stream: Readable, each: (line: string) => void, max = Infinity): 
   stream.on("data", (text: string) => {
     let from = 0;
     for (let end = text.indexOf("\n"); end !== -1; end = text.indexOf("\n", from)) {
-      if (!cut) each(rest + text.slice(from, end));
+      if (!cut) each((rest + text.slice(from, end)).slice(0, max));
       rest = "";
       cut = false;
       from = end + 1;
