@@ -322,18 +322,30 @@ test("what it prints with no line break is kept to a line's length, and what fol
 });
 
 test("what it starts in a chat's folder is no job of the chat's agent (Linux, where the jobs are read)", { skip: !LINUX && "only Linux lists an agent's jobs" }, async () => {
-  await host.syncServerHalves([
-    half("spawner", `
-      const { spawn } = await import("node:child_process");
-      const sleeper = spawn("sleep", ["300"], { cwd: portal.chats.folder("a"), stdio: "ignore" });
-      portal.router.get("/pid", (req, res) => res.json({ sleeper: sleeper.pid }));
-    `),
-  ]);
-  const { sleeper } = (await get("/api/x/spawner/pid")).body;
-  assert.equal(ended(sleeper), false);
-  assert.deepEqual((await listJobs(work, false, true)).filter((job) => job.pids.includes(sleeper)), []);
-  await host.syncServerHalves([]);
-  assert.equal(ended(sleeper), true);
+  // As the portal runs (server.ts): what it starts is marked as the agents' work, the half's process too.
+  process.env.PITHAGORAS_AGENT = "1";
+  const { spawn } = await import("node:child_process");
+  // An agent's job, for what the list finds: a session of its own, in the chat's folder.
+  const job = spawn("sleep", ["300"], { cwd: work, stdio: "ignore", detached: true });
+  try {
+    await host.syncServerHalves([
+      half("spawner", `
+        const { spawn } = await import("node:child_process");
+        const sleeper = spawn("sleep", ["300"], { cwd: portal.chats.folder("a"), stdio: "ignore" });
+        portal.router.get("/pid", (req, res) => res.json({ sleeper: sleeper.pid }));
+      `),
+    ]);
+    const { sleeper } = (await get("/api/x/spawner/pid")).body;
+    assert.equal(ended(sleeper), false);
+    const jobs = await listJobs(work, false, true);
+    assert.ok(jobs.some((one) => one.pids.includes(job.pid)), "an agent's job is listed");
+    assert.deepEqual(jobs.filter((one) => one.pids.includes(sleeper)), []);
+    await host.syncServerHalves([]);
+    assert.equal(ended(sleeper), true);
+  } finally {
+    job.kill("SIGKILL");
+    delete process.env.PITHAGORAS_AGENT;
+  }
 });
 
 test("a loop that never ends ends its process: its request is answered with the crash, the rest answers on, and it is held until switched off and on", async () => {
