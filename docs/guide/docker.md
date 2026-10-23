@@ -247,15 +247,29 @@ container you made before with another policy is given it in place, with
 neither makes it again nor restarts it: Voice does this as it starts, and
 wherever it finds its container.
 
+A container on the portal's network that is given `container:<id>`
+([above](#a-container-on-the-portal-s-network)), as Voice's and Understory's
+are, needs the portal's container running before it can start. As the machine
+starts, Docker 29 and later wait up to five seconds for the portal's to start
+first; older Docker starts them all at once, and one it starts before the
+portal's is running stays stopped, with `cannot join network namespace of a
+non running container` in `State.Error`, until it is started again. Voice's
+page then shows it as failed, and **Retry setup** starts it.
+
 A container that keeps failing is started again by Docker each time, after a
 wait that doubles up to a minute (and starts again from a tenth of a second
 once it has run for ten seconds). `containers.inspect` shows that:
 `State.Restarting` is `true` while Docker waits for the next try, with the
-last try's code in `State.ExitCode`, and `RestartCount` counts the tries since
-it was last started by a call (`start`), or by Docker as the machine started.
-While it waits, Docker counts it as running, so `start` leaves it to Docker's
-next try; `stop` and then `start` runs it now. Voice's page shows such a
-container as failed, with its log, until its services answer.
+last try's code in `State.ExitCode`, and `State.StartedAt` is when the run
+under way began, at each try anew. `RestartCount` counts Docker's own starts
+since it was last started by a call (`start`), or by Docker as the machine
+started, and Docker keeps that count for as long as a run it began goes on:
+a container that came back after one failure still has `1`, so the count alone
+does not say a try is under way. While it waits, Docker counts it as running,
+so `start` leaves it to Docker's next try; `stop` ends the tries, and `stop`
+and then `start` runs it now. Voice's page shows such a container as failed,
+with its log and **Stop · release VRAM**, until its services answer in the run
+Docker began.
 
 What the agent runs with its [tools](#the-agent-s-tools) is not an extension's
 service: a Dockerfile's container has no restart policy, and a compose file's
