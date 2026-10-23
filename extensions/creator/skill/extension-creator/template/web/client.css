@@ -1,0 +1,5 @@
+/* In the portal's own colours: its theme is a set of variables on the page, each the three numbers of a colour. */
+.my-extension-call { border: 1px solid rgb(var(--line)); border-radius: 10px; background: rgb(var(--raised) / .5); padding: 8px 10px; color: rgb(var(--fg)); font-size: 13px; }
+.my-extension-call span { color: rgb(var(--fg-faint)); font-size: 10px; letter-spacing: .06em; text-transform: uppercase; }
+.my-extension-call p { margin: 2px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.my-extension-page { margin: 0 auto; max-width: 48rem; padding: 24px 16px; color: rgb(var(--fg)); font-size: 14px; }

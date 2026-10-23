@@ -3,15 +3,20 @@
  * into its own stylesheet from the portal's preset, and its server half (src/server.ts) into server.js. The portal's own
  * `npm run build` runs this, so a checkout and the image build it the same way; what it makes is not kept in git.
  *
+ * Then the reference its skill points the agent at: the extension guide and the API's types, copied from the repository
+ * into skill/extension-creator/reference/, so that git keeps one copy of each. A missing one fails the build: the skill
+ * would point at nothing.
+ *
  * What it is built with (the icons) is this package's own (devDependencies), installed here first when it is not there
  * yet, or not at the version its lock file names. esbuild, tailwindcss and postcss are the repository's.
  */
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { buildExtension } from "@pithagoras/extension-api/build";
 
 const HERE = import.meta.dirname;
+const ROOT = path.resolve(HERE, "../..");
 
 const readJson = (file) => {
   try {
@@ -33,4 +38,10 @@ if (missing.length) {
 
 await buildExtension({ dir: HERE, tailwind: true, server: "src/server.ts" });
 
-console.log("pithagoras-creator: built web/ and server.js");
+const REFERENCE = path.join(HERE, "skill", "extension-creator", "reference");
+const sources = ["docs/guide/extension-ui.md", "packages/extension-api/index.d.ts", "packages/extension-api/server.d.ts"];
+const absent = sources.filter((file) => !existsSync(path.join(ROOT, file)));
+if (absent.length) throw new Error(`pithagoras-creator: its skill's reference needs ${absent.join(", ")} from the repository, which are not there`);
+mkdirSync(REFERENCE, { recursive: true });
+for (const file of sources) copyFileSync(path.join(ROOT, file), path.join(REFERENCE, path.basename(file)));
+console.log("pithagoras-creator: built web/, server.js and its skill's reference");

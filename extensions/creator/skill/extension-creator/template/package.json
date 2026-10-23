@@ -1,0 +1,14 @@
+{
+  "name": "my-extension",
+  "version": "0.1.0",
+  "type": "module",
+  "keywords": ["pi-package"],
+  "pi": {},
+  "pithagoras": {
+    "client": "./web/client.js",
+    "style": "./web/client.css",
+    "server": "./server.js",
+    "isolated": true
+  },
+  "license": "Apache-2.0"
+}
