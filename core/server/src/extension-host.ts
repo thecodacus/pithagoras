@@ -18,7 +18,7 @@ import { identityOf } from "./sandbox/identity.js";
 import { sandboxOn, sandboxSupport } from "./sandbox/policy.js";
 import { folderFiles } from "./folder-files.js";
 import { baseDir, setAgentAccess, type AgentAccess } from "./workspace-files.js";
-import { sendFile } from "./api/files.js";
+import { sendFile } from "./send-file.js";
 import { watchStream } from "./login-streams.js";
 import { personsEnv } from "./background.js";
 import { gitAt } from "./git.js";
