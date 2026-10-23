@@ -7,7 +7,8 @@
  *   puppet    "Puppet": a square on a canvas of its own that grows with the levels, read in a frame of its own. Its
  *             box says what it is given (`data-mode`, `data-still`, `data-agent`) and what it read last
  *             (`data-input`, `data-output`, to two places). `window.puppetMounts` counts the times it is mounted,
- *             and `window.puppetModes` lists the modes it was given, each once in a row
+ *             `window.puppetRenders` the times it is drawn, and `window.puppetModes` lists the modes it was given,
+ *             each once in a row
  *   waiting   "Waiting": draws the portal's orb and nothing else, as an avatar still loading would
  *   broken    "Broken": throws as it is drawn
  *   later     "Later": the puppet, drawn once a chunk of its own (later.js, which holds nothing) is fetched, as an
@@ -21,9 +22,11 @@ export default function (portal) {
   const h = React.createElement;
 
   window.puppetMounts = 0;
+  window.puppetRenders = 0;
   window.puppetModes = [];
 
   function Puppet({ agent, mode, levels, still }) {
+    window.puppetRenders++;
     const box = React.useRef(null);
     const canvas = React.useRef(null);
     React.useEffect(() => {

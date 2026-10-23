@@ -75,6 +75,40 @@ test.describe('with the extension installed', () => {
     await expect(puppet).toHaveAttribute('data-mode', 'output');
   });
 
+  test('it is drawn again for a new mode, not each time the stage is drawn again for a piece of what the agent says', async ({ page }) => {
+    await stage(page, chosen('test-puppet/puppet'));
+    await listening(page);
+    const puppet = page.getByTestId('puppet');
+    // How many times it was drawn, and how many modes it was given one after another: once as it was mounted, and
+    // once for each new mode since.
+    const drawn = () => page.evaluate(() => [(window as any).puppetRenders, (window as any).puppetModes.length]);
+    expect(await drawn()).toEqual([1, 1]);
+    // The model's thinking, streamed in while a window is open: the stage is drawn again for each piece, and keeps it
+    // for its dock (hidden while the orb is beside the window).
+    await page.getByRole('button', { name: 'Show the conversation' }).click();
+    const thought = page.locator('.voice-thought-stream');
+    for (let pieces = 1; pieces <= 5; pieces++) {
+      await page.getByRole('button', { name: 'Stream thinking' }).click();
+      await expect.poll(async () => (await thought.textContent())!.split('the page layout.').length - 1).toBe(pieces);
+    }
+    expect(await drawn()).toEqual([1, 1]);
+    // The person heard, the levels read in every frame, and then a reply streamed in a piece at a time and played.
+    await page.getByRole('button', { name: 'Inject speech' }).click();
+    await expect(puppet).toHaveAttribute('data-mode', 'input');
+    await expect.poll(() => level(page, 'input')).toBeGreaterThan(0);
+    await expect(page.getByTestId('sent')).toHaveText('1', { timeout: 12000 });
+    const conversation = page.getByRole('region', { name: 'Conversation', exact: true });
+    for (let pieces = 1; pieces <= 4; pieces++) {
+      await page.getByRole('button', { name: 'Stream reply', exact: true }).click();
+      await expect.poll(async () => (await conversation.textContent())!.split('Here is the first sentence.').length - 1).toBe(pieces);
+    }
+    await expect(puppet).toHaveAttribute('data-mode', 'output', { timeout: 12000 });
+    // A mode is listed once it has been drawn with.
+    await expect.poll(async () => { const [renders, modes] = await drawn(); return renders - modes; }).toBe(0);
+    expect((await drawn())[1]).toBeGreaterThan(3);
+    expect(await page.evaluate(() => (window as any).puppetMounts)).toBe(1);
+  });
+
   test('the wait after the person spoke is thinking too, before the reply is played', async ({ page }) => {
     let transcribed!: () => void;
     const gate = new Promise<void>(resolve => { transcribed = resolve; });
