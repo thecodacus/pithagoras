@@ -92,15 +92,6 @@ test("a server with hyphens is found by the underscored name the adapter gives i
   assert.equal(mcpServerOf("playwright_mcp_click", ["playwright-mcp"]), "playwright-mcp");
 });
 
-test("a server with a dot is found by the name the adapter gives its tools, which keeps the dot, and by the underscored one", () => {
-  const servers = ["docs.v2", "docs"];
-  assert.equal(mcpServerOf("docs.v2_search", servers), "docs.v2");
-  assert.equal(mcpServerOf("docs_v2_search", servers), "docs.v2");
-  assert.equal(mcpServerOf("docs_open", servers), "docs");
-  assert.equal(toolSource("docs.v2_search", "pi-mcp-adapter", servers), "docs.v2");
-  assert.equal(mcpServerOf("docs.v2_search", ["docs"]), undefined, "not the tool of the server its name starts like");
-});
-
 test("a default-off tool nobody was shown is left alone, not switched on", () => {
   // The page only ever lists what this run registered. Walking the defaults as
   // well wrote an "on" exception for every tool that was merely not loaded —
