@@ -271,6 +271,28 @@ test('the build context leaves out local data and what the image builds itself, 
   for (const source of copied) for (const pattern of ignored) assert.ok(!matches(pattern, source), `${source} is copied but ${pattern} leaves it out`);
 });
 
+// The server moved from server/ to core/server (#198). A service, the restart after an update, or a container's
+// `node server/dist/reset-password.js` that still names the old place starts the same file from the new one.
+test('a start file in the old server/dist runs the same file in core/server/dist, with its arguments, and the image has them', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'pithagoras-old-entries-'));
+  try {
+    mkdirSync(path.join(dir, 'scripts'));
+    writeFileSync(path.join(dir, 'scripts', 'old-entries.mjs'), read('scripts/old-entries.mjs'));
+    mkdirSync(path.join(dir, 'core', 'server', 'dist'), { recursive: true });
+    writeFileSync(path.join(dir, 'core', 'server', 'package.json'), read('core/server/package.json'));
+    const entries = ['index.js', 'reset-password.js', 'sso-only-off.js'];
+    for (const entry of entries) writeFileSync(path.join(dir, 'core', 'server', 'dist', entry), `console.log("core/server/dist/${entry}", process.argv.slice(2).join(" "));\n`);
+    execFileSync(process.execPath, [path.join(dir, 'scripts', 'old-entries.mjs')], { stdio: 'ignore' });
+    for (const entry of entries) {
+      assert.equal(execFileSync(process.execPath, [path.join(dir, 'server', 'dist', entry), '--yes'], { encoding: 'utf8' }), `core/server/dist/${entry} --yes\n`, entry);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+  assert.match(read('package.json'), /"build": "[^"]*&& node scripts\/old-entries\.mjs"/, 'the build writes them');
+  assert.match(dockerfile(), /^COPY --from=build \/app\/server\/dist server\/dist$/m, 'the image has them');
+});
+
 test('the README of the channels folder says what the folder is and points at the guide, with no second copy of the contract to go stale', () => {
   const readme = read('channels/README.md');
   assert.ok(readme.includes('/channels/writing-a-channel)'));
