@@ -35,16 +35,19 @@ export const BROWSER_MCP = "browser";
  * The longest match wins, or a server called `browser` would claim the tools
  * of one called `browser_staging`.
  *
- * The prefix is the server's name with its hyphens and dots as underscores, which
- * is how the adapter writes it: `brave-search` registers `brave_search_brave_web_search`.
- * What is returned is the name as configured.
+ * The prefix is the server's name with its hyphens as underscores, which is how
+ * the adapter writes it (pi-mcp-adapter 2.18.0, getServerPrefix): `brave-search`
+ * registers `brave_search_brave_web_search`, and `docs.v2`, whose dots it keeps,
+ * `docs.v2_search`. With the dots as underscores as well, as the guard reads a
+ * name the adapter might take (pi/guard.ts). What is returned is the name as
+ * configured.
  */
 export function mcpServerOf(name: string, servers: Iterable<string>): string | undefined {
   let best: string | undefined;
   let bestLength = -1;
   for (const server of servers) {
-    const prefix = server.replace(/[-.]/g, "_");
-    if (!name.startsWith(`${prefix}_`)) continue;
+    const prefix = [server.replace(/-/g, "_"), server.replace(/[-.]/g, "_")].find((p) => name.startsWith(`${p}_`));
+    if (prefix === undefined) continue;
     if (prefix.length > bestLength) {
       best = server;
       bestLength = prefix.length;

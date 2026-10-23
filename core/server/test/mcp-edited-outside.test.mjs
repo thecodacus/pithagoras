@@ -114,18 +114,23 @@ test("a tool of a server the portal's file never had, as one of a project's own,
   assert.ok(!sessions.piOff("in-project", [{ name: "cursorsrv_lookup" }]).includes("cursorsrv_lookup"));
 });
 
-test("a server with a hyphen in its name, taken out by hand, takes its tools with it, and the one its name starts like keeps its own", () => {
-  byHand({ jira: JIRA, "brave-search": { command: "b" }, brave: { command: "b" } });
-  cacheFile({ jira: { tools: [{ name: "search" }] }, "brave-search": { tools: [{ name: "web_search" }] }, brave: { tools: [{ name: "news" }] } });
-  db.rememberTools([adapter("brave_search_web_search"), adapter("brave_news")]);
-  assert.ok(listed().includes("brave_search_web_search"));
-  byHand({ jira: JIRA, brave: { command: "b" } });
+test("a server with a hyphen or a dot in its name, taken out by hand, takes its tools with it, and the one its name starts like keeps its own", () => {
+  // The adapter writes a server's hyphens as underscores and keeps its dots: `docs.v2` registers `docs.v2_search`.
+  const servers = { jira: JIRA, "brave-search": { command: "b" }, brave: { command: "b" }, "docs.v2": { command: "d" }, docs: { command: "d" } };
+  byHand(servers);
+  cacheFile({ jira: { tools: [{ name: "search" }] }, "brave-search": { tools: [{ name: "web_search" }] }, brave: { tools: [{ name: "news" }] }, "docs.v2": { tools: [{ name: "search" }] }, docs: { tools: [{ name: "open" }] } });
+  db.rememberTools([adapter("brave_search_web_search"), adapter("brave_news"), adapter("docs.v2_search"), adapter("docs_open")]);
+  assert.ok(listed().includes("brave_search_web_search") && listed().includes("docs.v2_search"));
+  byHand({ jira: JIRA, brave: servers.brave, docs: servers.docs });
   const shown = listed();
   assert.ok(!shown.includes("brave_search_web_search"));
-  assert.ok(shown.includes("brave_news"));
+  assert.ok(!shown.includes("docs.v2_search"));
+  assert.ok(shown.includes("brave_news") && shown.includes("docs_open"));
   assert.ok(!known().includes("brave_search_web_search"));
-  assert.deepEqual(cached(), ["brave", "jira"]);
-  assert.ok(removed().includes("brave-search") && !removed().includes("brave"));
+  assert.ok(!known().includes("docs.v2_search"));
+  assert.deepEqual(cached(), ["brave", "docs", "jira"]);
+  assert.ok(removed().includes("brave-search") && removed().includes("docs.v2"));
+  assert.ok(!removed().includes("brave") && !removed().includes("docs"));
 });
 
 test("a rename by hand is a removal and an addition", () => {
