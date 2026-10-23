@@ -1801,11 +1801,15 @@ portal.provide((consumer) => dockerFor(consumer.name));
 // pithagoras-browser
 const docker = portal.extensions.use("pithagoras-docker");
 await docker.images.ensure("lscr.io/linuxserver/chromium:latest");
-await docker.containers.create("pithagoras-browser", { Image: "lscr.io/linuxserver/chromium:latest" });
+await docker.containers.create("pithagoras-browser", { Image: "lscr.io/linuxserver/chromium:latest", HostConfig: { RestartPolicy: { Name: "unless-stopped" } } });
 await docker.containers.start("pithagoras-browser");
 ```
 
-[Docker for extensions](/guide/docker) is the one the portal ships.
+[Docker for extensions](/guide/docker) is the one the portal ships. A service
+container an extension runs through it uses Docker's `unless-stopped` restart
+policy, as Browser's, Voice's and Understory's do, so that it comes back after
+the host restarts and stays stopped when the person stops it
+([When the machine restarts](/guide/docker#when-the-machine-restarts)).
 
 - **`requires`**: the extensions it cannot work without, each with the versions
   it takes (a semver range). Without one of them, or with one in a version it
@@ -2548,6 +2552,7 @@ from the portal, and what gives the same to an extension:
 | A page in the sidebar only once its service is set up | `useShown` on its `nav.page` |
 | A container of its own, and the one the portal made before it was an extension taken over by its name | `requires` with `pithagoras-docker`, `extensions.use`, `containers.adopt` and `volumes.adopt` |
 | A container on the portal's loopback, made again on its network after the portal's container was, on the GPU it was given | `sharedNetwork()`, `containers.inspect`, and `DeviceRequests` in the create body |
+| A container that comes back after the host restarts and stays stopped when the person stops it, and one made before given that as it is | `RestartPolicy: { Name: "unless-stopped" }` in the create body, `containers.update` |
 | Recognising and speaking for voice mode with the voices it has, chosen once its service is up, with its model loaded while voice mode is used | `portal.voice.provide`, `voice.choose` and `voice.chosen` |
 | Scripts run in its container, one at a time, and ended where they took too long | `containers.exec`, with `timeoutMs` |
 | The agent's memory: its tools as an MCP server's, counted as the person's own words, and MEMORY.md left aside while it is on | `portal.mcp.set` with `trusted`, `portal.memory.hold` |
