@@ -103,13 +103,13 @@ function callNow(path: string, ...args: unknown[]): any {
 }
 
 const answers = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
-/** A call the portal answers later. `sent` is told its id, for what goes with it (an abort). */
-function callLater(path: string, args: unknown[], sent?: (id: number) => void): Promise<any> {
+/** What the portal answers later: `message`, sent with an id of its own, which `sent` is told for what goes with it (an abort). */
+function later(message: Record<string, unknown>, sent?: (id: number) => void): Promise<any> {
   const id = ++calls;
   return new Promise((resolve, reject) => {
     answers.set(id, { resolve, reject });
     try {
-      post({ t: "call", id, path, args });
+      post({ ...message, id });
     } catch (e) {
       answers.delete(id);
       return reject(e);
@@ -117,24 +117,13 @@ function callLater(path: string, args: unknown[], sent?: (id: number) => void): 
     sent?.(id);
   });
 }
+/** A call of a member of the portal's that answers later. */
+const callLater = (path: string, args: unknown[], sent?: (id: number) => void) => later({ t: "call", path, args }, sent);
 
-/** A function of what an extension in the portal provides: asked of the portal, which runs it as that extension's code. */
+/** What an extension in the portal provides: each of its functions asked of the portal, which runs it as that extension's code. */
 const provided = (of: string, value: unknown) =>
   swapped(value, (fn) => fn, (marker) =>
-    Array.isArray(marker[API_FN])
-      ? (...args: unknown[]) => {
-          const id = ++calls;
-          return new Promise((resolve, reject) => {
-            answers.set(id, { resolve, reject });
-            try {
-              post({ t: "api", id, of, path: marker[API_FN], args: swapped(args, (fn) => given(fn, "call")) });
-            } catch (e) {
-              answers.delete(id);
-              reject(e);
-            }
-          });
-        }
-      : marker,
+    Array.isArray(marker[API_FN]) ? (...args: unknown[]) => later({ t: "api", of, path: marker[API_FN], args: swapped(args, (fn) => given(fn, "call")) }) : marker,
   );
 
 const unavailable = (what: string) => () => {
