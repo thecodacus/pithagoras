@@ -20,6 +20,11 @@ export interface Copy {
   bytes: number;
   /** The links in the draft, by their paths in it: left out, not followed. */
   left: string[];
+  /**
+   * The copy this one took the place of, put aside (`made/.old-<name>-<hex>`) until the install is done: removed once it
+   * is (`installed`), put back where it was if it is not (`undo`).
+   */
+  old?: string;
 }
 
 /** Lets the portal's other work in: the files API is synchronous, and a whole draft read in one go would stall every chat and route. */
@@ -117,7 +122,8 @@ export async function snapshot(run: Run, chat: Chat, draft: string): Promise<Cop
     await walk(top, 0);
     const { name, version } = check(incoming);
     const digest = digestOf(files);
-    // In place with nothing awaited between: no `halves()` or `pi list` of the portal finds `made/<name>` missing.
+    // In place with nothing awaited between: no `halves()` or `pi list` of the portal finds `made/<name>` missing. The
+    // copy before it is kept aside until the install is done.
     const folder = path.join(made, name);
     const old = path.join(made, `.old-${name}-${randomBytes(4).toString("hex")}`);
     let replaced = true;
@@ -128,12 +134,28 @@ export async function snapshot(run: Run, chat: Chat, draft: string): Promise<Cop
       replaced = false;
     }
     renameSync(incoming, folder);
-    if (replaced) rmSync(old, { recursive: true, force: true });
-    return { name, ...(version ? { version } : {}), folder, digest, files: files.length, bytes, left };
+    return { name, ...(version ? { version } : {}), folder, digest, files: files.length, bytes, left, ...(replaced ? { old } : {}) };
   } catch (e) {
     rmSync(incoming, { recursive: true, force: true });
     throw e;
   }
+}
+
+/** The copy is installed: the one it took the place of goes. */
+export function installed(copy: Copy): void {
+  if (copy.old) rmSync(copy.old, { recursive: true, force: true });
+}
+
+/**
+ * The copy was not installed: the one it took the place of is put back where it was, with nothing awaited between,
+ * so that pi lists what was installed, and recorded, last; a copy that took no place is removed.
+ */
+export function undo(copy: Copy): void {
+  if (!copy.old) return rmSync(copy.folder, { recursive: true, force: true });
+  const aside = path.join(path.dirname(copy.folder), `.incoming-${randomBytes(4).toString("hex")}`);
+  renameSync(copy.folder, aside);
+  renameSync(copy.old, copy.folder);
+  rmSync(aside, { recursive: true, force: true });
 }
 
 /**

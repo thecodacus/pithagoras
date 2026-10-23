@@ -2,7 +2,7 @@ import { rmSync } from "node:fs";
 import type { Chat } from "@pithagoras/extension-api/server";
 import { DONE } from "../mode";
 import { copyOf, listMade, oneAtATime, records, saveRecords, subjectOf, type Run } from "./made";
-import { snapshot } from "./snapshot";
+import { installed, snapshot, undo } from "./snapshot";
 
 /** A tool's answer: its result as JSON, for the model, and as itself, for the page. */
 const answer = (result: object) => ({ content: [{ type: "text", text: JSON.stringify(result, null, 2) }], details: result });
@@ -45,20 +45,23 @@ export function registerTools(run: Run, pi: any, chat: Chat): void {
         const copy = await snapshot(run, chat, draft);
         const made = records(run);
         const first = !made.has(copy.name);
-        let installed;
+        let status;
         try {
-          installed = await portal.extensions.install(copy.folder, { note: `${portal.chats.get(chat.id)?.title ?? chat.title} · ${draft}` });
+          status = await portal.extensions.install(copy.folder, { note: `${portal.chats.get(chat.id)?.title ?? chat.title} · ${draft}` });
         } catch (e) {
-          // Nothing of a first install is left; a reinstall keeps its copy, which pi lists already.
-          if (first) rmSync(copy.folder, { recursive: true, force: true });
+          // What pi lists stays what was installed and recorded last: a copy changed in made/ without an install would load, unrecorded, at the next sync.
+          undo(copy);
           throw e;
         }
         const record = { ...(copy.version ? { version: copy.version } : {}), chat: chat.id, draft, digest: copy.digest, at: new Date().toISOString() };
+        // In Audit first: whatever fails after it, the install is there.
+        portal.audit.record({ subject: subjectOf(copy.name, record), reason: first ? DONE.installed : DONE.again, chatId: chat.id });
         made.set(copy.name, record);
         saveRecords(run, made);
-        portal.audit.record({ subject: subjectOf(copy.name, record), reason: first ? DONE.installed : DONE.again, chatId: chat.id });
-        // Its lines are extension_status's, which hands them over as outside content.
-        const { enabled, server, client, loadErrors, reloaded, waiting } = installed;
+        installed(copy);
+        // Its lines are extension_status's, which hands them over as outside content. What this chat could not load of
+        // it is said there too: the chat loads it at its next step, after this answer.
+        const { enabled, server, client, reloaded, waiting } = status;
         return answer({
           name: copy.name,
           version: copy.version,
@@ -69,7 +72,6 @@ export function registerTools(run: Run, pi: any, chat: Chat): void {
           enabled,
           server: server && { running: server.running, failure: server.failure, crash: server.crash },
           client,
-          loadErrors,
           reloaded,
           waiting,
           next: NEXT,

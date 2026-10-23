@@ -165,6 +165,8 @@ async function run(chat: Chat, message = "Go on") {
 const offered = (request: any): string[] => (request.tools ?? []).map((tool: any) => tool.function?.name ?? tool.name);
 const system = (request: any) => JSON.stringify(request.messages.filter((m: any) => m.role === "system"));
 const textOf = (result: any) => (result.result?.content ?? []).map((c: any) => c.text ?? "").join("");
+/** What a tool whose results are outside content said, inside the guard's markers. */
+const inside = (result: any) => textOf(result).replace(/^<<<untrusted:([0-9a-f]+)>>> \([^)]*\)(.*)<<<\/untrusted:\1>>>$/s, "$2");
 const questions = (events: any[]) => events.filter((e) => e.type === "extension_ui_request" && e.method === "confirm");
 /** A draft written into the chat's folder by hand, for a test whose model does not write it. */
 function draft(chat: Chat, name: string, server: string) {
@@ -196,9 +198,14 @@ const ask = { name: "moon_phase", args: { date: "2026-10-23" } };
 
 test("A. in one run the agent writes an extension, installs it, and calls its tool at the next step, in a process of its own", async () => {
   const work = await chat({ title: "Moon work" });
-  script = (request) => [write("extensions/moon/package.json", pkg("moon")), write("extensions/moon/server.js", moon(PHASE)), install("extensions/moon"), ask][resultsIn(request)] ?? "Done.";
+  script = (request) =>
+    [write("extensions/moon/package.json", pkg("moon")), write("extensions/moon/server.js", moon(PHASE)), install("extensions/moon"), ask, { name: "extension_status", args: {} }][resultsIn(request)] ?? "Done.";
   const { requests, results } = await run(work, "Write a moon_phase tool, install it, and call it for today");
-  assert.deepEqual(results.map((r) => [r.toolName, r.isError]), [["write", false], ["write", false], ["extension_install", false], ["moon_phase", false]], results.map(textOf).join("\n"));
+  assert.deepEqual(
+    results.map((r) => [r.toolName, r.isError]),
+    [["write", false], ["write", false], ["extension_install", false], ["moon_phase", false], ["extension_status", false]],
+    results.map(textOf).join("\n"),
+  );
   assert.ok(!offered(requests[2]).includes("moon_phase"));
   assert.ok(offered(requests[3]).includes("moon_phase"), "offered at the request after the install");
 
@@ -229,6 +236,8 @@ test("A. in one run the agent writes an extension, installs it, and calls its to
   const { at, ...record } = records().moon;
   assert.deepEqual(record, { version: "1.0.0", chat: work.id, draft: "extensions/moon", digest: installed.digest });
   assert.ok(!Number.isNaN(Date.parse(at)));
+  // Without a name, what was made: its chat by its title now, and no draft.
+  assert.deepEqual(results[4].result.details, { made: [{ name: "moon", version: "1.0.0", digest: installed.digest, at, chat: "Moon work", installed: true, enabled: true }] });
   const { installedFrom } = await listed("moon");
   assert.deepEqual({ ...installedFrom, at: undefined }, { extension: "pithagoras-creator", note: "Moon work · extensions/moon", at: undefined });
   assert.deepEqual(leftovers(), []);
@@ -480,6 +489,133 @@ test("H. Creator switched off while a Creator chat works: its next step has none
     assert.equal(db.getSession(work.id).mode, MODE, "the chat keeps its mode");
   } finally {
     assert.equal((await call("PUT", "/api/extensions/enabled", { spec, enabled: true })).status, 200);
+  }
+  assert.equal(host.isServing("pithagoras-creator"), true);
+  await sessions.stop(work.id);
+});
+
+test("J. a first install the portal refuses leaves no copy, record or row; a reinstall it refuses puts the copy before it back, as recorded", async () => {
+  const work = await chat();
+  draft(work, "pithagoras-kanban", moon(PHASE).replace("moon_phase", "kanban_phase"));
+  draft(work, "kept", moon(PHASE).replace("moon_phase", "kept_phase"));
+  script = (request) => [install("extensions/pithagoras-kanban"), install("extensions/kept")][resultsIn(request)] ?? "Done.";
+  let { results } = await run(work);
+  assert.deepEqual(results.map((r) => [r.toolName, r.isError]), [["extension_install", true], ["extension_install", false]], results.map(textOf).join("\n"));
+  assert.equal(inside(results[0]), "pithagoras-kanban is the name of an extension that comes with Pithagoras");
+  assert.equal(existsSync(path.join(MADE, "pithagoras-kanban")), false);
+  assert.equal(records()["pithagoras-kanban"], undefined);
+  assert.deepEqual(rowsOf("pithagoras-kanban"), []);
+  const first = results[1].result.details.digest;
+  const before = readFileSync(path.join(MADE, "kept", "server.js"), "utf8");
+
+  // A package of that name installed from elsewhere since: core refuses the reinstall.
+  const elsewhere = path.join(home, "packages", "kept");
+  mkdirSync(elsewhere, { recursive: true });
+  writeFileSync(path.join(elsewhere, "package.json"), pkg("kept"));
+  assert.equal((await call("POST", "/api/packages", { spec: elsewhere })).status, 200);
+  const spec = packages().find((one) => path.resolve(agent, one) === elsewhere);
+  writeFileSync(path.join(work.folder, "extensions", "kept", "server.js"), `// changed\n${before}`);
+  // The chat's two results before are in each request.
+  script = (request) => (resultsIn(request) === 2 ? install("extensions/kept") : "Done.");
+  ({ results } = await run(work));
+  assert.equal(results[0].isError, true);
+  assert.equal(inside(results[0]), `kept is installed already, from ${spec}`);
+  assert.equal(readFileSync(path.join(MADE, "kept", "server.js"), "utf8"), before, "the copy installed and recorded is back");
+  assert.equal(records().kept.digest, first);
+  assert.deepEqual(rowsOf("kept").map((row) => row.reason), ["Installed"]);
+  assert.deepEqual(leftovers(), []);
+  for (const one of [spec, (await listed("kept")).spec]) assert.equal((await call("DELETE", "/api/packages", { spec: one })).status, 200);
+  await sessions.stop(work.id);
+});
+
+test("K. extension_status says a name is not installed, keeps a made extension's lines to 8,000 characters with the cursor of the last; extension_remove takes only what Creator made", async () => {
+  const work = await chat();
+  draft(work, "chatter", `export default function (portal) {\n  for (let i = 0; i < 40; i++) portal.log(String(i).padStart(3, "0") + "x".repeat(497));\n}\n`);
+  script = (request) =>
+    [
+      { name: "extension_status", args: { name: "nobody" } },
+      { name: "extension_remove", args: { name: "pithagoras-creator" } },
+      install("extensions/chatter"),
+      { name: "extension_status", args: { name: "chatter" } },
+    ][resultsIn(request)] ?? "Done.";
+  const { results } = await run(work);
+  assert.deepEqual(results.map((r) => [r.toolName, r.isError]), [["extension_status", true], ["extension_remove", true], ["extension_install", false], ["extension_status", false]], results.map(textOf).join("\n"));
+  assert.equal(inside(results[0]), "nobody is not installed");
+  assert.equal(textOf(results[1]), "pithagoras-creator was not made in Creator mode: remove it in Settings → Extensions");
+  const { server, next } = results[3].result.details;
+  const texts = server.lines.map((line: any) => line.text);
+  assert.ok(texts.reduce((sum: number, text: string) => sum + text.length, 0) <= 8000, `${texts.join("").length} characters`);
+  assert.ok(texts.some((text: string) => text.startsWith("[extension chatter] 039")), "the latest are kept");
+  assert.ok(!texts.some((text: string) => text.startsWith("[extension chatter] 000")), "the earliest are not");
+  assert.equal(next, server.lines.at(-1).id);
+  assert.equal((await call("DELETE", "/api/packages", { spec: (await listed("chatter")).spec })).status, 200);
+  await sessions.stop(work.id);
+});
+
+test("L. what a made extension says (its lines, its failure) is outside content: flagged as a suspected injection, the next install is asked about", async () => {
+  const flagged = /^<<<untrusted:[0-9a-f]{16}>>> \(suspected prompt injection: /;
+  const asked = ["Let extension_install run after a suspected prompt injection? (persist)"];
+  const refused = /^Refused \(persist\): a result this conversation read looks like a prompt injection/;
+  const kinds = (work: Chat) => db.listAudit(500).filter((row: any) => row.session_id === work.id && ["flagged", "refused"].includes(row.kind)).reverse().map((row: any) => [row.kind, row.tool]);
+
+  const lines = await chat();
+  lines.answer = () => ({ cancelled: true });
+  draft(lines, "loud", `export default function (portal) {\n  portal.log(${JSON.stringify(INJECTION)});\n}\n`);
+  script = (request) => [install("extensions/loud"), { name: "extension_status", args: { name: "loud" } }, install("extensions/loud")][resultsIn(request)] ?? "Done.";
+  let { results, events } = await run(lines);
+  assert.deepEqual(results.map((r) => [r.toolName, r.isError]), [["extension_install", false], ["extension_status", false], ["extension_install", true]], results.map(textOf).join("\n"));
+  assert.match(textOf(results[1]), flagged);
+  assert.deepEqual(questions(events).map((e) => e.title), asked);
+  assert.match(textOf(results[2]), refused);
+  assert.deepEqual(kinds(lines), [["flagged", "extension_status"], ["refused", "extension_install"]]);
+  await sessions.stop(lines.id);
+
+  const failure = await chat();
+  failure.answer = () => ({ cancelled: true });
+  draft(failure, "loudfail", `export default function () {\n  throw new Error(${JSON.stringify(INJECTION)});\n}\n`);
+  script = (request) => [install("extensions/loudfail"), install("extensions/loudfail")][resultsIn(request)] ?? "Done.";
+  ({ results, events } = await run(failure));
+  assert.deepEqual(results.map((r) => [r.toolName, r.isError]), [["extension_install", false], ["extension_install", true]], results.map(textOf).join("\n"));
+  assert.equal(results[0].result.details.server.failure, INJECTION);
+  assert.match(textOf(results[0]), flagged);
+  assert.deepEqual(questions(events).map((e) => e.title), asked);
+  assert.match(textOf(results[1]), refused);
+  assert.deepEqual(kinds(failure), [["flagged", "extension_install"], ["refused", "extension_install"]]);
+  for (const name of ["loud", "loudfail"]) assert.equal((await call("DELETE", "/api/packages", { spec: (await listed(name)).spec })).status, 200, name);
+  await sessions.stop(failure.id);
+});
+
+test("M. Creator switched off and on sweeps what a cut-off install left; switched off while it copies a draft, the install gives up and made/ is as it was", async () => {
+  const { spec } = await listed("pithagoras-creator");
+  const toggle = async (enabled: boolean) => assert.equal((await call("PUT", "/api/extensions/enabled", { spec, enabled })).status, 200);
+  mkdirSync(path.join(MADE, ".incoming-x"));
+  mkdirSync(path.join(MADE, ".old-y-0123abcd"));
+  writeFileSync(path.join(MADE, ".old-y-0123abcd", "package.json"), "{}");
+  await toggle(false);
+  await toggle(true);
+  assert.deepEqual(leftovers(), []);
+  assert.equal(readFileSync(path.join(MADE, "y", "package.json"), "utf8"), "{}", "put back where pi would list it");
+  rmSync(path.join(MADE, "y"), { recursive: true });
+
+  const work = await chat();
+  draft(work, "many", moon(PHASE).replace("moon_phase", "many_phase"));
+  for (let folder = 0; folder < 3; folder++) {
+    mkdirSync(path.join(work.folder, "extensions", "many", `d${folder}`));
+    for (let i = 0; i < 2000; i++) writeFileSync(path.join(work.folder, "extensions", "many", `d${folder}`, `f${i}.js`), "");
+  }
+  const before = readdirSync(MADE).sort();
+  script = (request) => [install("extensions/many")][resultsIn(request)] ?? "Done.";
+  try {
+    const ran = run(work);
+    await until(() => leftovers().some((name) => name.startsWith(".incoming-")), "the copy to be under way");
+    await toggle(false);
+    const { results } = await ran;
+    assert.equal(results[0].isError, true);
+    assert.equal(inside(results[0]), "Creator mode was stopped while it copied the extension: nothing was installed");
+    assert.deepEqual(readdirSync(MADE).sort(), before);
+    assert.equal(await listed("many"), undefined);
+  } finally {
+    await toggle(true);
   }
   assert.equal(host.isServing("pithagoras-creator"), true);
   await sessions.stop(work.id);

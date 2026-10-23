@@ -6,7 +6,7 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import path from "node:path";
 import { inProcessHome, scratch } from "../../../core/server/test/server-harness.mjs";
-import { LIMITS, snapshot, sweepLeftovers } from "../src/server/snapshot.ts";
+import { LIMITS, installed, snapshot, sweepLeftovers, undo } from "../src/server/snapshot.ts";
 
 /**
  * A draft copied into Creator's own folder: walked with the portal's own `files`, as the chat's agent; links left out
@@ -65,12 +65,31 @@ test("a draft is copied whole, links left out and named, with the copy's own fre
   assert.match(copy.digest, /^[0-9a-f]{64}$/);
   assert.deepEqual(leftovers(), []);
 
-  // Copied again: the copy is replaced at its path, and nothing is left beside it.
+  // Copied again: the copy is replaced at its path, the one before kept aside until it is installed, and then gone.
   writeFileSync(path.join(dir, "server.js"), "export default () => 2;\n");
   const again = await snapshot(run, chat, rel);
   assert.equal(again.folder, copy.folder);
   assert.notEqual(again.digest, copy.digest);
   assert.equal(readFileSync(path.join(copy.folder, "server.js"), "utf8"), "export default () => 2;\n");
+  assert.match(path.basename(again.old!), /^\.old-whole-[0-9a-f]{8}$/);
+  assert.equal(readFileSync(path.join(again.old!, "server.js"), "utf8"), "export default () => {};\n");
+  assert.deepEqual(leftovers(), [path.basename(again.old!)]);
+  installed(again);
+  assert.deepEqual(leftovers(), []);
+});
+
+test("a copy that was not installed is undone: the one before it is put back, or a first one removed", async () => {
+  const rel = draft("undone", { "server.js": "export default () => 1;\n" });
+  const first = await snapshot(run, chat, rel);
+  assert.equal(first.old, undefined);
+  installed(first);
+  writeFileSync(path.join(base, rel, "server.js"), "export default () => 2;\n");
+  undo(await snapshot(run, chat, rel));
+  assert.equal(readFileSync(path.join(first.folder, "server.js"), "utf8"), "export default () => 1;\n", "the copy before it is back");
+  assert.deepEqual(leftovers(), []);
+  const lone = await snapshot(run, chat, draft("lone"));
+  undo(lone);
+  assert.equal(existsSync(lone.folder), false);
   assert.deepEqual(leftovers(), []);
 });
 
