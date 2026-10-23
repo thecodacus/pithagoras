@@ -43,6 +43,8 @@ export function MadePage() {
       title: t("Forget {name}?", { name: one.name }),
       message: t("Its copy is deleted from Creator mode's folder. It is not installed, so nothing else changes."),
       confirmLabel: t("Forget"),
+      danger: true,
+      deletes: true,
     });
     if (!sure) return;
     try {

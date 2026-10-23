@@ -118,6 +118,9 @@ test('its page in Settings lists what was made, with its state and its chat; For
   await item('old').getByRole('button', { name: 'Forget' }).click();
   const ask = page.getByRole('alertdialog', { name: 'Forget old?' });
   await expect(ask.getByText("Its copy is deleted from Creator mode's folder. It is not installed, so nothing else changes.")).toBeVisible();
+  // It deletes: its button is red, and Enter does not delete.
+  await expect(ask.getByRole('button', { name: 'Forget' })).toHaveClass(/text-danger/);
+  await expect(ask.getByRole('button', { name: 'Cancel' })).toBeFocused();
   await ask.getByRole('button', { name: 'Cancel' }).click();
   await page.waitForTimeout(200);
   expect(deleted).toEqual([]);
