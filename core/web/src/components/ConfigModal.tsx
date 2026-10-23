@@ -1,9 +1,10 @@
-import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { memo, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { Select } from "./Select";
 import {
   LuBlocks,
   LuBrain,
   LuCheck,
+  LuChevronRight,
   LuScrollText,
   LuExternalLink,
   LuEye,
@@ -148,6 +149,20 @@ function railSnapshot(): { spec: string; name: string }[] {
   try {
     const list = JSON.parse(local.get(RAIL_KEY) ?? "[]");
     return Array.isArray(list) ? list.filter((e) => e && typeof e.spec === "string" && typeof e.name === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * The rail's groups folded by hand in this browser, by their names in English. None is folded until somebody folds
+ * it: a rail nobody has touched is the one it always was.
+ */
+const FOLDED_KEY = "pithagoras.settings.rail-closed";
+function foldedGroups(): string[] {
+  try {
+    const list = JSON.parse(local.get(FOLDED_KEY) ?? "[]");
+    return Array.isArray(list) ? list.filter((name) => typeof name === "string") : [];
   } catch {
     return [];
   }
@@ -313,7 +328,7 @@ export const ConfigModal = memo(function ConfigModal({
         <SettingsSearch index={index} onPick={go}>
         <div className="space-y-4">
           {GROUPS.map((g) => (
-            <RailGroup key={g.label} label={t(g.label)}>
+            <RailGroup key={g.label} name={g.label} label={t(g.label)} held={nav.kind === "tab" && g.tabs.some((tab) => tab.id === nav.id)}>
               {g.tabs.map((tab) => (
                 <RailItem
                   key={tab.id}
@@ -329,7 +344,12 @@ export const ConfigModal = memo(function ConfigModal({
 
           {/* Only appears for extensions that actually read settings. */}
           {configurable.length > 0 && (
-            <RailGroup label={t("Extension settings")} className={exts.value && !railShown.current ? "stagger-in" : ""}>
+            <RailGroup
+              name="Extension settings"
+              label={t("Extension settings")}
+              held={configurable.some((e) => e.spec === railSpec)}
+              className={exts.value && !railShown.current ? "stagger-in" : ""}
+            >
               {configurable.map((e) => (
                 <RailItem
                   key={e.spec}
@@ -394,15 +414,57 @@ export const ConfigModal = memo(function ConfigModal({
 
 // --- rail ---
 
-function RailGroup({ label, children, className = "" }: { label?: string; children: ReactNode; className?: string }) {
+/**
+ * One of the rail's groups, under a heading that folds it like a folder. Open or shut as it was left in this
+ * browser; held open while one of its pages is showing, so that the page marked as the current one is in view, and a
+ * search that goes to a page in a folded group finds the group open. The search's own list stands in for the rail
+ * while something is typed, so what it finds is listed whatever is folded.
+ */
+function RailGroup({
+  name,
+  label,
+  held,
+  children,
+  className = "",
+}: {
+  /** What it is kept as: the same in every language. */
+  name: string;
+  label: string;
+  /** One of its pages is showing. */
+  held: boolean;
+  children: ReactNode;
+  className?: string;
+}) {
+  const [shut, setShut] = useState(() => foldedGroups().includes(name));
+  const open = !shut || held;
+  const body = useId();
   return (
     <div>
-      {label && (
-        <p className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-fg-faint">
-          {label}
-        </p>
-      )}
-      <div className={`space-y-0.5 ${className}`}>{children}</div>
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls={body}
+        aria-disabled={held || undefined}
+        title={held ? t("Open while one of its pages is showing") : undefined}
+        onClick={() => {
+          // A click that shut nothing, with its page in view, would still be remembered as shut.
+          if (held) return;
+          // Read again rather than kept from the first draw: the other groups write to the same list.
+          const others = foldedGroups().filter((n) => n !== name);
+          local.set(FOLDED_KEY, JSON.stringify(shut ? others : [...others, name]));
+          setShut(!shut);
+        }}
+        // Held open, it does nothing when pressed, and does not look as if it did.
+        className={`flex w-full items-center gap-1 rounded px-2 pb-1 text-left text-[10px] font-semibold uppercase tracking-wider text-fg-faint transition ${
+          held ? "cursor-default" : "hover:text-fg-subtle"
+        }`}
+      >
+        <span className="truncate">{label}</span>
+        <LuChevronRight aria-hidden className={`ml-auto h-3 w-3 shrink-0 transition-transform motion-reduce:transition-none ${open ? "rotate-90" : ""} ${held ? "opacity-40" : ""}`} />
+      </button>
+      <div id={body} role="group" aria-label={label} hidden={!open} className={`space-y-0.5 ${className}`}>
+        {children}
+      </div>
     </div>
   );
 }

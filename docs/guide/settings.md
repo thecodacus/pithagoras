@@ -15,6 +15,17 @@ Plus a page for every extension that exposes configuration, under **Extension
 settings**: [Media](/guide/media)'s is **Media**, at
 `/settings/x/pithagoras-media`.
 
+Each group folds under its heading: a click, or Enter or Space on it, hides its
+pages and shows them again, and the arrow beside the name says which it is. All
+of them are open until you fold one, and what you fold stays folded in this
+browser, through closing Settings and reloading the page. The group of the page
+showing is held open, so the page marked as the current one is always in the
+rail: a search, a link or an address that goes to a page in a folded group
+finds the group open, and it folds again once you go to a page in another
+group. While it is held, its heading does nothing. The search lists what it
+finds whatever is folded. On a phone, folding a group keeps you in the list of
+pages; it does not open one.
+
 The dialog takes the room the screen has: nearly all of a laptop's, and three
 quarters of the width of a wider one. Every page uses that width. Lists
 (providers, skills, MCP servers, channels, people, extensions) stand two
