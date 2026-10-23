@@ -1314,6 +1314,11 @@ export interface ExtensionInfo {
   filtered?: boolean;
   /** What it brings: something for pi (the agent), something the portal draws or runs, colours for the portal. */
   kinds?: PackageKind[];
+  /**
+   * The extension whose own data folder it is in, however it was installed; and the note that extension gave and when,
+   * where it installed it itself.
+   */
+  installedFrom?: { extension: string; note?: string; at?: string };
 }
 
 export type PackageKind = "pi" | "pithagoras" | "themes";
