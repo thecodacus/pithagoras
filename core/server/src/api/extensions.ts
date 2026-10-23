@@ -5,7 +5,8 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import express, { type Router } from "express";
 import { piSettingsPath, readPiSettings, updatePiSettings } from "../pi-settings.js";
-import { extensionStash, setExtensionStash } from "../db.js";
+import { extensionStash, installNotes, setExtensionStash } from "../db.js";
+import { dataOwner } from "../extension-data.js";
 import { isFiltered, isSwitchedOff, setPackageEnabled, sourceOf } from "../extension-switch.js";
 import { sessions } from "../session-manager.js";
 import { clientHalf, packageKinds, requiresOf, staticImports, packageThemes, serverHalf, type ClientHalf, type PackageKind, type PackageThemes, type ServerHalf } from "../extension-ui.js";
@@ -42,6 +43,11 @@ export interface ExtensionInfo {
   filtered?: boolean;
   /** What it brings: something for pi, something the portal draws or runs, colours for the portal. Empty where its folder could not be read. */
   kinds: PackageKind[];
+  /**
+   * The extension whose own data folder it is in, however it was installed; and the note that extension gave and
+   * when, where it installed it itself (`extensions.install`).
+   */
+  installedFrom?: { extension: string; note?: string; at?: string };
 }
 
 /** An extension that comes with the portal and is installed from its own folder. */
@@ -444,6 +450,13 @@ function clientFailure(half: ClientHalf): { error: string; stack?: string } | un
   return undefined;
 }
 
+/** What a page said last failed of the browser half of `name` that is installed now, and where; nothing where none is. */
+export async function browserFailure(name: string): Promise<{ error: string; stack?: string } | undefined> {
+  const half = (await clientHalves()).find((h) => h.name === name);
+  const failure = half && clientFailure(half);
+  return failure && { error: failure.error, ...(failure.stack ? { stack: failure.stack } : {}) };
+}
+
 export function extensionsRouter(): Router {
   const router = express.Router();
 
@@ -540,6 +553,7 @@ export function extensionsRouter(): Router {
       const settings = readPiSettings();
       const packages = await installedPackages(settings);
       const listed = Array.isArray(settings.packages) ? settings.packages : [];
+      const notes = installNotes();
 
       const infos: ExtensionInfo[] = packages.map((pkg) => {
         const info: ExtensionInfo = {
@@ -550,6 +564,9 @@ export function extensionsRouter(): Router {
           settings: [],
           kinds: pkg.path ? packageKinds(pkg.path) : [],
         };
+        // Told by its folder, however it was installed; with the note where the extension installed it itself.
+        const extension = pkg.path ? dataOwner(pkg.path) : undefined;
+        if (extension) info.installedFrom = { extension, ...notes[pkg.spec] };
 
         if (!pkg.scope || /^user/i.test(pkg.scope)) {
           const entry = listed.find((e) => sourceOf(e) === pkg.spec);

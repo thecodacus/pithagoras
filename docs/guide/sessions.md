@@ -664,6 +664,7 @@ and, for a tool, which tool and what it was asked to do:
 | `revoked` | An approval not yet spent was taken back in Settings → Guard |
 | `untrusted` | A flagged result you had trusted was untrusted in Settings → Guard, and holds its chat back again |
 | Mode chosen | A chat was put in an extension's [mode that asks first](#modes), after you said yes to its warning: the mode's name, and what the chat stores |
+| Extension | An extension [recorded something it did](/guide/extension-ui#a-row-in-audit), by its name: what it was done to, and what was done |
 | Log cleared | Somebody emptied the log, and how many entries went |
 
 The buttons above the list filter it: **Everything**, **Refused**, **Allowed**

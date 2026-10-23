@@ -336,6 +336,14 @@ export function ExtensionsPanel({
                       )}
                       {/* Said where it is not the usual one: a package a project brings has no switch here, and this is why. */}
                       {ext.scope && !/^user/i.test(ext.scope) && <span className={pillCls}>{ext.scope}</span>}
+                      {/* The extension whose own folder it is in; when, where that extension installed it itself. */}
+                      {ext.installedFrom && (
+                        <span className={pillCls} title={ext.installedFrom.at ? formatDateTime(ext.installedFrom.at) : undefined}>
+                          {t("From {name}", { name: displayName(ext.installedFrom.extension, names) })}
+                        </span>
+                      )}
+                      {/* The extension's own words, shown as they are. */}
+                      {ext.installedFrom?.note && <p className="basis-full break-words text-xs text-fg-subtle">{ext.installedFrom.note}</p>}
                       {failures[ext.name] ? (
                         <p role="alert" className="basis-full break-words text-xs text-warn">
                           {t("Its interface could not be loaded: {reason}", { reason: failures[ext.name] })}

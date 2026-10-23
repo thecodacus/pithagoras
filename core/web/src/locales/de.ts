@@ -694,6 +694,7 @@ const de: Locale = {
     "Installed commands show up in the chat box when you type “/”.": "Installierte Befehle erscheinen im Eingabefeld, wenn du „/“ tippst.",
     "Some of what it brings is switched off in settings.json. Switching it off and on again keeps that.": "Einiges davon ist in settings.json ausgeschaltet. Aus- und wieder Einschalten behält das bei.",
     "filtered": "gefiltert",
+    "From {name}": "Von {name}",
     "Switch off {name}": "{name} ausschalten",
     "Switch on {name}": "{name} einschalten",
     "On — click to switch it off without uninstalling it": "An — klicken, um es auszuschalten, ohne es zu deinstallieren",

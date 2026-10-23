@@ -126,6 +126,29 @@ test('a search of Settings opens the view its section is in', async ({ page }) =
   await expect(cards(page)).toHaveCount(1);
 });
 
+test("a package from an extension's folder says which, with its note", async ({ page }) => {
+  const madeIt = ext({
+    spec: '../../extension-data/test-maker/made/moon', name: 'moon', version: '0.1.0', kinds: ['pithagoras'],
+    installedFrom: { extension: 'test-maker', note: 'Moon chat · extensions/moon', at: '2026-10-23T09:00:00Z' },
+  });
+  // A folder of the extension's that the person installed by path: from it, with no note and no time.
+  const byHand = ext({ spec: '/data/extension-data/test-maker/made/sun', name: 'sun', version: '0.1.0', kinds: ['pithagoras'], installedFrom: { extension: 'test-maker' } });
+  await portal(page, [web, madeIt, byHand]);
+  await page.goto('/settings/extensions');
+  const moon = cards(page).filter({ hasText: 'moon' });
+  await expect(moon.getByText('From test-maker', { exact: true })).toHaveAttribute('title', /2026/);
+  await expect(moon.getByText('Moon chat · extensions/moon', { exact: true })).toBeVisible();
+  const sun = cards(page).filter({ hasText: 'sun' });
+  await expect(sun.getByText('From test-maker', { exact: true })).toBeVisible();
+  await expect(sun.getByText('From test-maker', { exact: true })).not.toHaveAttribute('title');
+  await expect(cards(page).filter({ hasText: 'pi-web-access' })).not.toContainText('From ');
+
+  await page.evaluate(() => localStorage.setItem('pithagoras.language', 'de'));
+  await page.reload();
+  // The tab is "Installiert" now.
+  await expect(page.getByRole('listitem').filter({ hasText: 'moon' }).getByText('Von test-maker', { exact: true })).toBeVisible();
+});
+
 const box = async (page: Page, of: ReturnType<Page['locator']>) => (await of.boundingBox())!;
 /** Whether the second of two cards is beside the first, once the page has come to rest at its new size. */
 const beside = (page: Page, a: number, b: number) =>

@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import { LuBan, LuCircleCheck, LuGlobe, LuKeyRound, LuRefreshCw, LuShield, LuShieldAlert, LuShieldCheck, LuTrash2, LuUserX } from "react-icons/lu";
+import { LuBan, LuCircleCheck, LuGlobe, LuKeyRound, LuPuzzle, LuRefreshCw, LuShield, LuShieldAlert, LuShieldCheck, LuTrash2, LuUserX } from "react-icons/lu";
 import { confirmDialog } from "./ConfirmDialog";
 import { PageHeader, Stat } from "./PageHeader";
 import { ErrorBanner, LoadFailed, Segments } from "./SettingsUi";
 import { api, type AuditEntry } from "../api";
 import { pollWhileVisible } from "../poll";
 import { msg, t, tp } from "../i18n";
+import { translate } from "../extensions/strings";
 import { serverTime, sinceThen } from "../time";
 
 /** What each kind means at a glance, without reading the reason. */
@@ -32,6 +33,8 @@ const KIND: Record<string, { label: string; icon: JSX.Element; tone: string }> =
   revoked: { label: msg("Approval taken back"), icon: <LuKeyRound className="h-3.5 w-3.5" />, tone: "text-fg-muted" },
   // A chat put in a mode that asks first, after a yes to its warning (see ModePicker.tsx).
   mode: { label: msg("Mode chosen"), icon: <LuShieldAlert className="h-3.5 w-3.5" />, tone: "text-warn" },
+  // What an extension recorded it did (portal.audit.record), under its name.
+  extension: { label: msg("Extension"), icon: <LuPuzzle className="h-3.5 w-3.5" />, tone: "text-accent" },
 };
 
 const FILTERS = [
@@ -242,7 +245,8 @@ function AuditPanel({ onError }: { onError: (e: string | null) => void }) {
                     {tp(Number(e.reason), "One entry was deleted.", "{n} entries were deleted.")}
                   </p>
                 ) : (
-                  e.reason && <p className="mt-0.5 text-[11px] text-fg-faint">{e.reason}</p>
+                  // An extension's reason is its own English text, shown in its own words in the page's language.
+                  e.reason && <p className="mt-0.5 text-[11px] text-fg-faint">{e.kind === "extension" ? translate(e.tool, e.reason) : e.reason}</p>
                 )}
               </li>
             );

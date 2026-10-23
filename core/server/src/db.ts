@@ -2867,6 +2867,26 @@ export function setExtensionStash(stash: Record<string, unknown>): void {
   putSetting("extension_stash", Object.keys(stash).length ? JSON.stringify(stash) : "");
 }
 
+/** What an extension said of a package it installed from its data folder (`extensions.install`), and when: by the package's spec. */
+export type InstallNote = { note?: string; at: string };
+
+export function installNotes(): Record<string, InstallNote> {
+  try {
+    const raw = JSON.parse(getSetting("extension_install_notes") || "{}");
+    return raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+  } catch {
+    return {};
+  }
+}
+
+/** Keeps what was said of the package `spec`, or with nothing, forgets it. */
+export function setInstallNote(spec: string, record: InstallNote | undefined): void {
+  const notes = installNotes();
+  if (record) notes[spec] = record;
+  else delete notes[spec];
+  putSetting("extension_install_notes", Object.keys(notes).length ? JSON.stringify(notes) : "");
+}
+
 /** The minutes ask_question waits for an answer; 0, the default, is until it is answered. */
 export const QUESTION_WAIT_MINUTES = [0, 5, 15, 30, 60] as const;
 
@@ -3424,9 +3444,10 @@ export function mcpCatalogueFor(folder: string | undefined, view: McpView): (Omi
 }
 
 /**
- * What a package that has been uninstalled leaves behind: its tools, and what
- * was kept aside for switching it back on, which has nothing left to go to —
- * dropped in turn with the switches, which read and write it too.
+ * What a package that has been uninstalled leaves behind: its tools, what was
+ * kept aside for switching it back on, which has nothing left to go to, and what
+ * an extension that installed it said of it — dropped in turn with the switches,
+ * which read and write the first too.
  */
 export async function packageRemoved(source: string): Promise<void> {
   forgetPackageTools(source);
@@ -3438,6 +3459,7 @@ export async function packageRemoved(source: string): Promise<void> {
       delete stash[source];
       setExtensionStash(stash);
     }
+    if (source in installNotes()) setInstallNote(source, undefined);
   });
 }
 

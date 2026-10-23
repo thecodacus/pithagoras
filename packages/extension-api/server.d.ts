@@ -334,6 +334,41 @@ export interface ChatMode {
   confirm?: string;
 }
 
+/** Where an installed extension stands: see `extensions.status`. */
+export interface ExtensionStatus {
+  name: string;
+  version?: string;
+  /** What it is installed by, as Settings → Extensions lists it. */
+  spec: string;
+  /** Whether it is switched on. One the person switched off stays off, installed again or not. */
+  enabled: boolean;
+  /**
+   * The extension whose own `dataDir()` it was installed from; and the note that extension gave and when (an ISO
+   * time), where it installed it with `extensions.install` (not where the person installed that folder in Settings).
+   */
+  installedFrom?: { extension: string; note?: string; at?: string };
+  /**
+   * Its server half, where it declares one: whether it runs, why not, the crash it is held off for, and its latest
+   * lines (up to 200, oldest first, after `since` where that was given), with what looks like a secret taken out.
+   */
+  server?: {
+    running: boolean;
+    failure?: string;
+    crash?: { rev: string; at: string; error: string; stack?: string };
+    lines: { id: number; at: string; level: "debug" | "info" | "warn" | "error"; text: string }[];
+  };
+  /** What a page said last failed of its browser half, at the revision installed now. */
+  client?: { error: string; stack?: string };
+  /**
+   * Where `chatId` was asked: what that chat could not load of it at its last load (a factory of its server half that
+   * threw, a tool whose name another had). Empty while the chat's pi is not running.
+   */
+  loadErrors?: { error: string }[];
+}
+
+/** What `extensions.install` answers: where the extension stands once installed, and the open chats given it. */
+export type ExtensionInstalled = ExtensionStatus & { reloaded: number; waiting: number };
+
 export interface ServerPortal {
   /** Of this interface: raised when something an extension relies on changes. */
   version: 1;
@@ -343,6 +378,15 @@ export interface ServerPortal {
   executor: string;
   /** A line in the portal's log, kept with the extension's own lines: what Settings → Extensions shows of it should it crash. */
   log(text: string): void;
+  audit: {
+    /**
+     * A row in Settings → Audit, of the kind "Extension", under this extension's name: `subject` what it was done to
+     * (a name, a path: shown as it is), `reason` a short text in English, shown through the extension's own translations,
+     * and `chatId` the chat it was done for, kept as given (a chat deleted since is still named by its id, as the guard's
+     * rows are). Throws a TypeError for an empty subject.
+     */
+    record(entry: { subject: string; reason?: string; chatId?: string }): void;
+  };
   /**
    * What this extension gives the extensions that build on it, those that name it in `pithagoras.requires` or
    * `pithagoras.optional` in their package.json. `factory` is called once for each of them, with its name, when it first
@@ -419,6 +463,25 @@ export interface ServerPortal {
      * started again when such an extension comes or goes. Naming one that is in neither is an error.
      */
     use<T = unknown>(name: string): T | undefined;
+    /**
+     * Installs the package in `folder`, a folder in this extension's own `dataDir()`, which no agent can write, and loads it
+     * as an install in Settings does: its server half started, the pages given its browser half, the open chats loaded
+     * again (an idle one at once, a working one at its next step). The same folder installed again is loaded again in
+     * place, every half at its new revision. Settings → Extensions shows that it came from this extension, with `note`.
+     * Rejects for a folder outside `dataDir()`, one with no package.json or no valid name, and a name that one of the
+     * portal's own extensions has or that a package installed from elsewhere has. Installs and removals of every extension
+     * run one at a time. Rejects at once while this half is starting, or once it stopped: the server halves follow an
+     * install, and they would wait for this one.
+     */
+    install(folder: string, options?: { note?: string }): Promise<ExtensionInstalled>;
+    /**
+     * Uninstalls a package installed from this extension's `dataDir()`, as Remove in Settings does, and loads the open
+     * chats again. Its files are left: they are this extension's, in its own folder. Rejects for a package from anywhere
+     * else, and as `install` does while this half is not running.
+     */
+    remove(name: string): Promise<{ reloaded: number; waiting: number }>;
+    /** Where an installed extension stands now (see ExtensionStatus); nothing for a name that is not installed. */
+    status(name: string, options?: { chatId?: string; since?: number }): Promise<ExtensionStatus | undefined>;
   };
   /**
    * The models the chats use, and how to reach them: for a server half that asks a model itself, such as the one the

@@ -10,7 +10,7 @@ import { agentHome } from "./agent-home.js";
 import { agentAt } from "./agents.js";
 import { HEARTBEAT_ROLE } from "./pi/heartbeat-names.js";
 import path from "node:path";
-import type { Draft, PiClient, PiTool, PromptTaken } from "./pi/types.js";
+import type { Draft, LoadError, PiClient, PiTool, PromptTaken } from "./pi/types.js";
 import { effectiveOff, exceptionsFor, heldOffUnshown, toolEnabled, toolSource } from "./tool-policy.js";
 import { scriptedMark } from "./tool-layers.js";
 import { unlisted } from "./mcp-offer.js";
@@ -558,6 +558,11 @@ class SessionManager extends EventEmitter {
   /** A pi process is up or starting for it: only then is there anything for discard() to stop. */
   isLoaded(sessionId: string): boolean {
     return this.live.has(sessionId) || this.starting.has(sessionId);
+  }
+
+  /** What the chat's last load could not load (see PiClient.loadErrors): nothing while its pi is not running, or where the executor cannot say. */
+  loadErrors(sessionId: string): LoadError[] {
+    return this.live.get(sessionId)?.client.loadErrors?.() ?? [];
   }
 
   /** Stream updates in memory; persist completed messages and lifecycle metadata. */
