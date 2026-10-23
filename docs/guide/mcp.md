@@ -135,10 +135,11 @@ is not there, as for a moment while an editor or a script puts a new one in its
 place: the file there next is compared with the servers last seen, so a file
 deleted for good takes its servers out once a new one is written. Only this
 file's servers count: one the adapter loads from a project's own `.mcp.json` or
-from anywhere else is never taken for one that was removed. The first time the
-portal looks at the file it has nothing to compare it with, so a tool left behind
-by a server taken out by hand before then stays listed, until it is removed from
-`tools_seen` in the portal's database.
+from anywhere else is not judged, though where its name is that of a server
+taken out of this file, or starts with it and an underscore, its tools are taken
+for that server's. The first time the portal looks at the file it has nothing to
+compare it with, so a tool left behind by a server taken out by hand before then
+stays listed, until it is removed from `tools_seen` in the portal's database.
 
 ::: tip The adapter has its own commands
 `/mcp` opens its status panel, `/mcp tools` lists what is available, and

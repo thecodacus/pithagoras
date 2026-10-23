@@ -219,8 +219,8 @@ const writtenListeners = new Set<(before: string[]) => void>();
 /**
  * Tell the listeners (onMcpWritten) that the file was written, with the
  * servers it had before: by writeMcpText, after its write, and for an edit
- * made outside the portal once it is noticed (db.ts noticeMcpEdits), with the
- * servers the portal last saw in the file.
+ * made outside the portal that adds or takes out a server, once it is noticed
+ * (db.ts noticeMcpEdits), with the servers the portal last saw in the file.
  */
 export function mcpWritten(before: string[]): void {
   for (const listener of [...writtenListeners]) {
@@ -235,11 +235,11 @@ export function mcpWritten(before: string[]): void {
 /**
  * Told after every write of the file, whoever wrote it — a route of the panel,
  * a feature switched off, the browser moved over, or an edit made outside the
- * portal, once it is noticed — with the servers it had before: what the
- * configuration offers decides which tools a running chat may still use (see
- * mcp-offer.ts), and a chat that has to be restarted to notice a server
- * switched off is a switch that looks broken. Returns the way to stop
- * listening.
+ * portal that adds or takes out a server, once it is noticed — with the
+ * servers it had before: what the configuration offers decides which tools a
+ * running chat may still use (see mcp-offer.ts), and a chat that has to be
+ * restarted to notice a server switched off is a switch that looks broken.
+ * Returns the way to stop listening.
  */
 export function onMcpWritten(listener: (before: string[]) => void): () => void {
   writtenListeners.add(listener);

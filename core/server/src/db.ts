@@ -3372,10 +3372,13 @@ let noticedMcpFile: string | undefined;
  *
  * Only the servers of this file are judged: the adapter also loads some from a
  * project's own files, from `~/.config/mcp/mcp.json` and from what a file
- * imports, which are in no file the portal writes, and their tools are left as
- * they are. The first time there is nothing to compare with, the servers there
- * are now are remembered and nothing is judged: a tool that a server taken out
- * before then left behind cannot be told from one of a project's own servers.
+ * imports, which are in no file the portal writes. Their tools are left as
+ * they are, except where one of them has the name of a server taken out of
+ * this file, or a name that starts with it and an underscore: its tools are
+ * then taken for that server's, as for a removal through the panel. The first
+ * time there is nothing to compare with, the servers there are now are
+ * remembered and nothing is judged: a tool that a server taken out before then
+ * left behind cannot be told from one of a project's own servers.
  * A file that cannot be read takes nothing out, as a typo in it withdraws
  * nothing (readableMcpConfig): it is compared again once it can be read. Nor
  * does one that is not there, as for a moment while an editor or a script puts
