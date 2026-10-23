@@ -5,7 +5,7 @@ import { PageHeader, Stat } from "./PageHeader";
 import { ErrorBanner, LoadFailed, Segments } from "./SettingsUi";
 import { api, type AuditEntry } from "../api";
 import { pollWhileVisible } from "../poll";
-import { msg, t, tp } from "../i18n";
+import { msg, t, tp, useLanguage } from "../i18n";
 import { translate } from "../extensions/strings";
 import { serverTime, sinceThen } from "../time";
 
@@ -84,6 +84,8 @@ function Subject({ text }: { text: string }) {
 }
 
 function AuditPanel({ onError }: { onError: (e: string | null) => void }) {
+  // An extension's row is in its own words, which its browser half can bring after the rows are drawn.
+  useLanguage();
   const [entries, setEntries] = useState<AuditEntry[]>([]);
   const [filter, setFilter] = useState("all");
   const [loading, setLoading] = useState(true);

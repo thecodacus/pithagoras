@@ -30,16 +30,21 @@ test.describe("an extension's rows", () => {
 
   test("an extension's row has its kind, and its reason in the extension's words", async ({ page }) => {
     const subject = 'moon 0.1.0 · 0123456789ab · extensions/moon';
-    await portal(page, [{ id: 2, at: '2026-10-01T09:00:00Z', kind: 'extension', tool: 'test-recorder', subject, reason: 'Installed', person_key: null, person_name: null, session_id: 'a' }]);
+    await portal(page, [{ id: 2, at: '2026-10-01T09:00:00Z', kind: 'extension', tool: 'test-recorder', subject, reason: 'Made again', person_key: null, person_name: null, session_id: 'a' }]);
     await page.goto('/audit');
     const row = page.getByRole('listitem').filter({ hasText: subject });
     await expect(row.getByText('Extension', { exact: true })).toHaveClass(/text-accent/);
     await expect(row.getByRole('button', { name: `test-recorder: ${subject}` })).toBeVisible();
-    await expect(row.getByText('Installed', { exact: true })).toBeVisible();
+    await expect(row.getByText('Made again', { exact: true })).toBeVisible();
 
+    // Its browser half comes a second after the rows are drawn: the row is drawn again in its words, not at the next poll.
+    await page.route('**/api/extension-ui/test-recorder/**', async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      await route.fallback();
+    });
     await page.evaluate(() => localStorage.setItem('pithagoras.language', 'de'));
     await page.reload();
     await expect(row.getByText('Erweiterung', { exact: true })).toBeVisible();
-    await expect(row.getByText('Installiert', { exact: true })).toBeVisible();
+    await expect(row.getByText('Erneut gemacht', { exact: true })).toBeVisible();
   });
 });
