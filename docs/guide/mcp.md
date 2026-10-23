@@ -139,7 +139,8 @@ from anywhere else is not judged, though where its name is that of a server
 taken out of this file, or starts with it and an underscore, its tools are taken
 for that server's. The first time the portal looks at the file it has nothing to
 compare it with, so a tool left behind by a server taken out by hand before then
-stays listed, until it is removed from `tools_seen` in the portal's database.
+stays listed. To be rid of it, add the server again under its name here, with
+any entry, and remove it.
 
 ::: tip The adapter has its own commands
 `/mcp` opens its status panel, `/mcp tools` lists what is available, and

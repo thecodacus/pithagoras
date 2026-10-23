@@ -246,3 +246,17 @@ test("an edit made while the portal was not running is noticed when it starts", 
   assert.ok(!tools.includes("wiki_page"), tools.join(", "));
   assert.ok(tools.includes("jira_search"));
 });
+
+test("a tool left behind by a server taken out by hand before the first look goes once the server is added again under its name and removed in Settings → MCP", () => {
+  // As the first look left `old_lookup` above: remembered, listed, and claimed by no server of the file.
+  writeMcpFile({ mcpServers: { jira: JIRA } });
+  db.rememberTools([adapter("gone_lookup")]);
+  assert.ok(listed().includes("gone_lookup"));
+  assert.ok(!configured().includes("gone"));
+  // Added again in the panel, with any entry, and removed there: its tools go as any removed server's do.
+  writeMcpFile({ mcpServers: { jira: JIRA, gone: { command: "true" } } });
+  writeMcpFile({ mcpServers: { jira: JIRA } });
+  assert.ok(!listed().includes("gone_lookup"));
+  assert.ok(!known().includes("gone_lookup"), "forgotten, not only hidden");
+  assert.ok(removed().includes("gone"));
+});
