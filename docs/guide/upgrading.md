@@ -235,6 +235,11 @@ listed under Settings → Extensions → Discover → Comes with Pithagoras: Bro
 (`pithagoras-kanban`) and Creator mode (`pithagoras-creator`). The sections
 below say which of them a portal that used 0.1.0's add-ons needs.
 
+Notes (`pithagoras-notes`) came with some builds of the main branch after 0.1.0,
+in `extensions/notes`, and is a test fixture now. A portal that installed it from
+that folder keeps it in pi's list with the folder gone: Settings → Extensions
+still lists it, with nothing behind it. Remove it there. 0.1.0 never had it.
+
 ## The terminal is an extension
 
 The terminal is the `pithagoras-terminal` extension now
