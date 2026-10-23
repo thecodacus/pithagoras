@@ -93,6 +93,8 @@ copy:
   folder, which is the portal's alone (mode 0700): the sandbox keeps the agents
   out of it. Each file of the copy is new, so each install is a new revision of
   every half. The copy is put in place whole, by a rename, after it is checked.
+  The copy it replaces is kept aside until the install is done: an install the
+  portal refuses puts it back, so what is installed is what was recorded last.
 - **The digest**, a sha256 of the copy's files, is in the answer, in Audit and on
   Creator's page: it names exactly what was installed.
 
@@ -128,8 +130,8 @@ chat that never reads one, nothing asks.
 
 - **Audit** has a row of the kind *Extension*, under `pithagoras-creator`, for
   each install (*Installed*, then *Installed again*) and each removal
-  (*Removed*): the name and version, the short digest and the folder, with the
-  chat.
+  (*Removed*): the name and version, the short digest and the folder. The
+  chat's id is kept with the row (`session_id` in `GET /api/audit`).
 - **Settings → Extensions** marks a made extension **From pithagoras-creator**
   (or the name you gave it in Settings → Tools), with when it was installed on
   hover and a note under it: the chat it was made in and its folder. Switch it

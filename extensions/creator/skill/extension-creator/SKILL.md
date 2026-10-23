@@ -71,7 +71,8 @@ install it again.
 - Links in your folder are left out of the copy, not followed. Install
   packages with `npm install` in the folder (npm copies them; pnpm links
   them), and the copy takes `node_modules` with it. At most 64 MB, 10,000
-  files and 32 folders deep are copied.
+  files, 32 folders deep and 2,000 entries in one folder (`node_modules`
+  included) are copied.
 
 ## Which half does what
 
