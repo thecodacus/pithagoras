@@ -1254,8 +1254,10 @@ the database since the upgrade is lost, as with any restore.
    Canvases, Media and the theme pack), and Browser, Docker for extensions,
    Voice, Voice servers, Understory, Documents, Kanban and Creator mode where
    you installed them. pi's `settings.json` lists each by its folder in the
-   image, and 0.1.0's image has none of those folders. Removing one keeps its
-   folder in `extension-data/`, and the containers keep running.
+   image, and 0.1.0's image has none of those folders: 0.1.0 starts all the
+   same, and lists them under Settings → Extensions with nothing behind them,
+   where they can be removed too. Removing one keeps its folder in
+   `extension-data/`, and the containers keep running.
 2. **Stop the portal.**
 3. **Put the backup back:** `backups/portal-v3-….db` as `portal.db`, with
    `portal.db-wal` and `portal.db-shm` beside it removed.
