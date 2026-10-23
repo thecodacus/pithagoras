@@ -7,6 +7,7 @@ import { folderFiles } from "./folder-files.js";
 import { gitAt } from "./git.js";
 import { API_FN, CHILD_FN, PARENT_FN, errorIn, errorOut, swapped, type FnUse } from "./half-wire.js";
 import { sendFile } from "./send-file.js";
+import { PI_BUILT_IN_TOOLS } from "./tool-policy.js";
 import { setAgentAccess } from "./workspace-files.js";
 
 /**
@@ -283,6 +284,8 @@ async function extend(chat: Chat, load: number) {
   };
   const members: Record<string, (...args: any[]) => unknown> = {
     registerTool: only("registerTool", (tool: any) => {
+      // pi lets a tool of an extension take the place of its own of that name, in every chat this factory runs for.
+      if (PI_BUILT_IN_TOOLS.includes(tool?.name)) throw new TypeError(`"${tool.name}" is one of pi's own tools: give the tool another name`);
       // How a tool is drawn in the terminal is pi's own, and not here.
       const def = data(tool ?? {}, "A tool", ["execute", "renderCall", "renderResult"]);
       delete def.renderCall;

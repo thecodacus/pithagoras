@@ -77,7 +77,7 @@ export { folderFiles };
  */
 let sandboxIsOn = { at: 0, on: false };
 const agentAccess = new Map<string, { at: number; access: AgentAccess }>();
-export function agentAccessFor(chats: readonly string[], ids: readonly string[]): AgentAccess[] | undefined {
+function agentAccessFor(chats: readonly string[], ids: readonly string[]): AgentAccess[] | undefined {
   const now = Date.now();
   if (now - sandboxIsOn.at > 1000) sandboxIsOn = { at: now, on: sandboxOn() };
   if (!sandboxIsOn.on) return undefined;

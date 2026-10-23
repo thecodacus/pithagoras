@@ -162,6 +162,8 @@ test("only a folder of its own data folder, with a name of its own: anything els
     [made("invalid", { name: "Not a name" }), { name: "TypeError", message: /has no valid name/ }],
     [made("kanban", { name: "pithagoras-kanban" }), { name: "Error", message: "pithagoras-kanban is the name of an extension that comes with Pithagoras" }],
     [made("subagent", { name: "pithagoras-subagent" }), { name: "Error", message: "pithagoras-subagent is the name of an extension that comes with Pithagoras" }],
+    [made("sandbox", { name: "sandbox" }), { name: "Error", message: "sandbox is the name of one of the portal's own extensions in a chat's pi" }],
+    [made("guard", { name: "guard" }), { name: "Error", message: "guard is the name of one of the portal's own extensions in a chat's pi" }],
     [made("dup", { name: "dup" }), { name: "Error", message: `dup is installed already, from ${dupSpec}` }],
   ];
   const before = readFileSync(settings, "utf8");

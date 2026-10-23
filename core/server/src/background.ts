@@ -5,6 +5,7 @@ import { fieldsOf, signalSession, statOf } from "./proc-stat.js";
 import { within } from "./paths.js";
 import { realPath } from "./within.js";
 import { EXECUTOR_KIND } from "./executor-kind.js";
+import { halfSessions } from "./isolated-half.js";
 
 /**
  * What the agent left running in a workspace: background shells, servers,
@@ -170,6 +171,9 @@ async function walk(roots: string[]): Promise<Proc[]> {
     return [];
   }
   const own = portalSession();
+  // A server half in a process of its own leads a session of its own: what it starts is the portal's, as what a half
+  // in the portal's process starts is, and stopping it would end the half.
+  const halves = halfSessions();
   const found: Proc[] = [];
   const read = async (name: string) => {
     const pid = Number(name);
@@ -182,7 +186,7 @@ async function walk(roots: string[]): Promise<Proc[]> {
       const stat = await readFile(`/proc/${pid}/stat`, "utf8");
       const f = fieldsOf(stat);
       const sid = Number(f[3]);
-      if (sid === own) return;
+      if (sid === own || halves.has(sid)) return;
       const argv = (await readFile(`/proc/${pid}/cmdline`, "utf8")).split("\0").filter(Boolean);
       found.push({ pid, cwd, ppid: Number(f[1]), sid, state: f[0], start: Number(f[19]), argv });
     } catch {
