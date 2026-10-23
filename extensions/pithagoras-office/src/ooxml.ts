@@ -116,8 +116,10 @@ function dosDateTime(d: Date): { time: number; date: number } {
   };
 }
 
-/** Fresh zip from named entries (order kept). Deflate for non-empty data, stored otherwise. */
-function writeZip(entries: { name: string; data: Buffer; time?: { time: number; date: number } }[]): Buffer {
+/** Fresh zip from named entries (order kept). Deflate for non-empty data, stored otherwise.
+ * Exported so scripts/make-fixtures.mjs can build the committed fixtures THROUGH this writer -- the
+ * fixtures then double as round-trip material for our own reader/writer pair. */
+export function writeZip(entries: { name: string; data: Buffer; time?: { time: number; date: number } }[]): Buffer {
   const now = dosDateTime(new Date());
   const chunks: Buffer[] = [];
   const cd: Buffer[] = [];
