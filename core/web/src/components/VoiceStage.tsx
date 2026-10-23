@@ -25,10 +25,14 @@ import type { PortalEvent } from "../api";
 import type { VoiceCue } from "../voice-cues";
 import type { VoicePhase } from "../hands-free";
 import { t } from "../i18n";
-import { VoiceOrb, useOrbStyle, type VoiceLevels } from "./VoiceOrb";
+import type { VoiceLevels } from "./VoiceOrb";
+import { AgentAvatar, useChatAvatar } from "./AgentAvatar";
 
 export type { VoiceLevels } from "./VoiceOrb";
 type OrbMode = "input" | "output" | "idle" | "muted";
+
+/** What the status line says as Transcribing, Thinking, Preparing your reply (Speaking with nothing played yet) and Compacting context. */
+const WORKING: ReadonlySet<VoicePhase> = new Set(["Transcribing", "Thinking", "Speaking", "Compacting context"]);
 
 /** What a window's place and size slide by (see stage.css). */
 const GEOMETRY = new Set(["left", "top", "right", "width", "height", "transform"]);
@@ -359,7 +363,9 @@ export function VoiceStage({ sessionId, folder, workPhase, title, phase, startin
   };
   const input = !muted && phase === "Hearing you";
   const mode: OrbMode = input ? "input" : speaking ? "output" : muted ? "muted" : "idle";
-  const orbStyle = useOrbStyle(sessionId);
+  // The agent at work and nothing played, as the status line says it: not while the person is heard or holds to talk.
+  const thinking = !input && !holding && !speaking && WORKING.has(phase);
+  const { agent, look } = useChatAvatar(sessionId);
   const touch = typeof matchMedia === "function" && matchMedia("(hover: none)").matches;
   const status = waitingForTap ? (touch ? t("Tap to continue voice mode") : t("Click or press a key to continue voice mode")) : starting ? t("Connecting") : input || holding ? t("Hearing you") : speaking ? t("Speaking") : phase === "Speaking" ? t("Preparing your reply") : phase === "Thinking" ? t("Thinking") : phase === "Transcribing" ? t("Transcribing") : muted ? t("Microphone muted") : ptt ? (touch || !bindings["voice.hold"] ? t("Hold the microphone to talk") : t("Hold {keys} to talk", { keys: describe(bindings["voice.hold"], layout) })) : t("Listening");
   const anyPanel = picturesShown || conversation || brought.length > 0;
@@ -520,7 +526,7 @@ export function VoiceStage({ sessionId, folder, workPhase, title, phase, startin
     }} />
     <div className="voice-presence">
       {/* With push-to-talk on, the orb can be held as well as the microphone button: it is the big target on a phone. */}
-      <div className={`voice-avatar ${ptt ? "is-holdable" : ""}`} {...(ptt && !starting ? holdHandlers : {})}><VoiceOrb mode={mode} levels={levels} look={orbStyle} /></div>
+      <div className={`voice-avatar ${ptt ? "is-holdable" : ""}`} {...(ptt && !starting ? holdHandlers : {})}><AgentAvatar look={look} agent={agent} mode={mode} thinking={thinking} levels={levels} /></div>
       <div className="voice-dock-center">
         {workPhase && (workPhase.label === 'processing the prompt' || workPhase.label === 'compacting the conversation') ? <ActivityProgress phase={workPhase} /> : <>
         <div className="voice-status" role="status"><span />{phase === 'Compacting context' ? t('Compacting context') : thought && anyPanel ? t("Thinking") : status}</div>

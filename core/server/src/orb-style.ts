@@ -86,6 +86,13 @@ export const ORB_PALETTES: Record<string, OrbColors> = {
 };
 
 export interface OrbStyle {
+  /**
+   * What voice mode draws for the agent: "orb", the portal's own, drawn with
+   * the rest of this, or an avatar an extension offers, by its entry's
+   * "<package>/<id>" (the `voice.avatar` slot). The page draws the orb for an
+   * avatar it does not have; the server cannot know which a page has.
+   */
+  avatar: string;
   personality: OrbPersonality;
   /** The palette the colors came from, or "custom" once one was changed by hand. */
   palette: string;
@@ -105,6 +112,7 @@ export interface OrbStyle {
 }
 
 export const DEFAULT_ORB: OrbStyle = {
+  avatar: "orb",
   personality: "balanced",
   palette: "aurora",
   colors: { ...ORB_PALETTES.aurora },
@@ -122,6 +130,8 @@ export const DEFAULT_ORB: OrbStyle = {
 };
 
 const HEX = /^#[0-9a-f]{6}$/i;
+/** The longest "<package>/<id>" kept for an extension's avatar. */
+const AVATAR_KEY_MAX = 256;
 const STATES: OrbState[] = ["idle", "input", "output", "muted"];
 
 /** A #rrggbb colour, lower-cased; anything else is the default. */
@@ -146,6 +156,7 @@ export function normalizeOrb(value: unknown): OrbStyle {
   const colors = Object.fromEntries(STATES.map((s) => [s, hex(given[s], DEFAULT_ORB.colors[s])])) as OrbColors;
   const palette = typeof v.palette === "string" && (Object.hasOwn(ORB_PALETTES, v.palette) || v.palette === "custom") ? v.palette : DEFAULT_ORB.palette;
   return {
+    avatar: typeof v.avatar === "string" && v.avatar && v.avatar.length <= AVATAR_KEY_MAX ? v.avatar : DEFAULT_ORB.avatar,
     personality,
     palette,
     colors,

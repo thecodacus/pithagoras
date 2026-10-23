@@ -3,7 +3,8 @@ import { useSearchParams } from "react-router-dom";
 import { OrbStudio } from "./OrbStudio";
 import { ActivityFeed, HeartbeatSettings } from "./AgentHeartbeat";
 import { AgentSkills } from "./AgentSkills";
-import { VoiceOrb, type VoiceLevels } from "./VoiceOrb";
+import type { VoiceLevels } from "./VoiceOrb";
+import { AgentAvatar } from "./AgentAvatar";
 import {
   LuBot,
   LuCheck,
@@ -166,7 +167,7 @@ function AgentCards({ agents, onOpen, onNew }: { agents: Agent[]; onOpen: (id: s
                 {/* Room around the orb for its glow, and for a hat or a prop. */}
                 <div className="flex h-28 w-28 items-center justify-center rounded-2xl bg-[#0b1220]">
                   <div className="voice-avatar w-[56%]">
-                    <VoiceOrb mode="idle" levels={still} look={a.orb} />
+                    <AgentAvatar look={a.orb} agent={a} mode="idle" levels={still} still />
                   </div>
                 </div>
                 {a.unread > 0 && (
@@ -386,7 +387,7 @@ function AgentView({
           {back}
           <PageHeader
             icon={<LuBot />}
-            media={<OrbStudio agent={agent.id} orb={agent.orb} voice={agent.voice} onSaved={() => void onChanged()} />}
+            media={<OrbStudio agent={agent.id} name={agent.name} orb={agent.orb} voice={agent.voice} onSaved={() => void onChanged()} />}
             title={
               renaming === "agent" ? (
                 <TitleInput value={agent.name} label={t("Agent name")} className="w-full" onCommit={renameAgent} onCancel={() => setRenaming(null)} />

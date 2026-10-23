@@ -1,6 +1,5 @@
-import { useEffect, useRef, useState, type MutableRefObject } from "react";
-import { api } from "../api";
-import { DEFAULT_ORB, ORB_PERSONALITIES, hexToRgb, itemColor, type OrbHat, type OrbPattern, type OrbProp, type OrbState, type OrbStyle } from "../../../server/src/orb-style";
+import { useEffect, useRef, type MutableRefObject } from "react";
+import { ORB_PERSONALITIES, hexToRgb, itemColor, type OrbHat, type OrbPattern, type OrbProp, type OrbState, type OrbStyle } from "../../../server/src/orb-style";
 
 type Ctx = CanvasRenderingContext2D;
 
@@ -8,23 +7,6 @@ export interface VoiceLevels { input: number; output: number }
 
 /** Sent with the new style when it is saved, so an open voice stage changes with it. */
 export const ORB_STYLE_EVENT = "orb-style-changed";
-
-/**
- * The avatar of the agent a chat talks to: the default until the server
- * answers, then whatever is saved. Asked again when an avatar is saved, since
- * it can be this one.
- */
-export function useOrbStyle(session: string): OrbStyle {
-  const [style, setStyle] = useState<OrbStyle>(DEFAULT_ORB);
-  useEffect(() => {
-    let live = true;
-    const load = () => api.chatOrb(session).then((s) => { if (live) setStyle(s); }).catch(() => {});
-    void load();
-    window.addEventListener(ORB_STYLE_EVENT, load);
-    return () => { live = false; window.removeEventListener(ORB_STYLE_EVENT, load); };
-  }, [session]);
-  return style;
-}
 
 type Rgb = [number, number, number];
 const css = (c: Rgb, a = 1) => `rgba(${c.map(Math.round).join(",")},${a})`;

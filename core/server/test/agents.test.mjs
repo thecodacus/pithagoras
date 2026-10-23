@@ -212,6 +212,28 @@ test("each agent has an avatar of its own, and voice mode shows its chat's agent
   assert.equal((await call("PUT", "/api/agents/ops/orb", [])).status, 400);
 });
 
+test("an agent's avatar can be one an extension offers, and voice mode is told the chat's agent with it", async () => {
+  const scout = (await call("POST", "/api/agents", { name: "Scout" })).body;
+  assert.equal(scout.orb.avatar, "orb");
+  const saved = await call("PUT", "/api/agents/scout/orb", { ...scout.orb, avatar: "test-puppet/puppet", hat: "crown" });
+  assert.equal(saved.status, 200);
+  assert.equal(saved.body.avatar, "test-puppet/puppet");
+  const agents = (await call("GET", "/api/agents")).body.agents;
+  assert.equal(agents.find((a) => a.id === "scout").orb.avatar, "test-puppet/puppet");
+  const first = agents.find((a) => a.first);
+
+  const chat = (await call("POST", "/api/sessions", { agent: "scout" })).body;
+  const avatar = (await call("GET", `/api/agent/avatar?session=${chat.id}`)).body;
+  assert.deepEqual(avatar.agent, { id: "scout", name: "Scout" });
+  // The orb's look is kept with the choice: it is what is drawn where the extension's cannot be.
+  assert.deepEqual([avatar.orb.avatar, avatar.orb.hat], ["test-puppet/puppet", "crown"]);
+  const homeChat = (await call("POST", "/api/sessions", {})).body;
+  assert.deepEqual((await call("GET", `/api/agent/avatar?session=${homeChat.id}`)).body, { agent: { id: first.id, name: first.name }, orb: first.orb });
+  // Saved without it, the orb is chosen again, as any field left out is its default.
+  const { avatar: _, ...look } = saved.body;
+  assert.equal((await call("PUT", "/api/agents/scout/orb", look)).body.avatar, "orb");
+});
+
 test("an agent speaks with a voice its voice mode's source offers, or the source's own choice", async () => {
   await call("POST", "/api/agents", { name: "Herald" });
   assert.equal((await call("GET", "/api/agents")).body.agents.find((a) => a.id === "herald").voice, "");

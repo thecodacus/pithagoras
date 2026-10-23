@@ -31,7 +31,9 @@ sidebar, and six tabs: **Conversations** (every chat in its home, however it was
 started, and the number above it counts them all),
 **Activity** (what its heartbeat noticed, with the number unread),
 **Heartbeat**, **Tools** (see [below](#tools)), **Skills** and **Files** to edit. The tab is kept in the link (`&tab=files`). Its avatar is at
-the top beside its name; the palette on it opens the avatar customizer. Each
+the top beside its name; the palette on it opens the avatar customizer, which
+also chooses what the avatar is drawn as: the orb, or an avatar an extension
+offers (see [Voice](/guide/voice)). Each
 agent's avatar is its own, and voice mode shows the avatar of the agent the
 chat is with (the agent a project works with for a chat in it, the first agent's if it
 works with none, see [Projects](/guide/projects#an-agent-for-a-project)). Its

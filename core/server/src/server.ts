@@ -971,6 +971,17 @@ app.get("/api/agent/orb", (req, res) => {
   res.json(orbOf(agentFor(session?.workspace)));
 });
 
+/**
+ * The agent a chat (`?session=`) is with and its avatar, which voice mode
+ * shows: the agent whose home the chat is in, the one a chat in a project is
+ * linked to, and else the first.
+ */
+app.get("/api/agent/avatar", (req, res) => {
+  const session = typeof req.query.session === "string" ? getSession(req.query.session) : undefined;
+  const agent = agentFor(session?.workspace);
+  res.json({ agent: { id: agent.id, name: agent.name }, orb: orbOf(agent) });
+});
+
 app.post("/api/sessions", (req, res) => {
   const { workspace, agent: agentId } = req.body ?? {};
   const title = cleanTitle(req.body?.title);

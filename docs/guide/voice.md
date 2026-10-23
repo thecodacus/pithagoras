@@ -54,6 +54,16 @@ only becomes the saved avatar once you press **Save avatar**. Voice mode shows
 the avatar of the agent the chat is with, the first agent's for a chat in a
 project.
 
+An agent's avatar can also be one an extension offers: with such an extension
+installed, the dialog has a row **Shown as** above its sections, with the orb and
+each avatar the extensions offer. One chosen is set up on its extension's page in
+Settings, so the orb's sections give way to a line that says so, and the preview
+can show it **Thinking** as well: what voice mode shows while the agent works and
+nothing is played yet. Voice mode shows the agent's orb wherever that avatar cannot
+be drawn. While its extension is not installed, is switched off, could not be
+loaded or no longer offers it, the dialog says it is **Not available** and keeps
+the choice, so the avatar comes back when its extension does.
+
 Browser tool calls bring the live browser into a floating window and dock the
 orb, with the [Browser](/guide/browser) extension installed. Terminal calls show the agent’s actual command and streamed output on the
 right, moving the orb left. With both open, the browser is larger and the terminal

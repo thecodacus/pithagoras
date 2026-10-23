@@ -972,8 +972,8 @@ export const api = {
   agentSkill: (agent: string, skill: string) =>
     json<{ content: string }>(`/api/agents/${encodeURIComponent(agent)}/skills/${encodeURIComponent(skill)}`),
   agentSetup: (agent: string) => json<AgentSetup>(`/api/agents/${encodeURIComponent(agent)}/setup`),
-  /** The avatar voice mode shows for a chat: its agent's. */
-  chatOrb: (session: string) => json<OrbStyle>(`/api/agent/orb?session=${encodeURIComponent(session)}`),
+  /** The agent a chat is with, and the avatar voice mode shows for it. */
+  chatAvatar: (session: string) => json<{ agent: { id: string; name: string }; orb: OrbStyle }>(`/api/agent/avatar?session=${encodeURIComponent(session)}`),
   /** An agent's avatar: the voice-mode orb's look and personality. */
   setAgentOrb: (agent: string, style: OrbStyle) =>
     json<OrbStyle>(`/api/agents/${encodeURIComponent(agent)}/orb`, { method: "PUT", body: JSON.stringify(style) }),

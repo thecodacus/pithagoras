@@ -1,0 +1,10 @@
+{
+  "name": "test-puppet",
+  "version": "0.1.0",
+  "description": "The portal's tests' stand-in for an extension that draws the agent in voice mode, so that no spec of the portal's own needs one the portal ships",
+  "type": "module",
+  "keywords": ["pi-package"],
+  "pi": {},
+  "pithagoras": { "client": "./web/client.js" },
+  "license": "Apache-2.0"
+}

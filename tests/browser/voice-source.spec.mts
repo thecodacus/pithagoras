@@ -6,7 +6,7 @@ import { test, expect, mockPortal } from './portal-mock';
  * own page. The voices it offers are what an agent's voice is picked from, on the Agents page.
  */
 const SOURCE = { provider: 'test-speaker', label: 'Speaker', ready: true, speech: true, enabled: true };
-const ORB = { personality: 'balanced', palette: 'aurora', colors: { idle: '#82bcff', input: '#7fe0b4', output: '#c9a2ff', muted: '#8a91a0' }, speed: 1, reactivity: 1, glow: 1, pattern: 'ribbons', finish: 'glossy', eyes: 'none', eyeColor: '#111111', hat: 'none', hatColor: 'auto', prop: 'none', propColor: 'auto' };
+const ORB = { avatar: 'orb', personality: 'balanced', palette: 'aurora', colors: { idle: '#82bcff', input: '#7fe0b4', output: '#c9a2ff', muted: '#8a91a0' }, speed: 1, reactivity: 1, glow: 1, pattern: 'ribbons', finish: 'glossy', eyes: 'none', eyeColor: '#111111', hat: 'none', hatColor: 'auto', prop: 'none', propColor: 'auto' };
 
 /**
  * The Agents page with the agent Home, which speaks with `voice`, and its avatar opened. `config` is voice mode's

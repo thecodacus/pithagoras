@@ -346,6 +346,7 @@ puts it before entries with a higher one, or none.
 | `chat.overlay` | Over the chat, placed by you | | `chat`, `channel`, `panels` |
 | `chat.background` | Nowhere: there while the chat is on screen, drawing nothing | | `chat`, `channel`, `panels` |
 | `voice.window` | A window in voice mode, placed and sized like the portal's own | `title`, `icon?`, `place?`, `maximizable?`, `keepLoaded?`, `useAutoOpen?`, `useButton?`, `opensFor?`, `describe?` | `chat`, `channel`, `panels`, `close()`, `opened`, `maximized`, `maximize()`, `restore()` |
+| `voice.avatar` | The agent in voice mode, where the orb is, for each agent whose avatar it was chosen as in the Avatar dialog | `title`, `description?` | `agent`, `mode`, `levels`, `still`, `orb` |
 | `nav.page` | A page at `/x/<package>/<id>`, with an entry in the sidebar | `title`, `icon?`, `useShown?` | |
 | `settings.page` | Your package's page in Settings, at `/settings/x/<package>`, above the fields the portal found for it | `title?` and `icon?`: its entry in Settings' list, in place of the package's name and the mark every extension has; `search`: what Settings' search finds on it, each `{ title, section?, words? }`, `section` being the heading it goes to | |
 
@@ -569,6 +570,109 @@ function Viewer({ maximized, restore }) {
 }
 
 portal.slots.register("voice.window", { id: "viewer", title: "Viewer", place: "middle", maximizable: true, keepLoaded: true, component: Viewer });
+```
+
+### An avatar in voice mode
+
+A `voice.avatar` entry is something an agent can be drawn as in voice mode, in
+place of the orb. Each agent's Avatar dialog (the palette on its avatar, on the
+**Agents** page) has a row **Shown as** that lists the orb and every entry by
+its `title` and `description`, both translated as a `title` is. An agent that
+chose yours is drawn with your component wherever the portal shows its avatar:
+on the voice stage, in the dialog's preview, on its card and on its page. The
+orb is drawn in its place wherever yours cannot be: your package is not
+installed, is switched off or has not loaded yet, it no longer registers that
+entry, or your component throws or its chunk cannot be fetched. That failure is
+shown in **Settings → Extensions**, and the agent keeps its choice. Do not
+catch your own errors to draw something else: throwing is what brings the orb
+back.
+
+What is chosen is kept for the agent as `<package>/<id>`, at most 256
+characters together. Keep an entry's `id` the same across versions, and the
+agents that chose it keep it; register one entry for each thing there is to
+choose (one for each character a person added, say), and take one out again with
+what `register` returned when it is gone. Registering is live: the dialog lists
+an entry as soon as it is registered.
+
+Your component is given:
+
+- `agent`: `{ id, name }`, the agent it is drawn for.
+- `mode`: what voice mode is doing. `input` while the person is heard,
+  `output` while the reply is played, `thinking` while the agent is at work and
+  nothing is played (the stage says Transcribing, Thinking, Preparing your
+  reply or Compacting context, and also for a moment between two phrases of one
+  reply), `muted` while the microphone is off and nothing else goes on, and
+  `idle` otherwise. While muted and at work, it is `thinking`.
+- `levels`: `levels.current.input` and `levels.current.output`, from 0 to 1,
+  what the microphone hears and what is played now. They change many times a
+  second and your component is not drawn again for them: read them in an
+  animation frame of your own, through `levels` each time. The object in
+  `current` is replaced at times (when voice mode stops, and on every frame of
+  the dialog's made-up voice), so one you kept no longer moves. Smoothing them
+  is yours.
+- `still`: `true` for a picture of the agent rather than voice mode: its card
+  on the Agents page and the avatar on its page. `mode` is `idle` and the
+  levels stay 0. Draw it once and keep nothing running for it: the Agents page
+  shows one for every agent, and a browser keeps only about 16 WebGL contexts
+  for a page, so draw a picture there rather than a live context.
+- `orb`: the portal's orb for the same agent, in the same mode and with the
+  same levels, to draw while you have nothing of your own to draw yet (a model
+  still loading, a drawing context that was lost).
+
+It is drawn in the orb's box, which is square and fills its parent. That box
+changes size without your component being made again: up to 380 pixels in the
+middle of the stage, `min(300px, 34%)` beside a window, 100 in its dock and 64 in its
+dock on a phone, its width animated over 0.7 seconds. Follow it with a
+`ResizeObserver` and apply the size inside your own animation frame, as the
+orb does, or it flickers while it moves. You may draw past the box, as the
+orb's glow does, by 3/14 of its size on each side. Pause while it is out of
+view (an `IntersectionObserver`), and read
+`matchMedia("(prefers-reduced-motion: reduce)")` for reduced motion: there is
+no prop for it. Free what you hold (a GL context, its textures) when the
+component is unmounted: when voice mode ends, the chat changes, the dialog
+closes, another avatar is saved, or your package goes away.
+
+With push-to-talk on, the person holds the avatar to talk. The box takes no
+pointer events, and a press on something of yours that does take them still
+reaches the box: do not stop it there.
+
+A heavy part (a drawing library) goes in a chunk of its own with `ui.lazy`; the orb
+is drawn while it is fetched.
+
+```js
+function Square({ mode, levels, still }) {
+  const canvas = React.useRef(null);
+  // Read in the frame, as the levels are: a new mode does not start the drawing again.
+  const now = React.useRef(mode);
+  now.current = mode;
+  React.useEffect(() => {
+    const el = canvas.current;
+    const ctx = el.getContext("2d");
+    let frame = 0, size = 0, seen = true, level = 0;
+    const resized = new ResizeObserver(([entry]) => { size = Math.round(entry.contentRect.width * Math.min(devicePixelRatio, 2)); });
+    const shown = new IntersectionObserver(([entry]) => { seen = entry.isIntersecting; if (seen && !frame) frame = requestAnimationFrame(draw); });
+    const draw = () => {
+      frame = 0;
+      // Sized here, in the frame it is drawn in, not as the observer says it.
+      if (size && el.width !== size) el.width = el.height = size;
+      const { input, output } = levels.current;
+      level += (Math.max(input, output) - level) * 0.3;
+      const side = el.width * (0.4 + 0.5 * level);
+      ctx.clearRect(0, 0, el.width, el.height);
+      ctx.fillStyle = now.current === "thinking" ? "#82bcff" : "#c9a2ff";
+      ctx.fillRect((el.width - side) / 2, (el.height - side) / 2, side, side);
+      // A picture is drawn once it has its size, and then left.
+      if (seen && (!still || !size)) frame = requestAnimationFrame(draw);
+    };
+    resized.observe(el);
+    shown.observe(el);
+    frame = requestAnimationFrame(draw);
+    return () => { cancelAnimationFrame(frame); resized.disconnect(); shown.disconnect(); };
+  }, [levels, still]);
+  return h("canvas", { ref: canvas, style: { position: "absolute", inset: 0, width: "100%", height: "100%" } });
+}
+
+portal.slots.register("voice.avatar", { id: "square", title: "Square", description: "A square that follows the voice", component: Square });
 ```
 
 ### A page

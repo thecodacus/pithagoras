@@ -626,7 +626,7 @@ Each agent has a home folder of its own, with its own `SOUL.md`,
 | `POST /api/agents/:id/setup` | Writes the identity files that are not there from the wizard's answers; the others are left, and `kept` names them |
 | `PUT /api/agents/:id/files/:name` | `{ content, mtime? }` — saves one of its files whole. With `mtime` (0 for a file that was not there), a file that has changed since is not overwritten: 409. A link is refused. |
 | `PUT /api/agents/:id/new-chats` | `{ on }` (boolean, else 400) — whether the **New** button starts chats with it. Turning it off hands New back to the first agent; off for an agent that is not the pick changes nothing. Answers the agent |
-| `PUT /api/agents/:id/orb` | Saves its avatar; answers the style as stored |
+| `PUT /api/agents/:id/orb` | Saves its avatar, `avatar` included (`"orb"`, or `<package>/<id>` of an extension's); answers the style as stored |
 | `PUT /api/agents/:id/heartbeat` | `{ minutes, quietStart, quietEnd }` — how often it looks around on its own (0 never, else 15 minutes to a week) and the hours it keeps quiet (`"HH:MM"`, both or neither) |
 | `POST /api/agents/:id/heartbeat/run` | A look now. Answers at once; `heartbeat.running` and `heartbeat.status` follow it |
 | `GET /api/agents/:id/activity` | `{ notes, unread }` — what it noticed on its own, newest first |
@@ -635,6 +635,7 @@ Each agent has a home folder of its own, with its own `SOUL.md`,
 | `DELETE /api/agents/:id/activity/:note` | Deletes a note |
 | `PUT /api/agents/:id/voice` | `{ voice }` — the voice it speaks with in voice mode: an id from the voices voice mode's source offers now (`voices` of `GET /api/voice`), or `""` for the source's own choice. `400` `Choose one of the voices voice mode's source offers now, or none` for any other id, and for any id while there is no source or it is not running |
 | `GET /api/agent/orb?session=` | The avatar voice mode shows for that chat: its agent's, or the first agent's |
+| `GET /api/agent/avatar?session=` | `{ agent: { id, name }, orb }`: the agent that chat is with and its avatar, which voice mode shows |
 | `POST /api/agent/sessions` | `{ agent?, title? }` — a conversation with that agent, the first without one |
 | `GET /api/agent/setup`, `POST /api/agent/setup`, `PUT /api/agent/files/:name` | The same for the first agent, answered by the same handlers: the 409 for a file that changed, and `kept` |
 

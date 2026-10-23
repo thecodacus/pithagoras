@@ -143,4 +143,8 @@ test("the avatar of a chat in a linked project is its agent's", async () => {
   // A chat in a project that works with no one is the first agent's, as it was.
   const plain = await json("/api/sessions", "POST", { workspace: "dev" });
   assert.notEqual((await json(`/api/agent/orb?session=${plain.id}`)).personality, "calm");
+  // And so is the agent voice mode is told it is with.
+  const avatar = await json(`/api/agent/avatar?session=${linked.id}`);
+  assert.deepEqual([avatar.agent.id, avatar.agent.name, avatar.orb.personality], [nova, "Nova", "calm"]);
+  assert.notEqual((await json(`/api/agent/avatar?session=${plain.id}`)).agent.id, nova);
 });

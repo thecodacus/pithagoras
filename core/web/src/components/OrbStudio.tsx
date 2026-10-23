@@ -1,11 +1,16 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { LuCheck, LuPalette, LuRefreshCw, LuRotateCcw } from "react-icons/lu";
+import type { AvatarMode } from "@pithagoras/extension-api";
 import { Modal } from "./Modal";
 import { api } from "../api";
 import { msg, t } from "../i18n";
 import { tabKeys } from "../tab-keys";
+import { useExtensions } from "../extensions/loader";
+import { titleOf, useSlot } from "../extensions/slots";
+import { translate } from "../extensions/strings";
 import { DEFAULT_ORB, ORB_PALETTES, itemColor, type OrbEyes, type OrbFinish, type OrbHat, type OrbPattern, type OrbPersonality, type OrbProp, type OrbState, type OrbStyle } from "../../../server/src/orb-style";
-import { ORB_STYLE_EVENT, VoiceOrb, type VoiceLevels } from "./VoiceOrb";
+import { ORB_STYLE_EVENT, type VoiceLevels } from "./VoiceOrb";
+import { AgentAvatar } from "./AgentAvatar";
 import { VoicePicker } from "./AgentVoice";
 
 const PERSONALITIES: [OrbPersonality, string, string][] = [
@@ -50,9 +55,11 @@ const TABS: [Tab, string][] = [
   ["personality", msg("Personality")], ["colours", msg("Colours")], ["surface", msg("Surface")], ["face", msg("Face")], ["wear", msg("Wear")],
 ];
 
-const STATES: [OrbState, string][] = [
-  ["idle", msg("Idle")], ["input", msg("Listening")], ["output", msg("Speaking")], ["muted", msg("Muted")],
+const STATES: [AvatarMode, string][] = [
+  ["idle", msg("Idle")], ["input", msg("Listening")], ["output", msg("Speaking")], ["thinking", msg("Thinking")], ["muted", msg("Muted")],
 ];
+/** The orb's own, each with a colour of its own: not thinking, which only an extension's avatar shows. */
+const ORB_STATES = STATES.filter((s): s is [OrbState, string] => s[0] !== "thinking");
 
 const SLIDERS: ["speed" | "reactivity" | "glow", string, number, number, string][] = [
   ["speed", msg("Motion speed"), 0.25, 2.5, msg("How fast it drifts when nothing is said")],
@@ -67,14 +74,20 @@ const SLIDERS: ["speed" | "reactivity" | "glow", string, number, number, string]
  *
  * The preview speaks with a made-up voice level so the motion can be judged
  * without starting voice mode; saved, the style reaches every open voice stage.
+ *
+ * Where an extension offers avatars of its own (`voice.avatar`), Shown as
+ * chooses between them and the orb. One chosen is set up by its extension,
+ * not here: the orb's own sections give way to a line that says so, and the
+ * preview can show it thinking too. A choice whose extension is not in the
+ * page is shown as Not available, and kept.
  */
-export function OrbStudio({ agent, orb, voice, onSaved }: { agent: string; orb: OrbStyle; voice: string; onSaved: () => void }) {
+export function OrbStudio({ agent, name: agentName, orb, voice, onSaved }: { agent: string; name: string; orb: OrbStyle; voice: string; onSaved: () => void }) {
   const [saved, setSaved] = useState<OrbStyle>(orb);
   const [draft, setDraft] = useState<OrbStyle>(orb);
   // The voice it speaks with, saved with the look: see VoicePicker.
   const [savedVoice, setSavedVoice] = useState(voice);
   const [voiceDraft, setVoiceDraft] = useState(voice);
-  const [state, setState] = useState<OrbState>("output");
+  const [state, setState] = useState<AvatarMode>("output");
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
   const [error, setError] = useState("");
@@ -82,6 +95,16 @@ export function OrbStudio({ agent, orb, voice, onSaved }: { agent: string; orb: 
   const [tab, setTab] = useState<Tab>("personality");
   const levels = useRef<VoiceLevels>({ input: 0, output: 0 });
   const still = useRef<VoiceLevels>({ input: 0, output: 0 });
+  const who = useMemo(() => ({ id: agent, name: agentName }), [agent, agentName]);
+  const avatars = useSlot("voice.avatar");
+  const { settled } = useExtensions();
+  // An extension's avatar, chosen; and a choice that is neither the orb nor one the page has.
+  const chosen = avatars.find((e) => e.key === draft.avatar);
+  const missing = draft.avatar !== "orb" && !chosen;
+  const savedEntry = avatars.find((e) => e.key === saved.avatar);
+  // Only an extension's avatar is previewed thinking: back to the orb, the preview speaks again.
+  useEffect(() => { if (!chosen && state === "thinking") setState("output"); }, [chosen, state]);
+  const previews = chosen ? STATES : ORB_STATES;
 
   // Syllables rising and falling inside slower phrases, like the meter during
   // speech. Only while the customizer is open: the card's orb stays idle.
@@ -102,7 +125,7 @@ export function OrbStudio({ agent, orb, voice, onSaved }: { agent: string; orb: 
   // Closing without saving puts the saved orb back.
   const close = () => { setOpen(false); setDraft(saved); setVoiceDraft(savedVoice); setError(""); setDone(false); };
   const name = <T extends string>(list: [T, string, ...unknown[]][], value: T) => t(list.find(([v]) => v === value)?.[1] ?? value);
-  const summary = [
+  const summary = savedEntry ? titleOf(savedEntry) : saved.avatar !== "orb" ? t("Not available") : [
     name(PERSONALITIES, saved.personality),
     saved.eyes !== "none" && name(EYES, saved.eyes),
     saved.hat !== "none" && name(HATS, saved.hat),
@@ -217,7 +240,7 @@ export function OrbStudio({ agent, orb, voice, onSaved }: { agent: string; orb: 
       <div className="relative h-16 w-16 shrink-0" title={summary}>
         <div className="flex h-full w-full items-center justify-center rounded-2xl bg-[#0b1220] ring-1 ring-inset ring-accent/15">
           <div className="voice-avatar w-[66%]">
-            <VoiceOrb mode="idle" levels={still} look={saved} />
+            <AgentAvatar look={saved} agent={who} mode="idle" levels={still} still />
           </div>
         </div>
         <button
@@ -238,11 +261,12 @@ export function OrbStudio({ agent, orb, voice, onSaved }: { agent: string; orb: 
         <div className="sm:sticky sm:top-0 sm:self-start">
           <div className="flex aspect-square items-center justify-center overflow-hidden rounded-xl bg-[#0b1220]">
             <div className="voice-avatar w-[58%]">
-              <VoiceOrb mode={state} levels={levels} look={draft} />
+              <AgentAvatar look={draft} agent={who} mode={state === "thinking" ? "idle" : state} thinking={state === "thinking"} levels={levels} />
             </div>
           </div>
-          <div className="mt-2 grid grid-cols-4 gap-1" role="group" aria-label={t("Preview state")}>
-            {STATES.map(([value, label]) => (
+          {/* Five German labels have no room in a row of the wide layout's narrow column; a phone's full width has. */}
+          <div className={`mt-2 grid gap-1 ${previews.length === 5 ? "grid-cols-5 sm:grid-cols-3" : "grid-cols-4"}`} role="group" aria-label={t("Preview state")}>
+            {previews.map(([value, label]) => (
               <button
                 key={value}
                 type="button"
@@ -258,6 +282,46 @@ export function OrbStudio({ agent, orb, voice, onSaved }: { agent: string; orb: 
         </div>
 
         <div className="min-w-0">
+          {/* Only where there is something to choose: for everyone without an avatar of an extension's, the dialog is as it always was. */}
+          {(avatars.length > 0 || saved.avatar !== "orb") && (
+            <div className="mb-4">
+              <p className="text-xs text-fg-muted">{t("Shown as")}</p>
+              <div className="mt-1.5 grid gap-1.5 sm:grid-cols-2" role="group" aria-label={t("Shown as")}>
+                {[
+                  { key: "orb", label: t("Orb"), hint: t("The portal's own: its personality, colours and what it wears are set here") },
+                  ...avatars.map((e) => ({ key: e.key, label: titleOf(e), hint: e.description && translate(e.extension, e.description) })),
+                ].map(({ key, label, hint }) => (
+                  <button
+                    key={key}
+                    type="button"
+                    aria-pressed={draft.avatar === key}
+                    onClick={() => change({ avatar: key })}
+                    className={`rounded-lg border px-3 py-2 text-left transition ${
+                      draft.avatar === key ? "border-accent/50 bg-accent/10" : "border-line hover:bg-fg/5"
+                    }`}
+                  >
+                    <span className="block text-xs font-medium text-fg">{label}</span>
+                    {hint && <span className="mt-0.5 block text-[11px] text-fg-faint">{hint}</span>}
+                  </button>
+                ))}
+                {missing && (
+                  <button type="button" aria-pressed="true" className="rounded-lg border border-accent/50 bg-accent/10 px-3 py-2 text-left">
+                    <span className="block text-xs font-medium text-fg">{t("Not available")}</span>
+                  </button>
+                )}
+              </div>
+              {/* Not before the extensions have been gone through: one that is still loading would be said to be missing. */}
+              {missing && settled && (
+                <p className="mt-2 text-[11px] text-fg-faint">
+                  {t("This avatar is not available: its extension is not installed or is switched off, could not be loaded, or no longer offers it. Voice mode shows the orb.")}
+                </p>
+              )}
+            </div>
+          )}
+
+          {chosen ? (
+            <p className="text-xs text-fg-muted">{t("How it looks is set by its extension, on the extension's page in Settings. Where it cannot be drawn, voice mode shows the agent's orb.")}</p>
+          ) : <>
           <div
             role="tablist"
             aria-label={t("Avatar sections")}
@@ -333,7 +397,7 @@ export function OrbStudio({ agent, orb, voice, onSaved }: { agent: string; orb: 
               )}
             </div>
             <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
-              {STATES.map(([s, label]) => (
+              {ORB_STATES.map(([s, label]) => (
                 <label key={s} className="flex items-center gap-2 text-[11px] text-fg-muted">
                   <input
                     type="color"
@@ -400,6 +464,7 @@ export function OrbStudio({ agent, orb, voice, onSaved }: { agent: string; orb: 
 
           </>}
           </div>
+          </>}
         </div>
       </div>
 

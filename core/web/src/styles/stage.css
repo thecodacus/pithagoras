@@ -105,6 +105,8 @@
 /* Overscan the canvas so the halo fades out beyond the orb's layout box. */
 .voice-avatar { position: relative; aspect-ratio: 1; overflow: visible; }
 .voice-orb { position: absolute; left: -21.428571%; top: -21.428571%; width: 142.857143%; max-width: none; pointer-events: none; }
+/* An extension's avatar (AgentAvatar): the orb's own box, so the orb it falls back to is drawn exactly as the orb is; push-to-talk holds go to the box. */
+.voice-avatar-x { position: absolute; inset: 0; pointer-events: none; }
 .voice-dock-center { display: contents; }
 .voice-stage.is-docked .voice-dock-center { display: flex; flex: 1; min-width: 0; flex-direction: column; justify-content: center; gap: 4px; }
 .voice-stage.is-docked .voice-dock-center .voice-status { flex: none; justify-content: flex-start; font-size: 10px; color: #acc9ee; }
