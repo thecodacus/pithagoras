@@ -117,6 +117,12 @@ function cachedTools(entry: { tools?: unknown; resources?: unknown } | undefined
 const prefixOf = (definition: Record<string, unknown>, settings: Record<string, unknown>): unknown =>
   definition.toolPrefix ?? settings.toolPrefix ?? "server";
 
+/** The naming the adapter gives a server's tools (`toolPrefix`): the server's own, else the one for every server, else `server`. */
+export function namingOf(config: McpConfigLike, server: string): string {
+  const naming = prefixOf(config.mcpServers?.[server] ?? {}, config.settings ?? {});
+  return typeof naming === "string" ? naming : "server";
+}
+
 /**
  * What the adapter does with a tool of this name, or undefined for a name no
  * configured server claims. The caller says which names are the adapter's: a

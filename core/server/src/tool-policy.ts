@@ -36,12 +36,28 @@ export function mcpPrefix(server: string): string {
 }
 
 /**
+ * How the adapter starts the names of a server's tools in the naming it is set to
+ * (`toolPrefix`, getServerPrefix): `server` is mcpPrefix; `short` leaves out a
+ * closing `mcp` (`docs-mcp` names its tools `docs_…`); `mcp` puts `mcp__` before
+ * it; `none` starts them with nothing, a tool's own name being all of it.
+ */
+export function mcpPrefixAs(server: string, naming: string): string {
+  if (naming === "none") return "";
+  if (naming === "short") return server.replace(/-?mcp$/i, "").replace(/-/g, "_") || "mcp";
+  if (naming === "mcp") return `mcp__${mcpPrefix(server)}`;
+  return mcpPrefix(server);
+}
+
+/**
  * Could a tool of this name be this server's, as the adapter names them? What
  * every place that tells a tool's server by its name goes by, so that none of
- * them gives a tool to a server another would not.
+ * them gives a tool to a server another would not. In the naming given, the
+ * default where none is: one that names a tool by its own name alone could have
+ * a tool of any name.
  */
-export function mcpClaims(server: string, name: string): boolean {
-  return name.startsWith(`${mcpPrefix(server)}_`);
+export function mcpClaims(server: string, name: string, naming = "server"): boolean {
+  const prefix = mcpPrefixAs(server, naming);
+  return !prefix || name.startsWith(`${prefix}_`);
 }
 
 /**

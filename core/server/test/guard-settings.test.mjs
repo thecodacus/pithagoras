@@ -233,3 +233,37 @@ test("a dotted server is trusted for the names the adapter gives its tools, and 
     setTrustedMcpServers([]);
   }
 });
+
+test("no server is trusted for a name another could give its tool in the naming it is set to", async () => {
+  // `short` leaves a closing `mcp` out of the start of a server's tool names (getServerPrefix): `docs.v2-mcp` gives its
+  // `search` the name `docs.v2_search`, as `docs.v2` does. `none` names a tool by its own name alone.
+  const config = (mcpServers, settings) => writeFileSync(path.join(agent, "mcp.json"), JSON.stringify({ mcpServers, ...(settings ? { settings } : {}) }));
+  const { setTrustedMcpServers } = await import("../dist/db.js");
+  const adapter = ["docs.v2_search", "jira_get_issue", "notes_search"];
+  const guard = () => {
+    const h = {};
+    guardExtension("t", () => ({ role: "primary" }), "trust-naming", () => new Set(), () => ({ allowed: true, allowlist: [] }), undefined, [], () => new Set(), () => false, () => undefined, (name) => adapter.includes(name))({ on: (k, f) => (h[k] = f) });
+    return h;
+  };
+  const wrapped = (h, toolName, input = {}) => /^<<<untrusted:/.test(h.tool_result({ toolName, input, isError: false, content: [{ type: "text", text: "x" }] })?.content?.[0]?.text ?? "");
+  try {
+    setTrustedMcpServers(["docs.v2", "jira", "notes"]);
+    config({ "docs.v2": { command: "a" }, "docs.v2-mcp": { command: "b", toolPrefix: "short" }, jira: { command: "j" } });
+    let h = guard();
+    assert.equal(wrapped(h, "docs.v2_search"), true, "docs.v2's search, or docs.v2-mcp's");
+    assert.equal(wrapped(h, "mcp", { tool: "docs.v2_search" }), true);
+    assert.equal(wrapped(h, "mcp", { tool: "docs.v2_search", server: "docs.v2" }), false, "named with its server, it is that server's");
+    assert.equal(wrapped(h, "jira_get_issue"), false, "a name docs.v2-mcp could not give");
+    // Every server named by its tools' own names but the one that says otherwise: misc could have a tool of any name.
+    config({ jira: { command: "j", toolPrefix: "server" }, misc: { command: "m" } }, { toolPrefix: "none" });
+    h = guard();
+    assert.equal(wrapped(h, "jira_get_issue"), true, "jira's get_issue, or misc's tool of that very name");
+    // A name without mcp at its end is left as it is: notes, named short, gives its search the name notes_search.
+    config({ jira: { command: "j" }, notes: { command: "n", toolPrefix: "short" } });
+    h = guard();
+    assert.equal(wrapped(h, "notes_search"), false);
+    assert.equal(wrapped(h, "jira_get_issue"), false);
+  } finally {
+    setTrustedMcpServers([]);
+  }
+});

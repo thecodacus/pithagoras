@@ -74,23 +74,24 @@ function untrustedResult(toolName: string, input: Record<string, unknown>, fromA
   if (/^mcp_/.test(toolName)) return true;
   const trusted = (server: string | undefined) => server !== undefined && trustedMcpServers().has(server);
   const mcp = mcpView();
-  if (toolName === "mcp") return !trusted(proxiedServer(input, mcp.servers));
+  if (toolName === "mcp") return !trusted(proxiedServer(input, mcp));
   // A tool the adapter registered is a server's whatever it is called (the adapter can name them without the
   // server, and merges servers from configs other than the portal's), and one whose server is not told is no trusted one's.
-  return (fromAdapter || mcp.serverTool(toolName)) && !trusted(onlyServerOf(toolName, mcp.servers));
+  return (fromAdapter || mcp.serverTool(toolName)) && !trusted(onlyServerOf(toolName, mcp));
 }
 
 /**
  * The server a tool's name is of, where no other configured server could have it: with `my-notes` and `my`, the name
  * `my_notes_search` is `my-notes`' `search` and as well `my`'s `notes_search`, and which the adapter runs is not told
- * by the name. Such a name is no trusted server's. The others are looked for as mcpServerOf looks (mcpClaims), or a
- * name it gives one server could be taken for that server's alone while another could have it too.
+ * by the name. Such a name is no trusted server's. Every server is looked at in the naming the adapter gives its tools
+ * (mcpClaims, with its `toolPrefix`): `docs.v2-mcp` named `short` gives its `search` the name `docs.v2_search`, as
+ * `docs.v2` does, and one named `none` could have a tool of any name.
  */
-function onlyServerOf(name: string, servers: readonly string[]): string | undefined {
-  const server = mcpServerOf(name, servers);
+function onlyServerOf(name: string, mcp: Pick<McpView, "servers" | "naming">): string | undefined {
+  const server = mcpServerOf(name, mcp.servers);
   if (server === undefined) return undefined;
-  const others = servers.filter((other) => other !== server && mcpClaims(other, name));
-  return others.length ? undefined : server;
+  const claimants = mcp.servers.filter((one) => mcpClaims(one, name, mcp.naming(one)));
+  return claimants.length === 1 && claimants[0] === server ? server : undefined;
 }
 
 /**
@@ -98,7 +99,7 @@ function onlyServerOf(name: string, servers: readonly string[]): string | undefi
  * Undefined for a call that runs no tool (a search or a list, which hands back what every server says of itself),
  * and for a tool of no server that is configured.
  */
-function proxiedServer(input: Record<string, unknown>, servers: readonly string[]): string | undefined {
+function proxiedServer(input: Record<string, unknown>, mcp: Pick<McpView, "servers" | "naming">): string | undefined {
   // As the adapter finds a tool by its name (findToolByName): hyphens for underscores, and nothing else. A dot is not
   // an underscore to it: `docs.v2_search` is the tool of a server `docs.v2`, and no tool of `docs`.
   const asked = typeof input.tool === "string" ? input.tool.trim().replace(/-/g, "_") : "";
@@ -107,8 +108,8 @@ function proxiedServer(input: Record<string, unknown>, servers: readonly string[
   // sessions' messages) hands back what every server says: only a plain call of a tool is that server's own words.
   if (["action", "search", "describe", "connect"].some((key) => input[key] !== undefined && input[key] !== null && input[key] !== "")) return undefined;
   // The adapter takes a server by its name as configured, and by no other (executeCall).
-  if (typeof input.server === "string" && input.server.trim()) return servers.find((server) => server === input.server);
-  return onlyServerOf(asked, servers);
+  if (typeof input.server === "string" && input.server.trim()) return mcp.servers.find((server) => server === input.server);
+  return onlyServerOf(asked, mcp);
 }
 
 /**

@@ -5,7 +5,7 @@ import { GUARD_RULE_NAMES } from "./pi/guard-rule-names.js";
 import { BUILT_IN_SET, PI_BUILT_IN_TOOLS, defaultsFor, lazyToolEntry, mcpServerOf, toolEnabled, toolSetOf } from "./tool-policy.js";
 import { projectOf } from "./workspaces.js";
 import { dropMcpCache, mcpAdapter, mcpCachePath, mcpConfigPath, mcpServerNames, onMcpWritten, readMcpCache, readMcpFile, readableMcpConfig, serversAndBrowsers } from "./api/mcp.js";
-import { mcpCatalogue, mcpDirect, mcpOffer, unlisted, type McpOffer } from "./mcp-offer.js";
+import { mcpCatalogue, mcpDirect, mcpOffer, namingOf, unlisted, type McpOffer } from "./mcp-offer.js";
 import { existsSync, mkdirSync, readdirSync, rmSync, rmdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { isWithinText } from "./within.js";
@@ -3315,6 +3315,8 @@ export interface McpView {
   catalogue: KnownTool[];
   serverTool: (name: string) => boolean;
   servers: string[];
+  /** The naming the adapter gives each configured server's tools (`toolPrefix`, see mcpPrefixAs). */
+  naming: (server: string) => string;
   gone: string[];
   /** What the portal remembers of every tool, read when first asked for. */
   known: () => Map<string, KnownTool>;
@@ -3349,7 +3351,7 @@ function readMcpView(): McpView {
   let known: Map<string, KnownTool> | undefined;
   const knownNow = () => (known ??= new Map(knownTools().map((t) => [t.name, t])));
   if (!config) {
-    return { offers: () => undefined, direct: () => undefined, catalogue: [], serverTool: () => false, servers: [], gone: [], known: knownNow };
+    return { offers: () => undefined, direct: () => undefined, catalogue: [], serverTool: () => false, servers: [], naming: () => "server", gone: [], known: knownNow };
   }
   const cache = readMcpCache();
   const offer = mcpOffer(config, cache);
@@ -3376,7 +3378,7 @@ function readMcpView(): McpView {
   };
   const servers = Object.keys(config.mcpServers ?? {});
   const gone = removedMcpServers().filter((name) => !servers.includes(name));
-  return { offers, direct, catalogue, serverTool, servers, gone, known: knownNow };
+  return { offers, direct, catalogue, serverTool, servers, naming: (server: string) => namingOf(config, server), gone, known: knownNow };
 }
 
 /**
