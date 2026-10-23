@@ -37,7 +37,7 @@ async function healthy(url: string) {
   try { return (await fetch(url, { signal: AbortSignal.timeout(1500) })).ok; } catch { return false; }
 }
 /** Of Docker's inspect body, what is read here. */
-type Inspected = { Config?: { Labels?: Record<string, string> | null }; HostConfig?: { NetworkMode?: string; DeviceRequests?: { DeviceIDs?: string[] | null }[] | null; RestartPolicy?: { Name?: string } }; State?: { Running?: boolean; Restarting?: boolean; ExitCode?: number; Error?: string }; RestartCount?: number };
+type Inspected = { Config?: { Labels?: Record<string, string> | null }; HostConfig?: { NetworkMode?: string; DeviceRequests?: { DeviceIDs?: string[] | null }[] | null; RestartPolicy?: { Name?: string } }; State?: { Running?: boolean; Restarting?: boolean; ExitCode?: number; Error?: string; StartedAt?: string }; RestartCount?: number };
 /**
  * How Docker restarts the voice container, as it does Browser's and Understory's: after it exits, and as Docker starts
  * after the host restarts, unless the person stopped it (Stop on the page, or in Settings → Docker), which it then stays.
@@ -68,12 +68,19 @@ async function inspected(): Promise<Inspected | undefined> {
   return detail;
 }
 /**
+ * When the run of the container that its services last all answered in began (Docker's `State.StartedAt`), as `status`
+ * found since the half started. Docker goes on counting a start it made by itself (`RestartCount`) for as long as the
+ * run it began lasts, so a run they answered in is one that came back, and no longer one of Docker's tries (`retrying`).
+ */
+let answered: string | undefined;
+/**
  * Docker is starting the container again by itself, after its setup or a service exited (`RESTART`), and goes on doing
  * so, waiting longer between tries while they fail: it is running to Docker while it waits for the next try
- * (`Restarting`), and Docker counts the tries (`RestartCount`, from none again at each start it is asked for, and at
- * the one it makes itself as the host starts). A stop ends it.
+ * (`Restarting`), and in a try it is a run Docker began (`RestartCount`, from none again at each start it is asked for,
+ * and at the one it makes itself as the host starts) that its services have not answered in (`answered`). One they
+ * answered in came back: a health check that is slow once after that is not a try of Docker's. A stop ends the tries.
  */
-const restartedByDocker = (found: Inspected | undefined) => found?.State?.Running === true && Boolean(found.State.Restarting || found.RestartCount);
+const retrying = (found: Inspected | undefined) => found?.State?.Running === true && Boolean(found.State.Restarting || (found.RestartCount && found.State.StartedAt !== answered));
 export interface ServiceStatus { available: boolean; state: string; busy: boolean; progress: string; error: string; /** The engines the container is built for, once there is one. */ choice?: VoiceChoice }
 /**
  * The engines of the running container, from when they were first found answering until the container is found stopped,
@@ -112,10 +119,11 @@ async function statusNow(): Promise<ServiceStatus> {
   // A container made before engines could be chosen has no recipe label, and is the original combination.
   const choice = detail ? choiceFromKey(detail.Config?.Labels?.['pithagoras.voice-recipe']) : undefined;
   const ready = running && (await Promise.all(healthUrls(choice ?? DEFAULT_CHOICE).map(healthy))).every(Boolean);
+  if (ready) answered = detail!.State!.StartedAt;
   // A container Docker is starting again by itself is one whose setup or service failed, until its services answer:
   // between the tries, and in one, which is Docker's and not a start of the person's. Its exit code is the last
   // failure's only between the tries, as Docker clears it when each begins.
-  const retried = restartedByDocker(detail);
+  const retried = retrying(detail);
   const failed = !ready && (retried || (!running && Boolean(detail?.State?.ExitCode)));
   return { available: true, state: pending ? 'installing' : ready ? 'running' : failed ? 'failed' : running ? 'starting' : detail ? 'stopped' : 'absent', busy: pending, progress: pending ? progress : logs, error: error || (failed ? explain(detail?.State?.Error || (retried ? 'Voice setup or service exited, and Docker is starting it again. Review the log, or retry now.' : 'Voice setup or service exited. Review the log, then retry.')) : ''), choice };
 }
@@ -155,9 +163,10 @@ async function ensureContainer(script: string, choice: VoiceChoice, plan: Plan) 
     const onCard = !usesGpu(choice) || !plan.card || holds(heldCard(existing.HostConfig?.DeviceRequests), plan.card);
     const current = labels['pithagoras.voice-network'] === 'shared-v1' && existing.HostConfig?.NetworkMode === networkMode && sameChoice(choiceFromKey(labels['pithagoras.voice-recipe']), choice) && onCard;
     if (current) {
-      // One Docker is starting again is running to Docker, so a start would leave it to Docker's next try: it is stopped
-      // first, so that a retry runs the setup now, and the tries are counted from none.
-      if (restartedByDocker(existing)) await d.containers.stop(CONTAINER);
+      // One Docker is starting again is running to Docker, so a start would leave it to Docker's next try, or to the one
+      // under way: it is stopped first, so that a retry runs the setup now, and the tries are counted from none. One that
+      // came back is left running, as a start finds it.
+      if (retrying(existing)) await d.containers.stop(CONTAINER);
       await d.containers.start(CONTAINER);
       return;
     }

@@ -31,9 +31,15 @@ export interface FakeContainer {
   error?: string;
   /**
    * How many times Docker started it again by itself, after it exited, since it was last started by request: inspect's
-   * `RestartCount`. Between those starts its `State` is "restarting", as Docker has it while it waits to start it again.
+   * `RestartCount`, which Docker keeps while a run it began goes on. Between those starts its `State` is "restarting",
+   * as Docker has it while it waits to start it again.
    */
   restarts?: number;
+  /**
+   * When it last began to run, at a start by request or at one of Docker's own: inspect's `State.StartedAt`, which each
+   * start sets anew. Docker's zero time where it was never started, or a test put it there without saying.
+   */
+  started?: string;
 }
 
 /** A command run in a container (`exec`), as it was asked for, and how it stands. */
@@ -87,6 +93,9 @@ export async function fakeDocker() {
   const pulls: string[] = [];
   /** A download that fails, by image, with Docker's own words. */
   const failing = new Map<string, string>();
+  /** When a start began, as Docker writes it: each later than the one before, as Docker's own, in nanoseconds, are. */
+  let clock = 0;
+  const startedAt = () => new Date((clock = Math.max(clock + 1, Date.now()))).toISOString();
   /**
    * While `pull` is set, a download says its first lines and does not end until it settles: an image on its way. While
    * `exec` is, a command writes what it writes and does not end until it settles.
@@ -164,7 +173,7 @@ export async function fakeDocker() {
           Name: `/${c.Name}`,
           Config: { ...config, Image: c.Image, Tty: c.Tty, Labels: c.Labels, ...(c.User !== undefined ? { User: c.User } : {}) },
           // Docker counts one it is waiting to start again as running, for its stop and its remove.
-          State: { Status: c.State, Running: c.State === "running" || c.State === "restarting", Restarting: c.State === "restarting", ExitCode: c.code ?? 0, Error: c.error ?? "" },
+          State: { Status: c.State, Running: c.State === "running" || c.State === "restarting", Restarting: c.State === "restarting", ExitCode: c.code ?? 0, Error: c.error ?? "", StartedAt: c.started ?? "0001-01-01T00:00:00Z" },
           RestartCount: c.restarts ?? 0,
           HostConfig: c.HostConfig ?? madeHost ?? {},
           Mounts: c.Mounts ?? [],
@@ -214,6 +223,7 @@ export async function fakeDocker() {
         if (want === "exited") runs.onStop?.(c);
         if (want === "running") {
           starts.push(c.Name);
+          c.started = startedAt();
           // A start by request counts Docker's own starts from none again.
           delete c.restarts;
         }

@@ -8,12 +8,14 @@ import { CONTAINER } from "./service.mts";
 /**
  * The voice container comes back after the host restarts, as Docker's `unless-stopped` has it, against Docker's fake
  * daemon and through the routes of the service's page: a new one is made so, one made before with no restart policy is
- * given it as it is, a setup that keeps failing while Docker starts it again shows the failure, and Retry, Install and
- * the person's Stop do what they say. No GPU, no image and no container of this machine is touched.
+ * given it as it is, a setup that keeps failing while Docker starts it again shows the failure, one Docker brought back
+ * is no failure, and Retry, Install and the person's Stop do what they say. No GPU, no image and no container of this
+ * machine is touched.
  */
 
 inProcessHome("pithagoras-voice-restart-");
 const { machine, at, docker: daemon } = await serveVoice();
+const { state: offers } = await import("../src/server/provider.ts");
 
 const json = { "content-type": "application/json" };
 const state = async () => (await fetch(`${at}/state`)).json();
@@ -27,6 +29,13 @@ const voiceIs = (container: Partial<FakeContainer> & { HostConfig: Record<string
     ...container,
     HostConfig: { NetworkMode: "container:portal-one", ...container.HostConfig },
   });
+/**
+ * Docker's own next try at the voice container: a run it began by itself, at a time of its own (`State.StartedAt`, in
+ * Docker's nanoseconds, so never one a start by request was given).
+ */
+let tries = 0;
+const dockersTry = (more: Partial<FakeContainer> = {}) =>
+  Object.assign(machine.voice()!, { State: "running", code: 0, started: `2026-10-23T11:52:${String(++tries).padStart(2, "0")}.000000001Z`, ...more });
 /** How many times Docker was asked to stop the voice container, and to start it, from now on. */
 const asked = () => {
   const starts = daemon.starts.length;
@@ -75,7 +84,7 @@ test("a setup that keeps failing shows the failure and its log while Docker star
   assert.deepEqual([between.state, between.busy, between.error], ["failed", false, "Voice setup or service exited, and Docker is starting it again. Review the log, or retry now."]);
   assert.match(between.progress, /VOICE_SETUP_ERROR: setup or service failed \(line 98\)/);
   // Docker's next try, which does not answer yet: still the failure, not Starting, so the page does not flicker with each try.
-  Object.assign(machine.voice()!, { State: "running", code: 0 });
+  dockersTry();
   machine.voiceProcesses.unhealthy = ["8188", "7862"];
   const inTry = await state();
   assert.deepEqual([inTry.state, inTry.error], ["failed", between.error]);
@@ -93,8 +102,8 @@ test("a setup that keeps failing shows the failure and its log while Docker star
   machine.voiceProcesses.unhealthy = [];
   assert.equal((await state()).state, "running");
 
-  // And in one of Docker's tries.
-  Object.assign(machine.voice()!, { restarts: 1 });
+  // And in one of Docker's tries, after the service that answered exited: a run Docker began, not answering yet.
+  dockersTry({ restarts: 1 });
   machine.voiceProcesses.unhealthy = ["8188"];
   assert.equal((await state()).state, "failed");
   const again = asked();
@@ -102,6 +111,27 @@ test("a setup that keeps failing shows the failure and its log while Docker star
   await machine.settle();
   assert.deepEqual([again.stops, again.starts(), daemon.created], [1, 1, []]);
   assert.equal((await state()).state, "starting");
+});
+
+test("one Docker brought back is no failure once its services answered: a check slow once after leaves it voice mode's, and Start and a GPU choice leave it running", async () => {
+  machine.reset();
+  // Docker started it again once, and goes on counting that start for as long as the run it began lasts.
+  voiceIs({ State: "running", restarts: 1, started: "2026-10-23T11:51:00.000000001Z", HostConfig: UNLESS_STOPPED });
+  assert.equal((await state()).state, "running");
+  machine.voiceProcesses.unhealthy = ["8188"];
+  const slow = await state();
+  assert.deepEqual([slow.state, slow.error], ["starting", ""]);
+  assert.ok(offers(), "voice mode still listens and speaks through it");
+
+  const said = asked();
+  assert.equal((await post("/start")).status, 200);
+  await machine.settle();
+  const gpu = await fetch(`${at}/gpu`, { method: "PUT", headers: json, body: JSON.stringify({ gpu: "" }) });
+  assert.deepEqual([gpu.status, (await gpu.json()).restarting], [200, true]);
+  await machine.settle();
+  assert.deepEqual([said.stops, said.starts(), daemon.created, machine.voice()!.State], [0, 0, [], "running"]);
+  machine.voiceProcesses.unhealthy = [];
+  assert.equal((await state()).state, "running");
 });
 
 test("Install with other engines replaces a container Docker is starting again", async () => {
