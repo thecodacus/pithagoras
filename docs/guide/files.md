@@ -90,12 +90,13 @@ The agent writes here too, so a save is checked. If the file changed after you
 opened it, the save is refused and you choose between loading the new version
 and saving yours anyway.
 
-**Refresh** reads again what is on screen: the folder, or the file that is open.
-A file without unsaved changes shows its new text in place, as the page or the
+**Refresh** reads the folder again and, when a file is open, that file too. A
+file without unsaved changes shows its new text in place, as the page or the
 source it was shown as. With unsaved changes, your text stays; if the file
-changed, you get the same choice as at a save. Files does not notice by itself
-a change made from outside this chat — by another chat, a terminal, another
-device — so **Refresh** is how it shows.
+changed, you get the same choice as at a save. The only change Files notices by
+itself is one the agent makes with its write and edit tools. A change made any
+other way — by the agent's shell commands, a terminal, another chat or another
+device — shows with **Refresh**.
 
 The Markdown files in a folder called `documents` are also the project's
 [Documents](/guide/documents), with a history of their own. A change made here

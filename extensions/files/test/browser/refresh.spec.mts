@@ -12,7 +12,9 @@ type Entry = { name: string; type: 'file' | 'dir'; size: number; mtime: number }
  * (notes.md at first), with notes.md opened by hand unless `open` is false.
  * `disk` is what a read of the file finds, which a test changes under the
  * panel: while `gone` is set the read finds no file, and from `hold()` until
- * what it returns is called a read waits. A save `put` refuses is answered
+ * what it returns is called a read waits. What a read finds is taken when it
+ * arrives, as the server reads the file then, so a read that waits answers
+ * with the file as it was before what happened meanwhile. A save `put` refuses is answered
  * with that; otherwise what was saved is on disk. A markdown file opens as a
  * page unless the source was chosen before, so the tests start with that
  * choice made; `shown: 'page'` leaves it out. Returned: what was saved, and
@@ -43,9 +45,10 @@ async function files(
       return route.fulfill({ json: { ok: true, size: disk.content.length, mtime: disk.mtime } });
     }
     reads++;
+    const found = { ...disk };
     if (held) await held;
-    if (disk.gone) return route.fulfill({ status: 404, json: { error: 'There is no such file' } });
-    return route.fulfill({ json: { content: disk.content, binary: false, size: disk.content.length, mtime: disk.mtime } });
+    if (found.gone) return route.fulfill({ status: 404, json: { error: 'There is no such file' } });
+    return route.fulfill({ json: { content: found.content, binary: false, size: found.content.length, mtime: found.mtime } });
   });
   if (shown === 'source') await page.addInitScript(() => localStorage.setItem('filesMarkdownRendered', '0'));
   await page.setViewportSize({ width: 1300, height: 800 });
@@ -167,6 +170,43 @@ test('Refresh with changes not saved keeps them, asks only when the file changed
   expect(disk.content).toBe('mine again\n');
 });
 
+test('a read that Refresh asked for before a save answered does not put back the text from before the save', async ({ page }) => {
+  const { saves, disk, hold, reads } = await files(page);
+  // Changes not saved, saved while the read is out: it found the file as it was before.
+  await box(page).fill('mine\n');
+  let release = hold();
+  await refresh(page).click();
+  await expect.poll(reads).toBe(2);
+  await save(page).click();
+  await expect(save(page)).toBeDisabled();
+  expect(disk).toMatchObject({ content: 'mine\n', mtime: 2 });
+  release();
+  await answered(page);
+  await expect(box(page)).toHaveValue('mine\n');
+  await expect(page.getByTitle('Not saved')).toHaveCount(0);
+  await expect(bar(page)).toHaveCount(0);
+
+  // No changes when it was asked for, typed and saved while it is out: the same.
+  release = hold();
+  await refresh(page).click();
+  await expect.poll(reads).toBe(3);
+  await box(page).fill('typed while it was read\n');
+  await box(page).press('ControlOrMeta+s');
+  await expect(save(page)).toBeDisabled();
+  release();
+  await answered(page);
+  await expect(box(page)).toHaveValue('typed while it was read\n');
+  // The next save is checked against the time the last one gave, not the time the old read found.
+  await box(page).fill('more\n');
+  await save(page).click();
+  await expect(save(page)).toBeDisabled();
+  expect(saves).toEqual([
+    { content: 'mine\n', mtime: 1 },
+    { content: 'typed while it was read\n', mtime: 2 },
+    { content: 'more\n', mtime: 3 },
+  ]);
+});
+
 test('what was said about the text before goes when Refresh shows the file as it is now', async ({ page }) => {
   const { disk } = await files(page, { put: () => ({ status: 500, json: { error: 'No space left on device', code: 'failed' } }) });
   await box(page).fill('two\n');
@@ -267,4 +307,14 @@ test('Refresh in the folder lists it again', async ({ page }) => {
   await refresh(page).click();
   await expect(page.getByRole('button', { name: /^later\.md/ })).toBeVisible();
   expect(lists()).toBe(2);
+});
+
+test('Refresh with a file open lists the folder again as well, so that the folder is as it is now when you go back to it', async ({ page }) => {
+  const { listed } = await files(page);
+  await expect(box(page)).toHaveValue('one\n');
+  listed.push({ name: 'later.md', type: 'file', size: 2, mtime: 1 });
+  await refresh(page).click();
+  await answered(page);
+  await page.getByRole('button', { name: 'Back to the folder' }).click();
+  await expect(page.getByRole('button', { name: /^later\.md/ })).toBeVisible();
 });

@@ -386,6 +386,8 @@ export const FilesPanel = memo(function FilesPanel({
     setSaveError(null);
     try {
       const r = await api.saveFile(sessionId, file.path, draft, overwrite ? undefined : file.mtime);
+      // A read of the file still out (Refresh, the agent's change) may have found it as it was before this save: shown now, its old text would pass for saved.
+      fileAsk.current++;
       setFile({ ...file, saved: draft, mtime: r.mtime, size: r.size, error: undefined });
       setChanged(false);
     } catch (e) {
@@ -613,9 +615,12 @@ export const FilesPanel = memo(function FilesPanel({
         >
           {showHidden ? <LuEye aria-hidden className="h-3.5 w-3.5" /> : <LuEyeOff aria-hidden className="h-3.5 w-3.5" />}
         </button>
-        {/* What is on screen: the open file when there is one, which is drawn instead of the folder. */}
+        {/* The folder, which is as it is now when the file is left, and the file that is open, which is drawn instead of it. */}
         <button
-          onClick={() => void (file ? rereadFile(file.path) : loadDir(dir))}
+          onClick={() => {
+            void loadDir(dir);
+            if (file) void rereadFile(file.path);
+          }}
           title={t("Refresh")}
           aria-label={t("Refresh")}
           className="shrink-0 rounded p-1 text-fg-faint transition hover:bg-fg/5 hover:text-fg"
