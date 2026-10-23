@@ -1528,6 +1528,8 @@ const de: Locale = {
     "Recognition only: dictation works, and replies are not spoken.": "Nur Erkennung: Diktieren funktioniert, Antworten werden nicht gesprochen.",
     "Open its page": "Seite öffnen",
     "Stop using": "Nicht mehr verwenden",
+    "Voice conversations": "Sprachgespräche",
+    "The waveform button beside the message box, and its shortcut, start a spoken conversation. Off leaves dictation, which types what you say and speaks nothing back.": "Der Wellenform-Knopf neben dem Eingabefeld und sein Tastenkürzel beginnen ein gesprochenes Gespräch. Aus bleibt nur das Diktieren: Es schreibt, was du sagst, und spricht nichts zurück.",
     "Conversation": "Gespräch",
     "Calm": "Ruhig",
     "Voice model": "Sprachmodell",

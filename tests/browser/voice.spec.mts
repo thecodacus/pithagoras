@@ -411,6 +411,37 @@ test('without speech synthesis voice mode is not offered, because it speaks its 
   await expect(page.getByRole('button', { name: 'Turn on hands-free voice' })).toBeVisible();
 });
 
+test('voice conversations switched off end voice mode that is on, and leave dictation: voice mode is not offered, and its shortcut starts nothing', async ({ page }) => {
+  let conversation = true;
+  const leases: boolean[] = [];
+  await page.route('**/api/voice', route => route.fulfill({ json: { enabled: true, speech: true, conversation } }));
+  await page.route('**/voice/connection', route => { leases.push(route.request().postDataJSON().active); return route.fulfill({ json: { ok: true } }); });
+  // As Settings → Defaults → Voice mode tells the page once it has saved.
+  const switched = async (on: boolean) => { conversation = on; await page.evaluate(() => window.dispatchEvent(new Event('voice-config-changed'))); };
+  await page.goto('/tests/voice.html');
+  await page.getByRole('button', { name: 'Turn on hands-free voice' }).click();
+  await expect(page.getByRole('button', { name: 'End voice mode' })).toBeVisible({ timeout: 25000 });
+  await switched(false);
+  await expect(page.getByRole('button', { name: 'End voice mode' })).toHaveCount(0);
+  await expect.poll(() => leases).toEqual([true, false]);
+  await expect(page.getByRole('button', { name: 'Dictate a message' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Turn on hands-free voice' })).toHaveCount(0);
+  // Alt+V starts nothing, from the page or from the message box.
+  await page.keyboard.press('Alt+v');
+  await page.getByRole('textbox', { name: 'Message' }).focus();
+  await page.keyboard.press('Alt+v');
+  expect(await page.evaluate(() => sessionStorage.getItem('voiceActive'))).toBeNull();
+  await expect(page.getByRole('textbox', { name: 'Message' })).toBeVisible();
+  expect(leases).toEqual([true, false]);
+  // Dictation listens as before.
+  await page.getByRole('button', { name: 'Dictate a message' }).click();
+  await expect(page.getByRole('button', { name: 'Stop dictating' })).toBeVisible({ timeout: 25000 });
+  await page.getByRole('button', { name: 'Stop dictating' }).click();
+  // Switched on again: voice mode is offered once more.
+  await switched(true);
+  await expect(page.getByRole('button', { name: 'Turn on hands-free voice' })).toBeVisible();
+});
+
 test('dictation in send mode sends what was said to the chat it was started in', async ({ page }) => {
   const asked: string[] = [], purposes: (string | null)[] = [];
   await page.addInitScript(() => localStorage.setItem('dictationMode', 'send'));

@@ -61,6 +61,12 @@ test('VAD settings preserve defaults, accept tuning and reject invalid threshold
   }
 });
 
+test('voice conversations are on unless a save switches them off, with true or false', () => {
+  assert.equal(validateConfig({}).conversation, true);
+  assert.equal(validateConfig({conversation:false}).conversation, false);
+  for (const conversation of ['no', 0]) assert.throws(() => validateConfig({conversation}), /switched on with true and off with false/);
+});
+
 test('a WAV whose data chunk carries a placeholder size keeps its samples', () => {
   const placeheld = wav(Buffer.from([0, 0, 255, 127]));
   assert.deepEqual(wavPcm(placeheld, 'Speaker'), Buffer.from([0, 0, 255, 127]));

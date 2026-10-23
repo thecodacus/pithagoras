@@ -26,7 +26,7 @@ async function voiceMode(page: Page, source: Record<string, unknown> = SPEAKER, 
     return route.fulfill({ json: {
       ...source, vad: saved.vad ?? VAD, responseInstructions: saved.responseInstructions || portal.builtIn, defaultResponseInstructions: portal.builtIn,
       responseInstructionsOff: saved.responseInstructionsOff ?? false, skipThinkingProviders: saved.skipThinkingProviders ?? DEFAULT_LIST,
-      defaultSkipThinkingProviders: DEFAULT_LIST, voiceModel: saved.voiceModel ?? '',
+      defaultSkipThinkingProviders: DEFAULT_LIST, voiceModel: saved.voiceModel ?? '', conversation: saved.conversation ?? true,
     } });
   });
   await page.goto('/tests/voice-mode.html');
@@ -44,7 +44,7 @@ test('a speech detection slider is saved as it is let go, with the rest of the s
   await silence.focus();
   await page.keyboard.press('ArrowRight');
   await expect.poll(() => puts.length).toBe(1);
-  expect(puts[0]).toEqual({ vad: { ...VAD, redemptionMs: 1050 }, responseInstructions: '', skipThinkingProviders: DEFAULT_LIST, voiceModel: '' });
+  expect(puts[0]).toEqual({ vad: { ...VAD, redemptionMs: 1050 }, responseInstructions: '', skipThinkingProviders: DEFAULT_LIST, voiceModel: '', conversation: true });
   await expect(saved(page)).toBeVisible();
   expect(await page.evaluate(() => (window as any).changed)).toBe(1);
   await expect(saved(page)).toBeHidden({ timeout: 4000 });
@@ -78,7 +78,7 @@ test('speaking instructions show the built-in text, save an edit as the field is
   expect(puts).toHaveLength(0);
   await text.blur();
   await expect.poll(() => puts.length).toBe(1);
-  expect(puts[0]).toEqual({ vad: VAD, responseInstructions: 'Answer in one word.', skipThinkingProviders: DEFAULT_LIST, voiceModel: '' });
+  expect(puts[0]).toEqual({ vad: VAD, responseInstructions: 'Answer in one word.', skipThinkingProviders: DEFAULT_LIST, voiceModel: '', conversation: true });
   await expect(saved(page)).toBeVisible();
   // Saved as it is, and the built-in text still there to reset to.
   await expect(text).toHaveValue('Answer in one word.');
@@ -174,7 +174,7 @@ test('a text being typed is kept while the answer to another save comes in', asy
   await expect(field).toHaveValue('llama-swap, my-gateway');
   await field.blur();
   await expect.poll(() => puts.length).toBe(2);
-  expect(puts[1]).toEqual({ vad: VAD, responseInstructions: 'Answer in one word.', skipThinkingProviders: ['llama-swap', 'my-gateway'], voiceModel: '' });
+  expect(puts[1]).toEqual({ vad: VAD, responseInstructions: 'Answer in one word.', skipThinkingProviders: ['llama-swap', 'my-gateway'], voiceModel: '', conversation: true });
 });
 
 test('the voice model is saved as it is chosen', async ({ page }) => {
@@ -185,7 +185,7 @@ test('the voice model is saved as it is chosen', async ({ page }) => {
   await model.click();
   await page.getByRole('option', { name: /Model B/ }).click();
   await expect.poll(() => puts.length).toBe(1);
-  expect(puts[0]).toEqual({ vad: VAD, responseInstructions: '', skipThinkingProviders: DEFAULT_LIST, voiceModel: 'llama-swap/model-b' });
+  expect(puts[0]).toEqual({ vad: VAD, responseInstructions: '', skipThinkingProviders: DEFAULT_LIST, voiceModel: 'llama-swap/model-b', conversation: true });
   await expect(saved(page)).toBeVisible();
   await expect(model).toContainText('Model B');
 });
@@ -236,8 +236,35 @@ test('a source that recognises speech alone leaves only speech detection to set:
   await expect(page.getByRole('combobox', { name: 'Voice model' })).toHaveCount(0);
   await expect(page.getByRole('textbox', { name: 'Reply without thinking first on' })).toHaveCount(0);
   await expect(page.locator('summary').filter({ hasText: 'Speaking instructions' })).toHaveCount(0);
+  // Nor is there a conversation to switch off.
+  await expect(page.getByRole('switch', { name: 'Voice conversations' })).toHaveCount(0);
   // Dictation listens with it too.
   await expect(page.locator('summary').filter({ hasText: 'Speech detection' })).toBeVisible();
+});
+
+test('voice conversations are switched off and on again, saved as they are, and off leaves only what dictation listens with', async ({ page }) => {
+  const { puts } = await voiceMode(page);
+  await page.evaluate(() => { (window as any).changed = 0; window.addEventListener('voice-config-changed', () => { (window as any).changed++; }); });
+  const conversations = page.getByRole('switch', { name: 'Voice conversations' });
+  await expect(conversations).toHaveAttribute('aria-checked', 'true');
+  await expect(page.getByRole('combobox', { name: 'Voice model' })).toBeVisible();
+  await conversations.click();
+  await expect.poll(() => puts.length).toBe(1);
+  expect(puts[0]).toEqual({ vad: VAD, responseInstructions: '', skipThinkingProviders: DEFAULT_LIST, voiceModel: '', conversation: false });
+  await expect(saved(page)).toBeVisible();
+  // Voice mode's controls are told: see voice.spec.mts for what the chat then offers.
+  expect(await page.evaluate(() => (window as any).changed)).toBe(1);
+  await expect(conversations).toHaveAttribute('aria-checked', 'false');
+  await expect(page.getByRole('combobox', { name: 'Voice model' })).toHaveCount(0);
+  await expect(page.getByRole('textbox', { name: 'Reply without thinking first on' })).toHaveCount(0);
+  await expect(page.locator('summary').filter({ hasText: 'Speaking instructions' })).toHaveCount(0);
+  await expect(page.locator('summary').filter({ hasText: 'Speech detection' })).toBeVisible();
+  await page.reload();
+  await expect(conversations).toHaveAttribute('aria-checked', 'false');
+  await conversations.click();
+  await expect.poll(() => puts.length).toBe(2);
+  expect(puts[1].conversation).toBe(true);
+  await expect(page.getByRole('combobox', { name: 'Voice model' })).toBeVisible();
 });
 
 test('Stop using leaves voice mode without a source, and the rest of the section as it is', async ({ page }) => {

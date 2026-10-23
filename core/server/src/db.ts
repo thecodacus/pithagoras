@@ -751,8 +751,8 @@ function voiceServiceUrl(value: unknown): boolean {
   }
 }
 
-/** The keys of voice mode's settings that stay the portal's: how a spoken conversation goes, whatever listens and speaks for it. */
-const VOICE_MODE_KEYS = ["vad", "responseInstructions", "skipThinkingProviders", "voiceModel"];
+/** The keys of voice mode's settings that stay the portal's: whether a spoken conversation is offered and how it goes, whatever listens and speaks for it. */
+const VOICE_MODE_KEYS = ["vad", "responseInstructions", "skipThinkingProviders", "voiceModel", "conversation"];
 
 /**
  * Voice mode listens and speaks through an extension now, the source, chosen on that extension's own page (`provider`

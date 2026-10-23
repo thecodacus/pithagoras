@@ -492,10 +492,12 @@ export interface VoiceConfig {
   voices: { id: string; name: string; builtIn?: boolean }[];
   // Voice mode is on while it has a source.
   enabled: boolean;
+  // Whether voice mode, the spoken conversation, is offered: off leaves dictation, which only listens.
+  conversation: boolean;
   vad?: typeof DEFAULT_VAD;
 }
-/** What the page saves of voice mode: how a spoken conversation goes, whatever listens and speaks for it. */
-export interface VoiceModeSave { vad: typeof DEFAULT_VAD; responseInstructions: string; skipThinkingProviders?: string[]; voiceModel: string }
+/** What the page saves of voice mode: whether a spoken conversation is offered and how it goes, whatever listens and speaks for it. */
+export interface VoiceModeSave { vad: typeof DEFAULT_VAD; responseInstructions: string; skipThinkingProviders?: string[]; voiceModel: string; conversation: boolean }
 
 /** Who is signed in, and how one signs in. */
 export interface AuthStatus {
