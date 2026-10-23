@@ -459,7 +459,8 @@ function RailGroup({
           held ? "cursor-default" : "hover:text-fg-subtle"
         }`}
       >
-        <span className="truncate">{label}</span>
+        {/* A name wider than the rail goes on to a second line rather than being cut off, as the German for "Extension settings" does. */}
+        <span>{label}</span>
         <LuChevronRight aria-hidden className={`ml-auto h-3 w-3 shrink-0 transition-transform motion-reduce:transition-none ${open ? "rotate-90" : ""} ${held ? "opacity-40" : ""}`} />
       </button>
       <div id={body} role="group" aria-label={label} hidden={!open} className={`space-y-0.5 ${className}`}>

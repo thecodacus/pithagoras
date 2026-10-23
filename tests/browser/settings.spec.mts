@@ -308,6 +308,22 @@ test("on a phone the rail's groups fold in the rail, without turning to a page, 
   await expect(dialog.getByRole('radiogroup', { name: 'Theme' })).toBeVisible();
 });
 
+test("in German no heading of the rail is cut off, the long one of the extensions' group included", async ({ page }) => {
+  await portal(page);
+  await page.addInitScript(() => {
+    localStorage.setItem('pithagoras.setup', 'done');
+    localStorage.setItem('pithagoras.language', 'de');
+  });
+  await page.goto('/settings/models');
+  const dialog = page.getByRole('dialog', { name: 'Einstellungen' });
+  await expect(dialog.getByRole('button', { name: 'pi-web-access' })).toBeVisible();
+  // None of a name runs past the room it is given, where it would be cut off.
+  for (const name of ['Modelle', 'Agent', 'Erreichbarkeit', 'Portal', 'Einstellungen der Erweiterungen']) {
+    const label = dialog.getByRole('button', { name, exact: true }).locator('span');
+    expect(await label.evaluate((el) => el.scrollWidth <= el.clientWidth), name).toBe(true);
+  }
+});
+
 test('with no model yet, the setup assistant walks through provider, model and packages', async ({ page }) => {
   const api = await portal(page, { models: false });
   await page.goto('/');
