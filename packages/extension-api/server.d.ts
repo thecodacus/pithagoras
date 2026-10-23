@@ -469,7 +469,8 @@ export interface ServerPortal {
      * again (an idle one at once, a working one at its next step). The same folder installed again is loaded again in
      * place, every half at its new revision. Settings → Extensions shows that it came from this extension, with `note`.
      * Rejects for a folder outside `dataDir()`, one with no package.json or no valid name, and a name that one of the
-     * portal's own extensions has or that a package installed from elsewhere has. Installs and removals of every extension
+     * portal's own extensions has (those it comes with, and those it gives every chat's pi, such as `sandbox` and
+     * `guard`) or that a package installed from elsewhere has. Installs and removals of every extension
      * run one at a time. Rejects at once while this half is starting, or once it stopped: the server halves follow an
      * install, and they would wait for this one.
      */
