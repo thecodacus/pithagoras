@@ -209,9 +209,14 @@ export function Modal({
         {rail ? (
           <div className="flex min-h-0 flex-1 flex-col sm:flex-row">
             {/* Any button in the rail picks a section, so any click on one
-                turns to it; the rail's own state says which. */}
+                turns to it; the rail's own state says which. A button that
+                folds a part of the rail, and says so (aria-expanded), picks
+                none: the rail stays. */}
             <nav
-              onClick={(e) => (e.target as HTMLElement).closest("button") && setInRail(false)}
+              onClick={(e) => {
+                const button = (e.target as HTMLElement).closest("button");
+                if (button && !button.hasAttribute("aria-expanded")) setInRail(false);
+              }}
               className={`min-h-0 flex-1 overflow-y-auto bg-canvas/40 p-2 sm:block sm:w-52 sm:flex-none sm:shrink-0 sm:border-r sm:border-line xl:w-60 xl:p-3 ${inRail ? "" : "hidden"}`}
             >
               {rail}

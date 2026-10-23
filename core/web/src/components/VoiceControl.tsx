@@ -233,10 +233,13 @@ export function VoiceControl({ sessionId, folder, items, running, work, onSend, 
       ttsPrefetch.current = config.ttsPrefetch === true;
       setPrefetchMode(ttsPrefetch.current);
       vadSettings.current = { ...DEFAULT_VAD, ...config.vad };
-      // Voice mode speaks its replies: without speech synthesis there is nothing for it to do. Dictation, which only listens, stays.
-      const usable = config.enabled && config.speech !== false;
+      // Voice mode speaks its replies: without speech synthesis, or with voice conversations switched off in Settings, there
+      // is nothing for it to do. Dictation, which only listens, stays.
+      const usable = config.enabled && config.speech !== false && config.conversation !== false;
       setAvailable(usable);
-      if (!usable) stop();
+      // Ended here, voice mode that was on in this tab before a reload is not brought back later either: this runs again
+      // each time Settings is closed, and once voice mode can be used again it would start, microphone and all, with no click.
+      if (!usable) { resume.current = false; stop(); }
       // Voice mode was on in this tab when the page was reloaded: carry on.
       else if (resume.current && !voice.current && !restoring.current) { restoring.current = true; void start(true); }
     }).catch(() => { if (mounted.current) { setAvailable(false); stop(); } });

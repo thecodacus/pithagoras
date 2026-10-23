@@ -170,7 +170,8 @@ can be changed under **Settings → Shortcuts**.
 Voice mode is a conversation. When you only want to get words into the message
 box, use **dictation**: the **microphone icon** left of the waveform icon. Speak,
 and what you say is transcribed and typed in; the agent never speaks back and a
-run in progress is not interrupted.
+run in progress is not interrupted. To have dictation alone, switch off **Voice
+conversations** in [Voice mode's settings](#voice-mode-s-settings).
 
 It listens the same way voice mode does, with the same in-browser speech
 detection and the same source, so it works as soon as voice mode has one, also a
@@ -251,13 +252,15 @@ it, a text field when you leave it, and the page says **Saved**.
 
 | | |
 | --- | --- |
+| **Voice conversations** | On by default: the waveform button and its shortcut start voice mode. Off, only dictation is offered, and a voice session already on ends: in this tab at once, in another when its next lease renewal is refused |
 | **Voice model** | The model that answers spoken messages (see [First spoken response](#first-spoken-response)) |
 | **Reply without thinking first on** | The providers whose first answer to a spoken message skips thinking |
 | **Speaking instructions** | How the agent is told to talk (see [Speaking instructions](#speaking-instructions)) |
 | **Speech detection** | When a turn starts and ends: the silence that ends a turn, the speech-start and speech-end thresholds, the shortest sound that counts and the audio kept from before speech. Restart voice mode to apply them. Shorter silence responds faster but can cut off pauses. **Reset speech detection** puts back the defaults. |
 
-The first three are not shown while the source recognises speech alone. Speech
-detection holds for dictation too.
+The first four are not shown while the source recognises speech alone, and the
+three after Voice conversations are not shown while it is off. Speech detection
+holds for dictation too.
 
 ## Other languages: Chatterbox and Qwen3-ASR
 
@@ -395,7 +398,8 @@ microphone submissions and typed requests sent in voice mode. The rule is part
 of the prompt pi builds, so it stays when tools come and go.
 
 While voice mode has a source that can speak now (not one that recognises
-speech alone, and not one that is not running), the rule is
+speech alone, and not one that is not running) and voice conversations are on,
+the rule is
 in the system prompt of every conversation, spoken in or not. A local model
 keeps a cache of the prompt it has already read, and that cache starts at the
 system prompt: with the rule there from the start, the first spoken message in a
@@ -404,8 +408,8 @@ the first spoken reply. The rule says plainly that it describes the marker and
 that a message is spoken only when its own text begins with it, so typed
 messages keep normal chat formatting.
 
-With no source, or one that recognises speech alone or is not running, the
-rule is only in a conversation that has had voice. It comes in with the first spoken message,
+With no source, one that recognises speech alone or is not running, or voice
+conversations switched off, the rule is only in a conversation that has had voice. It comes in with the first spoken message,
 including one sent while a typed run is still going, and typing again does not
 take it out. It is left out again when a spoken message never reached the
 conversation (refused, or taken by an extension) and no other spoken one is

@@ -172,6 +172,158 @@ test('the rail keeps its extension pages from last time, and a provider says it 
   await expect(dialog.getByTitle('model-a — loaded now')).toBeVisible();
 });
 
+/** Where the rail keeps which of its groups were folded, by their English names. */
+const FOLDED = 'pithagoras.settings.rail-closed';
+const folded = (page: Page) => page.evaluate((key) => localStorage.getItem(key), FOLDED);
+
+test("the rail's groups fold under their headings, with the keys too, and stay as they were left after a reload", async ({ page }) => {
+  await portal(page);
+  await page.addInitScript(() => localStorage.setItem('pithagoras.setup', 'done'));
+  await page.goto('/settings/models');
+  const dialog = page.getByRole('dialog', { name: 'Settings' });
+  const reach = dialog.getByRole('button', { name: 'Reach', exact: true });
+  const extensions = dialog.getByRole('button', { name: 'Extension settings', exact: true });
+  // Every group is open until somebody folds one, and its heading says which part of the rail it opens.
+  for (const name of ['Models', 'Agent', 'Reach', 'Portal', 'Extension settings']) {
+    const heading = dialog.getByRole('button', { name, exact: true });
+    await expect(heading).toHaveAttribute('aria-expanded', 'true');
+    await expect(heading).toHaveAttribute('aria-controls', (await dialog.getByRole('group', { name, exact: true }).getAttribute('id'))!);
+  }
+  await expect(dialog.getByRole('button', { name: 'pi-web-access' })).toBeVisible();
+  expect(await folded(page)).toBeNull();
+
+  await reach.click();
+  await expect(reach).toHaveAttribute('aria-expanded', 'false');
+  await expect(dialog.getByRole('button', { name: 'Channels' })).toBeHidden();
+  await expect(dialog.getByRole('button', { name: 'People' })).toBeHidden();
+  await extensions.click();
+  await expect(dialog.getByRole('button', { name: 'pi-web-access' })).toBeHidden();
+  expect(JSON.parse((await folded(page))!)).toEqual(['Reach', 'Extension settings']);
+  // The page showing is not left for the fold.
+  await expect(dialog.getByText('Online · 12 ms')).toBeVisible();
+
+  await page.reload();
+  await expect(reach).toHaveAttribute('aria-expanded', 'false');
+  await expect(extensions).toHaveAttribute('aria-expanded', 'false');
+  await expect(dialog.getByRole('button', { name: 'Channels' })).toBeHidden();
+  await expect(dialog.getByRole('button', { name: 'pi-web-access' })).toBeHidden();
+  await expect(dialog.getByRole('button', { name: 'Tools', exact: true })).toBeVisible();
+
+  // Enter and Space open and fold it as a click does, and the focus stays on the heading.
+  await reach.focus();
+  await page.keyboard.press('Enter');
+  await expect(reach).toHaveAttribute('aria-expanded', 'true');
+  await expect(dialog.getByRole('button', { name: 'Channels' })).toBeVisible();
+  await expect(reach).toBeFocused();
+  await page.keyboard.press('Space');
+  await expect(reach).toHaveAttribute('aria-expanded', 'false');
+  await expect(dialog.getByRole('button', { name: 'Channels' })).toBeHidden();
+  await page.keyboard.press('Enter');
+  await expect(reach).toHaveAttribute('aria-expanded', 'true');
+  expect(JSON.parse((await folded(page))!)).toEqual(['Extension settings']);
+  await page.reload();
+  await expect(reach).toHaveAttribute('aria-expanded', 'true');
+  await expect(extensions).toHaveAttribute('aria-expanded', 'false');
+});
+
+test('a page in a folded group, reached by a search or its address, is shown with its group held open, and folded again once it is left', async ({ page }) => {
+  await portal(page);
+  await page.addInitScript((key) => {
+    localStorage.setItem('pithagoras.setup', 'done');
+    if (!sessionStorage.getItem('seeded')) { sessionStorage.setItem('seeded', '1'); localStorage.setItem(key, JSON.stringify(['Agent', 'Portal', 'Extension settings'])); }
+  }, FOLDED);
+  await page.goto('/settings/general');
+  const dialog = page.getByRole('dialog', { name: 'Settings' });
+  const portalGroup = dialog.getByRole('button', { name: 'Portal', exact: true });
+  const extensions = dialog.getByRole('button', { name: 'Extension settings', exact: true });
+  await expect(dialog.getByLabel('Default model')).toBeVisible();
+  await expect(portalGroup).toHaveAttribute('aria-expanded', 'false');
+  await expect(dialog.getByRole('button', { name: 'This browser' })).toBeHidden();
+  // The group of the page showing is held open: its heading says so, and does nothing.
+  const models = dialog.getByRole('button', { name: 'Models', exact: true });
+  await expect(models).toHaveAttribute('aria-expanded', 'true');
+  await expect(models).toHaveAttribute('aria-disabled', 'true');
+  await expect(models).toHaveAttribute('title', 'Open while one of its pages is showing');
+
+  // What is in a folded group is found all the same, and picking it opens its group with its page marked.
+  await dialog.getByLabel('Search settings').fill('dunkel');
+  await expect(dialog.getByRole('option').first()).toContainText('Theme');
+  await dialog.getByLabel('Search settings').press('Enter');
+  await expect(dialog.getByRole('radiogroup', { name: 'Theme' })).toBeInViewport();
+  // What was found stays listed in the rail's place until the search is cleared.
+  await expect(portalGroup).toBeHidden();
+  await dialog.getByLabel('Search settings').press('Escape');
+  await expect(portalGroup).toHaveAttribute('aria-expanded', 'true');
+  await expect(dialog.getByRole('button', { name: 'This browser' })).toHaveAttribute('aria-current', 'page');
+  // Held open, a press on its heading neither folds it nor changes what is kept.
+  await expect(portalGroup).toHaveAttribute('aria-disabled', 'true');
+  await portalGroup.focus();
+  await page.keyboard.press('Enter');
+  await expect(portalGroup).toHaveAttribute('aria-expanded', 'true');
+  await portalGroup.click({ force: true });
+  await expect(portalGroup).toHaveAttribute('aria-expanded', 'true');
+  await expect(models).not.toHaveAttribute('aria-disabled', /.+/);
+  expect(JSON.parse((await folded(page))!)).toEqual(['Agent', 'Portal', 'Extension settings']);
+
+  // An extension's page too; the group left behind is folded again, as it was left.
+  await dialog.getByLabel('Search settings').fill('safe search');
+  await dialog.getByRole('option').first().click();
+  await expect(dialog.getByRole('switch', { name: 'Safe search' })).toBeVisible();
+  await dialog.getByLabel('Search settings').press('Escape');
+  await expect(extensions).toHaveAttribute('aria-expanded', 'true');
+  await expect(dialog.getByRole('button', { name: 'pi-web-access' })).toHaveAttribute('aria-current', 'page');
+  await expect(portalGroup).toHaveAttribute('aria-expanded', 'false');
+  await expect(dialog.getByRole('button', { name: 'This browser' })).toBeHidden();
+
+  // Opened at a page's address.
+  await page.goto('/settings/extensions');
+  const agent = dialog.getByRole('button', { name: 'Agent', exact: true });
+  await expect(agent).toHaveAttribute('aria-expanded', 'true');
+  await expect(dialog.getByRole('button', { name: 'Extensions', exact: true })).toHaveAttribute('aria-current', 'page');
+  await expect(extensions).toHaveAttribute('aria-expanded', 'false');
+  // Left for a page of another group, the one it was in is folded as it was kept.
+  await dialog.getByRole('button', { name: 'Providers' }).click();
+  await expect(agent).toHaveAttribute('aria-expanded', 'false');
+  await expect(dialog.getByRole('button', { name: 'Extensions', exact: true })).toBeHidden();
+});
+
+test("on a phone the rail's groups fold in the rail, without turning to a page, and a page picked in one is shown", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 800 });
+  await portal(page);
+  await page.addInitScript(() => localStorage.setItem('pithagoras.setup', 'done'));
+  await page.goto('/settings/general');
+  const dialog = page.getByRole('dialog', { name: 'Settings' });
+  const portalGroup = dialog.getByRole('button', { name: 'Portal', exact: true });
+  await expect(dialog.getByLabel('Search settings')).toBeVisible();
+  await portalGroup.click();
+  await expect(portalGroup).toHaveAttribute('aria-expanded', 'false');
+  await expect(dialog.getByRole('button', { name: 'This browser' })).toBeHidden();
+  // Still the rail: no page in its place, and no way back.
+  await expect(dialog.getByLabel('Search settings')).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Back', exact: true })).toBeHidden();
+  await portalGroup.click();
+  await dialog.getByRole('button', { name: 'This browser' }).click();
+  await expect(dialog.getByRole('button', { name: 'Back', exact: true })).toBeVisible();
+  await expect(dialog.getByLabel('Search settings')).toBeHidden();
+  await expect(dialog.getByRole('radiogroup', { name: 'Theme' })).toBeVisible();
+});
+
+test("in German no heading of the rail is cut off, the long one of the extensions' group included", async ({ page }) => {
+  await portal(page);
+  await page.addInitScript(() => {
+    localStorage.setItem('pithagoras.setup', 'done');
+    localStorage.setItem('pithagoras.language', 'de');
+  });
+  await page.goto('/settings/models');
+  const dialog = page.getByRole('dialog', { name: 'Einstellungen' });
+  await expect(dialog.getByRole('button', { name: 'pi-web-access' })).toBeVisible();
+  // None of a name runs past the room it is given, where it would be cut off.
+  for (const name of ['Modelle', 'Agent', 'Erreichbarkeit', 'Portal', 'Einstellungen der Erweiterungen']) {
+    const label = dialog.getByRole('button', { name, exact: true }).locator('span');
+    expect(await label.evaluate((el) => el.scrollWidth <= el.clientWidth), name).toBe(true);
+  }
+});
+
 test('with no model yet, the setup assistant walks through provider, model and packages', async ({ page }) => {
   const api = await portal(page, { models: false });
   await page.goto('/');

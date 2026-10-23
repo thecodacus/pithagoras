@@ -90,6 +90,14 @@ The agent writes here too, so a save is checked. If the file changed after you
 opened it, the save is refused and you choose between loading the new version
 and saving yours anyway.
 
+**Refresh** reads the folder again and, when a file is open, that file too. A
+file without unsaved changes shows its new text in place, as the page or the
+source it was shown as. With unsaved changes, your text stays; if the file
+changed, you get the same choice as at a save. The only change Files notices by
+itself is one the agent makes with its write and edit tools. A change made any
+other way — by the agent's shell commands, a terminal, another chat or another
+device — shows with **Refresh**.
+
 The Markdown files in a folder called `documents` are also the project's
 [Documents](/guide/documents), with a history of their own. A change made here
 is kept there as a revision, marked as an outside change, and a page that has
@@ -103,6 +111,9 @@ is shown — the editor, live, as it changes. Opening a file or a folder yoursel
 takes over from that, and **Follow** hands it back; clicking **Following** again
 stops following. Editing is never interrupted:
 while you have unsaved changes, the agent's next file does not replace them.
+When the agent writes or edits the file that is open, its new text shows there,
+following or not; with unsaved changes you get the same choice as at a save
+instead.
 
 In [voice mode](/guide/voice) it opens on its own the first time the agent touches
 a file, in the same way as the browser and the terminal, and there is a folder

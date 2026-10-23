@@ -15,6 +15,17 @@ Plus a page for every extension that exposes configuration, under **Extension
 settings**: [Media](/guide/media)'s is **Media**, at
 `/settings/x/pithagoras-media`.
 
+Each group folds under its heading: a click, or Enter or Space on it, hides its
+pages and shows them again, and the arrow beside the name says which it is. All
+of them are open until you fold one, and what you fold stays folded in this
+browser, through closing Settings and reloading the page. The group of the page
+showing is held open, so the page marked as the current one is always in the
+rail: a search, a link or an address that goes to a page in a folded group
+finds the group open, and it folds again once you go to a page in another
+group. While it is held, its heading does nothing. The search lists what it
+finds whatever is folded. On a phone, folding a group keeps you in the list of
+pages; it does not open one.
+
 The dialog takes the room the screen has: nearly all of a laptop's, and three
 quarters of the width of a wider one. Every page uses that width. Lists
 (providers, skills, MCP servers, channels, people, extensions) stand two
@@ -47,11 +58,12 @@ is kept when a chat is compacted, and where routines report. The fields are
 described in [Models and providers](/guide/models#defaults).
 
 At the end of the page, **Voice mode** holds what voice mode does whatever
-listens and speaks for it: speech detection, the speaking instructions, the
-model that answers spoken messages and the providers that reply without
-thinking first, each saved as it is changed. It names voice mode's source too,
-says whether it is running, and has a button to its page and **Stop using**:
-see [Voice mode's settings](/guide/voice#voice-mode-s-settings).
+listens and speaks for it: whether voice conversations are offered at all (off,
+only dictation is), speech detection, the speaking instructions, the model that
+answers spoken messages and the providers that reply without thinking first,
+each saved as it is changed. It names voice mode's source too, says whether it
+is running, and has a button to its page and **Stop using**: see
+[Voice mode's settings](/guide/voice#voice-mode-s-settings).
 
 The fields show **only your explicit overrides**. Leave one empty and it
 inherits, with the inherited value shown as the placeholder. Clearing a field

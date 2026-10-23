@@ -24,6 +24,7 @@ const { voiceRouter, providerUse, providerCall } = await import("../dist/api/voi
 const { agentsRouter } = await import("../dist/api/agents.js");
 const { createSession, getSetting, putSetting, voiceSpeaks } = await import("../dist/db.js");
 const { createAgent } = await import("../dist/agents.js");
+const { AudioRule } = await import("../dist/pi/voice-first.js");
 
 const SPEAKER = fileURLToPath(new URL("../../../tests/fixtures/extensions/speaker/server.js", import.meta.url));
 let revs = 0;
@@ -69,6 +70,7 @@ const agentVoice = (id, value) => send("PUT", `/api/agents/${id}/voice`, { voice
 const NOT_RUNNING = "Voice mode listens and speaks through test-speaker, which is not running: install or start it in Settings → Extensions, or stop using it in Settings → Defaults → Voice mode";
 const NO_SOURCE = "Voice mode has no source: choose one on the page of an extension that provides it, in Settings → Extensions";
 const NOT_OFFERED = "Choose one of the voices voice mode's source offers now, or none";
+const CONVERSATION_OFF = "Voice conversations are switched off in Settings → Defaults → Voice mode: dictation still works";
 /** Waits for `ready`, and fails rather than waiting for ever. */
 async function until(ready, what) {
   for (let i = 0; !(await ready()); i++) {
@@ -411,6 +413,46 @@ test("a save of voice mode's settings keeps the source and every setting it does
   assert.deepEqual([saved().provider, saved().whisperUrl], ["", "http://kept.example.test/inference"]);
   putSetting("voice", JSON.stringify({ provider: "" }));
   await choose(true);
+});
+
+test("voice conversations switched off leave dictation alone: voice mode's lease and speech are refused, nothing speaks, and a lease is still given back", async () => {
+  const saved = () => JSON.parse(getSetting("voice"));
+  const uses = async () => (await asked()).uses;
+  // The rule for spoken replies as a conversation that has had none has it: while voice mode can speak.
+  const rule = () => {
+    const audio = new AudioRule(undefined, undefined, voiceSpeaks);
+    audio.set(false);
+    return audio.lines().length;
+  };
+  // On where nothing is saved of it, as every setup was before there was a switch.
+  assert.equal(saved().conversation, undefined);
+  assert.deepEqual([(await voice()).conversation, voiceSpeaks(), rule()], [true, true, 1]);
+  // A voice session that is on as they are switched off.
+  await lease("held", true);
+  const before = (await uses()).length;
+  const off = await send("PUT", "/api/voice", { conversation: false });
+  assert.equal(off.status, 200);
+  assert.deepEqual([(await off.json()).conversation, saved().conversation, saved().provider], [false, false, "test-speaker"]);
+  assert.deepEqual([voiceSpeaks(), rule()], [false, 0]);
+  for (const answer of [await speak(), await lease("held", true), await lease("new", true)]) {
+    assert.deepEqual([answer.status, (await answer.json()).error], [409, CONVERSATION_OFF]);
+  }
+  // Its End still gives the lease back, and the source hears at once that voice mode is no longer used.
+  assert.deepEqual(await (await lease("held", false)).json(), { ok: true });
+  assert.deepEqual((await uses()).slice(before), [false]);
+  // Dictation is heard as before.
+  const heard = await transcribe("?purpose=dictation");
+  assert.deepEqual([heard.status, await heard.json()], [200, { text: "Heard by the speaker." }]);
+  assert.deepEqual((await asked()).heard.at(-1), { purpose: "dictation", bytes: 76 });
+  const wrong = await send("PUT", "/api/voice", { conversation: "no" });
+  assert.deepEqual([wrong.status, (await wrong.json()).error], [400, "Voice conversations are switched on with true and off with false"]);
+  assert.equal(saved().conversation, false, "a refused save changes nothing");
+  // Switched on again: all as before.
+  assert.equal((await (await send("PUT", "/api/voice", { conversation: true })).json()).conversation, true);
+  assert.deepEqual([voiceSpeaks(), rule()], [true, 1]);
+  assert.equal((await speak()).status, 200);
+  assert.deepEqual(await (await lease("new", true)).json(), { ok: true });
+  await lease("new", false);
 });
 
 test("an agent's voice is one its source offers now, or the source's own choice; any other is refused, also while there is no source or it is not running", async () => {

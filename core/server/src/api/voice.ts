@@ -18,6 +18,11 @@ export interface VoiceConfig {
   skipThinkingProviders?: string[];
   /** The model spoken turns run on, "provider/model"; "" or absent is the chat's own. */
   voiceModel?: string;
+  /**
+   * Whether voice mode, the spoken conversation, is offered; false leaves dictation, which only listens. Absent is true,
+   * as it was before there was a switch.
+   */
+  conversation?: boolean;
 }
 /** Long enough for the built-in text several times over; every voice turn carries it. */
 export const MAX_RESPONSE_INSTRUCTIONS = 8000;
@@ -25,7 +30,13 @@ function config(): VoiceConfig {
   const stored = getSetting("voice");
   return stored ? { provider: "", ...JSON.parse(stored) } : { provider: "" };
 }
-/** What the page saves of voice mode: how a spoken conversation goes, whatever listens and speaks for it. */
+/** Whether voice conversations are on: see VoiceConfig's `conversation`. */
+function conversing(): boolean {
+  return config().conversation !== false;
+}
+/** What voice mode's own routes answer while voice conversations are off. Dictation asks none of them. */
+const CONVERSATION_OFF = "Voice conversations are switched off in Settings → Defaults → Voice mode: dictation still works";
+/** What the page saves of voice mode: whether a spoken conversation is offered and how it goes, whatever listens and speaks for it. */
 export function validateConfig(value: any) {
   const responseInstructions = value?.responseInstructions ?? "";
   if (typeof responseInstructions !== "string" || responseInstructions.length > MAX_RESPONSE_INSTRUCTIONS)
@@ -39,7 +50,9 @@ export function validateConfig(value: any) {
     if (typeof vad[key] !== 'number' || !Number.isFinite(vad[key]) || vad[key] < min || vad[key] > max) throw new Error(`Invalid VAD ${key}: expected ${min}–${max}`);
   }
   if (vad.negativeSpeechThreshold >= vad.positiveSpeechThreshold) throw new Error('Speech-end threshold must be lower than speech-start threshold');
-  return { vad, responseInstructions: savedInstructions(responseInstructions), skipThinkingProviders, voiceModel };
+  const conversation = value?.conversation ?? true;
+  if (typeof conversation !== "boolean") throw new Error("Voice conversations are switched on with true and off with false");
+  return { vad, responseInstructions: savedInstructions(responseInstructions), skipThinkingProviders, voiceModel, conversation };
 }
 /**
  * The providers as saved: names as the model menu shows them, each once. The
@@ -201,10 +214,11 @@ function chooseProvider(name: string, chosen: boolean) {
   else if (current.provider === name) saveVoice({ ...current, provider: "" });
 }
 setVoiceChooser({ choose: chooseProvider, chosen: () => config().provider });
-// Whether voice mode can speak now, for the rule that is then in every conversation: it has a source, and that speaks now.
+// Whether voice mode can speak now, for the rule that is then in every conversation: voice conversations are on, it has a
+// source, and that speaks now.
 setVoiceSpeaks(() => {
   try {
-    return sourceOf().state.speaks;
+    return conversing() && sourceOf().state.speaks;
   } catch {
     // No source, one that is not running, or settings that cannot be read: nothing speaks.
     return false;
@@ -215,7 +229,7 @@ setVoiceSpeaks(() => {
  * it is now, and what the portal is set to.
  */
 function shown() {
-  const { provider, vad, responseInstructions, skipThinkingProviders, voiceModel } = config();
+  const { provider, vad, responseInstructions, skipThinkingProviders, voiceModel, conversation } = config();
   const source = voiceProviders().get(provider);
   const state = source && stateOf(provider, source);
   return {
@@ -228,6 +242,8 @@ function shown() {
     speech: state ? state.speaks : true,
     voices: state ? state.voices : [],
     enabled: provider !== "",
+    // Off: the page offers dictation, and not voice mode.
+    conversation: conversation !== false,
     comparison: process.env.VOICE_COMPARISON === "true",
     statusSpeech: process.env.VOICE_STATUS_SPEECH !== "false",
     ttsPrefetch: process.env.VOICE_TTS_PREFETCH === "true",
@@ -259,6 +275,9 @@ export function voiceRouter(): Router {
   router.post('/sessions/:id/voice/connection', async (req,res)=>{
     const {client,active}=req.body??{};
     if(typeof client!=='string'||client.length>100||!client||typeof active!=='boolean')return res.status(400).json({error:'A client ID and active flag are required'});
+    // A lease is how voice mode starts and stays on, so none is given while voice conversations are off. One given back
+    // still is, so that the source hears at once that voice mode is no longer used.
+    if(active&&!conversing())return res.status(409).json({error:CONVERSATION_OFF});
     try {
       const key=String(req.params.id)+':'+client;
       if(active)await leases.acquire(key);else await leases.release(key);
@@ -285,6 +304,8 @@ export function voiceRouter(): Router {
   });
   router.post("/sessions/:id/voice/speech", async (req, res) => {
     const started = performance.now();
+    // Replies are spoken in voice mode alone.
+    if (!conversing()) return res.status(409).json({ error: CONVERSATION_OFF });
     const source = usable(res);
     if (!source) return;
     if (!source.state.speaks) return res.status(409).json({ error: "Voice mode's source recognises speech alone: replies are not spoken" });

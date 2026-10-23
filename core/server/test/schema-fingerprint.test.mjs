@@ -1044,13 +1044,13 @@ test("what voice mode kept that cannot be left is kept whole for the next start,
   assert.equal(await new Promise((resolve) => run.on("exit", resolve)), 0, out);
   assert.match(out, /RESULT 200/);
   now = voiceIn(dir);
-  assert.deepEqual(now.voice, { ...own, provider: "", responseInstructions: "Answer briefly.", voiceModel: "" });
+  assert.deepEqual(now.voice, { ...own, provider: "", responseInstructions: "Answer briefly.", voiceModel: "", conversation: true });
 
   // Out of the way: the next start, which is no upgrade, leaves it, from what version 8 held.
   rmSync(path.join(dir, "handoff"));
   await upgraded(dir);
   now = voiceIn(dir);
-  assert.deepEqual([now.voice, now.value("voice_gpu"), now.table, existsSync(line)], [{ provider: "pithagoras-voice-servers", vad: VAD, responseInstructions: "Answer briefly.", voiceModel: "" }, undefined, false, false]);
+  assert.deepEqual([now.voice, now.value("voice_gpu"), now.table, existsSync(line)], [{ provider: "pithagoras-voice-servers", vad: VAD, responseInstructions: "Answer briefly.", voiceModel: "", conversation: true }, undefined, false, false]);
   assert.deepEqual(voiceLeft(dir, "voice-service", "settings.json"), serviceOf(own, "GPU-1"));
   assert.deepEqual(voiceLeft(dir, "voice-service", "voices.json").map((v) => v.name), ["Aria"]);
   assert.deepEqual(voiceLeft(dir, "voice-addresses", "settings.json"), addressesOf(own));

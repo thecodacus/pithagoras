@@ -4,7 +4,7 @@ import { LuCheck } from "react-icons/lu";
 import { DEFAULT_VAD, api, type AvailableModel, type VoiceConfig, type VoiceModeSave } from "../api";
 import { msg, t } from "../i18n";
 import { translate } from "../extensions/strings";
-import { LoadFailed, Section, btnCls, inputCls } from "./SettingsUi";
+import { LoadFailed, Section, SwitchRow, btnCls, inputCls } from "./SettingsUi";
 import { serialSaver } from "../serial-saver";
 
 /** The providers as typed: names separated by commas. */
@@ -12,8 +12,8 @@ const providerNames = (text: string) => text.split(",").map(name => name.trim())
 
 /**
  * Voice mode, at the end of Settings → Defaults: the extension it listens and speaks through, which is chosen on that
- * extension's own page and can be stopped here, and how spoken conversations go, whatever listens and speaks for them.
- * Each change is saved as it is made.
+ * extension's own page and can be stopped here, whether spoken conversations are offered and how they go, whatever
+ * listens and speaks for them. Each change is saved as it is made.
  */
 export function VoiceModeSettings({ onError, onExtensions, onSource }: {
   onError: (message: string) => void;
@@ -56,7 +56,7 @@ export function VoiceModeSettings({ onError, onExtensions, onSource }: {
     const text = next.responseInstructions ?? "";
     try {
       // Text that is still the built-in one this page was given is sent as nothing: the portal may have been updated since, and its newer text is then the one to follow.
-      await saver.request({ vad: { ...DEFAULT_VAD, ...next.vad }, responseInstructions: text.trim() === builtIn.trim() ? "" : text, skipThinkingProviders: next.skipThinkingProviders, voiceModel: next.voiceModel ?? "" });
+      await saver.request({ vad: { ...DEFAULT_VAD, ...next.vad }, responseInstructions: text.trim() === builtIn.trim() ? "" : text, skipThinkingProviders: next.skipThinkingProviders, voiceModel: next.voiceModel ?? "", conversation: next.conversation !== false });
     } catch (e) {
       onError((e as Error).message);
       // What was refused is not left on the page as if it were saved.
@@ -74,6 +74,9 @@ export function VoiceModeSettings({ onError, onExtensions, onSource }: {
   const source = config.label ? translate(config.provider, config.label) : config.provider;
   // The source recognises speech alone: the page can listen (dictation), and replies are not spoken.
   const listening = config.ready && !config.speech;
+  // Voice conversations switched off: the page listens for dictation alone, as it does with such a source.
+  const conversation = config.conversation !== false;
+  const speaking = !listening && conversation;
   const providers = providersText === null ? config.skipThinkingProviders ?? [] : providerNames(providersText);
   const vad = vadMoved ?? { ...DEFAULT_VAD, ...config.vad };
   // A slider is saved as it is let go, by the pointer or a key.
@@ -103,7 +106,9 @@ export function VoiceModeSettings({ onError, onExtensions, onSource }: {
         <button type="button" className={`mt-3 ${btnCls}`} onClick={onExtensions}>{t("Open Extensions")}</button>
       </>}
     </div>
-    {!listening && <div className="block text-xs text-fg-muted">{t("Voice model")}
+    {!listening && <SwitchRow title={t("Voice conversations")} on={conversation} onChange={on => void commit({ conversation: on })}
+      detail={t("The waveform button beside the message box, and its shortcut, start a spoken conversation. Off leaves dictation, which types what you say and speaks nothing back.")} />}
+    {speaking && <div className="block text-xs text-fg-muted">{t("Voice model")}
       <Select aria-label={t("Voice model")} size="sm" className="mt-1.5 w-full" value={config.voiceModel ?? ""} onChange={voiceModel => void commit({ voiceModel })} options={[
         { value: "", label: t("Same as the chat"), hint: t("The model the chat is on") },
         ...(!config.voiceModel || models.some(m => `${m.provider}/${m.id}` === config.voiceModel) ? [] : [{ value: config.voiceModel, label: config.voiceModel }]),
@@ -111,7 +116,7 @@ export function VoiceModeSettings({ onError, onExtensions, onSource }: {
       ]} />
       <p className="mt-1.5 text-xs text-fg-faint">{t("The model that answers spoken messages, so a slow chat model does not slow down a conversation. A spoken message that starts a run is answered by it and the chat goes back to its own model afterwards; the model picker of the chat is not changed.")}</p>
     </div>}
-    {!listening && <div className="space-y-2">
+    {speaking && <div className="space-y-2">
       <label className="block text-xs text-fg-muted">{t("Reply without thinking first on")}
         <input aria-label={t("Reply without thinking first on")} className={`mt-1.5 ${inputCls}`} value={providersText ?? (config.skipThinkingProviders ?? []).join(", ")}
           onChange={e => setProvidersText(e.target.value)}
@@ -121,7 +126,7 @@ export function VoiceModeSettings({ onError, onExtensions, onSource }: {
       <button type="button" className={btnCls} disabled={providers.join(",") === (config.defaultSkipThinkingProviders ?? []).join(",")}
         onClick={() => { setProvidersText(null); void commit({ skipThinkingProviders: config.defaultSkipThinkingProviders }); }}>{t("Reset to the default list")}</button>
     </div>}
-    {!listening && <details className="rounded-xl border border-line p-4">
+    {speaking && <details className="rounded-xl border border-line p-4">
       <summary className="cursor-pointer text-sm font-medium">{t("Speaking instructions")}<span className="mt-1 block text-xs font-normal text-fg-muted">{t("What the assistant is told about how to reply in voice mode")}</span></summary>
       <div className="mt-4 space-y-3">
         <p className="text-xs text-fg-faint">{t("Sent with every spoken message, after a fixed note on what the [Audio mode] marker means. They apply from the next spoken message. Empty text uses the built-in instructions.")}</p>
