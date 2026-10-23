@@ -1358,8 +1358,8 @@ Also:
   that needs pi 1.x does not load, and an Azure provider renamed to `azure`
   needs its old name, `azure-openai-responses`.
 - **The voice container** keeps the `unless-stopped` policy Voice gave it, so
-  Docker starts it after the host restarts. 0.1.0 manages it by its name, as
-  before.
+  Docker starts it after the host restarts, with Docker 29 or later as above.
+  0.1.0 manages it by its name, as before.
 - **A chat's mode, the modes you made, and a routine's exemptions** set in
   Settings → Guard are not in the backup. A routine has the Injection guard
   switch it had.
