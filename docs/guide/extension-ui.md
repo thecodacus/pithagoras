@@ -1392,9 +1392,8 @@ what a lazy mark or a name given to it holds to. They are listed while your
 package is installed and switched on, also while its server half has crashed or
 could not start; switched off or uninstalled, it registers none, and they are
 left out of every list, with what was switched for them kept for when it is
-back. Installing your package
-reloads the open chats, so a chat whose pi was running has them from its next
-step. A factory that throws is that chat's load error: nothing your package
+back. Installing your package reloads the open chats, so a chat whose pi was
+running has them from its next step. A factory that throws is that chat's load error: nothing your package
 adds to its pi is there, and the chat says why. One whose promise fails later
 is only in the [log](/guide/settings#logs).
 A server half is plain Node, though: what it imports is its own package's

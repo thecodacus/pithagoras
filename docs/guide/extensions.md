@@ -317,13 +317,13 @@ registers them any more. A switched-off package's are remembered and come back
 with it; an uninstalled one's are forgotten. The tools an extension's
 [server half](/guide/extension-ui#tools-that-share-the-server-half-s-state) adds
 to every chat are left out while its package is switched off or uninstalled, and
-come back with it, with what was switched for them; while it is switched on they
-are listed, even when its server half has crashed or could not start. MCP servers' tools go with
-`pi-mcp-adapter` when it is off or gone, but are remembered even when it is
-uninstalled, since the servers are configured apart from it. A package is the
-same package at any version, so updating one keeps its tools. One narrowed to
-some of its extensions keeps all its tools listed here; a started chat shows
-only what is loaded. Before a chat in a project starts, a package the project
+come back with it, with what was switched for them; while it is switched on
+they are listed, even when its server half has crashed or could not start. MCP
+servers' tools go with `pi-mcp-adapter` when it is off or gone, but are
+remembered even when it is uninstalled, since the servers are configured apart
+from it. A package is the same package at any version, so updating one keeps its
+tools. One narrowed to some of its extensions keeps all its tools listed here; a
+started chat shows only what is loaded. Before a chat in a project starts, a package the project
 lists and loads itself counts, whatever the user's entry says.
 
 A tool remembered before the portal recorded which package it came from is
