@@ -19,7 +19,7 @@ type Voice = { id: string; name: string; kind: string; instruction: string; tran
 test.beforeEach(async ({ page }) => {
   await mockPortal(page, ({ path, method }) => {
     if (method === 'GET' && path === '/api/extensions') return { settingsPath: '/a/settings.json', extensions: [
-      { spec: 'extensions/docker', name: 'pithagoras-docker', version: '1.1.0', settings: [] },
+      { spec: 'extensions/docker', name: 'pithagoras-docker', version: '1.2.0', settings: [] },
       { spec: 'extensions/voice', name: 'pithagoras-voice', version: '0.1.0', settings: [] },
     ] };
     if (method === 'GET' && path === '/api/x/pithagoras-voice/hardware') return { gpus: [], source: 'none', error: '', checked: false, cpuOnly: false, host: { totalMiB: 16384, freeMiB: 12000, threads: 8 }, selected: null, reserveMiB: 0, suggestion: { tts: 'breeze', asr: 'whisper', asrModel: 'base' } };

@@ -142,7 +142,7 @@ export async function voiceDocker() {
     reset() {
       daemon.containers.length = 0;
       daemon.volumes.length = 0;
-      for (const list of [daemon.created, daemon.starts, daemon.pulls]) list.length = 0;
+      for (const list of [daemon.created, daemon.starts, daemon.updates, daemon.pulls]) list.length = 0;
       daemon.failing.clear();
       daemon.images.clear();
       daemon.images.add(CUDA);

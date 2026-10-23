@@ -59,7 +59,7 @@ const VOLUME = "pithagoras_voice-models";
 test("Voice's server half does not start without Docker, which it requires, and starts after it", async () => {
   await host.syncServerHalves([halves.voice]);
   assert.equal(host.isServing("pithagoras-voice"), false);
-  assert.match(host.serverFailure("pithagoras-voice") ?? "", /It needs pithagoras-docker \(\^1\.1\.0\), which is not installed, or is switched off/);
+  assert.match(host.serverFailure("pithagoras-voice") ?? "", /It needs pithagoras-docker \(\^1\.2\.0\), which is not installed, or is switched off/);
 
   await host.syncServerHalves(both);
   assert.equal(host.serverFailure("pithagoras-voice"), undefined);
@@ -83,6 +83,22 @@ test("as it starts, the container and the volume the portal made are taken over 
   const said = await logged(restart);
   assert.doesNotMatch(said, /could not take over/);
   assert.deepEqual(adopted().volumes, { [VOLUME]: "pithagoras-voice" });
+});
+
+test("as it starts, a container Voice made with no restart policy is given unless-stopped as it is: not made again, started or stopped", async () => {
+  // As Voice made them until now, and as the one on friday is: Voice's own, running on the portal's loopback.
+  machine.reset();
+  machine.putVoice({ ...OLD, Labels: { ...OLD.Labels, "pithagoras.extension": "pithagoras-voice" }, HostConfig: { ...OLD.HostConfig, RestartPolicy: { Name: "no" } } });
+  let stops = 0;
+  docker.runs.onStop = (c) => { if (c.Name === CONTAINER) stops++; };
+  await restart();
+  await until(() => docker.updates.length > 0, "changed");
+  assert.deepEqual(docker.updates, [{ name: CONTAINER, changes: { RestartPolicy: { Name: "unless-stopped" } } }]);
+  assert.deepEqual((machine.voice()!.HostConfig as any).RestartPolicy, { Name: "unless-stopped" });
+  // Looked after as well, which finds it as it is now: nothing more is changed, made, started or stopped.
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.equal(docker.updates.length, 1);
+  assert.deepEqual([machine.voice()!.Id, machine.voice()!.State, docker.created, docker.starts, stops], [OLD.Id, "running", [], [], 0]);
 });
 
 test("a running container on the portal's old container is made again on its new one as the half starts, with its engines and its card", async () => {

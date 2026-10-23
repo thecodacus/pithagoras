@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { BASE_IMAGE, IMAGE, containerSpec, imageFor } from '../src/server/service.ts';
 test('voice container shares portal networking without publishing host ports',()=>{
  const spec=containerSpec('echo test', 'container:portal-id');
- assert.equal(spec.HostConfig.RestartPolicy.Name,'no');
+ assert.deepEqual(spec.HostConfig.RestartPolicy,{Name:'unless-stopped'});
  assert.deepEqual(spec.HostConfig.DeviceRequests![0].Capabilities,[['gpu']]);
  assert.ok(spec.HostConfig.Binds.includes('pithagoras_voice-models:/voice'));
  assert.equal(spec.HostConfig.NetworkMode,'container:portal-id');
@@ -56,10 +56,10 @@ test('a choice with nothing on the GPU asks for none and runs in the small image
   assert.equal(spec.Image,image,name);
   assert.equal(imageFor(choice as any),image,name);
   assert.equal('DeviceRequests' in spec.HostConfig,gpu,name);
-  // Shared with every recipe: the volume, the namespace, no restart and the way the script is run.
+  // Shared with every recipe: the volume, the namespace, the restart policy and the way the script is run.
   assert.deepEqual(spec.HostConfig.Binds,['pithagoras_voice-models:/voice'],name);
   assert.equal(spec.HostConfig.NetworkMode,'container:portal-id',name);
-  assert.equal(spec.HostConfig.RestartPolicy.Name,'no',name);
+  assert.deepEqual(spec.HostConfig.RestartPolicy,{Name:'unless-stopped'},name);
   assert.deepEqual(spec.Cmd,['bash','-c','echo test'],name);
   assert.equal(spec.Labels['pithagoras.addon'],'voice',name);
  }

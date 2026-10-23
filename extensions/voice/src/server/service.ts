@@ -37,14 +37,20 @@ async function healthy(url: string) {
   try { return (await fetch(url, { signal: AbortSignal.timeout(1500) })).ok; } catch { return false; }
 }
 /** Of Docker's inspect body, what is read here. */
-type Inspected = { Config?: { Labels?: Record<string, string> | null }; HostConfig?: { NetworkMode?: string; DeviceRequests?: { DeviceIDs?: string[] | null }[] | null }; State?: { Running?: boolean; ExitCode?: number; Error?: string } };
+type Inspected = { Config?: { Labels?: Record<string, string> | null }; HostConfig?: { NetworkMode?: string; DeviceRequests?: { DeviceIDs?: string[] | null }[] | null; RestartPolicy?: { Name?: string } }; State?: { Running?: boolean; Restarting?: boolean; ExitCode?: number; Error?: string }; RestartCount?: number };
+/**
+ * How Docker restarts the voice container, as it does Browser's and Understory's: after it exits, and as Docker starts
+ * after the host restarts, unless the person stopped it (Stop on the page, or in Settings → Docker), which it then stays.
+ */
+const RESTART = { Name: 'unless-stopped' };
 /** Docker's answer that there is no such container or volume, which is no failure where nothing has to be there. */
 function absent(e: unknown): void {
   if ((e as { status?: number }).status !== 404) throw e;
 }
 /**
  * How the voice container was made and how it stands, where there is one: one the portal made before Voice was an
- * extension is taken over first. One by its name that is not the voice service's is refused, and left alone.
+ * extension is taken over first. One by its name that is not the voice service's is refused, and left alone. One made
+ * with another restart policy, as Voice made them before, is given Voice's (`RESTART`).
  */
 async function inspected(): Promise<Inspected | undefined> {
   const d = docker();
@@ -55,8 +61,19 @@ async function inspected(): Promise<Inspected | undefined> {
     // One removed since it was looked at, as a setup that makes it again does, is not there to take over; what is there now is read below.
     await d.containers.adopt(CONTAINER).catch(absent);
   }
-  return (await d.containers.inspect(CONTAINER)) as Inspected | undefined;
+  const detail = (await d.containers.inspect(CONTAINER)) as Inspected | undefined;
+  // Changed in place, not made again: Docker does not restart it for that, its downloads and its setup stay as they are,
+  // and one the person stopped stays stopped. One removed since it was looked at has nothing to change.
+  if (detail && detail.HostConfig?.RestartPolicy?.Name !== RESTART.Name) await d.containers.update(CONTAINER, { RestartPolicy: RESTART }).catch(absent);
+  return detail;
 }
+/**
+ * Docker is starting the container again by itself, after its setup or a service exited (`RESTART`), and goes on doing
+ * so, waiting longer between tries while they fail: it is running to Docker while it waits for the next try
+ * (`Restarting`), and Docker counts the tries (`RestartCount`, from none again at each start it is asked for, and at
+ * the one it makes itself as the host starts). A stop ends it.
+ */
+const restartedByDocker = (found: Inspected | undefined) => found?.State?.Running === true && Boolean(found.State.Restarting || found.RestartCount);
 export interface ServiceStatus { available: boolean; state: string; busy: boolean; progress: string; error: string; /** The engines the container is built for, once there is one. */ choice?: VoiceChoice }
 /**
  * The engines of the running container, from when they were first found answering until the container is found stopped,
@@ -78,7 +95,8 @@ async function statusNow(): Promise<ServiceStatus> {
   let detail: Inspected | undefined;
   try { detail = await inspected(); }
   catch (e) { if (!(e instanceof NotVoices)) throw e; return { available: true, state: 'failed', busy: false, progress: '', error: e.message }; }
-  const running = detail?.State?.Running === true;
+  // One Docker waits to start again is running to Docker, with nothing running in it.
+  const running = detail?.State?.Running === true && !detail.State.Restarting;
   // A running container rejoins the portal's loopback after the portal's own container was made again; stopped ones stay stopped.
   if (running && !pending) {
     const target = await d.sharedNetwork();
@@ -94,8 +112,12 @@ async function statusNow(): Promise<ServiceStatus> {
   // A container made before engines could be chosen has no recipe label, and is the original combination.
   const choice = detail ? choiceFromKey(detail.Config?.Labels?.['pithagoras.voice-recipe']) : undefined;
   const ready = running && (await Promise.all(healthUrls(choice ?? DEFAULT_CHOICE).map(healthy))).every(Boolean);
-  const failed = !running && Boolean(detail?.State?.ExitCode);
-  return { available: true, state: pending ? 'installing' : ready ? 'running' : running ? 'starting' : failed ? 'failed' : detail ? 'stopped' : 'absent', busy: pending, progress: pending ? progress : logs, error: error || (failed ? explain(detail?.State?.Error || 'Voice setup or service exited. Review the log, then retry.') : ''), choice };
+  // A container Docker is starting again by itself is one whose setup or service failed, until its services answer:
+  // between the tries, and in one, which is Docker's and not a start of the person's. Its exit code is the last
+  // failure's only between the tries, as Docker clears it when each begins.
+  const retried = restartedByDocker(detail);
+  const failed = !ready && (retried || (!running && Boolean(detail?.State?.ExitCode)));
+  return { available: true, state: pending ? 'installing' : ready ? 'running' : failed ? 'failed' : running ? 'starting' : detail ? 'stopped' : 'absent', busy: pending, progress: pending ? progress : logs, error: error || (failed ? explain(detail?.State?.Error || (retried ? 'Voice setup or service exited, and Docker is starting it again. Review the log, or retry now.' : 'Voice setup or service exited. Review the log, then retry.')) : ''), choice };
 }
 /** What a container is set up with besides its engines: the card, the threads of recognition on the CPU, and what the check found. */
 interface Plan { card?: Card; note?: string; threads?: number }
@@ -116,7 +138,7 @@ export function containerSpec(script: string, networkMode: string, choice: Voice
     Labels: { 'pithagoras.addon': 'voice', 'pithagoras.voice-network': 'shared-v1', 'pithagoras.voice-recipe': choiceKey(choice) },
     HostConfig: { Binds: [`${VOLUME}:/voice`], NetworkMode: networkMode,
       ...(usesGpu(choice) ? { DeviceRequests: [{ Driver: 'nvidia', ...gpu, Capabilities: [['gpu']] }] } : {}),
-      RestartPolicy: { Name: 'no' }, LogConfig: { Type: 'json-file', Config: { 'max-size': '10m', 'max-file': '2' } } } };
+      RestartPolicy: RESTART, LogConfig: { Type: 'json-file', Config: { 'max-size': '10m', 'max-file': '2' } } } };
 }
 /** The card a container was given. One made before a card was named asked Docker for any one GPU, and has none. */
 const heldCard = (requests?: { DeviceIDs?: string[] | null }[] | null): Card | undefined => {
@@ -132,7 +154,13 @@ async function ensureContainer(script: string, choice: VoiceChoice, plan: Plan) 
     // A card that is asked for and is not the one it has makes it another container, so that Start moves it.
     const onCard = !usesGpu(choice) || !plan.card || holds(heldCard(existing.HostConfig?.DeviceRequests), plan.card);
     const current = labels['pithagoras.voice-network'] === 'shared-v1' && existing.HostConfig?.NetworkMode === networkMode && sameChoice(choiceFromKey(labels['pithagoras.voice-recipe']), choice) && onCard;
-    if (current) { await d.containers.start(CONTAINER); return; }
+    if (current) {
+      // One Docker is starting again is running to Docker, so a start would leave it to Docker's next try: it is stopped
+      // first, so that a retry runs the setup now, and the tries are counted from none.
+      if (restartedByDocker(existing)) await d.containers.stop(CONTAINER);
+      await d.containers.start(CONTAINER);
+      return;
+    }
   }
   // Container config is immutable: one with a stale namespace, or built for other engines or another card, is made
   // again below, which replaces it. /voice, with the cached model and build files, is kept. The volume the portal
@@ -375,8 +403,9 @@ export async function uninstall(removeData = false) {
 /**
  * Takes over the container and the volume the portal made before Voice was an extension, by their names, so that Voice
  * may start, stop and remove them as its own: as the half starts, every time, so that a record of them Docker lost is
- * made again. Nothing is made or started here. One that is not there is not taken over, and one that is not the voice
- * service's is not Voice's to take, which the portal's log says.
+ * made again. A container made with another restart policy, as Voice made them before, is given Voice's here too
+ * (`inspected`). Nothing is made or started here. One that is not there is not taken over, and one that is not the voice service's is
+ * not Voice's to take, which the portal's log says.
  */
 export async function adoptKept(): Promise<void> {
   const d = docker();
