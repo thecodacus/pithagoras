@@ -9,7 +9,7 @@ import { bareRef } from "../browser/ref.js";
 import { listToolRules, mcpView, recordAudit, trustResult, trustedMcpServers, trustedResults, untrustResult, useGrant, type McpView, type ToolRule } from "../db.js";
 import { SIGNALS, injectionSignals, type Signal } from "./injection.js";
 import { GUARD_RULE_NAMES, type GuardRuleName } from "./guard-rule-names.js";
-import { mcpServerOf } from "../tool-policy.js";
+import { mcpClaims, mcpServerOf } from "../tool-policy.js";
 import { DATA_DIR } from "../data-dir.js";
 import { piAgentDir } from "../pi-settings.js";
 import { isWithinText, pathBelow, realPath, realPathAhead } from "../within.js";
@@ -83,12 +83,13 @@ function untrustedResult(toolName: string, input: Record<string, unknown>, fromA
 /**
  * The server a tool's name is of, where no other configured server could have it: with `my-notes` and `my`, the name
  * `my_notes_search` is `my-notes`' `search` and as well `my`'s `notes_search`, and which the adapter runs is not told
- * by the name. Such a name is no trusted server's.
+ * by the name. Such a name is no trusted server's. The others are looked for as mcpServerOf looks (mcpClaims), or a
+ * name it gives one server could be taken for that server's alone while another could have it too.
  */
 function onlyServerOf(name: string, servers: readonly string[]): string | undefined {
   const server = mcpServerOf(name, servers);
   if (server === undefined) return undefined;
-  const others = servers.filter((other) => other !== server && name.startsWith(`${other.replace(/[-.]/g, "_")}_`));
+  const others = servers.filter((other) => other !== server && mcpClaims(other, name));
   return others.length ? undefined : server;
 }
 
@@ -98,13 +99,15 @@ function onlyServerOf(name: string, servers: readonly string[]): string | undefi
  * and for a tool of no server that is configured.
  */
 function proxiedServer(input: Record<string, unknown>, servers: readonly string[]): string | undefined {
-  const same = (name: string) => name.trim().replace(/[-.]/g, "_");
-  const asked = typeof input.tool === "string" ? same(input.tool) : "";
+  // As the adapter finds a tool by its name (findToolByName): hyphens for underscores, and nothing else. A dot is not
+  // an underscore to it: `docs.v2_search` is the tool of a server `docs.v2`, and no tool of `docs`.
+  const asked = typeof input.tool === "string" ? input.tool.trim().replace(/-/g, "_") : "";
   if (!asked) return undefined;
   // What the adapter does before or instead of running the tool (a search, a description, a connection, its UI
   // sessions' messages) hands back what every server says: only a plain call of a tool is that server's own words.
   if (["action", "search", "describe", "connect"].some((key) => input[key] !== undefined && input[key] !== null && input[key] !== "")) return undefined;
-  if (typeof input.server === "string" && input.server.trim()) return servers.find((server) => same(server) === same(input.server as string));
+  // The adapter takes a server by its name as configured, and by no other (executeCall).
+  if (typeof input.server === "string" && input.server.trim()) return servers.find((server) => server === input.server);
   return onlyServerOf(asked, servers);
 }
 
@@ -143,8 +146,9 @@ export function switchedOffVia(
   if (!off.size || (toolName !== GATEWAY_TOOL && toolName !== "mcp" && toolName !== "mcp_script" && toolName !== "mcpScript")) {
     return undefined;
   }
-  // The adapter takes a name with hyphens for underscores (findToolByName); dots as well, which it
-  // writes as underscores, so a name it might take one day is not a way round.
+  // The adapter takes a name with hyphens for underscores (findToolByName). Dots are taken as underscores
+  // here as well, though the adapter keeps a server's (mcpPrefix): wider than the adapter, this only refuses
+  // more, and a name it might take one day is not a way round.
   const same = (name: string) => name.replace(/[-.]/g, "_");
   if (toolName === GATEWAY_TOOL) {
     // Searching names nothing, and lists only what is lazy. Describing a tool is a way to it too: its

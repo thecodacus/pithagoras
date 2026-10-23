@@ -23,7 +23,7 @@
  * `mcpServerOf` can tell a server's tools by. A server named another way is not
  * judged here, and its tools are left as they are.
  */
-import { mcpServerOf } from "./tool-policy.js";
+import { mcpPrefix, mcpServerOf } from "./tool-policy.js";
 
 export interface McpConfigLike {
   mcpServers?: Record<string, Record<string, unknown>>;
@@ -137,7 +137,7 @@ export function mcpOffer(config: McpConfigLike, cache: McpCacheLike | null): (na
     if (server === undefined) return undefined;
     const definition = servers[server] ?? {};
     if (prefixOf(definition, settings) !== "server") return undefined;
-    const bare = name.slice(server.replace(/-/g, "_").length + 1);
+    const bare = name.slice(mcpPrefix(server).length + 1);
 
     if (definition.disabled === true) return "withdrawn";
 
@@ -182,7 +182,7 @@ export function mcpDirect(config: McpConfigLike, cache: McpCacheLike | null): (n
     if (filter === true) return true;
     if (!Array.isArray(filter) || !filter.length) return false;
     if (!tools.has(server)) tools.set(server, cachedTools(cache?.servers?.[server], definition));
-    const bare = name.slice(server.replace(/-/g, "_").length + 1);
+    const bare = name.slice(mcpPrefix(server).length + 1);
     // The list names a tool by the server's own name. Without a cache entry to tell it from, the registered one is all there is.
     return filter.includes(tools.get(server)?.get(bare)?.key ?? bare);
   };
@@ -203,7 +203,7 @@ export function mcpCatalogue(config: McpConfigLike, cache: McpCacheLike | null):
   const out: { name: string; server: string; description?: string; offer: McpOffer }[] = [];
   for (const [server, definition] of Object.entries(servers)) {
     if (prefixOf(definition ?? {}, settings) !== "server") continue;
-    const prefix = server.replace(/-/g, "_");
+    const prefix = mcpPrefix(server);
     for (const { bare, description } of cachedTools(cache?.servers?.[server], definition ?? {})?.values() ?? []) {
       const name = `${prefix}_${bare}`;
       // Claimed by a server with a longer name, whose tool it would be taken for.

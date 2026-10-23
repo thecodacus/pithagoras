@@ -24,30 +24,49 @@
 export const BROWSER_MCP = "browser";
 
 /**
+ * How the adapter starts the names of a server's tools, in its default `server` mode
+ * (getServerPrefix): the server's name with its hyphens as underscores, and its dots
+ * kept. `brave-search` registers `brave_search_brave_web_search`, and `docs.v2`
+ * registers `docs.v2_search`. A tool's own dots are written as underscores
+ * (formatToolName), a server's are not: `docs_v2_search` is the tool `v2_search` of
+ * a server called `docs`.
+ */
+export function mcpPrefix(server: string): string {
+  return server.replace(/-/g, "_");
+}
+
+/**
+ * Could a tool of this name be this server's, as the adapter names them? What
+ * every place that tells a tool's server by its name goes by, so that none of
+ * them gives a tool to a server another would not.
+ */
+export function mcpClaims(server: string, name: string): boolean {
+  return name.startsWith(`${mcpPrefix(server)}_`);
+}
+
+/**
  * Which MCP server a tool came through, if any.
  *
  * Everything behind the adapter registers itself as one package, so a machine
  * with three servers attached had one group of forty tools called
  * `pi-mcp-adapter`. Nobody thinks of them that way: they think "the browser
- * one", "the Jira one". The adapter names a tool `<server>_<tool>`, so the
- * server is recoverable from the name given the list of configured servers.
+ * one", "the Jira one". The adapter names a tool `<server>_<tool>` (mcpPrefix),
+ * so the server is recoverable from the name given the list of configured servers.
  *
  * The longest match wins, or a server called `browser` would claim the tools
  * of one called `browser_staging`.
  *
- * The prefix is the server's name with its hyphens and dots as underscores, which
- * is how the adapter writes it: `brave-search` registers `brave_search_brave_web_search`.
  * What is returned is the name as configured.
  */
 export function mcpServerOf(name: string, servers: Iterable<string>): string | undefined {
   let best: string | undefined;
   let bestLength = -1;
   for (const server of servers) {
-    const prefix = server.replace(/[-.]/g, "_");
-    if (!name.startsWith(`${prefix}_`)) continue;
-    if (prefix.length > bestLength) {
+    if (!mcpClaims(server, name)) continue;
+    const length = mcpPrefix(server).length;
+    if (length > bestLength) {
       best = server;
-      bestLength = prefix.length;
+      bestLength = length;
     }
   }
   return best;

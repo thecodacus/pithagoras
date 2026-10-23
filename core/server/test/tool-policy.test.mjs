@@ -92,6 +92,20 @@ test("a server with hyphens is found by the underscored name the adapter gives i
   assert.equal(mcpServerOf("playwright_mcp_click", ["playwright-mcp"]), "playwright-mcp");
 });
 
+test("a server with a dot keeps it in the names of its tools, as the adapter writes them, and is told from the server its name starts like", () => {
+  // pi-mcp-adapter 2.18.0 (getServerPrefix, formatToolName): a server's hyphens are underscores and its dots stay, a
+  // tool's own dots are underscores. `docs.v2` registers `docs.v2_search`; `docs_v2_search` is `docs`' `v2.search`.
+  const servers = ["docs", "docs.v2"];
+  assert.equal(mcpServerOf("docs.v2_search", servers), "docs.v2");
+  assert.equal(mcpServerOf("docs_v2_search", servers), "docs");
+  assert.equal(mcpServerOf("docs_open", servers), "docs");
+  assert.equal(toolSource("docs.v2_search", "pi-mcp-adapter", servers), "docs.v2");
+  assert.equal(toolSource("docs_v2_search", "pi-mcp-adapter", servers), "docs");
+  assert.equal(mcpServerOf("docs_v2_search", ["docs.v2"]), undefined, "no name the adapter gives a tool of docs.v2");
+  assert.equal(mcpServerOf("docs.v2_search", ["docs"]), undefined, "nor one it gives a tool of docs");
+  assert.equal(mcpServerOf("my_docs.v2_search", ["my-docs.v2", "my"]), "my-docs.v2", "hyphens and a dot together");
+});
+
 test("a default-off tool nobody was shown is left alone, not switched on", () => {
   // The page only ever lists what this run registered. Walking the defaults as
   // well wrote an "on" exception for every tool that was merely not loaded —
