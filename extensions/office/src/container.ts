@@ -159,7 +159,22 @@ async function ensureVolume(d: Docker): Promise<void> {
  * wrapper takes the name as its own parameter, not a field of the Docker create body) -- and started. ds.json is
  * rewritten on every success so it always reflects this container and the current deployment shape.
  */
-export async function ensureContainer(
+// Concurrency guard: serialize the WHOLE ensure so two simultaneous callers (portal start + a status poller)
+// cannot race create/start/ds.json. Cleared in finally so a failed run never poisons the next attempt.
+let ensuring: Promise<{ started: boolean }> | null = null;
+
+export function ensureContainer(
+  docker?: Docker,
+  onPull?: (state: PullState) => void,
+  root?: string,
+): Promise<{ started: boolean }> {
+  ensuring ??= ensureContainerOnce(docker, onPull, root).finally(() => {
+    ensuring = null;
+  });
+  return ensuring;
+}
+
+async function ensureContainerOnce(
   docker?: Docker,
   onPull?: (state: PullState) => void,
   root?: string,
@@ -179,7 +194,14 @@ export async function ensureContainer(
   const networkMode = await d.sharedNetwork();
 
   let containerId: string;
-  const existing = await d.containers.get(DS_NAME);
+  let existing = await d.containers.get(DS_NAME);
+  // A changed imageTag applies at the next start: a stopped (or created-but-never-started) container left from an
+  // older tag is removed so the creation path below rebuilds it with the CURRENT image. A running container is
+  // never touched -- no surprise restart; it picks up the new image at its next stop.
+  if (existing && existing.state !== "running" && existing.image !== tag) {
+    await d.containers.remove(DS_NAME);
+    existing = undefined; // let the creation path below recreate it with the new image
+  }
   if (!existing) {
     await ensureVolume(d);
     const spec = {

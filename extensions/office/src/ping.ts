@@ -113,7 +113,7 @@ function parseMentions(text: string): Mention[] {
   const out: Mention[] = [];
   for (const m of text.matchAll(MENTION_RE)) {
     if (m[1] === "agent") out.push({ owner: true, name: null });
-    else if (m[2] !== undefined) out.push({ owner: false, name: m[2] });
+    else if (m[2] !== undefined) out.push({ owner: false, name: m[2].replace(/[.,;:!?)\]}"']+$/, "") }); // trailing sentence punctuation is not part of the folder name
     else out.push({ owner: false, name: m[3] });
   }
   return out;
@@ -228,11 +228,24 @@ export function handlePersisted(docId: string, buffer: Buffer): void {
     if (meta.ext !== "docx") return; // v1: docx only, xlsx comments deferred to M4
     const { comments } = parseDocx(buffer);
     const prev = readSeen(rootDir, docId);
-    writeSeen(rootDir, docId, prev ? [...prev.ids, ...comments.map((c) => c.id)] : comments.map((c) => c.id));
-    if (prev === null) return; // first save: baseline recorded, no wakes (module header)
-    for (const c of diffComments([...prev.ids].map((id): Comment => ({ id, author: "", text: "" })), comments).added) {
-      processComment(docId, meta.title, meta.owner, c);
+    if (prev === null) { // first save: baseline recorded, no wakes (module header)
+      writeSeen(rootDir, docId, comments.map((c) => c.id));
+      return;
     }
+    // Write the seen set AFTER processing and only with ids handled successfully: a comment whose wake failed
+    // stays unseen and is re-reported by diffComments on the next persist (retry), while one later failure must
+    // not leave earlier comments permanently unseen either.
+    const added = diffComments([...prev.ids].map((id): Comment => ({ id, author: "", text: "" })), comments).added;
+    const seen = new Set(prev.ids);
+    for (const c of added) {
+      try {
+        processComment(docId, meta.title, meta.owner, c);
+        seen.add(c.id);
+      } catch (err) {
+        logLine("office ping: comment " + c.id + " of " + docId + " could not be processed and stays unseen for retry: " + ((err as Error)?.message ?? err));
+      }
+    }
+    writeSeen(rootDir, docId, [...seen]);
   } catch (err) {
     logLine(`office ping: persist of ${docId} failed: ${(err as Error)?.message ?? err}`);
   }

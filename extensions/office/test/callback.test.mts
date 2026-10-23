@@ -182,12 +182,14 @@ test("status 2 happy path: persists bytes, bumps index, stores history zip, fire
   const server = await startFileServer(() => ({ status: 200, bytes: newBytes }), zipBytes);
   const handler = createCallbackHandler(() => DS_STATE, () => SECRET, { root, retryDelaysMs: [5, 10], log: (l) => sink.push(l) });
 
-  const res = await post(handler, {
+  // The envelope is bound to the signed JWT claims; the JSON body is ignored by the handler.
+  const envelope = {
     key: makeKey(doc.docId, before.mtimeMs),
     status: 2,
     url: `${server.base}/saved`,
     changesurl: `${server.base}/changes.zip`,
-  }, { headers: { "x-auth-token": signJwt({ key: "", status: 2 }, 60_000, SECRET) } });
+  };
+  const res = await post(handler, envelope, { headers: { "x-auth-token": signJwt(envelope, 60_000, SECRET) } });
 
   await server.close();
   assert.equal(res.statusCode, 200);
@@ -226,11 +228,12 @@ test("stale key (revHash of an older mtime): document NOT overwritten, JSON erro
   const handler = createCallbackHandler(() => DS_STATE, () => SECRET, { root, retryDelaysMs: [5, 10], log: (l) => sink.push(l) });
 
   // key minted from an OLDER mtime than the one currently in the index
-  const res = await post(handler, {
+  const envelope = {
     key: makeKey(doc.docId, before.mtimeMs - 60_000),
     status: 2,
     url: `${server.base}/saved`,
-  }, { headers: { "x-auth-token": signJwt({}, 60_000, SECRET) } });
+  };
+  const res = await post(handler, envelope, { headers: { "x-auth-token": signJwt(envelope, 60_000, SECRET) } });
 
   await server.close();
   assert.equal(res.statusCode, 200);
@@ -256,17 +259,16 @@ test("duplicate force-save pass (same url + our revision): treated as done, no s
   let n = 0;
   const server = await startFileServer(() => ({ status: 200, bytes: firstBytes }), null);
   const handler = createCallbackHandler(() => DS_STATE, () => SECRET, { root, retryDelaysMs: [5, 10], log: (l) => sink.push(l) });
-  const tokenHeaders = { "x-auth-token": signJwt({}, 60_000, SECRET) };
-
   // Pass 1: the status-1 forcesave action (actions[].type === 2) persists now, doc STAYS locked.
   live.setLocked(doc.docId, true);
-  const r1 = await post(handler, {
+  const env1 = {
     key: makeKey(doc.docId, before.mtimeMs),
     status: 1,
     users: [{ id: "u2", name: "Bob" }],
     actions: [{ type: 2, userid: "u2" }],
     url: `${server.base}/saved`,
-  }, { headers: tokenHeaders });
+  };
+  const r1 = await post(handler, env1, { headers: { "x-auth-token": signJwt(env1, 60_000, SECRET) } });
   assert.deepEqual(json(r1), { error: 0 });
   const mid = getDoc(doc.docId, root)!;
   assert.ok(fs.readFileSync(docFile(root, doc)).equals(firstBytes));
@@ -274,12 +276,13 @@ test("duplicate force-save pass (same url + our revision): treated as done, no s
 
   // Pass 2: DS then reports the canonical status 6 for the SAME save. The key now hashes an older mtime than
   // the one we just wrote -- without lastPersist this would answer {error:1} as a stale session.
-  const r2 = await post(handler, {
+  const env2 = {
     key: makeKey(doc.docId, before.mtimeMs),
     status: 6,
     url: `${server.base}/saved`,
     forcesavetype: 1,
-  }, { headers: tokenHeaders });
+  };
+  const r2 = await post(handler, env2, { headers: { "x-auth-token": signJwt(env2, 60_000, SECRET) } });
   assert.deepEqual(json(r2), { error: 0 }, "duplicate pass reports success");
   const after = getDoc(doc.docId, root)!;
   assert.equal(after.mtimeMs, mid.mtimeMs, "no second persist happened");
@@ -351,11 +354,34 @@ test("JWT: embedded body.token is accepted as a defensive fallback (header path 
   const res = await post(handler, {
     key: makeKey("fallback-doc", 1),
     status: 4,
-    token: signJwt({ sub: "x" }, 60_000, SECRET), // no x-auth-token header
+    // The fallback token itself must carry the signed envelope (the body is never trusted).
+    token: signJwt({ key: makeKey("fallback-doc", 1), status: 4 }, 60_000, SECRET), // no x-auth-token header
   });
   assert.equal(res.statusCode, 200);
   assert.deepEqual(json(res), { error: 0 });
   assert.equal(live.pollState("fallback-doc", 0).locked, false, "status-4 unlock applied through the fallback");
+});
+
+test("envelope binding: valid token without signed key/status cannot drive a hostile body", async () => {
+  const root = tmpRoot();
+  const doc = await createDoc({ title: "Bind Doc", type: "word" }, root);
+  const original = fs.readFileSync(docFile(root, doc));
+  const server = await startFileServer(() => ({ status: 200, bytes: Buffer.from("attacker-bytes") }), null);
+  const handler = createCallbackHandler(() => DS_STATE, () => SECRET, { root, log: () => {} });
+
+  // A valid token that carries NO envelope (the shape of our own non-callback tokens) plus a hostile JSON
+  // body claiming status 2 for a library document: rejected at the binding check, disk untouched.
+  const res = await post(handler, {
+    key: makeKey(doc.docId, getDoc(doc.docId, root)!.mtimeMs),
+    status: 2,
+    url: `${server.base}/saved`,
+  }, { headers: { "x-auth-token": signJwt({ sub: "x" }, 60_000, SECRET) } });
+
+  await server.close();
+  assert.equal(res.statusCode, 400);
+  assert.deepEqual(json(res), { error: 1 });
+  assert.ok(fs.readFileSync(docFile(root, doc)).equals(original), "hostile body ignored, file untouched");
+  assert.equal(server.savedAttempts, 0);
 });
 
 /* ------------------------------------------------------------------ */
@@ -368,10 +394,9 @@ test("status 1 join then leave mutates live.usersOf; status 4 unlocks without an
   const before = getDoc(doc.docId, root)!;
   const original = fs.readFileSync(docFile(root, doc));
   const handler = createCallbackHandler(() => DS_STATE, () => SECRET, { root, log: () => {} });
-  const headers = { "x-auth-token": signJwt({}, 60_000, SECRET) };
-
   // JOIN: presence lands in live with id/name and a numeric join time; the doc locks (users.length>0).
-  const join = await post(handler, { key: makeKey(doc.docId, before.mtimeMs), status: 1, users: [{ id: "u9", name: "Bob" }] }, { headers });
+  const envJoin = { key: makeKey(doc.docId, before.mtimeMs), status: 1, users: [{ id: "u9", name: "Bob" }] };
+  const join = await post(handler, envJoin, { headers: { "x-auth-token": signJwt(envJoin, 60_000, SECRET) } });
   assert.deepEqual(json(join), { error: 0 });
   const joined = live.usersOf(doc.docId);
   assert.equal(joined.length, 1);
@@ -381,14 +406,16 @@ test("status 1 join then leave mutates live.usersOf; status 4 unlocks without an
   assert.equal(live.pollState(doc.docId, 0).locked, true);
 
   // LEAVE: the empty users snapshot removes the user and clears the derived lock.
-  const leave = await post(handler, { key: makeKey(doc.docId, before.mtimeMs), status: 1, users: [] }, { headers });
+  const envLeave = { key: makeKey(doc.docId, before.mtimeMs), status: 1, users: [] };
+  const leave = await post(handler, envLeave, { headers: { "x-auth-token": signJwt(envLeave, 60_000, SECRET) } });
   assert.deepEqual(json(leave), { error: 0 });
   assert.deepEqual(live.usersOf(doc.docId), []);
   assert.equal(live.pollState(doc.docId, 0).locked, false);
 
   // STATUS 4: explicit unlock, and the file + index are byte-identical to before.
   live.setLocked(doc.docId, true);
-  const r4 = await post(handler, { key: makeKey(doc.docId, before.mtimeMs), status: 4 }, { headers });
+  const env4 = { key: makeKey(doc.docId, before.mtimeMs), status: 4 };
+  const r4 = await post(handler, env4, { headers: { "x-auth-token": signJwt(env4, 60_000, SECRET) } });
   assert.deepEqual(json(r4), { error: 0 });
   assert.equal(live.pollState(doc.docId, 0).locked, false);
   assert.ok(fs.readFileSync(docFile(root, doc)).equals(original), "status 4 wrote nothing");
@@ -406,13 +433,13 @@ test("statuses 3 and 7: one log line each, zero file changes, zero downloads", a
 
   const server = await startFileServer(() => ({ status: 200, bytes: Buffer.from("should-not-be-fetched") }), null);
   const handler = createCallbackHandler(() => DS_STATE, () => SECRET, { root, retryDelaysMs: [5, 10], log: (l) => sink.push(l) });
-  const headers = { "x-auth-token": signJwt({}, 60_000, SECRET) };
-
-  const r3 = await post(handler, { key: makeKey(doc.docId, before.mtimeMs), status: 3, url: `${server.base}/saved` }, { headers });
+  const env3 = { key: makeKey(doc.docId, before.mtimeMs), status: 3, url: `${server.base}/saved` };
+  const r3 = await post(handler, env3, { headers: { "x-auth-token": signJwt(env3, 60_000, SECRET) } });
   assert.equal(r3.statusCode, 200);
   assert.deepEqual(json(r3), { error: 0 }, "we did not fail internally, so the answer is 0");
 
-  const r7 = await post(handler, { key: makeKey(doc.docId, before.mtimeMs), status: 7, url: `${server.base}/saved`, forcesavetype: 2 }, { headers });
+  const env7 = { key: makeKey(doc.docId, before.mtimeMs), status: 7, url: `${server.base}/saved`, forcesavetype: 2 };
+  const r7 = await post(handler, env7, { headers: { "x-auth-token": signJwt(env7, 60_000, SECRET) } });
   assert.equal(r7.statusCode, 200);
   assert.deepEqual(json(r7), { error: 0 });
 
@@ -439,11 +466,12 @@ test("retry: two failed downloads then success -> persisted", async () => {
   const server = await startFileServer((n) => (n < 3 ? { status: 500, bytes: Buffer.alloc(0) } : { status: 200, bytes: saved }), null);
   const handler = createCallbackHandler(() => DS_STATE, () => SECRET, { root, retryDelaysMs: [5, 10], log: () => {} });
 
-  const res = await post(handler, {
+  const envelope = {
     key: makeKey(doc.docId, before.mtimeMs),
     status: 2,
     url: `${server.base}/saved`,
-  }, { headers: { "x-auth-token": signJwt({}, 60_000, SECRET) } });
+  };
+  const res = await post(handler, envelope, { headers: { "x-auth-token": signJwt(envelope, 60_000, SECRET) } });
 
   await server.close();
   assert.deepEqual(json(res), { error: 0 });
@@ -463,11 +491,12 @@ test("retry: all attempts fail -> JSON error, doc untouched, lock left as-is", a
   const handler = createCallbackHandler(() => DS_STATE, () => SECRET, { root, retryDelaysMs: [5, 10], log: (l) => sink.push(l) });
 
   live.setLocked(doc.docId, true);
-  const res = await post(handler, {
+  const envelope = {
     key: makeKey(doc.docId, before.mtimeMs),
     status: 2,
     url: `${server.base}/saved`,
-  }, { headers: { "x-auth-token": signJwt({}, 60_000, SECRET) } });
+  };
+  const res = await post(handler, envelope, { headers: { "x-auth-token": signJwt(envelope, 60_000, SECRET) } });
 
   await server.close();
   assert.equal(res.statusCode, 200); // DS reads the JSON error field, not the HTTP code (plan 4)
@@ -488,25 +517,29 @@ test("route + envelope: GET -> 405, bad path -> 404, unknown status / bad key ->
   const root = tmpRoot();
   const handler = createCallbackHandler(() => DS_STATE, () => SECRET, { root, log: () => {} });
   const key = makeKey("route-doc", 1);
-  const headers = { "x-auth-token": signJwt({}, 60_000, SECRET) };
+  // Envelopes are signed into the token claims; each post below signs its own envelope.
+  const tokenFor = (env: Record<string, unknown>) => ({ "x-auth-token": signJwt(env, 60_000, SECRET) });
 
-  const get = await post(handler, { key, status: 4 }, { method: "GET", headers });
+  const get = await post(handler, { key, status: 4 }, { method: "GET", headers: tokenFor({ key, status: 4 }) });
   assert.equal(get.statusCode, 405);
   assert.deepEqual(json(get), { error: 1 });
 
-  const wrongPath = await post(handler, { key, status: 4 }, { url: "/doc/something-else", headers });
+  const wrongPath = await post(handler, { key, status: 4 }, { url: "/doc/something-else", headers: tokenFor({ key, status: 4 }) });
   assert.equal(wrongPath.statusCode, 404);
   assert.deepEqual(json(wrongPath), { error: 1 });
 
-  const unknownStatus = await post(handler, { key, status: 99 }, { headers });
+  // Signed envelope with an unknown status value -> the handler rejects the status itself.
+  const unknownStatus = await post(handler, { key, status: 99 }, { headers: tokenFor({ key, status: 99 }) });
   assert.equal(unknownStatus.statusCode, 400);
   assert.deepEqual(json(unknownStatus), { error: 1 });
 
-  const badKey = await post(handler, { key: "nope", status: 2 }, { headers });
+  // Signed envelope with a malformed key -> parseKey rejects it.
+  const badKey = await post(handler, { key: "nope", status: 2 }, { headers: tokenFor({ key: "nope", status: 2 }) });
   assert.equal(badKey.statusCode, 400);
   assert.deepEqual(json(badKey), { error: 1 });
 
-  const noKey = await post(handler, { status: 2 }, { headers });
+  // No signed key in the claims -> rejected at the binding check (the unsigned body is never consulted).
+  const noKey = await post(handler, { key, status: 2 }, { headers: tokenFor({ status: 2 }) });
   assert.equal(noKey.statusCode, 400);
   assert.deepEqual(json(noKey), { error: 1 });
 });
@@ -532,7 +565,8 @@ test("bare handleCallback: 503 until configure; after configure it serves reques
   // The real wiring shape (what server.ts does at boot).
   live.setLocked("wire-doc", true);
   configure({ getState: () => DS_STATE, getSecret: () => SECRET, root, log: () => {} });
-  const ok = await post(handleCallback, { key: makeKey("wire-doc", 1), status: 4 }, { headers: { "x-auth-token": signJwt({}, 60_000, SECRET) } });
+  const wireEnv = { key: makeKey("wire-doc", 1), status: 4 };
+  const ok = await post(handleCallback, wireEnv, { headers: { "x-auth-token": signJwt(wireEnv, 60_000, SECRET) } });
   assert.equal(ok.statusCode, 200);
   assert.deepEqual(json(ok), { error: 0 });
   assert.equal(live.pollState("wire-doc", 0).locked, false);

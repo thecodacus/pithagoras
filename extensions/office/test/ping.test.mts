@@ -1,6 +1,6 @@
 /**
  * Unit tests for src/ping.ts (wake on comment mention, plan 5.4). Run from the repo ROOT:
- *   env -u NODE_ENV node --import tsx --test extensions/pithagoras-office/test/ping.test.mts
+ *   env -u NODE_ENV node --import tsx --test extensions/office/test/ping.test.mts
  * Self-contained: tmp dataDir per test, real docx created via store.createDoc, comment XML injected
  * with ooxml.rewriteZip, every side effect (folders/inFolder/tell/record/log) injected through
  * wirePing so the tests NEVER reach portal().

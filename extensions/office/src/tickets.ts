@@ -18,6 +18,7 @@ function hmacHex(secret: string, message: string): string {
 /** Mint a fetch ticket for one document. token = base64urlNoPad(`docId|<expiresMs>|<hmacSha256Hex(secret, docId + "|" + expiresMs)`)`;
  * expiresMs is Date.now() + ttlMs (default 10 minutes). */
 export function mintTicket(docId: string, ttlMs = 600_000, secret: string): { token: string; expiresMs: number } {
+  if (secret === "") throw new Error("mintTicket: the shared secret is required"); // an empty secret would let anyone forge a ticket
   const expiresMs = Date.now() + ttlMs;
   return { token: b64url(`${docId}|${expiresMs}|${hmacHex(secret, `${docId}|${expiresMs}`)}`), expiresMs };
 }
@@ -27,6 +28,7 @@ export function mintTicket(docId: string, ttlMs = 600_000, secret: string): { to
  * or null -- never throws. A token whose payload splits into anything other than three non-empty sections is
  * rejected outright (so a docId containing "|" can never verify either). */
 export function verifyTicket(token: string, secret: string): { docId: string } | null {
+  if (secret === "") return null; // an empty secret would make every well-formed token verify -- refuse instead of forging
   if (!/^[A-Za-z0-9_-]*$/.test(token)) return null; // base64url alphabet only
   let decoded: Buffer;
   try {

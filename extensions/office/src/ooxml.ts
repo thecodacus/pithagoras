@@ -81,6 +81,11 @@ function readZip(buf: Buffer): ZipEntry[] {
   return entries;
 }
 
+// Hard cap on the uncompressed size of any single zip entry: a corrupt or hostile central directory could
+// otherwise advertise a multi-GB expansion (stored or deflated) that the portal would commit into memory.
+// 256 MiB is far above anything real in docx/xlsx parts we ever read back.
+const MAX_ENTRY_BYTES = 256 * 1024 * 1024;
+
 /** Uncompressed payload of one entry (payload length comes from the central directory, so local data descriptors are fine). */
 function readEntryData(buf: Buffer, e: ZipEntry): Buffer {
   if (e.lfhOffset + 30 > buf.length || buf.readUInt32LE(e.lfhOffset) !== LFH_SIG) throw ooxmlError(`corrupt zip local header for ${e.name}`, "invalid_zip");
@@ -89,9 +94,10 @@ function readEntryData(buf: Buffer, e: ZipEntry): Buffer {
   const start = e.lfhOffset + 30 + nameLen + extraLen;
   if (start + e.csize > buf.length) throw ooxmlError(`truncated zip payload for ${e.name}`, "invalid_zip");
   const raw = buf.subarray(start, start + e.csize);
+  if (e.usize > MAX_ENTRY_BYTES) throw ooxmlError(`zip entry ${e.name} exceeds the ${MAX_ENTRY_BYTES / (1024 * 1024)} MiB per-entry cap`, "invalid_zip");
   let out: Buffer;
   if (e.method === 0) out = raw;
-  else if (e.method === 8) { try { out = inflateRawSync(raw); } catch { throw ooxmlError(`bad deflate data for ${e.name}`, "invalid_zip"); } }
+  else if (e.method === 8) { try { out = inflateRawSync(raw, { maxOutputLength: Math.max(e.usize, 1) }); } catch { throw ooxmlError(`bad deflate data for ${e.name}`, "invalid_zip"); } }
   else throw ooxmlError(`unsupported zip compression method ${e.method} for ${e.name}`, "invalid_zip");
   if (out.length !== e.usize) throw ooxmlError(`size mismatch for ${e.name}`, "invalid_zip");
   return out;
@@ -227,7 +233,7 @@ type Para = { contentStart: number; contentEnd: number }; // paragraph-content o
  *  by contract ("w:p > w:r > w:t"); such content would be read as the outer paragraph's trailing run and editing it is unsupported. */
 function findParagraphs(xml: string): Para[] {
   const paras: Para[] = [];
-  for (const m of xml.matchAll(/<w:p(?:\s[^>]*)?(?:\/>|>([\s\S]*?)<\/w:p>)/g)) {
+  for (const m of xml.matchAll(/<w:p(?:\s[^>]*?)?(?:\/>|>([\s\S]*?)<\/w:p>)/g)) {
     if (m.index === undefined) continue;
     const content = m[1];
     paras.push(content === undefined ? { contentStart: 0, contentEnd: 0 } : { contentStart: m.index + m[0].indexOf(">") + 1, contentEnd: m.index + m[0].length - "</w:p>".length });
@@ -345,6 +351,9 @@ function applyEdit(xml: string, op: EditOp): string {
       }
     }
   });
+  // A quote that touches no w:t span at all (e.g. one spanning only paragraph breaks) passed the uniqueness
+  // check above but would leave the XML unchanged -- persisting it as a successful edit is wrong, so reject it.
+  if (!firstDone) throw ooxmlError("quote_not_found: the quoted passage covers no text runs (paragraph breaks only)", "quote_not_found");
   for (const edit of edits.sort((a, b) => b.start - a.start)) xml = xml.slice(0, edit.start) + edit.text + xml.slice(edit.end);
   return xml;
 }
@@ -374,7 +383,7 @@ function columnOf(ref: string): number { // "AB12" -> 27 (zero-based), -1 when t
  * booleans ("keep stored text"). Cells without an r= reference are skipped. A missing workbook or referenced
  * sheet part throws {code:"missing_part"}.
  */
-export function parseXlsx(buf: Buffer): { sheetNames: string[]; sheets: Record<string, string[][]> } {
+export function parseXlsx(buf: Buffer): { sheetNames: string[]; sheets: Record<string, string[][]>; truncatedSheets: Record<string, boolean> } {
   const parts = readZipParts(buf);
   const workbook = parts["xl/workbook.xml"];
   if (!workbook) throw ooxmlError("xlsx has no xl/workbook.xml", "missing_part");
@@ -387,7 +396,7 @@ export function parseXlsx(buf: Buffer): { sheetNames: string[]; sheets: Record<s
   }
   let sharedStrings: string[] = [];
   if (parts["xl/sharedStrings.xml"]) {
-    for (const m of parts["xl/sharedStrings.xml"].toString("utf8").matchAll(/<si(?:\s[^>]*)?(?:\/>|>([\s\S]*?)<\/si>)/g)) {
+    for (const m of parts["xl/sharedStrings.xml"].toString("utf8").matchAll(/<si(?:\s[^>]*?)?(?:\/>|>([\s\S]*?)<\/si>)/g)) {
       const content = m[1] ?? "";
       let text = "";
       for (const t of content.matchAll(/<t(?:\s[^>]*)?>([\s\S]*?)<\/t>/g)) text += decodeEntities(t[1]);
@@ -396,6 +405,7 @@ export function parseXlsx(buf: Buffer): { sheetNames: string[]; sheets: Record<s
   }
   const sheetNames: string[] = [];
   const sheets: Record<string, string[][]> = {};
+  const truncatedSheets: Record<string, boolean> = {};
   for (const m of workbook.toString("utf8").matchAll(/<sheet\b([^>]*)\/?>/g)) {
     if (m.index === undefined) continue;
     const attrs = parseAttributes(m[1]);
@@ -406,16 +416,23 @@ export function parseXlsx(buf: Buffer): { sheetNames: string[]; sheets: Record<s
     if (target === undefined) continue; // unresolvable sheet: listed by name, no grid
     const sheetPart = parts[resolveTarget(target)];
     if (!sheetPart) throw ooxmlError(`xlsx is missing the worksheet part ${resolveTarget(target)} for sheet "${name}"`, "missing_part");
-    sheets[name] = parseSheet(sheetPart.toString("utf8"), sharedStrings);
+    const flags: { truncated?: boolean } = {};
+    sheets[name] = parseSheet(sheetPart.toString("utf8"), sharedStrings, flags);
+    if (flags.truncated) truncatedSheets[name] = true;
   }
-  return { sheetNames, sheets };
+  return { sheetNames, sheets, truncatedSheets };
 }
 
-function parseSheet(xml: string, sharedStrings: string[]): string[][] {
+// Dense-grid caps: a hostile worksheet can reference absurdly distant cells (1M-row x 16K-col class); without
+// bounds the grid allocation below is unbounded. Cap both axes; skipped far cells are reported as truncation.
+const MAX_GRID_ROWS = 20000;
+const MAX_GRID_COLS = 500;
+function parseSheet(xml: string, sharedStrings: string[], flags?: { truncated?: boolean }): string[][] {
   const sheetData = xml.match(/<sheetData(?:\s[^>]*)?>([\s\S]*?)<\/sheetData>/);
   if (!sheetData) return [];
   let maxRow = 0;
   let maxCol = 0;
+  let truncated = false;
   const cells: Record<string, string> = {}; // "row,col" -> cell text
   for (const m of sheetData[1].matchAll(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)) {
     if (m.index === undefined) continue;
@@ -424,6 +441,7 @@ function parseSheet(xml: string, sharedStrings: string[]): string[][] {
     const row = Number.parseInt(attrs["r"].replace(/^[A-Z]+/, ""), 10);
     const col = columnOf(attrs["r"]);
     if (col < 0 || !Number.isFinite(row) || row < 1) continue;
+    if (row > MAX_GRID_ROWS || col >= MAX_GRID_COLS) { truncated = true; continue; } // grid cap, reported by the caller
     let value = "";
     const inner = m[2] ?? "";
     if (attrs["t"] === "inlineStr") {
@@ -442,6 +460,7 @@ function parseSheet(xml: string, sharedStrings: string[]): string[][] {
     for (let c = 0; c < maxCol; c++) line.push(cells[`${r + 1},${c}`] ?? "");
     grid.push(line);
   }
+  if (truncated) flags && (flags.truncated = true);
   return grid;
 }
 

@@ -214,7 +214,19 @@ function freshDocId(existing: DocMeta[], title: string): string {
   return docId;
 }
 
-async function storeDoc(doc: DocMeta, bytes: Buffer, rootDir: string): Promise<DocMeta> {
+/** Titles become FILE NAMES (docs/<docId>/<title>.<ext>): reject anything empty, over 200 chars, or carrying a
+ * path separator / C0 control character -- "../../etc/passwd.docx" would otherwise escape the library. */
+function assertSafeTitle(title: string): void {
+  if (title === "" || title.length > 200) {
+    throw Object.assign(new Error(`a document title must be 1-200 characters: ${JSON.stringify(title.slice(0, 80))}`), { code: "invalid_title" });
+  }
+  for (const ch of title) {
+    const code = ch.codePointAt(0) as number;
+    if (ch === "/" || ch === "\\" || code < 0x20) throw Object.assign(new Error(`the document title may not contain path separators or control characters: ${JSON.stringify(title.slice(0, 80))}`), { code: "invalid_title" });
+  }
+}
+
+function storeDoc(doc: DocMeta, bytes: Buffer, rootDir: string): DocMeta { // sync on purpose: the create/import paths must not await between readIndex and writeIndex
   const dir = path.join(rootDir, "docs", doc.docId);
   fs.mkdirSync(dir, { recursive: true });
   const file = path.join(dir, `${doc.title}.${doc.ext}`);
@@ -231,8 +243,9 @@ async function storeDoc(doc: DocMeta, bytes: Buffer, rootDir: string): Promise<D
  * home chat (agent tools pass it) or null for human-created docs; createdBy records who actually did it. */
 export async function createDoc(input: { title: string; type: "word" | "cell"; owner?: string | null; createdBy?: string }, root = dataDir()): Promise<DocMeta> {
   const rootDir = root ?? dataDir();
-  if (input.title === "") throw Object.assign(new Error("a document needs a title"), { code: "invalid_title" });
+  assertSafeTitle(input.title); // titles are file names
   const ext: DocMeta["ext"] = input.type === "word" ? "docx" : "xlsx";
+  const bytes = ext === "docx" ? await templateDocx() : await templateXlsx(); // BEFORE the index round-trip: no await may sit between readIndex and writeIndex, or a concurrent create would have its write clobbered
   const index = readIndex(rootDir);
   if (index.docs.some((d) => d.title === input.title && d.ext === ext)) throw Object.assign(new Error(`a document titled "${input.title}" already exists`), { code: "exists" });
   const now = Date.now();
@@ -248,7 +261,7 @@ export async function createDoc(input: { title: string; type: "word" | "cell"; o
     grants: [],
   };
   if (input.createdBy !== undefined) doc.createdBy = input.createdBy;
-  await storeDoc(doc, ext === "docx" ? await templateDocx() : await templateXlsx(), rootDir);
+  storeDoc(doc, bytes, rootDir);
   index.docs.push(doc);
   writeIndex(rootDir, index);
   return { ...doc };
@@ -261,7 +274,7 @@ export async function createDoc(input: { title: string; type: "word" | "cell"; o
  * exists refusal is the safe reading). */
 export function renameDoc(docId: string, newTitle: string, root = dataDir()): DocMeta {
   const rootDir = root ?? dataDir();
-  if (newTitle === "") throw Object.assign(new Error("a document needs a title"), { code: "invalid_title" });
+  assertSafeTitle(newTitle);
   const index = readIndex(rootDir);
   const doc = index.docs.find((d) => d.docId === docId);
   if (!doc) throw notFound(`no document with id ${docId}`);
@@ -357,6 +370,7 @@ export function importFile(absPath: string, meta: { title?: string; owner?: stri
   }
   if (!st.isFile()) throw Object.assign(new Error(`${absPath} is not a regular file`), { code: "unsupported_format" });
   const title = meta.title ?? base.slice(0, dot);
+  assertSafeTitle(title); // the imported file lands in the library as <title>.<ext> -- same rules as created titles
   const index = readIndex(rootDir);
   const now = Date.now();
   const doc: DocMeta = {

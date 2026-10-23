@@ -101,11 +101,13 @@ function recordAudit(entry: { subject: string; reason?: string; chatId?: string 
 function ensureJwtSecret(dd: string): string {
   fs.mkdirSync(dd, { recursive: true });
   const file = path.join(dd, "jwt-secret");
+  let raw = "";
   try {
-    fs.statSync(file);
+    raw = fs.readFileSync(file, "utf8");
   } catch {
-    fs.writeFileSync(file, randomBytes(32).toString("hex") + "\n", { mode: 0o600 });
+    raw = ""; // missing: generated below
   }
+  if (raw.trim().length < 32) fs.writeFileSync(file, randomBytes(32).toString("hex") + "\n", { mode: 0o600 }); // empty or truncated too soon to be a usable secret: (re)generate rather than reuse
   fs.chmodSync(file, 0o600); // the exact perms either way -- never rely on the process umask
   return fs.readFileSync(file, "utf8").trim();
 }
@@ -194,7 +196,9 @@ function makeLoopbackHandler(dd: string, secret: string): (req: http.IncomingMes
       return;
     }
     if (req.method === "GET" && pathname.startsWith("/doc/")) {
-      const ticket = decodeURIComponent(pathname.slice("/doc/".length));
+      // Tickets are base64url tokens: no percent-decoding -- decodeURIComponent would throw URIError on a
+      // malformed escape, and an uncaught throw in the http listener kills the server. verifyTicket enforces the alphabet anyway.
+      const ticket = pathname.slice("/doc/".length);
       const verified = verifyTicket(ticket, secret);
       if (!verified) {
         jsonRaw(res, 401, { error: "invalid or expired document ticket", code: "bad_ticket" });

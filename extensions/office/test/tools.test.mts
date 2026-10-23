@@ -1,6 +1,6 @@
 /**
  * Unit tests for src/tools.ts (the agent's office_* tools, plan 5.4/5.5). Run from the repo ROOT:
- *   env -u NODE_ENV node --import tsx --test extensions/pithagoras-office/test/tools.test.mts
+ *   env -u NODE_ENV node --import tsx --test extensions/office/test/tools.test.mts
  * Self-contained: tmp dataDir per test, real docx/xlsx via store.createDoc (real templates), comment
  * XML injected with ooxml.rewriteZip, every portal bit (extend registrar, chat->folder, folders list,
  * inFolder, root, record, log) injected through registerTools and the forcesave hook through

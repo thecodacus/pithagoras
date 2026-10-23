@@ -303,8 +303,24 @@ async function handleDispatch(
     return;
   }
 
+  // Envelope binding (security): the envelope is taken from the SIGNED claims, never from the unsigned JSON
+  // body -- with a valid token alone anyone could otherwise POST any {key,status,url} and overwrite a library
+  // document. DS carries the callback envelope in the JWT payload (possibly wrapped under a 'payload' key);
+  // our own non-callback tokens (editor config, fetch) carry no envelope and are rejected below. The body is
+  // ignored from here on.
+  const claims = verifyJwt(token, secret)!;
+  const signed = (claims.payload && typeof claims.payload === "object" && !Array.isArray(claims.payload))
+    ? claims.payload as Record<string, unknown>
+    : claims;
+  if (typeof signed.key !== "string" || typeof signed.status !== "number" || !Number.isInteger(signed.status)) {
+    log("rejected callback: token does not carry a signed callback envelope (key + integer status)");
+    respond(res, 400, 1);
+    return;
+  }
+  body = signed as Envelope;
+
   // Envelope shape.
-  const parsed = typeof body.key === "string" ? parseKey(body.key) : null;
+  const parsed = parseKey(body.key as string); // signed.key was verified a string above
   if (!parsed) {
     log("rejected callback: missing or malformed document.key");
     respond(res, 400, 1);

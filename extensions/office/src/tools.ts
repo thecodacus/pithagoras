@@ -286,6 +286,7 @@ function installTools(pi: unknown, home: string): void {
       const doc = visibleDoc(id);
       const buf = readBytes(doc);
       const lock = lockLine(doc);
+      const MAX_READ_CHARS = 200_000; // one office_read must not blow the agent context on a huge grid or document
       if (doc.ext === "xlsx") {
         // Plan 5.5: office_read returns a grid of cell values for xlsx; its COMMENTS are not in v1 (xl/commentsN.xml + VML, M4).
         const parsed = parseXlsx(buf); // throws {code:"invalid_zip"} -> corrupt
@@ -293,7 +294,10 @@ function installTools(pi: unknown, home: string): void {
           const rows = parsed.sheets[name] ?? [];
           return `Sheet "${name}" (${rows.length} row${rows.length === 1 ? "" : "s"}):\n${rows.map((r) => "| " + r.join(" | ") + " |").join("\n")}`;
         }).join("\n\n");
-        const said = `"${doc.title}" (id ${doc.docId}, xlsx, revision ${doc.mtimeMs})${lock}\n\n${sheets || "(empty workbook)"}\n\nNo comments: spreadsheet comments are not read in v1 (they arrive later).`;
+        const truncatedSheets = Object.keys(parsed.truncatedSheets);
+        let said = `"${doc.title}" (id ${doc.docId}, xlsx, revision ${doc.mtimeMs})${lock}\n\n${sheets || "(empty workbook)"}\n\nNo comments: spreadsheet comments are not read in v1 (they arrive later).`;
+        if (truncatedSheets.length) said += `\n\n(truncation: sheet ${truncatedSheets.map((n) => `"${n}"`).join(", ")} referenced cells beyond the supported grid size; those far-out cells were not read)`;
+        if (said.length > MAX_READ_CHARS) said = said.slice(0, MAX_READ_CHARS) + "\n\n[output truncated by office_read: it exceeds 200,000 characters]";
         return text(said, { action: "read", id: doc.docId, ext: doc.ext, mtimeMs: doc.mtimeMs, sheets: parsed.sheetNames });
       }
       const parsed = parseDocx(buf); // throws {code:"invalid_zip"|"missing_part"} -> corrupt
@@ -302,7 +306,9 @@ function installTools(pi: unknown, home: string): void {
         const lines = parsed.comments.map((c) => `- ${c.id}  ${c.author}${c.date ? `  ${c.date}` : ""}: ${c.text.replace(/\n/g, " ")}`);
         comments = `\n\nComments (${parsed.comments.length}):\n${lines.join("\n")}`;
       }
-      return text(`"${doc.title}" (id ${doc.docId}, docx, revision ${doc.mtimeMs})${lock}\n\n${parsed.text}${comments}`, { action: "read", id: doc.docId, ext: doc.ext, mtimeMs: doc.mtimeMs, comments: parsed.comments });
+      let said = `"${doc.title}" (id ${doc.docId}, docx, revision ${doc.mtimeMs})${lock}\n\n${parsed.text}${comments}`;
+      if (said.length > MAX_READ_CHARS) said = said.slice(0, MAX_READ_CHARS) + "\n\n[output truncated by office_read: it exceeds 200,000 characters]";
+      return text(said, { action: "read", id: doc.docId, ext: doc.ext, mtimeMs: doc.mtimeMs, comments: parsed.comments });
     }),
   });
 
