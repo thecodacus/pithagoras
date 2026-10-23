@@ -237,7 +237,9 @@ export function VoiceControl({ sessionId, folder, items, running, work, onSend, 
       // is nothing for it to do. Dictation, which only listens, stays.
       const usable = config.enabled && config.speech !== false && config.conversation !== false;
       setAvailable(usable);
-      if (!usable) stop();
+      // Ended here, voice mode that was on in this tab before a reload is not brought back later either: this runs again
+      // each time Settings is closed, and once voice mode can be used again it would start, microphone and all, with no click.
+      if (!usable) { resume.current = false; stop(); }
       // Voice mode was on in this tab when the page was reloaded: carry on.
       else if (resume.current && !voice.current && !restoring.current) { restoring.current = true; void start(true); }
     }).catch(() => { if (mounted.current) { setAvailable(false); stop(); } });

@@ -442,6 +442,26 @@ test('voice conversations switched off end voice mode that is on, and leave dict
   await expect(page.getByRole('button', { name: 'Turn on hands-free voice' })).toBeVisible();
 });
 
+test('voice mode that a reload would bring back while voice conversations are off does not start when they are switched on again', async ({ page }) => {
+  let conversation = false;
+  const leases: boolean[] = [];
+  await page.route('**/api/voice', route => route.fulfill({ json: { enabled: true, speech: true, conversation } }));
+  await page.route('**/voice/connection', route => { leases.push(route.request().postDataJSON().active); return route.fulfill({ json: { ok: true } }); });
+  // Voice mode was on in this tab, and was switched off in another before this one was reloaded.
+  await page.addInitScript(() => sessionStorage.setItem('voiceActive', 'test'));
+  await page.goto('/tests/voice.html');
+  await expect(page.getByRole('button', { name: 'Dictate a message' })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => sessionStorage.getItem('voiceActive'))).toBeNull();
+  // Switched on again, and Settings closed in this tab, which tells the page.
+  conversation = true;
+  await page.evaluate(() => window.dispatchEvent(new Event('voice-config-changed')));
+  await expect(page.getByRole('button', { name: 'Turn on hands-free voice' })).toBeVisible();
+  await page.waitForTimeout(1500);
+  await expect(page.getByRole('button', { name: 'End voice mode' })).toHaveCount(0);
+  expect(await page.evaluate(() => sessionStorage.getItem('voiceActive'))).toBeNull();
+  expect(leases).toEqual([]);
+});
+
 test('dictation in send mode sends what was said to the chat it was started in', async ({ page }) => {
   const asked: string[] = [], purposes: (string | null)[] = [];
   await page.addInitScript(() => localStorage.setItem('dictationMode', 'send'));
