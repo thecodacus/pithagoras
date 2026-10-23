@@ -122,7 +122,8 @@ const mirrored = (value: unknown) => (value as Record<string, unknown> | null)?.
  * Each line `stream` gives, as it comes; the last one too, without its line break. Each part is looked through once, as
  * it comes. With `max`, a line that grows past it is given in its first `max` characters, and what follows of it, up to
  * its line break, is left out: the half's output may have no line break at all (a progress meter that only goes back
- * to the line's start), and would fill the portal's memory.
+ * to the line's start), and would fill the portal's memory. A line that ends in the part it came in is held to it the
+ * same: which parts the pipe hands the output on in is not the half's doing.
  */
 function lines(stream: Readable, each: (line: string) => void, max = Infinity): void {
   let rest = "";
@@ -131,7 +132,7 @@ function lines(stream: Readable, each: (line: string) => void, max = Infinity): 
   stream.on("data", (text: string) => {
     let from = 0;
     for (let end = text.indexOf("\n"); end !== -1; end = text.indexOf("\n", from)) {
-      if (!cut) each(rest + text.slice(from, end));
+      if (!cut) each((rest + text.slice(from, end)).slice(0, max));
       rest = "";
       cut = false;
       from = end + 1;
