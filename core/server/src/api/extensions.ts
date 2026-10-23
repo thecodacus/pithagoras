@@ -302,7 +302,10 @@ export async function switchPackage(spec: string, enabled: boolean): Promise<boo
  * into its own process: of the packages its own settings install, the ones
  * switched on. Never a package a folder brings: an agent can write that
  * folder, and what it put there would run in the page of everyone who opens
- * the portal, or in the portal itself.
+ * the portal, or in the portal itself. A package an extension's data folder
+ * holds (one an extension wrote, for an agent, say) has its server half run in
+ * a process of its own, however it was installed: told by the folder, which is
+ * there before pi lists the package and as long as it does.
  */
 async function halves(): Promise<{ clients: ClientHalf[]; servers: ServerHalf[]; themed: PackageThemes[] }> {
   const settings = readPiSettings();
@@ -317,6 +320,8 @@ async function halves(): Promise<{ clients: ClientHalf[]; servers: ServerHalf[];
     const entry = listed.find((e) => sourceOf(e) === pkg.spec);
     if (entry === undefined || isSwitchedOff(entry)) continue;
     const client = clientHalf(pkg.path), server = serverHalf(pkg.path), themes = packageThemes(pkg.path);
+    // On the half itself: its revision is read when first asked for (see serverHalf), which a copy would do now.
+    if (server && dataOwner(pkg.path) !== undefined) server.isolated = true;
     const name = (client ?? server ?? themes)?.name;
     if (!name || taken.has(name)) continue;
     taken.add(name);

@@ -94,6 +94,7 @@ const NOW = new Set([
   "handoffs.take",
   "handoffs.done",
   "dataDir",
+  "audit.record",
   "modes.provide",
   "memory.hold",
   "extensions.use",
@@ -102,7 +103,7 @@ const NOW = new Set([
   "agentAccess",
 ]);
 /** What it calls and is answered later. */
-const LATER = new Set(["models.of", "models.endpoint", "mcp.set", "chats.tell", "chats.reload", "sandbox.run"]);
+const LATER = new Set(["models.of", "models.endpoint", "mcp.set", "chats.tell", "chats.reload", "sandbox.run", "extensions.install", "extensions.remove", "extensions.status"]);
 
 /** A member of `portal` by its path, called on what it belongs to. */
 function member(portal: ServerPortal, path: string): (...args: unknown[]) => unknown {

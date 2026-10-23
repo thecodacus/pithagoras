@@ -154,6 +154,9 @@ function portalOf(init: { name: string; executor: string }): ServerPortal {
     extension: init.name,
     executor: init.executor,
     log: (text) => console.log(`[extension ${name}] ${text}`),
+    audit: {
+      record: (entry) => callNow("audit.record", entry),
+    },
     provide: unavailable("provide"),
     folders: {
       list: () => callNow("folders.list"),
@@ -179,6 +182,9 @@ function portalOf(init: { name: string; executor: string }): ServerPortal {
     },
     extensions: {
       use: (of) => provided(of, callNow("extensions.use", of)) as never,
+      install: (folder, options) => callLater("extensions.install", [folder, options]),
+      remove: (of) => callLater("extensions.remove", [of]),
+      status: (of, options) => callLater("extensions.status", [of, options]),
     },
     models: {
       of: (chatId) => callLater("models.of", [chatId]),
