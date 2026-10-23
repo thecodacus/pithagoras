@@ -896,7 +896,9 @@ What it cannot have, or has otherwise:
    that chat's load error. A tool's `execute` is given no `ctx`, nor are its
    handlers and commands. A tool's definition is data: `renderCall` and
    `renderResult` are left out, and any other function in it
-   (`prepareArguments`, say) is refused by name. An event or an argument that
+   (`prepareArguments`, say) is refused by name, and so is a tool named as one
+   of pi's own (`read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`), which
+   would take that tool's place in every chat. An event or an argument that
    cannot be copied fails that call.
 3. What the portal asks of it at any moment, the tools it offers now
    (`tools.offer`) and whether it holds the agent's memory (`memory.hold`'s
@@ -904,7 +906,10 @@ What it cannot have, or has otherwise:
 4. What a page that opens a chat is told first (`chats.onOpen`) reaches the
    page after the stream's first events, within two seconds or not at all.
 5. A request's `req.socket`, `req.ip`, `req.secure` and `req.protocol` are
-   those of the local connection the portal hands it on by.
+   those of the local connection the portal hands it on by, and its
+   `req.originalUrl` and `req.baseUrl` are as its own routes see it: the path
+   below `/api/x/<package>` (`/where?a=1`) and `""`, where in the portal's
+   process they are the whole path and `/api/x`.
 6. After it is started again, a chat that has not loaded since still has its
    tools of the process before: a call of one fails until that chat's next
    step, which has the new ones.

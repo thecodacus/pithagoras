@@ -587,6 +587,9 @@ export interface ServerPortal {
    * The package's own routes, at /api/x/<package>/…, behind the portal's
    * login. No body is read for them: a route that takes JSON says so with
    * `portal.http.json()`, and one that takes a file reads the request itself.
+   * In a server half in a process of its own, a request's `originalUrl` is the
+   * path below /api/x/<package> and its `baseUrl` is "", and `socket`, `ip`,
+   * `secure` and `protocol` are of the local connection it is handed on by.
    */
   router: Router;
   http: {
@@ -671,7 +674,8 @@ export interface ServerPortal {
      * `sendUserMessage` alone, taken while the factory runs, whose promise is
      * waited for (five seconds at most); a tool's `execute`, a handler and a
      * command are given no `ctx`, `renderCall` and `renderResult` are left
-     * out, and a tool with any other function in it is refused.
+     * out, and a tool with any other function in it is refused, as is one
+     * named as one of pi's own tools (`read`, `bash`…).
      */
     extend(factory: (pi: any, chat: Chat) => void): void;
     /**
