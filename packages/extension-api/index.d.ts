@@ -286,7 +286,9 @@ export interface SlotMap {
    * the component being made again (from 380 pixels in the middle of the
    * stage to 64 in its dock on a phone), and may draw past it as the orb's
    * glow does, by 3/14 of its size on each side. It is drawn too in the
-   * dialog's preview, with a made-up voice, and `still` on the Agents page.
+   * dialog's preview, with a made-up voice, and `still` on the Agents page;
+   * there the box is the whole square it is drawn on, and what is past it is
+   * cut.
    * Where it is not in the page (its extension is not, or has not registered
    * it yet) or fails to draw, the orb is drawn in its place.
    */

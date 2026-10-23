@@ -624,8 +624,12 @@ changes size without your component being made again: up to 380 pixels in the
 middle of the stage, `min(300px, 34%)` beside a window, 100 in its dock and 64 in its
 dock on a phone, its width animated over 0.7 seconds. Follow it with a
 `ResizeObserver` and apply the size inside your own animation frame, as the
-orb does, or it flickers while it moves. You may draw past the box, as the
-orb's glow does, by 3/14 of its size on each side. Pause while it is out of
+orb does, or it flickers while it moves. On the stage you may draw past the
+box, as the orb's glow does, by 3/14 of its size on each side. Off the stage
+the box is the whole of the dark square it is drawn on, and what is past it is
+cut: 112 pixels on the agent's card, where its name is just under it, 64 on its
+page, and in the dialog's preview 220 beside the dialog's choices, or the
+dialog's width above them on a phone. Pause while it is out of
 view (an `IntersectionObserver`), and read
 `matchMedia("(prefers-reduced-motion: reduce)")` for reduced motion: there is
 no prop for it. Free what you hold (a GL context, its textures) when the

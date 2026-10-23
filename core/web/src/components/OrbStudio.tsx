@@ -238,8 +238,9 @@ export function OrbStudio({ agent, name: agentName, orb, voice, onSaved }: { age
     <>
       {/* The avatar itself, with the way to change it on it. */}
       <div className="relative h-16 w-16 shrink-0" title={summary}>
-        <div className="flex h-full w-full items-center justify-center rounded-2xl bg-[#0b1220] ring-1 ring-inset ring-accent/15">
-          <div className="voice-avatar w-[66%]">
+        {/* An extension's avatar is cut at its edge, as on the agent's card: the agent's name is just beside it. */}
+        <div className="flex h-full w-full items-center justify-center rounded-2xl bg-[#0b1220] ring-1 ring-inset ring-accent/15 has-[.voice-avatar-x]:overflow-hidden">
+          <div className="voice-avatar">
             <AgentAvatar look={saved} agent={who} mode="idle" levels={still} still />
           </div>
         </div>
@@ -260,7 +261,7 @@ export function OrbStudio({ agent, name: agentName, orb, voice, onSaved }: { age
         {/* Stays in view while the options scroll past, so a change is seen as it is made. */}
         <div className="sm:sticky sm:top-0 sm:self-start">
           <div className="flex aspect-square items-center justify-center overflow-hidden rounded-xl bg-[#0b1220]">
-            <div className="voice-avatar w-[58%]">
+            <div className="voice-avatar">
               <AgentAvatar look={draft} agent={who} mode={state === "thinking" ? "idle" : state} thinking={state === "thinking"} levels={levels} />
             </div>
           </div>

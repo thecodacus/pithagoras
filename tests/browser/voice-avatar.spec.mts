@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { type Page } from '@playwright/test';
+import { type Locator, type Page } from '@playwright/test';
 import { test, expect, mockPortal } from './portal-mock';
 import { settled } from './settled';
 import { DEFAULT_ORB, type OrbStyle } from '../../core/server/src/orb-style';
@@ -224,6 +224,15 @@ async function openAvatar(page: Page) {
 }
 
 const pressed = (choices: ReturnType<Page['getByRole']>) => choices.locator('button[aria-pressed="true"]');
+/**
+ * Off the stage, the dark square an avatar is drawn on, the avatar's box in it and what is drawn there, each by its
+ * width, and whether the square cuts what is drawn past it.
+ */
+const onSquare = (drawn: Locator) => drawn.evaluate((el) => {
+  const box = el.closest('.voice-avatar')!, square = box.parentElement!;
+  const width = (e: Element) => Math.round(e.getBoundingClientRect().width);
+  return { square: width(square), box: width(box), drawn: width(el), cut: getComputedStyle(square).overflow === 'hidden' };
+});
 
 test.describe('the Avatar dialog with the extension installed', () => {
   test.use({ installed: [PUPPET] });
@@ -243,6 +252,8 @@ test.describe('the Avatar dialog with the extension installed', () => {
     await expect(dialog).toContainText("How it looks is set by its extension, on the extension's page in Settings. Where it cannot be drawn, voice mode shows the agent's orb.");
     const puppet = dialog.getByTestId('puppet');
     await expect(puppet).toHaveAttribute('data-still', 'false');
+    // All of the preview's square is its box, and what is past it is cut.
+    expect(await onSquare(puppet)).toEqual({ square: 220, box: 220, drawn: 220, cut: true });
     await expect(states).toHaveText(['Idle', 'Listening', 'Speaking', 'Thinking', 'Muted']);
     for (const [label, mode] of [['Idle', 'idle'], ['Listening', 'input'], ['Speaking', 'output'], ['Thinking', 'thinking'], ['Muted', 'muted']]) {
       await states.filter({ hasText: label }).click();
@@ -258,6 +269,7 @@ test.describe('the Avatar dialog with the extension installed', () => {
     expect(saved[0].personality).toBe(DEFAULT_ORB.personality);
     // The agent's avatar on its page is now the puppet, as a picture, and says which it is.
     await expect(page.locator('[title="Puppet"]').getByTestId('puppet')).toHaveAttribute('data-still', 'true');
+    expect(await onSquare(page.locator('[title="Puppet"]').getByTestId('puppet'))).toEqual({ square: 64, box: 64, drawn: 64, cut: true });
 
     await dialog.getByRole('button', { name: 'Reset to default' }).click();
     await expect(pressed(shownAs)).toHaveText(/^Orb/);
@@ -316,7 +328,12 @@ test.describe('the Avatar dialog with the extension installed', () => {
     await expect(card.getByTestId('puppet')).toHaveAttribute('data-still', 'true');
     await expect(card.getByTestId('puppet')).toHaveAttribute('data-mode', 'idle');
     await expect(card.getByTestId('puppet')).toHaveAttribute('data-agent', 'home');
-    await expect(page.getByRole('button', { name: /Ada/ }).locator('.voice-orb')).toBeVisible();
+    // All of the card's square is its box, and what is past it, which would reach over the agent's name, is cut.
+    expect(await onSquare(card.getByTestId('puppet'))).toEqual({ square: 112, box: 112, drawn: 112, cut: true });
+    // The orb's square is as it was: its glow, and a hat, may reach past it.
+    const orb = page.getByRole('button', { name: /Ada/ }).locator('.voice-orb');
+    await expect(orb).toBeVisible();
+    expect(await onSquare(orb)).toEqual({ square: 112, box: 112, drawn: 160, cut: false });
   });
 });
 
