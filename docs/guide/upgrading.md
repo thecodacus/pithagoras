@@ -104,6 +104,9 @@ What you do:
 - **Change scripts and bookmarks** that use an address that moved (see the
   table below). The old addresses have no aliases.
 - **If you use Azure**, rename its provider ([pi is 1.1](#pi-is-1-1)).
+- **From a checkout, use Node 22.19 or later** ([pi is 1.1](#pi-is-1-1)).
+- **If you started with `docker-compose.voice.yml`**, drop it from your command:
+  it is gone (see [Voice's service is an extension](#voice-s-service-is-an-extension)).
 
 ### Pages, settings and routes that moved
 
@@ -121,8 +124,8 @@ What you do:
 | `/api/images…`, `/api/features/images` | `/api/x/pithagoras-media/images…`, `/api/x/pithagoras-media/settings/images` |
 | `/api/browser…`, `/browser-ui/` | `/api/x/pithagoras-browser/…`, `/api/x/pithagoras-browser/ui/` |
 | `PUT /api/browser/allowlist` | `PUT /api/guard/allowlist`; the list is in `GET /api/guard` |
-| `/api/voice/install`, `hardware`, `gpu`, `start`, `stop`, `uninstall`, `/api/voice/presets…` | `/api/x/pithagoras-voice/…` |
-| `/api/features/understory…`, `/api/memory/…` | `/api/x/pithagoras-understory/…` |
+| `/api/voice/install`, `hardware`, `gpu`, `start`, `stop`, `uninstall`; `/api/voice/presets…`; `POST /api/voice/connect` | `/api/x/pithagoras-voice/…` (`GET install` → `/state`); `…/voices…`; `PUT …/chosen` |
+| `/api/features/understory…`, `/api/memory/…`; `PUT /api/features/understory`; its part of `GET /api/features` | `/api/x/pithagoras-understory/…`; `…/use`; `…/state` |
 
 `/settings/images` and `/settings/add-ons` open Settings → Defaults. The
 sections below give each move in full, and the
@@ -130,9 +133,11 @@ sections below give each move in full, and the
 
 ### New environment variables
 
-None of them has to be set: unset, each keeps what 0.1.0 did, except
-`BROWSER_BIND`, whose default keeps a new browser container off the network.
-See [Configuration](/reference/configuration#environment).
+None of them has to be set. Unset, `BROWSER_BIND` keeps a new browser container
+off the network, the fetch and Understory waits are 30 minutes where 0.1.0 had
+Node's five, and a portal run from a checkout looks for new commits at the start
+and every six hours (`PORTAL_UPDATE_CHECK=off` stops that). See
+[Configuration](/reference/configuration#environment).
 
 | Variable | What it sets |
 | --- | --- |
@@ -752,8 +757,12 @@ restart policy, so it stayed stopped after a restart until it was started on its
 page. Voice makes its container `unless-stopped`, and gives one made before the
 same policy in place the first time it finds it, as its server half starts,
 without making it again or restarting it: a container that is stopped stays
-stopped, and Docker starts it again after the host restarts. That needs Docker
-for extensions 1.2.0, which this release ships and Voice requires; installing
+stopped, and Docker starts it again after the host restarts. Docker 29 and later
+start it after the portal's container; older Docker starts both at once, which
+can leave it stopped with `cannot join network namespace of a non running
+container`, and Voice's page then shows **failed** with **Retry setup**. The
+update in place needs Docker for extensions 1.2.0, which this release ships and
+Voice requires; installing
 Voice installs it, or says that the one installed is too old. A container you
 stop on Voice's page, or in Settings → Docker, stays stopped until you start it
 (see [The voice service](/guide/voice-service)).
@@ -1271,14 +1280,14 @@ the database since the upgrade is lost, as with any restore.
 
    ```sh
    cd /path/to/data
-   # The Images page's own pictures, where 0.1.0 keeps them.
+   # The pictures of the Images page, where 0.1.0 keeps them.
    mkdir -p images
    for from in extension-data/pithagoras-media handoff/media handoff/.media.*; do
      [ -d "$from" ] || continue
      find "$from" -type f \( -path "*/images/*" -o -path "*/.images.partial/*" \) \
        ! -path "*.copy/*" ! -name "*.copy" -exec mv {} images/ \;
    done
-   # A local Chrome's profile, where 0.1.0 keeps it.
+   # The profile of a local Chrome, where 0.1.0 keeps it.
    for from in extension-data/pithagoras-browser/profile \
      extension-data/pithagoras-browser/handoff-browser/profile \
      handoff/browser/profile handoff/.browser.*/profile handoff/.browser.*/.profile.partial; do
@@ -1294,9 +1303,35 @@ the database since the upgrade is lost, as with any restore.
    done
    ```
 
-   In a container, run the same with the portal container's own mounts, as
-   `docker run --rm --volumes-from pithagoras alpine sh -c '…'` with `cd /data`
-   first (see [Media's section](#going-back-to-a-version-before-it)).
+   In a container, run it with the portal container's own mounts
+   (`--volumes-from`), as in [Media's section](#going-back-to-a-version-before-it):
+
+   ```sh
+   docker run --rm --volumes-from pithagoras alpine sh -c '
+   cd /data
+   # The pictures of the Images page, where 0.1.0 keeps them.
+   mkdir -p images
+   for from in extension-data/pithagoras-media handoff/media handoff/.media.*; do
+     [ -d "$from" ] || continue
+     find "$from" -type f \( -path "*/images/*" -o -path "*/.images.partial/*" \) \
+       ! -path "*.copy/*" ! -name "*.copy" -exec mv {} images/ \;
+   done
+   # The profile of a local Chrome, where 0.1.0 keeps it.
+   for from in extension-data/pithagoras-browser/profile \
+     extension-data/pithagoras-browser/handoff-browser/profile \
+     handoff/browser/profile handoff/.browser.*/profile handoff/.browser.*/.profile.partial; do
+     [ -d "$from" ] || continue
+     mkdir -p browser-profile
+     find "$from" -mindepth 1 -maxdepth 1 -exec mv {} browser-profile/ \;
+   done
+   # The rest of what 0.2.0 kept, set aside where nothing reads it.
+   stamp=$(date +%Y%m%d-%H%M%S)
+   mkdir -p "backups/0.2.0-$stamp"
+   for d in extension-data handoff; do
+     if [ -e "$d" ]; then mv "$d" "backups/0.2.0-$stamp/"; fi
+   done'
+   ```
+
 5. **Set `PORTAL_PASSWORD` again**, to the password: 0.1.0 reads it from there,
    not from the database.
 6. **Start 0.1.0:** `PITHAGORAS_VERSION=0.1.0` in the Portainer stack, or the
