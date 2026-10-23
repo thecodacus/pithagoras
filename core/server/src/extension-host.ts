@@ -9,7 +9,7 @@ import semver from "semver";
 import express, { type NextFunction, type Request, type RequestHandler, type Response, type Router } from "express";
 import { agentOf, defaultAgent, listAgents } from "./agents.js";
 import { DATA_DIR } from "./data-dir.js";
-import { getSession, getSetting, listSessions, putSetting, sessionsByWorkspace, setServerHalfOffers, setTrustedMcpServers, toolExceptions, trustedMcpServers, untrustMcpServer, type SessionRow } from "./db.js";
+import { getSession, getSetting, listSessions, putSetting, recordAudit, sessionsByWorkspace, setServerHalfOffers, setTrustedMcpServers, toolExceptions, trustedMcpServers, untrustMcpServer, type SessionRow } from "./db.js";
 import { EXECUTOR_KIND } from "./executor-kind.js";
 import { takes, type ServerHalf } from "./extension-ui.js";
 import { moduleAt } from "./half-modules.js";
@@ -509,6 +509,17 @@ function portalFor(ext: Running): ServerPortal {
     extension: name,
     executor: EXECUTOR_KIND,
     log: (text) => say(name, text),
+    audit: {
+      record(entry) {
+        const { subject, reason, chatId } = entry ?? {};
+        if (typeof subject !== "string" || subject === "" || (reason !== undefined && typeof reason !== "string") || (chatId !== undefined && typeof chatId !== "string")) {
+          throw new TypeError("record takes { subject, reason?, chatId? }: what it was done to, a text that is not empty, and two texts");
+        }
+        // Under its name, of the one kind an extension writes: never a row that reads as the guard's. The chat is not
+        // looked up: one deleted meanwhile is still named by its id, as in the guard's rows.
+        recordAudit({ kind: "extension", tool: name, subject, reason, sessionId: chatId });
+      },
+    },
     provide(factory) {
       if (typeof factory !== "function") throw new TypeError("provide takes a function: (consumer) => what that consumer is given");
       ext.provider = factory;

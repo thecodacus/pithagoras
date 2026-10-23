@@ -343,6 +343,15 @@ export interface ServerPortal {
   executor: string;
   /** A line in the portal's log, kept with the extension's own lines: what Settings → Extensions shows of it should it crash. */
   log(text: string): void;
+  audit: {
+    /**
+     * A row in Settings → Audit, of the kind "Extension", under this extension's name: `subject` what it was done to
+     * (a name, a path: shown as it is), `reason` a short text in English, shown through the extension's own translations,
+     * and `chatId` the chat it was done for, kept as given (a chat deleted since is still named by its id, as the guard's
+     * rows are). Throws a TypeError for an empty subject.
+     */
+    record(entry: { subject: string; reason?: string; chatId?: string }): void;
+  };
   /**
    * What this extension gives the extensions that build on it, those that name it in `pithagoras.requires` or
    * `pithagoras.optional` in their package.json. `factory` is called once for each of them, with its name, when it first
