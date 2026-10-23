@@ -4,6 +4,7 @@ import { once } from "node:events";
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { connect } from "node:net";
 import path from "node:path";
+import { PassThrough } from "node:stream";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { inProcessHome, runToEnd, serverEnv, testHome } from "./server-harness.mjs";
@@ -322,13 +323,19 @@ test("what it prints with no line break is kept to a line's length, and what fol
 });
 
 test("a line is kept to that length however the pipe hands it on, its line break in the same part as the rest of it too", async () => {
-  // One write, which the pipe hands on in one part: the line ends in the part it began in.
-  await host.syncServerHalves([half("blurt", `portal.router.get("/say", (req, res) => { process.stdout.write("#".repeat(9000) + "\\nnext\\n"); res.json({}); });`)]);
-  await get("/api/x/blurt/say");
-  await until(() => status("blurt").lines.includes("next"), "the line after it was read");
-  const { lines } = status("blurt");
-  assert.equal(lines[lines.indexOf("next") - 1], "#".repeat(8000));
-  await host.syncServerHalves([]);
+  const { lines } = await import("../dist/isolated-half.js");
+  const read = async (...parts) => {
+    const stream = new PassThrough();
+    const got = [];
+    lines(stream, (line) => got.push(line), 8000);
+    for (const part of parts) stream.write(part);
+    stream.end();
+    await once(stream, "end");
+    return got;
+  };
+  assert.deepEqual(await read("#".repeat(9000) + "\nnext\n"), ["#".repeat(8000), "next"], "ended in the part it came in");
+  assert.deepEqual(await read("#".repeat(5000), "#".repeat(4000) + "\nnext\n"), ["#".repeat(8000), "next"], "begun in one part, ended in the next");
+  assert.deepEqual(await read("#".repeat(9000), "#".repeat(1000) + "\nnext\n"), ["#".repeat(8000), "next"], "cut before its line break came");
 });
 
 test("what it starts in a chat's folder is no job of the chat's agent (Linux, where the jobs are read)", { skip: !LINUX && "only Linux lists an agent's jobs" }, async () => {
