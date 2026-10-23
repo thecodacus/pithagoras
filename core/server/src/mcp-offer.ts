@@ -7,8 +7,7 @@
  * a tool by what the portal remembers: it registers a server's tools directly
  * from its own cache file (`mcp-cache.json`), and only those its configuration
  * still allows. A server switched off, a tool left out by `Only these tools` or
- * `Except these tools`, a tool the server no longer has, a server no longer
- * configured: each is a tool the portal went on listing,
+ * `Except these tools`, a tool the server no longer has: each is a tool the portal went on listing,
  * and a chat that had it loaded went on offering, after the configuration had
  * said no. This is where that is read, kept apart from the files so the rule
  * can be tested on its own.
@@ -22,8 +21,7 @@
  *
  * Only for the `server` prefix the adapter uses by default, which is the one
  * `mcpServerOf` can tell a server's tools by. A server named another way is not
- * judged here, and its tools are left as they are; while there is one, so is a
- * name no configured server claims, which may be one of that server's.
+ * judged here, and its tools are left as they are.
  */
 import { mcpServerOf } from "./tool-policy.js";
 
@@ -41,19 +39,11 @@ export interface McpCacheLike {
  * - `cached`: the adapter registers it from its cache, for a server it starts
  *   only when a tool of it is first used: what is listed is what the server had
  *   when it last ran.
- * - `withdrawn`: the configuration says no to it: its server is switched off or
- *   no longer configured, `Only these tools` or `Except these tools` leave it
- *   out, or its server no longer has it. The adapter's own `mcp` tool does not
- *   reach it either.
+ * - `withdrawn`: the configuration says no to it: its server is switched off,
+ *   `Only these tools` or `Except these tools` leave it out, or its server no
+ *   longer has it. The adapter's own `mcp` tool does not reach it either.
  */
 export type McpOffer = "offered" | "cached" | "withdrawn";
-
-/**
- * The tools the adapter registers as its own, whatever servers there are (pi-mcp-adapter 2.18.0, index.ts): `mcp`, its
- * way to every server's tools, and `mcp_script`, where its script mode is on. Every other tool it registers is a
- * server's, named `<server>_<tool>` by default.
- */
-export const ADAPTER_TOOLS: readonly string[] = ["mcp", "mcp_script"];
 
 /** Not a tool to list: the configuration said no to it. */
 export const unlisted = (offer: McpOffer | undefined): boolean => offer === "withdrawn";
@@ -128,22 +118,14 @@ const prefixOf = (definition: Record<string, unknown>, settings: Record<string, 
   definition.toolPrefix ?? settings.toolPrefix ?? "server";
 
 /**
- * What the adapter does with a tool of this name, or undefined where that is
- * not told by the name. The caller says which names are the adapter's: a
+ * What the adapter does with a tool of this name, or undefined for a name no
+ * configured server claims. The caller says which names are the adapter's: a
  * server's name is also the start of other tools' (`web` and `web_search`).
- *
- * Of the adapter's, one no configured server claims is withdrawn: the adapter
- * registers a server's tools, and reaches them through `mcp`, only for a server
- * its configuration has, so the tools of one taken out of it are nobody's,
- * whatever its cache and the portal still remember of them. Not the adapter's
- * own tools (ADAPTER_TOOLS), and nothing while a server is named another way
- * than the default: a name no server claims may then be one of its.
  */
 export function mcpOffer(config: McpConfigLike, cache: McpCacheLike | null): (name: string) => McpOffer | undefined {
   const servers = config.mcpServers ?? {};
   const settings = config.settings ?? {};
   const names = Object.keys(servers);
-  const defaultNamed = Object.values(servers).every((definition) => prefixOf(definition ?? {}, settings) === "server");
   // Each server's entry walked once, not once per tool asked about.
   const tools = new Map<string, Map<string, CachedTool> | undefined>();
   const toolsOf = (server: string, definition: Record<string, unknown>) => {
@@ -152,7 +134,7 @@ export function mcpOffer(config: McpConfigLike, cache: McpCacheLike | null): (na
   };
   return (name) => {
     const server = mcpServerOf(name, names);
-    if (server === undefined) return defaultNamed && !ADAPTER_TOOLS.includes(name) ? "withdrawn" : undefined;
+    if (server === undefined) return undefined;
     const definition = servers[server] ?? {};
     if (prefixOf(definition, settings) !== "server") return undefined;
     const bare = name.slice(server.replace(/-/g, "_").length + 1);
@@ -181,7 +163,7 @@ export function mcpOffer(config: McpConfigLike, cache: McpCacheLike | null): (na
 
 /**
  * Whether the adapter registers this tool as a tool of its own, one by one, rather than leaving it to
- * its `mcp` tool: undefined for a name no server claims. That is the server's
+ * its `mcp` tool: undefined for a name no server claims, as for mcpOffer. That is the server's
  * `directTools` (true, or a list that names the tool), or the adapter-wide `settings.directTools` where the
  * server says nothing; `false` on the server turns the adapter-wide one off for it. The adapter's
  * default is no: a tool is reached through `mcp`, which the portal calls lazy.

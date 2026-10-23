@@ -33,7 +33,7 @@ test("a server's tool is offered while its configuration registers it, and from 
   assert.equal(offer("jira_admin_delete"), "cached", "a dotted name is registered with underscores");
   assert.equal(offer("jira_read_project_list"), "cached", "a resource is a tool too");
   assert.equal(offer("brave_search_web_search"), "offered", "an eager server is started with the chat");
-  assert.equal(offer("mcp"), undefined, "the adapter's own");
+  assert.equal(offer("bash"), undefined, "no server's");
 });
 
 test("a server switched off, a tool left out or no longer there is withdrawn", () => {
@@ -142,17 +142,16 @@ test("a server behind the mcp tool only is switched like any other: whole, or to
   assert.deepEqual(names(listed), ["jira_admin_delete", "jira_create_issue", "jira_read_project_list", "jira_search"]);
   assert.ok(listed.every((t) => t.source === "jira" && t.enabled));
 
-  // One tool off: off for pi, and so for the guard, which holds the mcp tool to it. brave-search, taken out of the file
-  // above by hand, is no server the adapter has: the tool the portal remembers of it is withdrawn, and off for pi too.
+  // One tool off: off for pi, and so for the guard, which holds the mcp tool to it.
   await sessions.setTools("proxy", ["jira_create_issue"]);
-  assert.deepEqual(sessions.piOff("proxy"), ["brave_search_web_search", "jira_create_issue"]);
+  assert.deepEqual(sessions.piOff("proxy"), ["jira_create_issue"]);
   assert.equal(switchedOffVia("mcp", { tool: "jira_create_issue" }, new Set(sessions.piOff("proxy"))), "jira_create_issue");
   assert.equal(switchedOffVia("mcp", { tool: "jira_search" }, new Set(sessions.piOff("proxy"))), undefined);
 
   // The whole server off, as the group's switch sends it.
   const all = listed.map((t) => t.name);
   await sessions.setTools("proxy", all);
-  assert.deepEqual(sessions.piOff("proxy"), [...all, "brave_search_web_search"].sort());
+  assert.deepEqual(sessions.piOff("proxy"), [...all].sort());
   assert.ok((await sessions.getTools("proxy")).tools.filter((t) => t.name.startsWith("jira_")).every((t) => !t.enabled));
 });
 
@@ -163,27 +162,25 @@ test("a server that was removed has its tools off in a chat still running with i
   // As an extension does when it switches its server off (portal.mcp.set): the file written without the panel's routes.
   writeMcpFile({ mcpServers: { jira: { command: "j" } } });
   assert.equal(told, 2, "the running chats are told after every write");
-  // And brave-search's, remembered from a chat and no longer configured.
-  assert.deepEqual(withdrawnMcpTools(named("notes_read", "jira_search", "mcp", "bash")), ["brave_search_web_search", "notes_read"]);
+  assert.deepEqual(withdrawnMcpTools(named("notes_read", "jira_search", "mcp", "bash")), ["notes_read"]);
   // A tool of the portal's inline extensions is no server's, whatever its name starts with: a server half's, say.
-  assert.deepEqual(withdrawnMcpTools([{ name: "notes_read" }, { name: "notes_board", inline: true }]), ["brave_search_web_search", "notes_read"]);
+  assert.deepEqual(withdrawnMcpTools([{ name: "notes_read" }, { name: "notes_board", inline: true }]), ["notes_read"]);
   writeMcpFile({ mcpServers: { jira: { command: "j" }, notes: { command: "n" } } });
-  assert.deepEqual(withdrawnMcpTools(named("notes_read")), ["brave_search_web_search"], "configured again");
+  assert.deepEqual(withdrawnMcpTools(named("notes_read")), [], "configured again");
   stop();
 });
 
 test("a configuration that cannot be read is taken as it last could be", () => {
-  // brave-search's remembered tool is withdrawn throughout: no file here configures it.
   mcpFile({ mcpServers: { jira: { command: "j", disabled: true } } });
-  assert.deepEqual(withdrawnMcpTools(named("jira_search")), ["brave_search_web_search", "jira_create_issue", "jira_search"]);
+  assert.deepEqual(withdrawnMcpTools(named("jira_search")), ["jira_create_issue", "jira_search"]);
   writeFileSync(path.join(agent, "mcp.json"), "{ not json");
-  assert.deepEqual(withdrawnMcpTools(named("jira_search")), ["brave_search_web_search", "jira_create_issue", "jira_search"], "a typo hands nothing back");
+  assert.deepEqual(withdrawnMcpTools(named("jira_search")), ["jira_create_issue", "jira_search"], "a typo hands nothing back");
   // Fixed by a write that leaves a server out: the servers it had are the ones it last could be read with.
   mcpFile({ mcpServers: { jira: { command: "j" }, notes: { command: "n" } } });
   withdrawnMcpTools();
   writeFileSync(path.join(agent, "mcp.json"), "{ not json either");
   writeMcpFile({ mcpServers: { jira: { command: "j" } } });
-  assert.deepEqual(withdrawnMcpTools(named("notes_read")), ["brave_search_web_search", "notes_read"], "the server left out is one that was removed");
+  assert.deepEqual(withdrawnMcpTools(named("notes_read")), ["notes_read"], "the server left out is one that was removed");
 });
 
 test("a server's tools from the cache go with the adapter's package, whatever it was installed from", () => {
@@ -222,49 +219,4 @@ test("a server's tool is registered one by one only where its directTools or the
   assert.equal(mcpDirect({ mcpServers: { jira: { command: "j", toolPrefix: "short", directTools: true } } }, { servers: cache })("jira_search"), undefined);
   // Without a cache entry there is the registered name to go by.
   assert.equal(mcpDirect(jira({ directTools: ["search"] }), null)("jira_search"), true);
-});
-
-// As on a portal whose Tools page listed 27 `browser_browser_*` tools under pi-mcp-adapter: a Playwright server called
-// `browser`, taken out of mcp.json by hand, left its entry in the adapter's cache and its tools in what the portal
-// remembers. The adapter registers a server's tools only for a server its configuration has, so it had none of them.
-const stale = { ...cache, browser: { tools: [{ name: "browser_navigate" }, { name: "browser_click" }] } };
-
-test("a tool of a server no longer configured is withdrawn, whatever the cache still has of it; the adapter's own tools and a configured server's stay", () => {
-  const config = { mcpServers: { jira: { command: "j" } } };
-  const offer = mcpOffer(config, { servers: stale });
-  assert.equal(offer("browser_browser_navigate"), "withdrawn");
-  assert.equal(offer("notes_read"), "withdrawn", "one the cache never had as well");
-  assert.equal(offer("jira_search"), "cached", "a configured server's tool is judged as ever");
-  for (const own of ["mcp", "mcp_script"]) assert.equal(offer(own), undefined, `${own} is the adapter's, whatever servers there are`);
-  assert.equal(mcpOffer({}, null)("browser_browser_navigate"), "withdrawn", "with no server at all");
-  assert.equal(mcpOffer({}, null)("mcp"), undefined);
-  assert.ok(!mcpCatalogue(config, { servers: stale }).some((t) => t.server === "browser"), "nor is it in the catalogue");
-});
-
-test("while a server is named another way than the default, a name no server claims is not judged", () => {
-  const offer = (config) => mcpOffer(config, { servers: stale });
-  // `none` registers a server's tools under their own names, which no server's name tells.
-  const unprefixed = offer({ mcpServers: { jira: { command: "j" }, gh: { command: "g", toolPrefix: "none" } } });
-  assert.equal(unprefixed("browser_browser_navigate"), undefined);
-  assert.equal(unprefixed("jira_search"), "cached", "a server named the default way is judged as ever");
-  assert.equal(offer({ mcpServers: { jira: { command: "j" } }, settings: { toolPrefix: "short" } })("browser_browser_navigate"), undefined, "nor with the adapter-wide prefix");
-  assert.equal(offer({ mcpServers: { jira: { command: "j", toolPrefix: "server" } } })("browser_browser_navigate"), "withdrawn", "the default, said, is the default");
-});
-
-test("what the portal remembers of a server no longer configured is not listed, and is off in a chat", async () => {
-  cacheFile(stale);
-  mcpFile({ mcpServers: { jira: { command: "j" } } });
-  const adapter = (name) => ({ name, source: "pi-mcp-adapter", package: "npm:pi-mcp-adapter@2.18.0" });
-  rememberTools([adapter("browser_browser_navigate"), adapter("browser_browser_click"), adapter("mcp"), { name: "browser_open", source: "browser", package: null, inline: true }]);
-  const shown = names(shownTools());
-  assert.deepEqual(shown.filter((name) => name.startsWith("browser_")), ["browser_open"], "another extension's tool is not the adapter's");
-  assert.ok(shown.includes("mcp") && shown.includes("jira_search"));
-  createSession({ id: "stale", title: "stale", workspace: home, executor: "host" });
-  assert.ok(!(await sessions.getTools("stale")).tools.some((t) => t.name.startsWith("browser_browser_")), "nor in a chat's list");
-  const off = sessions.piOff("stale");
-  assert.ok(off.includes("browser_browser_navigate") && off.includes("browser_browser_click"));
-  assert.equal(switchedOffVia("mcp_script", {}, new Set(off)), undefined, "a script is not refused over a tool no server has");
-  // Remembered all the same: configured again, the server has them back.
-  mcpFile({ mcpServers: { jira: { command: "j" }, browser: { command: "b" } } });
-  assert.ok(names(shownTools()).includes("browser_browser_navigate"));
 });

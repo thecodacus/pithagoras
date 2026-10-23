@@ -4,8 +4,8 @@ import { packageIndex, packageKey, packageLabel, toolAvailability } from "./exte
 import { GUARD_RULE_NAMES } from "./pi/guard-rule-names.js";
 import { BUILT_IN_SET, PI_BUILT_IN_TOOLS, defaultsFor, lazyToolEntry, mcpServerOf, toolEnabled, toolSetOf } from "./tool-policy.js";
 import { projectOf } from "./workspaces.js";
-import { dropMcpCache, mcpAdapter, mcpCachePath, mcpConfigPath, mcpServerNames, onMcpWritten, readMcpCache, readMcpFile, readableMcpConfig, serversAndBrowsers } from "./api/mcp.js";
-import { ADAPTER_TOOLS, mcpCatalogue, mcpDirect, mcpOffer, unlisted, type McpOffer } from "./mcp-offer.js";
+import { dropMcpCache, mcpAdapter, mcpCachePath, mcpConfigPath, mcpServerNames, mcpWritten, onMcpWritten, readMcpCache, readMcpFile, readableMcpConfig, serversAndBrowsers } from "./api/mcp.js";
+import { mcpCatalogue, mcpDirect, mcpOffer, unlisted, type McpOffer } from "./mcp-offer.js";
 import { existsSync, mkdirSync, readdirSync, rmSync, rmdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { isWithinText } from "./within.js";
@@ -3273,6 +3273,30 @@ function setRemovedMcpServers(names: string[]): void {
   if (JSON.stringify(unique) !== JSON.stringify(removedMcpServers())) putSetting("mcp_removed", JSON.stringify(unique));
 }
 
+/**
+ * The servers of the portal's mcp.json as the portal last saw them, by name:
+ * what an edit made outside the portal is judged against (noticeMcpEdits).
+ * Kept in the settings, so one made while the portal was not running is
+ * noticed when it starts again. Undefined until the portal first looks at the
+ * file, which on an install from before this was kept is after whatever was
+ * taken out of it by hand until then.
+ */
+function configuredMcpServers(): string[] | undefined {
+  const value = getSetting("mcp_configured");
+  if (value === undefined) return undefined;
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed.filter((n): n is string => typeof n === "string") : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function setConfiguredMcpServers(names: string[]): void {
+  const unique = [...new Set(names)].sort();
+  if (JSON.stringify(unique) !== JSON.stringify(configuredMcpServers())) putSetting("mcp_configured", JSON.stringify(unique));
+}
+
 const ADAPTER_LABEL = "pi-mcp-adapter";
 
 /**
@@ -3282,7 +3306,7 @@ const ADAPTER_LABEL = "pi-mcp-adapter";
  * is not the tool of a server called `browser`.
  */
 const noServerOf = (tool: { name: string; inline?: boolean }): boolean =>
-  tool.inline === true || ADAPTER_TOOLS.includes(tool.name) || tool.name === "mcpScript";
+  tool.inline === true || tool.name === "mcp" || tool.name === "mcp_script" || tool.name === "mcpScript";
 
 /** Does the MCP adapter register this tool? By its package where it is recorded, by the label it is filed under where it is not. */
 export function adapterTool(t: Pick<KnownTool, "source" | "package">): boolean {
@@ -3330,6 +3354,48 @@ function fileStamp(file: string): string {
   }
 }
 
+/** The mcp.json that was last compared with the servers the portal last saw in it, by fileStamp. */
+let noticedMcpFile: string | undefined;
+
+/**
+ * An edit made to the portal's mcp.json outside the portal — by hand, by a
+ * script — taken in as a write of its own: the listeners are told
+ * (onMcpWritten), with the servers the portal last saw in the file as the ones
+ * it had before. A server the edit took out is removed as one taken out
+ * through the panel is (its tools forgotten, its cache entry dropped, and it
+ * recorded: see mcpServersRemoved), and a chat still running with it has its
+ * tools off.
+ * Asked for before the tools are listed or a chat's are worked out (mcpView),
+ * and as the portal starts, so an edit made while it was not running is
+ * noticed then. The file is read again only when it changed, and the
+ * listeners are told only when its servers did.
+ *
+ * Only the servers of this file are judged: the adapter also loads some from a
+ * project's own files, from `~/.config/mcp/mcp.json` and from what a file
+ * imports, which are in no file the portal writes, and their tools are left as
+ * they are. The first time there is nothing to compare with, the servers there
+ * are now are remembered and nothing is judged: a tool that a server taken out
+ * before then left behind cannot be told from one of a project's own servers.
+ * A file that cannot be read takes nothing out, as a typo in it withdraws
+ * nothing (readableMcpConfig): it is compared again once it can be read. One
+ * that is not there has no servers, for the adapter as for the panel.
+ */
+export function noticeMcpEdits(): void {
+  const stamp = fileStamp(mcpConfigPath());
+  if (stamp === noticedMcpFile) return;
+  // Before the listeners are told: what they do lists the tools again (mcpView), which must not compare the file again.
+  noticedMcpFile = stamp;
+  const { config, error } = readMcpFile();
+  if (error) return;
+  const now = Object.keys(config.mcpServers);
+  const seen = configuredMcpServers();
+  if (seen === undefined) {
+    setConfiguredMcpServers(now);
+    return;
+  }
+  if (seen.length !== now.length || seen.some((name) => !now.includes(name))) mcpWritten(seen);
+}
+
 let lastView: { stamp: string; view: McpView } | undefined;
 
 /**
@@ -3337,6 +3403,8 @@ let lastView: { stamp: string; view: McpView } | undefined;
  * so kept until one of the files it reads, or the settings, are written.
  */
 export function mcpView(): McpView {
+  // An edit made outside the portal first: taking it in forgets tools and writes the cache, and the view is of what is left.
+  noticeMcpEdits();
   const stamp = `${fileStamp(mcpConfigPath())}|${fileStamp(mcpCachePath())}|${settingsWrites}`;
   if (lastView?.stamp === stamp) return lastView.view;
   const view = readMcpView();
@@ -3393,10 +3461,14 @@ function mcpCatalogueIn(view: McpView, packages: unknown, projectPackages: unkno
   return view.catalogue.map((t) => ({ ...t, package: adapter.source }));
 }
 
-// A server taken out of the file, whoever wrote it, takes its tools with it.
+// A server taken out of the file, whoever wrote it, takes its tools with it. Judged against the servers the file had
+// and those the portal last saw in it: an edit made outside the portal that has not been noticed yet (noticeMcpEdits)
+// may have taken one out, and a write of the portal's right after it must not make that one forgotten unjudged.
 onMcpWritten((before) => {
   const after = Object.keys(readableMcpConfig()?.mcpServers ?? {});
-  if (before.some((name) => !after.includes(name)) || after.some((name) => !before.includes(name))) mcpServersRemoved(before, after);
+  const was = [...new Set([...(configuredMcpServers() ?? []), ...before])];
+  setConfiguredMcpServers(after);
+  if (was.some((name) => !after.includes(name)) || after.some((name) => !was.includes(name))) mcpServersRemoved(was, after);
 });
 
 /**

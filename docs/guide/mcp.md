@@ -108,12 +108,9 @@ at least once, and only where the adapter is installed and on — for every chat
 or for a project that brings it in its own settings. Only the adapter's default
 tool names (`<server>_<tool>`) are listed this way.
 
-What the configuration says no to is not listed at all: a server switched off
-or no longer in the file, a tool left out by `Only these tools` or `Except these
-tools`, or one the server no longer has. The adapter's own `mcp` and `mcp_script`
-stay, whatever servers there are. While a server uses a prefix other than the
-default, a tool whose name starts with no configured server's is left listed,
-since it may be that server's. A chat that is running is told at once: one that had such a tool
+What the configuration says no to is not listed at all: a server switched off,
+a tool left out by `Only these tools` or `Except these tools`, or one the server
+no longer has. A chat that is running is told at once: one that had such a tool
 loaded from before has it off from then on, through the `mcp` tool too. Nothing
 is written down against it, so it comes back the way it was when the
 configuration allows it again. A file that cannot be read is taken as it last
@@ -130,7 +127,15 @@ visible but is never connected. Better than deleting a server you are debugging.
 Deleting one, or renaming it, also takes its tools out of the Tools list, and a
 chat still running with it has them off from then on, as with one switched off —
 whatever took it out of the file: this panel, switching a feature such as
-Understory off, or an edit made by hand.
+Understory off, or an edit made by hand. The portal remembers which servers it
+last saw in the file, so an edit made by hand is noticed the next time the tools
+are listed or a chat starts, and one made while the portal was stopped when it
+starts again. A file that cannot be read takes nothing out; one that is not there
+has no servers. Only this file's servers count: one the adapter loads from a
+project's own `.mcp.json` or from anywhere else is never taken for one that was
+removed. The first time the portal looks at the file it has nothing to compare it
+with, so a tool left behind by a server taken out by hand before then stays
+listed, until it is removed from `tools_seen` in the portal's database.
 
 ::: tip The adapter has its own commands
 `/mcp` opens its status panel, `/mcp tools` lists what is available, and

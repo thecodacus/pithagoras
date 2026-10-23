@@ -59,6 +59,7 @@ import {
   lazyMarks,
   lazyRefused,
   lazyToolSets,
+  noticeMcpEdits,
   setLazyToolSets,
   toolGroupNames,
   updateSession,
@@ -1698,6 +1699,8 @@ app.use("/api", filesRouter());
 onMcpWritten(() => {
   sessions.applyToolDefaults().catch((e) => console.error(`[portal] could not apply the MCP configuration to running chats: ${(e as Error).message}`));
 });
+// An edit made to mcp.json while the portal was not running, taken in before anything lists the tools or starts a chat.
+noticeMcpEdits();
 app.use("/api", mcpRouter());
 app.use("/api", providersRouter());
 app.use("/api", peopleRouter());
