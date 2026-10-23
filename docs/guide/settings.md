@@ -47,11 +47,12 @@ is kept when a chat is compacted, and where routines report. The fields are
 described in [Models and providers](/guide/models#defaults).
 
 At the end of the page, **Voice mode** holds what voice mode does whatever
-listens and speaks for it: speech detection, the speaking instructions, the
-model that answers spoken messages and the providers that reply without
-thinking first, each saved as it is changed. It names voice mode's source too,
-says whether it is running, and has a button to its page and **Stop using**:
-see [Voice mode's settings](/guide/voice#voice-mode-s-settings).
+listens and speaks for it: whether voice conversations are offered at all (off,
+only dictation is), speech detection, the speaking instructions, the model that
+answers spoken messages and the providers that reply without thinking first,
+each saved as it is changed. It names voice mode's source too, says whether it
+is running, and has a button to its page and **Stop using**: see
+[Voice mode's settings](/guide/voice#voice-mode-s-settings).
 
 The fields show **only your explicit overrides**. Leave one empty and it
 inherits, with the inherited value shown as the placeholder. Clearing a field

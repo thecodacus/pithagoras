@@ -170,7 +170,8 @@ can be changed under **Settings → Shortcuts**.
 Voice mode is a conversation. When you only want to get words into the message
 box, use **dictation**: the **microphone icon** left of the waveform icon. Speak,
 and what you say is transcribed and typed in; the agent never speaks back and a
-run in progress is not interrupted.
+run in progress is not interrupted. To have dictation alone, switch off **Voice
+conversations** in [Voice mode's settings](#voice-mode-s-settings).
 
 It listens the same way voice mode does, with the same in-browser speech
 detection and the same source, so it works as soon as voice mode has one, also a
