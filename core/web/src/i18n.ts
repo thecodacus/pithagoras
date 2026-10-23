@@ -200,10 +200,19 @@ const subscribe = (listener: () => void) => {
   return () => listeners.delete(listener);
 };
 
-/** What a change is: the language, or only how it writes numbers and dates — either is drawn anew. */
-const snapshot = () => `${current.code}|${formatLocale}`;
+/** How many times texts were added to the language in effect from outside this file: an extension's (see addStrings). */
+let added = 0;
 
-/** The language in effect, drawing the component again when it — or how it writes numbers and dates — changes. */
+/** Texts were added to the language in effect: what is drawn with them is drawn anew, as for a change of language. */
+export function textsAdded(): void {
+  added++;
+  listeners.forEach((l) => l());
+}
+
+/** What a change is: the language, how it writes numbers and dates, or texts added to it — each is drawn anew. */
+const snapshot = () => `${current.code}|${formatLocale}|${added}`;
+
+/** The language in effect, drawing the component again when it — how it writes numbers and dates, or its texts — changes. */
 export const useLanguage = (): string => {
   useSyncExternalStore(subscribe, snapshot, snapshot);
   return current.code;

@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 // The portal's own lookups, under other names: what is passed to them here is the extension's text, not one written out.
-import { fill, formatNumber, language, pluralForm, t, tc as portalInContext, tp as portalCount, tx as portalWithParts, withParts, type Plural } from "../i18n";
+import { fill, formatNumber, language, pluralForm, t, textsAdded, tc as portalInContext, tp as portalCount, tx as portalWithParts, withParts, type Plural } from "../i18n";
 
 /**
  * An extension's own texts in other languages. English is what its code
@@ -12,12 +12,17 @@ type Strings = Record<string, string | Plural>;
 
 const added = new Map<string, Map<string, Strings>>();
 
-/** The texts of `extension` in the language `code` ("de"). Returns what takes them out again. */
+/**
+ * The texts of `extension` in the language `code` ("de"). Returns what takes them out again. Where that is the language
+ * in effect, what is drawn already is drawn anew in them: a browser half can arrive after the page drew the text it
+ * translates (a row in Audit).
+ */
 export function addStrings(extension: string, code: string, strings: Strings): () => void {
   let byExtension = added.get(code);
   if (!byExtension) added.set(code, (byExtension = new Map()));
   const merged = { ...byExtension.get(extension), ...strings };
   byExtension.set(extension, merged);
+  if (code === language()) textsAdded();
   return () => {
     if (byExtension.get(extension) === merged) byExtension.delete(extension);
   };

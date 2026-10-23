@@ -9,6 +9,7 @@ import { serverHalf, validName } from "./extension-ui.js";
 import { SUBAGENT_PACKAGE, piPackageArg } from "./features.js";
 import { scrubSecrets } from "./logs.js";
 import { oneAtATime } from "./one-at-a-time.js";
+import { INLINE_EXTENSIONS } from "./pi/sdk-client.js";
 import { readPiSettings } from "./pi-settings.js";
 import { sessions } from "./session-manager.js";
 import { realPath } from "./within.js";
@@ -60,6 +61,8 @@ export function installFor(dataDir: string, folder: string, note?: string): Prom
     if (!validName(name)) throw new TypeError(`The package.json in ${folder} has no valid name: an npm name, with or without a scope`);
     // halves() keeps the first package of a name: a second would be installed, and never loaded.
     if (name === SUBAGENT_PACKAGE || shippedExtensions().some((ext) => ext.name === name)) throw new Error(`${name} is the name of an extension that comes with Pithagoras`);
+    // A chat's pi files a server half's factory by its name, as it files the portal's own inline extensions.
+    if (INLINE_EXTENSIONS.includes(name)) throw new Error(`${name} is the name of one of the portal's own extensions in a chat's pi`);
     const other = (await usersOwn()).find((pkg) => metaOf(pkg)?.name === name && realPath(pkg.path!) !== real);
     if (other) throw new Error(`${name} is installed already, from ${other.spec}`);
     // pi keeps a folder it has listed already as it is, switched off or not: installed again, it is loaded again.

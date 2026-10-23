@@ -1895,7 +1895,12 @@ await portal.extensions.remove("moon");
   (those in its `extensions` folder, the subagent tool included) is refused, and
   so is one that a package installed from another folder has. Of two packages of
   one name, the portal loads the first: the second would be installed and never
-  run.
+  run. A name the portal gives one of its own extensions in a chat's pi
+  (`sandbox`, `guard`, `voice-first`, `cross-model-thinking`, `tools-gateway`,
+  `routines`, `ask-question`, `ask-primary`, `report`, `codemode`,
+  `heartbeat`) is refused too: pi files what a server half adds to a chat under
+  its package's name, as it files those, and the package would pass for the
+  portal's own.
 - **One at a time.** Installs and removals made through these calls, by every
   extension, run one after another, each whole, from its checks to the end. An
   install in Settings is not one of them, and checks no names.
