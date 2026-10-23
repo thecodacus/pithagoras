@@ -3377,14 +3377,19 @@ let noticedMcpFile: string | undefined;
  * are now are remembered and nothing is judged: a tool that a server taken out
  * before then left behind cannot be told from one of a project's own servers.
  * A file that cannot be read takes nothing out, as a typo in it withdraws
- * nothing (readableMcpConfig): it is compared again once it can be read. One
- * that is not there has no servers, for the adapter as for the panel.
+ * nothing (readableMcpConfig): it is compared again once it can be read. Nor
+ * does one that is not there, as for a moment while an editor or a script puts
+ * a new one in its place (`mv mcp.json mcp.json.bak` and then a new one
+ * written): the file that is there next is compared with the servers last
+ * seen, and a write of the portal's is judged against them too (onMcpWritten).
  */
 export function noticeMcpEdits(): void {
   const stamp = fileStamp(mcpConfigPath());
   if (stamp === noticedMcpFile) return;
   // Before the listeners are told: what they do lists the tools again (mcpView), which must not compare the file again.
   noticedMcpFile = stamp;
+  // Not there: fileStamp has "-" for a file it cannot look at.
+  if (stamp === "-") return;
   const { config, error } = readMcpFile();
   if (error) return;
   const now = Object.keys(config.mcpServers);

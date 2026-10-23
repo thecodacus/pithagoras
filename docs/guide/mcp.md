@@ -130,12 +130,15 @@ whatever took it out of the file: this panel, switching a feature such as
 Understory off, or an edit made by hand. The portal remembers which servers it
 last saw in the file, so an edit made by hand is noticed the next time the tools
 are listed or a chat starts, and one made while the portal was stopped when it
-starts again. A file that cannot be read takes nothing out; one that is not there
-has no servers. Only this file's servers count: one the adapter loads from a
-project's own `.mcp.json` or from anywhere else is never taken for one that was
-removed. The first time the portal looks at the file it has nothing to compare it
-with, so a tool left behind by a server taken out by hand before then stays
-listed, until it is removed from `tools_seen` in the portal's database.
+starts again. A file that cannot be read takes nothing out, and nor does one that
+is not there, as for a moment while an editor or a script puts a new one in its
+place: the file there next is compared with the servers last seen, so a file
+deleted for good takes its servers out once a new one is written. Only this
+file's servers count: one the adapter loads from a project's own `.mcp.json` or
+from anywhere else is never taken for one that was removed. The first time the
+portal looks at the file it has nothing to compare it with, so a tool left behind
+by a server taken out by hand before then stays listed, until it is removed from
+`tools_seen` in the portal's database.
 
 ::: tip The adapter has its own commands
 `/mcp` opens its status panel, `/mcp tools` lists what is available, and

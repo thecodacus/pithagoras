@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { freePort, inProcessHome, serverEnv, startServer } from "./server-harness.mjs";
 
@@ -202,17 +202,31 @@ test("a server put back by hand has its tools listed again, with the switches th
   assert.ok(known().includes("notes_read"), "a chat's report of it is remembered again");
 });
 
-test("an mcp.json that is not there has no servers: those the portal last saw in it are removed", () => {
-  byHand({ jira: JIRA });
-  db.rememberTools([adapter("jira_search")]);
+test("an mcp.json that is not there takes nothing out, and the file there next is compared with the servers last seen", () => {
+  byHand({ jira: JIRA, notes: { command: "notes-mcp" } });
+  cacheFile({ jira: { tools: [{ name: "search" }] }, notes: { tools: [{ name: "read" }] } });
+  db.rememberTools([adapter("jira_search"), adapter("notes_read")]);
   listed();
+  // Moved away and then written again, as `mv mcp.json mcp.json.bak` and a script or an editor after it do.
+  renameSync(mcpPath, `${mcpPath}.bak`);
+  listed();
+  assert.ok(known().includes("jira_search") && known().includes("notes_read"));
+  assert.deepEqual(cached(), ["jira", "notes"]);
+  assert.ok(!removed().includes("jira") && !removed().includes("notes"));
+  assert.deepEqual(configured(), ["jira", "notes"]);
+  byHand({ jira: JIRA });
+  const shown = listed();
+  assert.ok(shown.includes("jira_search") && !shown.includes("notes_read"));
+  assert.ok(known().includes("jira_search") && !known().includes("notes_read"));
+  assert.deepEqual(cached(), ["jira"]);
+  assert.ok(removed().includes("notes") && !removed().includes("jira"));
+  // Deleted, and then one written through the portal: judged against the servers last seen.
   rmSync(mcpPath);
-  assert.ok(!listed().includes("jira_search"));
-  assert.ok(removed().includes("jira"));
-  assert.deepEqual(configured(), []);
-  byHand({ jira: JIRA });
   listed();
-  assert.ok(!removed().includes("jira"));
+  writeMcpFile({ mcpServers: { fresh: { command: "f" } } });
+  assert.ok(!known().includes("jira_search"));
+  assert.ok(removed().includes("jira"));
+  assert.deepEqual(configured(), ["fresh"]);
 });
 
 test("an edit made while the portal was not running is noticed when it starts", async () => {
