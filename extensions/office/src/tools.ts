@@ -1,6 +1,7 @@
 /**
- * The agent's office tools (plan 5.5): list, create, read, edit and list the comments of the
- * documents this home owns or was granted in the office library (store.ts), docs-extension-style
+ * The agent's office tools (plan 5.5): list, create, read, edit and list the comments of the documents
+ * in this home's office-library scope (store.docsForHome -- every UNOWNED doc: the workspace-scanned and
+ * human-made docs are shared by all homes -- plus what this home owns or was granted), docs-extension-style
  * -- named by id, base-revision writes, coded error prefixes ("error:<code> <message>", the exact
  * docs convention with the "error:" prefix the office contract fixes).
  *

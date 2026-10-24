@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { LuArrowDownUp, LuDownload, LuFileText, LuPresentation, LuRefreshCw, LuTable, LuTrash2, LuUsers, LuUpload } from "react-icons/lu";
+import { LuDownload, LuFileText, LuPresentation, LuRefreshCw, LuTable, LuTrash2, LuUsers, LuUpload } from "react-icons/lu";
 import { officeUrl, portal, t } from "../portal";
+import { compareDocs, loadSort, saveSort, SortBar, workspaceLabel, type SortChoice } from "./sort";
 import { api, sayError, type OfficeDoc, type OfficeState } from "./api";
 import { editorsIn } from "../office-ui";
 import { parseDocQuery } from "../office-ui";
@@ -15,42 +16,8 @@ import { refreshOfficeState, useOfficeState } from "./state";
  * place (its file IS the document) -- plus what was made here.
  */
 
-/** How the library sorts: one of four keys, one direction. Persisted in localStorage (the portal's own local()
- * storage), default modified-descending -- newest work on top is what a document list should lead with. The sort
- * is pure client-side over the polled docs payload: the server hands back the raw meta, ordering is the page's.
- */
-type SortKey = "name" | "modified" | "size" | "type";
-const SORT_STORE_KEY = "po-sort";
-function loadSort(): { key: SortKey; dir: 1 | -1 } {
-  try {
-    const raw = JSON.parse(localStorage.getItem(SORT_STORE_KEY) ?? "");
-    if (raw && ["name", "modified", "size", "type"].includes(raw.key) && (raw.dir === 1 || raw.dir === -1)) return raw;
-  } catch {
-    // never held: fall through to the default
-  }
-  return { key: "modified", dir: -1 };
-}
-function saveSort(s: { key: SortKey; dir: 1 | -1 }): void {
-  try {
-    localStorage.setItem(SORT_STORE_KEY, JSON.stringify(s));
-  } catch {
-    // private mode: the choice simply does not stick
-  }
-}
-/** The one comparator for every key -- name by locale (the same order listDocs uses), modified by mtimeMs (the
- * file's own revision clock), size in bytes, type word-before-cell. */
-function compareDocs(a: OfficeDoc, b: OfficeDoc, key: SortKey): number {
-  switch (key) {
-    case "name":
-      return a.title.localeCompare(b.title);
-    case "modified":
-      return a.mtimeMs - b.mtimeMs;
-    case "size":
-      return a.sizeBytes - b.sizeBytes;
-    case "type":
-      return a.ext === b.ext ? 0 : a.ext < b.ext ? -1 : 1;
-  }
-}
+// How the list sorts and where that choice sticks live in web/sort.tsx, shared with the sidebar panel:
+// one of five keys (name / modified / size / type / workspace), one direction, persisted under "po-sort".
 
 function extMark(doc: OfficeDoc) {
   return doc.ext === "docx" ? (
@@ -178,7 +145,7 @@ function DocRow({ doc }: { doc: OfficeDoc }) {
           <span style={{ minWidth: 0 }}>
             <span className="po-title">{doc.title}</span>
             <span className="po-meta">
-              {t("{title}.{ext}", { title: doc.title, ext: doc.ext })} · {when(doc)}
+              {t("{title}.{ext}", { title: doc.title, ext: doc.ext })} · {when(doc)} · {workspaceLabel(doc)}
             </span>
           </span>
         </button>
@@ -317,47 +284,18 @@ function RescanLibrary() {
   );
 }
 
-/** The list's sort controls: a key (name / modified / size / type) and the direction, persisted per browser. */
-function SortBar({ sort, onSort }: { sort: { key: SortKey; dir: 1 | -1 }; onSort: (next: { key: SortKey; dir: 1 | -1 }) => void }) {
-  portal.locale.use();
-  return (
-    <span className="po-sortbar">
-      <portal.ui.Select
-        size="sm"
-        value={sort.key}
-        onChange={(key) => onSort({ ...sort, key })}
-        aria-label={t("Sort the document list by")}
-        options={[
-          { value: "modified", label: t("Modified") },
-          { value: "name", label: t("Name") },
-          { value: "size", label: t("Size") },
-          { value: "type", label: t("Type") },
-        ]}
-      />
-      <button
-        type="button"
-        className={portal.ui.classes.ghost}
-        aria-label={sort.dir === -1 ? t("Sorted descending; switch to ascending") : t("Sorted ascending; switch to descending")}
-        title={sort.dir === -1 ? t("Descending (newest first)") : t("Ascending")}
-        onClick={() => onSort({ ...sort, dir: sort.dir === -1 ? 1 : -1 })}
-      >
-        <LuArrowDownUp aria-hidden />
-        {sort.dir === -1 ? t("↓ newest first") : t("↑ oldest first")}
-      </button>
-    </span>
-  );
-}
+// The SortBar itself (key incl. workspace + direction, "po-sort" persistence) is the shared one from web/sort.tsx.
 
 function Library() {
   portal.locale.use();
   const state = useOfficeState();
-  const [sort, setSort] = useState(loadSort); // persisted per browser; default modified-descending
-  const chooseSort = (next: { key: SortKey; dir: 1 | -1 }) => {
+  const [sort, setSort] = useState(loadSort); // shared with the sidebar panel ("po-sort"); default modified-descending
+  const chooseSort = (next: SortChoice) => {
     setSort(next);
     saveSort(next);
   };
   const docs = useMemo(
-    () => (state ? [...state.docs].sort((a, b) => compareDocs(a, b, sort.key) * sort.dir) : []),
+    () => (state ? [...state.docs].sort((a, b) => compareDocs(a, b, sort.key, sort.dir)) : []),
     [state, sort],
   ); // client-side ordering of the polled payload; the server hands back raw meta
   return (

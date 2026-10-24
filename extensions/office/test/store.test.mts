@@ -118,6 +118,30 @@ test("docsForHome: owner path, grant path, dedupe of owned-and-granted doc; othe
   assert.deepEqual(bView, [granted.docId]);
 });
 
+test("docsForHome: UNOWNED docs (workspace-scanned and human-made) are visible to EVERY home", async () => {
+  const root = tmpRoot();
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), "office-unowned-"));
+  fs.writeFileSync(path.join(ws, "shared plan.docx"), Buffer.from("a shared docx of sorts"));
+  assert.deepEqual(scanWorkspace([ws], root), { added: 1, updated: 0 });
+  const scanned = getDoc(listDocs(root)[0].docId, root)!;
+  assert.equal(scanned.owner, null);
+
+  // a human-made doc (no owner passed) is shared too, while another home's OWNED doc stays private to it
+  const human = await createDoc({ title: "Human-made" }, root);
+  assert.equal(human.owner, null);
+  const onlyB = await createDoc({ title: "B only", owner: "chat-B" }, root);
+
+  for (const home of ["chat-A", "chat-C"]) {
+    const visible = docsForHome(home, root).map((d) => d.docId);
+    assert.ok(visible.includes(scanned.docId), `${home} sees the unowned scanned doc`);
+    assert.ok(visible.includes(human.docId), `${home} sees the unowned human doc`);
+    assert.ok(!visible.includes(onlyB.docId), `${home} does NOT see chat-B's owned doc`);
+  }
+  const bView = docsForHome("chat-B", root).map((d) => d.docId);
+  assert.deepEqual(bView.sort(), [scanned.docId, human.docId, onlyB.docId].sort());
+  fs.rmSync(ws, { recursive: true, force: true });
+});
+
 /* ---------------- rename / delete / trash ---------------- */
 
 test("renameDoc: renames the file on disk, keeps bytes and mtimeMs, bumps updatedAt", async () => {
@@ -399,6 +423,51 @@ test("scanWorkspace: a second scan refreshes changed mtime/size in place; untouc
   // and the refreshed doc still persists through the mtime gate: its revision IS the file's own mtime
   const saved = persistBytes(one, Buffer.from("123456789X"), root);
   assert.equal(saved.mtimeMs, fs.statSync(path.join(ws, "one.docx")).mtimeMs);
+  fs.rmSync(ws, { recursive: true, force: true });
+});
+
+test("scanWorkspace stamps DocMeta.workspace: first path segment under the DEEPEST scan root containing the file; a direct child takes the root's own dir name", () => {
+  const root = tmpRoot();
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "office-wslabel-"));
+  const repos = path.join(base, "repos"); // an inner root (e.g. a repo dir) nested under another one
+  const home = path.join(base, "homes", "acme"); // a home root; the deepest root for its files
+  fs.mkdirSync(path.join(repos, "pithagoras", "extensions"), { recursive: true });
+  fs.mkdirSync(path.join(home, "plans"), { recursive: true });
+  fs.writeFileSync(path.join(repos, "pithagoras", "extensions", "sample.docx"), Buffer.from("a docx of sorts"));
+  fs.writeFileSync(path.join(repos, "top.xlsx"), Buffer.from("an xlsx straight in the inner root"));
+  fs.writeFileSync(path.join(home, "readme.docx"), Buffer.from("directly in the home root"));
+  fs.writeFileSync(path.join(home, "plans", "q3.xlsx"), Buffer.from("nested in the home"));
+
+  // base is ALSO a root: the deepest matching root must label, not the broadest (via base, sample would read "repos")
+  assert.deepEqual(scanWorkspace([base, repos, home], root), { added: 4, updated: 0 });
+  const byTitle = new Map(listDocs(root).map((d) => [d.title, d.workspace]));
+  assert.equal(byTitle.get("sample"), "pithagoras", "first path segment under the deepest containing root (repos, not base)");
+  assert.equal(byTitle.get("top"), "repos", "a file straight in a root takes that root's OWN dir name, not its own file name");
+  assert.equal(byTitle.get("readme"), "acme", "a home-root file takes the home's dir name");
+  assert.equal(byTitle.get("q3"), "plans", "a nested file takes its first segment under the root");
+  fs.rmSync(base, { recursive: true, force: true });
+});
+
+test("scanWorkspace rescan BACKFILLS DocMeta.workspace on entries indexed before the stamp (counted as refreshed exactly once)", () => {
+  const root = tmpRoot();
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), "office-wsbackfill-"));
+  fs.mkdirSync(path.join(ws, "pithagoras", "fixtures"), { recursive: true });
+  fs.writeFileSync(path.join(ws, "pithagoras", "fixtures", "sample.docx"), Buffer.from("a docx of sorts"));
+  assert.deepEqual(scanWorkspace([ws], root), { added: 1, updated: 0 });
+
+  // simulate an older index.json (pre-stamp): the entry's workspace field is simply absent
+  const indexPathFile = path.join(root, "index.json");
+  const idx = JSON.parse(fs.readFileSync(indexPathFile, "utf8"));
+  delete idx.docs[0].workspace;
+  fs.writeFileSync(indexPathFile, JSON.stringify(idx));
+  assert.equal(listDocs(root)[0].workspace, undefined);
+
+  const second = scanWorkspace([ws], root);
+  assert.deepEqual(second, { added: 0, updated: 1 }, "the backfill counts as a refresh, once");
+  assert.equal(listDocs(root)[0].workspace, "pithagoras", "the existing entry picked up its label on the rescan");
+
+  const third = scanWorkspace([ws], root);
+  assert.deepEqual(third, { added: 0, updated: 0 }, "idempotent once backfilled");
   fs.rmSync(ws, { recursive: true, force: true });
 });
 

@@ -247,6 +247,48 @@
   color: rgb(var(--fg-subtle));
 }
 
+/* ---- the sidebar panel's slim new-document row ----------------------------
+   The full page keeps its NewDocument form; beside a chat the same create flow (no owner: unowned docs are
+   shared) goes in one slim dashed row with an icon kind toggle, so the panel stays list-shaped. */
+
+.po-newcompact {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  padding: 0.35rem 0.5rem;
+  border: 1px dashed rgb(var(--line));
+  border-radius: 0.6rem;
+}
+
+.po-newcompact input {
+  min-width: 0;
+  flex: 1;
+}
+
+.po-kind {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.po-kind-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.15rem 0.4rem;
+  border: 1px solid rgb(var(--line));
+  border-radius: 0.5rem;
+  background: none;
+  cursor: pointer;
+  color: rgb(var(--fg-muted));
+}
+
+.po-kind-on {
+  border-color: rgb(var(--accent) / 0.6);
+  background: rgb(var(--accent) / 0.08);
+  color: rgb(var(--accent));
+}
+
 /* ---- the settings page's service panel ----------------------------------- */
 
 .po-service {

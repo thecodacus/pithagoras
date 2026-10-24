@@ -41,6 +41,11 @@ export type DocMeta = {
   importedBaseline?: string[];
   /** A workspace-scanned doc lives in PLACE: its real, absolute file path (realpathSync'd at index time). ABSENT for library-created docs, whose bytes are docs/<docId>/<title>.<ext> under the library root -- docPath() prefers this field when present. */
   path?: string;
+  /** Which workspace a scanned doc lives in -- the "workspace" sort key of the UI: the FIRST path segment under the scan
+   * root that contains it (scanWorkspace; deepest matching root wins, so /root/repos/pithagoras/... labels "pithagoras"),
+   * and for a file straight in a root that root's OWN dir name. Stamped at index time and BACKFILLED on every rescan;
+   * ABSENT for library-created docs -- the UI reads undefined as "library". */
+  workspace?: string;
 };
 
 type IndexFile = { version: 1; docs: DocMeta[] };
@@ -211,8 +216,6 @@ export function getDoc(docId: string, root?: string): DocMeta | null {
   return readIndex(rootDir).docs.find((d) => d.docId === docId) ?? null;
 }
 
-/** The documents a home chat may see in its panel/tools: ones it OWNS or holds a mention-GRANT for (plan 2.1),
- * deduped by docId (a doc owned and granted to the same home appears once). */
 /** The ONE index writer for mention grants (ping.ts used to read-modify-write index.json on its own): fresh
  * read, dedupe by (chatId, commentId) -- a re-sent comment never adds a second row -- atomic tmp+rename through
  * the store's writeIndex. Sync like everything here and no logging (module contract). Returns "added",
@@ -229,12 +232,15 @@ export function addGrant(docId: string, chatId: string, commentId: string, at: n
   return "added";
 }
 
+/** The documents a home chat sees in its panel and office tools (plan 2.1, extended): every UNOWNED doc -- the
+ * workspace-scanned and human-made docs (owner null), shared by definition and visible to all homes -- plus ones it
+ * OWNS or holds a mention-GRANT for; deduped by docId (a doc owned and granted to the same home appears once). */
 export function docsForHome(homeChatId: string, root = dataDir()): DocMeta[] {
   const seen = new Set<string>();
   const out: DocMeta[] = [];
   for (const doc of readIndex(root).docs) {
     if (seen.has(doc.docId)) continue;
-    if (doc.owner === homeChatId || doc.grants.some((g) => g.chatId === homeChatId)) {
+    if (doc.owner === null || doc.owner === homeChatId || doc.grants.some((g) => g.chatId === homeChatId)) {
       seen.add(doc.docId);
       out.push(doc);
     }
@@ -406,7 +412,7 @@ export function pruneMissingDocs(root = dataDir()): string[] {
  * regular .docx/.xlsx and {code:"too_large"} above the 512 MiB cap; returns null when the basename (without its
  * extension) cannot become a document title -- such a file is skipped, not indexed. The single place where a
  * scanned file becomes a DocMeta, so the stamping rules of the former importFile live in exactly one spot. */
-function indexOne(real: string, rootDir: string): DocMeta | null {
+function indexOne(real: string, rootDir: string, workspace?: string): DocMeta | null {
   const base = path.basename(real);
   const dot = base.lastIndexOf(".");
   if (dot < 1) throw Object.assign(new Error(`${base} has no extension`), { code: "unsupported_format" });
@@ -460,6 +466,7 @@ function indexOne(real: string, rootDir: string): DocMeta | null {
     path: real, // IN PLACE: the scanned file IS the document; nothing is copied into the library
   };
   if (importedBaseline !== undefined) doc.importedBaseline = importedBaseline;
+  if (workspace !== undefined) doc.workspace = workspace; // the "workspace" sort label of the UI (scanWorkspace)
   index.docs.push(doc);
   writeIndex(rootDir, index);
   return { ...doc };
@@ -517,6 +524,29 @@ export function scanWorkspace(roots: string[], root = dataDir()): { added: numbe
   };
   for (const r of roots) walk(r);
 
+  // A file's WORKSPACE label (the "workspace" sort key of the UI): the first path segment under whichever scan root
+  // contains it -- the DEEPEST matching root wins, so a nested root labels more specifically than its parent.
+  // A file straight in a root takes that root's OWN dir name instead of being labelled by its own file name
+  // (a home-root file -> the home's dir name). undefined when no resolved root claims the file.
+  const resolvedRoots = roots.map((r) => {
+    try {
+      return fs.realpathSync(r);
+    } catch {
+      return path.resolve(r);
+    }
+  });
+  const workspaceOf = (real: string): string | undefined => {
+    let best: { dir: string; rel: string } | null = null;
+    for (const rootReal of resolvedRoots) {
+      if (real === rootReal || !real.startsWith(rootReal + path.sep)) continue;
+      const rel = path.relative(rootReal, real);
+      if (!best || rootReal.length > best.dir.length) best = { dir: rootReal, rel };
+    }
+    if (!best) return undefined;
+    const segs = best.rel.split(path.sep);
+    return segs.length > 1 ? segs[0] : path.basename(best.dir);
+  };
+
   // What is ALREADY indexed, by its real path: refreshes target these; everything else in `found` is a candidate add.
   const byReal = new Map<string, DocMeta>();
   const initial = readIndex(rootDir);
@@ -544,10 +574,18 @@ export function scanWorkspace(roots: string[], root = dataDir()): { added: numbe
         known.updatedAt = Date.now();
         updated++;
       }
+      const ws = workspaceOf(real);
+      if (ws !== undefined && known.workspace !== ws) {
+        // BACKFILL on every rescan: entries indexed before the stamp (or under an older root layout) pick up their
+        // workspace label here -- counted as a refresh, exactly once.
+        known.workspace = ws;
+        known.updatedAt = Date.now();
+        updated++;
+      }
       continue; // refresh-and-continue: a rescan never re-indexes what it already has
     }
     try {
-      const doc = indexOne(real, rootDir); // its own atomic read-modify-write -- one entry per file
+      const doc = indexOne(real, rootDir, workspaceOf(real)); // its own atomic read-modify-write -- one entry per file
       if (doc) {
         byReal.set(real, doc);
         added++;
@@ -563,10 +601,14 @@ export function scanWorkspace(roots: string[], root = dataDir()): { added: numbe
     let wrote = false;
     for (const [realPath, doc] of byReal) {
       const entry = index.docs.find((d) => d.path === realPath);
-      if (!entry || (doc.mtimeMs === entry.mtimeMs && doc.sizeBytes === entry.sizeBytes)) continue;
+      if (
+        !entry ||
+        (doc.mtimeMs === entry.mtimeMs && doc.sizeBytes === entry.sizeBytes && doc.workspace === entry.workspace)
+      ) continue;
       entry.mtimeMs = doc.mtimeMs;
       entry.sizeBytes = doc.sizeBytes;
       entry.updatedAt = doc.updatedAt;
+      if (doc.workspace !== undefined) entry.workspace = doc.workspace;
       wrote = true;
     }
     if (wrote) writeIndex(rootDir, index);

@@ -137,7 +137,7 @@ export function OfficeSettings() {
 
       {/* Where the things live, and who can reach them: said once, as fact. */}
       <div className="space-y-1">
-        <p className="po-exposure">{t("Documents keep in this extension's own data directory (its docs folder with its index and trash), not in a chat's folder; import and export are copies.")}</p>
+        <p className="po-exposure">{t("Made documents keep in this extension's own data directory (its docs folder with its index and trash), never in a chat's folder; workspace files stay where they are -- the library indexes them in place, and a download or export is a copy.")}</p>
         <p className="po-exposure">{t("The editor itself loads from the Document Server's own origin on this machine, so it works from here over plain HTTP; remote viewers reach the library, but not the live editor (a portal-side proxy would unlock that). The server-facing document fetch and callback endpoints are bound to 127.0.0.1 only.")}</p>
       </div>
     </div>

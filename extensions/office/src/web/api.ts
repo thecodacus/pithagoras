@@ -21,6 +21,8 @@ export interface OfficeDoc {
   /** Mentions in its comments that opened it to those homes. */
   grants: { chatId: string; commentId: string; at: number }[];
   createdBy?: string;
+  /** Which workspace dir the doc lives in, stamped by the scan (store.ts); ABSENT for library-made docs -- the UI shows "library". */
+  workspace?: string;
 }
 
 /** A pull in progress, out of the server half's memory (container.PullState). */

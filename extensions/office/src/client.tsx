@@ -1,10 +1,12 @@
 import "../style.css";
-import { Suspense } from "react";
+import { Suspense, useState } from "react";
 import type { ChatProps, PanelProps, Portal, ToolCallView } from "@pithagoras/extension-api";
 import { LuFileText, LuPresentation, LuTable } from "react-icons/lu";
 import type { ReactNode } from "react";
 import { officeUrl, portal, setPortal, t } from "./portal";
-import { useOfficeState } from "./web/state";
+import { refreshOfficeState, useOfficeState } from "./web/state";
+import { api, sayError } from "./web/api";
+import { compareDocs, loadSort, saveSort, SortBar, type SortChoice } from "./web/sort";
 import { editorsIn } from "./office-ui";
 
 /**
@@ -15,41 +17,111 @@ import { editorsIn } from "./office-ui";
  * load as chunks, the way Understory's do (ui.lazy + Suspense).
  */
 
-/** A document beside a home chat: one it owns, or one a comment mention granted it -- derived from GET /state
- * (the server half keeps no per-chat route; owner and grants ride in every doc's meta, plan 2.1). */
+/** A document beside a home chat: every UNOWNED one (workspace-scanned or human-made -- shared by all chats),
+ * plus ones it owns or a comment mention granted it -- derived from GET /state (the server half keeps no per-chat
+ * route; owner and grants ride in every doc's meta, plan 2.1). The sort choice is the one of web/sort.tsx,
+ * persisted under "po-sort" so this panel and the full Office page share it. */
 function OfficePanel({ chat }: PanelProps) {
   portal.locale.use();
   const state = useOfficeState();
+  const [sort, setSort] = useState<SortChoice>(loadSort);
   if (!state) return <portal.ui.RowsSkeleton rows={3} label={t("Loading…")} />;
-  const mine = state.docs.filter((d) => d.owner === chat.id || d.grants.some((g) => g.chatId === chat.id));
+  const chooseSort = (next: SortChoice) => {
+    setSort(next);
+    saveSort(next);
+  };
+  const mine = [...state.docs]
+    .filter((d) => d.owner === null || d.owner === chat.id || d.grants.some((g) => g.chatId === chat.id))
+    .sort((a, b) => compareDocs(a, b, sort.key, sort.dir));
   return (
     <div className="space-y-1 p-2">
+      <PanelNewDocument />
       {mine.length === 0 ? (
-        <portal.ui.Empty>{t("No office documents yet -- the ones this chat owns or was granted by a comment mention will appear here.")}</portal.ui.Empty>
+        <portal.ui.Empty>{t("No office documents yet -- the workspace .docx and .xlsx files, human-made docs, and the ones this chat owns or was granted by a comment mention will appear here.")}</portal.ui.Empty>
       ) : (
-        mine.map((doc) => {
-          const n = editorsIn(state.locks, doc.docId);
-          return (
-            <div key={doc.docId} className="po-row">
-              <button type="button" className="po-open" onClick={() => portal.navigate(officeUrl(doc.docId))}>
-                {doc.ext === "docx" ? (
-                  <LuFileText className="po-ext po-ext-word" aria-hidden />
-                ) : (
-                  <LuTable className="po-ext po-ext-cell" aria-hidden />
-                )}
-                <span style={{ minWidth: 0 }}>
-                  <span className="po-title">{doc.title}</span>
-                  <span className="po-meta">
-                    {t("{title}.{ext}", { title: doc.title, ext: doc.ext })}
-                    {n > 0 ? ` · ${n === 1 ? t("1 editing now") : t("{n} editing now", { n })}` : ""}
+        <>
+          <SortBar sort={sort} onSort={chooseSort} />
+          {mine.map((doc) => {
+            const n = editorsIn(state.locks, doc.docId);
+            return (
+              <div key={doc.docId} className="po-row">
+                <button type="button" className="po-open" onClick={() => portal.navigate(officeUrl(doc.docId))}>
+                  {doc.ext === "docx" ? (
+                    <LuFileText className="po-ext po-ext-word" aria-hidden />
+                  ) : (
+                    <LuTable className="po-ext po-ext-cell" aria-hidden />
+                  )}
+                  <span style={{ minWidth: 0 }}>
+                    <span className="po-title">{doc.title}</span>
+                    <span className="po-meta">
+                      {t("{title}.{ext}", { title: doc.title, ext: doc.ext })}
+                      {n > 0 ? ` · ${n === 1 ? t("1 editing now") : t("{n} editing now", { n })}` : ""}
+                    </span>
                   </span>
-                </span>
-              </button>
-            </div>
-          );
-        })
+                </button>
+              </div>
+            );
+          })}
+        </>
       )}
     </div>
+  );
+}
+
+/** The panel's slim new-document row: title + a word/sheet kind toggle + create, on the SAME api.createDocument
+ * as the page's NewDocument -- and like it it passes NO owner, so a doc made here is unowned and lands where the
+ * workspace docs already are: every chat's panel and the global library. */
+function PanelNewDocument() {
+  portal.locale.use();
+  const [title, setTitle] = useState("");
+  const [kind, setKind] = useState<"word" | "cell">("word");
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+  const make = async () => {
+    if (title.trim() === "" || busy) return;
+    setBusy(true);
+    setProblem(null);
+    try {
+      await api.createDocument({ title: title.trim(), type: kind });
+      setTitle("");
+      void refreshOfficeState(); // the new doc appears in this panel immediately, not on the next 5 s poll
+    } catch (e) {
+      setProblem(sayError(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <form
+      className="po-newcompact"
+      onSubmit={(e) => {
+        e.preventDefault();
+        void make();
+      }}
+    >
+      <input
+        className={portal.ui.classes.input}
+        value={title}
+        maxLength={200}
+        placeholder={t("New document title")}
+        aria-label={t("New document title")}
+        onChange={(e) => setTitle(e.target.value)}
+      />
+      <span className="po-kind">
+        <button type="button" aria-pressed={kind === "word"} className={`po-kind-btn${kind === "word" ? " po-kind-on" : ""}`} onClick={() => setKind("word")} title={t("Word (.docx)")} aria-label={t("Word (.docx)")}>
+          <LuFileText aria-hidden />
+        </button>
+        <button type="button" aria-pressed={kind === "cell"} className={`po-kind-btn${kind === "cell" ? " po-kind-on" : ""}`} onClick={() => setKind("cell")} title={t("Sheet (.xlsx)")} aria-label={t("Sheet (.xlsx)")}>
+          <LuTable aria-hidden />
+        </button>
+      </span>
+      <button type="submit" className={portal.ui.classes.primarySmall} disabled={busy || title.trim() === ""}>
+        {t("Add")}
+      </button>
+      {problem && (
+        <portal.ui.ErrorBanner onClose={() => setProblem(null)}>{t("The document could not be made: {error}", { error: problem })}</portal.ui.ErrorBanner>
+      )}
+    </form>
   );
 }
 
@@ -137,7 +209,8 @@ export default function office(given: Portal): void {
     ),
   });
 
-  // Beside every chat -- shown for all, as the docs' panel is; where a chat owns or was granted nothing, it says so.
+  // Beside every chat -- shown for all, as the docs' panel is: every unowned (workspace-scanned / human-made) doc
+  // is shared by every chat, plus what this one owns or was granted; where there is nothing at all, it says so.
   portal.slots.register("chat.panel", {
     id: "office",
     name: "office",
@@ -158,7 +231,7 @@ export default function office(given: Portal): void {
     title: t("Office"),
     icon: LuPresentation,
     search: [
-      { title: t("Office"), words: "office document docx xlsx word sheet spreadsheet onlyoffice document server container image tag pull co-editing library import export trash" },
+      { title: t("Office"), words: "office document docx xlsx word sheet spreadsheet onlyoffice document server container image tag pull co-editing library workspace scan rescan export trash" },
     ],
     component: () => (
       <Suspense fallback={<p className="text-sm text-fg-subtle">{t("Loading…")}</p>}>
