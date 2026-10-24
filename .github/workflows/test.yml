@@ -30,7 +30,10 @@ jobs:
       - run: npx playwright install --with-deps chromium
       # The extensions as the portal ships them, built: the tests list the ones in extensions/ by the halves they have.
       - run: npm run build:extensions
+      # OFFICE_IT_DOCKER=1 turns on 3 docker-gated office integration tests; they run in-process against a synthetic DS stand-in and only need a reachable docker CLI, which runners have.
       - run: npm test
+        env:
+          OFFICE_IT_DOCKER: "1"
 
   # The type check of the web app and its build, which is also what the image runs, the extensions' builds, and
   # the line between them and core (scripts/check-boundaries.mjs).
