@@ -53,7 +53,8 @@ All other CR threads are resolved per the author. Thread id 4364892451 (2026-10-
 
 ## PR's own checks (tasks/pr307-tools-verification.md, part B — ran in /root/repos/pithagoras)
 
-- `env -u NODE_ENV node --import tsx --test "extensions/office/test/*.test.mts"` → 123 total / 120 pass / 3 skip (docker-gated; docker present but no OnlyOffice image locally — do not pull) / 0 fail. The PR body's claimed "120/117/3" is STALE (+3 passing since).
+- `env -u NODE_ENV node --import tsx --test "extensions/office/test/*.test.mts"` → 123 total / 120 pass / 3 skip (docker-gated; see below) / 0 fail, run without the flag. The PR body's claimed "120/117/3" is STALE (+3 passing since).
+  - Those 3 skips are NOT waiting on an OnlyOffice image: they gate on `OFFICE_IT_DOCKER=1` + a healthy `docker info` (plan M0 operator intent) and need no DS image or container, because the assertions run in-process against a synthetic DS stand-in. Locally verified 3/3 pass with the flag; now also enabled in CI by commit f6788220 (`OFFICE_IT_DOCKER=1` in test.yml's server job).
 - `npx tsc --noEmit -p extensions/office` strict-clean (no root tsconfig exists; the PR's `-p .` only works from the extension dir).
 - `node scripts/build-extensions.mjs` emits gitignored web/ + server.js — zero tracked pollution.
 
@@ -108,3 +109,20 @@ Repo left clean: no worktrees beyond the main checkout, no orphaned test process
 **Deliberately not done:** 🟢 cross-paragraph quote-edit stray line break (needs paragraph-level XML surgery, documented in pr307-fixes-docs.md); host-mode nginx conf bind change (untestable without DS image).
 
 **Remaining follow-ups:** size gate for GET /documents/:id + office_read on huge workbooks (wall-clock guard); mention-grant revocation/expiry; per-purpose key rotation. CI server job will re-run — the prior failure is the unrelated extensions/docs {dev,ino} flake (separate issue to be filed against that extension).
+
+## Workspace library + co-editor push
+
+Verified independently on top of pushed tip f4330519, then committed and pushed as one commit.
+
+- **Tests** — `env -u NODE_ENV node --import tsx --test "extensions/office/test/*.test.mts"` run 6 times in a row:
+  every run **143 tests / 140 pass / 0 fail / 3 skipped** (the 3 pre-existing docker-gated integration skips; OFFICE_IT_DOCKER unset), all exit 0.
+- **tsc** — `npx tsc --noEmit -p extensions/office` → exit 0, no errors.
+- **Build** — `node scripts/build-extensions.mjs` → exit 0 (web/ + server.js regenerated); `git status` clean of tracked pollution afterwards (build outputs are gitignored).
+- **Coherence spot-checks** — settings shape is `{enabled, imageTag}` only in web/api.ts types, the POST /settings 400 path ("send { enabled?, imageTag? }") and GET /state payload; zero `coEdit` identifiers remain outside legacy-tolerance comment + tests; zero `session_open`; office_edit stale paths answer `error:revision_mismatch` with a loud CONFLICT naming open editors; POST /import route and ImportDocuments UI are gone; scanWorkspace runs at boot after settleKept and on POST /documents/rescan; README describes the no-switch co-editor model + automatic scan.
+- **Scope** — changed set confined to `extensions/office/**` + doc artifacts (`tasks/`, `PLAN-office-280.md`). Untracked `.office-contracts.md` (its own header says "local scratch, never commit"), `.pi/` and `.reports/` were deliberately left uncommitted.
+- **Commit** — `e4fd0b51716f7e589443584397090e2be6d28756` "Office extension: agents co-edit alongside humans; workspace scan instead of manual import" (no trailers, matching the PR's prior commit style), 32 files (+3045/−375): extensions/office {README.md, style.css, src/{live,ping,server,settings,store,tools}.ts, src/web/{api.ts,library.tsx,settings.tsx}, test/{container,integration,server,settings,store,tools}.test.mts} + PLAN-office-280.md + tasks/ report set.
+- **Push** — fast-forward f4330519..e4fd0b51 to origin; `gh pr view 307 --json headRefOid` == e4fd0b51… ✓. At the moment of the push no CI checks were reported on the branch yet ("no checks reported" — created later, not waited on).
+
+### DEPLOYMENT NOTE (read before assuming anything is live)
+
+The live portal process is **still running a stale pre-rebuild extension bundle** (it started before the noon rebuild and never reloaded; its data dir had no `index.json`, and it accepted a `coEdit` setting post-change — only the old code has that key). **None of these behaviors (no coEdit switch, CONFLICT model, workspace scan/rescan, sortables, 503 dependencies_pending) are visible to the user until the portal restarts/deploys.** The verify agent did NOT restart or kill any process.
