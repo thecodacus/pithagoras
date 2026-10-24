@@ -15,7 +15,7 @@ import { useOfficeState } from "./state";
 
 /** What DocsAPI leaves on window once api.js has loaded: only what is used, typed as it behaves. */
 interface DocsApiLike {
-  DocEditor: new (el: HTMLElement, config: Record<string, unknown>) => DestroyableEditor;
+  DocEditor: new (placeholderId: string, config: Record<string, unknown>) => DestroyableEditor;
 }
 interface DestroyableEditor {
   destroyEditor?: () => void;
@@ -76,7 +76,14 @@ export function OfficeEditor({ docId, onBack }: { docId: string; onBack(): void 
         const config: Record<string, unknown> = { ...minted };
         delete config.apiJs;
         if (!window.DocsAPI) throw new Error("api.js loaded but DocsAPI is not on window -- the Document Server answered with something that is not its script");
-        editor.current = new window.DocsAPI.DocEditor(box.current, config);
+        // DocsAPI.DocEditor takes a PLACEHOLDER ID: api.js runs document.getElementById on the first argument and then
+        // replaces that element with its iframe. Pass the host box itself and getElementById stringifies it to
+        // "[object HTMLDivElement]", finds nothing, and silently builds no editor (reproduced live against DS 10.0).
+        const ph = document.createElement("div");
+        ph.id = "po-doceditor";
+        box.current.querySelector("#po-doceditor")?.remove(); // never stack placeholders across remounts
+        box.current.appendChild(ph);
+        editor.current = new window.DocsAPI.DocEditor(ph.id, config);
         // onDocumentReady, as close to it as this tier can get: DS fills its own iframe into the placeholder.
         watch = setInterval(() => {
           if (box.current?.querySelector("iframe")) {
@@ -96,6 +103,7 @@ export function OfficeEditor({ docId, onBack }: { docId: string; onBack(): void 
       } catch {
         // a destroyed or half-built editor must not take the page down with it
       }
+      document.getElementById("po-doceditor")?.remove(); // sweep a placeholder DS never replaced; ours to clean, not React's
       editor.current = null;
     };
   }, [docId]);
