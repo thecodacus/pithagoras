@@ -1,0 +1,22 @@
+{
+  "name": "pithagoras-office",
+  "version": "0.1.0",
+  "description": "Office documents (docx, xlsx) edited in a full OnlyOffice editor that the portal runs in a container of its own: an Office tab for the library, tools so the agent can read and edit the same files, and a wake when a comment mentions it",
+  "type": "module",
+  "keywords": ["pi-package"],
+  "pi": {},
+  "pithagoras": {
+    "client": "./web/client.js",
+    "style": "./web/client.css",
+    "server": "./server.js",
+    "requires": { "pithagoras-docker": "^1.1.0" }
+  },
+  "scripts": { "build": "node build.mjs && tsc --noEmit -p ." },
+  "dependencies": {
+    "jszip": "^3.10.1"
+  },
+  "devDependencies": {
+    "react-icons": "5.7.0"
+  },
+  "license": "Apache-2.0"
+}
