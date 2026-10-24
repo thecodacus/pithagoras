@@ -113,6 +113,35 @@ test("parseXlsx resolves shared strings and inlineStr across both sheets, dense 
   ]);
 });
 
+test("parseXlsx bounds the dense grid of sparse far-out cells (memory/CPU cap, honest truncation)", async () => {
+  // The review's attack shape: a ~1.7 KB xlsx with few cells referencing huge coordinates used to densify to
+  // row x col PER SHEET and allocate hundreds of MB (+~18 s CPU). Each sheet here holds exactly two cells --
+  // A1 and one near the axis caps (row 20000, column 500 = MAX_GRID_COLS) -- so every sheet's PRODUCT is
+  // ~10M slots; the bounded grid must materialize at most floor(MAX_SHEET_CELLS / 500) rows per sheet and flag it.
+  const colLetters = (n: number): string => { let s = ""; while (n > 0) { const d = (n - 1) % 26; s = String.fromCharCode(65 + d) + s; n = Math.floor((n - 1) / 26); } return s; };
+  const farRef = `${colLetters(500)}20000`; // the 500th column (zero-based 499), row 20000 -- both at the axis caps
+  const sheetXml = `<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>origin</t></is></c></row><row r="20000"><c r="${farRef}" t="inlineStr"><is><t>far away</t></is></c></row></sheetData></worksheet>`;
+  const zip = new JSZip();
+  zip.file("[Content_Types].xml", CONTENT_TYPES);
+  zip.file("_rels/.rels", ROOT_RELS);
+  zip.file("xl/workbook.xml", `<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>${[1, 2, 3].map((i) => `<sheet name="S${i}" sheetId="${i}" r:id="rId${i}"/>`).join("")}</sheets></workbook>`);
+  zip.file("xl/_rels/workbook.xml.rels", `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${[1, 2, 3].map((i) => `<Relationship Id="rId${i}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i}.xml"/>`).join("")}</Relationships>`);
+  for (const i of [1, 2, 3]) zip.file(`xl/worksheets/sheet${i}.xml`, sheetXml);
+  const buf = await zip.generateAsync({ type: "nodebuffer" });
+
+  const t0 = Date.now();
+  const book = parseXlsx(buf); // must stay fast and bounded -- the pre-fix run took ~18 s CPU / ~523 MB heap here
+  assert.ok(Date.now() - t0 < 2000, `parseXlsx on a tiny sparse xlsx must be fast (took ${Date.now() - t0} ms)`);
+  assert.deepEqual(book.sheetNames, ["S1", "S2", "S3"]);
+  for (const name of book.sheetNames) {
+    const grid = book.sheets[name];
+    assert.ok(grid.length > 0, `${name}: the origin row is within budget`);
+    assert.equal(grid[0][0], "origin", `${name}: A1 readable in the affordable rows`);
+    assert.ok(grid.length < 20000, `${name}: grid height bounded (got ${grid.length} rows, file references row 20000)`);
+    assert.equal(book.truncatedSheets[name], true, `${name}: the skipped far rows are reported honestly`);
+  }
+});
+
 /* ---------------- editDocx ---------------- */
 
 /** editDocx works on the XML string; wrap its result into a docx and reparse it. */
@@ -190,6 +219,23 @@ test("rewriteZip appends a new part and leaves the rest untouched", async () => 
   for (const name of Object.keys(before)) assert.ok(Buffer.compare(before[name], after[name]) === 0, `entry ${name} content changed`);
 });
 
+test("rewriteZip matches part names case-insensitively (no shadow duplicate) and dedupes case variants last-one-wins", async () => {
+  const original = await buildDocxZip();
+  const beforeNames = Object.keys(await entryBytes(original)).sort();
+
+  // a key that differs only in case from the existing part must OVERWRITE it in place (original name kept), not shadow it
+  const edited = editDocx(DOCUMENT_XML, [{ quote: "Gamma one", replacement: "Case fixed" }]);
+  const out1 = rewriteZip(original, { "WORD/DOCUMENT.XML": edited });
+  assert.deepEqual(Object.keys(await entryBytes(out1)).sort(), beforeNames, "no shadow part was added");
+  assert.equal(parseDocx(out1).paragraphs[3], "Case fixed and gamma two");
+
+  // two change keys differing only in case dedupe to the LAST one (jszip last-one-wins), still exactly one part
+  const other = editDocx(DOCUMENT_XML, [{ quote: "Gamma one", replacement: "Last wins" }]);
+  const out2 = rewriteZip(original, { "word/document.xml": edited, "WORD/DOCUMENT.XML": other });
+  assert.equal(parseDocx(out2).paragraphs[3], "Last wins and gamma two");
+  assert.deepEqual(Object.keys(await entryBytes(out2)).sort(), beforeNames);
+});
+
 /* ---------------- diffComments ---------------- */
 
 test("diffComments reports only ids that are new", () => {
@@ -201,6 +247,41 @@ test("diffComments reports only ids that are new", () => {
   assert.deepEqual(diffComments(prev, next).added, [{ id: "2", author: "B", text: "brand new" }]);
   assert.deepEqual(diffComments(next, prev).added, []);
   assert.deepEqual(diffComments([], []).added, []);
+});
+
+/* ---------------- CRC validation on read ---------------- */
+
+test("a zip entry whose data no longer matches its CRC-32 is rejected loudly (invalid_zip)", async () => {
+  // Build the docx with STORED entries so corrupting a payload byte breaks ONLY the CRC (deflate corruption
+  // could fail earlier in the inflate step and would not prove the CRC check itself).
+  const zip = new JSZip();
+  zip.file("[Content_Types].xml", CONTENT_TYPES);
+  zip.file("_rels/.rels", ROOT_RELS);
+  zip.file("word/document.xml", DOCUMENT_XML);
+  const clean = await zip.generateAsync({ type: "nodebuffer", compression: "STORE" });
+  assert.equal(parseDocx(clean).paragraphs[0], "Hello & welcome to <Office>.", "the uncorrupt STORED archive parses");
+
+  // Find the LFH of word/document.xml and flip one byte of its (stored) payload.
+  const needle = Buffer.from("word/document.xml", "utf8");
+  const corrupted = Buffer.from(clean);
+  let flipped = false;
+  for (let i = 0; i + 30 + needle.length <= corrupted.length; i++) {
+    if (corrupted.readUInt32LE(i) !== 0x04034b50) continue; // local file header signature
+    const nameLen = corrupted.readUInt16LE(i + 26);
+    const extraLen = corrupted.readUInt16LE(i + 28);
+    if (nameLen !== needle.length || !corrupted.subarray(i + 30, i + 30 + nameLen).equals(needle)) continue;
+    corrupted[i + 30 + nameLen + extraLen] ^= 0xff; // stored: payload starts right after the name
+    flipped = true;
+    break;
+  }
+  assert.ok(flipped, "located the stored word/document.xml entry to corrupt");
+
+  const err = thrown(() => parseDocx(corrupted));
+  assert.equal(err.code, "invalid_zip");
+  assert.match(err.message, /CRC mismatch for word\/document\.xml/);
+  // and rewriting (persisting) the corrupt archive fails too -- corruption is never re-persisted with its old CRC
+  const rewriteErr = thrown(() => rewriteZip(corrupted, {}));
+  assert.equal(rewriteErr.code, "invalid_zip");
 });
 
 /* ---------------- readZip archive-level expansion cap ---------------- */

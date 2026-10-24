@@ -19,6 +19,9 @@
  *      documented.
  *   7. Boot: settleKept() (.trash >7d sweep + index-vs-disk prune) + container.lookAfter() (adopt an existing DS),
  *      then a 30_000 ms unref'd interval that re-runs both. The returned cleanup closes the listener and clears it.
+ *   8. deps.js, the pithagoras-docs pattern: ensureDependencies runs at boot IN THE BACKGROUND (this module has NO
+ *      static jszip import, so a folder without node_modules imports cleanly) and arms jsZip() to wait for it --
+ *      the first template/import call blocks on the install; later calls use the one cached load.
  *
  * dsOrigin(): ONE function, per the contract -- the browser-facing origin the editor page loads api.js from, read
  * straight out of ds.json (network-mode option (a), plan 5.2: host-networked DS at http://127.0.0.1). When the
@@ -42,6 +45,8 @@ import * as live from "./live";
 import * as callback from "./callback";
 import { wirePing } from "./ping";
 import { registerTools, setForcesaveHook } from "./tools";
+import { ensureDependencies } from "../deps.js"; // the pithagoras-docs pattern: its own node_modules installed at boot, in the background
+import { armJsZipInstall } from "./jszip";
 
 /* ------------------------------------------------------------------ */
 /* constants                                                           */
@@ -158,6 +163,7 @@ const CODE_STATUS: Record<string, number> = {
   revision_mismatch: 409,
   index_corrupt: 500,
   no_docker: 503,
+  too_large: 413, // store.importFile's 512 MiB import cap
 };
 
 /** Map the coded errors store/container throw onto consistent JSON {error, code?}. */
@@ -362,18 +368,27 @@ function registerRoutes(dd: string, secret: string): void {
   });
 
   /** POST /import {path, title?} -> copy into the library. The path is resolved server-side and MUST land inside an
-   * agent workspace folder (folders.allowed on its parent) -- plan 5.5's "imports only from folders the agents work in". */
+   * agent workspace folder (folders.allowed on its parent) -- plan 5.5's "imports only from folders the agents work in".
+   * The gate runs on the REALPATHED file: statSync/copyFileSync below follow symlinks, so a link planted inside an
+   * allowed folder must not smuggle a file outside it (CWE-22). */
   r.post("/import", json, async (req, res) => {
     const body = (req.body ?? {}) as Record<string, unknown>;
     const given = typeof body.path === "string" ? body.path : "";
     if (given.trim() === "") return res.status(400).json({ error: "the body needs { path: '<file to import>' } (absolute, or relative to the portal's cwd)" });
     const abs = path.resolve(given);
-    const parent = path.dirname(abs);
+    let real: string;
+    try {
+      real = fs.realpathSync(abs); // resolves symlinks in every component; ENOENT when the file is missing
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return res.status(404).json({ error: `no such file ${abs}`, code: "not_found" });
+      return codedResponse(res, err);
+    }
+    const parent = path.dirname(real); // the gate sees where the bytes REALLY live
     if (!portal().folders.allowed(parent)) {
       return res.status(403).json({ error: `the import source must live inside an agent workspace folder: ${parent} is not allowed by folders.allowed`, code: "not_allowed" });
     }
     try {
-      const doc = store.importFile(abs, { title: typeof body.title === "string" && body.title !== "" ? body.title : undefined }, dd);
+      const doc = store.importFile(real, { title: typeof body.title === "string" && body.title !== "" ? body.title : undefined }, dd);
       recordAudit({ subject: doc.title, reason: `imported ${doc.ext} from ${abs}` });
       res.status(201).json(doc);
     } catch (e) {
@@ -415,7 +430,9 @@ function registerRoutes(dd: string, secret: string): void {
       return res.status(rr.status).json(rr.body);
     }
     const config = built.config as Record<string, unknown>;
-    res.json({ ...config, token: signJwt(config, CONFIG_TTL_MS, secret), apiJs: `${dsOrigin(dd)}/web-apps/apps/api/documents/api.js` });
+    // purpose "editor-config" (S3): the signed typ claim tags this token's family for any future in-portal
+    // verification; DS itself checks only the HMAC/expiry and ignores the extra claim.
+    res.json({ ...config, token: signJwt(config, CONFIG_TTL_MS, secret, "editor-config"), apiJs: `${dsOrigin(dd)}/web-apps/apps/api/documents/api.js` });
   });
 
   /** POST /settings {enabled?, imageTag?, coEdit?} -> saved + side effects: enabling fires ensureContainer WITHOUT
@@ -509,6 +526,9 @@ export function dsOrigin(root?: string): string {
 
 export default async function officeServer(portalObj: ServerPortal): Promise<() => Promise<void>> {
   setPortal(portalObj);
+  // The pithagoras-docs pattern: a folder without its own node_modules gets them installed in the BACKGROUND --
+  // boot does not wait (the portal starts the rest), and jsZip() awaits this promise before first use.
+  void armJsZipInstall(ensureDependencies(logLine));
   const dd = portal().dataDir();
   const secret = ensureJwtSecret(dd); // the one HS256 secret: callbacks, tickets and configs all sign with it (plan 5.6)
 

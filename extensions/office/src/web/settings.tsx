@@ -106,7 +106,7 @@ export function OfficeSettings() {
       />
       <portal.ui.SwitchRow
         title={t("Live co-editing between agent and editor")}
-        detail={t("While on, an agent edit of a document somebody has open proceeds under the revision gate with a force-save request first; while off, it is refused until the editor is closed. Switching it off is the escape hatch.")}
+        detail={t("While on (the default), an agent edit of a document somebody has open is refused until that editor session closes -- an unsaved buffer must never be clobbered. While off, agent edits proceed under the revision gate even with the editor open; switching it off is the escape hatch.")}
         on={state.coEdit}
         disabled={busy !== null}
         onChange={(on) => void act("settings", () => api.saveSettings({ coEdit: on }))}

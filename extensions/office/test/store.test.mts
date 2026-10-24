@@ -219,6 +219,44 @@ test("importFile: .txt -> unsupported_format; missing file -> not_found; upperca
   assert.equal(meta.ext, "docx"); // normalized to the stored extension
 });
 
+test("importFile: a file above 512 MiB is rejected with too_large before anything is copied", async () => {
+  const root = tmpRoot();
+  const srcRoot = tmpRoot();
+  // Sparse on purpose: ftruncate advertises the size without writing 600 MiB of zeros (stat-based cap).
+  const big = path.join(srcRoot, "huge.docx");
+  const fd = fs.openSync(big, "w");
+  try {
+    fs.ftruncateSync(fd, 600 * 1024 * 1024);
+  } finally {
+    fs.closeSync(fd);
+  }
+  await assert.rejects(async () => importFile(big, {}, root), (err: Error) => err.code === "too_large" && /512 MiB/.test(err.message));
+  assert.equal(listDocs(root).length, 0, "nothing landed in the library");
+});
+
+test("importFile: docx at/under 32 MiB stamps importedBaseline; above it leaves it undefined (ping fallback)", async () => {
+  const root = tmpRoot();
+  const srcRoot = tmpRoot();
+
+  // under the cap: a real parseable docx with one comment -> baseline of its ids (the existing rule)
+  const small = path.join(srcRoot, "small.docx");
+  fs.writeFileSync(small, await templateDocx());
+  const metaSmall = importFile(small, {}, root);
+  assert.deepEqual(metaSmall.importedBaseline, [], "under-cap docx still parses and baselines (no comments in the template)");
+
+  // above the cap: a sparse 33 MiB .docx -- no parsing happens at all, baseline unknown, first-save fallback applies
+  const big = path.join(srcRoot, "big.docx");
+  const fd = fs.openSync(big, "w");
+  try {
+    fs.ftruncateSync(fd, 33 * 1024 * 1024);
+  } finally {
+    fs.closeSync(fd);
+  }
+  const metaBig = importFile(big, {}, root);
+  assert.equal(metaBig.importedBaseline, undefined, "above-cap docx skips the baseline; ping.ts baselines everything at first save");
+  assert.ok(metaBig.sizeBytes > 32 * 1024 * 1024);
+});
+
 test("exportDoc: writes <title>.<ext> into a created dest dir and returns the absolute path", async () => {
   const root = tmpRoot();
   const doc = await createDoc({ title: "Export me", type: "word" }, root);

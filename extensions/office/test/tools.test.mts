@@ -375,6 +375,27 @@ test("office_comments: docx lists comment ids/authors/text + grants; xlsx -> uns
   assert.match(await refused(tool(s, "office_comments").execute("cm3", { id: sheet.docId }), "xlsx comments"), /^error:unsupported_format /);
 });
 
+test("office_comments: aggregated comment output is capped like office_read (marker + bounded details)", async () => {
+  const s = setup();
+  // 300 comments x ~750 chars of text -- comfortably over the shared 200,000-character cap
+  const many = Array.from({ length: 300 }, (_, i) => ({ id: String(i), author: "Crowd", text: `note ${i}: ${"x".repeat(750)}` }));
+  const doc = await createDoc({ title: "Wall of Notes", type: "word", owner: "chat-atlas-home" }, s.root);
+  const file = path.join(s.root, "docs", doc.docId, `${doc.title}.${doc.ext}`);
+  fs.writeFileSync(file, rewriteZip(readDocBytes(s.root, doc.docId), { "word/comments.xml": commentsXml(many) }));
+
+  const res = (await tool(s, "office_comments").execute("cm4", { id: doc.docId })) as ToolResult;
+  const t = res.content[0].text;
+  assert.ok(!t.startsWith("error:"), t.slice(0, 200));
+  assert.match(t, /Comments \(300\):/, "the true total is announced even when truncated");
+  assert.ok(t.length <= 200_000 + 100, `output bounded (got ${t.length} chars)`);
+  assert.match(t, /\[output truncated by office_comments: it exceeds 200,000 characters\]/);
+
+  // details are bounded exactly like office_read's: 100 at 500 chars each, true total in commentCount
+  assert.equal(res.details.commentCount, 300);
+  assert.equal(res.details.comments.length, 100);
+  for (const c of res.details.comments) assert.ok(c.text.length <= 500);
+});
+
 /* ------------------------------------------------------------------ */
 /* error string format (docs convention, office fix)                   */
 /* ------------------------------------------------------------------ */

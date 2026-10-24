@@ -109,6 +109,11 @@ function readEntryData(buf: Buffer, e: ZipEntry): Buffer {
   else if (e.method === 8) { try { out = inflateRawSync(raw, { maxOutputLength: Math.max(e.usize, 1) }); } catch { throw ooxmlError(`bad deflate data for ${e.name}`, "invalid_zip"); } }
   else throw ooxmlError(`unsupported zip compression method ${e.method} for ${e.name}`, "invalid_zip");
   if (out.length !== e.usize) throw ooxmlError(`size mismatch for ${e.name}`, "invalid_zip");
+  // CRC-32 of the DECODED payload vs the central directory's record. Without this, bit-rot / partial-write
+  // corruption (the most common real-world kind -- a flipped stored-entry byte or a deflate stream that still
+  // inflates to the advertised length) would parse silently and rewriteZip would re-persist the corrupt bytes
+  // with their original wrong CRC, masking the damage inside the library. Cheap: `out` is already materialized.
+  if (crc32(out) !== e.crc) throw ooxmlError(`CRC mismatch for ${e.name}: the stored entry data does not match its checksum`, "invalid_zip");
   return out;
 }
 
@@ -387,7 +392,10 @@ function columnOf(ref: string): number { // "AB12" -> 27 (zero-based), -1 when t
 
 /**
  * Extract an xlsx: sheet names in workbook order, and per sheet a dense grid of cell strings -- sparse cells
- * are filled to the farthest used row/column with "" (plan simplicity note: grids, not sparse maps). Values:
+ * are filled to the farthest used row/column with "" (plan simplicity note: grids, not sparse maps). The
+ * materialized grid is bounded (see MAX_GRID_ROWS/MAX_GRID_COLS/MAX_SHEET_CELLS/MAX_TOTAL_GRID_CELLS): a sheet
+ * that would densify past its share of the cell budget gets only the affordable leading rows, and truncatedSheets
+ * names it so callers can say "those far-out cells were not read". Values:
  * sharedStrings lookups (t="s"), inline strings (t="inlineStr"), and stored text as-is for numbers/formulas/
  * booleans ("keep stored text"). Cells without an r= reference are skipped. A missing workbook or referenced
  * sheet part throws {code:"missing_part"}.
@@ -415,6 +423,7 @@ export function parseXlsx(buf: Buffer): { sheetNames: string[]; sheets: Record<s
   const sheetNames: string[] = [];
   const sheets: Record<string, string[][]> = {};
   const truncatedSheets: Record<string, boolean> = {};
+  const gridBudget: { left: number } = { left: MAX_TOTAL_GRID_CELLS }; // decremented as each sheet densifies
   for (const m of workbook.toString("utf8").matchAll(/<sheet\b([^>]*)\/?>/g)) {
     if (m.index === undefined) continue;
     const attrs = parseAttributes(m[1]);
@@ -426,7 +435,9 @@ export function parseXlsx(buf: Buffer): { sheetNames: string[]; sheets: Record<s
     const sheetPart = parts[resolveTarget(target)];
     if (!sheetPart) throw ooxmlError(`xlsx is missing the worksheet part ${resolveTarget(target)} for sheet "${name}"`, "missing_part");
     const flags: { truncated?: boolean } = {};
-    sheets[name] = parseSheet(sheetPart.toString("utf8"), sharedStrings, flags);
+    // The grid budget is per ARCHIVE (every sheet shares it) so a workbook cannot multiply the allocation
+    // across many sheets; see MAX_TOTAL_GRID_CELLS below.
+    sheets[name] = parseSheet(sheetPart.toString("utf8"), sharedStrings, gridBudget, flags);
     if (flags.truncated) truncatedSheets[name] = true;
   }
   return { sheetNames, sheets, truncatedSheets };
@@ -436,7 +447,15 @@ export function parseXlsx(buf: Buffer): { sheetNames: string[]; sheets: Record<s
 // bounds the grid allocation below is unbounded. Cap both axes; skipped far cells are reported as truncation.
 const MAX_GRID_ROWS = 20000;
 const MAX_GRID_COLS = 500;
-function parseSheet(xml: string, sharedStrings: string[], flags?: { truncated?: boolean }): string[][] {
+// The AXIS caps alone do not bound MEMORY: a sheet with just two cells (one at row 20000, one near column 500)
+// still densifies to the PRODUCT maxRow x maxCol (~10M cell slots, hundreds of MB per measured run), and there
+// is no cap on sheet count. Cap the materialized product per sheet AND the combined grid across the archive --
+// the same "per-unit / total" shape as MAX_ENTRY_BYTES (256 MiB) / MAX_TOTAL_BYTES (1 GiB), in CELLS instead
+// of bytes (256*1024 cells/sheet, 1024*1024 cells/archive ~= a few MB of JS arrays each). Rows beyond the
+// affordable height are not allocated; the sheet is flagged in truncatedSheets so callers surface it honestly.
+const MAX_SHEET_CELLS = 256 * 1024;
+const MAX_TOTAL_GRID_CELLS = 1024 * 1024;
+function parseSheet(xml: string, sharedStrings: string[], budget: { left: number }, flags?: { truncated?: boolean }): string[][] {
   const sheetData = xml.match(/<sheetData(?:\s[^>]*)?>([\s\S]*?)<\/sheetData>/);
   if (!sheetData) return [];
   let maxRow = 0;
@@ -463,8 +482,18 @@ function parseSheet(xml: string, sharedStrings: string[], flags?: { truncated?: 
     if (row > maxRow) maxRow = row;
     if (col >= maxCol) maxCol = col + 1;
   }
+  // Bound the MATERIALIZED product before allocating: shrink the height so rows x maxCol stays under the
+  // per-sheet cell cap AND what the shared archive budget can still afford; anything beyond is truncation.
+  let rows = maxRow;
+  if (rows > 0 && maxCol > 0) {
+    const perSheetRows = Math.floor(MAX_SHEET_CELLS / maxCol);
+    const affordableRows = budget.left > 0 ? Math.floor(budget.left / maxCol) : 0;
+    const limit = Math.min(perSheetRows, affordableRows);
+    if (limit < rows) { rows = limit; truncated = true; } // the far rows exist in the file but are not read
+    budget.left -= rows * maxCol;
+  }
   const grid: string[][] = [];
-  for (let r = 0; r < maxRow; r++) {
+  for (let r = 0; r < rows; r++) {
     const line: string[] = [];
     for (let c = 0; c < maxCol; c++) line.push(cells[`${r + 1},${c}`] ?? "");
     grid.push(line);
@@ -482,22 +511,39 @@ function asBuffer(value: string | Buffer): Buffer {
 }
 
 /**
- * Rewrite a zip with named parts replaced or added. Accepted deviation (noted in the contracts file): the
- * output is CONTENT-preserving -- every untouched entry re-extracts byte-identical to its original uncompressed
- * bytes, entry order is kept where this writer allows (replacements stay put, new parts are appended) -- but the
- * zip as a whole is NOT compression-byte-identical to the input: unchanged deflate entries are recompressed and
- * rewritten with fresh timestamps for added parts. Throws {code:"invalid_zip"} on unreadable archives.
+ * Rewrite a zip with named parts replaced or added. Part matching is CASE-INSENSITIVE (and change keys that
+ * collide only by case are deduped last-one-wins, jszip behavior): OOXML part names are treated case-tolerantly
+ * in several of Word/DS' code paths, so a key like "WORD/DOCUMENT.XML" over an archive holding word/document.xml
+ * OVERWRITES the existing part IN PLACE (its original name is kept) instead of creating a shadow duplicate that
+ * could win on load. Accepted deviation (noted in the contracts file): the output is CONTENT-preserving -- every
+ * untouched entry re-extracts byte-identical to its original uncompressed bytes, entry order is kept where this
+ * writer allows (replacements stay put, new parts are appended) -- but the zip as a whole is NOT
+ * compression-byte-identical to the input: unchanged deflate entries are recompressed and rewritten with fresh
+ * timestamps for added parts. Throws {code:"invalid_zip"} on unreadable archives.
  */
 export function rewriteZip(buf: Buffer, changes: Record<string, string | Buffer>): Buffer {
   const entries = readZip(buf);
-  const applied = new Set<string>();
+  // Change keys that differ from each other only in case would emit one shadow part for the same logical name --
+  // keep the LAST of them (jszip "last one wins") and let it match the existing entry case-insensitively below.
+  const norm: Record<string, string | Buffer> = {};
+  for (const [name, value] of Object.entries(changes)) {
+    for (const k of Object.keys(norm)) if (k.toLowerCase() === name.toLowerCase()) delete norm[k];
+    norm[name] = value;
+  }
+  const changeLower = new Map<string, string>(); // lowercased part name -> the surviving change key
+  for (const k of Object.keys(norm)) changeLower.set(k.toLowerCase(), k);
+  const applied = new Set<string>(); // lowercase names consumed by a change (an input SHADOW pair gets the data once)
   const out: { name: string; data: Buffer; time?: { time: number; date: number } }[] = [];
   for (const entry of entries) {
     let data = readEntryData(buf, entry);
-    if (entry.name in changes) { data = asBuffer(changes[entry.name]); applied.add(entry.name); }
+    const key = changeLower.get(entry.name.toLowerCase());
+    if (key !== undefined && !applied.has(key.toLowerCase())) { // exact match OR differs only by case
+      data = asBuffer(norm[key]);
+      applied.add(key.toLowerCase());
+    }
     out.push({ name: entry.name, data, time: { time: entry.modTime, date: entry.modDate } });
   }
-  for (const [name, value] of Object.entries(changes)) if (!applied.has(name)) out.push({ name, data: asBuffer(value) });
+  for (const [name, value] of Object.entries(norm)) if (!applied.has(name.toLowerCase())) out.push({ name, data: asBuffer(value) });
   return writeZip(out);
 }
 

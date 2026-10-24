@@ -98,11 +98,11 @@ test("officeWakeMessage renders the exact plan 5.4 template", () => {
       'Alice asked you in a comment on the office document "Budget 2026":',
       "> first line @agent",
       "> second line",
-      "You have edit access to this document for this task; answer with the office_* tools.",
+      "You have been given edit access to this document; answer with the office_* tools.",
     ].join("\n")
   );
   // single-line comment, no trailing blank line
-  assert.equal(officeWakeMessage("T", "Bob", "one"), 'Bob asked you in a comment on the office document "T":\n> one\nYou have edit access to this document for this task; answer with the office_* tools.');
+  assert.equal(officeWakeMessage("T", "Bob", "one"), 'Bob asked you in a comment on the office document "T":\n> one\nYou have been given edit access to this document; answer with the office_* tools.');
 });
 
 /* ------------------------------------------------------------------ */

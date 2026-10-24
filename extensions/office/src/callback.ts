@@ -458,8 +458,9 @@ async function persistSaved(
     return fail();
   }
 
-  // JWT for the outbound GET (documented choice -- plan silent, see module header): a fresh 60 s HS256 token.
-  const fetchToken = signJwt({ docId, key: body.key }, 60_000, secretOrThrow(cfg));
+  // JWT for the outbound GET (documented choice -- plan silent, see module header): a fresh 60 s HS256 token,
+  // purpose-tagged "fetch" (S3) so it can never masquerade as an editor-config or a callback in any verifier.
+  const fetchToken = signJwt({ docId, key: body.key }, 60_000, secretOrThrow(cfg), "fetch");
   let bytes: Buffer;
   try {
     bytes = await fetchWithRetry(body.url, fetchToken, cfg.retryDelaysMs ?? DEFAULT_RETRY_DELAYS_MS);

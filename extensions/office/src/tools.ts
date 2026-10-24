@@ -16,11 +16,11 @@
  * Revision model (plan 5.5/5.7): the mtimeMs of the library file IS the revision. office_edit
  * takes baseRevision (= the mtimeMs office_read showed), GATES FIRST (>1 ms drift ->
  * "error:revision_mismatch ..." with the fresh mtime, nothing written), and store.persistBytes re-
- * gates strictly at write time anyway. With coEdit on and an open human editor session (live.ts),
- * the agent does not refuse -- it FORCESAVEs the dirty DS session first via the forcesave hook
- * (T-WIRE registers the real one, the DS status-6 command; default is a no-op that logs), AWAITS
- * it, and RE-GATES, because the forced save itself moved the revision. An open session never blocks;
- * a stale baseRevision always fails.
+ * gates strictly at write time anyway. With coEdit on (the DEFAULT) and an open human editor session
+ * (live.ts), office_edit REFUSES with error:session_open until the session closes -- v1's forcesave hook
+ * (T-WIRE registers it) resolves FALSE while any session is open, because a server-side force-save command
+ * does not exist yet (M0/client-tier, plan 5.7): an unsaved human buffer must never be clobbered. With coEdit
+ * switched off, the plain revision gate decides even with an open session. A stale baseRevision always fails.
  *
  * Wakes (plan 5.4 step 4 -- "the drain side"): ping.ts only QUEUES wakes server-side and rings the
  * bell with chats.tell(chatId, {type:"ping"}). The office pi extension registered from THIS factory
@@ -37,7 +37,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import JSZip from "jszip";
+import { jsZip } from "./jszip"; // LAZY by design: the built server must import without its own node_modules yet (deps.js installs them at boot)
 import { portal } from "./host";
 import { getDoc, docsForHome, createDoc, persistBytes, type DocMeta } from "./store";
 import { parseDocx, parseXlsx, editDocx, rewriteZip, type EditOp } from "./ooxml";
@@ -182,6 +182,10 @@ function failed(e: unknown): unknown {
 /** `text` with a details side-channel, exactly docs' shape. */
 const text = (content: string, details?: unknown) => ({ content: [{ type: "text", text: content }], ...(details !== undefined ? { details } : {}) });
 
+/** One office_* tool result must not blow the agent context on a huge grid or document; both office_read and
+ * office_read's sibling office_comments truncate at this length with an explicit marker (docs' shape). */
+const MAX_READ_CHARS = 200_000;
+
 /** The library file of a doc (docs/<docId>/<title>.<ext>), or a not_found refusal. */
 function readBytes(doc: DocMeta, root = rootDir()): Buffer {
   const p = path.join(root, "docs", doc.docId, `${doc.title}.${doc.ext}`);
@@ -290,7 +294,6 @@ function installTools(pi: unknown, home: string): void {
       const doc = visibleDoc(id);
       const buf = readBytes(doc);
       const lock = lockLine(doc);
-      const MAX_READ_CHARS = 200_000; // one office_read must not blow the agent context on a huge grid or document
       if (doc.ext === "xlsx") {
         // Plan 5.5: office_read returns a grid of cell values for xlsx; its COMMENTS are not in v1 (xl/commentsN.xml + VML, M4).
         const parsed = parseXlsx(buf); // throws {code:"invalid_zip"} -> corrupt
@@ -322,7 +325,7 @@ function installTools(pi: unknown, home: string): void {
   p.registerTool({
     name: "office_edit",
     label: "Edit an office document",
-    description: `Change a Word document of your library by replacing quoted text, as office_read shows it. Each op is {quote, replacement}: the quote must appear in the extracted text (empty replacement removes it), ops apply one after another. baseRevision is the mtimeMs you read (or that your last edit returned): if the document moved on since, NOTHING is written and you are told the fresh revision -- re-read and redo. If a human has the editor open, the edit proceeds only once their unsaved changes are flushed by a COMPLETED force-save -- refused with error:session_open if that cannot be confirmed -- and re-checks the revision afterwards; you never overwrite an unsaved buffer. Spreadsheets cannot be edited in v1 (a later milestone). All ops are made or none.`,
+    description: `Change a Word document of your library by replacing quoted text, as office_read shows it. Each op is {quote, replacement}: the quote must appear in the extracted text (empty replacement removes it), ops apply one after another. baseRevision is the mtimeMs you read (or that your last edit returned): if the document moved on since, NOTHING is written and you are told the fresh revision -- re-read and redo. If a human still has the editor open while co-edit protection (coEdit, on by default) stands, the edit is refused with error:session_open until the editor session closes; with coEdit off it proceeds under the revision gate. You never overwrite an unsaved buffer. Spreadsheets cannot be edited in v1 (a later milestone). All ops are made or none.`,
     promptSnippet: "Edit a Word document: quoted replacements on the revision you read",
     executionMode: "sequential",
     parameters: {
@@ -364,10 +367,12 @@ function installTools(pi: unknown, home: string): void {
         new Refusal("revision_mismatch", `"${fresh.title}" is at revision ${fresh.mtimeMs}, not ${base}: it changed since you read it. Nothing was written. Read it again with office_read, then redo the edit with baseRevision ${fresh.mtimeMs}.`);
       if (Math.abs(meta.mtimeMs - base) > 1) throw stale(meta);
 
-      // Plan 5.7 (co-editing default ON): an open human session is flushed BEFORE anything may be written over it --
-      // the hook must confirm a COMPLETED force-save (true) before we proceed, and because that save moves the file
-      // the gate is re-checked on the FRESH meta afterwards. No hook wired, or a round-trip without confirmation:
-      // REFUSE with error:session_open -- an unsaved buffer must never be clobbered silently.
+      // Plan 5.7 (co-editing, fail-closed in v1): while coEdit stands and a human session is open, nothing may
+      // be written over it until the hook confirms a COMPLETED force-save (true), and because that save moves
+      // the file the gate is re-checked on the FRESH meta afterwards. No hook wired, or a round-trip without
+      // confirmation: REFUSE with error:session_open -- an unsaved buffer must never be clobbered silently.
+      // v1's real hook (server.makeForcesaveHook) never confirms while sessions are open, so this branch in
+      // practice always refuses until the editor closes; with coEdit off it is skipped and the gate decides.
       if (loadSettings(rootDir()).coEdit && usersOf(doc.docId).length > 0) {
         if (!forcesaveHook) throw new Refusal("session_open", `"${doc.title}" is open in an editor with possibly unsaved changes, and no force-save is available to flush them first: have the editor save (or close), then retry this edit`);
         const flushed = await forcesaveHook(doc.docId); // a hook that THROWS propagates as a tool failure via guarded()
@@ -381,7 +386,7 @@ function installTools(pi: unknown, home: string): void {
       const buf = readBytes(doc);
       let documentXml: string;
       try {
-        const zip = await JSZip.loadAsync(buf);
+        const zip = await (await jsZip()).loadAsync(buf);
         const part = zip.file("word/document.xml");
         if (!part) throw new Refusal("corrupt", `"${doc.title}" has no word/document.xml: it is not a Word document`);
         documentXml = (await part.async("string")) ?? "";
@@ -417,7 +422,13 @@ function installTools(pi: unknown, home: string): void {
       const parsed = parseDocx(readBytes(doc)); // corrupt mapping via failed()
       const commentLines = parsed.comments.length ? parsed.comments.map((c) => `- ${c.id}  ${c.author}${c.date ? `  ${c.date}` : ""}: ${c.text.replace(/\n/g, " ")}`).join("\n") : "(none)";
       const grantLines = doc.grants.length ? doc.grants.map((g) => `- ${g.chatId}  via comment ${g.commentId}  at ${new Date(g.at).toISOString()}`).join("\n") : "(none -- only the owner can see this document)";
-      return text(`"${doc.title}" (id ${doc.docId})\n\nComments (${parsed.comments.length}):\n${commentLines}\n\nGrants:\n${grantLines}`, { action: "comments", id: doc.docId, comments: parsed.comments, grants: doc.grants });
+      let said = `"${doc.title}" (id ${doc.docId})\n\nComments (${parsed.comments.length}):\n${commentLines}\n\nGrants:\n${grantLines}`;
+      // Same cap and marker as office_read: aggregated comment text is unbounded input and must not blow the agent context.
+      if (said.length > MAX_READ_CHARS) said = said.slice(0, MAX_READ_CHARS) + "\n\n[output truncated by office_comments: it exceeds 200,000 characters]";
+      // details lands in the portal tool-event store and the web transcript -- bound it like office_read does
+      // (100 at 500 chars each, worst case ~50 KB); commentCount keeps the true total.
+      const detailComments = parsed.comments.slice(0, 100).map((c) => ({ id: c.id, author: c.author, date: c.date, text: c.text.slice(0, 500) }));
+      return text(said, { action: "comments", id: doc.docId, comments: detailComments, grants: doc.grants, commentCount: parsed.comments.length });
     }),
   });
 }

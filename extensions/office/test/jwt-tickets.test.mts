@@ -111,3 +111,32 @@ test("tickets: malformed tokens -> null (never throws)", () => {
   assert.equal(verifyTicket(Buffer.from("onlytwo|3").toString("base64url"), SECRET), null); // two sections
   assert.equal(verifyTicket(Buffer.from("|1700000000000|abcdef").toString("base64url"), SECRET), null); // empty docId section
 });
+
+/* ---------------- purpose separation (S3) ---------------- */
+
+test("jwt: a signed typ claim separates token families; each verifier pins its own purpose", () => {
+  const cfg = signJwt({ docId: "d1" }, 60_000, SECRET, "editor-config");
+  assert.equal(verifyJwt(cfg, SECRET, "editor-config")?.docId, "d1"); // right family verifies
+  assert.equal(verifyJwt(cfg, SECRET, "fetch"), null); // an editor-config token is not a fetch token
+  assert.ok(verifyJwt(cfg, SECRET), "no purpose requested -> accepted (DS-signed callback tokens carry no typ)");
+
+  const fetch = signJwt({ docId: "d1", key: "k" }, 60_000, SECRET, "fetch");
+  assert.equal(verifyJwt(fetch, SECRET, "fetch")?.key, "k");
+  assert.equal(verifyJwt(fetch, SECRET, "editor-config"), null);
+
+  // the typ claim is SIGNED: stripping or rewriting it outside the signature breaks verification of that family
+  const [head, body, sig] = cfg.split(".");
+  const stripped = JSON.parse(Buffer.from(body, "base64url").toString("utf8"));
+  delete stripped.typ;
+  assert.equal(verifyJwt(`${head}.${b64url(JSON.stringify(stripped))}.${sig}`, SECRET, "editor-config"), null);
+});
+
+test("tickets: the HMAC covers a purpose domain separator -- an un-prefixed MAC does not verify", () => {
+  const { token } = mintTicket("doc-x-1", 60_000, SECRET);
+  assert.deepEqual(verifyTicket(token, SECRET), { docId: "doc-x-1" }); // round-trip intact; payload layout unchanged
+  const [docId, expStr, mac] = Buffer.from(token, "base64url").toString("utf8").split("|");
+  // A MAC computed over the legacy/un-prefixed message is a different family's keying and must be rejected:
+  const unprefixed = createHmac("sha256", SECRET).update(`${docId}|${expStr}`).digest("hex");
+  assert.notEqual(unprefixed, mac, "the minted MAC visibly includes the purpose prefix");
+  assert.equal(verifyTicket(Buffer.from(`${docId}|${expStr}|${unprefixed}`).toString("base64url"), SECRET), null);
+});

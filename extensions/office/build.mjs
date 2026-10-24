@@ -4,30 +4,20 @@
  * portal's own `npm run build` runs this, so a checkout and the image build it the same way; what it makes is not kept
  * in git.
  *
- * What it is built and runs with (jszip for the OOXML templates on the server side) is this package's own, installed
- * here first when it is not there yet, or not at the version its lock file names. esbuild, tailwindcss and postcss are
- * the repository's.
+ * What it is built and runs with (react-icons for the browser half, jszip for the OOXML templates on the server
+ * side -- which deps.js ALSO installs at boot in the background, as pithagoras-docs does) is this package's own,
+ * installed here first when it is not there yet, or not at the version its lock file names (missingDependencies,
+ * shared with deps.js). esbuild, tailwindcss and postcss are the repository's.
  */
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
 import path from "node:path";
 import { buildExtension } from "@pithagoras/extension-api/build";
+import { missingDependencies } from "./deps.js";
 
 const HERE = import.meta.dirname;
 
-const readJson = (file) => {
-  try {
-    return JSON.parse(readFileSync(file, "utf8"));
-  } catch {
-    return null;
-  }
-};
-
 // Missing, or not the versions the lock names (a later commit changed them): installed as the lock says.
-const lock = readJson(path.join(HERE, "package-lock.json"));
-const missing = Object.entries(lock?.packages ?? {}).filter(
-  ([where, entry]) => where.startsWith("node_modules/") && !entry.link && readJson(path.join(HERE, where, "package.json"))?.version !== entry.version && !entry.optional,
-);
+const missing = missingDependencies(HERE, { dev: true });
 if (missing.length) {
   console.log(`pithagoras-office: installing its packages (${missing.length})`);
   execFileSync(process.platform === "win32" ? "npm.cmd" : "npm", ["ci", "--ignore-scripts", "--no-audit", "--no-fund", "--prefer-offline"], { cwd: HERE, stdio: "inherit" });

@@ -22,18 +22,54 @@
  * TERMINAL CLOSES are authoritative though: status 2 (ready for saving) and status 4 (closed with no changes)
  * mean nobody is connected anymore, so callback.ts clears presence AND the flag there (clearDoc) instead of
  * only flipping the flag -- otherwise a server-minted user without a DS leave event would badge forever.
+ *
+ * On top of that, tracked PRESENCE carries a TTL (DEFAULT_PRESENCE_TTL_MS = 15 min, setPresenceTtl to change):
+ * presence is minted at editor-config time for a single shared seat and only cleared on terminal closes, so
+ * an abandoned open (api.js never loads, tab closed before DS connects) would otherwise hold the lock -- and
+ * refuse every office_edit -- forever. Stale entries are dropped lazily on read (usersOf/pollState); a live
+ * session is immune because every status-1 heartbeat re-calls setUser and pushes expiresAt forward. This adds
+ * expiry only -- it does NOT change co-editing semantics: a non-expired open session still refuses agent edits.
  */
 
 export type LiveUser = { id: string; name?: string; at: number };
 
-/** docId -> userId -> LiveUser. Maps (not arrays) so a re-join of the same user never duplicates. */
-const presence = new Map<string, Map<string, LiveUser>>();
+/** A tracked entry plus its expiry (internal: usersOf returns LiveUser copies without it).
+ * The TTL closes the stuck-lock DoS of S2: presence is minted at editor-config time (a single shared seat,
+ * EDITOR_USER id "portal-user") and only cleared unconditionally on a terminal DS close -- so a failed or
+ * abandoned open (api.js never loads, tab closed before DS connects) left the doc locked FOREVER. With a TTL
+ * such a stuck entry auto-expires; a LIVE session keeps itself fresh because every status-1 heartbeat re-calls
+ * setUser and pushes expiresAt forward.
+ * 15 minutes matches CONFIG_TTL_MS (server.ts): an editor config outlives a single page-load, and the badge is
+ * already best-effort (the /state poller refreshes it every 5 s from this same map). */
+const DEFAULT_PRESENCE_TTL_MS = 15 * 60_000;
+type PresenceRecord = LiveUser & { expiresAt: number };
+
+let presenceTtlMs = DEFAULT_PRESENCE_TTL_MS;
+
+/** Change the presence TTL (default DEFAULT_PRESENCE_TTL_MS). Affects joins from now on; already-tracked users
+ * keep their existing expiry until their next heartbeat re-sets them. Tests use it to exercise expiry fast.
+ * Non-finite or non-positive values are ignored rather than stored (0 would expire everything immediately). */
+export function setPresenceTtl(ms: number): void {
+  if (Number.isFinite(ms) && ms > 0) presenceTtlMs = ms;
+}
+
+/** The configured presence TTL in milliseconds. */
+export function getPresenceTtl(): number {
+  return presenceTtlMs;
+}
+
+function isStale(u: PresenceRecord, now: number): boolean {
+  return u.expiresAt <= now; // inclusive: exactly-at-expiry counts as gone (clocks only ever move forward here)
+}
+
+/** docId -> userId -> PresenceRecord. Maps (not arrays) so a re-join of the same user never duplicates. */
+const presence = new Map<string, Map<string, PresenceRecord>>();
 /** docIds explicitly locked by a callback command (statuses 1/2/4/6). */
 const locked = new Set<string>();
 /** Injected source of "the document's current mtimeMs revision"; null until server.ts registers one. */
 let resolveMeta: ((docId: string) => number | null) | null = null;
 
-function userMap(docId: string): Map<string, LiveUser> {
+function userMap(docId: string): Map<string, PresenceRecord> {
   let users = presence.get(docId);
   if (!users) {
     users = new Map();
@@ -43,11 +79,14 @@ function userMap(docId: string): Map<string, LiveUser> {
 }
 
 /** Everyone currently tracked as present on the doc (join time ascending), or [] for none. Returns copies --
- * callers may hold onto them freely. */
+ * callers may hold onto them freely. Expired entries (TTL passed without a heartbeat) are dropped on sight:
+ * they no longer count as "editing now", so lockLine and the office_edit refusal expire with them. */
 export function usersOf(docId: string): LiveUser[] {
   const users = presence.get(docId);
   if (!users) return [];
-  return [...users.values()].map((u) => ({ ...u }));
+  const now = Date.now();
+  for (const [id, u] of [...users]) if (isStale(u, now)) users.delete(id);
+  return [...users.values()].map(({ id, name, at }) => ({ id, name, at }));
 }
 
 /** Track a join (joined=true -- inserts or updates the entry, KEEPING the original `at` of an already-tracked
@@ -59,7 +98,9 @@ export function setUser(docId: string, user: { id: string; name?: string }, join
   const users = userMap(docId);
   if (joined) {
     const existing = users.get(user.id);
-    users.set(user.id, { id: user.id, name: user.name ?? existing?.name, at: existing?.at ?? Date.now() });
+    // `at` keeps the FIRST join (the badge shows when they opened it); expiresAt moves forward on EVERY
+    // join/heartbeat, so a live session never trips its own TTL while a dead one does.
+    users.set(user.id, { id: user.id, name: user.name ?? existing?.name, at: existing?.at ?? Date.now(), expiresAt: Date.now() + presenceTtlMs });
   } else {
     users.delete(user.id);
   }
@@ -84,7 +125,8 @@ export function isLocked(docId: string): boolean {
  * = not pending), else null. No resolver registered -> null.
  */
 export function pollState(docId: string, clientMtimeMs: number): { locked: boolean; pendingRev: number | null } {
-  const present = (presence.get(docId)?.size ?? 0) > 0;
+  // usersOf filters + physically drops expired entries, so "present" here can never count a stale lock
+  const present = usersOf(docId).length > 0;
   let pendingRev: number | null = null;
   if (resolveMeta) {
     const mtimeMs = resolveMeta(docId);
@@ -106,10 +148,11 @@ export function clearDoc(docId: string): void {
   locked.delete(docId);
 }
 
-/** Wipe every doc's state (and the resolver). Exported for unit tests that share one process; safe to call at
- * any other time -- it only loses in-memory lock badges, nothing on disk. */
+/** Wipe every doc's state (and the resolver) and restore the DEFAULT presence TTL. Exported for unit tests that
+ * share one process; safe to call at any other time -- it only loses in-memory lock badges, nothing on disk. */
 export function resetLive(): void {
   presence.clear();
   locked.clear();
   resolveMeta = null;
+  presenceTtlMs = DEFAULT_PRESENCE_TTL_MS;
 }

@@ -449,6 +449,33 @@ test("/import: allowed folder passes (bytes copied), outside is 403 not_allowed,
   await b.cleanup();
 });
 
+test("/import: a symlink inside an allowed folder pointing OUTSIDE is refused (realpath gate, CWE-22)", async () => {
+  const b = await boot();
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), "office-ws-link-"));
+  b.allowedDirs.push(ws);
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), "office-outside-link-"));
+  const secretBytes = Buffer.from("a docx that must not leave this folder");
+  fs.writeFileSync(path.join(outside, "secret.docx"), secretBytes);
+  // the link itself lives in the allowed workspace; its target does not
+  fs.symlinkSync(path.join(outside, "secret.docx"), path.join(ws, "link.docx"));
+
+  const res = await b.router.dispatch("POST", "/import", { path: path.join(ws, "link.docx") });
+  assert.equal(res.statusCode, 403);
+  const body = res.body as Record<string, unknown>;
+  assert.equal(body.code, "not_allowed");
+  assert.match(String(body.error), /not allowed by folders.allowed/);
+  assert.equal(store.listDocs(b.root).length, 0, "nothing was imported");
+
+  // and a symlink INSIDE the allowed folder stays importable (only escape is blocked)
+  fs.writeFileSync(path.join(ws, "real.docx"), secretBytes);
+  fs.symlinkSync(path.join(ws, "real.docx"), path.join(ws, "alias.docx"));
+  const ok = await b.router.dispatch("POST", "/import", { path: path.join(ws, "alias.docx") });
+  assert.equal(ok.statusCode, 201);
+
+  fs.rmSync(outside, { recursive: true, force: true });
+  await b.cleanup();
+});
+
 /* ---------------- /settings + container routes ---------------- */
 
 test("/settings: enable fires ensureContainer exactly once with the settings tag; disable stops + leaves the user-stopped marker", async () => {

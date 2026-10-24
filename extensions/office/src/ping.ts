@@ -30,7 +30,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { portal } from "./host";
-import { getDoc } from "./store";
+import { addGrant as storeAddGrant, getDoc } from "./store";
 import { parseDocx, diffComments, type Comment } from "./ooxml";
 import { onPersisted } from "./callback";
 
@@ -96,12 +96,12 @@ export function drainWakeQueue(chatId: string): WakeEntry[] {
   return entries;
 }
 
-/** The exact plan-5.4 wake text shape, following docs' wakeMessage(): doc title, quoted comment (every line prefixed "> "), and the standing-grant sentence with the office_* pointer. The doc id is NOT embedded in the text: it rides in WakeEntry.details ({docId, commentId}) per plan 5.4 step 2, which the drain side hands to pi's sendMessage. `author` is included because an office mention is one specific person's ask (docs' template omits it; the office one does not). */
+/** The exact plan-5.4 wake text shape, following docs' wakeMessage(): doc title, quoted comment (every line prefixed "> "), and the grant sentence with the office_* pointer -- "given access", NOT "for this task": the added grants are permanent in v1 (per-comment expiry is deferred), so the text must not promise a scope that does not exist. The doc id is NOT embedded in the text: it rides in WakeEntry.details ({docId, commentId}) per plan 5.4 step 2, which the drain side hands to pi's sendMessage. `author` is included because an office mention is one specific person's ask (docs' template omits it; the office one does not). */
 export function officeWakeMessage(docTitle: string, author: string, commentText: string): string {
   return [
     `${author} asked you in a comment on the office document "${docTitle}":`,
     ...commentText.split("\n").map((line) => `> ${line}`),
-    "You have edit access to this document for this task; answer with the office_* tools.",
+    "You have been given edit access to this document; answer with the office_* tools.",
   ].join("\n");
 }
 
@@ -148,28 +148,13 @@ function writeSeen(rootDir: string, docId: string, ids: Iterable<string>): void 
   fs.renameSync(tmp, p);
 }
 
-/**
- * Minimal internal index writer -- store.ts exposes no grant mutation (checked its exports), and plan
- * 5.4 requires the grant persisted BEFORE the bell rings (the woken pi's office_* tools read docsForHome,
- * which reads index.json, and no other task has a seam to add it). Mirrors store.writeIndex: fresh read,
- * mutate one doc, atomic temp+rename. Dedupe is by (chatId, commentId): a re-sent comment never adds a
- * second row. If grant mutations are centralized in store.ts later, this helper goes away.
- */
-function addGrant(rootDir: string, docId: string, chatId: string, commentId: string, at: number): boolean {
-  const p = path.join(rootDir, "index.json");
-  const raw = JSON.parse(fs.readFileSync(p, "utf8")) as { docs?: { docId?: string; grants?: { chatId: string; commentId: string; at: number }[] }[] };
-  const doc = (raw.docs ?? []).find((d) => d.docId === docId);
-  if (!doc) {
-    logLine(`office ping: document ${docId} vanished from index between resolve and grant -- skipped`);
-    return false;
-  }
-  const grants = (doc.grants ??= []);
-  if (grants.some((g) => g.chatId === chatId && g.commentId === commentId)) return false; // dedupe before adding
-  grants.push({ chatId, commentId, at });
-  const tmp = path.join(path.dirname(p), `.${path.basename(p)}.${process.pid}.tmp`);
-  fs.writeFileSync(tmp, JSON.stringify(raw, null, 2));
-  fs.renameSync(tmp, p);
-  return true;
+/** The store's index writer (its ONE path for index.json -- fresh read, dedupe by (chatId, commentId), atomic
+ * temp+rename): plan 5.4 requires the grant persisted BEFORE the bell rings (the woken pi's office_* tools read
+ * docsForHome, which reads index.json). This wrapper keeps this module's log lines: a vanished doc is logged,
+ * a duplicate adds nothing; "added"/"duplicate" are both fine to ring the bell for. */
+function addGrant(rootDir: string, docId: string, chatId: string, commentId: string, at: number): void {
+  const outcome = storeAddGrant(docId, chatId, commentId, at, rootDir);
+  if (outcome === null) logLine(`office ping: document ${docId} vanished from index between resolve and grant -- skipped`);
 }
 
 /** Resolve one mention to a home chat id, or null (reason logged). */

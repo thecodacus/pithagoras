@@ -14,7 +14,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { randomInt } from "node:crypto";
-import JSZip from "jszip";
+import { jsZip } from "./jszip"; // LAZY by design: the built server must import without its own node_modules yet (deps.js installs them at boot)
 import { dataDir } from "./host";
 import { parseDocx } from "./ooxml"; // importFile baselines the source file's comment ids at import time (ping.ts first-save rule)
 
@@ -38,6 +38,11 @@ export type DocMeta = {
 type IndexFile = { version: 1; docs: DocMeta[] };
 
 const TRASH_TTL_MS = 7 * 24 * 60 * 60 * 1000; // sweepTrash removes .trash entries older than this
+// importFile caps: the sync copy must not commit an unbounded file into the library (and any xlsx/docx in it
+// is parsed later against ooxml.ts' 256 MiB / 1 GiB zip envelope). Above MAX_BASELINE_BYTES the docx comment
+// baseline is skipped (ping.ts "unparseable source" fallback) instead of reading a huge file inline.
+const MAX_IMPORT_BYTES = 512 * 1024 * 1024;
+const MAX_BASELINE_BYTES = 32 * 1024 * 1024;
 
 /* ------------------------------------------------------------------ */
 /* index I/O                                                           */
@@ -129,7 +134,7 @@ const DOCX_STYLES = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:s
  * referenced. Opens cleanly in Word/OnlyOffice and parses with ooxml.parseDocx. jszip only writes buffers
  * asynchronously, which is why this (and createDoc) are async. */
 export async function templateDocx(): Promise<Buffer> {
-  const zip = new JSZip();
+  const zip = new (await jsZip())();
   zip.file("[Content_Types].xml", DOCX_CONTENT_TYPES);
   zip.file("_rels/.rels", DOCX_ROOT_RELS);
   zip.file("word/document.xml", DOCX_DOCUMENT);
@@ -173,7 +178,7 @@ const XLSX_SHEET1 =
  * and an empty xl/worksheets/sheet1.xml named "Sheet1". Opens cleanly in Excel/OnlyOffice and parses with
  * ooxml.parseXlsx (one sheet, zero rows). Async for the same jszip reason as templateDocx. */
 export async function templateXlsx(): Promise<Buffer> {
-  const zip = new JSZip();
+  const zip = new (await jsZip())();
   zip.file("[Content_Types].xml", XLSX_CONTENT_TYPES);
   zip.file("_rels/.rels", XLSX_ROOT_RELS);
   zip.file("xl/workbook.xml", XLSX_WORKBOOK);
@@ -199,6 +204,22 @@ export function getDoc(docId: string, root?: string): DocMeta | null {
 
 /** The documents a home chat may see in its panel/tools: ones it OWNS or holds a mention-GRANT for (plan 2.1),
  * deduped by docId (a doc owned and granted to the same home appears once). */
+/** The ONE index writer for mention grants (ping.ts used to read-modify-write index.json on its own): fresh
+ * read, dedupe by (chatId, commentId) -- a re-sent comment never adds a second row -- atomic tmp+rename through
+ * the store's writeIndex. Sync like everything here and no logging (module contract). Returns "added",
+ * "duplicate" (already granted: nothing written), or null when the doc is not in the index any more.
+ * A corrupt index throws the usual {code:"index_corrupt"} -- a bad file, not a vanished doc. */
+export function addGrant(docId: string, chatId: string, commentId: string, at: number, root = dataDir()): "added" | "duplicate" | null {
+  const index = readIndex(root);
+  const doc = index.docs.find((d) => d.docId === docId);
+  if (!doc) return null;
+  const grants = (doc.grants ??= []);
+  if (grants.some((g) => g.chatId === chatId && g.commentId === commentId)) return "duplicate";
+  grants.push({ chatId, commentId, at });
+  writeIndex(root, index);
+  return "added";
+}
+
 export function docsForHome(homeChatId: string, root = dataDir()): DocMeta[] {
   const seen = new Set<string>();
   const out: DocMeta[] = [];
@@ -357,8 +378,11 @@ export function pruneMissingDocs(root = dataDir()): string[] {
 
 /** Import an existing .docx/.xlsx from an absolute path into the library (copy, never move -- the source stays).
  * The extension comes from the basename (case-insensitive) and anything else throws {code:"unsupported_format"};
- * a missing/unreadable source throws {code:"not_found"}. title defaults to the basename without its extension;
- * owner is set by the caller (an agent/project context passes its home chat, human imports stay ownerless). */
+ * a missing/unreadable source throws {code:"not_found"}; a file above 512 MiB throws {code:"too_large"} before
+ * anything is copied. title defaults to the basename without its extension; owner is set by the caller (an
+ * agent/project context passes its home chat, human imports stay ownerless). For docx sources up to 32 MiB the
+ * comment ids are baselined into importedBaseline at import time; above that the field stays undefined and
+ * ping.ts applies its "unparseable source" first-save fallback. */
 export function importFile(absPath: string, meta: { title?: string; owner?: string | null }, root = dataDir()): DocMeta {
   const rootDir = root ?? dataDir();
   const base = path.basename(absPath);
@@ -374,12 +398,18 @@ export function importFile(absPath: string, meta: { title?: string; owner?: stri
     throw err;
   }
   if (!st.isFile()) throw Object.assign(new Error(`${absPath} is not a regular file`), { code: "unsupported_format" });
+  // Hard size cap (N2): importFile copies synchronously into the library and parses xlsx/docx later -- an uncapped
+  // source would also blow the ooxml reader's 1 GiB zip envelope. 512 MiB is far above any real Office file.
+  if (st.size > MAX_IMPORT_BYTES) throw Object.assign(new Error(`${absPath} is ${st.size} bytes: imports are capped at ${MAX_IMPORT_BYTES / (1024 * 1024)} MiB`), { code: "too_large" });
   const title = meta.title ?? base.slice(0, dot);
   assertSafeTitle(title); // the imported file lands in the library as <title>.<ext> -- same rules as created titles
   // Baseline AT IMPORT TIME (review 4364810146): record which comment ids this file carries NOW, so a mention added to it
   // before its first save is still NEW at first save and can wake; only the history that came in WITH the file baselines.
+  // Only for files up to MAX_BASELINE_BYTES: reading a multi-hundred-MiB docx inline just to stamp a baseline is not worth
+  // the sync stall -- above the cap leave it undefined so ping.ts applies its documented "unparseable source" fallback
+  // (baseline everything the first save holds) and first-save wake semantics are preserved.
   let importedBaseline: string[] | undefined;
-  if (extRaw === "docx") {
+  if (extRaw === "docx" && st.size <= MAX_BASELINE_BYTES) {
     try {
       importedBaseline = parseDocx(fs.readFileSync(absPath)).comments.map((c) => c.id);
     } catch {
