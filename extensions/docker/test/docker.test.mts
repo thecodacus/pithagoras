@@ -119,11 +119,11 @@ test("an extension reads how its own containers were made and how they stand, an
     Image: "voice:1",
     Env: ["VOICE_TTS=breeze"],
     Cmd: ["bash", "-c", "serve"],
-    HostConfig: { NetworkMode: "container:portal", DeviceRequests: [{ Driver: "nvidia", DeviceIDs: ["GPU-1"], Capabilities: [["gpu"]] }], RestartPolicy: { Name: "no" } },
+    HostConfig: { NetworkMode: "host", DeviceRequests: [{ Driver: "nvidia", DeviceIDs: ["GPU-1"], Capabilities: [["gpu"]] }], RestartPolicy: { Name: "no" } },
   });
   const made = (await voice.containers.inspect("dk-inspect")) as any;
   assert.deepEqual([made.Config.Env, made.Config.Cmd, made.Config.Labels[OWNER_LABEL]], [["VOICE_TTS=breeze"], ["bash", "-c", "serve"], "pithagoras-voice"]);
-  assert.equal(made.HostConfig.NetworkMode, "container:portal");
+  assert.equal(made.HostConfig.NetworkMode, "host");
   assert.deepEqual(made.HostConfig.DeviceRequests[0].DeviceIDs, ["GPU-1"]);
   assert.deepEqual([made.State.Running, made.State.ExitCode], [false, 0]);
   Object.assign(docker.containers.find((c) => c.Name === "dk-inspect")!, { State: "exited", code: 1, error: "could not select device driver" });
@@ -144,14 +144,14 @@ test("an extension reads how its own containers were made and how they stand, an
 test("an extension changes its own container as it is, running, without its being made again or restarted; not another's, nor one there is none of", async () => {
   const { forExtension } = dockerFor(dataDir());
   const voice = forExtension("pithagoras-voice"), other = forExtension("someone-else");
-  await voice.containers.create("dk-update", { Image: "voice:1", HostConfig: { NetworkMode: "container:portal", RestartPolicy: { Name: "no" } } });
+  await voice.containers.create("dk-update", { Image: "voice:1", HostConfig: { NetworkMode: "host", RestartPolicy: { Name: "no" } } });
   await voice.containers.start("dk-update");
   const [made, started] = [docker.created.length, docker.starts.length];
   await voice.containers.update("dk-update", { RestartPolicy: { Name: "unless-stopped" } });
   assert.deepEqual(docker.updates.at(-1), { name: "dk-update", changes: { RestartPolicy: { Name: "unless-stopped" } } }, "Docker's own update, with the body as it was given");
   const changed = (await voice.containers.inspect("dk-update")) as any;
   assert.deepEqual(changed.HostConfig.RestartPolicy, { Name: "unless-stopped" });
-  assert.equal(changed.HostConfig.NetworkMode, "container:portal", "what the change does not name stays");
+  assert.equal(changed.HostConfig.NetworkMode, "host", "what the change does not name stays");
   assert.equal(changed.State.Running, true);
   assert.deepEqual([docker.created.length, docker.starts.length], [made, started], "neither made again nor started again");
   const updates = docker.updates.length;
@@ -327,6 +327,47 @@ test("an extension's network has no way out and carries its name; one of its own
   }
 });
 
+test("a container is made on the extension's own networks and Docker's own alone, and shares the network of its own container or the portal's alone: what Docker made otherwise is taken away again", async () => {
+  const was = process.env.PORTAL_CONTAINER_NAME;
+  process.env.PORTAL_CONTAINER_NAME = "dk-portal";
+  docker.containers.push({ Id: "portal1000000", Name: "dk-portal", Image: "pithagoras-portal", State: "running", Labels: {}, Tty: false, out: "", err: "" });
+  docker.networks.push({ Id: "dockers00000", Name: "bridge", Labels: {} }, { Id: "nobodys00000", Name: "dk-nobodys", Labels: {} });
+  const { forExtension } = dockerFor(dataDir(), true);
+  const blender = forExtension("pithagoras-blender"), godot = forExtension("pithagoras-godot");
+  const gone = (name: string) => assert.equal(docker.containers.find((c) => c.Name === name), undefined, `${name} is taken away again`);
+  try {
+    const theirs = await blender.networks.create("dk-b-island");
+    await godot.networks.create("dk-g-island");
+    await blender.containers.create("dk-b", { Image: "blender:1", HostConfig: { NetworkMode: "dk-b-island" } });
+    for (const [label, spec] of [
+      ["by its name", { HostConfig: { NetworkMode: "dk-b-island" } }],
+      ["by its id", { HostConfig: { NetworkMode: theirs.id } }],
+      ["as one more endpoint, under the name of the other's container", { HostConfig: { NetworkMode: "dk-g-island" }, NetworkingConfig: { EndpointsConfig: { "dk-g-island": {}, "dk-b-island": { Aliases: ["dk-b"] } } } }],
+    ] as const) {
+      await assert.rejects(godot.containers.create("dk-g", { Image: "godot:1", ...spec }), { status: 403, message: /dk-g would be on dk-b-island, which is pithagoras-blender's network, not pithagoras-godot's/ }, label);
+      gone("dk-g");
+    }
+    await assert.rejects(godot.containers.create("dk-g", { Image: "godot:1", HostConfig: { NetworkMode: "dk-nobodys" } }), { status: 403, message: /dk-g would be on dk-nobodys, which is no extension's network, not pithagoras-godot's/ });
+    gone("dk-g");
+    await assert.rejects(godot.containers.create("dk-g", { Image: "godot:1", HostConfig: { NetworkMode: "container:dk-b" } }), { status: 403, message: /dk-g would share the network of dk-b, which is neither pithagoras-godot's container nor the portal's/ });
+    gone("dk-g");
+    await assert.rejects(godot.containers.create("dk-g", { Image: "godot:1", HostConfig: { NetworkMode: "container:dk-later" } }), { status: 403, message: /dk-g would share the network of dk-later, which there is no container of/ });
+    gone("dk-g");
+    assert.equal((await godot.containers.create("dk-g", { Image: "godot:1", HostConfig: { NetworkMode: "dk-g-island" } })).owner, "pithagoras-godot", "on its own network");
+    assert.ok(docker.containers.find((c) => c.Name === "dk-g")!.Networks!["dk-g-island"]);
+    await godot.containers.create("dk-g-bridge", { Image: "godot:1", HostConfig: { NetworkMode: "bridge" } });
+    assert.ok(docker.containers.find((c) => c.Name === "dk-g-bridge")!.Networks!.bridge, "on Docker's own");
+    await godot.containers.create("dk-g-side", { Image: "godot:1", HostConfig: { NetworkMode: "container:dk-g" } });
+    await godot.containers.create("dk-g-portal", { Image: "godot:1", HostConfig: { NetworkMode: "container:portal1000000" } });
+    assert.deepEqual(["dk-g-side", "dk-g-portal"].map((n) => Boolean(docker.containers.find((c) => c.Name === n))), [true, true], "sharing its own container's network, and the portal's");
+  } finally {
+    if (was === undefined) delete process.env.PORTAL_CONTAINER_NAME;
+    else process.env.PORTAL_CONTAINER_NAME = was;
+    docker.networks.splice(docker.networks.findIndex((n) => n.Name === "bridge"), 1);
+    sweep("dk-");
+  }
+});
+
 test("a Docker that makes the network with a way out is refused, and what it made is taken away again", async () => {
   const own = dockerFor(dataDir(), false).forExtension("a");
   docker.runs.oldNetworks = true;
@@ -479,7 +520,8 @@ test("reach is refused for another's network or container, one not on the networ
   try {
     await blender.networks.create("dk-bnet");
     await blender.containers.create("dk-bsrv", { Image: "blender:1", HostConfig: { NetworkMode: "dk-bnet" } });
-    await godot.containers.create("dk-gsrv", { Image: "godot:1", HostConfig: { NetworkMode: "dk-bnet" } });
+    // Godot's container on Blender's network, which `create` refuses: as if it were made with the docker command.
+    docker.containers.push({ Id: "gsrv00000000", Name: "dk-gsrv", Image: "godot:1", State: "created", Labels: { [OWNER_LABEL]: "pithagoras-godot" }, Tty: false, out: "", err: "", Networks: { "dk-bnet": { NetworkID: "" } } });
     await blender.containers.create("dk-loose", { Image: "blender:1" });
     docker.networks.push({ Id: "nobody000000", Name: "dk-nobodys", Labels: {} });
     docker.networks.push({ Id: "gateway00000", Name: "dk-gateway", Labels: { [OWNER_LABEL]: "pithagoras-blender" }, Internal: true, Options: ISOLATED, IPAM: { Config: [{ Gateway: "10.200.0.1" }] } });

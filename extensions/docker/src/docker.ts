@@ -20,6 +20,7 @@ type Inspected = {
   Id: string;
   Name: string;
   Config?: { Image?: string; Tty?: boolean; Labels?: Record<string, string> | null };
+  HostConfig?: { NetworkMode?: string };
   State?: { Status?: string; Running?: boolean };
   NetworkSettings?: { Networks?: Record<string, { NetworkID?: string }> | null };
 };
@@ -43,10 +44,18 @@ type RawNetwork = {
 /**
  * A network that has no way out: internal, so that Docker routes nothing from it to anywhere else, and in the gateway
  * mode `isolated`, with no IPv6, so that the machine has no address on it either, and so no gateway: a plain internal
- * network leaves every service the machine listens for on 0.0.0.0 open through its bridge's address.
+ * network leaves every service the machine listens for on 0.0.0.0 open through its bridge's address. The machine's side
+ * of the bridge still has an IPv6 link-local address (fe80::), as every bridge of Docker's has, whatever the network;
+ * with no IPv6 on the network, Docker turns IPv6 off on each container's interface on it (its
+ * `net.ipv6.conf.<interface>.disable_ipv6`), so that a container has no IPv6 there but its own loopback, and code in it
+ * cannot turn it on again, as a container's /proc/sys is read-only. A create body that turns it on (the endpoint's
+ * driver option `com.docker.network.endpoint.sysctls`) gives the container that way to the machine back.
  */
 const noWayOut = (n: RawNetwork) => n.Internal === true && n.EnableIPv6 !== true && n.Options?.[GATEWAY_MODE] === "isolated" && !(n.IPAM?.Config ?? []).some((c) => c.Gateway);
 const wayOut = (name: string) => new DockerError(`${name} has a way out to the machine, which an extension's network may not have: remove it, and it is made again`, 409);
+
+/** Docker's own networks, which no extension makes and every container may be on: the default bridge, the machine's, and none. */
+const DOCKERS_OWN = new Set(["bridge", "host", "none"]);
 
 /** How much of what a container wrote `logs` gives, unless asked for another amount, and the most it gives. */
 const TAIL = 200;
@@ -125,6 +134,30 @@ export function dockerFor(dataDir: string, inContainer = existsSync("/.dockerenv
     return raw
       ? info(raw)
       : { name: found.Name.replace(/^\//, ""), id: found.Id, image: found.Config?.Image ?? "", state: found.State?.Status ?? "", status: "", owner: containerOwner(found.Id, found.Config?.Labels), labels: found.Config?.Labels ?? {} };
+  }
+
+  /**
+   * Why `who` may not have made the container `name` as Docker made it (`made`), where it may not: it is on a network
+   * that is not the extension's own (another extension's, or nobody's), Docker's own aside, or shares the network of a
+   * container that is neither the extension's own nor the portal's. Read back from Docker, which has found what the
+   * create body named (a name, an id or the start of one, `default`), and keeps the network by its name and the
+   * container by its id. A container to share that is not there is refused too: Docker keeps that one by the name it
+   * was given, and the container made would share the network of whichever is made under that name later.
+   */
+  async function notWhosToMake(who: string, name: string, made: Inspected): Promise<string | undefined> {
+    for (const net of Object.keys(made.NetworkSettings?.Networks ?? {})) {
+      if (DOCKERS_OWN.has(net)) continue;
+      const found = await network(net);
+      const owner = found ? networkOwner(found) : "";
+      if (owner !== who) return `${name} would be on ${net}, which is ${owner ? `${owner}'s network` : "no extension's network"}, not ${who}'s`;
+    }
+    const mode = made.HostConfig?.NetworkMode ?? "";
+    if (!mode.startsWith("container:")) return undefined;
+    const to = mode.slice("container:".length);
+    const shared = await inspect(to);
+    if (!shared) return `${name} would share the network of ${to}, which there is no container of`;
+    if (containerOwner(shared.Id, shared.Config?.Labels) === who || shared.Id === (await portalContainer(inContainer))?.Id) return undefined;
+    return `${name} would share the network of ${shared.Name.replace(/^\//, "")}, which is neither ${who}'s container nor the portal's`;
   }
 
   /** The container `name` is, for `who` to act on: refused where it is someone else's, or nobody's. Nothing where there is none. */
@@ -335,7 +368,12 @@ export function dockerFor(dataDir: string, inContainer = existsSync("/.dockerenv
           const was = await own(who, name);
           if (was) await act(was.Id, "remove");
           const labels = { ...((spec.Labels as Record<string, string> | undefined) ?? {}), [OWNER_LABEL]: who };
-          await checked("POST", `/containers/create?name=${encodeURIComponent(name)}`, { ...spec, Labels: labels });
+          const { Id } = await checked<{ Id: string }>("POST", `/containers/create?name=${encodeURIComponent(name)}`, { ...spec, Labels: labels });
+          const refused = await notWhosToMake(who, name, (await inspect(Id))!);
+          if (refused) {
+            await act(Id, "remove");
+            throw new DockerError(refused, 403);
+          }
           return (await get(name))!;
         },
         async start(name) {

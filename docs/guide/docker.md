@@ -169,7 +169,7 @@ What it gives (`extensions/docker/src/api.ts`, with its types):
 | `sharedNetwork()` | The network mode for a container on the portal's own network ([below](#a-container-on-the-portal-s-network)) |
 | `images.present(image)`, `images.ensure(image, onProgress?)` | Whether an image is there; downloads it when it is not, telling `onProgress` how it goes. One download of an image at a time, whoever asks |
 | `containers.list()`, `containers.get(name)` | Your containers; a container by name, with `owner` saying whose it is and `labels` the labels it was made with |
-| `containers.create(name, spec)` | Makes one, not started, from Docker's own create body (`Image`, `Env`, `Cmd`, `HostConfig`, …). One of yours by that name is removed first |
+| `containers.create(name, spec)` | Makes one, not started, from Docker's own create body (`Image`, `Env`, `Cmd`, `HostConfig`, …). One of yours by that name is removed first. One on a network that is not yours, or sharing the network of a container that is neither yours nor the portal's, is refused |
 | `containers.inspect(name)` | How your container was made and how it stands: Docker's own inspect body (`Config`, `HostConfig`, `State`, …), as `create` takes Docker's own create body. Nothing where there is none |
 | `containers.update(name, changes)` | Changes your container as it is, running or not, from Docker's own update body (`RestartPolicy`, and the resources: `Memory`, `NanoCpus`, …): it is neither made again nor restarted, and what the change does not name stays ([below](#when-the-machine-restarts)) |
 | `containers.exec(name, cmd, options?)` | Runs a command in your running container, and gives what it wrote and how it ended ([below](#running-a-command-in-a-container)) |
@@ -190,7 +190,16 @@ its name (the label `pithagoras.extension`), and it may start, stop, change,
 remove, read and run commands in only those, and the ones it took over: another
 extension's, or a container nobody made through Docker, is refused until it is
 taken over. Which ones it took over is kept in Docker's own folder in the
-portal's data folder.
+portal's data folder. A container is made on your networks and Docker's own
+(`bridge`, `host`, `none`) alone: `containers.create` reads back from Docker
+the networks it put the container on, by `HostConfig.NetworkMode` and by
+`NetworkingConfig.EndpointsConfig`, whether the body named them by name or by
+id, and refuses one on another extension's network or on one nobody made, with
+403, taking what Docker made away again. It refuses in the same way a container
+that would share the network (`container:<name or id>`) of a container that is
+neither yours nor the portal's own, or that is not there: Docker would keep that
+one by its name, and the container would share the network of whichever is made
+under it later.
 
 ### Running a command in a container
 
@@ -241,7 +250,11 @@ same, keeping its memory and its token.
 
 A container on the portal's network reaches everything the portal reaches. One
 that runs code from elsewhere goes on a network of its own instead
-([below](#a-container-on-a-network-of-its-own)).
+([below](#a-container-on-a-network-of-its-own)). What one on the portal's
+network listens for on 0.0.0.0 is reached, where the portal runs in a container
+of its own, by every container on a network of an extension's that the portal
+is put on ([below](#a-container-on-a-network-of-its-own)): listen on 127.0.0.1
+where the portal is all that calls it.
 
 ### A container on a network of its own
 
@@ -271,7 +284,14 @@ on it, and no route onto it: the containers on it reach one another, by name,
 and nothing else. What Docker made is read back, and a Docker that made it with
 a gateway after all (Docker before 28.0, which has no `isolated`) is refused,
 with the network taken away again. One of yours by that name is kept as it is;
-one with a way out is refused. Your server listens on 0.0.0.0 of its own
+one with a way out is refused. The machine's side of the bridge still has an
+IPv6 link-local address (`fe80::`), as every bridge of Docker's has; on a
+network with no IPv6, Docker turns IPv6 off on each container's interface on it
+(`net.ipv6.conf.<interface>.disable_ipv6`), so a container there has no IPv6
+but its own loopback, and code in it cannot turn it on again: a container's
+`/proc/sys` is read-only. A create body that turns it on, with the endpoint's
+driver option `com.docker.network.endpoint.sysctls`, gives the container that
+way to the machine back. Your server listens on 0.0.0.0 of its own
 container, as only what is on its network reaches it.
 
 `networks.reach(name, container, port)` gives where the portal reaches `port`
@@ -313,10 +333,16 @@ differ. Docker sets that id when the container first starts: it is empty for
 one that was made and never started.
 
 What a container on the network still reaches, where the portal runs in a
-container of its own, is what the portal's container listens on 0.0.0.0: the
-portal's own port, behind its sign-in. Not its 127.0.0.1, its other networks
-or the containers on them. A forwarder's port on 127.0.0.1 is open to every
-process on the machine, as a port of a server on the portal's loopback is.
+container of its own, is what is listened for on 0.0.0.0 in the portal's
+container's network namespace: the portal's own port, behind its sign-in, and
+the port of every container that shares that namespace
+([above](#a-container-on-the-portal-s-network)) and listens on every interface.
+Of the portal's own extensions, Understory's does (3800), and asks for its
+token. Not the namespace's 127.0.0.1, its other networks or the containers on
+them. Where the portal is in the machine's network namespace, and a forwarder
+leads onto the network, a container on it reaches the forwarder's port alone,
+which leads back to your container. A forwarder's port on 127.0.0.1 is open to
+every process on the machine, as a port of a server on the portal's loopback is.
 
 Each network takes one of Docker's address pools, of which there are about 31
 by default; a forwarder's own network takes one more.

@@ -113,7 +113,8 @@ export interface Docker {
    * portal's container is made again, and a container made with the old one is then to be made again with the new.
    * Refused, with an Error that says what to do, on another system than Linux outside a container, or where the
    * portal's container is not found running. A container that runs code from elsewhere (the agent's) is on a network
-   * of its own instead (`networks`), where it reaches nothing of the portal's.
+   * of its own instead (`networks`), where it reaches nothing of the portal's but, for a portal in a container of its
+   * own network namespace, what is listened for on 0.0.0.0 in that namespace (`networks.reach`).
    */
   sharedNetwork(): Promise<string>;
   images: {
@@ -128,7 +129,11 @@ export interface Docker {
     get(name: string): Promise<ContainerInfo | undefined>;
     /**
      * Made, and not started, from `spec`, under `name`: one of this extension's by that name is removed first. A name
-     * another extension's container has, or one nobody's has, is refused: take that one over first (`adopt`).
+     * another extension's container has, or one nobody's has, is refused: take that one over first (`adopt`). Refused
+     * too, with 403 and what Docker made taken away again, where it would be on a network that is not this extension's
+     * (another extension's, or nobody's), Docker's own `bridge`, `host` and `none` aside, by `HostConfig.NetworkMode` or
+     * `NetworkingConfig.EndpointsConfig`, or share the network (`container:<name or id>`) of a container that is
+     * neither this extension's nor the portal's own, or that is not there.
      */
     create(name: string, spec: ContainerSpec): Promise<ContainerInfo>;
     start(name: string): Promise<void>;
@@ -174,7 +179,10 @@ export interface Docker {
     /**
      * A network for this extension's containers that has no way out: Docker's bridge, internal, in the gateway mode
      * `isolated`, with no IPv6. Nothing on it reaches the machine, the local network or the internet, and the machine
-     * has no way onto it either; the containers on it reach one another, by name. Made with this extension's name on
+     * has no way onto it either; the containers on it reach one another, by name. With no IPv6 on it, Docker turns IPv6
+     * off on each container's interface on it, which keeps the container from the IPv6 address the machine still has on
+     * the bridge (fe80::): a `spec` that turns it on again (the endpoint's driver option
+     * `com.docker.network.endpoint.sysctls`) gives that way to the machine back. Made with this extension's name on
      * it; one of its own by that name is kept as it is. Refused for a name another extension's network has, or one
      * nobody's has, and refused, with what was made taken away again, where Docker makes it with a way out after all:
      * Docker Engine before 28.0 has no `isolated`.
@@ -193,7 +201,10 @@ export interface Docker {
      * Each call puts right what is not as it should be: a portal's container made again, with a new id, is put on the
      * network, and a forwarder that is not as it would be made now, or is gone, is made again, and started where it is
      * stopped. Refused for a network or a container that is not this extension's, a container that is not on the
-     * network, and a portal whose container shares another container's network namespace.
+     * network, and a portal whose container shares another container's network namespace. With the portal's container
+     * on the network, the containers on it reach what is listened for on 0.0.0.0 in the portal's network namespace: the
+     * portal's own port, and that of every container that shares the namespace (`sharedNetwork`) and listens on every
+     * interface. Through a forwarder they reach its port alone, which leads back to `container`.
      */
     reach(name: string, container: string, port: number): Promise<Reach>;
     /**
