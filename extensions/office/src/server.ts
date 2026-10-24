@@ -6,7 +6,9 @@
  *      crypto.randomBytes(32).toString("hex"), reused on every later boot -- one secret for callback JWTs,
  *      document tickets AND editor-config signing: plan 5.6).
  *   2. registerTools({record}), wirePing({root, record}) -- both audit sinks land in portal().audit AND a log line.
- *   3. The forcesave-first hook (plan 5.7) via setForcesaveHook(makeForcesaveHook(dd)) -- v1: documented below.
+ *   3. The co-editor model (plan 5.7): there is NO co-editing switch and NO hook to wire -- office_edit
+ *      proceeds under the strict mtime/revision gate no matter who has the editor open, and a stale edit is
+ *      refused loudly as a conflict (fail loud, re-read + retry). Nothing here installs any refusal machinery.
  *   4. callback.configure(...) once, with getState = () => container.readDsRecord(root) and the boot secret;
  *      live.setMetaResolver(docId -> store.getDoc(docId, root)?.mtimeMs ?? null).
  *   5. The UI routes on portal.router (mounted by core at /api/x/pithagoras-office, session-gated there): see the
@@ -17,11 +19,15 @@
  *      is what document.url and editorConfig.callbackUrl point at in the minted config (a container cannot fetch a
  *      browser-only origin; "container:<id>" origins have no URL at all). Divergence from the contract's one-liner,
  *      documented.
- *   7. Boot: settleKept() (.trash >7d sweep + index-vs-disk prune) + container.lookAfter() (adopt an existing DS),
- *      then a 30_000 ms unref'd interval that re-runs both. The returned cleanup closes the listener and clears it.
+ *   7. Boot: settleKept() (.trash >7d sweep + index-vs-disk prune) FIRST, then the workspace scan
+ *      (store.scanWorkspace over portal().folders.list(): every .docx/.xlsx of the agent homes and projects
+ *      indexed IN PLACE -- manual import is gone, the scanned file IS the document; POST /documents/rescan
+ *      re-runs it on demand) + container.lookAfter() (adopt an existing DS),
+ *      then a 30_000 ms unref'd interval that re-runs settleKept+lookAfter. The returned cleanup closes the listener and clears it.
  *   8. deps.js, the pithagoras-docs pattern: ensureDependencies runs at boot IN THE BACKGROUND (this module has NO
  *      static jszip import, so a folder without node_modules imports cleanly) and arms jsZip() to wait for it --
- *      the first template/import call blocks on the install; later calls use the one cached load.
+ *      the first template call blocks on the install; later calls use the one cached load. A create that still
+ *      hits an unready dependency answers 503 code "dependencies_pending" (retryable) and logs why.
  *
  * dsOrigin(): ONE function, per the contract -- the browser-facing origin the editor page loads api.js from, read
  * straight out of ds.json (network-mode option (a), plan 5.2: host-networked DS at http://127.0.0.1). When the
@@ -44,7 +50,7 @@ import * as store from "./store";
 import * as live from "./live";
 import * as callback from "./callback";
 import { wirePing } from "./ping";
-import { registerTools, setForcesaveHook } from "./tools";
+import { registerTools } from "./tools";
 import { ensureDependencies } from "../deps.js"; // the pithagoras-docs pattern: its own node_modules installed at boot, in the background
 import { armJsZipInstall } from "./jszip";
 
@@ -123,7 +129,7 @@ export function jwtSecret(root?: string): string {
 }
 
 /* ------------------------------------------------------------------ */
-/* settleKept + forcesave                                              */
+/* settleKept                                                          */
 /* ------------------------------------------------------------------ */
 
 /** Reconcile the library with what is on disk: sweep .trash entries older than 7 days, then drop index entries
@@ -134,26 +140,24 @@ export function settleKept(root?: string): { sweptTrash: number; prunedDocs: str
   return { sweptTrash: store.sweepTrash(dd), prunedDocs: store.pruneMissingDocs(dd) };
 }
 
-/** The real forcesave-first hook (plan 5.7 tier-1): what an office_edit does BEFORE it may write over a doc that a
- * human has open in DS. It resolves TRUE only when a force-save for every open session completed AND persisted to
- * disk; anything less must make the edit refuse, so v1 -- which has no server-side command that forces a dirty DS
- * session to persist (the plan delivers "if the session reports unsaved state (appstate), trigger forcesave first and
- * apply after its status-6 persists" as a browser-side DocsAPI command on the editor page, M0/client-tier work) --
- * resolves FALSE with one audit line naming the sessions. office_edit then answers error:session_open instead of
- * risking an unsaved buffer (the earlier proceed-under-the-revision-gate acceptance is retracted: the review demanded
- * fail-closed). Nobody open -> true, a pure no-op that leaves the revision gate to decide. */
-export function makeForcesaveHook(): (docId: string) => Promise<boolean> {
-  return async (docId: string): Promise<boolean> => {
-    const users = live.usersOf(docId);
-    if (!users.length) return true; // nobody open any more -- the revision gate is all we need
-    recordAudit({ subject: docId, reason: `forcesave requested while ${users.length} editor session(s) are open; the browser-side force-save command is M0/client-tier (plan 5.7) -- NOT confirmed, so the edit is refused (error:session_open)` });
-    return false;
-  };
-}
-
 /* ------------------------------------------------------------------ */
 /* small response helpers                                              */
 /* ------------------------------------------------------------------ */
+
+/** A failure of the LAZY jszip load (deps.js): its module import is refused while npm still installs in the
+ * background at boot, or the install failed and the next call has not retried yet. Recognized on the error chain,
+ * not by message cosmetics alone: ERR_MODULE_NOT_FOUND naming jszip, or a message that names the dependency
+ * install. A 503 retryable answer is right for BOTH (the other codes -- exists/corrupt index -- are not). */
+function isDependencyError(e: unknown): boolean {
+  let cur: unknown = e;
+  for (let i = 0; cur && i < 10; i++) {
+    const ce = cur as { code?: string; message?: string };
+    if (ce.code === "ERR_MODULE_NOT_FOUND" && /jszip/i.test(ce.message ?? "")) return true;
+    if (/Cannot find package 'jszip'|installing its dependencies|Could not install its dependencies/i.test(ce.message ?? "")) return true;
+    cur = (cur as { cause?: unknown }).cause;
+  }
+  return false;
+}
 
 const CODE_STATUS: Record<string, number> = {
   not_found: 404,
@@ -172,8 +176,9 @@ function codedResponse(res: { status: (c: number) => { json: (b: unknown) => voi
   res.status(CODE_STATUS[ce.code ?? ""] ?? 500).json({ error: ce.message, ...(ce.code ? { code: ce.code } : {}) });
 }
 
+/** Where a doc's bytes live NOW: a scanned doc's real workspace file (DocMeta.path), else its library folder. */
 function fileFor(root: string, doc: store.DocMeta): string {
-  return path.join(root, "docs", doc.docId, `${doc.title}.${doc.ext}`);
+  return doc.path ?? path.join(root, "docs", doc.docId, `${doc.title}.${doc.ext}`);
 }
 
 /** Content-Disposition for a download: an ASCII fallback name plus the RFC 5987 UTF-8 form for any non-ASCII title. */
@@ -302,10 +307,14 @@ function registerRoutes(dd: string, secret: string): void {
       // every doc gets an entry -- the client badge code reads locks[docId] without a null check
       locks[d.docId] = live.usersOf(d.docId).map((u) => ({ id: u.id, name: u.name }));
     }
-    res.json({ enabled: s.enabled, imageTag: s.imageTag, coEdit: s.coEdit, container: c, docs, locks });
+    res.json({ enabled: s.enabled, imageTag: s.imageTag, container: c, docs, locks });
   });
 
-  /** POST /documents {title, type:"word"|"cell", owner?} -> 201 meta; 409 exists. */
+  /** POST /documents {title, type:"word"|"cell", owner?} -> 201 meta; 409 exists. A jszip load failure is NOT the
+   * ordinary coded response: the dependency may still be installing in the background at boot (deps.js), so the
+   * answer is a retryable 503 with code "dependencies_pending" -- the UI shows it verbatim and the click never dies
+   * silently. Every other failure is logged too, so a live failure finally LEAVES A LINE in the portal's log
+   * (the pre-fix routes logged nothing, which is why the first live create-failure had no trace to read). */
   r.post("/documents", json, async (req, res) => {
     const body = (req.body ?? {}) as Record<string, unknown>;
     const title = typeof body.title === "string" ? body.title : "";
@@ -318,6 +327,27 @@ function registerRoutes(dd: string, secret: string): void {
       recordAudit({ subject: title, reason: `created ${doc.ext} document ${doc.docId}`, chatId: owner ?? undefined });
       res.status(201).json(doc);
     } catch (e) {
+      if (isDependencyError(e)) {
+        logLine(`POST /documents failed while its jszip dependency is not ready yet: ${(e as Error).message}`);
+        return res.status(503).json({
+          error: "the document templates are not ready yet -- the extension's jszip dependency is still installing in the background (or its install failed; see the portal log). Retry in a few seconds.",
+          code: "dependencies_pending",
+        });
+      }
+      logLine(`POST /documents failed: ${(e as Error).message}`);
+      codedResponse(res, e);
+    }
+  });
+
+  /** POST /documents/rescan -> { added, updated }: re-run the workspace scan NOW over every agent folder (fresh from
+   * portal().folders.list()), in addition to the automatic one at boot. The library UI's Rescan button calls it. */
+  r.post("/documents/rescan", json, async (_req, res) => {
+    try {
+      const out = store.scanWorkspace(portal().folders.list().map((f) => f.path), dd);
+      logLine(`workspace rescan: ${out.added} added, ${out.updated} refreshed`);
+      res.json(out);
+    } catch (e) {
+      logLine(`workspace rescan failed: ${(e as Error).message}`);
       codedResponse(res, e);
     }
   });
@@ -367,35 +397,6 @@ function registerRoutes(dd: string, secret: string): void {
     res.json({ ok: true });
   });
 
-  /** POST /import {path, title?} -> copy into the library. The path is resolved server-side and MUST land inside an
-   * agent workspace folder (folders.allowed on its parent) -- plan 5.5's "imports only from folders the agents work in".
-   * The gate runs on the REALPATHED file: statSync/copyFileSync below follow symlinks, so a link planted inside an
-   * allowed folder must not smuggle a file outside it (CWE-22). */
-  r.post("/import", json, async (req, res) => {
-    const body = (req.body ?? {}) as Record<string, unknown>;
-    const given = typeof body.path === "string" ? body.path : "";
-    if (given.trim() === "") return res.status(400).json({ error: "the body needs { path: '<file to import>' } (absolute, or relative to the portal's cwd)" });
-    const abs = path.resolve(given);
-    let real: string;
-    try {
-      real = fs.realpathSync(abs); // resolves symlinks in every component; ENOENT when the file is missing
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === "ENOENT") return res.status(404).json({ error: `no such file ${abs}`, code: "not_found" });
-      return codedResponse(res, err);
-    }
-    const parent = path.dirname(real); // the gate sees where the bytes REALLY live
-    if (!portal().folders.allowed(parent)) {
-      return res.status(403).json({ error: `the import source must live inside an agent workspace folder: ${parent} is not allowed by folders.allowed`, code: "not_allowed" });
-    }
-    try {
-      const doc = store.importFile(real, { title: typeof body.title === "string" && body.title !== "" ? body.title : undefined }, dd);
-      recordAudit({ subject: doc.title, reason: `imported ${doc.ext} from ${abs}` });
-      res.status(201).json(doc);
-    } catch (e) {
-      codedResponse(res, e);
-    }
-  });
-
   /** GET /documents/:id/export -> a FRESH copy of the current bytes, exported to a temp dir, served, and the temp
    * gone again (store.exportDoc writes `${title}.ext` next to nothing else -- nothing is ever overwritten). */
   r.get("/documents/:id/export", async (req, res) => {
@@ -435,7 +436,8 @@ function registerRoutes(dd: string, secret: string): void {
     res.json({ ...config, token: signJwt(config, CONFIG_TTL_MS, secret, "editor-config"), apiJs: `${dsOrigin(dd)}/web-apps/apps/api/documents/api.js` });
   });
 
-  /** POST /settings {enabled?, imageTag?, coEdit?} -> saved + side effects: enabling fires ensureContainer WITHOUT
+  /** POST /settings {enabled?, imageTag?} -> saved + side effects: enabling fires ensureContainer WITHOUT
+   * (There is NO co-editing switch in this payload: the agent is a co-editor under the revision gate, full stop.)
    * awaiting it forever (catch+log; the response says `starting:true` and reports the container state AS OF NOW --
    * a poller watches it arrive), disabling stops it now. :latest is refused -- a moved tag bricks co-editing keys. */
   r.post("/settings", json, async (req, res) => {
@@ -452,14 +454,10 @@ function registerRoutes(dd: string, secret: string): void {
       if (/:(latest|stable)$/i.test(tag) || tag.endsWith("@latest")) return res.status(400).json({ error: "never pin :latest -- it moves under you and breaks co-editing keys", code: "invalid_image_tag" });
       patch.imageTag = tag;
     }
-    if ("coEdit" in body) {
-      if (typeof body.coEdit !== "boolean") return res.status(400).json({ error: "{ coEdit } must be a boolean", code: "invalid_coedit" });
-      patch.coEdit = body.coEdit as boolean;
-    }
-    if (Object.keys(patch).length === 0) return res.status(400).json({ error: "no known setting in the body -- send { enabled?, imageTag?, coEdit? }" });
+    if (Object.keys(patch).length === 0) return res.status(400).json({ error: "no known setting in the body -- send { enabled?, imageTag? }" });
 
     const settings = saveSettings(patch, dd);
-    recordAudit({ subject: "pithagoras-office settings", reason: `enabled=${settings.enabled} imageTag=${settings.imageTag} coEdit=${settings.coEdit}` });
+    recordAudit({ subject: "pithagoras-office settings", reason: `enabled=${settings.enabled} imageTag=${settings.imageTag}` });
 
     let starting = false;
     if (patch.enabled === true && !before.enabled) {
@@ -532,10 +530,11 @@ export default async function officeServer(portalObj: ServerPortal): Promise<() 
   const dd = portal().dataDir();
   const secret = ensureJwtSecret(dd); // the one HS256 secret: callbacks, tickets and configs all sign with it (plan 5.6)
 
-  // the seams, exactly as their module headers contract them (audit lands in portal().audit AND a log line)
+  // the seams, exactly as their module headers contract them (audit lands in portal().audit AND a log line).
+  // NOTE: there is NO co-editing switch and no flush-before-write hook to install here -- office_edit runs under
+  // the strict mtime/revision gate with human editor sessions open or not (co-editor model; fail loud, re-read + retry).
   registerTools({ root: dd, record: recordAudit });
   wirePing({ root: dd, record: recordAudit });
-  setForcesaveHook(makeForcesaveHook());
   callback.configure({ getState: () => container.readDsRecord(dd), getSecret: () => secret, root: dd });
   live.setMetaResolver((docId) => store.getDoc(docId, dd)?.mtimeMs ?? null);
 
@@ -554,6 +553,15 @@ export default async function officeServer(portalObj: ServerPortal): Promise<() 
     settleKept(dd);
   } catch (e) {
     logLine(`settleKept at boot failed: ${(e as Error).message}`);
+  }
+  // the workspace scan indexes every .docx/.xlsx of the agent folders IN PLACE (product decision: no manual import
+  // any more -- what the agents work in IS the library). settleKept runs FIRST on purpose: it prunes entries whose
+  // file vanished while the portal slept, so the scan then REFRESHES only surviving files instead of re-adding them.
+  try {
+    const out = store.scanWorkspace(portal().folders.list().map((f) => f.path), dd);
+    logLine(`workspace scan at boot: ${out.added} added, ${out.updated} refreshed`);
+  } catch (e) {
+    logLine(`workspace scan at boot failed: ${(e as Error).message}`);
   }
   container.lookAfter(undefined, dd); // fire-and-forget by contract; logs its own failures
 

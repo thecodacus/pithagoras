@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { LuDownload, LuFileText, LuPresentation, LuTable, LuTrash2, LuUsers, LuUpload } from "react-icons/lu";
+import { useEffect, useMemo, useState } from "react";
+import { LuArrowDownUp, LuDownload, LuFileText, LuPresentation, LuRefreshCw, LuTable, LuTrash2, LuUsers, LuUpload } from "react-icons/lu";
 import { officeUrl, portal, t } from "../portal";
 import { api, sayError, type OfficeDoc, type OfficeState } from "./api";
 import { editorsIn } from "../office-ui";
@@ -10,8 +10,47 @@ import { refreshOfficeState, useOfficeState } from "./state";
 /**
  * The Office page -- the global tab's view of the library. With `?doc=<id>` in its address it is the full-bleed
  * editor (the docs extension keeps its opened document in the page the same way); without it, the workbench:
- * a new-document line, an import line, and the list of every document with who owns it and who is in it.
+ * a new-document line and the list of every document with who owns it and who is in it. The list itself is the
+ * workspace scan -- every .docx/.xlsx of the agent homes and projects, indexed at boot and on Rescan, each in
+ * place (its file IS the document) -- plus what was made here.
  */
+
+/** How the library sorts: one of four keys, one direction. Persisted in localStorage (the portal's own local()
+ * storage), default modified-descending -- newest work on top is what a document list should lead with. The sort
+ * is pure client-side over the polled docs payload: the server hands back the raw meta, ordering is the page's.
+ */
+type SortKey = "name" | "modified" | "size" | "type";
+const SORT_STORE_KEY = "po-sort";
+function loadSort(): { key: SortKey; dir: 1 | -1 } {
+  try {
+    const raw = JSON.parse(localStorage.getItem(SORT_STORE_KEY) ?? "");
+    if (raw && ["name", "modified", "size", "type"].includes(raw.key) && (raw.dir === 1 || raw.dir === -1)) return raw;
+  } catch {
+    // never held: fall through to the default
+  }
+  return { key: "modified", dir: -1 };
+}
+function saveSort(s: { key: SortKey; dir: 1 | -1 }): void {
+  try {
+    localStorage.setItem(SORT_STORE_KEY, JSON.stringify(s));
+  } catch {
+    // private mode: the choice simply does not stick
+  }
+}
+/** The one comparator for every key -- name by locale (the same order listDocs uses), modified by mtimeMs (the
+ * file's own revision clock), size in bytes, type word-before-cell. */
+function compareDocs(a: OfficeDoc, b: OfficeDoc, key: SortKey): number {
+  switch (key) {
+    case "name":
+      return a.title.localeCompare(b.title);
+    case "modified":
+      return a.mtimeMs - b.mtimeMs;
+    case "size":
+      return a.sizeBytes - b.sizeBytes;
+    case "type":
+      return a.ext === b.ext ? 0 : a.ext < b.ext ? -1 : 1;
+  }
+}
 
 function extMark(doc: OfficeDoc) {
   return doc.ext === "docx" ? (
@@ -243,86 +282,113 @@ function NewDocument() {
   );
 }
 
-/** Bring an existing .docx/.xlsx into the library: its path, which the server half checks against the agent workspace folders. */
-function ImportDocuments() {
+/** Re-run the workspace scan from the page: boot already scanned once, this catches files written straight to
+ * disk since (an agent or a person working in the homes and projects) without waiting for the next portal start.
+ * The answer's counts are said out loud in a hint line, not an alert. */
+function RescanLibrary() {
   portal.locale.use();
-  const [pathIn, setPathIn] = useState("");
-  const [title, setTitle] = useState("");
   const [busy, setBusy] = useState(false);
-  const [problem, setProblem] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
   const go = async () => {
-    if (pathIn.trim() === "" || busy) return;
+    if (busy) return;
     setBusy(true);
-    setProblem(null);
+    setNote(null);
     try {
-      await api.importFile({ path: pathIn.trim(), ...(title.trim() !== "" ? { title: title.trim() } : {}) });
-      setPathIn("");
-      setTitle("");
+      const out = await api.rescanLibrary();
+      setNote(
+        out.added === 0 && out.updated === 0
+          ? t("Nothing new: the library already knew every .docx and .xlsx in the agent folders.")
+          : t("Scan done: {added} indexed, {updated} refreshed.", { added: out.added, updated: out.updated }),
+      );
       void refreshOfficeState();
     } catch (e) {
-      setProblem(sayError(e));
+      setNote(t("The rescan did not work: {error}", { error: sayError(e) }));
     } finally {
       setBusy(false);
     }
   };
   return (
-    <form
-      className="po-form"
-      onSubmit={(e) => {
-        e.preventDefault();
-        void go();
-      }}
-    >
-      <input
-        className={`po-grow ${portal.ui.classes.input}`}
-        value={pathIn}
-        placeholder={t("Path of a .docx or .xlsx to import")}
-        aria-label={t("Path of a .docx or .xlsx to import")}
-        onChange={(e) => setPathIn(e.target.value)}
-      />
-      <input
-        className={portal.ui.classes.input}
-        value={title}
-        maxLength={200}
-        placeholder={t("Title (optional, defaults to the file's name)")}
-        aria-label={t("Title (optional, defaults to the file's name)")}
-        onChange={(e) => setTitle(e.target.value)}
-      />
-      <button type="submit" className={portal.ui.classes.primarySmall} disabled={busy || pathIn.trim() === ""}>
-        {t("Import")}
+    <span className="po-rescan">
+      <button type="button" className={portal.ui.classes.ghost} onClick={() => void go()} disabled={busy} aria-label={t("Rescan the agent folders for .docx and .xlsx files")}>
+        <LuRefreshCw aria-hidden /> {t("Rescan workspace")}
       </button>
-      <span className="po-hint">{t("Absolute or relative to the portal; only files inside an agent workspace folder are accepted.")}</span>
-      {problem && (
-        <portal.ui.ErrorBanner onClose={() => setProblem(null)}>{t("The file could not be imported: {error}", { error: problem })}</portal.ui.ErrorBanner>
-      )}
-    </form>
+      {note && <span className="po-hint">{note}</span>}
+    </span>
+  );
+}
+
+/** The list's sort controls: a key (name / modified / size / type) and the direction, persisted per browser. */
+function SortBar({ sort, onSort }: { sort: { key: SortKey; dir: 1 | -1 }; onSort: (next: { key: SortKey; dir: 1 | -1 }) => void }) {
+  portal.locale.use();
+  return (
+    <span className="po-sortbar">
+      <portal.ui.Select
+        size="sm"
+        value={sort.key}
+        onChange={(key) => onSort({ ...sort, key })}
+        aria-label={t("Sort the document list by")}
+        options={[
+          { value: "modified", label: t("Modified") },
+          { value: "name", label: t("Name") },
+          { value: "size", label: t("Size") },
+          { value: "type", label: t("Type") },
+        ]}
+      />
+      <button
+        type="button"
+        className={portal.ui.classes.ghost}
+        aria-label={sort.dir === -1 ? t("Sorted descending; switch to ascending") : t("Sorted ascending; switch to descending")}
+        title={sort.dir === -1 ? t("Descending (newest first)") : t("Ascending")}
+        onClick={() => onSort({ ...sort, dir: sort.dir === -1 ? 1 : -1 })}
+      >
+        <LuArrowDownUp aria-hidden />
+        {sort.dir === -1 ? t("↓ newest first") : t("↑ oldest first")}
+      </button>
+    </span>
   );
 }
 
 function Library() {
   portal.locale.use();
   const state = useOfficeState();
+  const [sort, setSort] = useState(loadSort); // persisted per browser; default modified-descending
+  const chooseSort = (next: { key: SortKey; dir: 1 | -1 }) => {
+    setSort(next);
+    saveSort(next);
+  };
+  const docs = useMemo(
+    () => (state ? [...state.docs].sort((a, b) => compareDocs(a, b, sort.key) * sort.dir) : []),
+    [state, sort],
+  ); // client-side ordering of the polled payload; the server hands back raw meta
   return (
     <div className="po-page">
       <portal.ui.PageHeader
         icon={<LuPresentation />}
         title={t("Office")}
-        description={t("The office documents of this portal, in their own library: open them, make them, import and export them.")}
+        description={t("The office documents of this portal: everything made here plus every .docx or .xlsx found across the agent homes and projects -- indexed automatically at boot and by Rescan, editable in place.")}
       />
       {!state ? (
         <portal.ui.RowsSkeleton rows={4} label={t("Loading…")} />
       ) : (
         <>
           <NewDocument />
-          <ImportDocuments />
           {state.docs.length === 0 ? (
-            <portal.ui.Empty>{t("No documents yet. Make a Word or sheet document above, import an existing one, or ask an agent to write one.")}</portal.ui.Empty>
+            <>
+              <portal.ui.Empty>{t("No documents yet. Make a Word or sheet document above, ask an agent to write one -- or drop a .docx / .xlsx into any agent folder and press Rescan: everything is indexed here automatically, in place.")}</portal.ui.Empty>
+              <RescanLibrary />
+            </>
           ) : (
-            <ul className="po-list">
-              {state.docs.map((doc) => (
-                <DocRow key={doc.docId} doc={doc} />
-              ))}
-            </ul>
+            <>
+              <span className="po-listhead">
+                <SortBar sort={sort} onSort={chooseSort} />
+                <RescanLibrary />
+              </span>
+              <ul className="po-list">
+                {docs.map((doc) => (
+                  <DocRow key={doc.docId} doc={doc} />
+                ))}
+              </ul>
+            </>
           )}
         </>
       )}

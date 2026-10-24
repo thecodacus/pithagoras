@@ -22,7 +22,17 @@ test("loadSettings: missing file -> defaults", () => {
 test("loadSettings: partial file merges field by field, unknown fields ignored", () => {
   const root = tmpRoot();
   fs.writeFileSync(path.join(root, "settings.json"), JSON.stringify({ enabled: true, imageTag: "some/other:9.9", nonsense: 42 }));
-  assert.deepEqual(loadSettings(root), { enabled: true, imageTag: "some/other:9.9", coEdit: true });
+  assert.deepEqual(loadSettings(root), { enabled: true, imageTag: "some/other:9.9" });
+});
+
+test("loadSettings: a LEGACY file carrying the removed \"coEdit\" key loads without crashing and simply ignores it", () => {
+  const root = tmpRoot();
+  fs.writeFileSync(path.join(root, "settings.json"), JSON.stringify({ enabled: true, imageTag: "some/other:9.9", coEdit: true }));
+  assert.deepEqual(loadSettings(root), { enabled: true, imageTag: "some/other:9.9" }, "legacy key tolerated and not surfaced");
+  // and saving over the legacy file rewrites it clean (the removed key is dropped, never echoed back)
+  const saved = saveSettings({ enabled: false }, root);
+  assert.deepEqual(saved, { enabled: false, imageTag: "some/other:9.9" });
+  assert.ok(!JSON.stringify(fs.readFileSync(path.join(root, "settings.json"), "utf8")).includes("coEdit"));
 });
 
 test("loadSettings: corrupt JSON -> defaults; non-object JSON -> defaults", () => {
@@ -45,9 +55,10 @@ test("saveSettings: round-trip keeps other fields and ignores unknown patch keys
   const root = tmpRoot();
   const first = saveSettings({ enabled: true }, root);
   assert.deepEqual(first, { ...DEFAULT_SETTINGS, enabled: true });
-  // a later patch must not clobber the earlier one; keys outside OfficeSettings are dropped at runtime
-  const second = saveSettings({ coEdit: false, bogusKey: "x" } as Partial<{ enabled: boolean; imageTag: string; coEdit: boolean }>, root);
-  assert.deepEqual(second, { enabled: true, imageTag: DEFAULT_SETTINGS.imageTag, coEdit: false });
+  // a later patch must not clobber the earlier one; keys outside OfficeSettings (incl. the legacy
+  // "coEdit") are dropped at runtime and never persisted back
+  const second = saveSettings({ imageTag: "pinned/x:2.0", bogusKey: "x" } as Partial<{ enabled: boolean; imageTag: string; coEdit?: boolean }>, root);
+  assert.deepEqual(second, { enabled: true, imageTag: "pinned/x:2.0" });
   assert.deepEqual(loadSettings(root), second);
 });
 

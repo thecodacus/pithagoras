@@ -8,9 +8,10 @@
  *   2. A synthetic OnlyOffice callback with status 2 arrives on the loopback POST /callback WITHOUT any
  *      session cookie, persists (bytes on disk changed to exactly what body.url served), bumps the index
  *      revision, writes history/<doc>/<rev>.zip from changesurl, and clears the lock AFTER the persist.
- *   3. office_edit against a doc with a live human session present: the forcesave hook is AWAITED before
- *      the edit's own persistBytes runs (observable via the injected counter seam setForcesaveHook), and a
- *      revision that moves DURING the hook surfaces as error:revision_mismatch -- nothing is overwritten.
+ *   3. office_edit against a doc with a live human session present: the co-editor model means the session
+ *      neither blocks nor gates the edit -- a matching revision succeeds alongside the open editor, and a
+ *      revision that moved underneath (an external co-editor save) surfaces as error:revision_mismatch
+ *      CONFLICT -- nothing is overwritten.
  *
  * The gate (why it is an env flag + a docker CLI probe instead of host.docker()): the contract says these
  * tests are "docker-gated on docker.available()", but src/host.ts' docker() mirrors the portal's
@@ -41,7 +42,7 @@ import { mintTicket } from "../src/tickets";
 import { signJwt } from "../src/jwt";
 import { makeKey } from "../src/callback";
 import { parseDocx, rewriteZip } from "../src/ooxml";
-import { registerTools, setForcesaveHook, __resetToolsForTests } from "../src/tools";
+import { registerTools, __resetToolsForTests } from "../src/tools";
 
 const FIXTURES = fileURLToPath(new URL("../fixtures/", import.meta.url));
 /** The committed sample docx doubles as the "what the DS saved" payload in test 2: it differs from the
@@ -236,10 +237,10 @@ IT("synthetic status-2 callback WITHOUT any session cookie: persist happened (by
 });
 
 /* ------------------------------------------------------------------ */
-/* 3. forcesave ordering + mid-flight revision bump                    */
+/* 3. co-editor model: open session + revision gate                    */
 /* ------------------------------------------------------------------ */
 
-IT("office_edit with a live session: the forcesave hook is AWAITED before the edit persists; a revision bump during the hook surfaces as revision_mismatch", async () => {
+IT("office_edit with a live human session: proceeds under the revision gate (matching revision succeeds); an external save that moves the revision underneath is refused as a CONFLICT", async () => {
   __resetToolsForTests(); // this file's process starts clean; be explicit
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "office-it-tools-"));
   const home = "chat-aegis-home";
@@ -257,54 +258,42 @@ IT("office_edit with a live session: the forcesave hook is AWAITED before the ed
   });
   assert.ok(tools2.office_edit, "office_edit registered into the agent home (ownership scope is real here)");
 
-  /* Scenario A -- ordering without a bump: the hook's counter must show it ran to completion BEFORE the
-   * edit's own persist landed; while it runs, the OLD bytes are still on disk. */
+  /* Scenario A -- the open session must NEITHER block NOR gate: a matching revision succeeds alongside it. */
   const docA = await store.createDoc({ title: "Order Doc", type: "word", owner: home }, root); // template says "New document"
-  live.setUser(docA.docId, { id: "u-sam", name: "Sam" }, true); // a fake human with the editor open (coEdit default ON)
+  live.setUser(docA.docId, { id: "u-sam", name: "Sam" }, true); // a fake human with the editor open
   const fileA = path.join(root, "docs", docA.docId, "Order Doc.docx");
-  const eventsA: string[] = [];
-  let hookSawOriginalBytes = false;
-  setForcesaveHook(async () => {
-    eventsA.push("hook:start");
-    // The library file is a zip, so "the old content" is checked through our own parser, not raw bytes.
-    hookSawOriginalBytes = parseDocx(fs.readFileSync(fileA)).text.includes("New document"); // still the pre-edit content while the hook runs
-    await new Promise((r) => setTimeout(r, 25)); // a slow status-6 round-trip to DS, simulated
-    eventsA.push("hook:end");
-    return true; // the (simulated) forcesave completed and persisted -> confirmed
-  });
-  await tools2.office_edit.execute(null, { id: docA.docId, ops: [{ quote: "New document", replacement: "Edited by the agent" }], baseRevision: docA.mtimeMs });
-  setForcesaveHook(null);
-  eventsA.push("edit:resolved"); // recorded only after office_edit -- and its persistBytes -- finished
-  assert.deepEqual(eventsA, ["hook:start", "hook:end", "edit:resolved"], "the hook fully resolved BEFORE the edit (and its persist) completed");
-  assert.ok(hookSawOriginalBytes, "while the hook ran, the pre-edit bytes were still on disk -- the edit's persistBytes cannot have run yet");
-  assert.ok(parseDocx(fs.readFileSync(fileA)).text.includes("Edited by the agent"), "the edit landed at a new revision afterwards");
+  // Pin the file mtime to an exact value AND mirror it in the index so the ZERO-tolerance gate is deterministic
+  // (a fresh create can leave a sub-ms stat drift on some filesystems; this guest fs also reports utimes'd
+  // values ~1 µs low, so the index mirrors what stat ACTUALLY reads back).
+  fs.utimesSync(fileA, new Date(Date.now() - 10_000), new Date(Date.now() - 10_000));
+  const baseA = fs.statSync(fileA).mtimeMs;
+  { const ip = path.join(root, "index.json"); const raw = JSON.parse(fs.readFileSync(ip, "utf8")); raw.docs.find((d: { docId?: string }) => d.docId === docA.docId).mtimeMs = baseA; fs.writeFileSync(ip, JSON.stringify(raw, null, 2)); }
+  await tools2.office_edit.execute(null, { id: docA.docId, ops: [{ quote: "New document", replacement: "Edited by the agent" }], baseRevision: baseA });
+  assert.ok(parseDocx(fs.readFileSync(fileA)).text.includes("Edited by the agent"), "the edit landed at a new revision while the human session is still open");
   assert.notEqual(store.getDoc(docA.docId, root)!.mtimeMs, docA.mtimeMs);
 
-  /* Scenario B -- a bump MID-FLIGHT: the hook's own save moves the revision, so office_edit must refuse
-   * error:revision_mismatch and leave the human's (the hook's) bytes on disk. */
+  /* Scenario B -- an EXTERNAL co-editor save (persistBytes, the same path the DS callback persist takes)
+   * moves the revision after the agent read it: office_edit must refuse error:revision_mismatch CONFLICT
+   * and leave the human's bytes on disk. */
   const docB = await store.createDoc({ title: "Bump Doc", type: "word", owner: home }, root);
   live.setUser(docB.docId, { id: "u-sam", name: "Sam" }, true);
   const fileB = path.join(root, "docs", docB.docId, "Bump Doc.docx");
-  const eventsB: string[] = [];
-  setForcesaveHook(async (d: string) => {
-    eventsB.push("hook:start");
-    store.persistBytes(store.getDoc(d, root)!, SAVED_DOCX, root); // the DS forcesave lands a NEWER revision under our feet
-    await new Promise((r) => setTimeout(r, 10)); // >1 ms apart so mtime-as-revision actually moves (the gate's threshold)
-    eventsB.push("hook:persisted-newer-revision");
-    return true; // confirmed: the forcesave DID land -- office_edit must now be refused by the RE-GATE, not the hook
-  });
+  // Same pin as Scenario A: the agent reads at exactly this revision (index mirrors the stat readback)...
+  fs.utimesSync(fileB, new Date(Date.now() - 8000), new Date(Date.now() - 8000));
+  const baseB = fs.statSync(fileB).mtimeMs;
+  { const ip = path.join(root, "index.json"); const raw = JSON.parse(fs.readFileSync(ip, "utf8")); raw.docs.find((d: { docId?: string }) => d.docId === docB.docId).mtimeMs = baseB; fs.writeFileSync(ip, JSON.stringify(raw, null, 2)); }
+  await new Promise((r) => setTimeout(r, 5)); // guarantee >1 ms of drift: mtime-as-revision moves for real
+  store.persistBytes(store.getDoc(docB.docId, root)!, SAVED_DOCX, root); // ...a human co-editor's save lands a NEWER revision under our feet
   let thrown: unknown;
   try {
-    await tools2.office_edit.execute(null, { id: docB.docId, ops: [{ quote: "New document", replacement: "should never land" }], baseRevision: docB.mtimeMs });
+    await tools2.office_edit.execute(null, { id: docB.docId, ops: [{ quote: "New document", replacement: "should never land" }], baseRevision: baseB });
   } catch (e) {
     thrown = e;
-  } finally {
-    setForcesaveHook(null);
   }
   assert.ok(thrown instanceof Error, "office_edit refused");
   assert.match((thrown as Error).message, /^error:revision_mismatch /, `the refusal carries the coded prefix (got: ${(thrown as Error).message})`);
-  assert.deepEqual(eventsB.slice(0, 2), ["hook:start", "hook:persisted-newer-revision"], "the hook -- including its persist -- completed before the re-gate refused");
-  assert.equal(Buffer.compare(fs.readFileSync(fileB), SAVED_DOCX), 0, "the HUMAN's forcesave is what stayed on disk; the agent edit never wrote");
+  assert.match((thrown as Error).message, /CONFLICT/, "the refusal is an explicit conflict message");
+  assert.equal(Buffer.compare(fs.readFileSync(fileB), SAVED_DOCX), 0, "the HUMAN's save is what stayed on disk; the agent edit never wrote");
 
   __resetToolsForTests();
   live.resetLive();

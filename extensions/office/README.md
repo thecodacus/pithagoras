@@ -6,9 +6,9 @@ Office documents (.docx and .xlsx) edited in a real [OnlyOffice Document Server]
 
 An opt-in package (it requires `pithagoras-docker`). In plain terms, v1 gives you:
 
-- **A document library** on the portal's Office tab: create blank Word/sheet documents, open them full-screen in the embedded OnlyOffice editor, import .docx/.xlsx into the library and export (download) a copy of one, delete (7-day trash).
+- **A document library** on the portal's Office tab: create blank Word/sheet documents, open them full-screen in the embedded OnlyOffice editor, sort the list by name / modified / size / type, and export (download) a copy of one. There is no manual import: every `.docx`/`.xlsx` found across the agent homes and projects (`portal().folders.list()`) is indexed **automatically at boot** (and on demand with the **Rescan workspace** button) — IN PLACE, so the scanned file IS the document and is edited through the same mtime-gated flow. Deleting a workspace-scanned document moves its real file into this library's trash, like everything else: reversible for 7 days.
 - **Agent tools** (`office_list`, `office_create`, `office_read`, `office_edit`, `office_comments`) registered in agent/project home chats. Agents read and edit the SAME files humans edit; writes are quote-based replacements gated on a revision number (the file's mtime), so a stale agent edit fails loudly instead of clobbering a human save.
-- **Co-edit protection, on by default (`coEdit`)**: while a human has the document open in the editor, an agent edit is REFUSED with `error:session_open` until the session closes — an unsaved browser buffer must never be clobbered (the v1 force-save hook can never confirm a flush, so it always refuses rather than proceed). With `coEdit` switched off in settings, agent edits proceed under the plain mtime revision gate even with an editor session open. Every agent revision is recorded for the editor's version history.
+- **Co-editor model (no switch)**: the agent is just another user in the editor, like Office 365 — a human and the agent may edit the same document at the same time, and there is no setting to turn that on or off. Agent edits always proceed under the strict mtime/revision gate; if the file changed since they were read (for example a co-editor's save), NOTHING is written and the tool answers a loud `error:revision_mismatch` CONFLICT naming the open editor session when one stands — re-read and retry. Conflicts are surfaced, not prevented by refusal. Open editors learn about external changes through the existing 5 s polling loop (`live.ts pollState`). Every agent revision is recorded for the editor's version history.
 - **Wake on mention**: when a human comments `@agent` (the doc's owner) or `@<name>` / `@project:<name>` (a named agent/project) and saves, that home chat gets pinged with the quoted comment and gains an audited grant on the document.
 
 ## Requirements
@@ -19,7 +19,7 @@ An opt-in package (it requires `pithagoras-docker`). In plain terms, v1 gives yo
 ## Setup
 
 1. Install/enable the package, then open Settings → office: enable it and press start. The pinned image (default `onlyoffice/documentserver:10.0` — never `:latest`; changing the tag can silently change callback/JWT behavior) is pulled on first start with progress shown in the UI.
-2. Documents appear under the Office tab. Open one to edit; agents work on it through their chat tools.
+2. Documents appear under the Office tab: what you create here, plus every `.docx`/`.xlsx` found across the agent homes and projects — indexed automatically at boot (the scan runs after `settleKept`, so files that vanished while the portal slept are pruned, not re-added), with Rescan picking up anything written straight to disk afterwards. Open one to edit; agents work on it through their chat tools.
 
 ## Where things live, and what is exposed
 

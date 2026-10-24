@@ -16,11 +16,12 @@
  * Revision model (plan 5.5/5.7): the mtimeMs of the library file IS the revision. office_edit
  * takes baseRevision (= the mtimeMs office_read showed), GATES FIRST (>1 ms drift ->
  * "error:revision_mismatch ..." with the fresh mtime, nothing written), and store.persistBytes re-
- * gates strictly at write time anyway. With coEdit on (the DEFAULT) and an open human editor session
- * (live.ts), office_edit REFUSES with error:session_open until the session closes -- v1's forcesave hook
- * (T-WIRE registers it) resolves FALSE while any session is open, because a server-side force-save command
- * does not exist yet (M0/client-tier, plan 5.7): an unsaved human buffer must never be clobbered. With coEdit
- * switched off, the plain revision gate decides even with an open session. A stale baseRevision always fails.
+ * gates strictly at write time anyway (ZERO tolerance: stat-vs-meta must match exactly). The agent is
+ * a CO-EDITOR alongside human editor sessions (live.ts) -- like Office 365 there is NO switch and NO
+ * session check: the edit proceeds under that gate regardless of who else has the document open. If the
+ * file moved on in between (a co-editor's save), NOTHING is written and the tool answers a loud CONFLICT
+ * ("error:revision_mismatch ...", naming the open editor session when one stands) -- re-read and retry.
+ * A stale baseRevision always fails that way.
  *
  * Wakes (plan 5.4 step 4 -- "the drain side"): ping.ts only QUEUES wakes server-side and rings the
  * bell with chats.tell(chatId, {type:"ping"}). The office pi extension registered from THIS factory
@@ -33,7 +34,7 @@
  * record fn, log fn. EVERY one defaults LAZY: the real portal() is read only when a default is used
  * (in production). Mutating ops (office_create, office_edit) call record({subject, reason, chatId})
  * after the write; the default seam is a one-line log via portal().log (ping.ts pattern -- T-WIRE may
- * pass a real audit sink). setForcesaveHook installs the forcesave-first hook; null uninstalls it.
+ * pass a real audit sink).
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -42,7 +43,6 @@ import { portal } from "./host";
 import { getDoc, docsForHome, createDoc, persistBytes, type DocMeta } from "./store";
 import { parseDocx, parseXlsx, editDocx, rewriteZip, type EditOp } from "./ooxml";
 import { usersOf, isLocked } from "./live";
-import { loadSettings } from "./settings";
 import { drainWakeQueue } from "./ping";
 
 /** The UI_RECEIVE bus event chats.tell rings (core server extension-ui.ts and docs/ping.js use the same name). */
@@ -73,22 +73,10 @@ export type ToolsDeps = {
 };
 
 let cfg: ToolsDeps = {};
-/** The forcesave-first hook (plan 5.7): resolves TRUE only when a force-save was actually issued for the open
- * session(s) AND its save landed on disk; office_edit then re-gates on the fresh meta before writing. T-WIRE registers
- * the real one (the DS status-6 command). Anything less than confirmed completion -- no hook at all, or a result that
- * is not true -- makes office_edit REFUSE with error:session_open: an unsaved human buffer must never be clobbered
- * silently. */
-let forcesaveHook: ((docId: string) => Promise<boolean>) | null = null;
 
-/** Install the forcesave-first hook, or pass null to go back to the refusing default. */
-export function setForcesaveHook(fn: ((docId: string) => Promise<boolean>) | null): void {
-  forcesaveHook = fn ?? null;
-}
-
-/** Test seam: drop the module-level seams and the forcesave hook. */
+/** Test seam: drop the module-level seams (the tests' injections are back to the lazy portal defaults). */
 export function __resetToolsForTests(): void {
   cfg = {};
-  forcesaveHook = null;
 }
 
 /* ------------------------------------------------------------------ */
@@ -325,7 +313,7 @@ function installTools(pi: unknown, home: string): void {
   p.registerTool({
     name: "office_edit",
     label: "Edit an office document",
-    description: `Change a Word document of your library by replacing quoted text, as office_read shows it. Each op is {quote, replacement}: the quote must appear in the extracted text (empty replacement removes it), ops apply one after another. baseRevision is the mtimeMs you read (or that your last edit returned): if the document moved on since, NOTHING is written and you are told the fresh revision -- re-read and redo. If a human still has the editor open while co-edit protection (coEdit, on by default) stands, the edit is refused with error:session_open until the editor session closes; with coEdit off it proceeds under the revision gate. You never overwrite an unsaved buffer. Spreadsheets cannot be edited in v1 (a later milestone). All ops are made or none.`,
+    description: `Change a Word document of your library by replacing quoted text, as office_read shows it. Each op is {quote, replacement}: the quote must appear in the extracted text (empty replacement removes it), ops apply one after another. You are a CO-EDITOR alongside any human who has the document open -- there is no session check and no switch; the edit always proceeds under the revision gate: baseRevision is the mtimeMs you read (or that your last edit returned), and if the document moved on since (for example a co-editor's save) NOTHING is written and you hear a CONFLICT with the fresh revision -- re-read and retry. You never clobber a newer revision. Spreadsheets cannot be edited in v1 (a later milestone). All ops are made or none.`,
     promptSnippet: "Edit a Word document: quoted replacements on the revision you read",
     executionMode: "sequential",
     parameters: {
@@ -363,24 +351,15 @@ function installTools(pi: unknown, home: string): void {
       // re-gates strictly at write time too, so this is belt and not only braces.
       let meta = getDoc(doc.docId, rootDir());
       if (!meta) throw new Refusal("not_found", `"${doc.title}" vanished from the library between list and edit`);
-      const stale = (fresh: DocMeta) =>
-        new Refusal("revision_mismatch", `"${fresh.title}" is at revision ${fresh.mtimeMs}, not ${base}: it changed since you read it. Nothing was written. Read it again with office_read, then redo the edit with baseRevision ${fresh.mtimeMs}.`);
+      // The co-editor model: NO session check here (live.ts presence neither allows nor blocks) -- the revision
+      // gate alone decides. When it refuses, say LOUDLY that this is a CONFLICT, name any open human editor so
+      // the agent learns somebody is co-editing, and point at the fresh revision to re-read + retry.
+      const stale = (fresh: DocMeta) => {
+        const humans = usersOf(fresh.docId);
+        const openEditorNote = humans.length > 0 ? ` A human editor (${humans.map((h) => h.name ?? h.id).join(", ")}) still has the document open, so a co-editor is likely behind the change.` : "";
+        return new Refusal("revision_mismatch", `CONFLICT: "${fresh.title}" is at revision ${fresh.mtimeMs}, not ${base}: it changed since you read it. Nothing was written.${openEditorNote} Read it again with office_read, then redo the edit with baseRevision ${fresh.mtimeMs}.`);
+      };
       if (Math.abs(meta.mtimeMs - base) > 1) throw stale(meta);
-
-      // Plan 5.7 (co-editing, fail-closed in v1): while coEdit stands and a human session is open, nothing may
-      // be written over it until the hook confirms a COMPLETED force-save (true), and because that save moves
-      // the file the gate is re-checked on the FRESH meta afterwards. No hook wired, or a round-trip without
-      // confirmation: REFUSE with error:session_open -- an unsaved buffer must never be clobbered silently.
-      // v1's real hook (server.makeForcesaveHook) never confirms while sessions are open, so this branch in
-      // practice always refuses until the editor closes; with coEdit off it is skipped and the gate decides.
-      if (loadSettings(rootDir()).coEdit && usersOf(doc.docId).length > 0) {
-        if (!forcesaveHook) throw new Refusal("session_open", `"${doc.title}" is open in an editor with possibly unsaved changes, and no force-save is available to flush them first: have the editor save (or close), then retry this edit`);
-        const flushed = await forcesaveHook(doc.docId); // a hook that THROWS propagates as a tool failure via guarded()
-        if (!flushed) throw new Refusal("session_open", `"${doc.title}" is open in an editor and its unsaved changes could not be force-saved: have the editor save (or close), then retry this edit`);
-        meta = getDoc(doc.docId, rootDir());
-        if (!meta) throw new Refusal("not_found", `"${doc.title}" vanished from the library between list and edit`);
-        if (Math.abs(meta.mtimeMs - base) > 1) throw stale(meta);
-      }
 
       // word/document.xml out of the archive; damage is `corrupt`, quote problems pass through ooxml's codes.
       const buf = readBytes(doc);
@@ -397,7 +376,21 @@ function installTools(pi: unknown, home: string): void {
 
       const editedXml = editDocx(documentXml, ops as EditOp[]); // throws {code:"quote_not_found"|"quote_ambiguous"} -- surfaced unchanged by failed()
       const out = rewriteZip(buf, { "word/document.xml": editedXml }); // {code:"invalid_zip"} -> corrupt
-      const saved = persistBytes(meta, out, rootDir()); // the strict final gate + index update; revision_mismatch carries currentMtimeMs
+      let saved: { mtimeMs: number };
+      try {
+        saved = persistBytes(meta, out, rootDir()); // the strict ZERO-tolerance final gate + index update
+      } catch (e) {
+        const err = e as (Error & { code?: string; currentMtimeMs?: number }) | null;
+        if (err?.code === "revision_mismatch") {
+          // The file moved underneath us between the pre-gate read and the write (a co-editor's save landing
+          // on disk through the DS callback persist path). Refuse LOUD as a conflict with the FRESH revision,
+          // generic wording here: this is the safety mechanism of the co-editor model (fail loud, re-read + retry).
+          const humans = usersOf(doc.docId);
+          const note = humans.length > 0 ? ` A human editor (${humans.map((h) => h.name ?? h.id).join(", ")}) has the document open -- a co-editor's save is the likely change.` : "";
+          throw new Refusal("revision_mismatch", `CONFLICT: "${doc.title}" changed while this edit was in flight: it is now at revision ${err.currentMtimeMs ?? "unknown"}, you based the edit on ${base}. Nothing was written.${note} Read it again with office_read, then redo the edit with baseRevision ${err.currentMtimeMs ?? "the fresh revision office_list shows"}.`);
+        }
+        throw e;
+      }
       record({ subject: doc.title, reason: `office_edit: ${ops.length} op(s) applied, revision ${meta.mtimeMs} -> ${saved.mtimeMs}`, chatId: home });
       const n = ops.length;
       return text(`Edited "${doc.title}" (${n} op${n === 1 ? "" : "s"} made): now at revision ${saved.mtimeMs}. Pass that as baseRevision for the next edit.`, { action: "edit", id: doc.docId, from: meta.mtimeMs, to: saved.mtimeMs, ops: n });

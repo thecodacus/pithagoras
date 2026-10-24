@@ -42,7 +42,6 @@ export interface OfficeContainer {
 export interface OfficeState {
   enabled: boolean;
   imageTag: string;
-  coEdit: boolean;
   container: OfficeContainer;
   docs: OfficeDoc[];
   /** Every doc has an entry: empty while nobody is editing it, so the badge code needs no null check. */
@@ -55,11 +54,11 @@ export interface EditorConfig extends Record<string, unknown> {
   apiJs: string;
 }
 
-export type SettingsPatch = { enabled?: boolean; imageTag?: string; coEdit?: boolean };
+export type SettingsPatch = { enabled?: boolean; imageTag?: string };
 
 /** The settings answer: what was saved, where the container stands as of now, and that a start went on its own. */
 export interface SettingsAnswer {
-  settings: { enabled: boolean; imageTag: string; coEdit: boolean };
+  settings: { enabled: boolean; imageTag: string };
   container: OfficeContainer;
   starting?: boolean;
 }
@@ -74,7 +73,8 @@ export const api = {
   renameDocument: (id: string, title: string) =>
     call<OfficeDoc>(`/documents/${encodeURIComponent(id)}/rename`, { method: "POST", body: JSON.stringify({ title }) }),
   deleteDocument: (id: string) => call<{ ok: true }>(`/documents/${encodeURIComponent(id)}`, { method: "DELETE" }),
-  importFile: (body: { path: string; title?: string }) => call<OfficeDoc>("/import", { method: "POST", body: JSON.stringify(body) }),
+  /** Re-run the workspace scan now (boot does it automatically): { added, updated }. */
+  rescanLibrary: () => call<{ added: number; updated: number }>("/documents/rescan", { method: "POST" }),
   editorConfig: (docId: string) => call<EditorConfig>("/editor-config", { method: "POST", body: JSON.stringify({ doc: docId }) }),
   saveSettings: (patch: SettingsPatch) => call<SettingsAnswer>("/settings", { method: "POST", body: JSON.stringify(patch) }),
   /** Awaits the whole first pull to completion -- the page shows its progress from /state meanwhile. */
@@ -85,7 +85,9 @@ export const api = {
   exportUrl: (id: string) => portal.api.url(`/documents/${encodeURIComponent(id)}/export`),
 };
 
-/** A refusal of the server half, in words for where it says the rest. */
+/** A refusal of the server half, in words for where it says the rest. The ApiError of core's json() carries
+ * exactly that message (the { error } field), so a failure of POST /documents -- including the retryable 503
+ * "dependencies_pending" while jszip is still installing -- reaches an ErrorBanner verbatim, never a dead click. */
 export function sayError(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }

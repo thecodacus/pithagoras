@@ -13,6 +13,7 @@ import JSZip from "jszip";
 import {
   listDocs, getDoc, docsForHome, createDoc, renameDoc, deleteDoc, sweepTrash,
   importFile, exportDoc, persistBytes, templateDocx, templateXlsx, slugify,
+  scanWorkspace, pruneMissingDocs,
 } from "../src/store";
 import { parseDocx, parseXlsx } from "../src/ooxml";
 
@@ -339,4 +340,116 @@ test("a full round-trip: create -> edit bytes through the gate -> export is pars
   }
   const out = exportDoc(doc.docId, path.join(tmpRoot(), "rt"), root);
   assert.equal(fs.readFileSync(out).toString("utf8"), "revision 2 of the round trip document");
+});
+
+/* ---------------- workspace scan (in-place indexing, replaces manual import) ---------------- */
+
+test("scanWorkspace: discovers nested docx/xlsx case-insensitively; skips hidden dirs, node_modules, .txt", () => {
+  const root = tmpRoot();
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), "office-scan-ws-"));
+  fs.writeFileSync(path.join(ws, "alpha.docx"), Buffer.from("bytes a"));
+  fs.mkdirSync(path.join(ws, "nested", "deeper"), { recursive: true });
+  fs.writeFileSync(path.join(ws, "nested", "deeper", "BETA.XLSX"), Buffer.from("bytes b")); // uppercase ext counts
+  fs.mkdirSync(path.join(ws, ".cache"));
+  fs.writeFileSync(path.join(ws, ".cache", "hidden.docx"), Buffer.from("nope"));
+  fs.mkdirSync(path.join(ws, "node_modules", "pkg"), { recursive: true });
+  fs.writeFileSync(path.join(ws, "node_modules", "pkg", "vendor.docx"), Buffer.from("nope"));
+  fs.writeFileSync(path.join(ws, "readme.txt"), "not office");
+
+  const out = scanWorkspace([ws], root);
+  assert.deepEqual(out, { added: 2, updated: 0 });
+  const docs = listDocs(root);
+  assert.deepEqual(docs.map((d) => d.title), ["alpha", "BETA"], "listDocs keeps its localeCompare order even with a mixed-case title");
+  for (const doc of docs) {
+    assert.equal(doc.path, path.join(ws, doc.title === "alpha" ? "alpha.docx" : path.join("nested", "deeper", "BETA.XLSX")), "points at the real file in place");
+    assert.equal(doc.owner, null); // unowned human doc: docsForHome shows it to every home
+    assert.ok(fs.existsSync(doc.path!)); // IN PLACE: no copy was made
+  }
+  fs.rmSync(ws, { recursive: true, force: true });
+});
+
+test("scanWorkspace: never indexes the library's own dir (docs/ or .trash), even when it is passed as a root", async () => {
+  const root = tmpRoot();
+  await createDoc({ title: "Inside The Library", type: "word" }, root); // lives in docs/<id>/ -- must stay unindexed-as-scanned
+  fs.mkdirSync(path.join(root, ".trash"));
+  fs.writeFileSync(path.join(root, ".trash", "old.docx"), Buffer.from("trash stays trash"));
+
+  const out = scanWorkspace([root], root); // the data dir IS a root: the whole walk must refuse to enter it
+  assert.deepEqual(out, { added: 0, updated: 0 });
+  const doc = listDocs(root)[0];
+  assert.equal(doc.path, undefined, "the library-created doc has no path and is not re-indexed over itself");
+});
+
+test("scanWorkspace: a second scan refreshes changed mtime/size in place; untouched files do not count as updated", () => {
+  const root = tmpRoot();
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), "office-scan-refresh-"));
+  fs.writeFileSync(path.join(ws, "one.docx"), Buffer.from("12345"));
+  fs.writeFileSync(path.join(ws, "two.xlsx"), Buffer.from("abcdef"));
+  assert.deepEqual(scanWorkspace([ws], root), { added: 2, updated: 0 });
+
+  assert.deepEqual(scanWorkspace([ws], root), { added: 0, updated: 0 }, "immediately rescanning changes nothing");
+
+  fs.writeFileSync(path.join(ws, "one.docx"), Buffer.from("123456789")); // grew AND got a new mtime
+  const out = scanWorkspace([ws], root);
+  assert.deepEqual(out, { added: 0, updated: 1 }, "only the file that actually changed counts as refreshed");
+  const one = getDoc(listDocs(root).find((d) => d.title === "one")!.docId, root)!;
+  assert.equal(one.sizeBytes, 9);
+  assert.ok(Math.abs(one.mtimeMs - fs.statSync(path.join(ws, "one.docx")).mtimeMs) < 50);
+
+  // and the refreshed doc still persists through the mtime gate: its revision IS the file's own mtime
+  const saved = persistBytes(one, Buffer.from("123456789X"), root);
+  assert.equal(saved.mtimeMs, fs.statSync(path.join(ws, "one.docx")).mtimeMs);
+  fs.rmSync(ws, { recursive: true, force: true });
+});
+
+test("scanWorkspace: skips files whose basename cannot be a title or busts the size cap; a collision on title does not sink the sweep", () => {
+  const root = tmpRoot();
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), "office-scan-bad-"));
+  fs.writeFileSync(path.join(ws, "bad\tname.docx"), Buffer.from("control char in a title: skipped, not indexed"));
+  fs.writeFileSync(path.join(ws, "hugemem.docx"), Buffer.alloc(1)); // size is faked below with sparse write
+  fs.rmSync(path.join(ws, "hugemem.docx"));
+  const huge = fs.openSync(path.join(ws, "hugemem.docx"), "w");
+  fs.ftruncateSync(huge, 513 * 1024 * 1024); // just above the 512 MiB cap: sparse file, no real I/O
+  fs.closeSync(huge);
+  fs.writeFileSync(path.join(ws, "same.docx"), Buffer.from("first"));
+  const ws2 = fs.mkdtempSync(path.join(os.tmpdir(), "office-scan-bad2-"));
+  fs.writeFileSync(path.join(ws2, "same.docx"), Buffer.from("second -- same title in another folder: skipped by the guard"));
+
+  const out = scanWorkspace([ws, ws2], root);
+  assert.deepEqual(out, { added: 1, updated: 0 }, "only 'same' from the first root survived: bad title, over cap and title collision are all quiet skips");
+  assert.equal(listDocs(root)[0].title, "same");
+  fs.rmSync(ws, { recursive: true, force: true });
+  fs.rmSync(ws2, { recursive: true, force: true });
+});
+
+test("deleteDoc on a scanned doc moves its REAL file to the office trash; an already-vanished file is a clean prune, not ENOENT", () => {
+  const root = tmpRoot();
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), "office-scan-del-"));
+  fs.writeFileSync(path.join(ws, "doomed.docx"), Buffer.from("soon to be trashed"));
+  scanWorkspace([ws], root);
+  const doc = listDocs(root)[0];
+
+  deleteDoc(doc.docId, root); // the real workspace file is what moves
+  assert.ok(!fs.existsSync(path.join(ws, "doomed.docx")), "the workspace file is gone from its folder");
+  const trash = fs.readdirSync(path.join(root, ".trash"));
+  assert.equal(trash.length, 1, "exactly one entry landed in the office trash -- recoverable for 7 days");
+  assert.equal(fs.readFileSync(path.join(root, ".trash", trash[0]), "utf8"), "soon to be trashed");
+  assert.equal(listDocs(root).length, 0);
+
+  // a file deleted OUT-OF-BAND (no one asked the library): deleting its index entry must not ENOENT
+  fs.writeFileSync(path.join(ws, "walked.docx"), Buffer.from("leaving on its own"));
+  scanWorkspace([ws], root);
+  const gone = listDocs(root)[0];
+  fs.rmSync(path.join(ws, "walked.docx")); // the workspace itself loses the file
+  deleteDoc(gone.docId, root); // and: no throw, just the index drop -- pruneMissingDocs semantics on demand
+  assert.equal(listDocs(root).length, 0);
+
+  // and pruneMissingDocs agrees with that: it drops the orphaned entry, nothing else
+  fs.writeFileSync(path.join(ws, "fleeing.docx"), Buffer.from("gone before the sweep"));
+  scanWorkspace([ws], root);
+  fs.rmSync(path.join(ws, "fleeing.docx"));
+  const fleeingId = listDocs(root)[0].docId;
+  assert.deepEqual(pruneMissingDocs(root), [fleeingId], "the orphaned scanned entry is dropped by the next settleKept");
+  assert.equal(listDocs(root).length, 0);
+  fs.rmSync(ws, { recursive: true, force: true });
 });

@@ -16,8 +16,8 @@ const TAG92 = "onlyoffice/documentserver:9.2";
 
 function tmpRoot(withSettings?: Record<string, unknown>, secret = "s3cret\n"): string {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "office-container-"));
-  if (withSettings) fs.writeFileSync(path.join(root, "settings.json"), JSON.stringify({ enabled: false, imageTag: DEFAULT_TAG, coEdit: true, ...withSettings }));
-  else fs.writeFileSync(path.join(root, "settings.json"), JSON.stringify({ enabled: false, imageTag: DEFAULT_TAG, coEdit: true }));
+  if (withSettings) fs.writeFileSync(path.join(root, "settings.json"), JSON.stringify({ enabled: false, imageTag: DEFAULT_TAG, ...withSettings }));
+  else fs.writeFileSync(path.join(root, "settings.json"), JSON.stringify({ enabled: false, imageTag: DEFAULT_TAG }));
   if (secret !== null) fs.writeFileSync(path.join(root, "jwt-secret"), secret);
   return root;
 }

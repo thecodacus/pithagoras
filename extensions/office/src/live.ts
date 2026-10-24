@@ -25,10 +25,12 @@
  *
  * On top of that, tracked PRESENCE carries a TTL (DEFAULT_PRESENCE_TTL_MS = 15 min, setPresenceTtl to change):
  * presence is minted at editor-config time for a single shared seat and only cleared on terminal closes, so
- * an abandoned open (api.js never loads, tab closed before DS connects) would otherwise hold the lock -- and
- * refuse every office_edit -- forever. Stale entries are dropped lazily on read (usersOf/pollState); a live
+ * an abandoned open (api.js never loads, tab closed before DS connects) would otherwise hold the doc locked for
+ * DS and badge "still editing" -- forever. Stale entries are dropped lazily on read (usersOf/pollState); a live
  * session is immune because every status-1 heartbeat re-calls setUser and pushes expiresAt forward. This adds
- * expiry only -- it does NOT change co-editing semantics: a non-expired open session still refuses agent edits.
+ * expiry only -- it does NOT change lock/badge semantics: a non-expired open session still locks the doc for
+ * DS (the status rules above) and is reported to polling clients by pollState. Agent edits are gated purely on
+ * the revision, never on who is present -- an open editor neither allows nor blocks office_edit (co-editor model).
  */
 
 export type LiveUser = { id: string; name?: string; at: number };
@@ -80,7 +82,7 @@ function userMap(docId: string): Map<string, PresenceRecord> {
 
 /** Everyone currently tracked as present on the doc (join time ascending), or [] for none. Returns copies --
  * callers may hold onto them freely. Expired entries (TTL passed without a heartbeat) are dropped on sight:
- * they no longer count as "editing now", so lockLine and the office_edit refusal expire with them. */
+ * they no longer count as "editing now", so tools.ts' "editing now" annotation expires with them. */
 export function usersOf(docId: string): LiveUser[] {
   const users = presence.get(docId);
   if (!users) return [];

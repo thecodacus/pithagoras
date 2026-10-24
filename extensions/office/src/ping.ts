@@ -15,7 +15,7 @@
  * import but BEFORE the first save is NEW to this library and IS processed on that first save, so its wake is not lost. When
  * the source did not parse at import the field is absent and we fall back to baselining whatever the first save holds.
  * A CREATED blank document gets no baseline: its seen set starts empty, so an @mention typed during the very first editing
- * session is processed on its first save like any later one. (store.ts marks imported documents with DocMeta.imported; see importFile.)
+ * session is processed on its first save like any later one. (store.ts marks imported documents with DocMeta.imported; see importFile / scanWorkspace.)
  * Corrupt/undecodable state file: logged, previous set treated as EMPTY (every current comment is
  * then "new", its mentions processed once; the immediately-following write restores a sane file).
  * Erring toward notifying beats silently dropping a mention after a corruption event. A re-send of

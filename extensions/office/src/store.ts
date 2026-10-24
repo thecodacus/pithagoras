@@ -6,9 +6,15 @@
  * directory + rename). Document bytes live in the plain filesystem: the portal's 1 MB managed-file cap
  * does not apply here, so >1 MB Office files work natively.
  *
+ * Created docs are written INTO this library (docs/<docId>/<title>.<ext>); workspace-scanned docs (see
+ * scanWorkspace) point at their file IN PLACE via DocMeta.path -- the scanned file IS the document, and
+ * every path-taking operation (persistBytes, renameDoc, deleteDoc, exportDoc, pruneMissingDocs) resolves
+ * through docPath(), which prefers that field. A deleted scanned doc moves its REAL file into this
+ * library's .trash (7-day sweep); a scanned file already gone out-of-band is pruned, not an error.
+ *
  * Every exported function takes a trailing optional `root = dataDir()` so unit tests can pass a tmp
  * dir (per the wave-2 amendments); production callers just omit it. The ONLY async functions are
- * templateDocx/templateXlsx and createDoc/importFile, because jszip -- the only zip writer allowed in
+ * templateDocx/templateXlsx and createDoc, because jszip -- the only zip writer allowed in
  * this package -- generates buffers asynchronously; everything that touches existing files is sync.
  */
 import fs from "node:fs";
@@ -16,7 +22,7 @@ import path from "node:path";
 import { randomInt } from "node:crypto";
 import { jsZip } from "./jszip"; // LAZY by design: the built server must import without its own node_modules yet (deps.js installs them at boot)
 import { dataDir } from "./host";
-import { parseDocx } from "./ooxml"; // importFile baselines the source file's comment ids at import time (ping.ts first-save rule)
+import { parseDocx } from "./ooxml"; // importFile + scanWorkspace baseline the source file's comment ids at import/index time (ping.ts first-save rule)
 
 export type DocMeta = {
   docId: string;
@@ -29,10 +35,12 @@ export type DocMeta = {
   owner: string | null;
   grants: { chatId: string; commentId: string; at: number }[];
   createdBy?: string;
-  /** Set for importFile only. ping.ts uses it as the first-save rule: an imported doc's imported comments are baselined without wakes; a created (blank) doc gets no such baseline. */
+  /** Set for workspace-scanned docs only (importFile stamps it too, for its copy flow). ping.ts uses it as the first-save rule: a scanned doc's pre-existing comments are baselined without wakes; a created (blank) doc gets no such baseline. */
   imported?: boolean;
-  /** Comment ids present in the file at IMPORT time (stamped by importFile). The first-save baseline for imported docs: any id NOT listed here appeared after the import and is still processed normally. Absent when the source did not parse as docx. */
+  /** Comment ids present in the file at INDEX time (stamped by scanWorkspace). The first-save baseline for scanned docs: any id NOT listed here appeared after indexing and is still processed normally. Absent when the source did not parse as docx. */
   importedBaseline?: string[];
+  /** A workspace-scanned doc lives in PLACE: its real, absolute file path (realpathSync'd at index time). ABSENT for library-created docs, whose bytes are docs/<docId>/<title>.<ext> under the library root -- docPath() prefers this field when present. */
+  path?: string;
 };
 
 type IndexFile = { version: 1; docs: DocMeta[] };
@@ -71,7 +79,8 @@ function writeIndex(root: string, index: IndexFile): void {
 }
 
 function docPath(doc: DocMeta, root: string): string {
-  return path.join(root, "docs", doc.docId, `${doc.title}.${doc.ext}`);
+  // A scanned doc's bytes are the workspace file itself; only library-created docs live under docs/<docId>/.
+  return doc.path ?? path.join(root, "docs", doc.docId, `${doc.title}.${doc.ext}`);
 }
 
 function notFound(message = "no such document"): Error {
@@ -307,8 +316,12 @@ export function renameDoc(docId: string, newTitle: string, root = dataDir()): Do
   if (newTitle !== doc.title && index.docs.some((d) => d.docId !== docId && d.title === newTitle)) {
     throw Object.assign(new Error(`a document titled "${newTitle}" already exists`), { code: "exists" });
   }
-  const dir = path.join(rootDir, "docs", doc.docId);
-  fs.renameSync(path.join(dir, `${doc.title}.${doc.ext}`), path.join(dir, `${newTitle}.${doc.ext}`));
+  // One rule for both kinds: rename inside the file's OWN directory. For a library doc that is docs/<docId>/;
+  // for a scanned doc it renames the real workspace file next to where it already is (same parent, new name).
+  const from = docPath(doc, rootDir);
+  const to = path.join(path.dirname(from), `${newTitle}.${doc.ext}`);
+  fs.renameSync(from, to);
+  if (doc.path) doc.path = to;
   doc.title = newTitle;
   doc.updatedAt = Date.now();
   writeIndex(rootDir, index);
@@ -316,24 +329,37 @@ export function renameDoc(docId: string, newTitle: string, root = dataDir()): Do
 }
 
 /** Delete a document: its docs/<docId> folder is moved to .trash/<Date.now()>-<docId> (a hard delete would not be
- * undoable) and the index entry removed. sweepTrash (called at server boot / settleKept) reclaims trash older than
- * 7 days. Throws {code:"not_found"} for an unknown id. */
+ * undoable) and the index entry removed. A scanned doc's REAL FILE (not a library folder) is what moves -- deleting
+ * one moves the workspace file into this library's trash, exactly as reversible as everything else here. A scanned
+ * file already gone from its workspace (deleted out-of-band since the last scan) is NOT an error: only the index
+ * entry drops, which is what pruneMissingDocs would have done at the next settleKept anyway. sweepTrash (server boot /
+ * settleKept) reclaims trash older than 7 days. Throws {code:"not_found"} for an unknown id. */
 export function deleteDoc(docId: string, root = dataDir()): void {
   const rootDir = root ?? dataDir();
   const index = readIndex(rootDir);
-  if (!index.docs.some((d) => d.docId === docId)) throw notFound(`no document with id ${docId}`);
-  const from = path.join(rootDir, "docs", docId);
-  const trash = path.join(rootDir, ".trash");
-  fs.mkdirSync(trash, { recursive: true });
-  fs.renameSync(from, path.join(trash, `${Date.now()}-${docId}`));
+  const doc = index.docs.find((d) => d.docId === docId);
+  if (!doc) throw notFound(`no document with id ${docId}`);
+  const from = doc.path ? doc.path : path.join(rootDir, "docs", doc.docId);
+  fs.mkdirSync(trashDir(rootDir), { recursive: true });
+  try {
+    fs.renameSync(from, path.join(trashDir(rootDir), `${Date.now()}-${docId}`)); // the real file (scanned) or the folder (library)
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+    // the file left its workspace on its own: nothing to move, the index drop below IS the deletion
+  }
   writeIndex(rootDir, { version: 1, docs: index.docs.filter((d) => d.docId !== docId) });
+}
+
+/** The library's trash dir, made if missing -- one place that names it. */
+function trashDir(rootDir: string): string {
+  return path.join(rootDir, ".trash");
 }
 
 /** Reclaim .trash entries whose name timestamp (the "<ms>-<name>" prefix written by deleteDoc) is older than 7 days.
  * Returns how many were removed. Server boot (settleKept) and the lookAfter path call this. */
 export function sweepTrash(root = dataDir()): number {
   const rootDir = root ?? dataDir();
-  const trash = path.join(rootDir, ".trash");
+  const trash = trashDir(rootDir);
   let entries: string[];
   try {
     entries = fs.readdirSync(trash);
@@ -376,7 +402,179 @@ export function pruneMissingDocs(root = dataDir()): string[] {
   return dropped;
 }
 
-/** Import an existing .docx/.xlsx from an absolute path into the library (copy, never move -- the source stays).
+/** ONE file of a scan, resolved to its index entry: throws {code:"unsupported_format"} for anything that is not a
+ * regular .docx/.xlsx and {code:"too_large"} above the 512 MiB cap; returns null when the basename (without its
+ * extension) cannot become a document title -- such a file is skipped, not indexed. The single place where a
+ * scanned file becomes a DocMeta, so the stamping rules of the former importFile live in exactly one spot. */
+function indexOne(real: string, rootDir: string): DocMeta | null {
+  const base = path.basename(real);
+  const dot = base.lastIndexOf(".");
+  if (dot < 1) throw Object.assign(new Error(`${base} has no extension`), { code: "unsupported_format" });
+  const extRaw = base.slice(dot + 1).toLowerCase();
+  if (extRaw !== "docx" && extRaw !== "xlsx") throw Object.assign(new Error(`${base}: only .docx and .xlsx files are indexed`), { code: "unsupported_format" });
+  let st: fs.Stats;
+  try {
+    st = fs.statSync(real);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") throw notFound(`no such file ${real}`);
+    throw err;
+  }
+  if (!st.isFile()) throw Object.assign(new Error(`${real} is not a regular file`), { code: "unsupported_format" });
+  // The cap importFile had, now on INDEXING: an uncapped source would also blow the ooxml reader's 1 GiB zip
+  // envelope at parse time -- above it the file stays out of the library and its mtime-gated flow.
+  if (st.size > MAX_IMPORT_BYTES) throw Object.assign(new Error(`${real} is ${st.size} bytes: files above ${MAX_IMPORT_BYTES / (1024 * 1024)} MiB are not indexed`), { code: "too_large" });
+  const title = base.slice(0, dot);
+  try {
+    assertSafeTitle(title); // a file name that cannot be a document title is skipped, not indexed
+  } catch {
+    return null;
+  }
+  // Baseline AT INDEX TIME (the importFile rule, carried over): record which comment ids this file carries NOW, so
+  // pre-existing @mentions do not fire wakes at index time and the first save baselines exactly this history. Only
+  // for files up to MAX_BASELINE_BYTES -- above it the field stays undefined and ping.ts applies its documented
+  // "unparseable source" fallback; a docx that does not parse leaves it undefined too.
+  let importedBaseline: string[] | undefined;
+  if (extRaw === "docx" && st.size <= MAX_BASELINE_BYTES) {
+    try {
+      importedBaseline = parseDocx(fs.readFileSync(real)).comments.map((c) => c.id);
+    } catch {
+      // does not parse as docx: baseline unknown, ping.ts' fallback applies
+    }
+  }
+  const now = Date.now();
+  const index = readIndex(rootDir);
+  if (index.docs.some((d) => d.path === real || (d.title === title && d.ext === extRaw))) {
+    throw Object.assign(new Error(`a document titled "${title}" (${extRaw}) is already in the library`), { code: "exists" });
+  }
+  const doc: DocMeta = {
+    docId: `${slugify(title)}-${randomSuffix()}`,
+    title,
+    ext: extRaw,
+    createdAt: now,
+    updatedAt: now,
+    sizeBytes: st.size,
+    mtimeMs: st.mtimeMs, // the file's OWN mtime IS its revision from day one -- the mtime-gated flow edits it in place
+    owner: null, // a human doc: no home owns it -- it shows in the global library, exactly like a human-made created doc
+    grants: [],
+    imported: true, // ping.ts first-save rule for the stamped baseline above
+    path: real, // IN PLACE: the scanned file IS the document; nothing is copied into the library
+  };
+  if (importedBaseline !== undefined) doc.importedBaseline = importedBaseline;
+  index.docs.push(doc);
+  writeIndex(rootDir, index);
+  return { ...doc };
+}
+
+/** Synchronous workspace scan: every *.docx/*.xlsx (case-insensitive) under `roots`, indexed IN PLACE.
+ *
+ * roots are the portal's agent folders (portal().folders.list(): every agent home, every project, every chat's
+ * working folder). The walk is bounded and deliberately dumb -- no git, no content sniffing: it never enters the
+ * library's own data dir (indexing a copy of itself would re-index its own docs forever), never hidden dirs
+ * (dot-prefixed: .git, editor scratch), and never node_modules. A file is identified by its REALPATH, so two roots
+ * reaching the same file through a symlink or bind mount produce ONE entry. Already-indexed files get their
+ * mtimeMs/sizeBytes REFRESHED from disk (a rescan after something wrote the file straight to disk keeps the list
+ * honest) and count as `updated` only when something actually changed; new files go through indexOne -- in place,
+ * owner null, with the importedBaseline stamp so pre-existing @mentions do not fire wakes at index time. A file
+ * that cannot be indexed (oversized, unsafe title, already titled, unreadable) is skipped: one bad file must
+ * never fail the whole sweep.
+ *
+ * Returns { added, updated }. */
+export function scanWorkspace(roots: string[], root = dataDir()): { added: number; updated: number } {
+  const rootDir = root ?? dataDir();
+  let self: string;
+  try {
+    self = fs.realpathSync(rootDir);
+  } catch {
+    self = path.resolve(rootDir);
+  }
+  const seenDirs = new Set<string>(); // per-walk guard: a dir is walked at most once (also breaks symlink loops)
+  const found: string[] = []; // candidate files, in walk order
+
+  const isSkippedName = (name: string): boolean => name.startsWith(".") || name === "node_modules";
+  const walk = (dir: string): void => {
+    let real: string;
+    try {
+      real = fs.realpathSync(dir);
+    } catch {
+      return; // gone mid-walk or unreadable -- the rest of the tree still counts
+    }
+    if (real === self || seenDirs.has(real)) return; // our own library dir is never walked, and neither is any dir twice
+    seenDirs.add(real);
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const at = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (!isSkippedName(entry.name)) walk(at); // hidden dirs and node_modules are never walked
+        continue;
+      }
+      if (entry.isFile() && /\.(docx|xlsx)$/i.test(entry.name)) found.push(at);
+    }
+  };
+  for (const r of roots) walk(r);
+
+  // What is ALREADY indexed, by its real path: refreshes target these; everything else in `found` is a candidate add.
+  const byReal = new Map<string, DocMeta>();
+  const initial = readIndex(rootDir);
+  for (const doc of initial.docs) if (doc.path) byReal.set(doc.path, doc);
+  let added = 0;
+  let updated = 0;
+  for (const file of found) {
+    let real: string;
+    try {
+      real = fs.realpathSync(file); // symlinks collapse into one identity; a broken link is skipped
+    } catch {
+      continue;
+    }
+    const known = byReal.get(real);
+    if (known) {
+      let st: fs.Stats;
+      try {
+        st = fs.statSync(real);
+      } catch {
+        continue; // vanished since the index was read: pruneMissingDocs settles it at the next settleKept
+      }
+      if (st.mtimeMs !== known.mtimeMs || st.size !== known.sizeBytes) {
+        known.mtimeMs = st.mtimeMs;
+        known.sizeBytes = st.size;
+        known.updatedAt = Date.now();
+        updated++;
+      }
+      continue; // refresh-and-continue: a rescan never re-indexes what it already has
+    }
+    try {
+      const doc = indexOne(real, rootDir); // its own atomic read-modify-write -- one entry per file
+      if (doc) {
+        byReal.set(real, doc);
+        added++;
+      }
+    } catch (err) {
+      const ce = err as { code?: string };
+      if (ce.code === "unsupported_format" || ce.code === "too_large" || ce.code === "exists") continue; // expected skips
+      throw err; // a real failure (index corrupt, disk full) IS a rescan failure
+    }
+  }
+  if (updated > 0) {
+    const index = readIndex(rootDir); // fresh: add-writes may have landed since `initial`
+    let wrote = false;
+    for (const [realPath, doc] of byReal) {
+      const entry = index.docs.find((d) => d.path === realPath);
+      if (!entry || (doc.mtimeMs === entry.mtimeMs && doc.sizeBytes === entry.sizeBytes)) continue;
+      entry.mtimeMs = doc.mtimeMs;
+      entry.sizeBytes = doc.sizeBytes;
+      entry.updatedAt = doc.updatedAt;
+      wrote = true;
+    }
+    if (wrote) writeIndex(rootDir, index);
+  }
+  return { added, updated };
+}
+
+/** Import an existing .docx/.xlsx from an absolute path into the library (copy, never move -- the source stays). SUPERSEDED for the UI flow by scanWorkspace (in-place indexing); retained because ping.test exercises its copy-into-library shape.
  * The extension comes from the basename (case-insensitive) and anything else throws {code:"unsupported_format"};
  * a missing/unreadable source throws {code:"not_found"}; a file above 512 MiB throws {code:"too_large"} before
  * anything is copied. title defaults to the basename without its extension; owner is set by the caller (an
@@ -405,6 +603,7 @@ export function importFile(absPath: string, meta: { title?: string; owner?: stri
   assertSafeTitle(title); // the imported file lands in the library as <title>.<ext> -- same rules as created titles
   // Baseline AT IMPORT TIME (review 4364810146): record which comment ids this file carries NOW, so a mention added to it
   // before its first save is still NEW at first save and can wake; only the history that came in WITH the file baselines.
+  // scanWorkspace stamps the same baseline IN PLACE via indexOne -- keep the two stampings in step.
   // Only for files up to MAX_BASELINE_BYTES: reading a multi-hundred-MiB docx inline just to stamp a baseline is not worth
   // the sync stall -- above the cap leave it undefined so ping.ts applies its documented "unparseable source" fallback
   // (baseline everything the first save holds) and first-save wake semantics are preserved.

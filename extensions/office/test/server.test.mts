@@ -12,8 +12,9 @@ import os from "node:os";
 import path from "node:path";
 import type { ServerPortal } from "@pithagoras/extension-api/server";
 import type { ContainerInfo, Docker, ExecResult, VolumeInfo } from "../../docker/src/api";
-import officeServer, { dsOrigin, jwtSecret, loopbackPort, makeForcesaveHook, settleKept } from "../src/server";
+import officeServer, { dsOrigin, jwtSecret, loopbackPort, settleKept } from "../src/server";
 import * as store from "../src/store";
+import { rewriteZip } from "../src/ooxml";
 import * as live from "../src/live";
 import { mintTicket, verifyTicket } from "../src/tickets";
 import { verifyJwt } from "../src/jwt";
@@ -339,10 +340,9 @@ test("/state: settings + container status + docs list + locks for EVERY doc", as
   const res = await b.router.dispatch("GET", "/state");
   assert.equal(res.statusCode, 200);
   const body = res.body as Record<string, unknown>;
-  assert.deepEqual(Object.keys(body).sort(), ["coEdit", "container", "docs", "enabled", "imageTag", "locks"]);
+  assert.deepEqual(Object.keys(body).sort(), ["container", "docs", "enabled", "imageTag", "locks"]);
   assert.equal(body.enabled, false); // defaults from a fresh dataDir
   assert.equal(body.imageTag, DEFAULT_TAG);
-  assert.equal(body.coEdit, true);
   const c = body.container as Record<string, unknown>;
   assert.equal(c.state, "stopped"); // fake docker: nothing made yet
   const docs = body.docs as store.DocMeta[];
@@ -407,74 +407,99 @@ test("/documents: create (409 on duplicate), rename keeps mtimeMs, download byte
   await b.cleanup();
 });
 
-/* ---------------- /import + /export ---------------- */
+/* ---------------- /documents/rescan (the import route is gone) ---------------- */
 
-test("/import: allowed folder passes (bytes copied), outside is 403 not_allowed, bad ext 415, missing 404", async () => {
-  const b = await boot();
+/** Point the fake portal's folders.list at a workspace AFTER boot: the rescan route reads it live per request,
+ * so overwriting the method is enough -- exactly how a real portal picks up newly added agent folders. */
+function pointFoldersAt(b: Booted, ...dirs: string[]): void {
+  // the route reads AgentFolder[] ({path,name,kind}) -- the fake must hand back that shape, not bare strings
+  (b.portal as unknown as { folders: { list: () => Array<{ path: string; name: string; kind: string }> } }).folders.list =
+    () => dirs.map((d) => ({ path: d, name: path.basename(d), kind: "project" }));
+}
+
+test("/documents/rescan: indexes in place (no copy), skips hidden/node_modules/.txt, second run is a no-op", async () => {
+  const b = await boot(); // boots with folders.list -> [] : the boot scan logs zero and touches nothing
+  assert.ok(b.logs.some((l) => l.startsWith("workspace scan at boot:")), "boot logged its workspace scan");
   const ws = fs.mkdtempSync(path.join(os.tmpdir(), "office-ws-"));
-  b.allowedDirs.push(ws);
   const srcBytes = Buffer.from(`a docx of sorts ${Date.now()}`);
   fs.writeFileSync(path.join(ws, "report.docx"), srcBytes);
+  fs.mkdirSync(path.join(ws, "deep", "drafts"), { recursive: true }); // nested dirs ARE walked
+  fs.writeFileSync(path.join(ws, "deep", "drafts", "plan.xlsx"), Buffer.from("an xlsx of sorts"));
+  fs.mkdirSync(path.join(ws, ".hidden"));
+  fs.writeFileSync(path.join(ws, ".hidden", "secret.docx"), srcBytes); // hidden dir: never indexed
+fs.mkdirSync(path.join(ws, "node_modules", "pkg"), { recursive: true });
+  fs.writeFileSync(path.join(ws, "node_modules", "pkg", "bundled.docx"), srcBytes); // node_modules: never indexed
+  fs.writeFileSync(path.join(ws, "notes.txt"), "plain text is not office"); // wrong type: ignored, not an error
+  pointFoldersAt(b, ws);
 
-  let res = await b.router.dispatch("POST", "/import", { path: path.join(ws, "report.docx") });
-  assert.equal(res.statusCode, 201);
-  const doc = res.body as store.DocMeta;
-  assert.equal(doc.title, "report"); // basename without extension
-  assert.equal(doc.ext, "docx");
-  const libBytes = fs.readFileSync(path.join(b.root, "docs", doc.docId, "report.docx"));
-  assert.ok(Buffer.compare(libBytes, srcBytes) === 0);
-
-  const outside = fs.mkdtempSync(path.join(os.tmpdir(), "office-outside-"));
-  fs.writeFileSync(path.join(outside, "sneaky.docx"), srcBytes);
-  res = await b.router.dispatch("POST", "/import", { path: path.join(outside, "sneaky.docx") });
-  assert.equal(res.statusCode, 403);
-  const body = res.body as Record<string, unknown>;
-  assert.equal(body.code, "not_allowed");
-
-  fs.writeFileSync(path.join(ws, "notes.txt"), "plain text is not office");
-  res = await b.router.dispatch("POST", "/import", { path: path.join(ws, "notes.txt") });
-  assert.equal(res.statusCode, 415);
-  assert.equal((res.body as Record<string, unknown>).code, "unsupported_format");
-
-  res = await b.router.dispatch("POST", "/import", { path: path.join(ws, "ghost.docx") });
-  assert.equal(res.statusCode, 404);
-  assert.equal((res.body as Record<string, unknown>).code, "not_found");
-
-  // export of the imported doc: a fresh copy served as an attachment
-  res = await b.router.dispatch("GET", `/documents/${doc.docId}/export`);
+  const res = await b.router.dispatch("POST", "/documents/rescan");
   assert.equal(res.statusCode, 200);
-  assert.ok(Buffer.compare(Buffer.from(res.data as Buffer), srcBytes) === 0);
-  assert.match(String(res.headers["content-disposition"]), /filename="report\.docx"/);
+  assert.deepEqual(res.body, { added: 2, updated: 0 });
+  const docs = store.listDocs(b.root);
+  assert.equal(docs.length, 2);
+  const report = docs.find((d) => d.title === "report")!;
+  assert.equal(report.path, path.join(ws, "report.docx"), "the entry points at the REAL file");
+  assert.ok(fs.existsSync(path.join(ws, "report.docx")), "the source file is still where it was: IN PLACE, never copied");
+  assert.ok(!fs.existsSync(path.join(b.root, "docs", report.docId)), "nothing was written into the library's docs/ for a scanned doc");
+  assert.equal(report.owner, null); // a human doc: every home's view shows it (docsForHome's unowned pass)
+  assert.equal(report.imported, true);
 
+  // rescan again with nothing changed: idempotent by realpath identity, counts stay honest
+  const again = await b.router.dispatch("POST", "/documents/rescan");
+  assert.deepEqual(again.body, { added: 0, updated: 0 });
+  assert.equal(store.listDocs(b.root).length, 2);
+
+  // something wrote the file straight to disk (an agent outside DS): a rescan REFRESHES it in place
+  const bigger = Buffer.concat([srcBytes, Buffer.from(" more")]);
+  fs.writeFileSync(path.join(ws, "report.docx"), bigger);
+  const refresh = await b.router.dispatch("POST", "/documents/rescan");
+  assert.deepEqual(refresh.body, { added: 0, updated: 1 });
+  const refreshed = store.listDocs(b.root).find((d) => d.docId === report.docId)!;
+  assert.equal(refreshed.sizeBytes, bigger.length);
+  assert.ok(Math.abs(refreshed.mtimeMs - fs.statSync(path.join(ws, "report.docx")).mtimeMs) < 50, "mtimeMs now matches the file on disk");
+
+  // /state's payload carries the sort keys: mtimeMs and sizeBytes are real numbers, path is where it lives
+  const state = (await b.router.dispatch("GET", "/state")).body as { docs: Array<Record<string, unknown>> };
+  const stReport = state.docs.find((d) => d.docId === report.docId)!;
+  assert.equal(typeof stReport.mtimeMs, "number");
+  assert.equal(stReport.sizeBytes, bigger.length);
+  assert.equal(stReport.path, path.join(ws, "report.docx"));
+
+  // export of a scanned doc serves the REAL file's bytes as an attachment (fileFor honors DocMeta.path)
+  const ex = await b.router.dispatch("GET", `/documents/${report.docId}/export`);
+  assert.equal(ex.statusCode, 200);
+  assert.ok(Buffer.compare(Buffer.from(ex.data as Buffer), bigger) === 0);
+  assert.match(String(ex.headers["content-disposition"]), /filename="report\.docx"/);
+
+  // the manual import surface is GONE: no route registered at all (MiniRouter throws, not a coded refusal)
+  await assert.rejects(b.router.dispatch("POST", "/import", { path: path.join(ws, "report.docx") }), /no registered POST route for \/import/);
+
+  fs.rmSync(ws, { recursive: true, force: true });
   await b.cleanup();
 });
 
-test("/import: a symlink inside an allowed folder pointing OUTSIDE is refused (realpath gate, CWE-22)", async () => {
+test("/documents/rescan: a docx with pre-existing comments is stamped with an importedBaseline at index time", async () => {
   const b = await boot();
-  const ws = fs.mkdtempSync(path.join(os.tmpdir(), "office-ws-link-"));
-  b.allowedDirs.push(ws);
-  const outside = fs.mkdtempSync(path.join(os.tmpdir(), "office-outside-link-"));
-  const secretBytes = Buffer.from("a docx that must not leave this folder");
-  fs.writeFileSync(path.join(outside, "secret.docx"), secretBytes);
-  // the link itself lives in the allowed workspace; its target does not
-  fs.symlinkSync(path.join(outside, "secret.docx"), path.join(ws, "link.docx"));
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), "office-ws-baseline-"));
+  const docBytes = rewriteZip(await store.templateDocx(), { "word/comments.xml": commentsXmlWith([
+    { id: "1", author: "Cara", text: "a mention from before the library existed" },
+  ]) });
+  fs.writeFileSync(path.join(ws, "legacy.docx"), docBytes);
+  pointFoldersAt(b, ws);
 
-  const res = await b.router.dispatch("POST", "/import", { path: path.join(ws, "link.docx") });
-  assert.equal(res.statusCode, 403);
-  const body = res.body as Record<string, unknown>;
-  assert.equal(body.code, "not_allowed");
-  assert.match(String(body.error), /not allowed by folders.allowed/);
-  assert.equal(store.listDocs(b.root).length, 0, "nothing was imported");
-
-  // and a symlink INSIDE the allowed folder stays importable (only escape is blocked)
-  fs.writeFileSync(path.join(ws, "real.docx"), secretBytes);
-  fs.symlinkSync(path.join(ws, "real.docx"), path.join(ws, "alias.docx"));
-  const ok = await b.router.dispatch("POST", "/import", { path: path.join(ws, "alias.docx") });
-  assert.equal(ok.statusCode, 201);
-
-  fs.rmSync(outside, { recursive: true, force: true });
+  const res = await b.router.dispatch("POST", "/documents/rescan");
+  assert.equal(res.statusCode, 200);
+  const doc = store.listDocs(b.root).find((d) => d.title === "legacy")!;
+  assert.deepEqual(doc.importedBaseline, ["1"], "the file's own comment history is the first-save baseline -- index time must not wake anyone");
+  fs.rmSync(ws, { recursive: true, force: true });
   await b.cleanup();
 });
+
+/** Minimal comments.xml body for a docx (ping.test has its own richer variant). */
+function commentsXmlWith(comments: Array<{ id: string; author: string; text: string }>): string {
+  const items = comments.map((c) => `<w:comment w:id="${c.id}" w:author="${c.author}"><w:p><w:r><w:t>${c.text}</w:t></w:r></w:p></w:comment>`).join("");
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:comments xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">${items}</w:comments>`;
+}
 
 /* ---------------- /settings + container routes ---------------- */
 
@@ -482,6 +507,9 @@ test("/settings: enable fires ensureContainer exactly once with the settings tag
   const m = makeDocker();
   const b = await boot(undefined, m.docker);
   assert.equal(store.listDocs(b.root).length, 0);
+  // a LEGACY settings file (written before the removed switch existed) must load without crashing -- write it
+  // before any POST so every route in this test runs over tolerant loading; saveSettings then rewrites it clean.
+  fs.writeFileSync(path.join(b.root, "settings.json"), JSON.stringify({ enabled: false, imageTag: DEFAULT_TAG, coEdit: true }));
 
   // enable: side effect is fire-and-forget -- poll for the create, not the response
   let res = await b.router.dispatch("POST", "/settings", { enabled: true });
@@ -517,6 +545,15 @@ test("/settings: enable fires ensureContainer exactly once with the settings tag
   assert.equal(res.statusCode, 400);
   assert.equal((res.body as Record<string, unknown>).code, "invalid_image_tag");
 
+  // there is no co-editing switch in this payload any more (the agent is a co-editor under the revision gate,
+  // full stop): a body carrying only the LEGACY key hits the existing no-known-setting path and changes nothing
+  res = await b.router.dispatch("POST", "/settings", { coEdit: true });
+  assert.equal(res.statusCode, 400);
+  assert.match(String((res.body as Record<string, unknown>).error), /no known setting/);
+  const after = await b.router.dispatch("GET", "/state");
+  assert.equal(after.statusCode, 200, "a legacy key in the body must not wedge the state poller");
+  assert.ok(!JSON.stringify(after.body).includes("coEdit"), "the removed setting never lands in the /state payload");
+
   // the audit sink got the settings change
   assert.ok(b.audits.some((a) => String(a.subject).includes("settings")), "the settings change was audited");
 
@@ -550,7 +587,7 @@ test("/container/status + /container/start + /container/stop drive the same life
   await b.cleanup();
 });
 
-/* ---------------- settleKept + forcesave hook ---------------- */
+/* ---------------- settleKept ---------------- */
 
 test("settleKept: stale index entries are pruned, orphan dirs stay, fresh trash is kept and old trash is swept", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "office-settle-"));
@@ -581,24 +618,4 @@ test("settleKept: stale index entries are pruned, orphan dirs stay, fresh trash 
   assert.ok(fs.existsSync(path.join(root, ".trash", "not-a-timestamp")), "non-deleteDoc entries are untouched");
 });
 
-test("makeForcesaveHook: confirms (true) without open sessions; refuses (false) + one audit line while somebody is in it", async () => {
-  const b = await boot();
-  const doc = await store.createDoc({ title: "Hooked", type: "word" }, b.root);
-  const hook = makeForcesaveHook();
 
-  const auditsBefore = b.audits.length;
-  assert.equal(await hook(doc.docId), true, "nobody open -> nothing to flush -> confirmed (pure no-op)");
-  assert.equal(b.audits.length, auditsBefore, "no audit line when no session is open");
-
-  live.setUser(doc.docId, { id: "u-ada", name: "Ada" }, true);
-  assert.equal(await hook(doc.docId), false, "a session is open and v1 cannot confirm a force-save -> office_edit must refuse (error:session_open)");
-  assert.equal(b.audits.length, auditsBefore + 1);
-  const last = b.audits[b.audits.length - 1];
-  assert.equal(last.subject, doc.docId);
-  assert.match(String(last.reason), /forcesave requested while 1 editor session/);
-  // and the log line landed too (the one-line audit that also hits portal().log)
-  assert.ok(b.logs.some((l) => l.includes(`pithagoras-office: ${doc.docId}`)));
-
-  live.resetLive();
-  await b.cleanup();
-});

@@ -6,7 +6,9 @@ import { refreshOfficeState, useOfficeState } from "./state";
 
 /**
  * The Office page in Settings: a service panel for the Document Server -- where it stands (and what a first pull is
- * doing), start and stop, the pinned image tag, co-editing, and where the documents live. Enabling goes through
+ * doing), start and stop, the pinned image tag, and where the documents live. There is no co-editing switch: the
+ * agent is a co-editor under the revision gate (fail loud, re-read + retry) and nothing on this page changes that.
+ * Enabling goes through
  * POST /settings, which answers without waiting for a first pull to finish (`starting`): the pull progress keeps
  * coming in over the shared 5 s poll, and the server half's lookAfter stays quiet while the person has stopped it.
  */
@@ -104,14 +106,6 @@ export function OfficeSettings() {
         disabled={busy !== null}
         onChange={(on) => void act("settings", () => api.saveSettings({ enabled: on }))}
       />
-      <portal.ui.SwitchRow
-        title={t("Live co-editing between agent and editor")}
-        detail={t("While on (the default), an agent edit of a document somebody has open is refused until that editor session closes -- an unsaved buffer must never be clobbered. While off, agent edits proceed under the revision gate even with the editor open; switching it off is the escape hatch.")}
-        on={state.coEdit}
-        disabled={busy !== null}
-        onChange={(on) => void act("settings", () => api.saveSettings({ coEdit: on }))}
-      />
-
       <div className="flex flex-wrap items-center gap-2">
         <button type="button" className={portal.ui.classes.button} disabled={busy !== null || running} onClick={() => void start()}>
           {busy === "start" ? t("Starting… (first pull can take minutes)") : t("Start container")}

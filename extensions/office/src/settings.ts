@@ -10,10 +10,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { dataDir } from "./host";
 
-export type OfficeSettings = { enabled: boolean; imageTag: string; coEdit: boolean };
+export type OfficeSettings = { enabled: boolean; imageTag: string };
 
 /** Pinned image tag -- never :latest (the settings page warns about it). */
-export const DEFAULT_SETTINGS: OfficeSettings = { enabled: false, imageTag: "onlyoffice/documentserver:10.0", coEdit: true };
+export const DEFAULT_SETTINGS: OfficeSettings = { enabled: false, imageTag: "onlyoffice/documentserver:10.0" };
 
 const FILE = "settings.json";
 
@@ -22,8 +22,10 @@ function field<K extends keyof OfficeSettings>(raw: Record<string, unknown>, key
   return value !== undefined && typeof value === typeof DEFAULT_SETTINGS[key] ? (value as OfficeSettings[K]) : DEFAULT_SETTINGS[key];
 }
 
-/** Read root/settings.json and merge it over DEFAULTS field by field; unknown fields are ignored. Missing file, unreadable file,
- * or anything that is not a JSON object -> DEFAULT_SETTINGS (returned silently -- no logging in this module). */
+/** Read root/settings.json and merge it over DEFAULTS field by field; unknown fields are ignored -- LEGACY files
+ * written before the co-editing switch existed still carry a "coEdit" key, which is loaded without crashing and
+ * simply never surfaced. Missing file, unreadable file, or anything that is not a JSON object -> DEFAULT_SETTINGS
+ * (returned silently -- no logging in this module). */
 export function loadSettings(root = dataDir()): OfficeSettings {
   let raw: unknown;
   try {
@@ -33,7 +35,7 @@ export function loadSettings(root = dataDir()): OfficeSettings {
   }
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return { ...DEFAULT_SETTINGS };
   const obj = raw as Record<string, unknown>;
-  return { enabled: field(obj, "enabled"), imageTag: field(obj, "imageTag"), coEdit: field(obj, "coEdit") };
+  return { enabled: field(obj, "enabled"), imageTag: field(obj, "imageTag") };
 }
 
 /** Load, apply a patch of any subset of fields (ignoring absent/undefined ones), persist the whole object atomically
