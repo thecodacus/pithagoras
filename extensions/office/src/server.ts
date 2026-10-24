@@ -29,10 +29,14 @@
  *      the first template call blocks on the install; later calls use the one cached load. A create that still
  *      hits an unready dependency answers 503 code "dependencies_pending" (retryable) and logs why.
  *
- * dsOrigin(): ONE function, per the contract -- the browser-facing origin the editor page loads api.js from, read
- * straight out of ds.json (network-mode option (a), plan 5.2: host-networked DS at http://127.0.0.1). When the
- * recorded origin is a "container:<id>" marker there is NO usable URL in v1: it is returned as-is and /editor-config
- * fails with a clear JSON error saying that deployment shape needs an M0 decision.
+ * dsOrigin(): ONE function, per the contract -- the origin read straight out of ds.json (network-mode option (a),
+ * plan 5.2: host-networked DS at http://127.0.0.1). The BROWSER now reaches it through the portal's GET /ds/ reverse
+ * proxy (api.js, the editor iframe and every asset -- same-origin, behind the session gate like every route here):
+ * apiJs is that root-relative prefix, and api.js' getBasePath() turns it into the editor's base URL. What stays an
+ * ABSOLUTE LOOPBACK URL in the signed config is document.url and editorConfig.callbackUrl: those are fetched by the
+ * DS server-side (host netns -> loopback works), never by a browser -- leave them exactly as-is. When the recorded
+ * origin is a "container:<id>" marker there is NO usable URL in v1: it is returned as-is and /editor-config AND /ds
+ * refuse with a clear JSON error saying that deployment shape needs an M0 decision.
  */
 import http from "node:http";
 import type { AddressInfo } from "node:net";
@@ -433,7 +437,11 @@ function registerRoutes(dd: string, secret: string): void {
     const config = built.config as Record<string, unknown>;
     // purpose "editor-config" (S3): the signed typ claim tags this token's family for any future in-portal
     // verification; DS itself checks only the HMAC/expiry and ignores the extra claim.
-    res.json({ ...config, token: signJwt(config, CONFIG_TTL_MS, secret, "editor-config"), apiJs: `${dsOrigin(dd)}/web-apps/apps/api/documents/api.js` });
+    // apiJs: ROOT-RELATIVE through this extension's /ds proxy. The browser resolves it against its own page origin
+    // (exactly where the user reached the portal, session-gated) -- and api.js' getBasePath() takes everything before
+    // "api/documents/api.js" in its script src as the editor iframe base, so the whole editor runs under that prefix.
+    // It is NOT part of the signed payload (the client drops it before calling DocEditor).
+    res.json({ ...config, token: signJwt(config, CONFIG_TTL_MS, secret, "editor-config"), apiJs: `/api/x/${encodeURIComponent(portal().extension)}/ds/web-apps/apps/api/documents/api.js` });
   });
 
   /** POST /settings {enabled?, imageTag?} -> saved + side effects: enabling fires ensureContainer WITHOUT
@@ -508,6 +516,49 @@ function registerRoutes(dd: string, secret: string): void {
       res.json({ container: await container.status(undefined, dd) });
     } catch (e) {
       codedResponse(res, e);
+    }
+  });
+
+  /** GET /ds/<rest...> -> a thin reverse proxy for the browser's Document Server traffic (api.js, the editor iframe,
+   * its assets). Core mounts us at /api/x/<extension> BEHIND THE SESSION GATE (core/server/src/extension-host.ts),
+   * so only signed-in browsers may reach this -- and it forwards GETs to ONE origin only: the recorded DS origin
+   * from ds.json, never anywhere else. The upstream path is recomputed from the RAW request URL with its query
+   * string included (express params may be decoded; an iframe's ?dockey=... must pass verbatim). Body bytes are
+   * buffered and passed through untouched -- including a gzip/br content-encoding, whose header is copied, so the
+   * browser decodes exactly what DS sent. Refusals mirror /editor-config: 503 ds_not_configured (no ds.json),
+   * 422 unresolvable_ds_origin (a "container:<id>" marker has no URL until M0), 503 ds_unavailable (the origin
+   * did not answer). GET-only; nothing below this route mutates portal state. */
+  r.get(/^\/ds\/(.*)$/, async (req, res) => {
+    const raw = typeof req.url === "string" ? req.url : "";
+    const i = raw.indexOf("/ds/");
+    if (i === -1) return res.status(404).json({ error: "bad proxy path", code: "not_found" });
+    const rest = raw.slice(i + 4); // everything after /ds/, query string included, untouched
+    const origin = dsOrigin(dd);
+    if (origin === "") {
+      return res.status(503).json({ error: "the document server is not configured yet -- start it from the Office page first", code: "ds_not_configured" });
+    }
+    if (origin.startsWith("container:")) {
+      return res.status(422).json({ error: `the document server runs under ${origin}: that deployment shape cannot expose the editor to a browser until the M0 spike-2 decision lands`, code: "unresolvable_ds_origin", origin });
+    }
+    let upstream: Response;
+    try {
+      upstream = await fetch(`${origin}/${rest}`, { redirect: "follow", signal: AbortSignal.timeout(15_000) });
+    } catch (e) {
+      logLine(`GET /ds/${rest.split("?")[0]} -> ${origin} failed: ${(e as Error).message}`);
+      return res.status(503).json({ error: `the document server at ${origin} did not answer`, code: "ds_unavailable" });
+    }
+    for (const k of ["content-type", "content-encoding", "content-length", "cache-control", "content-disposition", "access-control-allow-origin"]) {
+      const v = upstream.headers.get(k);
+      if (v !== null) res.setHeader(k, v);
+    }
+    // Everything else (hop-by-hop, set-cookie, server banners, ...) is dropped.
+    try {
+      const buf = Buffer.from(await upstream.arrayBuffer());
+      res.status(upstream.status).end(buf.length === 0 ? undefined : buf);
+    } catch (e) {
+      logLine(`GET /ds/${rest.split("?")[0]}: the body from ${origin} could not be read: ${(e as Error).message}`);
+      if (!res.headersSent) res.status(503).json({ error: `the document server at ${origin} did not answer`, code: "ds_unavailable" });
+      else res.destroy();
     }
   });
 }

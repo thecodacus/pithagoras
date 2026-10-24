@@ -7,9 +7,11 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import http from "node:http";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import type { AddressInfo } from "node:net";
 import type { ServerPortal } from "@pithagoras/extension-api/server";
 import type { ContainerInfo, Docker, ExecResult, VolumeInfo } from "../../docker/src/api";
 import officeServer, { dsOrigin, jwtSecret, loopbackPort, settleKept } from "../src/server";
@@ -27,9 +29,9 @@ const DEFAULT_TAG = "onlyoffice/documentserver:10.0";
 /* ------------------------------------------------------------------ */
 
 class MiniRouter {
-  routes: Array<{ method: string; pattern: string; handler: (req: unknown, res: FakeRes) => Promise<void> | void }> = [];
+  routes: Array<{ method: string; pattern: string | RegExp; handler: (req: unknown, res: FakeRes) => Promise<void> | void }> = [];
   private reg(method: string) {
-    return (pattern: string, ...rest: unknown[]) => {
+    return (pattern: string | RegExp, ...rest: unknown[]) => {
       const handler = rest[rest.length - 1] as (req: unknown, res: FakeRes) => Promise<void> | void;
       this.routes.push({ method, pattern, handler });
     };
@@ -44,6 +46,16 @@ class MiniRouter {
     const us = urlPath.split("/").filter(Boolean);
     for (const route of this.routes) {
       if (route.method !== method) continue;
+      // Express regex paths match the WHOLE raw url (query included); groups land in params[0..].
+      if (typeof route.pattern === "object") {
+        const m = route.pattern.exec(urlPath);
+        if (!m) continue;
+        const params: Record<string, string> = {};
+        for (let g = 1; g < m.length; g++) params[String(g - 1)] = m[g] ?? "";
+        const res = fakeRes();
+        await route.handler({ method, url: urlPath, params, query: {}, body }, res);
+        return res;
+      }
       const ps = route.pattern.split("/").filter(Boolean);
       if (ps.length !== us.length) continue;
       const params: Record<string, string> = {};
@@ -128,6 +140,7 @@ async function boot(root?: string, docker?: Docker): Promise<Booted> {
   const router = new MiniRouter();
   const ddock = docker ?? makeDocker().docker; // ONE instance per boot: extensions.use() resolves the same fake every time
   const portalObj = {
+    extension: "pithagoras-office",
     dataDir: () => rootDir,
     log: (l: unknown) => logs.push(String(l)),
     audit: { record: (e: Record<string, unknown>) => audits.push(e) },
@@ -290,8 +303,10 @@ test("editor-config (docx): key round-trips through parseKey, url is a fresh ver
   );
   const exp = Number(claims?.exp); const iat = Number(claims?.iat);
   assert.equal(exp - iat, 900, "config token lives exactly 15 minutes (the official sample's window)");
-  // api.js src: the browser-facing DS origin (ds.json option a) + the fixed path
-  assert.equal(body.apiJs, "http://127.0.0.1/web-apps/apps/api/documents/api.js");
+  // api.js src: ROOT-RELATIVE through this extension's own /ds proxy (resolved by the browser against the page
+  // origin it reached the portal at); getBasePath() turns that prefix into the editor iframe base. The loopback
+  // document.url/callbackUrl above are what STAY absolute for DS-side fetches.
+  assert.equal(body.apiJs, "/api/x/pithagoras-office/ds/web-apps/apps/api/documents/api.js");
   // and minting claimed the seat in live presence
   assert.deepEqual(live.usersOf(doc.docId).map((u) => ({ id: u.id, name: u.name })), [{ id: "portal-user", name: "Portal" }]);
 
@@ -616,6 +631,104 @@ test("settleKept: stale index entries are pruned, orphan dirs stay, fresh trash 
   assert.ok(!fs.existsSync(path.join(root, ".trash", oldStamp)), "the 8-day-old trash entry was swept");
   assert.ok(fs.existsSync(path.join(root, ".trash", freshStamp)), "the 2-day-old trash entry stays (7-day TTL)");
   assert.ok(fs.existsSync(path.join(root, ".trash", "not-a-timestamp")), "non-deleteDoc entries are untouched");
+});
+
+/* ---------------- GET /ds/* (browser -> DS proxy) ---------------- */
+
+const API_JS_BYTES = Buffer.from("// stand-in for the real api.js: getBasePath() walks document scripts\nwindow.DocsAPI={};");
+
+/** A fake Document Server on an ephemeral 127.0.0.1 port: serves /web-apps/... with a body + content-type,
+ * answers a dedicated 404, and records every raw request url it received (the verbatim-pass-through proof). */
+function startFakeDs(): Promise<{ server: http.Server; port: number; urls: string[] }> {
+  const urls: string[] = [];
+  const server = http.createServer((req, res) => {
+    urls.push(req.url);
+    if (req.method === "GET" && req.url?.startsWith("/web-apps/")) {
+      res.writeHead(200, { "Content-Type": "application/javascript; charset=utf-8", "Cache-Control": "no-cache" });
+      res.end(API_JS_BYTES);
+      return;
+    }
+    res.writeHead(404, { "Content-Type": "text/plain" });
+    res.end("nope");
+  });
+  return new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => resolve({ server, port: (server.address() as AddressInfo).port, urls }));
+  });
+}
+
+test("/ds proxy: 200 passes the body, content-type and the RAW query string verbatim to the recorded DS origin", async () => {
+  const b = await boot();
+  const ds = await startFakeDs();
+  try {
+    writeDsJson(b.root, `http://127.0.0.1:${ds.port}`);
+    // the iframe-style query: percent-encoded chars must arrive upstream byte-for-byte (no re-encoding)
+    const q = "/ds/web-apps/apps/api/documents/api.js?dockey=a%2Bb~c&lang=en-US&x=1%20two";
+    const res = await b.router.dispatch("GET", q);
+    assert.equal(res.statusCode, 200, "the upstream status passes through");
+    assert.equal(Buffer.from(res.data as Buffer).compare(API_JS_BYTES), 0, "the body bytes are byte-for-byte what the DS sent");
+    assert.match(String(res.headers["content-type"]), /application\/javascript/, "content-type is copied");
+    assert.equal(res.headers["cache-control"], "no-cache", "cache-control is copied");
+    const upstream = ds.urls.at(-1);
+    assert.ok(upstream !== undefined, "the fake DS was hit");
+    assert.equal(upstream, q.replace(/^\/ds/, ""), "path + raw query string reached the DS untouched (no re-encoding)");
+  } finally {
+    ds.server.closeAllConnections();
+    await new Promise<void>((r) => ds.server.close(() => r()));
+    await b.cleanup();
+  }
+});
+
+test("/ds proxy: an upstream 404 passes through as a 404 with the upstream body", async () => {
+  const b = await boot();
+  const ds = await startFakeDs();
+  try {
+    writeDsJson(b.root, `http://127.0.0.1:${ds.port}`);
+    const res = await b.router.dispatch("GET", "/ds/missing/page.html?dockey=z");
+    assert.equal(res.statusCode, 404, "the upstream status passes through");
+    assert.match(String(res.data), /nope/, "the upstream body passes through");
+  } finally {
+    ds.server.closeAllConnections();
+    await new Promise<void>((r) => ds.server.close(() => r()));
+    await b.cleanup();
+  }
+});
+
+test("/ds proxy: a dead origin -> 503 {code:'ds_unavailable'} and a log line", async () => {
+  const b = await boot();
+  try {
+    // an ephemeral port nothing listens on: bind one, close it, reuse the number for the dead target
+    const dead = http.createServer();
+    await new Promise<void>((resolve, reject) => { dead.once("error", reject); dead.listen(0, "127.0.0.1", () => resolve()); });
+    const port = (dead.address() as AddressInfo).port;
+    await new Promise<void>((r) => dead.close(() => r()));
+    writeDsJson(b.root, `http://127.0.0.1:${port}`);
+
+    const res = await b.router.dispatch("GET", "/ds/web-apps/apps/api/documents/api.js");
+    assert.equal(res.statusCode, 503);
+    assert.deepEqual(res.body, { error: `the document server at http://127.0.0.1:${port} did not answer`, code: "ds_unavailable" });
+    assert.ok(b.logs.some((l) => l.includes("GET /ds/") && l.includes(`http://127.0.0.1:${port}`)), "the failure left a log line");
+  } finally {
+    await b.cleanup();
+  }
+});
+
+test("/ds proxy: an unconfigured data dir -> 503 {code:'ds_not_configured'}; a container: origin -> the same 422 /editor-config refusal", async () => {
+  const b = await boot(); // fresh root, no ds.json
+  try {
+    const none = await b.router.dispatch("GET", "/ds/web-apps/apps/api/documents/api.js");
+    assert.equal(none.statusCode, 503);
+    assert.equal((none.body as Record<string, unknown>).code, "ds_not_configured");
+
+    writeDsJson(b.root, "container:cid-ab12");
+    const cc = await b.router.dispatch("GET", "/ds/web-apps/apps/api/documents/api.js");
+    assert.equal(cc.statusCode, 422);
+    const body = cc.body as Record<string, unknown>;
+    assert.equal(body.code, "unresolvable_ds_origin");
+    assert.equal(body.origin, "container:cid-ab12", "same refusal family as /editor-config");
+  } finally {
+    await b.cleanup();
+  }
 });
 
 
