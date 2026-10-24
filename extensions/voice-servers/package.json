@@ -1,7 +1,7 @@
 {
   "name": "pithagoras-voice-servers",
   "version": "0.1.0",
-  "description": "Voice servers for Pithagoras: voice mode listens and speaks through speech recognition and speech synthesis servers you run, spoken to as OpenAI's audio API is, with the voices you name",
+  "description": "Voice servers for Pithagoras: voice mode listens and speaks through speech recognition and speech synthesis servers you run, spoken to as OpenAI's audio API is, with the voices you name, and with custom voices on, voices of your own for Breeze or Chatterbox",
   "type": "module",
   "keywords": ["pi-package"],
   "pi": {},

@@ -22,7 +22,7 @@ export default function voiceServers(given: Portal) {
     search: [
       {
         title: msg("Voice servers"),
-        words: "voice speech recognition synthesis transcription whisper openai server url dictation sprache spracherkennung sprachausgabe server diktat",
+        words: "voice speech recognition synthesis transcription whisper openai server url dictation custom voices clone breeze chatterbox sprache spracherkennung sprachausgabe server diktat eigene stimmen klon",
       },
     ],
     component: () => (

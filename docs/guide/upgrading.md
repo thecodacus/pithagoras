@@ -814,7 +814,9 @@ model, and the input language (not auto-detect). It takes the speech synthesis
 address only where it spoke Kokoro on audio.cpp, which answers the OpenAI
 request Voice servers sends, with Kokoro's voice as its voice; an address that
 spoke Breeze Python, Breeze on audio.cpp or Chatterbox is not taken, since Voice
-servers does not speak those, and the log says so. Each says in the log what it
+servers does not speak those as it starts (its
+[custom voices](/guide/voice-servers#custom-voices), which speak Breeze and
+Chatterbox, are off), and the log says so. Each says in the log what it
 took up. With the extension not installed, its hand-off waits, nothing of it
 lost, until it is.
 

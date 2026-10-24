@@ -220,7 +220,7 @@ Pithagoras:
 | | |
 | --- | --- |
 | [The voice service](/guide/voice-service) (Voice) | Builds and runs speech engines in a container of its own: Breeze, Chatterbox or Kokoro to speak, Whisper or Qwen3-ASR to listen, on the GPU or the CPU. It keeps your voices, clones of a recording among them. |
-| [Voice servers](/guide/voice-servers) | Speech servers you run yourself, spoken to as OpenAI's audio API is: an address to listen at, one to speak at, and the voices that server has. |
+| [Voice servers](/guide/voice-servers) | Speech servers you run yourself, spoken to as OpenAI's audio API is: an address to listen at, one to speak at, and the voices that server has, with voices of your own as well once custom voices are on. |
 
 A source is chosen on its own page with **Use for voice mode**, and let go with
 **Stop using**; the page says **In use for voice mode** while it is the source.
@@ -287,8 +287,10 @@ with a recording, is in [Chatterbox](/guide/voice-service#chatterbox) on the
 voice service's page.
 
 A Qwen3-ASR of your own listens through [Voice servers](/guide/voice-servers)
-as well. Voice servers does not speak Chatterbox, which needs a recording of the
-voice with every phrase.
+as well, and with its [custom voices](/guide/voice-servers#custom-voices) on, a
+Chatterbox or Breeze of your own speaks your voices: in audio.cpp, sent as the
+voice service sends them, or as Chatterbox-TTS-Server or Breeze-TTS's own server
+takes them.
 
 ## Speech servers you run
 

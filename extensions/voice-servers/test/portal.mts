@@ -63,20 +63,31 @@ export interface Heard {
   body: Buffer;
 }
 
+/** What the speech server answers a path with: a status, a type, other headers and a body, and what it answers after it. */
+export interface Answer {
+  status?: number;
+  type?: string;
+  headers?: Record<string, string>;
+  body: Buffer | string;
+  /** Answered from the next request on, where it is given: a server busy once, say. */
+  next?: Answer;
+}
+
 /**
  * A speech server on the loopback, standing in for the person's own: it keeps every request it gets, and answers each
- * path with what `answers` holds for it (a status, a type and a body), or 404.
+ * path with what `answers` holds for it, or 404.
  */
 export async function speechServer() {
   const heard: Heard[] = [];
-  const answers = new Map<string, { status?: number; type?: string; body: Buffer | string }>();
+  const answers = new Map<string, Answer>();
   const server = http.createServer(async (req, res) => {
     const chunks: Buffer[] = [];
     for await (const chunk of req) chunks.push(chunk as Buffer);
     heard.push({ method: req.method!, path: req.url!, headers: req.headers, body: Buffer.concat(chunks) });
     const answer = answers.get(req.url!);
     if (!answer) return res.writeHead(404).end();
-    res.writeHead(answer.status ?? 200, answer.type ? { "content-type": answer.type } : {}).end(answer.body);
+    if (answer.next) answers.set(req.url!, answer.next);
+    res.writeHead(answer.status ?? 200, { ...answer.headers, ...(answer.type ? { "content-type": answer.type } : {}) }).end(answer.body);
   });
   server.listen(0, "127.0.0.1");
   await once(server, "listening");

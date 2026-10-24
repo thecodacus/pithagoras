@@ -62,7 +62,9 @@ under the preview: the voice the agent speaks with in voice mode, saved with
 **Save avatar**. It lists the voices the source offers now: with
 [the voice service](/guide/voice-service#your-voice), the designed voice and
 your voices, or Kokoro's own voices while Kokoro speaks; with
-[Voice servers](/guide/voice-servers), the voices on its page. **As Voice
+[Voice servers](/guide/voice-servers), the voices listed on its page, or your
+voices there while its [custom voices](/guide/voice-servers#custom-voices) are on
+for Breeze or Chatterbox. **As Voice
 service chooses** (named after the source) is the source's own choice, the
 voice set on its page. Under the menu, **Add a voice in Voice service** opens
 the source's page in Settings, where voices are added, and asks first whether

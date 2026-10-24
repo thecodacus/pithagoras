@@ -1,5 +1,6 @@
 import { closeSync, fsyncSync, openSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { offered } from "./requests";
 
 /** A voice the speech server speaks with: what it is sent as (`id`), and what the person calls it. */
 export interface ServerVoice {
@@ -28,9 +29,24 @@ export interface Settings {
   ttsModel?: string;
   /** What an agent's voice is chosen from: typed in, or read from the server. */
   voices?: ServerVoice[];
-  /** Its own choice, one of `voices`: what it speaks with where an agent has none. */
+  /**
+   * Its own choice: what it speaks with where an agent has none. One of the voices offered (see requests.ts): one of
+   * `voices`, or, with custom voices on and Breeze or Chatterbox, a voice of the library that engine speaks with.
+   */
   voice?: string;
+  /** Custom voices: the voice library (voices.ts), for Breeze and Chatterbox. Left out while they are off, as they start. */
+  customVoices?: true;
+  /**
+   * What the speech server is, and how it is reached, while custom voices are on (see requests.ts); left out, a server
+   * with fixed voices, such as Kokoro, spoken to as OpenAI's API is. Kept while custom voices are off, for when they are
+   * on again.
+   */
+  speechServer?: Exclude<SpeechServer, "fixed">;
 }
+
+/** What the speech server can be: one with fixed voices, spoken to as it is while custom voices are off, first. */
+export const SPEECH_SERVERS = ["fixed", "breeze-audiocpp", "breeze-tts", "chatterbox-audiocpp", "chatterbox-tts-server"] as const;
+export type SpeechServer = (typeof SPEECH_SERVERS)[number];
 
 let file: string | undefined;
 let kept: Settings = {};
@@ -48,20 +64,25 @@ export function openStore(dir: string): void {
 export const settings = (): Settings => kept;
 
 /**
- * Keeps `next` as the settings, the whole file put in place at once. It is on disk before it is put in place, so a crash
- * after leaves the new file and not an empty one: the take-up of the hand-off removes the only other copy once it is
- * saved.
+ * `data` as `target`, for its owner alone (0600), put in place at once: a reader finds the old file or the new one. It is
+ * on disk before it is put in place, so a crash after leaves the new file and not an empty one: the take-up of the
+ * hand-off removes the only other copy once the settings are saved.
  */
-export function saveSettings(next: Settings): void {
-  if (!file) throw new Error("Voice servers' settings have not been read");
-  const fd = openSync(`${file}.tmp`, "w", 0o600);
+export function writePrivately(target: string, data: string | Buffer): void {
+  const fd = openSync(`${target}.tmp`, "w", 0o600);
   try {
-    writeFileSync(fd, JSON.stringify(next, null, 2));
+    writeFileSync(fd, data);
     fsyncSync(fd);
   } finally {
     closeSync(fd);
   }
-  renameSync(`${file}.tmp`, file);
+  renameSync(`${target}.tmp`, target);
+}
+
+/** Keeps `next` as the settings, the whole file put in place at once. */
+export function saveSettings(next: Settings): void {
+  if (!file) throw new Error("Voice servers' settings have not been read");
+  writePrivately(file, JSON.stringify(next, null, 2));
   kept = next;
 }
 
@@ -88,8 +109,20 @@ function checkModel(label: string, given: unknown): string {
 }
 
 /**
+ * `next` held to what the speech server needs, where custom voices are on: Chatterbox in audio.cpp is told the language
+ * it speaks, as it has no detection mode, so the input language has to be set; Chatterbox-TTS-Server refuses a request
+ * that names no model. Throws with what is wrong.
+ */
+export function checkCustom(next: Settings): void {
+  if (!next.customVoices) return;
+  if (next.speechServer === "chatterbox-audiocpp" && !next.language) throw new Error("Chatterbox speaks the input language it is told, and has no detection: set an input language");
+  if (next.speechServer === "chatterbox-tts-server" && !next.ttsModel) throw new Error("Chatterbox-TTS-Server needs a speech synthesis model in each request: any name, such as chatterbox");
+}
+
+/**
  * The settings in `value`, as the page sends them, checked: each address, each model, the language, the voices and the
- * voice chosen of them. Throws with what is wrong. What is empty is left out.
+ * voice chosen of them, with the custom voices as they are (`customVoices` and `speechServer` have routes of their own,
+ * and are kept). Throws with what is wrong. What is empty is left out.
  */
 export function checkSettings(value: Record<string, unknown> | undefined): Settings {
   const language = said("The input language", value?.language).trim();
@@ -102,7 +135,8 @@ export function checkSettings(value: Record<string, unknown> | undefined): Setti
     return { id, name: said("A voice's name", name) || id };
   });
   const voice = said("The voice", value?.voice);
-  if (voice && !listed.some((v) => v.id === voice)) throw new Error("Choose one of the voices listed, or none");
+  const { customVoices, speechServer } = kept;
+  if (voice && !offered({ voices: listed, customVoices, speechServer }).some((v) => v.id === voice)) throw new Error("Choose one of the voices listed, or none");
   const next: Settings = {
     sttUrl: checkUrl("The speech recognition URL", value?.sttUrl),
     sttModel: checkModel("The speech recognition model", value?.sttModel),
@@ -114,5 +148,7 @@ export function checkSettings(value: Record<string, unknown> | undefined): Setti
     voices: listed,
     voice,
   };
-  return Object.fromEntries(Object.entries(next).filter(([, v]) => v.length)) as Settings;
+  const checked: Settings = { ...(Object.fromEntries(Object.entries(next).filter(([, v]) => v.length)) as Settings), ...(customVoices ? { customVoices } : {}), ...(speechServer ? { speechServer } : {}) };
+  checkCustom(checked);
+  return checked;
 }

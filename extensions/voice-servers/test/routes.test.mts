@@ -6,11 +6,12 @@ import http from "node:http";
 import type { AddressInfo } from "node:net";
 import path from "node:path";
 import { inProcessHome } from "../../../tests/helpers.mts";
-import { serveVoiceServers, speechServer } from "./portal.mts";
+import { serveVoiceServers, speechServer, wav } from "./portal.mts";
 
 /**
  * Voice servers' routes, as its page in Settings uses them: the settings and their checks, the voices read from a
- * speech server, and voice mode's source chosen, through the portal's own extension host and voice routes.
+ * speech server, voice mode's source chosen, and custom voices switched on and off with the form they are sent in,
+ * through the portal's own extension host and voice routes. The library's own routes are voices.test.mts's.
  */
 
 inProcessHome("pithagoras-voice-servers-routes-");
@@ -156,4 +157,80 @@ test("voice mode listens and speaks through these servers once there is a recogn
   assert.deepEqual(await choose(false), [200, { chosen: false }]);
   assert.equal(await source(), "");
   assert.equal((await shown()).chosen, false);
+});
+
+const customRoute = (on: unknown) => fetch(`${at}/custom-voices`, { method: "PUT", headers: json, body: JSON.stringify({ on }) });
+const serverRoute = (speechServer: unknown) => fetch(`${at}/speech-server`, { method: "PUT", headers: json, body: JSON.stringify({ speechServer }) });
+
+test("custom voices are off until switched on, what the speech server is is kept while they are off, and the switch and the choice are checked", async () => {
+  assert.equal((await put({ sttUrl: RECOGNITION })).status, 200);
+  const file = path.join(data, "settings.json");
+  assert.deepEqual(JSON.parse(readFileSync(file, "utf8")), { sttUrl: RECOGNITION }, "off, nothing of them is kept");
+  assert.deepEqual(await said(await customRoute("yes")), [400, "on must be true or false"]);
+  assert.deepEqual(await said(await serverRoute("piper")), [400, "speechServer is one of fixed, breeze-audiocpp, breeze-tts, chatterbox-audiocpp, chatterbox-tts-server"]);
+  const on = await customRoute(true);
+  assert.equal(on.status, 200);
+  assert.deepEqual(await on.json(), { sttUrl: RECOGNITION, customVoices: true, chosen: false });
+  assert.deepEqual(await (await serverRoute("breeze-tts")).json(), { sttUrl: RECOGNITION, customVoices: true, speechServer: "breeze-tts", chosen: false });
+  // A save of the page's fields keeps them: they have routes of their own.
+  assert.equal((await put({ sttUrl: RECOGNITION, language: "de" })).status, 200);
+  assert.deepEqual(await shown(), { sttUrl: RECOGNITION, language: "de", customVoices: true, speechServer: "breeze-tts", chosen: false });
+  // Off, the choice stays for when they are on again.
+  assert.deepEqual(await (await customRoute(false)).json(), { sttUrl: RECOGNITION, language: "de", speechServer: "breeze-tts", chosen: false });
+  assert.deepEqual(JSON.parse(readFileSync(file, "utf8")), { sttUrl: RECOGNITION, language: "de", speechServer: "breeze-tts" });
+  assert.equal(statSync(file).mode & 0o777, 0o600);
+  // A server with fixed voices is the one left out.
+  assert.deepEqual(await (await serverRoute("fixed")).json(), { sttUrl: RECOGNITION, language: "de", chosen: false });
+});
+
+test("with custom voices on, Chatterbox in audio.cpp needs an input language, and Chatterbox-TTS-Server a model", async () => {
+  const language = "Chatterbox speaks the input language it is told, and has no detection: set an input language";
+  const model = "Chatterbox-TTS-Server needs a speech synthesis model in each request: any name, such as chatterbox";
+  assert.equal((await put({ sttUrl: RECOGNITION })).status, 200);
+  assert.equal((await customRoute(true)).status, 200);
+  assert.deepEqual(await said(await serverRoute("chatterbox-audiocpp")), [400, language]);
+  assert.deepEqual(await said(await serverRoute("chatterbox-tts-server")), [400, model]);
+  assert.equal((await customRoute(false)).status, 200);
+  // Off, it is only kept: nothing is sent to it.
+  assert.equal((await serverRoute("chatterbox-audiocpp")).status, 200);
+  assert.deepEqual(await said(await customRoute(true)), [400, language]);
+  assert.equal((await shown()).customVoices, undefined);
+  assert.equal((await put({ sttUrl: RECOGNITION, language: "de" })).status, 200);
+  assert.equal((await customRoute(true)).status, 200);
+  assert.deepEqual(await said(await put({ sttUrl: RECOGNITION })), [400, language]);
+  assert.equal((await shown()).language, "de");
+  assert.equal((await put({ sttUrl: RECOGNITION, language: "de", ttsModel: "chatterbox" })).status, 200);
+  assert.equal((await serverRoute("chatterbox-tts-server")).status, 200);
+  assert.deepEqual(await said(await put({ sttUrl: RECOGNITION, language: "de" })), [400, model]);
+  assert.equal((await customRoute(false)).status, 200);
+  assert.equal((await serverRoute("fixed")).status, 200);
+});
+
+test("the page's voice is one of those offered: the ids listed for fixed voices, else the library's the engine speaks with; a change that no longer offers it lets it go", async () => {
+  const add = async (voice: object) => (await (await fetch(`${at}/voices`, { method: "POST", headers: json, body: JSON.stringify(voice) })).json()).id as string;
+  const clone = await add({ name: "Clone", kind: "clone", instruction: "Plain", transcript: "Words.", audio: wav(Buffer.alloc(32000), 16000).toString("base64") });
+  const designed = await add({ name: "Designed", kind: "design", instruction: "Plain" });
+  const base = { sttUrl: RECOGNITION, language: "de", voices: [{ id: "af_heart" }] };
+  const listedOnly = "Choose one of the voices listed, or none";
+  assert.equal((await put(base)).status, 200);
+  // Off, or on with fixed voices, the library is not offered.
+  assert.deepEqual(await said(await put({ ...base, voice: designed })), [400, listedOnly]);
+  assert.equal((await customRoute(true)).status, 200);
+  assert.deepEqual(await said(await put({ ...base, voice: designed })), [400, listedOnly]);
+  assert.equal((await put({ ...base, voice: "af_heart" })).status, 200);
+  // Breeze speaks with the library, and with no id listed for fixed voices: the id goes.
+  assert.equal((await (await serverRoute("breeze-audiocpp")).json()).voice, undefined);
+  assert.deepEqual(await said(await put({ ...base, voice: "af_heart" })), [400, listedOnly]);
+  assert.equal((await put({ ...base, voice: designed })).status, 200);
+  // Chatterbox clones: the designed voice goes, and the server's own is the page's choice.
+  assert.equal((await (await serverRoute("chatterbox-audiocpp")).json()).voice, undefined);
+  assert.deepEqual(await said(await put({ ...base, voice: designed })), [400, listedOnly]);
+  assert.equal((await put({ ...base, voice: clone })).status, 200);
+  assert.equal((await (await serverRoute("breeze-tts")).json()).voice, clone);
+  // Off, a voice of the library goes; one listed for fixed voices stays.
+  assert.equal((await (await customRoute(false)).json()).voice, undefined);
+  assert.equal((await serverRoute("fixed")).status, 200);
+  assert.equal((await customRoute(true)).status, 200);
+  assert.equal((await put({ ...base, voice: "af_heart" })).status, 200);
+  assert.equal((await (await customRoute(false)).json()).voice, "af_heart");
 });
