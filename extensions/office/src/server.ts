@@ -519,20 +519,32 @@ function registerRoutes(dd: string, secret: string): void {
     }
   });
 
-  /** GET /ds/<rest...> -> a thin reverse proxy for the browser's Document Server traffic (api.js, the editor iframe,
-   * its assets). Core mounts us at /api/x/<extension> BEHIND THE SESSION GATE (core/server/src/extension-host.ts),
-   * so only signed-in browsers may reach this -- and it forwards GETs to ONE origin only: the recorded DS origin
-   * from ds.json, never anywhere else. The upstream path is recomputed from the RAW request URL with its query
-   * string included (express params may be decoded; an iframe's ?dockey=... must pass verbatim). The upstream ask
-   * carries accept-encoding: identity and neither content-encoding nor content-length is copied on the way out:
+  /** GET+POST /ds/<rest...> -> a thin reverse proxy for the browser's Document Server traffic (api.js, the editor
+   * iframe and its assets -- AND the socket.io POLLING channel). The editor app talks to docserver over engine.io:
+   * GET <app>/10.0.0-<buildhash>/doc/<key>/c/?EIO=4&transport=polling handshakes, then the client's packets (the
+   * "40" connect packet, user state, ...) arrive as POSTs to the same path while its next-poll GETs stay open until
+   * the server has something to send. A GET-only proxy answered every POST with the core's 404 and the channel never
+   * opened: the editor white-loads forever even though DS is healthy (reproduced by wire replay, see PR307 notes).
+   * Core mounts us at /api/x/<extension> BEHIND THE SESSION GATE (core/server/src/extension-host.ts), so only
+   * signed-in browsers may reach this -- and it forwards to ONE origin only: the recorded DS origin from ds.json,
+   * never anywhere else. The upstream path is recomputed from the RAW request URL with its query string included
+   * (express params may be decoded; an iframe's ?dockey=... must pass verbatim). The upstream ask carries
+   * accept-encoding: identity and neither content-encoding nor content-length is copied on the way out:
    * Node's undici fetch AUTO-DECODES gzip bodies but keeps the upstream's compressed content-encoding and COMPRESSED
    * content-length in the response headers, so copying them made Node emit Content-Length for 13.7KB while sending
    * 67KB of decoded bytes -- browsers read a truncated api.js (invalid JS) and the keep-alive stream reset. Asking
    * identity means the body arrives plain with a truthful length anyway; buffering it and letting Node compute
-   * Content-Length from the ACTUAL bytes makes header and payload exactly consistent. Refusals mirror /editor-config: 503 ds_not_configured (no ds.json),
-   * 422 unresolvable_ds_origin (a "container:<id>" marker has no URL until M0), 503 ds_unavailable (the origin
-   * did not answer). GET-only; nothing below this route mutates portal state. */
-  r.get(/^\/ds\/(.*)$/, async (req, res) => {
+   * Content-Length from the ACTUAL bytes makes header and payload exactly consistent.
+   * Two transport rules beyond that: polling GETs are HELD open by docserver until it has data (an engine.io ping
+   * lands at least every 25s), so the abort window must cover a full ping cycle or the proxy kills healthy long-
+   * polls -- undici's abort also closes the upstream socket, which DS logs as a 499 at exactly the cutoff. And the
+   * handshake JSON advertises upgrades:["websocket"]: this proxy is fetch-based and cannot relay WebSocket frames,
+   * so "websocket" is stripped from every outbound handshake, pinning the client to polling for good (engine.io's
+   * fallback on a failed upgrade works, but a deterministic single transport has no double-connection churn).
+   * Refusals mirror /editor-config: 503 ds_not_configured (no ds.json), 422 unresolvable_ds_origin (a
+   * "container:<id>" marker has no URL until M0), 503 ds_unavailable (the origin did not answer). Nothing below
+   * this route mutates portal state: POSTs only ever forward to the DS. */
+  const proxyDs = async (req: any, res: any): Promise<void> => {
     const raw = typeof req.url === "string" ? req.url : "";
     const i = raw.indexOf("/ds/");
     if (i === -1) return res.status(404).json({ error: "bad proxy path", code: "not_found" });
@@ -544,11 +556,35 @@ function registerRoutes(dd: string, secret: string): void {
     if (origin.startsWith("container:")) {
       return res.status(422).json({ error: `the document server runs under ${origin}: that deployment shape cannot expose the editor to a browser until the M0 spike-2 decision lands`, code: "unresolvable_ds_origin", origin });
     }
+    const fwdHeaders: Record<string, string> = { "accept-encoding": "identity" };
+    let body: Buffer | undefined;
+    if (req.method !== "GET" && req.method !== "HEAD") {
+      // engine.io POSTs its client packets as raw text/plain; buffer them verbatim. Nothing upstream of this
+      // route parses non-JSON bodies, so the stream is still ours when it is one at all.
+      const chunks: Buffer[] = [];
+      let total = 0;
+      for await (const c of req) {
+        total += c.length;
+        if (total > 128 * 1024 * 1024) break; // the handshake advertises maxPayload 100MB; stay above it
+        chunks.push(c);
+      }
+      body = Buffer.concat(chunks);
+      const ct = req.headers?.["content-type"];
+      if (typeof ct === "string") fwdHeaders["content-type"] = ct;
+    }
     let upstream: Response;
     try {
-      upstream = await fetch(`${origin}/${rest}`, { headers: { "accept-encoding": "identity" }, redirect: "follow", signal: AbortSignal.timeout(15_000) });
+      upstream = await fetch(`${origin}/${rest}`, {
+        method: req.method,
+        headers: fwdHeaders,
+        body: body && body.length > 0 ? new Uint8Array(body) : undefined,
+        redirect: "follow",
+        // An idle poll must survive a full engine.io ping cycle (pingInterval 25s) or more; 15s cut healthy
+        // long-polls in half and made every doc channel look like it was dying.
+        signal: AbortSignal.timeout(90_000),
+      });
     } catch (e) {
-      logLine(`GET /ds/${rest.split("?")[0]} -> ${origin} failed: ${(e as Error).message}`);
+      logLine(`${req.method} /ds/${rest.split("?")[0]} -> ${origin} failed: ${(e as Error).message}`);
       return res.status(503).json({ error: `the document server at ${origin} did not answer`, code: "ds_unavailable" });
     }
     // content-encoding / content-length are DELIBERATELY not copied: undici has already decoded any gzip body,
@@ -560,14 +596,30 @@ function registerRoutes(dd: string, secret: string): void {
     }
     // Everything else (hop-by-hop, set-cookie, server banners, ...) is dropped.
     try {
-      const buf = Buffer.from(await upstream.arrayBuffer());
+      let buf = Buffer.from(await upstream.arrayBuffer());
+      // Pin the socket.io client to polling: strip "websocket" from the engine.io handshake's upgrades list --
+      // this proxy cannot relay WebSocket frames (fetch-based), so a promised upgrade could only end in churn.
+      if (upstream.status === 200 && buf.length > 2 && buf[0] === 0x30 /* '0', the EIO handshake prefix */ && buf[1] === 0x7b /* '{' */ && !rest.includes("/a/") && !rest.includes("/u/") && !rest.includes("/s/")) {
+        try {
+          const h = JSON.parse(buf.subarray(1).toString("utf8")); // skip the '0' packet prefix
+          if (Array.isArray(h.upgrades) && h.upgrades.includes("websocket")) {
+            h.upgrades = h.upgrades.filter((t: unknown) => t !== "websocket");
+            // the '0' EIO packet-type prefix is PART of the wire format -- re-serialize behind it
+            buf = Buffer.from("0" + JSON.stringify(h), "utf8");
+          }
+        } catch {
+          /* not a handshake shape after all -- forward untouched */
+        }
+      }
       res.status(upstream.status).end(buf.length === 0 ? undefined : buf);
     } catch (e) {
-      logLine(`GET /ds/${rest.split("?")[0]}: the body from ${origin} could not be read: ${(e as Error).message}`);
+      logLine(`${req.method} /ds/${rest.split("?")[0]}: the body from ${origin} could not be read: ${(e as Error).message}`);
       if (!res.headersSent) res.status(503).json({ error: `the document server at ${origin} did not answer`, code: "ds_unavailable" });
       else res.destroy();
     }
-  });
+  };
+  r.get(/^\/ds\/(.*)$/, proxyDs);
+  r.post(/^\/ds\/(.*)$/, proxyDs);
 }
 
 /* ------------------------------------------------------------------ */

@@ -43,7 +43,16 @@ class MiniRouter {
   put(...args: unknown[]) { this.reg("PUT")(...args); }
   delete(...args: unknown[]) { this.reg("DELETE")(...args); }
 
-  async dispatch(method: string, urlPath: string, body: unknown): Promise<FakeRes> {
+  /** Express-shaped fake request: the plain fields PLUS the stream surface -- an async iterator over the body
+   * (real IncomingMessages are async-iterable, and the /ds proxy's POST forwarding reads `for await (req)`). */
+  private fakeReq(method: string, urlPath: string, params: Record<string, string>, body: unknown, headers: Record<string, string>): unknown {
+    const o: Record<PropertyKey, unknown> = { method, url: urlPath, params, query: {}, body, headers };
+    const data = typeof body === "string" ? Buffer.from(body, "utf8") : Buffer.isBuffer(body) ? body : undefined;
+    o[Symbol.asyncIterator] = async function* () { if (data && data.length > 0) yield data; };
+    return o;
+  }
+
+  async dispatch(method: string, urlPath: string, body: unknown, headers: Record<string, string> = {}): Promise<FakeRes> {
     const us = urlPath.split("/").filter(Boolean);
     for (const route of this.routes) {
       if (route.method !== method) continue;
@@ -54,7 +63,7 @@ class MiniRouter {
         const params: Record<string, string> = {};
         for (let g = 1; g < m.length; g++) params[String(g - 1)] = m[g] ?? "";
         const res = fakeRes();
-        await route.handler({ method, url: urlPath, params, query: {}, body }, res);
+        await route.handler(this.fakeReq(method, urlPath, params, body, headers), res);
         return res;
       }
       const ps = route.pattern.split("/").filter(Boolean);
@@ -67,7 +76,7 @@ class MiniRouter {
       }
       if (!hit) continue;
       const res = fakeRes();
-      await route.handler({ method, url: urlPath, params, query: {}, body }, res);
+      await route.handler(this.fakeReq(method, urlPath, params, body, headers), res);
       return res;
     }
     throw new Error(`no registered ${method} route for ${urlPath}`);
@@ -762,6 +771,90 @@ test("/ds proxy: an unconfigured data dir -> 503 {code:'ds_not_configured'}; a c
     assert.equal(body.code, "unresolvable_ds_origin");
     assert.equal(body.origin, "container:cid-ab12", "same refusal family as /editor-config");
   } finally {
+    await b.cleanup();
+  }
+});
+
+/** A fake engine.io polling endpoint: answers the handshake GET and records every POST body it received.
+ * The real docserver's /<app>/10.0.0-<buildhash>/doc/<key>/c/ speaks exactly this shape (replayed live). */
+function startFakeEngineIo(holdMs = 0): Promise<{ server: http.Server; port: number; posts: string[] }> {
+  const posts: string[] = [];
+  const HANDSHAKE = '0{"sid":"Zkx0F6Y_6ZptlT-cAAKS","upgrades":["websocket"],"pingInterval":25000,"pingTimeout":20000,"maxPayload":100000000}';
+  const server = http.createServer((req, res) => {
+    if (req.method === "GET" && req.url?.startsWith("/c/?")) {
+      if (holdMs > 0) setTimeout(() => { res.writeHead(200, { "Content-Type": "text/plain" }); res.end(HANDSHAKE); }, holdMs);
+      else { res.writeHead(200, { "Content-Type": "text/plain" }); res.end(HANDSHAKE); }
+      return;
+    }
+    if (req.method === "POST" && req.url?.startsWith("/c/?")) {
+      let b = "";
+      req.on("data", (d: string) => (b += d));
+      req.on("end", () => { posts.push(b); res.writeHead(200, { "Content-Type": "text/plain" }); res.end(""); });
+      return;
+    }
+    res.writeHead(404); res.end("nope");
+  });
+  return new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => resolve({ server, port: (server.address() as AddressInfo).port, posts }));
+  });
+}
+
+test("/ds proxy: a POST forwards method + raw body verbatim to the DS (the socket.io client channel)", async () => {
+  // The editor app's doc channel: engine.io GETs handshake, then its packets (the "40" connect packet and on
+  // every state change) arrive as POSTs to the same /c/ path. A GET-only proxy answered those with the core's
+  // 404 and the channel never opened -- the white-spinner root cause (reproduced live against DS 10.0).
+  const ds = await startFakeEngineIo();
+  const b = await boot();
+  try {
+    writeDsJson(b.root, `http://127.0.0.1:${ds.port}`);
+    const res = await b.router.dispatch("POST", "/ds/c/?EIO=4&transport=polling&sid=Zkx0F6Y_6ZptlT-cAAKS", "40", { "content-type": "text/plain;charset=UTF-8" });
+    assert.equal(res.statusCode, 200, "the upstream answer passes back through the proxy");
+    assert.deepEqual(ds.posts, ["40"], "the raw engine.io packet arrived at the DS byte-for-byte with its query string");
+  } finally {
+    ds.server.closeAllConnections();
+    await new Promise<void>((r) => ds.server.close(() => r()));
+    await b.cleanup();
+  }
+});
+
+test("/ds proxy: an engine.io handshake loses its websocket upgrade offer (this proxy is polling-only)", async () => {
+  // fetch cannot relay WebSocket frames, so advertising upgrades:["websocket"] would only end in failed-upgrade
+  // churn; the handler strips it from outbound handshakes and pins the client to long-polling.
+  const ds = await startFakeEngineIo();
+  const b = await boot();
+  try {
+    writeDsJson(b.root, `http://127.0.0.1:${ds.port}`);
+    const res = await b.router.dispatch("GET", "/ds/c/?EIO=4&transport=polling");
+    assert.equal(res.statusCode, 200);
+    const raw = String(res.data as Buffer | string);
+    assert.ok(raw.startsWith("0{"), "the EIO handshake prefix is preserved");
+    const hs = JSON.parse(raw.slice(1)) as Record<string, unknown>;
+    assert.equal(hs.sid, "Zkx0F6Y_6ZptlT-cAAKS", "everything else in the handshake is untouched");
+    assert.ok(!Array.isArray(hs.upgrades) || !hs.upgrades.includes("websocket"), "no websocket upgrade is offered to the client");
+  } finally {
+    ds.server.closeAllConnections();
+    await new Promise<void>((r) => ds.server.close(() => r()));
+    await b.cleanup();
+  }
+});
+
+test("/ds proxy: an idle long-poll HELD past the old 15s cutoff still comes back (engine.io keeps polls open until it has data)", async () => {
+  // The pre-fix handler aborted every upstream fetch after exactly 15s -- and undici's abort also closes the
+  // upstream socket, which docserver logs as a 499 at precisely that moment. engine.io pings at least every
+  // 25s, so a healthy poll can sit empty for longer than 15s; the window must cover a full ping cycle.
+  const ds = await startFakeEngineIo(16_500); // held open just past the old 15_000ms cutoff
+  const b = await boot();
+  try {
+    writeDsJson(b.root, `http://127.0.0.1:${ds.port}`);
+    const t0 = Date.now();
+    const res = await b.router.dispatch("GET", "/ds/c/?EIO=4&transport=polling");
+    assert.equal(res.statusCode, 200, "the held poll answers instead of a ds_unavailable abort");
+    assert.match(String(res.data as Buffer | string), /Zkx0F6Y_6ZptlT-cAAKS/, "the handshake body arrives after the hold");
+    assert.ok(Date.now() - t0 >= 15_000, "it really waited out the old cutoff window before answering");
+  } finally {
+    ds.server.closeAllConnections();
+    await new Promise<void>((r) => ds.server.close(() => r()));
     await b.cleanup();
   }
 });
