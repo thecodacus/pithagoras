@@ -523,9 +523,13 @@ function registerRoutes(dd: string, secret: string): void {
    * its assets). Core mounts us at /api/x/<extension> BEHIND THE SESSION GATE (core/server/src/extension-host.ts),
    * so only signed-in browsers may reach this -- and it forwards GETs to ONE origin only: the recorded DS origin
    * from ds.json, never anywhere else. The upstream path is recomputed from the RAW request URL with its query
-   * string included (express params may be decoded; an iframe's ?dockey=... must pass verbatim). Body bytes are
-   * buffered and passed through untouched -- including a gzip/br content-encoding, whose header is copied, so the
-   * browser decodes exactly what DS sent. Refusals mirror /editor-config: 503 ds_not_configured (no ds.json),
+   * string included (express params may be decoded; an iframe's ?dockey=... must pass verbatim). The upstream ask
+   * carries accept-encoding: identity and neither content-encoding nor content-length is copied on the way out:
+   * Node's undici fetch AUTO-DECODES gzip bodies but keeps the upstream's compressed content-encoding and COMPRESSED
+   * content-length in the response headers, so copying them made Node emit Content-Length for 13.7KB while sending
+   * 67KB of decoded bytes -- browsers read a truncated api.js (invalid JS) and the keep-alive stream reset. Asking
+   * identity means the body arrives plain with a truthful length anyway; buffering it and letting Node compute
+   * Content-Length from the ACTUAL bytes makes header and payload exactly consistent. Refusals mirror /editor-config: 503 ds_not_configured (no ds.json),
    * 422 unresolvable_ds_origin (a "container:<id>" marker has no URL until M0), 503 ds_unavailable (the origin
    * did not answer). GET-only; nothing below this route mutates portal state. */
   r.get(/^\/ds\/(.*)$/, async (req, res) => {
@@ -542,12 +546,15 @@ function registerRoutes(dd: string, secret: string): void {
     }
     let upstream: Response;
     try {
-      upstream = await fetch(`${origin}/${rest}`, { redirect: "follow", signal: AbortSignal.timeout(15_000) });
+      upstream = await fetch(`${origin}/${rest}`, { headers: { "accept-encoding": "identity" }, redirect: "follow", signal: AbortSignal.timeout(15_000) });
     } catch (e) {
       logLine(`GET /ds/${rest.split("?")[0]} -> ${origin} failed: ${(e as Error).message}`);
       return res.status(503).json({ error: `the document server at ${origin} did not answer`, code: "ds_unavailable" });
     }
-    for (const k of ["content-type", "content-encoding", "content-length", "cache-control", "content-disposition", "access-control-allow-origin"]) {
+    // content-encoding / content-length are DELIBERATELY not copied: undici has already decoded any gzip body,
+    // so the upstream length now describes compressed bytes we never send. The buffer below IS the payload;
+    // Node computes a truthful Content-Length from it.
+    for (const k of ["content-type", "cache-control", "content-disposition", "access-control-allow-origin"]) {
       const v = upstream.headers.get(k);
       if (v !== null) res.setHeader(k, v);
     }

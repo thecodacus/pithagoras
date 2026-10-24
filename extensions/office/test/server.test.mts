@@ -11,6 +11,7 @@ import http from "node:http";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import zlib from "node:zlib";
 import type { AddressInfo } from "node:net";
 import type { ServerPortal } from "@pithagoras/extension-api/server";
 import type { ContainerInfo, Docker, ExecResult, VolumeInfo } from "../../docker/src/api";
@@ -690,6 +691,40 @@ test("/ds proxy: an upstream 404 passes through as a 404 with the upstream body"
   } finally {
     ds.server.closeAllConnections();
     await new Promise<void>((r) => ds.server.close(() => r()));
+    await b.cleanup();
+  }
+});
+
+test("/ds proxy: an identity request answered with GZIP bytes + LYING headers still delivers the FULL original payload", async () => {
+  // The exact PR #307 bug, replayed against a hostile upstream: it honours NOTHING -- it answers our
+  // accept-encoding: identity ask with a gzip body while declaring content-encoding: gzip and a
+  // content-length sized to the COMPRESSED bytes. undici auto-decodes the gzip; the handler must not copy
+  // either lying header, so the client reads every original byte intact -- no truncation, no manual gunzip.
+  const ORIGINAL = Buffer.concat(Array.from({ length: 64 }, () => API_JS_BYTES));
+  assert.ok(ORIGINAL.length > 1024, "sanity: the payload is big enough for gzip to shrink it");
+  const gzipped = zlib.gzipSync(ORIGINAL);
+  assert.ok(gzipped.length < ORIGINAL.length, "sanity: the gzip body is really smaller than the original");
+  const b = await boot();
+  const seenEncodings: string[] = [];
+  let server: http.Server | undefined;
+  try {
+    server = http.createServer((req, res) => {
+      seenEncodings.push(req.headers["accept-encoding"] ?? "");
+      res.writeHead(200, { "Content-Type": "application/javascript; charset=utf-8", "Content-Encoding": "gzip", "Content-Length": gzipped.length });
+      res.end(gzipped);
+    });
+    await new Promise<void>((resolve, reject) => { server!.once("error", reject); server!.listen(0, "127.0.0.1", () => resolve()); });
+    const port = (server.address() as AddressInfo).port;
+    writeDsJson(b.root, `http://127.0.0.1:${port}`);
+    const res = await b.router.dispatch("GET", "/ds/web-apps/apps/api/documents/api.js");
+    assert.equal(res.statusCode, 200, "the upstream status passes through");
+    assert.equal(seenEncodings.at(-1), "identity", "the proxy asks the DS for an UNENCODED body");
+    assert.match(String(res.headers["content-type"]), /application\/javascript/, "the content-type passes through");
+    assert.equal(res.headers["content-encoding"], undefined, "the (lying) upstream content-encoding is NOT copied");
+    assert.ok(!Object.keys(res.headers).includes("content-length"), "no upstream-declared content-length is forwarded -- Node sizes the real buffer");
+    assert.equal(Buffer.from(res.data as Buffer).compare(ORIGINAL), 0, "the FULL original payload arrives intact (undici decoded it; no truncation at the lying length)");
+  } finally {
+    if (server) { server.closeAllConnections(); await new Promise<void>((r) => server.close(() => r())); }
     await b.cleanup();
   }
 });
