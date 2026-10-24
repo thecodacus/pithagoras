@@ -1,21 +1,52 @@
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import type { ContainerInfo, ContainerSpec, Docker, PullState, VolumeInfo } from "./api";
+import type { ContainerInfo, ContainerSpec, Docker, NetworkInfo, PullState, Reach, VolumeInfo } from "./api";
 import { checked, DockerError, exec, logs, ping, pull, request, socketThere } from "./engine";
+import { FORWARD_SPEC_LABEL, FORWARDER_IMAGE, FORWARDS_LABEL, forwarderName, forwarderSpec } from "./forward";
 
 /**
  * Docker as each extension is given it (api.ts), and as the person sees it all (`overview`). What is whose is the label
- * an extension's containers and volumes are made with (OWNER_LABEL), or, for one it took over, what is kept in this
- * extension's own folder (`adopted.json`): a container's labels cannot be changed once it is made, and one taken over
- * is kept by its id, so that one made again under its name by someone else is not taken for it.
+ * an extension's containers, volumes and networks are made with (OWNER_LABEL), or, for a container or a volume it took
+ * over, what is kept in this extension's own folder (`adopted.json`): a container's labels cannot be changed once it is
+ * made, and one taken over is kept by its id, so that one made again under its name by someone else is not taken for
+ * it. A network is the extension's by its label alone: none was made before there were extensions.
  */
 
-/** The label that says which extension a container or a volume is. */
+/** The label that says which extension a container, a volume or a network is. */
 export const OWNER_LABEL = "pithagoras.extension";
 
 type Raw = { Id: string; Names?: string[]; Image: string; State: string; Status: string; Labels?: Record<string, string> | null };
-type Inspected = { Id: string; Name: string; Config?: { Image?: string; Tty?: boolean; Labels?: Record<string, string> | null }; State?: { Status?: string; Running?: boolean } };
+type Inspected = {
+  Id: string;
+  Name: string;
+  Config?: { Image?: string; Tty?: boolean; Labels?: Record<string, string> | null };
+  State?: { Status?: string; Running?: boolean };
+  NetworkSettings?: { Networks?: Record<string, { NetworkID?: string }> | null };
+};
 type Adopted = { containers: Record<string, string>; volumes: Record<string, string> };
+/** The portal's own container, as much of Docker's inspect as is read of it. */
+type PortalContainer = { Id: string; HostConfig?: { NetworkMode?: string }; NetworkSettings?: Inspected["NetworkSettings"] };
+
+/** The driver option that sets how a bridge network's IPv4 gateway works: `isolated` gives it none. */
+const GATEWAY_MODE = "com.docker.network.bridge.gateway_mode_ipv4";
+type RawNetwork = {
+  Id: string;
+  Name: string;
+  Internal?: boolean;
+  EnableIPv6?: boolean;
+  Options?: Record<string, string> | null;
+  IPAM?: { Config?: { Subnet?: string; Gateway?: string }[] | null };
+  Labels?: Record<string, string> | null;
+  /** The containers on it now, by their ids: those running. */
+  Containers?: Record<string, { Name?: string }> | null;
+};
+/**
+ * A network that has no way out: internal, so that Docker routes nothing from it to anywhere else, and in the gateway
+ * mode `isolated`, with no IPv6, so that the machine has no address on it either, and so no gateway: a plain internal
+ * network leaves every service the machine listens for on 0.0.0.0 open through its bridge's address.
+ */
+const noWayOut = (n: RawNetwork) => n.Internal === true && n.EnableIPv6 !== true && n.Options?.[GATEWAY_MODE] === "isolated" && !(n.IPAM?.Config ?? []).some((c) => c.Gateway);
+const wayOut = (name: string) => new DockerError(`${name} has a way out to the machine, which an extension's network may not have: remove it, and it is made again`, 409);
 
 /** How much of what a container wrote `logs` gives, unless asked for another amount, and the most it gives. */
 const TAIL = 200;
@@ -26,25 +57,35 @@ const nameOf = (raw: Raw) => (raw.Names?.[0] ?? "").replace(/^\//, "");
 const validName = (name: string) => /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(name);
 
 /**
- * The network mode that puts a container on the portal's own loopback (api.ts): `host` for a portal on the machine itself
- * (Linux only), else `container:<id>` of the running container named by `PORTAL_CONTAINER_NAME`, or by `HOSTNAME`.
- * Whether the portal runs in a container, and on which system, are the portal's own unless a test gives them.
+ * The portal's running container, as Docker has it: the one `PORTAL_CONTAINER_NAME` names, or else `HOSTNAME`, where the
+ * portal runs in a container or the name is set; nothing for a portal on the machine itself. Whether the portal runs
+ * in a container is the portal's own unless a test gives it.
  */
-export async function sharedNetwork(inContainer = existsSync("/.dockerenv"), platform = process.platform): Promise<string> {
-  if (!inContainer && !process.env.PORTAL_CONTAINER_NAME) {
-    if (platform !== "linux") throw new Error("A container shares the network of a portal on the machine itself only on Linux. Run the portal in Docker on this platform.");
-    return "host";
-  }
+export async function portalContainer(inContainer = existsSync("/.dockerenv")): Promise<PortalContainer | undefined> {
+  if (!inContainer && !process.env.PORTAL_CONTAINER_NAME) return undefined;
   const name = process.env.PORTAL_CONTAINER_NAME || process.env.HOSTNAME;
   if (!name) throw new Error("Set PORTAL_CONTAINER_NAME to the portal Docker container name.");
-  const detail = await request<{ Id?: string; State?: { Running?: boolean } }>("GET", `/containers/${encodeURIComponent(name)}/json`);
+  const detail = await request<PortalContainer & { State?: { Running?: boolean } }>("GET", `/containers/${encodeURIComponent(name)}/json`);
   if (detail.status !== 200 || !detail.body?.Id || !detail.body.State?.Running) {
     throw new Error("Cannot identify the running portal container. Set PORTAL_CONTAINER_NAME to its Docker name.");
   }
-  return `container:${detail.body.Id}`;
+  return detail.body;
 }
 
-export function dockerFor(dataDir: string) {
+/**
+ * The network mode that puts a container on the portal's own loopback (api.ts): `host` for a portal on the machine itself
+ * (Linux only), else `container:<id>` of the portal's running container (`portalContainer`). Whether the portal runs in
+ * a container, and on which system, are the portal's own unless a test gives them.
+ */
+export async function sharedNetwork(inContainer = existsSync("/.dockerenv"), platform = process.platform): Promise<string> {
+  const portal = await portalContainer(inContainer);
+  if (portal) return `container:${portal.Id}`;
+  if (platform !== "linux") throw new Error("A container shares the network of a portal on the machine itself only on Linux. Run the portal in Docker on this platform.");
+  return "host";
+}
+
+/** Docker for each extension, and for the person, with what it keeps in `dataDir`. Whether the portal runs in a container is the portal's own unless a test gives it. */
+export function dockerFor(dataDir: string, inContainer = existsSync("/.dockerenv")) {
   const file = path.join(dataDir, "adopted.json");
   const adopted = (): Adopted => {
     try {
@@ -176,11 +217,111 @@ export function dockerFor(dataDir: string) {
     }
   }
 
-  /** What one extension is given: its own containers and volumes, by its name. */
+  /** A network by its name: nothing where there is none, or where Docker answered for another (its inspect also takes an id, or the start of one). */
+  async function network(name: string): Promise<RawNetwork | undefined> {
+    if (!validName(name)) throw new DockerError(`"${name}" is not a name Docker takes`);
+    const { status, body } = await request<RawNetwork & { message?: string }>("GET", `/networks/${encodeURIComponent(name)}`);
+    if (status === 404) return undefined;
+    if (status >= 400) throw new DockerError(body?.message || `Docker answered ${status}`, status);
+    return body.Name === name ? body : undefined;
+  }
+  const networkOwner = (n: RawNetwork) => n.Labels?.[OWNER_LABEL] ?? "";
+  const networkInfo = (n: RawNetwork): NetworkInfo => ({ name: n.Name, id: n.Id, owner: networkOwner(n) });
+  /** The network `name` is, for `who` to act on: refused where it is someone else's, or nobody's. Nothing where there is none. */
+  async function ownNetwork(who: string, name: string): Promise<RawNetwork | undefined> {
+    const found = await network(name);
+    if (!found) return undefined;
+    const owner = networkOwner(found);
+    if (owner !== who) throw new DockerError(owner ? `${name} is ${owner}'s network, not ${who}'s` : `${name} is no extension's network`, 403);
+    return found;
+  }
+  /** A network gone, by its id: Docker's no passed on (403 while a container is on it), and one gone already is gone. */
+  async function removeNetwork(id: string): Promise<void> {
+    const { status, body } = await request<{ message?: string }>("DELETE", `/networks/${encodeURIComponent(id)}`);
+    if (status >= 400 && status !== 404) throw new DockerError(body?.message || `Docker answered ${status}`, status);
+  }
+
+  /**
+   * The portal's container put on `island`, where it is not on it yet. Docker refuses one that is on it already (403):
+   * the refusal counts as done where the container, read again, is on it, which is checked rather than read from
+   * Docker's words, which are Docker's to change.
+   */
+  async function connect(island: RawNetwork, portal: PortalContainer): Promise<void> {
+    if (portal.NetworkSettings?.Networks?.[island.Name]) return;
+    const { status, body } = await request<{ message?: string }>("POST", `/networks/${encodeURIComponent(island.Id)}/connect`, { Container: portal.Id });
+    if (status < 400) return;
+    if ((await inspect(portal.Id))?.NetworkSettings?.Networks?.[island.Name]) return;
+    throw new DockerError(body?.message || `Docker answered ${status}`, status);
+  }
+
+  /**
+   * The forwarder to `port` of `container` on `island` (forward.ts), as it would be made now, and running: its own
+   * network made where it is not there, kept where it is; the forwarder made again where its mark is not the one it
+   * would be made with now, or where there is none, and started (Docker answers a start of one that runs with 304).
+   * Its start fails in Docker's words where 127.0.0.1:`port` is taken.
+   */
+  async function forwarder(who: string, island: RawNetwork, container: string, port: number): Promise<void> {
+    const name = forwarderName(container);
+    // Not internal: Docker publishes no port of a container that is only on internal networks.
+    const door = (await ownNetwork(who, name)) ?? {
+      Name: name,
+      Id: (await checked<{ Id: string }>("POST", "/networks/create", { Name: name, Driver: "bridge", Labels: { [OWNER_LABEL]: who, [FORWARDS_LABEL]: island.Name } })).Id,
+    };
+    const spec = forwarderSpec(container, port, island, door);
+    const mine = forExtension(who);
+    if ((await own(who, name))?.Config?.Labels?.[FORWARD_SPEC_LABEL] !== spec.Labels[FORWARD_SPEC_LABEL]) {
+      await ensure(FORWARDER_IMAGE);
+      await mine.containers.create(name, spec);
+    }
+    await mine.containers.start(name);
+  }
+
+  /** The forwarder of `container` gone, with its own network, where there is one: for a portal that needs none, it would hold the port for nothing. */
+  async function dropForwarder(who: string, container: string): Promise<void> {
+    const name = forwarderName(container);
+    const was = await own(who, name);
+    if (was) await act(was.Id, "remove");
+    const door = await ownNetwork(who, name);
+    if (door) await removeNetwork(door.Id);
+  }
+
+  /** Where the portal reaches `port` of `container` on the network `name`, with what that takes put right (api.ts, `networks.reach`). */
+  async function reach(who: string, name: string, container: string, port: number): Promise<Reach> {
+    if (!Number.isInteger(port) || port < 1 || port > 65535) throw new DockerError(`${port} is not a port`);
+    const island = await ownNetwork(who, name);
+    if (!island) throw new DockerError(`There is no network ${name}`, 404);
+    if (!noWayOut(island)) throw wayOut(name);
+    const found = await own(who, container);
+    if (!found) throw new DockerError(`There is no container ${container}`, 404);
+    if (!found.NetworkSettings?.Networks?.[name]) throw new DockerError(`${container} is not on ${name}`, 409);
+    const portal = await portalContainer(inContainer);
+    const mode = portal?.HostConfig?.NetworkMode;
+    if (mode?.startsWith("container:")) {
+      throw new DockerError("The portal's container shares the network of another container, to which no network can be added: run the portal with a network of its own, or on the machine's (network_mode: host).", 409);
+    }
+    if (portal && mode !== "host") {
+      await dropForwarder(who, container);
+      await connect(island, portal);
+      return { host: container, port };
+    }
+    await forwarder(who, island, container, port);
+    return { host: "127.0.0.1", port };
+  }
+
+  /** One reach at a time for a container, whoever asks: two at once would each make its forwarder and its network. */
+  const reaching = new Map<string, Promise<unknown>>();
+  function oneAtATime<T>(key: string, work: () => Promise<T>): Promise<T> {
+    const next = (reaching.get(key) ?? Promise.resolve()).catch(() => {}).then(work);
+    reaching.set(key, next);
+    void next.catch(() => {}).finally(() => reaching.get(key) === next && reaching.delete(key));
+    return next;
+  }
+
+  /** What one extension is given: its own containers, volumes and networks, by its name. */
   function forExtension(who: string): Docker {
     return {
       available: async () => socketThere() && (await ping()),
-      sharedNetwork: () => sharedNetwork(),
+      sharedNetwork: () => sharedNetwork(inContainer),
       images: {
         present: async (image) => (await request("GET", `/images/${encodeURIComponent(image)}/json`)).status === 200,
         ensure,
@@ -269,6 +410,46 @@ export function dockerFor(dataDir: string) {
             was.volumes[name] = who;
             keep(was);
           }
+        },
+      },
+      networks: {
+        async create(name) {
+          const there = await ownNetwork(who, name);
+          if (there) {
+            if (!noWayOut(there)) throw wayOut(name);
+            return networkInfo(there);
+          }
+          const { Id } = await checked<{ Id: string }>("POST", "/networks/create", {
+            Name: name,
+            Driver: "bridge",
+            Internal: true,
+            EnableIPv6: false,
+            Options: { [GATEWAY_MODE]: "isolated" },
+            Labels: { [OWNER_LABEL]: who },
+          });
+          // What Docker made, read back: one older than 28.0 may make it with a gateway, the option ignored.
+          const made = await checked<RawNetwork>("GET", `/networks/${encodeURIComponent(Id)}`);
+          if (!noWayOut(made)) {
+            await removeNetwork(Id);
+            throw new DockerError("This Docker cannot make a network with no way out: that takes Docker Engine 28.0 or later.");
+          }
+          return networkInfo(made);
+        },
+        async get(name) {
+          const found = await network(name);
+          return found && networkInfo(found);
+        },
+        reach: (name, container, port) => oneAtATime(`${who}\n${container}`, () => reach(who, name, container, port)),
+        async remove(name) {
+          const island = await ownNetwork(who, name);
+          if (!island) return;
+          // The forwarders that lead onto it, and their own networks: by their labels.
+          const of = encodeURIComponent(JSON.stringify({ label: [`${OWNER_LABEL}=${who}`, `${FORWARDS_LABEL}=${name}`] }));
+          for (const c of await checked<Raw[]>("GET", `/containers/json?all=1&filters=${of}`)) await act(c.Id, "remove");
+          for (const n of await checked<RawNetwork[]>("GET", `/networks?filters=${of}`)) await removeNetwork(n.Id);
+          const portal = await portalContainer(inContainer);
+          if (portal && island.Containers?.[portal.Id]) await checked("POST", `/networks/${encodeURIComponent(island.Id)}/disconnect`, { Container: portal.Id, Force: true });
+          await removeNetwork(island.Id);
         },
       },
     };

@@ -1,12 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { mkdtempSync, readFileSync } from "node:fs";
+import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { once } from "node:events";
 import net, { type AddressInfo } from "node:net";
 import express from "express";
-import { fakeDocker } from "./fake-docker.ts";
+import { fakeDocker, type FakeContainer } from "./fake-docker.ts";
 import type { Docker } from "../src/api.ts";
 
 // Docker for the extensions that build on it (src/docker.ts), against a daemon of the tests' own on a socket.
@@ -14,6 +16,7 @@ const docker = await fakeDocker();
 process.env.DOCKER_SOCKET = docker.socket;
 const { dockerFor, OWNER_LABEL, sharedNetwork } = await import("../src/docker.ts");
 const { demux, pull, request } = await import("../src/engine.ts");
+const { FORWARD_SCRIPT, FORWARDER_IMAGE } = await import("../src/forward.ts");
 const { default: serverHalf } = await import("../src/server.ts");
 test.after(() => docker.close());
 
@@ -275,6 +278,337 @@ test("an extension's volumes are its own as its containers are", async () => {
   await browser.volumes.remove("pithagoras_browser-profile");
   await browser.volumes.remove("dk-profile");
   assert.deepEqual(docker.volumes, []);
+});
+
+const ISOLATED = { "com.docker.network.bridge.gateway_mode_ipv4": "isolated" };
+/** A running portal container in the fake, named by PORTAL_CONTAINER_NAME, in the network mode given; taken away again, with the name, after `work`. */
+async function withPortal(mode: string, work: (portal: FakeContainer) => Promise<void>, id = `portal-${mode}`.replace(/[^a-z0-9]/g, "").padEnd(12, "0")) {
+  const was = process.env.PORTAL_CONTAINER_NAME;
+  const portal: FakeContainer = { Id: id, Name: "dk-the-portal", Image: "pithagoras-portal", State: "running", Labels: {}, Tty: false, out: "", err: "", HostConfig: { NetworkMode: mode } };
+  docker.containers.push(portal);
+  process.env.PORTAL_CONTAINER_NAME = portal.Name;
+  try {
+    await work(portal);
+  } finally {
+    if (was === undefined) delete process.env.PORTAL_CONTAINER_NAME;
+    else process.env.PORTAL_CONTAINER_NAME = was;
+    if (docker.containers.includes(portal)) docker.containers.splice(docker.containers.indexOf(portal), 1);
+  }
+}
+/** What is left in the fake of a test's networks and containers, by the start of their names, taken away. */
+function sweep(prefix: string) {
+  for (const list of [docker.containers, docker.networks] as { Name: string }[][]) {
+    for (let i = list.length - 1; i >= 0; i--) if (list[i].Name.startsWith(prefix)) list.splice(i, 1);
+  }
+}
+
+test("an extension's network has no way out and carries its name; one of its own is kept, another's or nobody's is refused", async () => {
+  const { forExtension } = dockerFor(dataDir(), false);
+  const blender = forExtension("pithagoras-blender"), godot = forExtension("pithagoras-godot");
+  try {
+    const made = await blender.networks.create("dk-island");
+    const there = docker.networks.find((n) => n.Name === "dk-island")!;
+    assert.deepEqual(made, { name: "dk-island", id: there.Id, owner: "pithagoras-blender" });
+    assert.deepEqual([there.Internal, there.EnableIPv6, there.Options, there.Labels], [true, false, ISOLATED, { [OWNER_LABEL]: "pithagoras-blender" }], "internal, isolated, no IPv6, and the extension's");
+    assert.deepEqual(there.IPAM!.Config.map((c) => c.Gateway), [undefined], "so no gateway");
+    const count = docker.networks.length;
+    assert.deepEqual(await blender.networks.create("dk-island"), made, "one of its own is kept");
+    assert.equal(docker.networks.length, count, "and nothing is made");
+    await assert.rejects(godot.networks.create("dk-island"), { status: 403, message: /dk-island is pithagoras-blender's network, not pithagoras-godot's/ });
+    docker.networks.push({ Id: "bridge000000", Name: "dk-bridge", Labels: {} });
+    await assert.rejects(blender.networks.create("dk-bridge"), { status: 403, message: /dk-bridge is no extension's network/ });
+    await assert.rejects(blender.networks.create("../up"), { status: 0, message: /is not a name Docker takes/ });
+    assert.deepEqual(await godot.networks.get("dk-island"), made, "another's may be seen, with whose it is");
+    assert.deepEqual(await blender.networks.get("dk-bridge"), { name: "dk-bridge", id: "bridge000000", owner: "" });
+    assert.equal(await blender.networks.get("dk-none"), undefined);
+    assert.equal(await blender.networks.get(there.Id), undefined, "by its name only: Docker's inspect also takes an id");
+  } finally {
+    sweep("dk-");
+  }
+});
+
+test("a Docker that makes the network with a way out is refused, and what it made is taken away again", async () => {
+  const own = dockerFor(dataDir(), false).forExtension("a");
+  docker.runs.oldNetworks = true;
+  try {
+    await assert.rejects(own.networks.create("dk-old"), { status: 0, message: /^This Docker cannot make a network with no way out: that takes Docker Engine 28.0 or later.$/ });
+    assert.equal(docker.networks.some((n) => n.Name === "dk-old"), false, "taken away again");
+    docker.runs.oldNetworks = undefined;
+    // One of its own that lacks any of it, as one made by hand may: refused, and left as it is.
+    const noWayOut = { Labels: { [OWNER_LABEL]: "a" }, Internal: true, EnableIPv6: false, Options: ISOLATED, IPAM: { Config: [{ Subnet: "10.200.0.0/16" }] } };
+    const lacking = {
+      "dk-gateway": { IPAM: { Config: [{ Subnet: "10.200.0.0/16", Gateway: "10.200.0.1" }] } },
+      "dk-not-isolated": { Options: {} },
+      "dk-not-internal": { Internal: false },
+      "dk-ipv6": { EnableIPv6: true },
+    };
+    for (const [name, lacks] of Object.entries(lacking)) {
+      docker.networks.push({ Id: `${name}-id`, Name: name, ...noWayOut, ...lacks });
+      await assert.rejects(own.networks.create(name), { status: 409, message: new RegExp(`^${name} has a way out to the machine, which an extension's network may not have: remove it, and it is made again$`) });
+      assert.ok(docker.networks.some((n) => n.Name === name), "not removed");
+    }
+  } finally {
+    docker.runs.oldNetworks = undefined;
+    sweep("dk-");
+  }
+});
+
+test("for a portal in a container of its own network, reach puts the portal's container on the network once and gives the container's name", async () => {
+  const own = dockerFor(dataDir(), false).forExtension("pithagoras-blender");
+  try {
+    await withPortal("bridge", async (portal) => {
+      const island = await own.networks.create("dk-net");
+      await own.containers.create("dk-srv", { Image: "blender:1", HostConfig: { NetworkMode: "dk-net" } });
+      const asked = docker.connects.length;
+      assert.deepEqual(await own.networks.reach("dk-net", "dk-srv", 3870), { host: "dk-srv", port: 3870 }, "for one not running yet too");
+      assert.deepEqual(docker.connects.slice(asked), [{ network: "dk-net", container: "dk-the-portal" }]);
+      assert.deepEqual(portal.Networks, { "dk-net": { NetworkID: island.id } });
+      assert.deepEqual(await own.networks.reach("dk-net", "dk-srv", 3870), { host: "dk-srv", port: 3870 });
+      assert.equal(docker.connects.length, asked + 1, "a second reach connects nothing");
+
+      // Connected by another just then: Docker's 403 counts as done, as the portal is on it.
+      delete portal.Networks!["dk-net"];
+      docker.runs.onConnect = (n, c) => (c.Networks = { ...c.Networks, [n.Name]: { NetworkID: n.Id } });
+      assert.deepEqual(await own.networks.reach("dk-net", "dk-srv", 3870), { host: "dk-srv", port: 3870 });
+      assert.equal(docker.connects.length, asked + 2);
+      // A refusal that leaves it off the network is passed on, in Docker's words.
+      delete portal.Networks!["dk-net"];
+      docker.runs.onConnect = (_n, c) => (c.HostConfig = { NetworkMode: "host" });
+      await assert.rejects(own.networks.reach("dk-net", "dk-srv", 3870), { status: 400, message: /cannot be connected to any other network/ });
+      docker.runs.onConnect = undefined;
+      portal.HostConfig = { NetworkMode: "bridge" };
+
+      // The portal's container made again, with another id: on no network but its own, and connected at the next reach.
+      docker.containers.splice(docker.containers.indexOf(portal), 1);
+      const again: FakeContainer = { ...portal, Id: "portalagain0", Networks: undefined };
+      docker.containers.push(again);
+      assert.deepEqual(await own.networks.reach("dk-net", "dk-srv", 3870), { host: "dk-srv", port: 3870 });
+      assert.deepEqual(again.Networks, { "dk-net": { NetworkID: island.id } });
+      assert.equal(docker.containers.some((c) => c.Name === "dk-srv-forward") || docker.networks.some((n) => n.Name === "dk-srv-forward"), false, "nothing was published");
+      docker.containers.splice(docker.containers.indexOf(again), 1);
+    });
+  } finally {
+    docker.runs.onConnect = undefined;
+    sweep("dk-");
+  }
+});
+
+test("for a portal on the machine's network, reach runs a forwarder that publishes the port on 127.0.0.1", async () => {
+  const own = dockerFor(dataDir(), false).forExtension("pithagoras-godot");
+  const forwarder = () => docker.containers.find((c) => c.Name === "dk-gsrv-forward")!;
+  try {
+    await withPortal("host", async () => {
+      const island = await own.networks.create("dk-gnet");
+      await own.containers.create("dk-gsrv", { Image: "godot:1", HostConfig: { NetworkMode: "dk-gnet" } });
+      const pulls = docker.pulls.length;
+      assert.deepEqual(await own.networks.reach("dk-gnet", "dk-gsrv", 3880), { host: "127.0.0.1", port: 3880 });
+      assert.deepEqual(docker.pulls.slice(pulls), [FORWARDER_IMAGE], "its image downloaded, the first time");
+      assert.equal(FORWARDER_IMAGE, "node:22.23.4-alpine3.23");
+      const door = docker.networks.find((n) => n.Name === "dk-gsrv-forward")!;
+      assert.deepEqual([door.Internal, door.Labels], [false, { [OWNER_LABEL]: "pithagoras-godot", "pithagoras.forwards": "dk-gnet" }], "its own network, with a way out for its port, and the extension's");
+      const made = forwarder().made as any;
+      assert.deepEqual([made.Image, made.User, made.Cmd, made.Env], [FORWARDER_IMAGE, "1000:1000", ["node", "-e", FORWARD_SCRIPT], ["FORWARD_PORT=3880", "FORWARD_TO_HOST=dk-gsrv", "FORWARD_TO_PORT=3880"]]);
+      assert.deepEqual(made.ExposedPorts, { "3880/tcp": {} });
+      assert.deepEqual(made.HostConfig.PortBindings, { "3880/tcp": [{ HostIp: "127.0.0.1", HostPort: "3880" }] }, "published on the machine's 127.0.0.1 alone");
+      assert.deepEqual([made.HostConfig.NetworkMode, Object.keys(made.NetworkingConfig.EndpointsConfig)], ["dk-gsrv-forward", ["dk-gsrv-forward", "dk-gnet"]], "on both networks from its create");
+      assert.deepEqual(
+        [made.HostConfig.CapDrop, made.HostConfig.SecurityOpt, made.HostConfig.ReadonlyRootfs, made.HostConfig.RestartPolicy, made.HostConfig.Memory, made.HostConfig.PidsLimit],
+        [["ALL"], ["no-new-privileges"], true, { Name: "unless-stopped" }, 128 * 1024 ** 2, 64],
+      );
+      assert.deepEqual(forwarder().Networks, { "dk-gsrv-forward": { NetworkID: door.Id }, "dk-gnet": { NetworkID: island.id } });
+      assert.equal(forwarder().Labels[OWNER_LABEL], "pithagoras-godot");
+      assert.equal(forwarder().Labels["pithagoras.forwards"], "dk-gnet");
+      assert.equal(forwarder().State, "running", "started");
+      assert.deepEqual((await own.containers.list()).map((c) => c.name).sort(), ["dk-gsrv", "dk-gsrv-forward"], "listed as the extension's, in Settings too");
+
+      const count = () => [docker.created.length, docker.starts.length, docker.pulls.length, docker.networks.length];
+      let before = count();
+      assert.deepEqual(await own.networks.reach("dk-gnet", "dk-gsrv", 3880), { host: "127.0.0.1", port: 3880 });
+      assert.deepEqual(count(), before, "a second reach makes and starts nothing");
+
+      // Another port: made again, the old one gone.
+      const first = forwarder();
+      assert.deepEqual(await own.networks.reach("dk-gnet", "dk-gsrv", 3881), { host: "127.0.0.1", port: 3881 });
+      assert.notEqual(forwarder(), first);
+      assert.deepEqual((forwarder().made as any).HostConfig.PortBindings, { "3881/tcp": [{ HostIp: "127.0.0.1", HostPort: "3881" }] });
+      assert.equal(docker.containers.filter((c) => c.Name === "dk-gsrv-forward").length, 1);
+      // The island made again under its name, with another id, and the server made again on it: made again too.
+      const second = forwarder();
+      const there = docker.networks.find((n) => n.Name === "dk-gnet")!;
+      there.Id = "renewed00000";
+      docker.containers.find((c) => c.Name === "dk-gsrv")!.Networks = { "dk-gnet": { NetworkID: there.Id } };
+      await own.networks.reach("dk-gnet", "dk-gsrv", 3881);
+      assert.notEqual(forwarder(), second);
+      // A stopped one is started, and not made again.
+      forwarder().State = "exited";
+      before = count();
+      await own.networks.reach("dk-gnet", "dk-gsrv", 3881);
+      assert.deepEqual([docker.created.length, docker.starts.at(-1), forwarder().State], [before[0], "dk-gsrv-forward", "running"]);
+    });
+    // A portal on the machine itself, with no container: the same.
+    const asked = docker.connects.length;
+    assert.deepEqual(await own.networks.reach("dk-gnet", "dk-gsrv", 3881), { host: "127.0.0.1", port: 3881 });
+    assert.equal(docker.connects.length, asked, "nothing is connected");
+    // The portal moved into a container of its own: the forwarder left from before goes, with its network.
+    await withPortal("bridge", async () => {
+      assert.deepEqual(await own.networks.reach("dk-gnet", "dk-gsrv", 3881), { host: "dk-gsrv", port: 3881 });
+      assert.equal(docker.containers.some((c) => c.Name === "dk-gsrv-forward"), false);
+      assert.equal(docker.networks.some((n) => n.Name === "dk-gsrv-forward"), false);
+    });
+  } finally {
+    sweep("dk-");
+  }
+});
+
+test("two reaches at once make one forwarder", async () => {
+  const own = dockerFor(dataDir(), false).forExtension("a");
+  try {
+    await own.networks.create("dk-twice");
+    await own.containers.create("dk-twice-srv", { Image: "x", HostConfig: { NetworkMode: "dk-twice" } });
+    const made = docker.created.length;
+    assert.deepEqual(await Promise.all([own.networks.reach("dk-twice", "dk-twice-srv", 3890), own.networks.reach("dk-twice", "dk-twice-srv", 3890)]), [{ host: "127.0.0.1", port: 3890 }, { host: "127.0.0.1", port: 3890 }]);
+    assert.equal(docker.created.length, made + 1);
+  } finally {
+    sweep("dk-");
+  }
+});
+
+test("reach is refused for another's network or container, one not on the network, a port that is none, and a portal that shares another container's network", async () => {
+  const { forExtension } = dockerFor(dataDir(), false);
+  const blender = forExtension("pithagoras-blender"), godot = forExtension("pithagoras-godot");
+  try {
+    await blender.networks.create("dk-bnet");
+    await blender.containers.create("dk-bsrv", { Image: "blender:1", HostConfig: { NetworkMode: "dk-bnet" } });
+    await godot.containers.create("dk-gsrv", { Image: "godot:1", HostConfig: { NetworkMode: "dk-bnet" } });
+    await blender.containers.create("dk-loose", { Image: "blender:1" });
+    docker.networks.push({ Id: "nobody000000", Name: "dk-nobodys", Labels: {} });
+    docker.networks.push({ Id: "gateway00000", Name: "dk-gateway", Labels: { [OWNER_LABEL]: "pithagoras-blender" }, Internal: true, Options: ISOLATED, IPAM: { Config: [{ Gateway: "10.200.0.1" }] } });
+    await assert.rejects(godot.networks.reach("dk-bnet", "dk-gsrv", 3880), { status: 403, message: /dk-bnet is pithagoras-blender's network, not pithagoras-godot's/ });
+    await assert.rejects(blender.networks.reach("dk-nobodys", "dk-bsrv", 3870), { status: 403, message: /dk-nobodys is no extension's network/ });
+    await assert.rejects(blender.networks.reach("dk-none", "dk-bsrv", 3870), { status: 404, message: /There is no network dk-none/ });
+    await assert.rejects(blender.networks.reach("dk-gateway", "dk-bsrv", 3870), { status: 409, message: /dk-gateway has a way out to the machine/ });
+    await assert.rejects(blender.networks.reach("dk-bnet", "dk-gsrv", 3880), { status: 403, message: /dk-gsrv is pithagoras-godot's container, not pithagoras-blender's/ });
+    await assert.rejects(blender.networks.reach("dk-bnet", "dk-nosrv", 3870), { status: 404, message: /There is no container dk-nosrv/ });
+    await assert.rejects(blender.networks.reach("dk-bnet", "dk-loose", 3870), { status: 409, message: /dk-loose is not on dk-bnet/ });
+    for (const port of [0, 65536, 3870.5, Number.NaN]) await assert.rejects(blender.networks.reach("dk-bnet", "dk-bsrv", port), { status: 0, message: /is not a port/ });
+    await withPortal("container:0123456789ab", async () => {
+      await assert.rejects(blender.networks.reach("dk-bnet", "dk-bsrv", 3870), {
+        status: 409,
+        message: /^The portal's container shares the network of another container, to which no network can be added: run the portal with a network of its own, or on the machine's \(network_mode: host\)\.$/,
+      });
+    });
+    assert.equal(docker.containers.some((c) => c.Name.endsWith("-forward")), false, "nothing was made for any of them");
+  } finally {
+    sweep("dk-");
+  }
+});
+
+test("remove takes the forwarder and its network and the portal's container off first, and is refused while one of the extension's containers is on it", async () => {
+  const { forExtension } = dockerFor(dataDir(), false);
+  const own = forExtension("pithagoras-blender");
+  try {
+    await own.networks.create("dk-rnet");
+    await own.containers.create("dk-rsrv", { Image: "blender:1", HostConfig: { NetworkMode: "dk-rnet" } });
+    await own.containers.start("dk-rsrv");
+    await withPortal("host", async () => {
+      await own.networks.reach("dk-rnet", "dk-rsrv", 3870);
+    });
+    assert.ok(docker.containers.some((c) => c.Name === "dk-rsrv-forward"));
+    await assert.rejects(own.networks.remove("dk-rnet"), { status: 403, message: /network dk-rnet has active endpoints \(name:"dk-rsrv"/ });
+    assert.equal(docker.containers.some((c) => c.Name === "dk-rsrv-forward"), false, "the forwarder went first");
+    assert.equal(docker.networks.some((n) => n.Name === "dk-rsrv-forward"), false, "and its network");
+    assert.ok(docker.networks.some((n) => n.Name === "dk-rnet"), "the network stays while the server is on it");
+    await assert.rejects(forExtension("pithagoras-godot").networks.remove("dk-rnet"), { status: 403, message: /dk-rnet is pithagoras-blender's network, not pithagoras-godot's/ });
+    await withPortal("bridge", async (portal) => {
+      await own.networks.reach("dk-rnet", "dk-rsrv", 3870);
+      assert.ok(portal.Networks?.["dk-rnet"]);
+      await own.containers.remove("dk-rsrv");
+      await own.networks.remove("dk-rnet");
+      assert.deepEqual(portal.Networks, {}, "the portal's container taken off it");
+    });
+    assert.equal(docker.networks.some((n) => n.Name === "dk-rnet"), false, "gone");
+    await own.networks.remove("dk-rnet");
+  } finally {
+    sweep("dk-");
+  }
+});
+
+test("the forwarder passes HTTP and a WebSocket on, both ways, looks its target up at each connection, closes a connection whose target does not answer, and ends at Docker's stop", async () => {
+  const target = http.createServer((req, res) => res.end(`ok ${req.method} ${req.url}`));
+  // An upgrade that echoes what it is sent after its answer, as a WebSocket does with its frames, and ends as the other side does.
+  target.on("upgrade", (_req, socket) => {
+    socket.write("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n");
+    socket.on("data", (d) => socket.write(d));
+    socket.on("end", () => socket.end());
+  });
+  target.listen(0, "127.0.0.1");
+  await once(target, "listening");
+  const targetPort = (target.address() as AddressInfo).port;
+  const free = net.createServer().listen(0, "127.0.0.1");
+  await once(free, "listening");
+  const port = (free.address() as AddressInfo).port;
+  await new Promise((resolve) => free.close(resolve));
+  const forwarding = spawn(process.execPath, ["-e", FORWARD_SCRIPT], { env: { ...process.env, FORWARD_PORT: String(port), FORWARD_TO_HOST: "127.0.0.1", FORWARD_TO_PORT: String(targetPort) }, stdio: "inherit" });
+  /**
+   * What a connection through the forwarder is answered with, after `send` and its end where asked, until it closes,
+   * and how: a connection closed with what was sent still unread is reset.
+   */
+  const exchange = (send: string, end: boolean) =>
+    new Promise<{ got: string; error?: string }>((resolve) => {
+      const s = net.connect(port, "127.0.0.1");
+      let got = "";
+      let error: string | undefined;
+      s.on("data", (d) => (got += d));
+      s.on("error", (e: NodeJS.ErrnoException) => (error = e.code));
+      s.on("close", () => resolve({ got, ...(error ? { error } : {}) }));
+      s.write(send);
+      if (end) s.end();
+    });
+  try {
+    for (let tries = 0; ; tries++) {
+      try {
+        await new Promise<void>((resolve, reject) => net.connect(port, "127.0.0.1").on("connect", function (this: net.Socket) { this.destroy(); resolve(); }).on("error", reject));
+        break;
+      } catch (e) {
+        if (tries > 200) throw e;
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+    }
+    assert.equal(await (await fetch(`http://127.0.0.1:${port}/state`)).text(), "ok GET /state");
+    // A request whose writing ends before its answer comes: the answer still comes.
+    const half = await exchange("GET /half HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n", true);
+    assert.equal(half.error, undefined);
+    assert.match(half.got, /^HTTP\/1\.1 200 OK[\s\S]*ok GET \/half$/);
+    // A WebSocket: the upgrade's answer, then what is sent comes back, as it goes, both ways.
+    const ws = net.connect(port, "127.0.0.1");
+    let heard = "";
+    ws.on("data", (d) => (heard += d));
+    ws.write("GET /ws HTTP/1.1\r\nHost: x\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n");
+    while (!heard.includes("\r\n\r\n")) await once(ws, "data");
+    assert.match(heard, /^HTTP\/1\.1 101 Switching Protocols/);
+    heard = "";
+    ws.write("\x81\x05hello");
+    while (heard.length < 7) await once(ws, "data");
+    assert.equal(heard, "\x81\x05hello");
+    ws.destroy();
+    // The target gone: a connection is closed, with nothing said.
+    target.closeAllConnections();
+    await new Promise((resolve) => target.close(resolve));
+    const gone = await exchange("GET / HTTP/1.1\r\nHost: x\r\n\r\n", false);
+    assert.equal(gone.got, "");
+    assert.ok([undefined, "ECONNRESET"].includes(gone.error), gone.error);
+    // Back on the same port: the next connection reaches it.
+    target.listen(targetPort, "127.0.0.1");
+    await once(target, "listening");
+    assert.equal(await (await fetch(`http://127.0.0.1:${port}/again`)).text(), "ok GET /again");
+    // Docker's stop: it ends, as itself, where Node would be killed by the signal.
+    forwarding.kill("SIGTERM");
+    assert.deepEqual(await once(forwarding, "exit"), [0, null]);
+  } finally {
+    forwarding.kill();
+    target.closeAllConnections();
+    target.close();
+  }
 });
 
 test("without Docker's socket it is not available, and what is asked of it says why", async () => {

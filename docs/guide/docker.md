@@ -176,16 +176,21 @@ What it gives (`extensions/docker/src/api.ts`, with its types):
 | `containers.start`, `stop`, `remove`, `logs(name, { tail })` | Your container's life, and the end of what it wrote |
 | `containers.adopt(name)` | Takes over a container that carries no extension's name: one made before your app was an extension, so that what it kept is kept. Browser takes over the `pithagoras-browser` container and its profile volume this way each time it starts, Voice the `pithagoras-voice` container (where it is labelled as the voice service) and its models volume, and Understory the `pithagoras-understory` container (where it is labelled as the portal's Understory) and its memory volume |
 | `volumes.list`, `create`, `remove`, `adopt` | The same for volumes |
+| `networks.create(name)`, `networks.get(name)` | A network of your own that has no way out, made or kept; a network by its name, with whose it is ([below](#a-container-on-a-network-of-its-own)) |
+| `networks.reach(name, container, port)` | Where the portal reaches a port of your container on it: [below](#a-container-on-a-network-of-its-own) |
+| `networks.remove(name)` | Your network gone, with what `reach` made for it |
 
 `sharedNetwork`, `containers.inspect` and `containers.exec` came with Docker
 1.1.0: an extension that uses them requires `^1.1.0`. `containers.update` came
-with 1.2.0, and requires `^1.2.0`.
+with 1.2.0, and requires `^1.2.0`. `networks` came with 1.3.0, and requires
+`^1.3.0` and Docker Engine 28.0 or later.
 
-Each extension has its own. What it makes carries its name (the label
-`pithagoras.extension`), and it may start, stop, change, remove, read and run
-commands in only those, and the ones it took over: another extension's, or a
-container nobody made through Docker, is refused until it is taken over. Which
-ones it took over is kept in Docker's own folder in the portal's data folder.
+Each extension has its own. The containers, volumes and networks it makes carry
+its name (the label `pithagoras.extension`), and it may start, stop, change,
+remove, read and run commands in only those, and the ones it took over: another
+extension's, or a container nobody made through Docker, is refused until it is
+taken over. Which ones it took over is kept in Docker's own folder in the
+portal's data folder.
 
 ### Running a command in a container
 
@@ -234,6 +239,93 @@ voice service does this as it starts and every 30 seconds for a running
 container, keeping its engines and the GPU it was given, and Understory the
 same, keeping its memory and its token.
 
+A container on the portal's network reaches everything the portal reaches. One
+that runs code from elsewhere goes on a network of its own instead
+([below](#a-container-on-a-network-of-its-own)).
+
+### A container on a network of its own
+
+A container that runs code from elsewhere (code the agent writes, a program it
+builds) must not reach the portal's services, the machine, your local network
+or the internet. Put it on a network of your extension's own, which has no way
+out, and let the portal reach it there:
+
+```js
+await docker.networks.create("my-server-net");
+await docker.containers.create("my-server", {
+  Image: "my-server:1",
+  Env: ["HOST=0.0.0.0"],
+  HostConfig: { NetworkMode: "my-server-net", RestartPolicy: { Name: "unless-stopped" } },
+});
+await docker.containers.start("my-server");
+const { host, port } = await docker.networks.reach("my-server-net", "my-server", 3870);
+await fetch(`http://${host}:${port}/state`);
+```
+
+`networks.create(name)` makes a bridge network that is internal and in the
+gateway mode `isolated`, with no IPv6. Internal alone is not enough: Docker
+then gives the machine an address on the network, and a container on it reaches
+every service the machine listens for on 0.0.0.0 (sshd, the portal itself)
+through that address. In the gateway mode `isolated` the machine has no address
+on it, and no route onto it: the containers on it reach one another, by name,
+and nothing else. What Docker made is read back, and a Docker that made it with
+a gateway after all (Docker before 28.0, which has no `isolated`) is refused,
+with the network taken away again. One of yours by that name is kept as it is;
+one with a way out is refused. Your server listens on 0.0.0.0 of its own
+container, as only what is on its network reaches it.
+
+`networks.reach(name, container, port)` gives where the portal reaches `port`
+of your container on that network, which need not be running yet. It depends
+on where the portal runs:
+
+- in a container with a network of its own (Docker's default bridge, or a
+  network of its own): its container is put on your network, and the host is
+  your container's name, which Docker's own DNS on the network answers;
+- in the machine's network namespace, on the machine itself or in a container
+  with `network_mode: host`, as both of the portal's Compose files run it:
+  Docker can add no network to that, so a forwarder runs, the container
+  `<container>-forward`. It is on your network and on a network of its own
+  by the same name, publishes `port` on the machine's 127.0.0.1 alone, and
+  passes each connection on to your container. The host is `127.0.0.1`. It is
+  your extension's container, shown under it in Settings → Docker, unprivileged
+  and read-only, and started again by Docker after the machine restarts. Its
+  image (`node:22.23.4-alpine3.23`) is downloaded the first time one is made;
+- in a container that shares another container's network: refused, with 409,
+  as Docker can add no network to that either. Run the portal with a network
+  of its own, or on the machine's.
+
+The host is a name or 127.0.0.1, never your container's address, which changes
+as it starts again: what `reach` gave stays right while the portal runs. Each
+`reach` also puts right what is not as it should be: a portal's container that
+was made again, with a new id, is put on the network; a forwarder that is gone,
+or not as it would be made now (another port, a network made again), is made
+again, and one that is stopped is started. So ask for it as your server starts,
+and again where it does not answer. A forwarder that was just made or started
+takes a moment to listen: a connection in that moment is closed.
+
+Restarting a container, Docker or the machine keeps all of it: the networks,
+their gateway mode, and the containers on them. A network that was removed
+and made again is another network, on which a container made on the old one
+does not start (`network … not found`): compare
+`NetworkSettings.Networks[<name>].NetworkID` from `containers.inspect` with
+the network's `id` (`networks.get`), and make the container again where they
+differ. Docker sets that id when the container first starts: it is empty for
+one that was made and never started.
+
+What a container on the network still reaches, where the portal runs in a
+container of its own, is what the portal's container listens on 0.0.0.0: the
+portal's own port, behind its sign-in. Not its 127.0.0.1, its other networks
+or the containers on them. A forwarder's port on 127.0.0.1 is open to every
+process on the machine, as a port of a server on the portal's loopback is.
+
+Each network takes one of Docker's address pools, of which there are about 31
+by default; a forwarder's own network takes one more.
+
+`networks.remove(name)` removes the forwarders that lead onto it, with their
+networks, takes the portal's container off it, and removes it. While one of
+your containers is still on it, Docker refuses, with 403: remove that container
+first.
+
 ### When the machine restarts
 
 A container that runs your extension's service, as Browser's, Voice's and
@@ -278,10 +370,16 @@ has the one the file gives it.
 ### When a call fails
 
 A call that fails throws an Error with `status`: Docker's own HTTP status where
-it said no (403 for a container or volume that is another extension's, or
-nobody's; 404 where there is none to act on; 409 for `exec` in a container
-that is not running), and 0 where Docker was not reached or gave no HTTP status:
-there is no socket, it did not answer in time, its answer was cut off partway,
-the name is not one Docker takes, or a download failed partway. Where
-`sharedNetwork` does not find the portal's network, its Error has no `status`,
-and says what to set.
+it said no (403 for a container, volume or network that is another extension's,
+or nobody's, and for removing a network a container is still on; 404 where
+there is none to act on; 409 for `exec` in a container that is not running,
+and for `reach` to a container that is not on the network, from a portal that
+shares another container's network, or on a network of yours that has a way
+out), and 0 where Docker was not reached or gave no HTTP status: there is no
+socket, it did not answer in time, its answer was cut off partway, the name is
+not one Docker takes, a download failed partway, or a Docker older than 28.0
+made a network with a way out (taken away again). Where Docker refuses a
+forwarder's start, as for a port on 127.0.0.1 that is in use, `reach` fails
+with Docker's own status and words. Where `sharedNetwork`, `networks.reach` or
+`networks.remove` does not find the portal's container, its Error has no
+`status`, and says what to set.

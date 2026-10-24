@@ -114,7 +114,8 @@ session's folder through what the portal gives every extension
 terminal runs a pty for each terminal itself. The containers of Browser, of the voice service (Voice) and of
 Understory, the agent's memory, are run through the
 [Docker](/guide/docker) extension, which every extension that runs containers builds on; the voice and Understory containers share the
-portal's network namespace so their services need no published ports. Opt-in pi extensions the
+portal's network namespace so their services need no published ports. An extension's container that runs code from
+elsewhere is on a network of its own instead (Docker's `networks`). Opt-in pi extensions the
 portal ships (`extensions/`, the subagent tool) are installed as local pi
 packages only when switched on. The server holds one socket in its data
 directory so only one portal runs on it.

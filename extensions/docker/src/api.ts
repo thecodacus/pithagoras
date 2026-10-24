@@ -2,8 +2,8 @@
  * What Docker gives an extension that builds on it: name `pithagoras-docker` in `pithagoras.requires` (or `optional`)
  * in its package.json, and ask for it with `portal.extensions.use<Docker>("pithagoras-docker")`.
  *
- * Each extension has its own: the containers and volumes it makes carry its name, and it may start, stop, change, remove,
- * read and run commands in only those, and the ones it took over (`adopt`). Another extension's are not its to touch, and
+ * Each extension has its own: the containers, volumes and networks it makes carry its name, and it may start, stop,
+ * change, remove, read and run commands in only those, and the ones it took over (`adopt`). Another extension's are not its to touch, and
  * neither is a container nobody made through here until one takes it over. The person sees all of them in Settings →
  * Docker, by the extension that runs each, and may stop or remove any.
  *
@@ -14,9 +14,10 @@
 
 /**
  * How a call fails where Docker said no, or was not reached: an Error with `status`. That is Docker's own HTTP status
- * where it gave one (403 and 404 among them, for a container that is not the extension's or that there is none of), and
- * 0 where Docker was not reached or gave no HTTP status: there is no socket, it did not answer in time, its answer was
- * cut off partway, the name is not one Docker takes, or a download failed partway.
+ * where it gave one (403 and 404 among them, for a container that is not the extension's or that there is none of, and
+ * 409 where `networks.reach` cannot be given: below), and 0 where Docker was not reached or gave no HTTP status: there
+ * is no socket, it did not answer in time, its answer was cut off partway, the name is not one Docker takes, a
+ * download failed partway, or a Docker older than 28.0 made a network with a way out (`networks.create`).
  */
 export interface DockerError extends Error {
   status: number;
@@ -42,6 +43,23 @@ export interface ContainerInfo {
 export interface VolumeInfo {
   name: string;
   owner: string;
+}
+
+/** A network of an extension's, as Docker has it now. */
+export interface NetworkInfo {
+  name: string;
+  id: string;
+  /** The extension it belongs to, or "" for nobody's. */
+  owner: string;
+}
+
+/**
+ * Where the portal reaches a port of a container on a network of an extension's (`networks.reach`): the host and the
+ * port to connect to, over TCP, for HTTP, a WebSocket or anything else that runs on it.
+ */
+export interface Reach {
+  host: string;
+  port: number;
 }
 
 /**
@@ -94,7 +112,8 @@ export interface Docker {
    * the portal's running container, named by `PORTAL_CONTAINER_NAME`, or else by `HOSTNAME`. The id changes when the
    * portal's container is made again, and a container made with the old one is then to be made again with the new.
    * Refused, with an Error that says what to do, on another system than Linux outside a container, or where the
-   * portal's container is not found running.
+   * portal's container is not found running. A container that runs code from elsewhere (the agent's) is on a network
+   * of its own instead (`networks`), where it reaches nothing of the portal's.
    */
   sharedNetwork(): Promise<string>;
   images: {
@@ -150,5 +169,38 @@ export interface Docker {
     remove(name: string): Promise<void>;
     /** A volume nobody's, made this extension's: as `containers.adopt`. */
     adopt(name: string): Promise<void>;
+  };
+  networks: {
+    /**
+     * A network for this extension's containers that has no way out: Docker's bridge, internal, in the gateway mode
+     * `isolated`, with no IPv6. Nothing on it reaches the machine, the local network or the internet, and the machine
+     * has no way onto it either; the containers on it reach one another, by name. Made with this extension's name on
+     * it; one of its own by that name is kept as it is. Refused for a name another extension's network has, or one
+     * nobody's has, and refused, with what was made taken away again, where Docker makes it with a way out after all:
+     * Docker Engine before 28.0 has no `isolated`.
+     */
+    create(name: string): Promise<NetworkInfo>;
+    /** A network by its name: nothing where there is none; with `owner` saying whose it is, which may be another's, or "" for nobody's. */
+    get(name: string): Promise<NetworkInfo | undefined>;
+    /**
+     * Where the portal reaches `port` of `container`, one of this extension's containers on one of its networks
+     * (`name`), which need not be running yet. Where the portal runs in a container of its own network namespace, its
+     * container is put on the network, and the host is the container's name, which Docker's own DNS on the network
+     * answers with wherever the container is after a restart. Where the portal is in the machine's namespace (on the
+     * machine itself, or in a container with the network mode `host`), to which no network can be added, a forwarder
+     * runs: a container of this extension's, `<container>-forward`, on the network and on a network of its own, which
+     * publishes `port` on the machine's 127.0.0.1 and passes each connection on to `container`; the host is 127.0.0.1.
+     * Each call puts right what is not as it should be: a portal's container made again, with a new id, is put on the
+     * network, and a forwarder that is not as it would be made now, or is gone, is made again, and started where it is
+     * stopped. Refused for a network or a container that is not this extension's, a container that is not on the
+     * network, and a portal whose container shares another container's network namespace.
+     */
+    reach(name: string, container: string, port: number): Promise<Reach>;
+    /**
+     * Gone: the portal's container taken off it, and the forwarder `reach` ran for it gone with that one's network.
+     * A network that one of this extension's containers is still on is refused, in Docker's words: remove that
+     * container first. One that is gone already is gone.
+     */
+    remove(name: string): Promise<void>;
   };
 }

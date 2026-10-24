@@ -2663,6 +2663,7 @@ from the portal, and what gives the same to an extension:
 | A page in the sidebar only once its service is set up | `useShown` on its `nav.page` |
 | A container of its own, and the one the portal made before it was an extension taken over by its name | `requires` with `pithagoras-docker`, `extensions.use`, `containers.adopt` and `volumes.adopt` |
 | A container on the portal's loopback, made again on its network after the portal's container was, on the GPU it was given | `sharedNetwork()`, `containers.inspect`, and `DeviceRequests` in the create body |
+| A container that runs code from elsewhere, on a network that reaches nothing but the portal | `networks.create`, `networks.reach`, `networks.remove` |
 | A container that comes back after the host restarts and stays stopped when the person stops it, and one made before given that as it is | `RestartPolicy: { Name: "unless-stopped" }` in the create body, `containers.update` |
 | Recognising and speaking for voice mode with the voices it has, chosen once its service is up, with its model loaded while voice mode is used | `portal.voice.provide`, `voice.choose` and `voice.chosen` |
 | Scripts run in its container, one at a time, and ended where they took too long | `containers.exec`, with `timeoutMs` |

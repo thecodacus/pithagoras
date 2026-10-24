@@ -5,7 +5,8 @@ import path from "node:path";
 
 /**
  * A Docker daemon for the tests, on a socket of its own: the endpoints the extension uses, answered as Docker answers
- * them, from what it holds. `containers` and `volumes` may be filled by a test, as if made with the docker command.
+ * them, from what it holds. `containers`, `volumes` and `networks` may be filled by a test, as if made with the docker
+ * command.
  */
 export interface FakeContainer {
   Id: string;
@@ -21,7 +22,12 @@ export interface FakeContainer {
   User?: string;
   HostConfig?: Record<string, unknown>;
   Mounts?: Record<string, unknown>[];
-  Networks?: Record<string, unknown>;
+  /**
+   * The networks it is on, by their names, as inspect's `NetworkSettings.Networks` has them: those it was made on, or
+   * connected to. Each has its network's id (`NetworkID`) from the container's first start, or its connect, on: "" for
+   * one that was made and never started, as Docker has it, and kept as it was after a stop.
+   */
+  Networks?: Record<string, { NetworkID?: string }>;
   Ports?: { PrivatePort: number; PublicPort?: number; Type: string; IP?: string }[];
   /** What it was made with: Docker's create body. */
   made?: Record<string, unknown>;
@@ -55,6 +61,21 @@ export interface FakeExec {
   ExitCode: number | null;
 }
 
+/**
+ * A network, as Docker's inspect has it, without the containers on it, which inspect adds (the running ones). One made
+ * through the daemon is internal, has IPv6 and options as asked, and an address range with a gateway, but none where it
+ * is internal and in the gateway mode `isolated`, as Docker Engine 28.0 and later make it.
+ */
+export interface FakeNetwork {
+  Id: string;
+  Name: string;
+  Labels: Record<string, string>;
+  Internal?: boolean;
+  EnableIPv6?: boolean;
+  Options?: Record<string, string>;
+  IPAM?: { Config: { Subnet?: string; Gateway?: string }[] };
+}
+
 /** What a list's `filters` asks of something's labels: each "key" there, and each "key=value" so. */
 const labelled = (labels: Record<string, string> | null | undefined, wanted: string[] | undefined) =>
   (wanted ?? []).every((w) => {
@@ -68,7 +89,7 @@ export async function fakeDocker() {
   const images = new Set<string>();
   const containers: FakeContainer[] = [];
   const volumes: { Name: string; Labels: Record<string, string> | null; Driver?: string; Options?: Record<string, string> | null }[] = [];
-  const networks: { Id: string; Name: string; Labels: Record<string, string> }[] = [];
+  const networks: FakeNetwork[] = [];
   /** Images by id, with their labels: the ones a build made. */
   const built: { Id: string; Labels: Record<string, string> }[] = [];
   /**
@@ -76,7 +97,9 @@ export async function fakeDocker() {
    * own words for a start it refuses, which leaves the container as it was (one that asks for a GPU Docker has no
    * runtime for). What a container that is stopped leaves behind (the memory it held). What becomes of a container
    * once a command is made in it, before the command starts. And what a command run in one writes, and the code it
-   * ends with: nothing, and 0, unless a test says.
+   * ends with: nothing, and 0, unless a test says. What becomes of a network and a container as the container is
+   * connected to it, before Docker answers (another connected it just then). And, with `oldNetworks`, every network is
+   * made with a gateway, as a Docker before 28.0 that ignores the gateway mode makes it.
    */
   const runs: {
     onStart?: (c: FakeContainer) => void | Promise<void>;
@@ -84,6 +107,8 @@ export async function fakeDocker() {
     onStop?: (c: FakeContainer) => void;
     onExecCreate?: (c: FakeContainer) => void;
     onExec?: (e: FakeExec) => { out?: string; err?: string; code?: number };
+    onConnect?: (n: FakeNetwork, c: FakeContainer) => void;
+    oldNetworks?: boolean;
   } = {};
   const execs: FakeExec[] = [];
   /** The containers made, and those started (by name), in the order they were; and each change to one (`update`), by its name. */
@@ -91,6 +116,8 @@ export async function fakeDocker() {
   const starts: string[] = [];
   const updates: { name: string; changes: Record<string, unknown> }[] = [];
   const pulls: string[] = [];
+  /** Each connect asked for, refused or not: the network's name and the container's. */
+  const connects: { network: string; container: string }[] = [];
   /** A download that fails, by image, with Docker's own words. */
   const failing = new Map<string, string>();
   /** When a start began, as Docker writes it: each later than the one before, as Docker's own, in nanoseconds, are. */
@@ -104,6 +131,9 @@ export async function fakeDocker() {
   let ids = 0;
 
   const find = (key: string) => containers.find((c) => c.Id === key || c.Name === key);
+  const findNetwork = (key: string) => networks.find((n) => n.Id === key || n.Name === key);
+  /** The containers on a network as Docker counts them for its inspect and its remove: the running ones. */
+  const onNetwork = (n: FakeNetwork) => containers.filter((c) => c.State === "running" && c.Networks?.[n.Name]);
   const raw = (c: FakeContainer) => ({ Id: c.Id, Names: [`/${c.Name}`], Image: c.Image, State: c.State, Status: c.State === "running" ? "Up 2 minutes" : "Exited (0) 1 minute ago", Labels: c.Labels, Ports: c.Ports ?? [] });
   const filtersOf = (url: URL) => JSON.parse(url.searchParams.get("filters") ?? "{}") as Record<string, string[]>;
   /** Docker's frames for a container with no terminal: a header of eight bytes, which stream and how long, then the bytes. */
@@ -159,6 +189,10 @@ export async function fakeDocker() {
         const name = url.searchParams.get("name")!;
         if (find(name)) return send(409, { message: `Conflict. The container name "/${name}" is already in use` });
         const made: FakeContainer = { Id: `id${++ids}`.padEnd(12, "0"), Name: name, Image: body.Image, State: "created", Labels: body.Labels ?? {}, Tty: Boolean(body.Tty), out: "", err: "", made: body };
+        // On the network its network mode names, and on those its endpoints do, of the ones there are here: by its id from its first start.
+        const named = [body.HostConfig?.NetworkMode, ...Object.keys(body.NetworkingConfig?.EndpointsConfig ?? {})];
+        const on = networks.filter((n) => named.includes(n.Name) || named.includes(n.Id));
+        if (on.length) made.Networks = Object.fromEntries(on.map((n) => [n.Name, { NetworkID: "" }]));
         containers.push(made);
         created.push(made);
         return send(201, { Id: made.Id });
@@ -222,6 +256,7 @@ export async function fakeDocker() {
         c.State = want;
         if (want === "exited") runs.onStop?.(c);
         if (want === "running") {
+          for (const [name, endpoint] of Object.entries(c.Networks ?? {})) endpoint.NetworkID ||= networks.find((n) => n.Name === name)?.Id;
           starts.push(c.Name);
           c.started = startedAt();
           // A start by request counts Docker's own starts from none again.
@@ -268,14 +303,49 @@ export async function fakeDocker() {
       }
       if (p === "/volumes") return send(200, { Volumes: volumes.filter((v) => labelled(v.Labels, filtersOf(url).label)) });
       if (p === "/networks") return send(200, networks.filter((n) => labelled(n.Labels, filtersOf(url).label)));
+      if (p === "/networks/create" && req.method === "POST") {
+        if (networks.some((n) => n.Name === body.Name)) return send(409, { message: `network with name ${body.Name} already exists` });
+        const at = ++ids;
+        const isolated = body.Internal === true && body.Options?.["com.docker.network.bridge.gateway_mode_ipv4"] === "isolated" && !runs.oldNetworks;
+        const made: FakeNetwork = {
+          Id: `net${at}`.padEnd(12, "0"),
+          Name: body.Name,
+          Labels: body.Labels ?? {},
+          Internal: Boolean(body.Internal),
+          EnableIPv6: Boolean(body.EnableIPv6),
+          Options: body.Options ?? {},
+          IPAM: { Config: [{ Subnet: `10.${at % 256}.0.0/16`, ...(isolated ? {} : { Gateway: `10.${at % 256}.0.1` }) }] },
+        };
+        networks.push(made);
+        return send(201, { Id: made.Id, Warning: "" });
+      }
+      if ((m = /^\/networks\/([^/]+)\/(connect|disconnect)$/.exec(p)) && req.method === "POST") {
+        const n = findNetwork(m[1]);
+        if (!n) return send(404, { message: `network ${m[1]} not found` });
+        const c = find(body.Container);
+        if (!c) return send(404, { message: `No such container: ${body.Container}` });
+        if (m[2] === "disconnect") {
+          delete c.Networks?.[n.Name];
+          return send(200);
+        }
+        connects.push({ network: n.Name, container: c.Name });
+        runs.onConnect?.(n, c);
+        const mode = String(((c.HostConfig ?? c.made?.HostConfig) as Record<string, unknown> | undefined)?.NetworkMode ?? "");
+        if (mode === "host" || mode.startsWith("container:")) return send(400, { message: "container sharing network namespace with another container or host cannot be connected to any other network" });
+        if (c.Networks?.[n.Name]) return send(403, { message: `endpoint with name ${c.Name} already exists in network ${n.Name}` });
+        c.Networks = { ...c.Networks, [n.Name]: { NetworkID: n.Id } };
+        return send(200);
+      }
       if ((m = /^\/networks\/([^/]+)$/.exec(p))) {
-        const n = networks.find((x) => x.Id === m![1] || x.Name === m![1]);
+        const n = findNetwork(m[1]);
         if (!n) return send(404, { message: `network ${m[1]} not found` });
         if (req.method === "DELETE") {
+          const on = onNetwork(n);
+          if (on.length) return send(403, { message: `error while removing network: network ${n.Name} has active endpoints (${on.map((c) => `name:"${c.Name}" id:"${c.Id.slice(0, 12)}"`).join(", ")})` });
           networks.splice(networks.indexOf(n), 1);
           return send(204);
         }
-        return send(200, n);
+        return send(200, { ...n, Containers: Object.fromEntries(onNetwork(n).map((c) => [c.Id, { Name: c.Name }])) });
       }
       if (p === "/images/json") return send(200, built.filter((i) => labelled(i.Labels, filtersOf(url).label)));
       if ((m = /^\/images\/([^/]+)$/.exec(p)) && req.method === "DELETE") {
@@ -301,5 +371,5 @@ export async function fakeDocker() {
     });
   });
   await new Promise<void>((resolve) => server.listen(socket, resolve));
-  return { socket, dir, images, containers, volumes, networks, built, runs, execs, created, starts, updates, pulls, failing, hold, close: () => new Promise<void>((resolve) => server.close(() => resolve())) };
+  return { socket, dir, images, containers, volumes, networks, built, runs, execs, created, starts, updates, pulls, connects, failing, hold, close: () => new Promise<void>((resolve) => server.close(() => resolve())) };
 }

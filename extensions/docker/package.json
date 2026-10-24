@@ -1,6 +1,6 @@
 {
   "name": "pithagoras-docker",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "Docker for the Pithagoras portal: containers and volumes that other extensions run, each its own, and a page in Settings to see and control them",
   "type": "module",
   "keywords": ["pi-package"],
