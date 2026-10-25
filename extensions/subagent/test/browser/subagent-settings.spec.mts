@@ -74,15 +74,17 @@ test("subagents run on the chat's model unless one is named", async ({ page }) =
   expect(sent).toEqual([{ model: 'llama-swap/model-b' }]);
 });
 
-test('the search of Settings finds the subagents on their page', async ({ page }) => {
+test('the search of Settings finds the subagents on their page, and lights up the part it leads to', async ({ page }) => {
   await portal(page);
-  await page.goto('/settings/general');
-  const dialog = settings(page);
-  await expect(dialog.getByLabel('Default model')).toBeVisible();
-  await dialog.getByLabel('Search settings').fill('teilagenten');
-  await dialog.getByRole('option').first().click();
-  await expect(dialog.getByRole('group', { name: 'Subagents at once' })).toBeVisible();
-  await expect(dialog.locator('[data-setting="Subagents"]')).toHaveClass(/setting-flash/);
+  for (const [words, part] of [['teilagenten', 'How a subagent runs against the agent'], ['parallel', 'Subagents at once']]) {
+    await page.goto('/settings/general');
+    const dialog = settings(page);
+    await expect(dialog.getByLabel('Default model')).toBeVisible();
+    await dialog.getByLabel('Search settings').fill(words);
+    await dialog.getByRole('option').first().click();
+    await expect(dialog.getByRole('group', { name: 'Subagents at once' })).toBeVisible();
+    await expect(dialog.locator(`[data-setting="${part}"]`)).toHaveClass(/setting-flash/);
+  }
 });
 
 test('the page fits a phone', async ({ page }) => {

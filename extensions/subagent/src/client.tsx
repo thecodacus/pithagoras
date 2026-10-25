@@ -17,12 +17,11 @@ export default function subagent(given: Portal) {
     id: "subagent",
     title: msg("Subagents"),
     icon: AgentsIcon,
+    // Each leads to its part of the page, which is named for it (web/SubagentSettings.tsx).
     search: [
-      {
-        title: msg("Subagents"),
-        section: msg("Subagents"),
-        words: "subagent subagents parallel background interrupt model at once teilagenten parallel hintergrund",
-      },
+      { title: msg("Subagents"), section: msg("How a subagent runs against the agent"), words: "subagent subagents mode background interrupt teilagenten modus hintergrund unterbrechen" },
+      { title: msg("Subagents at once"), section: msg("Subagents at once"), words: "subagent parallel limit slots at once teilagenten gleichzeitig" },
+      { title: msg("Subagent model"), section: msg("Subagent model"), words: "subagent model llm teilagenten modell" },
     ],
     component: () => (
       <Suspense fallback={<p className="text-sm text-fg-subtle">{t("Loading…")}</p>}>

@@ -19,7 +19,7 @@ test('Settings has no Add-ons page, and Tools has no subagent tool of its own, w
   await page.setViewportSize({ width: 390, height: 800 });
   await portal(page);
   await page.goto('/settings/tools');
-  await expect(settings(page).getByText('Default tools', { exact: true }).first()).toBeVisible();
+  await expect(settings(page).getByRole('heading', { name: 'Questions from the agent' })).toBeVisible();
   await expect(settings(page).getByRole('switch', { name: 'Subagent tool' })).toHaveCount(0);
   await expect(settings(page).getByRole('group', { name: 'Subagents at once' })).toHaveCount(0);
   await expect(settings(page).getByText('Add-ons', { exact: true })).toHaveCount(0);

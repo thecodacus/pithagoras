@@ -100,84 +100,83 @@ export function SubagentSettings() {
   return (
     <div className="space-y-4">
       {error && <ui.ErrorBanner onClose={() => setError(null)}>{error}</ui.ErrorBanner>}
-      <ui.Section
-        title={t("Subagents")}
-        hint={tx("A {tool} tool: the agent hands a self-contained task to a second agent with a context of its own, and gets its answer back. You can watch it beside the chat and give it instructions while it works.", { tool: <code>subagent</code> })}
-      >
-        <div className="space-y-3">
-          <fieldset className="rounded-xl border border-line bg-raised/40 p-3" disabled={busy}>
-            <legend className="px-1 text-xs text-fg-muted">{t("How a subagent runs against the agent")}</legend>
-            <div className="space-y-2">
-              {MODES.map((m) => (
-                <label key={m.value} className="flex cursor-pointer items-start gap-2.5 rounded-lg p-1.5 hover:bg-fg/5">
-                  <input
-                    type="radio"
-                    name={name}
-                    value={m.value}
-                    checked={s.mode === m.value}
-                    onChange={() => void change({ mode: m.value })}
-                    className="mt-0.5 accent-current"
-                  />
-                  <span className="min-w-0 text-sm text-fg">
-                    {t(m.label)}
-                    <span className="mt-0.5 block text-xs text-fg-faint">{t(m.detail)}</span>
-                  </span>
-                </label>
-              ))}
-            </div>
-          </fieldset>
-          <div className="rounded-xl border border-line bg-raised/40 p-3 text-sm text-fg">
-            {t("Model")}
-            <span className="mt-0.5 block text-xs text-fg-faint">
-              {t("What a subagent runs on unless its chat says otherwise (in the chat's model menu). The chat's own is the one already loaded, so no second model is started.")}
-            </span>
-            <Select
-              aria-label={t("Subagent model")}
-              size="sm"
-              className="mt-2 w-full"
-              value={s.model}
-              disabled={busy}
-              onChange={(model) => void change({ model })}
-              options={[
-                { value: "auto", label: t("Same as the chat"), hint: t("The model the chat is on when it starts one") },
-                ...(models.some((m) => `${m.provider}/${m.id}` === s.model) || s.model === "auto" ? [] : [{ value: s.model, label: s.model }]),
-                ...models.map((m) => ({ value: `${m.provider}/${m.id}`, label: m.name || m.id, hint: `${m.provider}/${m.id}` })),
-              ]}
-            />
+      {/* The page's head, drawn by Settings, has the extension's name and mark already. Each part is named for Settings' search (client.tsx). */}
+      <p className="text-xs text-fg-faint">
+        {tx("A {tool} tool: the agent hands a self-contained task to a second agent with a context of its own, and gets its answer back. You can watch it beside the chat and give it instructions while it works.", { tool: <code>subagent</code> })}
+      </p>
+      <div className="space-y-3">
+        <fieldset data-setting={t("How a subagent runs against the agent")} className="rounded-xl border border-line bg-raised/40 p-3" disabled={busy}>
+          <legend className="px-1 text-xs text-fg-muted">{t("How a subagent runs against the agent")}</legend>
+          <div className="space-y-2">
+            {MODES.map((m) => (
+              <label key={m.value} className="flex cursor-pointer items-start gap-2.5 rounded-lg p-1.5 hover:bg-fg/5">
+                <input
+                  type="radio"
+                  name={name}
+                  value={m.value}
+                  checked={s.mode === m.value}
+                  onChange={() => void change({ mode: m.value })}
+                  className="mt-0.5 accent-current"
+                />
+                <span className="min-w-0 text-sm text-fg">
+                  {t(m.label)}
+                  <span className="mt-0.5 block text-xs text-fg-faint">{t(m.detail)}</span>
+                </span>
+              </label>
+            ))}
           </div>
-          <div className="flex items-start gap-3 rounded-xl border border-line bg-raised/40 p-3">
-            <div className="min-w-0 flex-1 text-sm text-fg">
-              {t("Subagents at once")}
-              <span className="mt-0.5 block text-xs text-fg-faint">
-                {t("Across every chat. One asked for beyond it waits for a free slot — its call waits in interrupt mode, and in the background it starts once another has finished. Each one is a model running.")}
-              </span>
-            </div>
-            <div role="group" aria-label={t("Subagents at once")} className="flex shrink-0 items-center gap-1">
-              <button
-                type="button"
-                aria-label={t("Fewer at once")}
-                disabled={busy || s.maxParallel <= 1}
-                onClick={() => void change({ maxParallel: s.maxParallel - 1 })}
-                className="grid h-7 w-7 place-items-center rounded-lg bg-fg/5 text-fg-muted transition hover:bg-fg/10 disabled:opacity-40"
-              >
-                <Sign plus={false} />
-              </button>
-              <output aria-live="polite" className="w-6 text-center text-sm tabular-nums text-fg">{s.maxParallel}</output>
-              <button
-                type="button"
-                aria-label={t("More at once")}
-                disabled={busy || s.maxParallel >= s.maxParallelLimit}
-                onClick={() => void change({ maxParallel: s.maxParallel + 1 })}
-                className="grid h-7 w-7 place-items-center rounded-lg bg-fg/5 text-fg-muted transition hover:bg-fg/10 disabled:opacity-40"
-              >
-                <Sign plus />
-              </button>
-            </div>
-          </div>
-          {busy && <p className="text-xs text-fg-subtle">{t("Applying…")}</p>}
-          {note && !busy && <p role="status" className="text-xs text-fg-muted">{note()}</p>}
+        </fieldset>
+        <div data-setting={t("Subagent model")} className="rounded-xl border border-line bg-raised/40 p-3 text-sm text-fg">
+          {t("Model")}
+          <span className="mt-0.5 block text-xs text-fg-faint">
+            {t("What a subagent runs on unless its chat says otherwise (in the chat's model menu). The chat's own is the one already loaded, so no second model is started.")}
+          </span>
+          <Select
+            aria-label={t("Subagent model")}
+            size="sm"
+            className="mt-2 w-full"
+            value={s.model}
+            disabled={busy}
+            onChange={(model) => void change({ model })}
+            options={[
+              { value: "auto", label: t("Same as the chat"), hint: t("The model the chat is on when it starts one") },
+              ...(models.some((m) => `${m.provider}/${m.id}` === s.model) || s.model === "auto" ? [] : [{ value: s.model, label: s.model }]),
+              ...models.map((m) => ({ value: `${m.provider}/${m.id}`, label: m.name || m.id, hint: `${m.provider}/${m.id}` })),
+            ]}
+          />
         </div>
-      </ui.Section>
+        <div data-setting={t("Subagents at once")} className="flex items-start gap-3 rounded-xl border border-line bg-raised/40 p-3">
+          <div className="min-w-0 flex-1 text-sm text-fg">
+            {t("Subagents at once")}
+            <span className="mt-0.5 block text-xs text-fg-faint">
+              {t("Across every chat. One asked for beyond it waits for a free slot — its call waits in interrupt mode, and in the background it starts once another has finished. Each one is a model running.")}
+            </span>
+          </div>
+          <div role="group" aria-label={t("Subagents at once")} className="flex shrink-0 items-center gap-1">
+            <button
+              type="button"
+              aria-label={t("Fewer at once")}
+              disabled={busy || s.maxParallel <= 1}
+              onClick={() => void change({ maxParallel: s.maxParallel - 1 })}
+              className="grid h-7 w-7 place-items-center rounded-lg bg-fg/5 text-fg-muted transition hover:bg-fg/10 disabled:opacity-40"
+            >
+              <Sign plus={false} />
+            </button>
+            <output aria-live="polite" className="w-6 text-center text-sm tabular-nums text-fg">{s.maxParallel}</output>
+            <button
+              type="button"
+              aria-label={t("More at once")}
+              disabled={busy || s.maxParallel >= s.maxParallelLimit}
+              onClick={() => void change({ maxParallel: s.maxParallel + 1 })}
+              className="grid h-7 w-7 place-items-center rounded-lg bg-fg/5 text-fg-muted transition hover:bg-fg/10 disabled:opacity-40"
+            >
+              <Sign plus />
+            </button>
+          </div>
+        </div>
+        {busy && <p className="text-xs text-fg-subtle">{t("Applying…")}</p>}
+        {note && !busy && <p role="status" className="text-xs text-fg-muted">{note()}</p>}
+      </div>
     </div>
   );
 }
