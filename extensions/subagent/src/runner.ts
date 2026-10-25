@@ -23,10 +23,12 @@ export interface Runner {
   id: string;
   /** "running" until `finished` has settled, and then how it ended. */
   status(): "running" | Status;
-  /** The last thing it said, so far. */
-  answer(): string;
-  /** A message for it while it works, taken in after the step it is on, as the person's would be in its chat. */
-  send(text: string): void;
+  /**
+   * A message for it while it works, taken in after the step it is on, as the person's would be in its chat. Settles
+   * with why it was not taken in, where the portal refused it or the run had ended; with nothing once the run it went
+   * into is over, which for a steer is the run of its task: whoever needs to know of a refusal waits only a moment.
+   */
+  send(text: string): Promise<string | undefined>;
   /** Stops its run, as the person's Stop in its chat does. */
   stop(): void;
   /**
@@ -76,10 +78,16 @@ export function startRunner(chats: ChildChats, id: string, task: string, hear?: 
   return {
     id,
     status: () => status,
-    answer: () => answer,
-    send: (text) => {
+    send: async (text) => {
       // Once it has ended, a message would start a run of its own that nobody waits for.
-      if (status === "running") void chats.prompt(id, text, { steer: true }).catch(() => undefined);
+      if (status !== "running") return "it has ended";
+      try {
+        const run = await chats.prompt(id, text, { steer: true });
+        // Refused on its way in, the portal says why; a run that took it in and was stopped later is no refusal.
+        return run.status === "error" || (run.status === "stopped" && run.error) ? run.error || "the run failed" : undefined;
+      } catch (e) {
+        return (e as Error)?.message ?? String(e);
+      }
     },
     stop: () => {
       if (status === "running") void chats.abort(id).catch(() => undefined);

@@ -52,7 +52,7 @@ load(routineTools("s"), all);
 const subagentIn = (settings: object) => (pi: any) => subagentTool(pi, { chat: { id: "s" }, chats: {} as any, settings: () => settingsOf(settings) });
 load(subagentIn({ mode: "interrupt" }), all);
 // The shapes that depend on a setting are looked at as well: a subagent that runs in the background, and one whose
-// chats are kept, which takes an id.
+// chats are kept, which take an id and come with `subagents`, the tool that lists and stops them.
 const subagentBackground: Registered[] = [];
 load(subagentIn({ mode: "background" }), subagentBackground);
 const subagentKept: Registered[] = [];
@@ -73,9 +73,10 @@ const AGREED: Record<string, number> = {
   routine_update: 142,
   routine_run: 41,
   subagent: 118,
-  "subagent#background": 136,
+  "subagent#background": 150,
   "subagent#kept": 136,
-  "subagent#background+kept": 154,
+  "subagent#background+kept": 163,
+  subagents: 50,
 };
 
 test("every tool of the portal's own is within the length agreed for it", () => {
@@ -84,6 +85,8 @@ test("every tool of the portal's own is within the length agreed for it", () => 
     ["subagent#background", subagentBackground[0]],
     ["subagent#kept", subagentKept[0]],
     ["subagent#background+kept", subagentBackgroundKept[0]],
+    // The same in each shape it comes with: measured once.
+    ["subagents", subagentBackground[1]],
   ];
   assert.deepEqual(tools.map(([key]) => key).sort(), Object.keys(AGREED).sort(), "a tool without an agreed length, or an agreed length without a tool");
   for (const [key, tool] of tools) {

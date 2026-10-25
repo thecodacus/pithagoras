@@ -26,8 +26,8 @@
  *   is idle. Two agents run at the same time.
  *
  * What a subagent says after it read outside content (`ChildRun.marked`) goes to its chat in the form of a flagged
- * result (flagged.ts), as the tool's result and as the background message alike: the portal has marked the chat, and the
- * form in its history keeps the mark when the guard is made again.
+ * result (flagged.ts), as the tool's result, the background message and what `subagents` stop says it had alike: the
+ * portal has marked the chat, and the form in its history keeps the mark when the guard is made again.
  *
  * Kept or not, as the settings say ("Keep subagent chats", off by default): a
  * kept child is a sub-chat listed under its chat, and the agent gives it a
@@ -40,6 +40,11 @@
  * say Standard ("Subagents work in the chat's mode", on by default). Where the
  * chat's mode is not there for a child, it works in Standard, and the result
  * says so.
+ *
+ * Where the agent can do anything while a subagent works (in the background,
+ * or with kept chats), it can also talk to its subagents: `subagent` with the
+ * id of one at work sends it a message, as the person's would be, and a second
+ * tool, `subagents`, lists them and stops one, or takes one off the queue.
  *
  * The model a child runs on: the one its parent is on now, unless the chat
  * says otherwise (its model menu, kept by the server half: per-chat.ts) or the
@@ -148,7 +153,11 @@ const busy: Set<string> = ((globalThis as any)[Symbol.for("pithagoras-subagent:b
  */
 export function describe(mode: Mode, limit: number, keep = false): string {
   const room = limit === 1 ? "One runs at a time: further calls wait for it to finish." : `At most ${limit} run at once; further calls wait for a free one.`;
-  const again = keep ? " Pass id to continue a finished one, with its context." : "";
+  const again = keep
+    ? ` Pass id to continue a finished one, with its context${mode === "background" ? ", or to message a running one" : ""}.`
+    : mode === "background"
+      ? " Pass id to message a running one."
+      : "";
   return mode === "background"
     ? `Hand a self-contained task to a separate agent with its own context. It runs in the background: this call returns at once and its final answer arrives later as a message. For research that would fill this chat. The person can watch and steer it. ${room}${again}`
     : `Hand a self-contained task to a separate agent with its own context and get its final answer back. For research that would fill this chat. The person can watch and steer it. ${room}${again}`;
@@ -183,9 +192,43 @@ const named = (id: string, kept: boolean, fell?: string) =>
 /** What a chat that is in no mode stores, and what a child chat is put in to be in none. */
 const STANDARD = "standard";
 
+/** How many ended subagents `subagents` lists, the latest ones: those at work are all listed. */
+export const LISTED_ENDED = 20;
+
 /**
- * Registers the `subagent` tool in a chat's pi. A change to the settings needs
- * no reload for the model and the limit, which are asked as each starts.
+ * How long a message from the agent waits to be refused before it is said to be sent: a refusal comes at once, and one
+ * that is taken in is not heard of again before the run it went into ends.
+ */
+export const REFUSAL_WAIT_MS = 1_000;
+
+/**
+ * One task given to a subagent of this chat, from the call that gives it to its end: waiting for a slot ("queued"),
+ * at work ("running"), or how it ended. Once it has ended it stays so: a kept one given more is a new task.
+ */
+interface Task {
+  id: string;
+  label: string;
+  kept: boolean;
+  background: boolean;
+  state: "queued" | "running" | Status;
+  /** When it was asked for, when it started and when it ended. */
+  at: number;
+  started?: number;
+  ended?: number;
+  /** Its run, from its start until it has ended. */
+  runner?: Runner;
+  /** Said by the agent while it waited: given with its task as it starts. */
+  more: string[];
+  /** Taken off the queue before it started. */
+  cancelled: boolean;
+  /** Stopped by the agent, which was told what it had then: its end is not said again. */
+  stoppedByAgent: boolean;
+}
+
+/**
+ * Registers the `subagent` tool in a chat's pi, and, where the agent can do anything while a subagent works,
+ * `subagents` beside it. A change to the settings needs no reload for the model and the limit, which are asked as
+ * each starts.
  */
 export default function subagentTool(pi: any, given: Given) {
   const { chat, chats, settings } = given;
@@ -198,17 +241,30 @@ export default function subagentTool(pi: any, given: Given) {
   const liveLimit = () => settings().maxParallel;
   /** Says something on the chat's bus, as the protocol has it. */
   const say = <C extends keyof SubagentProtocol>(channel: C, data: SubagentProtocol[C]) => pi.events.emit(channel, data);
-  // Background children still running, stopped with the session that started them.
-  const detached = new Set<Runner>();
+  // The tasks this chat's pi gave its subagents, by the child chat's id, in the order they were given: what
+  // `subagents` lists and stops, and what a message by id reaches.
+  const tasks = new Map<string, Task>();
   // Set once the session is over: what still waits for a slot does not start.
   let shutDown = false;
+  // In interrupt mode the agent waits for each subagent, so there is nothing to talk to while one works; kept chats
+  // are still there to be listed.
+  const talks = mode === "background" || keep;
 
   pi.on?.("session_shutdown", () => {
     shutDown = true;
-    // Nobody is left to hear their answers: their chats stop, and their slots are every chat's.
-    for (const run of detached) run.stop();
+    // Nobody is left to hear the background ones' answers: their chats stop, and their slots are every chat's.
+    for (const task of tasks.values()) if (task.background && task.state === "running") task.runner?.stop();
     wakeAll();
   });
+
+  /** Stops it at work, or takes it off the queue; nothing for one that has ended. */
+  function stop(task: Task): void {
+    if (task.state === "running") task.runner?.stop();
+    else if (task.state === "queued") {
+      task.cancelled = true;
+      wakeAll();
+    }
+  }
 
   /**
    * The child chat `id` names, to be given another task: one this chat's subagent worked in, that was kept, and that
@@ -223,18 +279,64 @@ export default function subagentTool(pi: any, given: Given) {
   }
 
   /**
+   * Whether the child chat `id` is at work on something this chat's pi did not give it: the person working with a kept
+   * one in its own chat, or the chat's pi loaded before winding one down. Neither is this pi's to list as ended or to stop.
+   */
+  function atWorkElsewhere(id: string): boolean {
+    const task = tasks.get(id);
+    if (task && (task.state === "queued" || task.state === "running")) return false;
+    return (!task && busy.has(id)) || chats.get(id)?.status === "running";
+  }
+
+  /**
+   * A message from the agent for one of its subagents at work: into its run after the step it is on, or with its task.
+   * One the portal refuses (the chat is going, the run has just ended) throws, saying why, so the agent does not wait for
+   * a reaction that will not come.
+   */
+  async function message(task: Task, text: string) {
+    if (task.state === "queued") {
+      task.more.push(text);
+      return {
+        content: [{ type: "text", text: `Subagent "${task.label}" (${task.id}) has not started yet: it gets this with its task.` }],
+        details: { phase: "queued", id: task.id },
+      };
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const refused = await Promise.race([
+      task.runner ? task.runner.send(text) : Promise.resolve("it has ended"),
+      new Promise<undefined>((done) => {
+        timer = setTimeout(() => done(undefined), REFUSAL_WAIT_MS);
+      }),
+    ]);
+    clearTimeout(timer);
+    if (refused) throw new Error(`Subagent "${task.label}" (${task.id}) did not get the message: ${refused}`);
+    return {
+      content: [{ type: "text", text: `Sent to subagent "${task.label}" (${task.id}), which reads it after the step it is on. Its answer comes as before.` }],
+      details: { phase: "sent", id: task.id },
+    };
+  }
+
+  /**
    * Gives the task to the child chat, says so on the bus, and says how it ended once it has; the slot is the
    * caller's. `progress` is the call's own card, for one that waits on it.
    */
-  function run(id: string, task: string, label: string, toolCallId: string, detail: string, background: boolean, progress?: (answer: string, phase: string) => void): Runner {
-    say(START, { id, label, toolCallId, input: true, stop: true, detail, chat: id, ...(background ? { detached: true } : {}) });
-    const runner = startRunner(chats, id, task, given.hear, progress);
+  function run(task: Task, text: string, toolCallId: string, detail: string, progress?: (answer: string, phase: string) => void): Runner {
+    const { id, label } = task;
+    say(START, { id, label, toolCallId, input: true, stop: true, detail, chat: id, ...(task.background ? { detached: true } : {}) });
+    const runner = startRunner(chats, id, [text, ...task.more.splice(0)].join("\n\n"), given.hear, progress);
+    task.runner = runner;
+    task.state = "running";
+    task.started = Date.now();
     const off = [
       pi.events.on(INPUT, (d: any) => d?.id === id && typeof d.text === "string" && runner.send(d.text)),
       pi.events.on(STOP, (d: any) => d?.id === id && runner.stop()),
     ];
     const finished = runner.finished.then((ended) => {
       off.forEach((f: () => void) => f());
+      task.state = ended.status;
+      task.ended = Date.now();
+      // What it said is with whoever waits on its end: an ended task holds on to nothing more than its line in the list.
+      task.runner = undefined;
       say(END, { id, status: ended.status, ...(ended.failure ? { error: ended.failure } : {}) });
       return ended;
     });
@@ -253,34 +355,38 @@ export default function subagentTool(pi: any, given: Given) {
         task: { type: "string", description: "The whole task with all it needs: it sees nothing of this chat" },
         label: { type: "string", description: "Short name, e.g. Research: vector DBs" },
         // Said in the description: a description of its own would cost as much again.
-        ...(keep ? { id: { type: "string" } } : {}),
+        ...(talks ? { id: { type: "string" } } : {}),
       },
     },
     // What it hands on goes to a chat that has not read what this one read: after a suspected prompt injection, a call
-    // waits for the person, as the guard's rule for a tool of this name says too.
+    // waits for the person, as the guard's rule for a tool of this name says too. A message to one at work as well.
     guard: { acts: ["delegate"] },
 
     async execute(toolCallId: string, params: { task: string; label?: string; id?: string }, signal: AbortSignal | undefined, onUpdate: any, ctx: any) {
+      const asked = typeof params.id === "string" ? params.id.trim() : "";
+      // One of this chat's at work, or waiting to be: the task is a message for it.
+      const atWork = asked ? tasks.get(asked) : undefined;
+      if (atWork && (atWork.state === "queued" || atWork.state === "running")) return message(atWork, params.task);
       // One to continue is looked at before anything is made or a slot is taken: one that cannot be is refused at once.
-      const again = typeof params.id === "string" && params.id.trim() ? toContinue(params.id.trim()) : undefined;
+      const again = asked ? toContinue(asked) : undefined;
       const label = params.label?.trim() || again?.title || "Subagent";
       const model = again ? undefined : childModel(chatModel(), ctx?.model, settings().model);
       // Made in the chat's mode, as the settings say; in Standard where it is not there for a child (its extension is
       // off, the person's mode is gone), which the result says. A kept child keeps the mode it was made in.
       const parentMode = chats.get(chat.id)?.mode;
-      const asked = again || !parentMode ? undefined : settings().inheritMode ? parentMode : STANDARD;
+      const wantMode = again || !parentMode ? undefined : settings().inheritMode ? parentMode : STANDARD;
       let fell: string | undefined;
       const make = (into: string | undefined) => chats.create({ parent: chat.id, title: label, listed: keep, ...(model ? { model } : {}), ...(into ? { mode: into } : {}) });
       const child =
         again ??
         (() => {
           try {
-            return make(asked);
+            return make(wantMode);
           } catch (e) {
             // Only a refusal of the mode (core's say "mode"): any other reason is not the mode's, and is not hidden by a
             // second try that happens to work.
-            if (!asked || asked === STANDARD || !(e instanceof TypeError) || !/\bmode\b/.test(e.message)) throw e;
-            fell = asked;
+            if (!wantMode || wantMode === STANDARD || !(e instanceof TypeError) || !/\bmode\b/.test(e.message)) throw e;
+            fell = wantMode;
             return make(STANDARD);
           }
         })();
@@ -288,27 +394,36 @@ export default function subagentTool(pi: any, given: Given) {
       const kept = again ? true : keep;
       const detail = again ? "Continuing" : model ? `Starting on ${model.provider}/${model.id}` : "Starting";
       busy.add(id);
+      const background = mode === "background";
+      const task: Task = { id, label, kept, background, state: "queued", at: Date.now(), more: [], cancelled: false, stoppedByAgent: false };
+      // A kept one given more goes to the end of the list, as the latest.
+      tasks.delete(id);
+      tasks.set(id, task);
       /** A chat made for a task that never started holds nothing: it goes, rather than be left as an empty sub-chat. */
       const unmade = () => {
         if (!again) void chats.remove(id).catch(() => undefined);
       };
+      /** Over before it started: stopped, or failed with `failure`. */
+      const neverStarted = (failure?: string) => {
+        task.state = failure === undefined ? "stopped" : "error";
+        // Its chat goes (unmade): nothing is left to continue.
+        if (!again) task.kept = false;
+        task.ended = Date.now();
+      };
 
-      if (mode === "background") {
+      if (background) {
         // Whether it starts now or waits for one of the others: said now, since the call does not wait.
         const waiting = slots.running >= liveLimit() ? slots.running : 0;
         // One that waits is announced at once: counted as running, so its chat
         // is not reloaded from under it, and it can be stopped before it starts.
-        let cancelled = false;
-        const offWait = waiting
-          ? pi.events.on(STOP, (d: any) => {
-              if (d?.id !== id) return;
-              cancelled = true;
-              wakeAll();
-            })
-          : () => {};
+        const offWait = waiting ? pi.events.on(STOP, (d: any) => d?.id === id && stop(task)) : () => {};
         if (waiting) say(START, { id, label, toolCallId, input: false, stop: true, detail: "Waiting for a free slot", detached: true, chat: id });
-        /** What the parent is told when it is over: its answer starts a turn; a stop waits for the person. */
+        /**
+         * What the parent is told when it is over: its answer starts a turn; a stop waits for the person. One the agent
+         * stopped itself is not told again: its stop said what it had.
+         */
         const tell = (status: Status, said: string, marked?: true) => {
+          if (status === "stopped" && task.stoppedByAgent) return;
           try {
             pi.sendMessage(
               { customType: "subagent", content: marked ? flagged(said) : said, display: true, details: { id, status } },
@@ -322,16 +437,16 @@ export default function subagentTool(pi: any, given: Given) {
           let release: (() => void) | undefined;
           let runner: Runner | undefined;
           try {
-            release = await takeSlot(liveLimit, () => shutDown || cancelled, () => {});
+            release = await takeSlot(liveLimit, () => shutDown || task.cancelled, () => {});
             offWait();
             if (!release) {
+              neverStarted();
               if (waiting) say(END, { id, status: "stopped" });
               unmade();
-              if (cancelled && !shutDown) tell("stopped", `Subagent "${label}" was stopped before it started.`);
+              if (task.cancelled && !shutDown) tell("stopped", `Subagent "${label}" was stopped before it started.`);
               return;
             }
-            runner = run(id, params.task, label, toolCallId, detail, true);
-            detached.add(runner);
+            runner = run(task, params.task, toolCallId, detail);
             const { status, answer, failure, marked } = await runner.finished;
             tell(
               status,
@@ -345,14 +460,16 @@ export default function subagentTool(pi: any, given: Given) {
           } catch (e) {
             // Whatever went wrong, the slot is given back below and the parent is told.
             const why = (e as Error)?.message ?? String(e);
-            if (waiting && !runner) say(END, { id, status: "error", error: why });
-            // Failed before its chat was given the task: it holds nothing, and is not left as an empty sub-chat.
-            if (!runner) unmade();
+            if (!runner) {
+              neverStarted(why);
+              if (waiting) say(END, { id, status: "error", error: why });
+              // Failed before its chat was given the task: it holds nothing, and is not left as an empty sub-chat.
+              unmade();
+            }
             tell("error", `Subagent "${label}" failed: ${why}`);
           } finally {
             offWait();
             release?.();
-            if (runner) detached.delete(runner);
             busy.delete(id);
           }
         })();
@@ -386,19 +503,20 @@ export default function subagentTool(pi: any, given: Given) {
         }
         release = await takeSlot(
           liveLimit,
-          () => signal?.aborted === true || shutDown,
+          () => signal?.aborted === true || shutDown || task.cancelled,
           (wake) => {
             signal?.addEventListener("abort", wake, { once: true });
             return () => signal?.removeEventListener("abort", wake);
           },
         );
         if (!release) {
+          neverStarted();
           if (hadToWait) say(END, { id, status: "stopped" });
           unmade();
           return { content: [{ type: "text", text: "(stopped before the subagent started)" }], details: { phase: "stopped", id } };
         }
         const startedAt = Date.now();
-        runner = run(id, params.task, label, toolCallId, detail, false, (answer, phase) => onUpdate?.({ content: [{ type: "text", text: answer }], details: { phase } }));
+        runner = run(task, params.task, toolCallId, detail, (answer, phase) => onUpdate?.({ content: [{ type: "text", text: answer }], details: { phase } }));
         const running = runner;
         const stopped = () => running.stop();
         signal?.addEventListener("abort", stopped, { once: true });
@@ -414,12 +532,99 @@ export default function subagentTool(pi: any, given: Given) {
         return { content: [{ type: "text", text: marked ? flagged(said) : said }], details: { phase: status, id } };
       } catch (e) {
         // Failed before its chat was given the task (its start could not be said, say): no empty sub-chat is left.
-        if (!runner) unmade();
+        if (!runner) {
+          neverStarted((e as Error)?.message ?? String(e));
+          unmade();
+        }
         throw e;
       } finally {
         release?.();
         busy.delete(id);
       }
+    },
+  });
+
+  if (!talks) return;
+
+  /**
+   * One line of the list: what it is, where it is and for how long. Nothing of what one at work has said: it may have
+   * read outside content, and the portal marks this chat with that only as its run ends, before its words come back.
+   */
+  const line = (task: Task, now: number) => {
+    const head = `- ${task.id} "${task.label}"`;
+    if (task.state === "queued") return `${head}: waiting for a free slot for ${waited(now - task.at)}`;
+    if (task.state === "running") return `${head}: running for ${waited(now - (task.started ?? task.at))}`;
+    const how = task.state === "done" ? "finished" : task.state === "stopped" ? "stopped" : "failed";
+    const when = task.started ? `after ${waited((task.ended ?? now) - task.started)}` : "before it started";
+    return `${head}: ${how} ${when}${task.kept ? ", kept" : ""}`;
+  };
+
+  /** One at work on something this pi did not give it (atWorkElsewhere). */
+  const elsewhere = (id: string, title: string) => `- ${id} "${title}": at work in its own chat, not on a task from you`;
+
+  /** This chat's subagents: those it gave a task since it was loaded, then the kept chats of earlier ones. */
+  function list(): string {
+    const now = Date.now();
+    const all = [...tasks.values()];
+    const atWork = all.filter((t) => t.state === "queued" || t.state === "running");
+    const kids = chats.children(chat.id);
+    const busyElsewhere = kids.filter((c) => (c.listed !== false || tasks.has(c.id)) && atWorkElsewhere(c.id));
+    const ended = all.filter((t) => !atWork.includes(t) && !busyElsewhere.some((c) => c.id === t.id));
+    const earlier = kids.filter((c) => c.listed !== false && !tasks.has(c.id) && !busyElsewhere.includes(c));
+    const left = ended.length + earlier.length - LISTED_ENDED;
+    const lines = [
+      ...atWork.map((t) => line(t, now)),
+      ...busyElsewhere.map((c) => elsewhere(c.id, tasks.get(c.id)?.label ?? c.title)),
+      // The latest of those that have ended: kept ones from before this chat was loaded are the oldest.
+      ...[
+        ...earlier.map((c) => `- ${c.id} "${c.title}": kept${c.status === "interrupted" ? ", cut off by a restart" : ""}`),
+        ...ended.map((t) => line(t, now)),
+      ].slice(Math.max(0, left)),
+    ];
+    if (!lines.length) return "This chat has no subagents.";
+    return (left > 0 ? `(${left} earlier ones that have ended are left out.)\n` : "") + lines.join("\n");
+  }
+
+  pi.registerTool({
+    name: "subagents",
+    label: "Subagents",
+    description: "List this chat's subagents (id, status, time), or stop one by id.",
+    parameters: {
+      type: "object",
+      required: ["action"],
+      properties: { action: { type: "string", enum: ["list", "stop"] }, id: { type: "string" } },
+    },
+    // No guard of its own: it reads what this chat's subagents did, and stops them. What it sends one goes through
+    // `subagent`, which the guard holds as a delegation.
+
+    async execute(_toolCallId: string, params: { action: "list" | "stop"; id?: string }) {
+      if (params.action !== "stop") return { content: [{ type: "text", text: list() }], details: { action: "list" } };
+      const id = typeof params.id === "string" ? params.id.trim() : "";
+      if (!id) throw new Error("Name the subagent to stop by its id.");
+      const task = tasks.get(id);
+      const child = chats.children(chat.id).find((c) => c.id === id);
+      if (!task && !child) throw new Error(`There is no subagent ${id} in this chat.`);
+      const label = task?.label ?? child!.title;
+      // Not one this pi set going: the person may be working with it in its chat, which is theirs to stop.
+      if (atWorkElsewhere(id)) throw new Error(`Subagent "${label}" (${id}) is at work in its own chat, not on a task from you: it is not stopped from here.`);
+      if (!task || (task.state !== "queued" && task.state !== "running")) throw new Error(`Subagent "${label}" (${id}) has ended already: there is nothing to stop.`);
+      if (task.state === "queued") {
+        task.stoppedByAgent = true;
+        stop(task);
+        return { content: [{ type: "text", text: `Took subagent "${label}" (${id}) off the queue before it started.` }], details: { action: "stop", id } };
+      }
+      const ending = task.runner!.finished;
+      task.stoppedByAgent = true;
+      stop(task);
+      // What it had comes back once its run is over: a subagent that read outside content has marked this chat by then
+      // (the portal does as the run ends), so its words are held as what they are, and are handed on as a flagged result
+      // so that the mark is found again when the guard is made again, as with its answer.
+      const { status, answer, marked } = await ending;
+      if (status !== "stopped") {
+        return { content: [{ type: "text", text: `Subagent "${label}" (${id}) ended before it could be stopped: its answer comes as it would have.` }], details: { action: "stop", id } };
+      }
+      const said = `Stopped subagent "${label}" (${id}).${answer ? ` What it had so far:\n\n${answer}` : " It had said nothing yet."}`;
+      return { content: [{ type: "text", text: marked ? flagged(said) : said }], details: { action: "stop", id } };
     },
   });
 }
