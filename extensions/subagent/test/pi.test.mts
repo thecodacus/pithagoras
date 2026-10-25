@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import subagentTool, {childModel, describe, waited} from '../src/pi.ts';
+import subagentTool, {childModel, describe, LISTED_ENDED, waited} from '../src/pi.ts';
 import { settingsOf, type Settings } from '../src/settings.ts';
 /**
  * The `subagent` tool in a chat's pi (src/pi.ts), over a stand-in for pi and a stand-in for the portal's child chats
@@ -65,14 +65,15 @@ function load(f=fakeChats(),chat='parent'){
  const events={emit:(c:string,d:any)=>h.get(c)?.forEach(f=>f(d)),on:(c:string,f:(d:any)=>void)=>{h.set(c,[...(h.get(c)??[]),f]);return()=>h.set(c,(h.get(c)??[]).filter(x=>x!==f));}};
  const hooks=new Map<string,()=>void>();
  const sent:{message:any,options:any}[]=[];
- let tool:any;
- subagentTool({registerTool:(t:any)=>tool=t,events,on:(e:string,f:()=>void)=>hooks.set(e,f),sendMessage:(message:any,options:any)=>sent.push({message,options})},{chat:{id:chat},chats:f.api as any,settings,chatModel:()=>chatSaid,hear:f.hear});
+ const tools=new Map<string,any>();
+ subagentTool({registerTool:(t:any)=>tools.set(t.name,t),events,on:(e:string,f:()=>void)=>hooks.set(e,f),sendMessage:(message:any,options:any)=>sent.push({message,options})},{chat:{id:chat},chats:f.api as any,settings,chatModel:()=>chatSaid,hear:f.hear});
  const ends:any[]=[];events.on('subagent:v1:end',d=>ends.push(d));
  const starts:any[]=[];events.on('subagent:v1:start',d=>starts.push(d));
  const seen:string[]=[];
  events.on('subagent:v1:start',d=>seen.push(`start ${d.toolCallId}`));
  events.on('subagent:v1:end',()=>seen.push('end'));
- return {tool,events,ends,starts,sent,seen,hooks,...f};
+ // `subagents` beside it where the agent can talk to its subagents.
+ return {tool:tools.get('subagent'),subagents:tools.get('subagents'),events,ends,starts,sent,seen,hooks,...f};
 }
 const until=async(ok:()=>boolean)=>{for(let i=0;i<200&&!ok();i++)await sleep(20);assert.ok(ok());};
 const slots=()=>(globalThis as any)[Symbol.for('pithagoras-subagent:slots')];
@@ -128,8 +129,9 @@ test('an unknown id, another chat\'s subagent and one that was not kept are refu
  await assert.rejects(mine.tool.execute('c',{task:'x',id:'their-kept'},undefined,undefined,{}),/There is no subagent their-kept in this chat\./);
  await assert.rejects(mine.tool.execute('d',{task:'x',id:'loose'},undefined,undefined,{}),/Subagent "Loose" \(loose\) was not kept, so it cannot be continued: start a new one with the whole task\./);
  assert.deepEqual([f.created.length,f.prompts.length,slots().running],[made,prompted,taken]);
- // And one that is still at work.
- await assert.rejects(mine.tool.execute('e',{task:'x',id:'child-1'},undefined,undefined,{}),/Subagent "Subagent" \(child-1\) is still working: wait for its answer before you give it more\./);
+ // And one at work for the chat as its pi was loaded before: this one's own are given a message instead.
+ const reloaded=load(f,'parent');
+ await assert.rejects(reloaded.tool.execute('e',{task:'x',id:'child-1'},undefined,undefined,{}),/Subagent "Subagent" \(child-1\) is still working: wait for its answer before you give it more\./);
  mine.events.emit('subagent:v1:stop',{id:'child-1'});
  await running;
  mode();
@@ -526,4 +528,133 @@ test('a wait is said in the units a person uses',()=>{
  assert.equal(waited(12_000),'12 s');
  assert.equal(waited(180_000),'3 min');
  assert.equal(waited(185_000),'3 min 5 s');
+});
+test('subagents is there where the agent can talk to its subagents: in the background or with kept chats, not in interrupt mode alone',()=>{
+ mode();
+ assert.equal(load().subagents,undefined);
+ assert.equal(load().tool.parameters.properties.id,undefined);
+ for(const [m,more] of [['background',{}],[undefined,{keep:true}],['background',{keep:true}]] as const){
+  mode(m,more);
+  const {tool,subagents}=load();
+  assert.ok(subagents,`${m} ${JSON.stringify(more)}`);
+  assert.deepEqual(subagents.parameters.properties.action.enum,['list','stop']);
+  assert.equal(subagents.guard,undefined,'it reads and stops: no acts of its own');
+  assert.ok(tool.parameters.properties.id,'subagent takes an id');
+ }
+ mode('background');
+ assert.match(load().tool.description,/Pass id to message a running one\./);
+ mode('background',{keep:true});
+ assert.match(load().tool.description,/Pass id to continue a finished one, with its context, or to message a running one\./);
+ mode();
+});
+test('subagents lists the chat\'s subagents: one at work with what it said so far, one waiting for a slot, and kept ones that have ended',{timeout:5000},async()=>{
+ play='hang';mode('background',{keep:true});
+ const f=fakeChats();
+ // A kept one from before the chat's pi was loaded, and one of another chat's.
+ f.chats.set('earlier',{id:'earlier',title:'Earlier',status:'interrupted',parent:'parent',listed:true});
+ f.chats.set('theirs',{id:'theirs',title:'Theirs',status:'idle',parent:'other',listed:true});
+ const {tool,subagents,events,ends,prompts}=load(f);
+ assert.equal((await subagents.execute('l',{action:'list'})).content[0].text,'- earlier "Earlier": kept, cut off by a restart');
+ await tool.execute('a',{task:'one',label:'Research'},undefined,undefined,{});
+ await tool.execute('b',{task:'two',label:'Later'},undefined,undefined,{});
+ await until(()=>prompts.length===1);
+ await sleep(20);
+ const text=(await subagents.execute('l',{action:'list'})).content[0].text;
+ assert.match(text,/^- child-1 "Research": running for under a second; so far: half of it$/m);
+ assert.match(text,/^- child-2 "Later": waiting for a free slot for under a second$/m);
+ assert.match(text,/^- earlier "Earlier": kept, cut off by a restart$/m);
+ assert.doesNotMatch(text,/theirs/);
+ events.emit('subagent:v1:stop',{id:'child-1'});
+ events.emit('subagent:v1:stop',{id:'child-2'});
+ await until(()=>ends.length===2);
+ const after=(await subagents.execute('l',{action:'list'})).content[0].text;
+ assert.match(after,/^- child-1 "Research": stopped after under a second, kept$/m);
+ assert.match(after,/^- child-2 "Later": stopped before it started, kept$/m);
+ mode();
+});
+test('subagents lists the latest of those that have ended, and says how many it left out',{timeout:5000},async()=>{
+ play='retry';mode(undefined,{keep:true});
+ const f=fakeChats();
+ for(let i=0;i<LISTED_ENDED+2;i++)f.chats.set(`old-${i}`,{id:`old-${i}`,title:`Old ${i}`,status:'idle',parent:'parent',listed:true});
+ const {tool,subagents}=load(f);
+ await tool.execute('a',{task:'one',label:'New'},undefined,undefined,{});
+ const lines=(await subagents.execute('l',{action:'list'})).content[0].text.split('\n');
+ assert.equal(lines[0],'(3 earlier ones that have ended are left out.)');
+ assert.equal(lines.length,LISTED_ENDED+1);
+ assert.equal(lines[1],'- old-3 "Old 3": kept');
+ assert.match(lines.at(-1)!,/^- child-1 "New": finished after .*, kept$/);
+ mode();
+});
+test('subagent with the id of one at work sends it the task as a message, after the step it is on, and makes nothing new',{timeout:5000},async()=>{
+ play='hang';mode('background');
+ const {tool,events,prompts,created,ends}=load();
+ await tool.execute('a',{task:'one'},undefined,undefined,{});
+ await tool.execute('b',{task:'two'},undefined,undefined,{});
+ await until(()=>prompts.length===1);
+ const sent=await tool.execute('c',{task:'Look at the tests too',id:'child-1'},undefined,undefined,{});
+ assert.equal(sent.content[0].text,'Sent to subagent "Subagent" (child-1), which reads it after the step it is on. Its answer comes as before.');
+ assert.deepEqual(prompts.slice(1),[{id:'child-1',message:'Look at the tests too',options:{steer:true}}]);
+ // One still waiting for a slot gets it with its task.
+ const queued=await tool.execute('d',{task:'And this',id:'child-2'},undefined,undefined,{});
+ assert.equal(queued.content[0].text,'Subagent "Subagent" (child-2) has not started yet: it gets this with its task.');
+ assert.equal(created.length,2,'nothing new is made');
+ events.emit('subagent:v1:stop',{id:'child-1'});
+ await until(()=>prompts.length===3);
+ assert.deepEqual(prompts[2],{id:'child-2',message:'two\n\nAnd this',options:{}});
+ events.emit('subagent:v1:stop',{id:'child-2'});
+ await until(()=>ends.length===2);
+ mode();
+});
+test('subagents stops one at work by its id: it ends as stopped, the agent is told what it had, and no turn starts',{timeout:5000},async()=>{
+ play='hang';mode('background');
+ const {tool,subagents,prompts,aborted,ends,sent}=load();
+ await tool.execute('a',{task:'one',label:'Research'},undefined,undefined,{});
+ await until(()=>prompts.length===1);
+ await sleep(20);
+ const result=await subagents.execute('s',{action:'stop',id:'child-1'});
+ assert.equal(result.content[0].text,'Stopped subagent "Research" (child-1). What it had so far:\n\nhalf of it');
+ await until(()=>ends.length===1);
+ assert.deepEqual(ends,[{id:'child-1',status:'stopped'}]);
+ assert.deepEqual(aborted,['child-1']);
+ await sleep(50);
+ assert.deepEqual(sent,[],'nothing is sent: the stop said what it had, and no turn starts');
+ await assert.rejects(subagents.execute('s',{action:'stop',id:'child-1'}),/Subagent "Research" \(child-1\) has ended already: there is nothing to stop\./);
+ mode();
+});
+test('subagents takes one waiting for a slot off the queue: it never starts, and the next one gets the slot',{timeout:5000},async()=>{
+ play='hang';mode('background');
+ const {tool,subagents,prompts,removed,ends,sent}=load();
+ for(const label of ['A','B','C'])await tool.execute(label,{task:label,label},undefined,undefined,{});
+ await until(()=>prompts.length===1);
+ const off=await subagents.execute('s',{action:'stop',id:'child-2'});
+ assert.equal(off.content[0].text,'Took subagent "B" (child-2) off the queue before it started.');
+ await until(()=>ends.length===1);
+ assert.deepEqual(ends,[{id:'child-2',status:'stopped'}]);
+ assert.deepEqual(removed,['child-2'],'its empty chat goes');
+ // A is stopped: its slot goes to C, which was behind B.
+ await subagents.execute('s',{action:'stop',id:'child-1'});
+ await until(()=>prompts.length===2);
+ assert.deepEqual(prompts.map(p=>p.id),['child-1','child-3']);
+ await subagents.execute('s',{action:'stop',id:'child-3'});
+ await until(()=>ends.length===3);
+ assert.deepEqual(sent,[],'the agent stopped each itself: no message, no turn');
+ await until(()=>slots().running===0&&slots().waiting.length===0);
+ mode();
+});
+test('subagents and a message by id refuse an unknown id and another chat\'s subagent',{timeout:5000},async()=>{
+ play='hang';mode('background');
+ const f=fakeChats();
+ const mine=load(f,'parent'),theirs=load(f,'other');
+ await theirs.tool.execute('a',{task:'theirs'},undefined,undefined,{});
+ await until(()=>f.prompts.length===1);
+ for(const id of ['nobody','child-1']){
+  await assert.rejects(mine.subagents.execute('s',{action:'stop',id}),new RegExp(`There is no subagent ${id} in this chat\\.`));
+  await assert.rejects(mine.tool.execute('m',{task:'x',id},undefined,undefined,{}),new RegExp(`There is no subagent ${id} in this chat\\.`));
+ }
+ await assert.rejects(mine.subagents.execute('s',{action:'stop'}),/Name the subagent to stop by its id\./);
+ assert.deepEqual([f.prompts.length,f.aborted,f.created.length],[1,[],1]);
+ assert.equal((await mine.subagents.execute('l',{action:'list'})).content[0].text,'This chat has no subagents.');
+ theirs.events.emit('subagent:v1:stop',{id:'child-1'});
+ await until(()=>theirs.ends.length===1);
+ mode();
 });
