@@ -99,6 +99,7 @@ test("what mail, the web through a command, an MCP server or the browser returne
     ["bash", { command: "ls -la" }], ["bash", { command: "git status" }], ["ask_primary", {}], ["activity_note", {}], ["report", {}],
     ["routines_list", {}], ["routine_create", {}], ["routine_update", {}], ["show_image", {}], ["generate_image", {}], ["edit_image", {}],
     ["understory_memory_search", { query: "x" }], ["subagent", { task: "x" }], ["routine_run", {}], ["todo", { action: "list" }],
+    ["subagents", { action: "list" }],
   ];
   for (const [tool, input] of own) {
     const h = guardAs();

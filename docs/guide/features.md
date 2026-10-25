@@ -106,12 +106,40 @@ window. Closing or reloading the chat does.
   and the agent can go on with it. Every result names the subagent's id ("Its
   chat is kept as `k3f9x2`: pass that id to continue it."), and a later call
   with that `id` gives the same chat a further task, with everything it already
-  knows. Another chat's subagent, one that was not kept and one that is still
-  working are refused before anything starts, with the reason.
+  knows. Another chat's subagent and one that was not kept are refused before
+  anything starts, with the reason. A call with the id of one that is still
+  working sends it a message instead (see below).
 
 Either way a subagent's chat is deleted with its chat. With it on, the tool's
 description says that a finished one can be continued, and the tool takes an
-`id`: about 19 tokens more on every request.
+`id`: about 19 tokens more on every request, and the `subagents` tool below
+about 54 more.
+
+### What the agent can do with its subagents
+
+In the background, or with kept chats on, the agent can act while a subagent
+works, so it can also look after its subagents, as you can from the panel:
+
+- **List them**: the `subagents` tool (`action: list`) lists the chat's
+  subagents with their id: those at work, how long they have run and the start
+  of what each has said so far, those waiting for a slot, and those that have
+  ended (the latest 20), kept ones marked as such.
+- **Send one a message**: a `subagent` call with the `id` of one at work sends
+  it the task as a message, which it reads after the step it is on, as yours
+  from the panel; it shows in its chat as a message. One still waiting for a
+  slot gets it with its task. Its answer comes as it would have.
+- **Stop one** (`action: stop` with its `id`): it stops as with **Stop** in the
+  panel, and the agent is told what it had said so far. One still waiting for a
+  slot is taken off the queue and never starts, so the next one gets the slot.
+  A subagent the agent stopped itself sends no message later and starts no
+  turn.
+
+The agent reaches only its own chat's subagents: an id of another chat's is
+refused as unknown. In interrupt mode with kept chats off the `subagents` tool
+is not there, as the agent waits for each subagent's answer and has nothing to
+talk to meanwhile. In the background the `subagent` tool takes an `id` for
+messages, about 14 tokens more on every request, and `subagents` costs about
+54.
 
 ### Which model a subagent runs on
 
