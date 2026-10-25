@@ -389,8 +389,8 @@ portal.slots.register("chat.panel", {
 ```
 
 `useButton` may return `hidden` (no button until there is something to open:
-the portal's Subagents button is like this), `live` (a dot that says something
-in it is running) and `title`.
+the subagent extension's Subagents button is like this), `live` (a dot that
+says something in it is running) and `title`.
 
 `bleed: true` is for a panel whose body is filled by what it draws, a frame or
 another program's screen, as the browser's is: its body is black from edge to

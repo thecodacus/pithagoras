@@ -1156,9 +1156,10 @@ its folder, and keeps them from then on, each until its chat is deleted.
 The subagents beside a chat are drawn by the extension too: the Subagents panel
 and its button in the chat's header, a chip in the running tray for each one at
 work, *Watch* on the call that started one, and the row in the model menu. They
-look as they did. Switched off, the extension takes all of it with it, and a
-subagent another extension runs over the
-[subagent protocol](/guide/extensions#the-subagent-protocol) is not drawn
+look the same, apart from the panel's remembered place: a dock side or width
+you gave the Subagents panel starts at the default once. Switched off, the
+extension takes all of it with it, and a subagent another extension runs over
+the [subagent protocol](/guide/extensions#the-subagent-protocol) is not drawn
 either.
 
 **A copy of the tool that you installed by hand** from an old clone of the

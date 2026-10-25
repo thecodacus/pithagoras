@@ -207,7 +207,7 @@ const de: Locale = {
     "allowed": "erlaubt",
     "turned away": "abgewiesen",
     "Nothing recorded. The guard writes here when it refuses something, lets something through on a rule or an approval, or turns a stranger away.": "Nichts aufgezeichnet. Der Wächter schreibt hierher, wenn er etwas ablehnt, etwas per Regel oder Freigabe durchlässt oder einen Fremden abweist.",
-    // components/RunningTray.tsx, SubagentPanel.tsx and others
+    // components/RunningTray.tsx and ChatActivity.tsx
     "paused": "pausiert",
     "Waiting for output…": "Warte auf Ausgabe…",
     // components/SandboxSettings.tsx
@@ -1402,8 +1402,7 @@ const de: Locale = {
     // components/StatusDot.tsx
     "idle": "bereit",
     "interrupted — server restarted mid-run": "unterbrochen — der Server wurde mitten im Lauf neu gestartet",
-    // components/SubagentModelPicker.tsx
-    // components/SubagentPanel.tsx
+    // components/UpdateSection.tsx and VoiceToolActivity.tsx
     "Failed": "Fehlgeschlagen",
     // components/ThemeSwitcher.tsx
     "Match system": "Wie das System",
@@ -1773,7 +1772,6 @@ const de: Locale = {
     "Keyboard shortcuts": "Tastenkürzel",
     "settings.json": "settings.json",
     "Update the portal": "Das Portal aktualisieren",
-    // subagents.ts
     // tool-activity.ts
     "Opening a page": "Öffnet eine Seite",
     "a file": "eine Datei",

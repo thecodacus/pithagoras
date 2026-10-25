@@ -77,3 +77,19 @@ test('ui.Transcript draws a conversation from its events as the chat draws its o
   await expect(replay.locator('.chat-tool').filter({ hasText: 'npm run build -w web' })).toBeVisible();
   await expect(replay.getByText(/compacted|Compacted/).first()).toBeVisible();
 });
+
+test("ui.Transcript draws an extension's card for a call where it is given the chat, and the portal's where it is not", async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  await page.goto('/tests/chat.html?phase=tools');
+  await page.getByRole('button', { name: 'Replay', exact: true }).click();
+  const replay = page.getByTestId('replay');
+  // The stand-in marks the cards of the three shell calls (the fourth is a read): each marker has the portal's card in it.
+  await expect(replay.locator('.chat-tool')).toHaveCount(4);
+  await expect(replay.getByTestId('tool-card')).toHaveCount(3);
+  await expect(replay.getByTestId('tool-card').first().locator('.chat-tool')).toHaveCount(1);
+
+  await page.getByRole('button', { name: 'Bare replay', exact: true }).click();
+  const bare = page.getByTestId('bare');
+  await expect(bare.locator('.chat-tool')).toHaveCount(4);
+  await expect(bare.getByTestId('tool-card')).toHaveCount(0);
+});

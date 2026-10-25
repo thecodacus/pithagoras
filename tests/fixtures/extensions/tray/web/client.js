@@ -6,7 +6,9 @@
  *   chat.tray          a chip "Following" while a shell command of the chat's runs, counting from its start
  *   chat.model.menu    a row in the model menu that says the chat and how many models the menu lists
  *   chat.tool.action   "Follow" beside the head of a shell call's card (`head`)
- *   chat.panel         "Replay": the chat's own conversation drawn again with `ui.Transcript`
+ *   chat.panel         "Replay": the chat's own conversation drawn again with `ui.Transcript`, given the chat; "Bare replay":
+ *                      the same without it
+ *   chat.tool          a marker around the card of a shell call, where the conversation is given its chat
  *
  * Plain JavaScript with the portal's React, as the Notes example is: nothing
  * to build.
@@ -53,6 +55,24 @@ export default function (portal) {
     component: ({ chat }) => {
       const feed = portal.chats.use(chat.id, (f) => ({ events: f.events, running: f.running }));
       return h("div", { "data-testid": "replay", style: { padding: 12, overflow: "auto", height: "100%" } }, h(ui.Transcript, { events: feed.events, running: feed.running, chat, empty: h("p", null, "Nothing yet") }));
+    },
+  });
+
+  // Only where the card is drawn for a chat: the chat's own conversation, and a Transcript that is given the chat.
+  portal.slots.register("chat.tool", {
+    id: "marked",
+    tool: "bash",
+    component: ({ card }) => h("div", { "data-testid": "tool-card" }, card),
+  });
+
+  portal.slots.register("chat.panel", {
+    id: "bare",
+    name: "bare",
+    title: "Bare replay",
+    icon: Icon,
+    component: ({ chat }) => {
+      const feed = portal.chats.use(chat.id, (f) => ({ events: f.events, running: f.running }));
+      return h("div", { "data-testid": "bare", style: { padding: 12, overflow: "auto", height: "100%" } }, h(ui.Transcript, { events: feed.events, running: feed.running }));
     },
   });
 }
