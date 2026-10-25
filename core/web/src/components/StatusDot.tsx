@@ -1,25 +1,29 @@
 import type { SessionStatus } from "../api";
 import { labelOf, msg } from "../i18n";
+import type { ShownStatus } from "../sub-chats";
 
-const LABEL: Record<SessionStatus, string> = {
+const LABEL: Record<ShownStatus, string> = {
   running: msg("running"),
   idle: msg("idle"),
   error: msg("error"),
   interrupted: msg("interrupted — server restarted mid-run"),
+  asking: msg("waiting for you"),
 };
 
 /**
  * How a chat is doing: the same everywhere a list of chats is shown. At rest
  * a dot; working, the app's π, breathing with a glow behind it — the way the
  * thinking in a chat breathes — rather than one more spinner or blinking dot.
- * Its title shimmers beside it (`working-text`), as "Thinking" does.
+ * Its title shimmers beside it (`working-text`), as "Thinking" does. A chat
+ * one of whose sub-chats waits on a person is marked so (`asking`, see
+ * sub-chats.ts).
  */
 export function StatusDot({
   status,
   className = "",
   bare = false,
 }: {
-  status: SessionStatus;
+  status: ShownStatus;
   className?: string;
   /**
    * Without its slot. In a list every mark takes the same 16px, so a title

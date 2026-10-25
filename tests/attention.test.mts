@@ -43,3 +43,9 @@ test("what was not seen before, or was cut off by a restart, is not news", () =>
   assert.deepEqual(finishedRuns(before, [{ id: "a", status: "interrupted" as const }]), []);
   assert.deepEqual(finishedRuns(new Map(), [{ id: "new", status: "idle" as const }]), []);
 });
+
+test("a sub-chat's run ending is not told on its own", () => {
+  const before = new Map([["a", "running"], ["sub", "running"]] as const);
+  const now = [{ id: "a", status: "running" as const }, { id: "sub", status: "idle" as const, parent: "a" }];
+  assert.deepEqual(finishedRuns(before, now), []);
+});

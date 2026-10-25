@@ -282,7 +282,8 @@ function Shell({
   latestSessions.current = sessions;
   useEffect(() => {
     if (!sessionsAsked || sessionId || settings || view !== "chat") return;
-    const first = latestSessions.current[0];
+    // A chat of its own, not a sub-chat, which is listed under its chat.
+    const first = latestSessions.current.find((s) => !s.parent);
     if (first) navigate(`/s/${first.id}`, { replace: true });
   }, [sessionsAsked, sessionId, settings, view]);
 
@@ -637,9 +638,14 @@ function Shell({
     navigate(`/s/${id}`);
   });
   const onDeleteChat = useStable(async (id: string) => {
+    const gone = sessions.find((s) => s.id === id);
+    // The chat open is this one, or one of its sub-chats, which go with it.
+    const open = sessionId === id || (!!sessionId && sessions.find((s) => s.id === sessionId)?.parent === id);
     await api.deleteSession(id);
     const list = await refreshSessions();
-    if (sessionId === id) navigate(list[0] ? `/s/${list[0].id}` : "/", { replace: true });
+    // A sub-chat gone takes its page back to its chat; a chat gone, to the latest chat of its own.
+    const next = gone?.parent ?? list.find((s) => !s.parent)?.id;
+    if (open) navigate(next ? `/s/${next}` : "/", { replace: true });
   });
   const onRenameChat = useStable(async (id: string, title: string) => {
     await api.renameSession(id, title);
@@ -811,6 +817,7 @@ function Shell({
               await refreshSessions();
             }}
             onOpenNavigation={() => setMobileNav(true)}
+            parentTitle={active.parent ? sessions.find((s) => s.id === active.parent)?.title : undefined}
             onClientCommand={async (name, args) => {
               if (name === "settings") {
                 navigate(`/s/${active.id}/settings/general`);

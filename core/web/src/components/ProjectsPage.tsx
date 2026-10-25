@@ -86,10 +86,10 @@ export function ProjectsPage({
     }
   };
 
-  /** The project's newest chat, counting ones started in a subfolder. */
+  /** The project's newest chat, counting ones started in a subfolder: a chat of its own, not a sub-chat (see sub-chats.ts). */
   const latestChat = (p: Project) =>
     sessions
-      .filter((s) => within(p.path, s.workspace))
+      .filter((s) => !s.parent && within(p.path, s.workspace))
       .reduce<Session | null>((best, s) => (!best || s.updated_at > best.updated_at ? s : best), null);
 
   const lastActive = (p: Project) => latestChat(p)?.updated_at ?? p.lastActive;
