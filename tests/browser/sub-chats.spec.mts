@@ -1,0 +1,159 @@
+import { type Page } from '@playwright/test';
+import { test, expect, mockPortal } from './portal-mock';
+
+const at = (minutesAgo: number) => new Date(Date.now() - minutesAgo * 60_000).toISOString();
+const chat = (id: string, title: string, minutesAgo: number, extra: Record<string, unknown> = {}) =>
+  ({ id, title, workspace: '/data/agent', status: 'idle', kind: 'task', pinned: false, updated_at: at(minutesAgo), created_at: at(minutesAgo), ...extra });
+/** A sub-chat of `parent`, as the portal lists a child chat. */
+const sub = (id: string, title: string, parent: string, minutesAgo: number, extra: Record<string, unknown> = {}) =>
+  chat(id, title, minutesAgo, { parent, listed: true, ...extra });
+
+/** A chat with two sub-chats, and a chat without any; the sub-chats changed last, so that a flat list would put them first. */
+const family = () => [
+  sub('links', 'Check the links', 'build', 1),
+  sub('images', 'Shrink the images', 'build', 2),
+  chat('build', 'Build the site', 10),
+  chat('logo', 'Fix the logo', 20),
+];
+
+/** A portal with these chats, Home and the projects named; what is deleted is gone from the list it gives next. */
+async function portal(page: Page, sessions: Record<string, unknown>[] = family(), projects: string[] = []) {
+  const deleted: string[] = [];
+  await mockPortal(page, ({ path: p, method }) => {
+    if (p === '/api/sessions' && method === 'GET') return { sessions: sessions.filter((s) => !deleted.includes(s.id as string) && !deleted.includes(s.parent as string)), executor: 'host' };
+    const del = /^\/api\/sessions\/([^/]+)$/.exec(p);
+    if (del && method === 'DELETE') {
+      deleted.push(del[1]);
+      return { ok: true };
+    }
+    if (p === '/api/projects') return { root: '/w', home: '/data/agent', projects: projects.map((name) => ({ name, path: `/w/${name}`, isGit: false, hasInstructions: false, sessions: 0, lastActive: null })) };
+    if (p === '/api/models') return { models: [{ provider: 'x', id: 'm', name: 'M', reasoning: false }], providers: {} };
+  }, { settings: true });
+  return deleted;
+}
+
+const sidebar = (page: Page) => page.getByRole('complementary', { name: 'Sidebar' });
+const subChats = (scope: ReturnType<Page['locator']>, title: string) => scope.getByRole('group', { name: `Sub-chats of ${title}` });
+
+test('a chat\'s sub-chats are under it in the sidebar, shut until opened, and stay as they were left', async ({ page }) => {
+  await portal(page);
+  await page.goto('/sessions');
+  const side = sidebar(page);
+  const toggle = side.getByRole('button', { name: '2 sub-chats' });
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  await expect(side.getByText('Check the links')).toHaveCount(0);
+  // Listed on their own, the chats are only the two: the sub-chats are not rows among them.
+  await expect(side.locator('[data-flip]')).toHaveCount(2);
+  await expect(side.locator('[data-flip]').first()).toContainText('Build the site');
+
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+  const group = subChats(side, 'Build the site');
+  await expect(group.locator('[data-flip]')).toHaveText(['Check the links', 'Shrink the images']);
+  // Under its chat, a sub-chat has no pin: it is listed where its chat is.
+  await group.getByText('Check the links').hover();
+  await expect(group.getByRole('button', { name: 'Pin Check the links' })).toHaveCount(0);
+  await expect(group.getByRole('button', { name: 'Delete Check the links' })).toBeVisible();
+
+  await page.reload();
+  await expect(side.getByRole('button', { name: '2 sub-chats' })).toHaveAttribute('aria-expanded', 'true');
+  await side.getByRole('button', { name: '2 sub-chats' }).click();
+  await page.reload();
+  await expect(side.getByRole('button', { name: '2 sub-chats' })).toHaveAttribute('aria-expanded', 'false');
+});
+
+test('a chat shows as running while a sub-chat runs, with its sub-chats open, and as waiting for you while one asks', async ({ page }) => {
+  await portal(page, [
+    sub('links', 'Check the links', 'build', 1, { status: 'running' }),
+    chat('build', 'Build the site', 10),
+    sub('answer', 'Ask the owner', 'docs', 2, { asking: true }),
+    chat('docs', 'Write the docs', 20),
+  ]);
+  await page.goto('/sessions');
+  const side = sidebar(page);
+  const build = side.locator('[data-flip="build"]');
+  await expect(build.getByRole('img', { name: 'running' })).toBeVisible();
+  await expect(subChats(side, 'Build the site').getByText('Check the links')).toBeVisible();
+  const docs = side.locator('[data-flip="docs"]');
+  await expect(docs.getByRole('img', { name: 'waiting for you' })).toBeVisible();
+  await expect(subChats(side, 'Write the docs').locator('[data-flip="answer"]').getByRole('img', { name: 'waiting for you' })).toBeVisible();
+  // The Sessions page counts a chat as running while its sub-chat runs, and the chat once.
+  const main = page.getByRole('main');
+  await expect(main.getByText('total').locator('..')).toContainText('2');
+  await expect(main.getByText('running', { exact: true }).locator('..')).toContainText('1');
+});
+
+test('opening a sub-chat opens its chat\'s sub-chats, and its header leads back to its chat', async ({ page }) => {
+  await portal(page);
+  await page.goto('/s/images');
+  const side = sidebar(page);
+  await expect(side.getByRole('button', { name: '2 sub-chats' })).toHaveAttribute('aria-expanded', 'true');
+  await expect(subChats(side, 'Build the site').locator('[data-flip="images"]')).toHaveAttribute('aria-current', 'page');
+  const back = page.locator('.chat-header').getByRole('link', { name: 'Sub-chat of Build the site' });
+  await back.click();
+  await expect(page).toHaveURL(/\/s\/build$/);
+  await expect(page.locator('.chat-header').getByRole('link')).toHaveCount(0);
+});
+
+test('the sidebar\'s limit and search count chats, not their sub-chats, and a search finds a sub-chat under its chat', async ({ page }) => {
+  // Twelve chats fill the sidebar: their sub-chats neither push one of them out nor bring the search box.
+  const chats = Array.from({ length: 12 }, (_, i) => chat(`c${i}`, `Chat ${i}`, 10 + i));
+  await portal(page, [...chats, sub('s1', 'Sub one', 'c0', 1), sub('s2', 'Sub two', 'c0', 2)]);
+  await page.goto('/sessions');
+  const side = sidebar(page);
+  await expect(side.locator('[data-flip]')).toHaveCount(12);
+  await expect(side.getByRole('searchbox')).toHaveCount(0);
+  await expect(side.getByText(/more…/)).toHaveCount(0);
+
+  await portal(page, [...chats, chat('c12', 'Chat 12', 30), sub('s1', 'Sub one', 'c0', 1), sub('s2', 'Sub two', 'c0', 2)]);
+  await page.reload();
+  await expect(side.getByRole('button', { name: '1 more…' })).toBeVisible();
+  await side.getByRole('searchbox', { name: 'Search chats' }).fill('sub two');
+  await expect(side.locator('[data-flip]')).toHaveText(['Chat 0', 'Sub two']);
+  await expect(subChats(side, 'Chat 0').getByText('Sub two')).toBeVisible();
+});
+
+test('a folder counts its chats without their sub-chats', async ({ page }) => {
+  await portal(page, family().map((s) => (s.id === 'logo' ? s : { ...s, workspace: '/w/site' })), ['site']);
+  await page.goto('/sessions');
+  const side = sidebar(page);
+  const site = side.locator('[data-folder="project:site"]');
+  await expect(site.getByText('1 chat', { exact: true })).toBeAttached();
+  await site.getByRole('button', { name: 'site', exact: true }).click();
+  await expect(side.getByRole('group', { name: 'site' }).locator(':scope > [data-flip]')).toHaveText(['Build the site']);
+});
+
+test('the Sessions page lists sub-chats under their chat, and counts chats without them', async ({ page }) => {
+  await portal(page);
+  await page.goto('/sessions');
+  const main = page.getByRole('main');
+  await expect(main.getByText('total').locator('..')).toContainText('2');
+  const toggle = main.getByRole('button', { name: '2 sub-chats' });
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  await expect(main.locator('li[data-flip]')).toHaveCount(2);
+  await toggle.click();
+  await expect(subChats(main, 'Build the site').locator('li[data-flip]')).toHaveCount(2);
+  // Its own place to keep what was opened: the sidebar's stays shut.
+  await expect(sidebar(page).getByRole('button', { name: '2 sub-chats' })).toHaveAttribute('aria-expanded', 'false');
+  await main.getByPlaceholder('Search by name or folder…').fill('images');
+  await expect(main.getByText('1 of 2')).toBeVisible();
+  await expect(subChats(main, 'Build the site').locator('li[data-flip]')).toHaveText([/Shrink the images/]);
+});
+
+test('deleting a chat names the sub-chats that go with it, and takes them from the list', async ({ page }) => {
+  const deleted = await portal(page);
+  await page.goto('/sessions');
+  const row = sidebar(page).locator('[data-flip="build"]');
+  await row.hover();
+  await row.getByRole('button', { name: 'Delete Build the site' }).click();
+  const dialog = page.getByRole('alertdialog');
+  await expect(dialog).toContainText('Its 2 sub-chats are deleted with it: “Check the links”, “Shrink the images”.');
+  await dialog.getByRole('button', { name: 'Delete', exact: true }).click();
+  await expect(sidebar(page).locator('[data-flip]')).toHaveText(['Fix the logo']);
+  expect(deleted).toEqual(['build']);
+
+  // A chat without sub-chats says nothing of them.
+  await sidebar(page).locator('[data-flip="logo"]').hover();
+  await sidebar(page).getByRole('button', { name: 'Delete Fix the logo' }).click();
+  await expect(page.getByRole('alertdialog')).not.toContainText('sub-chat');
+});
