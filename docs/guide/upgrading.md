@@ -1148,6 +1148,14 @@ as it was beside it, as `settings.json.bak`. The extension takes them up as it
 starts, into its own folder (`extension-data/pithagoras-subagent`). A chat's own
 choice in its model menu stays as it was.
 
+**A copy of the tool that you installed by hand** from an old clone of the
+repository (a folder named `pithagoras-subagent` in pi's packages, without a
+`pithagoras` block in its `package.json`) is not the extension: pi loads it as
+it did, and it reads its settings from pi's `settings.json`. The upgrade leaves
+them there, and says so in the log. Take the copy out of pi's packages and
+install the one that comes with the portal, and the next start takes the
+settings up.
+
 | Before | Now |
 | --- | --- |
 | `GET`, `PUT /api/features/subagent` | `/api/x/pithagoras-subagent/settings`, `{ mode, maxParallel, model }`; the old address answers with a 307 to it |
@@ -1163,7 +1171,9 @@ version reads the subagent's settings from pi's `settings.json` again: put
 `settings.json.bak` where nothing was changed since, or from
 `extension-data/pithagoras-subagent/settings.json` (`mode`, `maxParallel` and
 `model`). The tool's folder stays in pi's packages, and the older version
-loads it as it did.
+loads it as it did. Upgrading again takes up what pi's settings hold then: it
+leaves the settings again, and the extension takes each one that you have not
+changed on its page since it took them up before.
 
 ## Chats have a mode
 

@@ -70,19 +70,31 @@ export function openStore(dir: string): void {
 /** The settings now, as the tool reads them. */
 export const settings = (): Settings => settingsOf(kept);
 
-/** Which of them the person has said, rather than left at the default. */
-export const said = (key: keyof Settings): boolean => kept[key] !== undefined;
+/** What a hand-off gave, and is still what is kept: the file has it beside the settings, under `handedOver`. */
+const handedOver = (): Record<string, unknown> => {
+  const given = kept.handedOver;
+  return given && typeof given === "object" && !Array.isArray(given) ? (given as Record<string, unknown>) : {};
+};
+
+/**
+ * Which of them the person has said, rather than left at the default or taken from pi's settings (a hand-off gives
+ * what the person said there, and a later one, after going back, is newer than that).
+ */
+export const said = (key: keyof Settings): boolean => kept[key] !== undefined && kept[key] !== handedOver()[key];
 
 /**
  * Saves `next`, each left out where it is the default, for its owner alone (0600), put in place at once: a reader finds
- * the old file or the new one, and a crash after leaves the new one whole, not empty.
+ * the old file or the new one, and a crash after leaves the new one whole, not empty. `given` is what a hand-off gave
+ * with it; of what an earlier one gave, what is still kept as it was given stays marked so.
  */
-export function saveSettings(next: Settings): void {
+export function saveSettings(next: Settings, given: Partial<Settings> = {}): void {
   if (!file) throw new Error("The subagent's settings are not open");
   const stored: Record<string, unknown> = {};
   if (next.mode !== DEFAULTS.mode) stored.mode = next.mode;
   if (next.maxParallel !== DEFAULTS.maxParallel) stored.maxParallel = next.maxParallel;
   if (next.model !== DEFAULTS.model) stored.model = next.model;
+  const handed = Object.fromEntries(Object.entries({ ...handedOver(), ...given }).filter(([key, value]) => stored[key] === value));
+  if (Object.keys(handed).length) stored.handedOver = handed;
   const fd = openSync(`${file}.tmp`, "w", 0o600);
   try {
     writeFileSync(fd, JSON.stringify(stored, null, 2) + "\n");
@@ -92,4 +104,18 @@ export function saveSettings(next: Settings): void {
   }
   renameSync(`${file}.tmp`, file);
   kept = stored;
+}
+
+/**
+ * Takes `old` (what pi's settings held) as the settings, each where the person has said nothing of their own and it
+ * differs from what is kept; the keys it took.
+ */
+export function takeSettings(old: Settings): (keyof Settings)[] {
+  const own = settings();
+  const taken = (Object.keys(old) as (keyof Settings)[]).filter((key) => !said(key) && old[key] !== own[key]);
+  if (taken.length) {
+    const given = Object.fromEntries(taken.map((key) => [key, old[key]]));
+    saveSettings({ ...own, ...given }, given);
+  }
+  return taken;
 }

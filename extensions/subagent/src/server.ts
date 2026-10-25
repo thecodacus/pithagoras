@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import type { ServerPortal } from "@pithagoras/extension-api/server";
 import subagentTool from "./pi";
-import { checkChange, MAX_PARALLEL, openStore, said, saveSettings, settings, settingsOf, type Settings } from "./settings";
+import { checkChange, MAX_PARALLEL, openStore, saveSettings, settings, settingsOf, takeSettings, type Settings } from "./settings";
 
 /**
  * The subagent extension's server half: the `subagent` tool in every chat's pi (`portal.chats.extend`, pi.ts), with
@@ -31,9 +31,10 @@ export default function subagent(portal: ServerPortal) {
  *                   had none
  *
  * Each is read as the tool read it, and taken where this extension has none of its own: one said on its page since,
- * while the hand-off waited, is the person's latest word. Only then is the hand-off done with, so a start that stopped
- * half way takes it up again, harmlessly. What cannot be taken up stays where it is, for the next start: the extension
- * starts with what it has, and says why in the portal's log.
+ * while the hand-off waited, is the person's latest word. One that an earlier hand-off gave and nobody has changed
+ * since is not: the person went back to pi's settings meanwhile, and what they hold now is newer. Only then is the
+ * hand-off done with, so a start that stopped half way takes it up again, harmlessly. What cannot be taken up stays
+ * where it is, for the next start: the extension starts with what it has, and says why in the portal's log.
  */
 export function takeHandoff(portal: Pick<ServerPortal, "handoffs" | "log">): void {
   try {
@@ -44,9 +45,7 @@ export function takeHandoff(portal: Pick<ServerPortal, "handoffs" | "log">): voi
     if (format !== 1) throw new Error(`they are in a format this version does not read (${format})`);
     const kept = read("settings.json") ?? {};
     const old = settingsOf({ mode: kept.subagentMode, maxParallel: kept.subagentMaxParallel, model: kept.subagentModel });
-    const own = settings();
-    const taken = (Object.keys(old) as (keyof Settings)[]).filter((key) => !said(key) && old[key] !== own[key]);
-    if (taken.length) saveSettings({ ...own, ...Object.fromEntries(taken.map((key) => [key, old[key]])) });
+    const taken = takeSettings(old);
     portal.handoffs.done("subagent");
     portal.log(`took up the subagent settings pi's settings held${taken.length ? `: ${taken.join(", ")}` : ""}`);
   } catch (e) {

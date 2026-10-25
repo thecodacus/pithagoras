@@ -1405,6 +1405,40 @@ test("pi's settings that cannot be written keep the subagent's for the next star
   assert.deepEqual(JSON.parse(readFileSync(path.join(dir, "handoff", "subagent", "settings.json"), "utf8")), { subagentMode: null, subagentMaxParallel: null, subagentModel: "llama-swap/model-b" });
 });
 
+test("a subagent hand-off that waits from an earlier upgrade is written anew from the keys pi's settings hold now", async () => {
+  const dir = databaseAt11("subagent-again");
+  const left = (name) => path.join(dir, "handoff", "subagent", name);
+  await withPiSettings(JSON.stringify({ subagentMode: "background" }), () => upgraded(dir));
+  assert.deepEqual(JSON.parse(readFileSync(left("settings.json"), "utf8")), { subagentMode: "background", subagentMaxParallel: null, subagentModel: null });
+  // Gone back to the older version, the person raised the limit there; the database is at 11 again, as its backup is put in.
+  const d = new Database(path.join(dir, "portal.db"));
+  d.pragma("user_version = 11");
+  d.close();
+  await withPiSettings(JSON.stringify({ subagentMode: "background", subagentMaxParallel: 4 }), async (file) => {
+    await upgraded(dir);
+    assert.deepEqual(JSON.parse(readFileSync(file, "utf8")), {});
+  });
+  assert.deepEqual(JSON.parse(readFileSync(left("settings.json"), "utf8")), { subagentMode: "background", subagentMaxParallel: 4, subagentModel: null });
+  assert.deepEqual(leftAt(dir), ["subagent"]);
+});
+
+test("a copy of the subagent tool that is no extension keeps its settings in pi's file, which it still reads, and says so", async () => {
+  const dir = databaseAt11("subagent-copy");
+  const copy = path.join(home, "subagent-clone");
+  mkdirSync(copy, { recursive: true });
+  writeFileSync(path.join(copy, "package.json"), JSON.stringify({ name: "pithagoras-subagent", version: "0.1.0", pi: { extensions: ["./index.ts"] } }));
+  const text = JSON.stringify({ packages: [copy], subagentMode: "background" });
+  await withPiSettings(text, async (file) => {
+    assert.match(await upgraded(dir), /subagent settings stay in pi's settings\.json/);
+    assert.equal(readFileSync(file, "utf8"), text);
+    // The same folder with a server half is the extension, and the settings go.
+    writeFileSync(path.join(copy, "package.json"), JSON.stringify({ name: "pithagoras-subagent", version: "0.2.0", pithagoras: { server: "server.js" } }));
+    await upgraded(dir);
+    assert.deepEqual(JSON.parse(readFileSync(file, "utf8")), { packages: [copy] });
+  });
+  assert.deepEqual(leftAt(dir), ["subagent"]);
+});
+
 // A data folder of v0.1.0 that used every part an extension holds now, each kept as v0.1.0 kept it, on fixtures/portal-v3.db:
 // a chat with a canvas, a picture of the Media page with its file, the image endpoint, voice mode on at the voice service's
 // addresses with the person's own remembered as connecting it kept them, a designed voice and a clone, the GPU chosen,
