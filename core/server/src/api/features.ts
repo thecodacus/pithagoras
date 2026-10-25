@@ -37,9 +37,10 @@ export function featuresRouter(): Router {
   });
 
   // The subagent's settings are its extension's now, at an address of its own; its switch is Settings → Extensions'.
-  // The old address sends there, the method and the body kept (308), and answers what the extension does.
-  router.get("/features/subagent", (_req, res) => res.redirect(308, SUBAGENT_SETTINGS));
-  router.put("/features/subagent", (_req, res) => res.redirect(308, SUBAGENT_SETTINGS));
+  // The old address sends there, the method and the body kept, and answers what the extension does. A 307, not a 308:
+  // a browser keeps a 308 for good, and an older version after a going back has no route there to answer it.
+  router.get("/features/subagent", (_req, res) => res.redirect(307, SUBAGENT_SETTINGS));
+  router.put("/features/subagent", (_req, res) => res.redirect(307, SUBAGENT_SETTINGS));
 
   /** What one chat's subagents run on: its own choice, or null for the extension's (GET /api/x/pithagoras-subagent/settings). */
   router.get("/sessions/:id/subagent-model", (req, res) => {

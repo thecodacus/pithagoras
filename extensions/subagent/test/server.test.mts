@@ -58,7 +58,8 @@ test("what is not a mode, a limit from 1 to 16 or a model is refused, and nothin
 
 test("the portal's old address for the settings sends to the extension's, the method and the body kept", async () => {
   const asked = await fetch(`${api}/features/subagent`, { redirect: "manual" });
-  assert.equal(asked.status, 308);
+  // Not a 308: a browser keeps that for good, and a version without the extension has nothing at the new address.
+  assert.equal(asked.status, 307);
   assert.equal(asked.headers.get("location"), "/api/x/pithagoras-subagent/settings");
   const changed = await put(`${api}/features/subagent`, { maxParallel: 2 });
   assert.equal(changed.status, 200);

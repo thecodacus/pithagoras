@@ -237,7 +237,8 @@ listed under Settings → Extensions → Discover → Comes with Pithagoras: Bro
 (`pithagoras-browser`), Docker for extensions (`pithagoras-docker`), Voice
 (`pithagoras-voice`), Voice servers (`pithagoras-voice-servers`), Understory
 (`pithagoras-understory`), Documents (`pithagoras-docs`), Kanban
-(`pithagoras-kanban`) and Creator mode (`pithagoras-creator`). The sections
+(`pithagoras-kanban`), Creator mode (`pithagoras-creator`) and Subagents
+(`pithagoras-subagent`). The sections
 below say which of them a portal that used 0.1.0's add-ons needs.
 
 Notes (`pithagoras-notes`) came with some builds of the main branch after 0.1.0,
@@ -1132,8 +1133,9 @@ done'
 
 ## Subagents are an extension
 
-The subagent tool, switched on and set up in Settings → Tools → Subagents until
-0.2.0, is the `pithagoras-subagent` extension now, which comes with the portal
+This comes after 0.2.0, which still has the subagent tool in Settings → Tools →
+Subagents, and is not one of the steps from 0.1.0. In the release after 0.2.0 the
+tool is the `pithagoras-subagent` extension, which comes with the portal
 ([Subagents](/guide/features#subagents)). **A portal that had it on keeps it on**:
 its folder was in pi's packages already, and is loaded as an extension. It is
 switched in **Settings → Extensions**, and set up under **Extension settings →
@@ -1148,7 +1150,7 @@ choice in its model menu stays as it was.
 
 | Before | Now |
 | --- | --- |
-| `GET`, `PUT /api/features/subagent` | `/api/x/pithagoras-subagent/settings`, `{ mode, maxParallel, model }`; the old address answers with a 308 to it |
+| `GET`, `PUT /api/features/subagent` | `/api/x/pithagoras-subagent/settings`, `{ mode, maxParallel, model }`; the old address answers with a 307 to it |
 | `PUT /api/features/subagent` with `enabled` | Settings → Extensions: `POST /api/packages` with the `extensions/subagent` folder to install it, `PUT /api/extensions/enabled` to switch it |
 | `GET /api/sessions/:id/subagent-model` answered `{ model, default }` | `{ model }`; the default is the extension's `model` |
 
