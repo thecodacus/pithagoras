@@ -2353,7 +2353,14 @@ portal.chats.extend((pi, chat) => {
   was deleted) or `"error"`. `answer` is the last thing it said. `marked` is
   there when the guard had marked the child (it read something that looked like
   a prompt injection): the parent is marked then too, so the guard's rules for a
-  marked chat hold what it does with the answer. Sent while it
+  marked chat hold what it does with the answer. The mark is in the guard that
+  runs now: to keep it when the guard is made again (the chat is reloaded or
+  the portal restarted), hand the answer on in a tool result or a message that
+  starts with `<<<untrusted:` and 16 hexadecimal digits, `>>> (suspected prompt
+  injection: ` and a sign in lowercase words, `)`, which the guard reads in the
+  chat's history as it reads a result it flagged itself (the subagent
+  extension's `flagged.ts` writes it, and the person can trust it like
+  that one). Sent while it
   works, a message waits for the run to end, as the person's does; with
   `steer`, it is taken after the step the run is on, and both prompts resolve
   as that run ends. A run that fails resolves as an error, and so does a

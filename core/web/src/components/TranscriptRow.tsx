@@ -65,7 +65,11 @@ export type RowActions = {
 
 type ToolItem = Extract<Item, { kind: "tool" }>;
 
-/** What each sign the guard found means, said to the person (server/src/pi/injection.ts). */
+/**
+ * What each sign the guard found means, said to the person (server/src/pi/injection.ts), and the one the subagent
+ * extension gives the words of a subagent that read outside content (extensions/subagent/src/flagged.ts), which is its
+ * own text.
+ */
 const SIGNS: Record<string, string> = {
   override: msg("tells the reader to ignore its instructions"),
   addressed: msg("speaks to an AI reading it"),
@@ -73,6 +77,7 @@ const SIGNS: Record<string, string> = {
   "role-markup": msg("contains chat-format markers that pretend to be another speaker"),
   hidden: msg("hides text in invisible characters"),
   "secret-request": msg("asks for keys, passwords or private files to be sent somewhere"),
+  "came from a subagent that read outside content": msg("came from a subagent that read outside content"),
 };
 
 /**
