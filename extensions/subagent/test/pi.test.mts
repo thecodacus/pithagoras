@@ -26,6 +26,7 @@ function fakeChats(){
   create:(o:any)=>{
    tried.push(o);
    if(o.parent==='gone')throw new TypeError('There is no chat gone');
+   if(o.parent==='busy')throw new Error('database is locked');
    if(o.mode==='custom/gone')throw new TypeError('There is no mode "custom/gone" for this child chat');
    const c={id:`child-${++n}`,title:o.title,workspace:'/w',status:'idle',parent:o.parent,listed:o.listed!==false};
    chats.set(c.id,c);created.push(o);return {...c};
@@ -569,12 +570,16 @@ test('a mode the portal will not put a child in is worked in as Standard, and th
  await until(()=>f.prompts.length===2);
  mode();
 });
-test('a refusal that is not about the mode is not hidden by the fall back to Standard',async()=>{
+test('a failure that is not about the mode is not hidden by the fall back to Standard',async()=>{
  play='retry';mode();
  const f=fakeChats();f.chats.set('gone',{id:'gone',title:'P',status:'idle',mode:'code'});
  await assert.rejects(load(f,'gone').tool.execute('a',{task:'x'},undefined,undefined,{}),/There is no chat gone/);
- assert.deepEqual(f.tried.map(o=>o.mode),['code','standard'],'tried again in Standard, and refused again');
+ assert.deepEqual(f.tried.map(o=>o.mode),['code'],'a refusal about the chat is not the mode\'s: no second try');
  assert.equal(f.created.length,0);
+ // Nor is a failure that is not a refusal at all: a second try that happens to work would blame the mode.
+ f.chats.set('busy',{id:'busy',title:'P',status:'idle',mode:'code'});
+ await assert.rejects(load(f,'busy').tool.execute('b',{task:'x'},undefined,undefined,{}),/database is locked/);
+ assert.deepEqual(f.tried.map(o=>o.mode),['code','code']);
 });
 test('a kept subagent continued keeps the mode it was made in: the setting is not asked again',async()=>{
  play='retry';mode(undefined,{keep:true});

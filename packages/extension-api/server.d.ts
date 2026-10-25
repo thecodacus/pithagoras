@@ -57,10 +57,12 @@ export interface ChildChatOptions {
   title: string;
   /**
    * A mode the child may be put in, as a chat stores it (see `Chat.mode`). Left out, it is in its parent's, so a mode
-   * that took tools away does not stop at a child; "standard" puts it in none.
+   * that took tools away does not stop at a child; "standard" puts it in none, and the tools its parent's mode took
+   * away stay off for it. Naming its parent's own mode is the same as leaving it out, but is refused if that mode is
+   * not there for a child.
    */
   mode?: string;
-  /** The model it runs on; its mode's, or else its parent's, when left out. */
+  /** The model it runs on; the model of a mode that is named, else its parent's, when left out. */
   model?: ModelRef;
   /** Whether it shows in the chat lists, under its parent (the default), or is found by its id alone. */
   listed?: boolean;

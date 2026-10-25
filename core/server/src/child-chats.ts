@@ -1,6 +1,6 @@
 import { nanoid } from "nanoid";
 import { STANDARD } from "./chat-modes.js";
-import { createSession, getSession, modesFor, type SessionRow } from "./db.js";
+import { createSession, getSession, modeOf, modesFor, parseToolsOff, type SessionRow } from "./db.js";
 import { cleanTitle } from "./projects.js";
 
 /**
@@ -62,7 +62,9 @@ export function newChildChat(options: unknown, creator: string): SessionRow {
   // As the child will be: modesFor looks to the parent for where the person can answer (dialogHost).
   const draft = { kind: "task" as const, role: parent.role, channel_slug: null, parent_id: parent.id };
   // With no mode asked for, the parent's: a child is not a way out of the tools a mode took away. The parent's own
-  // model and effort stay (the parent may have been moved off its mode's since); a mode that is named is its own choice.
+  // model and effort stay (the parent may have been moved off its mode's since); another mode that is named is its own
+  // choice, and its model and effort are the child's. The parent's own mode, named, is the same as none: it is how an
+  // extension says "the mode my chat is in" and still hears if that is gone.
   let mode: string | null = asked.mode === undefined ? parent.mode : null;
   let fromMode: { provider?: string; model?: string; thinkingLevel?: string } = {};
   if (asked.mode !== undefined && asked.mode !== STANDARD) {
@@ -71,8 +73,11 @@ export function newChildChat(options: unknown, creator: string): SessionRow {
     // A mode that asks the person first was said yes to for the parent, if it is in it; for nothing else.
     if (entry.confirm && parent.mode !== entry.id) throw new TypeError(`The mode "${entry.id}" asks the person first: a child chat can only be put in it where its parent is in it`);
     mode = entry.id;
-    fromMode = entry;
+    if (entry.id !== parent.mode) fromMode = entry;
   }
+  // A child in another mode than its parent's has not that mode's layer: the tools it took away stay off for the child
+  // too, as its own switches, or naming Standard would be a way out of them.
+  const left = mode === parent.mode ? [] : (modeOf(parent.mode)?.tools?.off ?? []);
 
   const id = nanoid(12);
   createSession({
@@ -94,8 +99,8 @@ export function newChildChat(options: unknown, creator: string): SessionRow {
         ? { provider: fromMode.provider ?? null, model: fromMode.model }
         : { provider: parent.provider, model: parent.model }),
     thinking_level: fromMode.thinkingLevel ?? parent.thinking_level,
-    tools_off: parent.tools_off,
-    tools_on: parent.tools_on,
+    tools_off: left.length ? [...new Set([...parseToolsOff(parent.tools_off), ...left])].sort().join("\n") : parent.tools_off,
+    tools_on: left.length ? parseToolsOff(parent.tools_on).filter((name) => !left.includes(name)).join("\n") : parent.tools_on,
   });
   return getSession(id)!;
 }

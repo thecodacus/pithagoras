@@ -37,8 +37,7 @@ in the background once that is done: see
 self-contained task to a second agent with a context of its own and gets its
 answer back. The subagent works in a **chat of its own**, a child chat of the
 chat that asked: in the same folder, in the chat's mode (see *The mode a subagent
-works in*), with its tools and its
-model, under the [guard](/guide/security) and the [sandbox](/guide/sandbox) as
+works in*), with its tools and its model, under the [guard](/guide/security) and the [sandbox](/guide/sandbox) as
 the person the chat works for, and with a transcript of its own. You can watch
 it beside the chat, give it instructions while it works, open its chat, and stop
 it. A subagent's chat has no subagent tool of its own: there is one level, and a
@@ -118,11 +117,14 @@ description says that a finished one can be continued, and the tool takes an
 
 **Subagents work in the chat's mode**, on by default: a subagent's chat is made
 in the [mode](/guide/sessions#modes) of the chat it works for, with that
-mode's tools and instructions. In a chat in **Code mode** the subagent works
-through the code tool as well, in a mode you made it has the mode's tool layer
-and instructions, and in an extension's mode it is in that mode. Off, every
-subagent works in Standard mode, with the tools Standard gives, whatever mode its
-chat is in; the tools you switched off in the chat itself still hold for it.
+mode's tools and instructions, and on the model and effort its chat is on now
+(not the ones the mode starts a chat on). In a chat in **Code mode** the subagent
+works through the code tool as well, in a mode you made it has the mode's tool
+layer and instructions, and in an extension's mode it is in that mode. Off, every
+subagent works in Standard mode: without the code tool, the mode's instructions
+and an extension's mode. The tools its chat's mode switched off stay off for it
+(a mode with `bash` and `write` off gives no subagent either), and so do the ones
+you switched off in the chat itself; what Standard gives beyond those it has.
 
 - A subagent that is **kept** keeps the mode it was made in when it is continued
   (a chat's mode is fixed once it has said something), so a change of the
@@ -165,9 +167,9 @@ you to answer a question in its chat, because its model is still the one in use:
 raise the limit if that is in your way.
 
 The mode, the limit, the model, whether chats are kept and whether subagents
-work in the chat's mode are kept in the extension's own folder of the portal's data folder
-(`extension-data/pithagoras-subagent/settings.json`), each left out while it is
-the default. Before it was an extension, the tool read
+work in the chat's mode are kept in the extension's own folder of the portal's
+data folder (`extension-data/pithagoras-subagent/settings.json`), each left out
+while it is the default. Before it was an extension, the tool read
 them from pi's `settings.json` (`subagentMode`, `subagentMaxParallel`,
 `subagentModel`): the upgrade hands them over once, and takes them out of pi's
 file. They are set on its page or through its own address

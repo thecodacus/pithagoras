@@ -125,7 +125,7 @@ test("subagents work in the chat's mode unless switched off here", async ({ page
   await page.goto('/settings/x/pithagoras-subagent');
   const inherit = settings(page).getByRole('switch', { name: "Subagents work in the chat's mode" });
   await expect(inherit).toBeChecked();
-  await expect(settings(page).getByText(/Off, it works in Standard mode\./)).toBeVisible();
+  await expect(settings(page).getByText(/Off, it works in Standard mode, without the code tool.*never with a tool the mode switched off/)).toBeVisible();
   await inherit.click();
   await expect(inherit).not.toBeChecked();
   expect(sent).toEqual([{ inheritMode: false }]);

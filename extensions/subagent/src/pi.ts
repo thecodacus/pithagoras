@@ -272,8 +272,9 @@ export default function subagentTool(pi: any, given: Given) {
           try {
             return make(asked);
           } catch (e) {
-            // Any other reason is the same for Standard, and thrown from there.
-            if (!asked || asked === STANDARD) throw e;
+            // Only a refusal of the mode (core's say "mode"): any other reason is not the mode's, and is not hidden by a
+            // second try that happens to work.
+            if (!asked || asked === STANDARD || !(e instanceof TypeError) || !/\bmode\b/.test(e.message)) throw e;
             fell = asked;
             return make(STANDARD);
           }

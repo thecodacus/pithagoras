@@ -4,8 +4,8 @@ import { Select, msg, portal, t, tp, tx } from "../portal";
 
 /**
  * The subagent extension's page in Settings: how a subagent runs against the agent, what it runs on unless its chat
- * says otherwise, how many run at once, whether their chats are kept, and whether they work in their chat's mode. It is switched on and off in Settings →
- * Extensions, like any extension.
+ * says otherwise, how many run at once, whether their chats are kept, and whether they work in their chat's mode. It
+ * is switched on and off in Settings → Extensions, like any extension.
  */
 
 type Mode = "interrupt" | "background";
@@ -196,7 +196,7 @@ export function SubagentSettings() {
         <div data-setting={t("Subagents work in the chat's mode")} className="rounded-xl border border-line bg-raised/40 p-3">
           <ui.SwitchRow
             title={t("Subagents work in the chat's mode")}
-            detail={t("A subagent's chat is made in the mode of the chat it works for — code mode, a mode you made, an extension's — with that mode's tools and instructions. Off, it works in Standard mode. One kept keeps the mode it was made in.")}
+            detail={t("A subagent's chat is made in the mode of the chat it works for — code mode, a mode you made, an extension's — with that mode's tools and instructions. Off, it works in Standard mode, without the code tool and the instructions, but never with a tool the mode switched off. One kept keeps the mode it was made in.")}
             on={s.inheritMode}
             disabled={busy}
             onChange={(inheritMode) => void change({ inheritMode })}

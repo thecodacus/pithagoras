@@ -27,7 +27,7 @@ const letGo = () => {
 writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR, "models.json"), JSON.stringify(model.models()));
 
 const host = await import("../dist/extension-host.js");
-const { createCustomMode, createSession, eventsSince, getDb, getSession, getSettings, listChatSessions, listSessions, setSettings, updateCustomMode, updateSession } = await import("../dist/db.js");
+const { createCustomMode, setCustomModeTools, createSession, eventsSince, getDb, getSession, getSettings, listChatSessions, listSessions, setSettings, updateCustomMode, updateSession } = await import("../dist/db.js");
 const { SESSION_ROOT, sessions } = await import("../dist/session-manager.js");
 const { sessionTainted, taintSession } = await import("../dist/pi/guard.js");
 setSettings({ ...getSettings(), provider: "fake", model: "m" });
@@ -324,6 +324,34 @@ test("a mode that asks the person first is for a child only where its parent is 
   assert.deepEqual([fromMode.mode, fromMode.provider, fromMode.model, fromMode.thinking_level], [careful, "fake", "careful", "high"], "its mode's model and effort, over its parent's");
   const given = getSession(helper.chats.create({ parent, title: "Given", mode: careful, model: { provider: "other", id: "big" } }).id);
   assert.deepEqual([given.provider, given.model, given.thinking_level], ["other", "big", "high"], "a model it is given, over its mode's");
+});
+
+test("a child put in Standard or another mode keeps the tools its parent's mode took away; one asked into its parent's mode takes the parent's model and effort", async () => {
+  const mine = createCustomMode({ label: "Review only", description: "Cannot change the folder" });
+  updateCustomMode(mine.id, { provider: "fake", model: "mode-model", thinking_level: "high" });
+  setCustomModeTools(mine.id, { off: ["bash", "write"], on: [] });
+  const review = `custom/${mine.id}`;
+  const parent = chat({ mode: review });
+  // The person moved the chat off its mode's model and effort, and switched web_search off on top.
+  updateSession(parent, { provider: "fake", model: "m", thinking_level: "low", tools_off: "web_search" });
+
+  const standard = helper.chats.create({ parent, title: "Standard", mode: "standard" });
+  assert.equal(getSession(standard.id).mode, null);
+  assert.equal(getSession(standard.id).tools_off, "bash\nweb_search\nwrite", "the mode's layer is the child's own switches now");
+  const asked = model.requests.length;
+  assert.equal((await helper.chats.prompt(standard.id, "Answer please")).status, "done");
+  const tools = declared(model.requests[asked]);
+  assert.ok(!tools.includes("bash") && !tools.includes("write") && !tools.includes("web_search"), "none of them declared to its model");
+  assert.ok(tools.includes("read"), "the rest of Standard is");
+
+  const same = getSession(helper.chats.create({ parent, title: "Same", mode: review }).id);
+  assert.deepEqual([same.mode, same.provider, same.model, same.thinking_level], [review, "fake", "m", "low"], "named, the parent's own mode is the parent's model and effort, not the mode's");
+  assert.equal(same.tools_off, "web_search", "and the mode's layer applies from the mode itself");
+  assert.throws(() => helper.chats.create({ parent: chat({ mode: review }), title: "Gone", mode: "custom/gone" }), /There is no mode/);
+
+  // Not a layer to fold where the parent is in no mode, or in one that took nothing away.
+  assert.equal(getSession(helper.chats.create({ parent: chat(), title: "Plain", mode: "standard" }).id).tools_off, "");
+  assert.equal(getSession(helper.chats.create({ parent: chat({ mode: "code" }), title: "Code", mode: "standard" }).id).tools_off, "");
 });
 
 test("a command a child's speaker may not run resolves as an error, not as done", async () => {

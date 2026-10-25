@@ -2270,7 +2270,9 @@ portal.chats.extend((pi, chat) => {
   agent's page, where pi runs in the portal's own process (`portal.executor` is
   `"host"`): not to a routine's run, a heartbeat, a chat that came through a
   channel, or a colleague's chat. Leaving a mode means a new chat; `/new` and
-  `/clear` start one in Standard mode, and a subagent does not take the mode.
+  `/clear` start one in Standard mode, and a subagent works in it too, unless the
+  person switched off **Subagents work in the chat's mode** (see
+  [Subagents](/guide/features#the-mode-a-subagent-works-in)).
 - **It goes with the server half.** When the half stops (switched off,
   removed, or crashed), the mode leaves the picker. A chat started in it keeps
   it, and its header says it is not available; from its next load it has
@@ -2330,9 +2332,11 @@ portal.chats.extend((pi, chat) => {
   its parent's, so a mode that took tools away does not stop at a child; one
   that is named is the half's own choice (`"standard"` for none), as a chat
   stores it ([Chat modes](#chat-modes)), and a mode that asks the person first
-  only where its parent is in it. `model` is a
-  `{ provider, id }`; without one it starts on its mode's model, or else on
-  its parent's. It throws, and says why, for a parent that is not there, is a
+  only where its parent is in it. A child in another mode than its parent's
+  still has the tools its parent's mode took away, switched off as its own. The
+  parent's own mode, named, is the same as none, and is refused if it is not
+  there for a child. `model` is a `{ provider, id }`; without one it starts on
+  the model (and effort) of another mode that is named, or else on its parent's. It throws, and says why, for a parent that is not there, is a
   child itself (one level only) or is a heartbeat (which is held to reading by a
   role of its own that a child would not carry), for no title, and for a model
   or a mode it cannot have.
