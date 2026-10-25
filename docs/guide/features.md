@@ -1,14 +1,16 @@
 # Opt-in features
 
 Four capabilities ship with Pithagoras and are **off** until you switch them on
-in **Settings**: a **subagent tool** under **Tools**, **Understory** as the
+in **Settings**: a **subagent tool**, **Understory** as the
 agent's memory under **Extension settings → Memory**, and **image generation and
 editing** and **video generation** under **Extension settings → Media**. A fresh
 install has none of them. ([Voice mode](/guide/voice)'s settings are at the end of **Settings → Defaults**;
-the [voice service](/guide/voice-service), [Voice servers](/guide/voice-servers) and the agent's [browser](/guide/browser) are extensions.) Switching on
-the first two writes them into pi's own configuration — a package, an MCP
-server — so they can also be seen, and undone, from Settings → Extensions and
-Settings → MCP. Switching one off removes it. Understory is the
+the [voice service](/guide/voice-service), [Voice servers](/guide/voice-servers) and the agent's [browser](/guide/browser) are extensions.)
+The subagent tool is the `pithagoras-subagent` extension, which comes with the
+portal and is switched on in **Settings → Extensions** like any other, with its
+settings under **Extension settings → Subagents**. Switching Understory on
+writes it into pi's own configuration as an MCP server, so it can also be seen,
+and undone, from Settings → MCP. Understory is the
 `pithagoras-understory` extension, which you install first (see
 [Memory: Understory](#memory-understory)). Image and video generation are
 the tools of the [Media](/guide/media) extension, which a portal installs when
@@ -30,14 +32,17 @@ in the background once that is done: see
 
 ## Subagents
 
-**Settings → Tools → Subagents.** The `subagent` tool hands a self-contained
-task to a second pi with a context of its own and gets its answer back. You can
-watch it beside the chat (the robot button in the chat's header), give it
-instructions while it works, and stop it.
+**Settings → Extension settings → Subagents.** The `subagent` tool hands a
+self-contained task to a second pi with a context of its own and gets its answer
+back. You can watch it beside the chat (the robot button in the chat's header),
+give it instructions while it works, and stop it.
 
-Switching it on installs the bundled `extensions/subagent` folder as a local pi
-package; switching it off removes it. One you installed by hand from a clone is
-recognised as the same tool.
+It is the `pithagoras-subagent` extension, which comes with the portal in its
+`extensions/subagent` folder. Install it, or switch it on and off, in
+**Settings → Extensions**: switched off, no chat has the tool, and its page is
+gone from Settings. Its server half gives every chat's pi the tool and keeps
+its settings. A portal that had the tool on before it was an extension keeps it
+on, with the settings it had (see [Upgrading](/guide/upgrading)).
 
 ### How it runs against the agent
 
@@ -55,14 +60,14 @@ window. Closing or reloading the chat does.
 
 By default a subagent runs on **the model its chat is on** when it starts one —
 the one already loaded, so a local server does not have to load a second one.
-**Model** under Subagents names another for every chat instead, and each
+**Model** on its page names another for every chat instead, and each
 chat can say its own in its model menu (*Subagents in this chat run on*):
 the default, this chat's model, or any model there is. A choice is read when a
 subagent starts, so it needs no restart.
 
-Stored as `subagentModel` in pi's `settings.json` (`"provider/model"`, or
-absent for the chat's own); a chat's own is the portal's, and reaches the tool
-over the protocol's `subagent:v1:config`.
+Stored in the extension's own settings (`"provider/model"`, or absent for the
+chat's own); a chat's own is the portal's, and reaches the tool over the
+protocol's `subagent:v1:config`.
 
 ### Subagents at once
 
@@ -73,13 +78,18 @@ stopped meanwhile); in the background the call returns saying it is queued,
 and it starts once another has finished. A queued one does not start once its
 chat has been closed or reloaded.
 
-Both choices are stored in pi's `settings.json` — `subagentMode`
-(`"background"`, or absent for interrupt) and `subagentMaxParallel` (absent
-for 1, at most 16) — so the tool behaves the same when pi runs outside the
-portal. `PI_SUBAGENT_BIN` picks the `pi` it starts (default: `pi` on `PATH`).
+The mode, the limit and the model are kept in the extension's own folder of the
+portal's data folder (`extension-data/pithagoras-subagent/settings.json`), each
+left out while it is the default. Before it was an extension, the tool read
+them from pi's `settings.json` (`subagentMode`, `subagentMaxParallel`,
+`subagentModel`): the upgrade hands them over once, and takes them out of pi's
+file. They are set on its page or through its own address
+(`/api/x/pithagoras-subagent/settings`, see the [API](/reference/api)).
+`PI_SUBAGENT_BIN` picks the `pi` it starts (default: `pi` on `PATH`).
 
 Subagents need the host executor (`EXECUTOR=host`): only there does the portal
-share pi's event bus with the tool.
+run pi in its own process, where the extension gives a chat's pi the tool and
+shares its event bus.
 
 ### What the agent is told
 

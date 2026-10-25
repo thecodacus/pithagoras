@@ -405,8 +405,6 @@ export function startExtensions(): void {
   void loadExtensions();
   const again = () => void loadExtensions();
   window.addEventListener(EXTENSIONS_CHANGED, again);
-  // The subagent tool, switched in Settings → Tools, is a package too.
-  window.addEventListener("features-changed", again);
   // What an extension's module runs of its own (a timer, a fetch, a handler of its) and nothing caught: told as its
   // failure, as one the portal caught is. What came from no extension is left as it is.
   window.addEventListener("error", (event) => {

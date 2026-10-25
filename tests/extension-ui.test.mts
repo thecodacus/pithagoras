@@ -654,7 +654,8 @@ test('a package may name themes in its package.json and bring nothing else', () 
 test('a package is told apart by what it brings: something for pi, something for the portal, colours', () => {
   assert.deepEqual(packageKinds(path.resolve('tests/fixtures/extensions/notes')), ['pi', 'pithagoras']);
   assert.deepEqual(packageKinds(path.resolve('extensions/themes')), ['themes'], 'no code, so nothing for pi');
-  assert.deepEqual(packageKinds(path.resolve('extensions/subagent')), ['pi']);
+  // Its tool comes through its server half: it gives pi nothing of its own.
+  assert.deepEqual(packageKinds(path.resolve('extensions/subagent')), ['pithagoras']);
   assert.deepEqual(packageKinds(pkg({ server: './server.js', themes: [{ id: 'a', name: 'A' }] }, ['server.js'])), ['pi', 'pithagoras', 'themes']);
   // A half it names and does not have is not one it brings.
   assert.deepEqual(packageKinds(pkg({ client: './web/client.js' }, [])), ['pi']);

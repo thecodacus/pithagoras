@@ -1,7 +1,5 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { writeFileSync } from "node:fs";
-import path from "node:path";
 import { inProcessHome } from "./helpers.mts";
 
 // What the portal's own tools cost in every request: their description, their schema and the line pi lists them
@@ -15,7 +13,8 @@ const { askQuestionTool } = await import("../core/server/src/pi/ask-question.ts"
 const { heartbeatTool } = await import("../core/server/src/pi/heartbeat-tool.ts");
 const { reportTool } = await import("../core/server/src/pi/report-tool.ts");
 const { routineTools } = await import("../core/server/src/pi/routine-tools.ts");
-const { default: subagent } = await import("../extensions/subagent/index.ts");
+const { default: subagentTool } = await import("../extensions/subagent/src/pi.ts");
+const { settingsOf } = await import("../extensions/subagent/src/settings.ts");
 const { piDependency } = await import("../core/server/src/pi/package.ts");
 
 interface Registered {
@@ -49,13 +48,10 @@ load(askQuestionTool(), all);
 load(heartbeatTool("a", "s"), all);
 load(reportTool(null), all);
 load(routineTools("s"), all);
-const agentDir = process.env.PI_CODING_AGENT_DIR!;
-writeFileSync(path.join(agentDir, "settings.json"), JSON.stringify({ subagentMode: "interrupt" }));
-load(subagent, all);
+load((pi) => subagentTool(pi, () => settingsOf({ mode: "interrupt" })), all);
 // The shape that depends on a setting is looked at as well: a subagent that runs in the background.
-writeFileSync(path.join(agentDir, "settings.json"), JSON.stringify({ subagentMode: "background" }));
 const subagentBackground: Registered[] = [];
-load(subagent, subagentBackground);
+load((pi) => subagentTool(pi, () => settingsOf({ mode: "background" })), subagentBackground);
 
 /** The most each tool may cost, in tokens: what was agreed, as the review of issue #183 measured it, and 10 for a changed word. */
 const ROOM = 10;

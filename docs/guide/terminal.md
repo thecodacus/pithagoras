@@ -114,7 +114,7 @@ Where its extension speaks the subagent protocol, the panel has a box to
 does not take messages says so. A subagent needs the chat to be running here, and
 with `EXECUTOR=container` the portal cannot reach extensions to send to.
 
-The bundled subagent tool is one of the [opt-in features](/guide/features); an
+The subagent extension that comes with the portal is one of the [opt-in features](/guide/features); an
 extension can announce its own agents to the panel too, and a tool that is not on
 the protocol still shows its steps. With no subagents in the chat, the panel says
 so.

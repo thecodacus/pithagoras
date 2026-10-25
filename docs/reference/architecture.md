@@ -115,9 +115,9 @@ terminal runs a pty for each terminal itself. The containers of Browser, of the 
 Understory, the agent's memory, are run through the
 [Docker](/guide/docker) extension, which every extension that runs containers builds on; the voice and Understory containers share the
 portal's network namespace so their services need no published ports. An extension's container that runs code from
-elsewhere is on a network of its own instead (Docker's `networks`). Opt-in pi extensions the
-portal ships (`extensions/`, the subagent tool) are installed as local pi
-packages only when switched on. The server holds one socket in its data
+elsewhere is on a network of its own instead (Docker's `networks`). The extensions the
+portal ships (`extensions/`, the subagent tool among them) are installed as local pi
+packages from that folder; the ones a fresh portal starts with are in `extensions/defaults.json`. The server holds one socket in its data
 directory so only one portal runs on it.
 
 Two things run on a clock of their own. The routine supervisor

@@ -238,6 +238,72 @@ export interface ModelRef {
   id: string;
 }
 
+/**
+ * The subagent protocol: how a pi extension that runs an agent of its own lets the portal show it beside the chat, and
+ * lets the person talk to it and stop it. It rides on the chat's event bus (`pi.events`, given to `chats.extend`'s
+ * factory and to any pi extension in a chat whose pi runs in the portal's own process), so a pi extension that speaks it
+ * needs nothing of the portal and does nothing different where nobody listens. Each channel by its name, with what is
+ * sent on it: the portal's own copy of the names is checked against these. See "The subagent protocol" in the guide.
+ */
+export interface SubagentProtocol {
+  /** Extension → portal: one has started, or waits for its turn to. */
+  "subagent:v1:start": SubagentStart;
+  /** Extension → portal: one of its child's pi events, as `pi --mode json` or `--mode rpc` print them. */
+  "subagent:v1:event": SubagentEvent;
+  /** Extension → portal: it is over. */
+  "subagent:v1:end": SubagentEnd;
+  /** Portal → extension, only where `start` said `input: true`: a message for it (an RPC `steer`, say). */
+  "subagent:v1:input": SubagentInput;
+  /** Portal → extension, only where `start` said `stop: true`. */
+  "subagent:v1:stop": SubagentStop;
+  /** Asked by the extension, answered at once, as the bus is synchronous: what the chat says its subagents run on. */
+  "subagent:v1:config": SubagentConfig;
+}
+
+export interface SubagentStart {
+  /** Its id, the same on every channel, until its `end`. */
+  id: string;
+  /** What the person calls it: "Research: vector DBs". */
+  label: string;
+  /** The tool call that started it, whose card gets a Watch button. */
+  toolCallId?: string;
+  /** It takes `subagent:v1:input`. */
+  input?: boolean;
+  /** It takes `subagent:v1:stop`. */
+  stop?: boolean;
+  /** What it is doing, until its child says: "Starting on provider/model", "Waiting for a free slot". */
+  detail?: string;
+  /** It runs on after the tool call that started it has returned (in the background), so the end of that call is not its end. */
+  detached?: boolean;
+}
+
+export interface SubagentEvent {
+  id: string;
+  /** The child's event, with its `type`: drawn as the chat's own are. */
+  event: { type: string; [key: string]: unknown };
+}
+
+export interface SubagentEnd {
+  id: string;
+  status: "done" | "error" | "stopped";
+  /** Why it failed, where it did. */
+  error?: string;
+}
+
+export interface SubagentInput {
+  id: string;
+  text: string;
+}
+
+export interface SubagentStop {
+  id: string;
+}
+
+export interface SubagentConfig {
+  /** Called at once with the chat's choice: `model` is "provider/model" or "auto", and not there when the chat has none of its own. */
+  reply(config: { model?: string }): void;
+}
+
 /** Where a model is asked, and how a request signs in there: see `models.endpoint`. */
 export interface ModelEndpoint {
   /** What it speaks, as pi says it: "openai-completions", "anthropic-messages"… */

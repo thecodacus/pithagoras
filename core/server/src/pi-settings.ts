@@ -168,6 +168,17 @@ export function updatePiSettings(
 }
 
 /**
+ * The same change, made now rather than in turn with the others: for the database's upgrade, which runs as the portal
+ * starts, before anything of it writes the file, and cannot wait for a promise.
+ */
+export function updatePiSettingsNow(mutate: (settings: Record<string, unknown>) => void): Record<string, unknown> {
+  const all = readForChange();
+  mutate(all);
+  replaceFile(JSON.stringify(all, null, 2) + "\n");
+  return all;
+}
+
+/**
  * The raw editor's save: whatever the user wrote, as long as it is an object
  * pi can read, in turn with the other writes. It does not start from the file,
  * so it is also how one that cannot be read is put right.

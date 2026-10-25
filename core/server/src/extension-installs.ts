@@ -6,7 +6,7 @@ import { dataOwner } from "./extension-data.js";
 import { serverHalfStatus } from "./extension-host.js";
 import { isSwitchedOff, sourceOf } from "./extension-switch.js";
 import { serverHalf, validName } from "./extension-ui.js";
-import { SUBAGENT_PACKAGE, piPackageArg } from "./features.js";
+import { piPackageArg } from "./features.js";
 import { scrubSecrets } from "./logs.js";
 import { oneAtATime } from "./one-at-a-time.js";
 import { INLINE_EXTENSIONS } from "./pi/inline-extensions.js";
@@ -60,7 +60,7 @@ export function installFor(dataDir: string, folder: string, note?: string): Prom
     const name = meta?.name;
     if (!validName(name)) throw new TypeError(`The package.json in ${folder} has no valid name: an npm name, with or without a scope`);
     // halves() keeps the first package of a name: a second would be installed, and never loaded.
-    if (name === SUBAGENT_PACKAGE || shippedExtensions().some((ext) => ext.name === name)) throw new Error(`${name} is the name of an extension that comes with Pithagoras`);
+    if (shippedExtensions().some((ext) => ext.name === name)) throw new Error(`${name} is the name of an extension that comes with Pithagoras`);
     // A chat's pi files a server half's factory by its name, as it files the portal's own inline extensions.
     if (INLINE_EXTENSIONS.includes(name)) throw new Error(`${name} is the name of one of the portal's own extensions in a chat's pi`);
     const other = (await usersOwn()).find((pkg) => metaOf(pkg)?.name === name && realPath(pkg.path!) !== real);

@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
 import { schemaFingerprint } from "./schema-fingerprint.mjs";
@@ -18,7 +18,7 @@ import { freePort, inProcessHome } from "./server-harness.mjs";
 // src/schema-version.ts (once for the release, not once for each change),
 // pin the new version and fingerprint here, and have an upgrade test for what
 // changed (below) that starts from a database made before it.
-const PINNED = { version: 11, fingerprint: "d118d40ea237b90e58c0ef97d6f1cdcb5e876ed739c3e2bbc6684f74a8aa653a" };
+const PINNED = { version: 12, fingerprint: "d118d40ea237b90e58c0ef97d6f1cdcb5e876ed739c3e2bbc6684f74a8aa653a" };
 /** The schema of version 10, the one pinned before: chats with no mode, and no table of the modes the person made. */
 const V10_FINGERPRINT = "155cf58f87a19f0a102c8475bdceee87a98d9169c400d887a37411107f0a5ccf";
 /** The schema of version 9: a project's switch for the agent's memory named for Understory. */
@@ -1321,6 +1321,122 @@ test("a database of version 10 is backed up and given chat modes: every chat is 
   assert.deepEqual([now.pragma("user_version", { simple: true }), schemaFingerprint(now)], [SCHEMA_VERSION, PINNED.fingerprint]);
   now.close();
   assert.deepEqual(modesIn(dir), { chats: [{ id: "c1", mode: null }, { id: "c2", mode: null }], made: [] });
+});
+
+/**
+ * pi's settings.json while the test runs `work`, holding `text`; what was there before is put back after. The upgrade
+ * reads it from where every test's pi has its folder.
+ */
+async function withPiSettings(text, work) {
+  const file = path.join(process.env.PI_CODING_AGENT_DIR, "settings.json");
+  mkdirSync(path.dirname(file), { recursive: true });
+  const before = existsSync(file) ? readFileSync(file, "utf8") : undefined;
+  writeFileSync(file, text);
+  try {
+    return await work(file);
+  } finally {
+    if (before === undefined) rmSync(file, { force: true });
+    else writeFileSync(file, before);
+    rmSync(`${file}.bak`, { force: true });
+  }
+}
+
+/** A database of version 11 in its own folder `name`, with one chat: the schema of this version, before it was raised. */
+function databaseAt11(name) {
+  const dir = path.join(home, name);
+  mkdirSync(dir, { recursive: true });
+  getDb().exec(`VACUUM INTO '${path.join(dir, "portal.db")}'`);
+  const d = new Database(path.join(dir, "portal.db"));
+  d.pragma("user_version = 11");
+  d.prepare("INSERT INTO sessions (id, title, workspace, kind) VALUES ('c1', 'Kites', '/w/site', 'task')").run();
+  d.close();
+  return dir;
+}
+
+test("the subagent settings in pi's settings.json are left for its extension at schema 12, and leave pi's file, the rest of it kept", async () => {
+  const dir = databaseAt11("subagent-out");
+  assert.deepEqual(upgradeCheck(path.join(dir, "portal.db")), { needed: true, from: 11 });
+  const others = { packages: ["../../extensions/subagent"], defaultProvider: "llama-swap" };
+  await withPiSettings(JSON.stringify({ ...others, subagentMode: "background", subagentMaxParallel: 3 }), async (file) => {
+    assert.match(await upgraded(dir), new RegExp(`upgrading the database from version 11 to ${SCHEMA_VERSION}`));
+    assert.deepEqual(JSON.parse(readFileSync(file, "utf8")), others);
+    // What pi's file was is kept beside it, as every change of it keeps it.
+    assert.deepEqual(JSON.parse(readFileSync(`${file}.bak`, "utf8")), { ...others, subagentMode: "background", subagentMaxParallel: 3 });
+  });
+  assert.match(path.basename(backupsIn(path.join(dir, "backups"))[0]), /^portal-v11-\d{8}-\d{6}\.db$/);
+  const now = new Database(path.join(dir, "portal.db"), { readonly: true });
+  assert.deepEqual([now.pragma("user_version", { simple: true }), schemaFingerprint(now)], [SCHEMA_VERSION, PINNED.fingerprint]);
+  now.close();
+  assert.deepEqual(leftAt(dir), ["subagent"], "nothing half done beside it");
+  const left = (name) => path.join(dir, "handoff", "subagent", name);
+  const { made: _made, ...about } = JSON.parse(readFileSync(left("handoff.json"), "utf8"));
+  assert.deepEqual(about, { format: 1, name: "subagent", schema: 12 });
+  assert.deepEqual(JSON.parse(readFileSync(left("settings.json"), "utf8")), { subagentMode: "background", subagentMaxParallel: 3, subagentModel: null });
+  assert.equal(modeOf(left("settings.json")), 0o600);
+});
+
+test("pi's settings with none of the subagent's, or that cannot be read, leave nothing and are not changed", async () => {
+  for (const [name, text] of [["subagent-none", JSON.stringify({ defaultProvider: "llama-swap" })], ["subagent-unreadable", '{ "subagentMode": "background", ']]) {
+    const dir = databaseAt11(name);
+    await withPiSettings(text, async (file) => {
+      await upgraded(dir);
+      assert.equal(readFileSync(file, "utf8"), text, name);
+    });
+    assert.deepEqual(leftAt(dir), [], name);
+  }
+});
+
+test("pi's settings that cannot be written keep the subagent's for the next start, which takes them out and leaves them once", async () => {
+  const dir = databaseAt11("subagent-kept");
+  const agentDir = process.env.PI_CODING_AGENT_DIR;
+  const text = JSON.stringify({ subagentModel: "llama-swap/model-b" });
+  await withPiSettings(text, async (file) => {
+    chmodSync(agentDir, 0o555);
+    try {
+      assert.match(await upgraded(dir), /could not be left for its extension, and are kept for the next start/);
+    } finally {
+      chmodSync(agentDir, 0o755);
+    }
+    assert.equal(readFileSync(file, "utf8"), text);
+    await upgraded(dir);
+    assert.deepEqual(JSON.parse(readFileSync(file, "utf8")), {});
+  });
+  assert.deepEqual(leftAt(dir), ["subagent"]);
+  assert.deepEqual(JSON.parse(readFileSync(path.join(dir, "handoff", "subagent", "settings.json"), "utf8")), { subagentMode: null, subagentMaxParallel: null, subagentModel: "llama-swap/model-b" });
+});
+
+test("a subagent hand-off that waits from an earlier upgrade is written anew from the keys pi's settings hold now", async () => {
+  const dir = databaseAt11("subagent-again");
+  const left = (name) => path.join(dir, "handoff", "subagent", name);
+  await withPiSettings(JSON.stringify({ subagentMode: "background" }), () => upgraded(dir));
+  assert.deepEqual(JSON.parse(readFileSync(left("settings.json"), "utf8")), { subagentMode: "background", subagentMaxParallel: null, subagentModel: null });
+  // Gone back to the older version, the person raised the limit there; the database is at 11 again, as its backup is put in.
+  const d = new Database(path.join(dir, "portal.db"));
+  d.pragma("user_version = 11");
+  d.close();
+  await withPiSettings(JSON.stringify({ subagentMode: "background", subagentMaxParallel: 4 }), async (file) => {
+    await upgraded(dir);
+    assert.deepEqual(JSON.parse(readFileSync(file, "utf8")), {});
+  });
+  assert.deepEqual(JSON.parse(readFileSync(left("settings.json"), "utf8")), { subagentMode: "background", subagentMaxParallel: 4, subagentModel: null });
+  assert.deepEqual(leftAt(dir), ["subagent"]);
+});
+
+test("a copy of the subagent tool that is no extension keeps its settings in pi's file, which it still reads, and says so", async () => {
+  const dir = databaseAt11("subagent-copy");
+  const copy = path.join(home, "subagent-clone");
+  mkdirSync(copy, { recursive: true });
+  writeFileSync(path.join(copy, "package.json"), JSON.stringify({ name: "pithagoras-subagent", version: "0.1.0", pi: { extensions: ["./index.ts"] } }));
+  const text = JSON.stringify({ packages: [copy], subagentMode: "background" });
+  await withPiSettings(text, async (file) => {
+    assert.match(await upgraded(dir), /subagent settings stay in pi's settings\.json/);
+    assert.equal(readFileSync(file, "utf8"), text);
+    // The same folder with a server half is the extension, and the settings go.
+    writeFileSync(path.join(copy, "package.json"), JSON.stringify({ name: "pithagoras-subagent", version: "0.2.0", pithagoras: { server: "server.js" } }));
+    await upgraded(dir);
+    assert.deepEqual(JSON.parse(readFileSync(file, "utf8")), { packages: [copy] });
+  });
+  assert.deepEqual(leftAt(dir), ["subagent"]);
 });
 
 // A data folder of v0.1.0 that used every part an extension holds now, each kept as v0.1.0 kept it, on fixtures/portal-v3.db:

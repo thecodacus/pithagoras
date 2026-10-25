@@ -5,7 +5,9 @@ one written in TypeScript and JSX.
 
 - `@pithagoras/extension-api`: `Portal`, what a browser half's default export is called with, and the slots' entries
   and props.
-- `@pithagoras/extension-api/server`: `ServerPortal`, what a server half's default export is called with.
+- `@pithagoras/extension-api/server`: `ServerPortal`, what a server half's default export is called with, and
+  `SubagentProtocol`, the channels a pi extension speaks on a chat's event bus to have its own agent shown and steered
+  beside the chat.
 - `@pithagoras/extension-api/build`: `buildExtension({ dir })` bundles `src/client.tsx` into `web/client.js` and
   `web/client.css`, with React taken from the portal, and with `server` the server half into `server.js`.
 - `@pithagoras/extension-api/tailwind`: the portal's colours, rounding and shadow as a Tailwind preset.

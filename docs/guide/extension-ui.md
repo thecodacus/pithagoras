@@ -2012,7 +2012,7 @@ await portal.extensions.remove("moon");
   runs in the portal, with no install in between. So an extension copies what it
   is given into its own folder, checks the copy, and installs that.
 - **A name of its own.** A name that one of the portal's own extensions has
-  (those in its `extensions` folder, the subagent tool included) is refused, and
+  (those in its `extensions` folder) is refused, and
   so is one that a package installed from another folder has. Of two packages of
   one name, the portal loads the first: the second would be installed and never
   run. A name the portal gives one of its own extensions in a chat's pi

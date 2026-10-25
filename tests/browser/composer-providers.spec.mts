@@ -9,16 +9,20 @@ test("the model menu's providers link goes through the router, as any other link
   expect(await page.evaluate(() => typeof history.state?.idx)).toBe('number');
 });
 
+/** The subagent extension's settings, as its server half answers them: what a chat's own choice falls back to. */
+const extensionSettings = (model = 'auto') => ({ mode: 'interrupt', maxParallel: 1, maxParallelLimit: 16, model });
+
 test("with the subagent tool on, the model menu says what this chat's subagents run on, and a choice there is kept", async ({ page }) => {
   const saved: unknown[] = [];
   await page.route('**/api/features/flags', (route) => route.fulfill({ json: { subagent: { enabled: true }, memory: { held: false, by: null } } }));
+  await page.route('**/api/x/pithagoras-subagent/settings', (route) => route.fulfill({ json: extensionSettings() }));
   await page.route('**/api/sessions/preview/subagent-model', async (route) => {
     if (route.request().method() === 'PUT') {
       const { model } = route.request().postDataJSON();
       saved.push(model);
-      return route.fulfill({ json: { model, default: 'auto' } });
+      return route.fulfill({ json: { model } });
     }
-    await route.fulfill({ json: { model: null, default: 'auto' } });
+    await route.fulfill({ json: { model: null } });
   });
   await page.goto('/tests/chat.html?phase=model');
   await page.getByTitle('Model A', { exact: true }).click();
@@ -42,10 +46,11 @@ test('without the subagent tool, the model menu has nothing about subagents', as
 test("the subagents' row is asked for with the chat, so the model menu opens with it already there", async ({ page }) => {
   let asked = 0;
   await page.route('**/api/features/flags', (route) => route.fulfill({ json: { subagent: { enabled: true }, memory: { held: false, by: null } } }));
+  await page.route('**/api/x/pithagoras-subagent/settings', (route) => route.fulfill({ json: extensionSettings() }));
   await page.route('**/api/sessions/preview/subagent-model', async (route) => {
     asked++;
     await new Promise((r) => setTimeout(r, 300));
-    await route.fulfill({ json: { model: 'llama-swap/model-b', default: 'auto' } });
+    await route.fulfill({ json: { model: 'llama-swap/model-b' } });
   });
   await page.goto('/tests/chat.html?phase=model');
   await expect.poll(() => asked).toBe(1);

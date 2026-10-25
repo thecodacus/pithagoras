@@ -105,8 +105,9 @@ and the flagged results you trusted, each of which can be taken back, and what i
 saved as it is made.
 
 **Tools** sets which tools every conversation starts with, see
-[The interface](/guide/interface#tools). Under them, **Subagents** switches the
-subagent tool on or off and sets how it runs, see
+[The interface](/guide/interface#tools). **Subagents**, under **Extension
+settings** while the subagent extension is on, sets how the subagent tool runs;
+the extension is switched in **Extensions**, see
 [Opt-in features](/guide/features#subagents). **Skills** lists, creates, imports and
 switches the agent's procedures, see [Skills](/guide/skills). **MCP** manages MCP servers, see
 [MCP servers](/guide/mcp).
