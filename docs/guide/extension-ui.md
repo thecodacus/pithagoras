@@ -154,6 +154,7 @@ with it either way.
 | `slots.register(slot, entry)` | Puts an entry into a [slot](#slots). Returns what takes it out |
 | `chats.use(chatId, pick?)` | A hook: [the chat as the page has it](#the-chat-s-events) |
 | `chats.on(chatId, handler)` | The same outside a component |
+| `chats.useEvents(chatId)` | A hook: any chat's events by its id, streamed while the component is drawn, as the page streams the chat on screen: `{ events, status, loading, missing }`. For drawing another chat beside the one on screen, such as a [child chat](#child-chats)'s run with `ui.Transcript`. The latest part of a long one; nothing without an id |
 | `panels` | [Any panel of the chat on screen](#panels-and-commands), by name |
 | `commands` | [What can be asked of an extension by name](#panels-and-commands) |
 | `api.json(url, init?)` | A request as the portal's own are made |
@@ -2367,6 +2368,11 @@ portal.chats.extend((pi, chat) => {
   or loaded again, and a message in it cannot be edited until the child is
   done. A portal that restarts marks a child it cut off *interrupted*, as any
   chat.
+- **Beside its parent**, a browser half draws a child's run from its own
+  events, `portal.chats.useEvents(child.id)` with `ui.Transcript`, and opens it
+  with `portal.navigate("/s/" + child.id)`. The subagent extension does, and
+  names the child on its [protocol](/guide/extensions#the-subagent-protocol)
+  start (`chat`).
 - **In a process of its own** (`"isolated": true`), `create` is answered at
   once (`children` too) and the others later, as the other calls are.
 

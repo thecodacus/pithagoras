@@ -34,9 +34,13 @@ in the background once that is done: see
 ## Subagents
 
 **Settings → Extension settings → Subagents.** The `subagent` tool hands a
-self-contained task to a second pi with a context of its own and gets its answer
-back. You can watch it beside the chat, give it instructions while it works, and
-stop it.
+self-contained task to a second agent with a context of its own and gets its
+answer back. The subagent works in a **chat of its own**, a child chat of the
+chat that asked: in the same folder, in the chat's mode, with its tools and its
+model, under the [guard](/guide/security) and the [sandbox](/guide/sandbox) as
+the person the chat works for, and with a transcript of its own. You can watch
+it beside the chat, give it instructions while it works, open its chat, and stop
+it. A subagent's chat has no subagent tool of its own: there is one level.
 
 It is the `pithagoras-subagent` extension, which comes with the portal in its
 `extensions/subagent` folder. Install it, or switch it on and off, in
@@ -54,10 +58,15 @@ any other extension's:
 
 - **The Subagents panel** (its button in the chat's header, there once the chat
   has had one, with a dot while one is working): a tab for each subagent, what
-  it was asked, its replies and tool calls drawn as the chat draws its own, how
-  long it has run, a box to tell it something while it works, and **Stop**.
+  it was asked, its replies and tool calls drawn as the chat draws its own (read
+  from its own chat), how long it has run, **Open as chat**, a box to tell it
+  something while it works, and **Stop**.
 - **A chip in the running tray** above the message box for each one at work,
   which opens it in the panel.
+- **Waiting for you**: a subagent's chat is under the guard, so it may ask you
+  something there (a guard question, a dialog). Nobody may have that chat open,
+  so its chip in the tray and its head in the panel say *waiting for you*, and
+  the panel has the link that opens its chat to answer.
 - **Watch** beside the tool call that started one (**Open** once it is over),
   without opening the call's card.
 
@@ -77,6 +86,24 @@ Background runs two agents — two model processes — at the same time. With a
 local model that means two model calls at once, which a single GPU may not
 hold. Stopping the chat does not stop a background subagent; stop it from its
 window. Closing or reloading the chat does.
+
+### Kept subagent chats
+
+**Keep subagent chats** on its page, off by default:
+
+- **Off**: a subagent's chat is not in the chat lists. It is opened from the
+  panel (**Open as chat**), and once it has finished it is not given more. Its
+  transcript stays, to be read beside the chat.
+- **On**: it is a [sub-chat](/guide/sessions#sub-chats), listed under its chat,
+  and the agent can go on with it. Every result names the subagent's id ("Its
+  chat is kept as `k3f9x2`: pass that id to continue it."), and a later call
+  with that `id` gives the same chat a further task, with everything it already
+  knows. Another chat's subagent, one that was not kept and one that is still
+  working are refused before anything starts, with the reason.
+
+Either way a subagent's chat is deleted with its chat. With it on, the tool's
+description says that a finished one can be continued, and the tool takes an
+`id`: about 19 tokens more on every request.
 
 ### Which model a subagent runs on
 
@@ -103,18 +130,18 @@ stopped meanwhile); in the background the call returns saying it is queued,
 and it starts once another has finished. A queued one does not start once its
 chat has been closed or reloaded.
 
-The mode, the limit and the model are kept in the extension's own folder of the
-portal's data folder (`extension-data/pithagoras-subagent/settings.json`), each
-left out while it is the default. Before it was an extension, the tool read
+The mode, the limit, the model and whether chats are kept are kept in the
+extension's own folder of the portal's data folder
+(`extension-data/pithagoras-subagent/settings.json`), each left out while it is
+the default. Before it was an extension, the tool read
 them from pi's `settings.json` (`subagentMode`, `subagentMaxParallel`,
 `subagentModel`): the upgrade hands them over once, and takes them out of pi's
 file. They are set on its page or through its own address
 (`/api/x/pithagoras-subagent/settings`, see the [API](/reference/api)).
-`PI_SUBAGENT_BIN` picks the `pi` it starts (default: `pi` on `PATH`).
 
 Subagents need the host executor (`EXECUTOR=host`): only there does the portal
 run pi in its own process, where the extension gives a chat's pi the tool and
-shares its event bus.
+shares its event bus. The subagent's own chat runs as any chat does.
 
 ### What the agent is told
 
@@ -125,8 +152,9 @@ than will start. The results carry the live numbers, counted across every chat:
 a background call says how many are running and how many wait ("2 of 2 running,
 1 waiting, this one included"), and an interrupt call that had to wait for a
 slot ends its answer with how long it waited, so the agent can tell the wait
-from the subagent's own work time. Nothing is added to the system prompt, so its
-cache holds.
+from the subagent's own work time. Every result names the subagent's id, and
+with kept chats the description adds that a finished one can be continued by
+it. Nothing is added to the system prompt, so its cache holds.
 
 The description is read when a chat loads the tool, so a change under
 **Subagents at once** or **Mode** reaches an idle chat at once (it is reloaded),

@@ -525,7 +525,7 @@ are text on both sides, so a pi extension that imports nothing speaks it too.
 
 | Channel | Direction | Payload |
 |---|---|---|
-| `subagent:v1:start` | extension → portal | `{ id, label, toolCallId?, input?: boolean, stop?: boolean, detail?, detached?: boolean }` |
+| `subagent:v1:start` | extension → portal | `{ id, label, toolCallId?, input?: boolean, stop?: boolean, detail?, detached?: boolean, chat? }` |
 | `subagent:v1:event` | extension → portal | `{ id, event }` — one of the child's pi events, as `pi --mode json` or `--mode rpc` print them |
 | `subagent:v1:end` | extension → portal | `{ id, status: "done" \| "error" \| "stopped", error? }` |
 | `subagent:v1:input` | portal → extension | `{ id, text }` — only if `start` said `input: true` |
@@ -536,6 +536,14 @@ Passing the child's events on unchanged is the whole integration: the portal
 draws them the way it draws the main conversation. A child started with
 `pi --mode rpc` can take `input` as an RPC `steer` command.
 
+A subagent that works in a chat of the portal's, a
+[child chat](/guide/extension-ui#child-chats) (`portal.chats.create`), says so
+with `chat`, that chat's id, on its start, and sends no `event`s: its run is the
+chat's own transcript, which the panel draws from the chat itself
+(`chats.useEvents`) beside a link that opens it. `input` goes into the chat as
+a steer (`chats.prompt` with `steer`), and `stop` stops its run
+(`chats.abort`).
+
 A subagent is over when its tool call is, unless `start` said `detached: true`:
 then it runs on after the call has returned — a subagent in the background —
 until its `end`, or until the chat's pi stops. A chat with one still running is
@@ -543,8 +551,9 @@ not reloaded when a package is switched: it is reloaded later, see
 [a chat that is working](#a-chat-that-is-working).
 
 `extensions/subagent` in this repository is a complete example: a `subagent`
-tool that hands a task to a second pi and can be steered while it works, in
-the foreground or the background. It is a Pithagoras extension like the others
+tool that hands a task to a child chat of the chat that calls it, which can be
+steered while it works, in the foreground or the background, and kept and given
+more by its id. It is a Pithagoras extension like the others
 that ship with the portal, switched on in Settings → Extensions (see
 [Opt-in features](/guide/features#subagents)): its server half gives every
 chat's pi the tool (`portal.chats.extend`, in `src/pi.ts`, which speaks the

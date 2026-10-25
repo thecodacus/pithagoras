@@ -150,7 +150,7 @@ problem are held: put to you where you are there to answer (see
 | `read-credentials` | `auth.json`, `.env`, `.ssh/`, tokens, also among the files a tool declares it takes |
 | `publish` | `git push` is not undoable from here, also with git's options before it (`git -C repo push`, `git -c k=v push`) |
 | `persist` | What outlives the conversation: a routine, `cron`, a systemd unit, a shell start-up file, and a change to what the agent loads as its own (`AGENTS.md`, `CLAUDE.md`, its context files, `WATCH.md`, `.pi/`, `.agents/`, `.mcp.json`; see [what a colleague may do](/people/roles#what-a-colleague-may-do)), by a tool or by a command that writes there (a redirect, `tee`, `cp`, `mv`, `ln`, `sed -i`, a download's `-o`, a clone) |
-| `delegate` | A `subagent` runs its own pi, which has no guard, and a routine runs in a session of its own, without this conversation's rules, so a tainted session may start neither |
+| `delegate` | A `subagent` and a routine work in a conversation of their own, which has not read what this one read and so is not held back as it is: a tainted session may start neither. A subagent's chat is guarded on its own, and marked by what it reads itself |
 
 A tool that declares that every call of it is the shape of one of these rules
 (`acts`), such as an extension's tool that sends mail declaring `upload`, is

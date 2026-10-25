@@ -25,6 +25,9 @@ same permissions. It is off until you switch it on in **Settings → Sandbox**.
   password, its secret and the provider keys are not among them, so `env` shows
   nothing worth taking. Each agent has a `HOME` and a `TMPDIR` of its own under
   `/data/sandbox-home`, so no cache or temporary file is shared between agents.
+- **Subagents.** A subagent works in a chat of its own in its chat's folder
+  ([Subagents](/guide/features#subagents)), whose commands run as that folder's
+  user, as the chat's own do.
 
 ## One user per agent
 
@@ -145,7 +148,6 @@ A trusted command must not print its own key: what it prints, the agent reads.
 
 ## Not covered yet
 
-- **Subagents** start a separate pi process, as the portal's user.
 - **MCP servers** that pi starts, and **an extension's own tools** that start
   programs, run as the portal's user.
 - **The Terminal panel** is yours, not the agent's, and is not sandboxed.

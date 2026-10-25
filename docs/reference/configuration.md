@@ -59,7 +59,6 @@ an empty field inherits, and clearing one hands the setting back.
 | `PI_PROVIDER` | — | Override for pi's `defaultProvider`. |
 | `PI_MODEL` | — | Override for pi's `defaultModel`. |
 | `PI_THINKING_LEVEL` | — | Override for pi's `defaultThinkingLevel`. |
-| `PI_SUBAGENT_BIN` | `pi` | The `pi` the subagent extension's tool starts. |
 | `MEMORY_UNDERSTORY_URL` | `http://localhost:3800/mcp` | Read by the [Understory](/guide/features#memory-understory) extension: where its page in Settings looks for Understory first. |
 | `MEMORY_UNDERSTORY_AUTH_TOKEN` | — | Read by the Understory extension: Understory's bearer token, named in `mcp.json` rather than copied into it. |
 | `UNDERSTORY_PORT` | `3800` | Read by the Understory extension: the port the Understory it runs listens on, on the portal's own network. |

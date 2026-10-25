@@ -56,7 +56,8 @@ const UNTRUSTED_COMMAND = /\b(himalaya|mutt|neomutt|notmuch|offlineimap|mbsync|c
  * Does what this call returned carry somebody else's words? Mail and the web
  * read through a command, an MCP server the portal does not control, and the
  * browser, which reads pages anyone can write. The agent's own tools, a
- * subagent's answer and a routine's included, do not mark the conversation.
+ * subagent's answer and a routine's included, do not mark the conversation:
+ * a subagent's chat is marked by what it reads itself.
  *
  * A server's tools are its words however they are called: through the adapter's
  * `mcp` tool, or under their own names (`jira_get_issue`), which the adapter
@@ -1104,7 +1105,7 @@ const RULES: Rule[] = [
   },
   {
     name: "delegate",
-    why: "a subagent or a routine works without this conversation's rules, so what it does is not held to them",
+    why: "a subagent or a routine works in a conversation of its own, which has not read what this one read, so it is not held back as this one is",
     hit: (tool) => tool === "subagent" || tool === "routine_run",
   },
 ];

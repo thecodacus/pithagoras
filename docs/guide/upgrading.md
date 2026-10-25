@@ -1258,6 +1258,22 @@ straight from schema 13 has, also needs what
 says for it, and an older backup what
 [Chats can have child chats](#chats-can-have-child-chats) says.
 
+## Subagents work in chats of their own
+
+A subagent no longer runs as a separate `pi` process: it works in a
+[child chat](/guide/features#subagents) of the chat that asked, under the guard
+and the sandbox as the person the chat works for, in the chat's mode and with
+its tools. Something a subagent could do before may now be refused, or wait for
+you in its chat (the panel and the tray say so). Its run is in its chat's own
+transcript, not in the parent's: a subagent from before the upgrade still shows
+in the panel from what the parent kept.
+
+New: **Keep subagent chats** on the extension's page (off by default), which
+lists them as sub-chats and lets the agent continue one by its id. Gone:
+`PI_SUBAGENT_BIN` and `PI_SUBAGENT_GRACE_MS`, which nothing reads any more. The
+database is not changed, so going back needs nothing but the older version; the
+subagents' chats it made stay, as chats of their own.
+
 ## The guard
 
 What the guard holds a chat to changed in this release

@@ -85,10 +85,11 @@ so give a rule the folder it is for. The heartbeat keeps the rules written for *
 roles*, as it reads what its `WATCH.md` names wherever that is.
 
 Four tools are not opened by a rule at all, nor by an approval: `subagent`,
-`routine_create`, `routine_update` and `routine_run`. A subagent is a pi of its own
-and has no guard, and a routine runs as you, with your private notes and your
-rights; what a colleague or a guest wrote into either would be done as you, and
-what it read would be handed back to them. The agent is told so and does not ask
+`routine_create`, `routine_update` and `routine_run`. A subagent works in a chat of
+its own, which an approval given here does not reach, and a routine runs as you,
+with your private notes and your rights; what a colleague or a guest wrote into
+either would be done beyond what was approved, or as you, and what it read would
+be handed back to them. The agent is told so and does not ask
 you for them, a rule for one cannot be saved, and the conversations that are your
 own have them as before.
 

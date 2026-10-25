@@ -414,13 +414,13 @@ test("a rule or an approval does not open a tool that would run what a colleague
         const h = guardAs({ role, key: "priya", workspace, session });
         const result = call(h, tool, input);
         assert.equal(refused(result), true, `${role}: ${tool} under a rule`);
-        assert.match(result.reason, /^Refused: a (subagent works without this guard|routine runs as the primary user)/);
+        assert.match(result.reason, /^Refused: a (subagent works in a chat of its own|routine runs as the primary user)/);
         assert.match(lastAudit().reason, new RegExp(`^Not permitted for a ${role}: a (subagent|routine) `));
         recordApproval(asked(subject, tool), { id: session }, true, false);
         assert.equal(refused(call(h, tool, input)), true, `${role}: ${tool} after an approval`);
         assert.equal(useGrant(session, tool, subject), false, `${role}: an approval for it writes nothing that could be spent`);
         // Asking cannot help, whatever the agent writes as the action: the primary user is not put the question.
-        for (const action of [subject, "do it", `{"name":"x"}`]) assert.match(approvalCannotHelp(tool, action, workspace), /^a (subagent works without this guard|routine runs as the primary user)/, `${tool}: ${action}`);
+        for (const action of [subject, "do it", `{"name":"x"}`]) assert.match(approvalCannotHelp(tool, action, workspace), /^a (subagent works in a chat of its own|routine runs as the primary user)/, `${tool}: ${action}`);
       }
     }
     // The primary user's own conversation is not held by it, and nor is a call that is none of these.
