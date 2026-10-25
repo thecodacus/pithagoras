@@ -46,8 +46,19 @@ export interface RoutineRow {
   updated_at: string;
 }
 
-/** How long a single run may take before it is abandoned. */
-const RUN_TIMEOUT_MS = 60 * 60_000;
+/**
+ * How long a single run may take before it is abandoned: an hour, or the
+ * minutes ROUTINE_RUN_TIMEOUT_MIN says. A build, a download or a benchmark on
+ * local hardware can take longer than an hour, and the limit is not what keeps
+ * runs from stacking: the next slot of a routine still running is skipped. What
+ * is not a count of minutes above zero leaves the default; past what a timer
+ * may hold there is nothing to wait for.
+ */
+export const runTimeoutMs = (raw: string | undefined): number => {
+  const minutes = Number(raw);
+  return Number.isFinite(minutes) && minutes > 0 ? Math.min(minutes * 60_000, 2_147_483_647) : 60 * 60_000;
+};
+const RUN_TIMEOUT_MS = runTimeoutMs(process.env.ROUTINE_RUN_TIMEOUT_MIN);
 
 /** Enough of the outcome to see what happened without storing a transcript. */
 const MAX_OUTPUT = 4000;
