@@ -1,5 +1,6 @@
 import { type Page } from '@playwright/test';
-import { test, expect, mockPortal } from './portal-mock';
+import { test, expect, mockPortal, reply } from './portal-mock';
+import { DEFAULT_ORB } from '../../core/server/src/orb-style';
 
 const at = (minutesAgo: number) => new Date(Date.now() - minutesAgo * 60_000).toISOString();
 const chat = (id: string, title: string, minutesAgo: number, extra: Record<string, unknown> = {}) =>
@@ -20,7 +21,14 @@ const family = () => [
 async function portal(page: Page, sessions: Record<string, unknown>[] = family(), projects: string[] = []) {
   const deleted: string[] = [];
   await mockPortal(page, ({ path: p, method }) => {
-    if (p === '/api/sessions' && method === 'GET') return { sessions: sessions.filter((s) => !deleted.includes(s.id as string) && !deleted.includes(s.parent as string)), executor: 'host' };
+    const alive = (s: Record<string, unknown>) => !deleted.includes(s.id as string) && !deleted.includes(s.parent as string);
+    // A child an extension keeps out of the list is found by its id only.
+    if (p === '/api/sessions' && method === 'GET') return { sessions: sessions.filter((s) => alive(s) && s.listed !== false), executor: 'host' };
+    const one = /^\/api\/sessions\/([^/]+)$/.exec(p);
+    if (one && method === 'GET') {
+      const found = sessions.find((s) => s.id === one[1] && alive(s));
+      return found ?? reply(404, { error: 'No such session' });
+    }
     const del = /^\/api\/sessions\/([^/]+)$/.exec(p);
     if (del && method === 'DELETE') {
       deleted.push(del[1]);
@@ -151,7 +159,7 @@ test('deleting a chat names the sub-chats that go with it, and takes them from t
   await row.hover();
   await row.getByRole('button', { name: 'Delete Build the site' }).click();
   const dialog = page.getByRole('alertdialog');
-  await expect(dialog).toContainText('Its 2 sub-chats are deleted with it: “Check the links”, “Shrink the images”.');
+  await expect(dialog).toContainText('Its 2 sub-chats are deleted with it: "Check the links", "Shrink the images".');
   await dialog.getByRole('button', { name: 'Delete', exact: true }).click();
   await expect(sidebar(page).locator('[data-flip]')).toHaveText(['Fix the logo']);
   expect(deleted).toEqual(['build']);
@@ -160,4 +168,112 @@ test('deleting a chat names the sub-chats that go with it, and takes them from t
   await sidebar(page).locator('[data-flip="logo"]').hover();
   await sidebar(page).getByRole('button', { name: 'Delete Fix the logo' }).click();
   await expect(page.getByRole('alertdialog')).not.toContainText('sub-chat');
+});
+
+test('landing on / opens the newest chat of its own, not a sub-chat that changed after it', async ({ page }) => {
+  await portal(page);
+  await page.goto('/');
+  await expect(page).toHaveURL(/\/s\/build$/);
+});
+
+test('deleting the open sub-chat leads to its chat, and deleting a chat with a sub-chat open leaves the sub-chat', async ({ page }) => {
+  await portal(page);
+  await page.goto('/s/links');
+  const side = sidebar(page);
+  const links = subChats(side, 'Build the site').locator('[data-flip="links"]');
+  await links.hover();
+  await links.getByRole('button', { name: 'Delete Check the links' }).click();
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Delete', exact: true }).click();
+  await expect(page).toHaveURL(/\/s\/build$/);
+
+  // The chat itself deleted while a sub-chat is open: on to the next chat of its own, not left on a page that is gone.
+  await page.goto('/s/images');
+  const build = side.locator('[data-flip="build"]');
+  await build.hover();
+  await build.getByRole('button', { name: 'Delete Build the site' }).click();
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Delete', exact: true }).click();
+  await expect(page).toHaveURL(/\/s\/logo$/);
+});
+
+test('deleting a chat while one of its sub-chats that the lists leave out is open leaves that page too', async ({ page }) => {
+  await portal(page, [...family(), sub('hidden', 'Looks it up', 'build', 3, { listed: false })]);
+  await page.goto('/s/hidden');
+  await expect(page.locator('.chat-header').getByRole('link', { name: 'Sub-chat of Build the site' })).toBeVisible();
+  const build = sidebar(page).locator('[data-flip="build"]');
+  await build.hover();
+  await build.getByRole('button', { name: 'Delete Build the site' }).click();
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Delete', exact: true }).click();
+  await expect(page).toHaveURL(/\/s\/logo$/);
+});
+
+test('a folder past the eight it lists still lists the chat of the open sub-chat, with its sub-chats', async ({ page }) => {
+  const chats = Array.from({ length: 9 }, (_, i) => chat(`c${i}`, `Chat ${i}`, 10 + i, { workspace: '/w/site' }));
+  await portal(page, [...chats, sub('deep', 'Deep part', 'c8', 1, { workspace: '/w/site' })], ['site']);
+  await page.goto('/s/deep');
+  const inSite = sidebar(page).getByRole('group', { name: 'site' });
+  await expect(inSite.locator('[data-flip="c8"]')).toBeVisible();
+  await expect(subChats(inSite, 'Chat 8').locator('[data-flip="deep"]')).toHaveAttribute('aria-current', 'page');
+});
+
+test('a search of one folder on the Sessions page finds a sub-chat under its chat', async ({ page }) => {
+  await portal(page, family().map((s) => ({ ...s, workspace: '/w/site' })), ['site']);
+  await page.goto('/sessions?folder=project:site');
+  const main = page.getByRole('main');
+  await main.getByPlaceholder('Search by name or folder…').fill('images');
+  await expect(main.locator('li[data-flip]')).toHaveText([/Build the site/, /Shrink the images/]);
+  await expect(main.getByText('1 of 2')).toBeVisible();
+});
+
+test('a project\'s last activity is its newest chat of its own, not a sub-chat that changed later', async ({ page }) => {
+  const sessions = family().map((s) => ({ ...s, workspace: '/w/site' }));
+  await portal(page, sessions, ['site']);
+  await page.goto('/projects');
+  // The chat changed ten minutes ago; its sub-chats a minute and two.
+  await expect(page.getByRole('main').getByText(/last 10m ago/)).toBeVisible();
+});
+
+test('a sub-chat whose chat is not listed is a chat of its own: it has a pin, and its run ending is told', async ({ page }) => {
+  await portal(page, [chat('main', 'A chat', 5), sub('orphan', 'Channel part', 'a-channel-conversation', 1)]);
+  await page.goto('/sessions');
+  const row = sidebar(page).locator('[data-flip="orphan"]');
+  await row.hover();
+  await expect(row.getByRole('button', { name: 'Pin Channel part' })).toBeVisible();
+});
+
+test('a chat whose sub-chat runs shimmers its title with the π, and the toggles say whose sub-chats they open', async ({ page }) => {
+  await portal(page, [
+    sub('links', 'Check the links', 'build', 1, { status: 'running' }),
+    chat('build', 'Build the site', 10),
+    sub('more', 'More work', 'docs', 2),
+    chat('docs', 'Write the docs', 20),
+  ]);
+  await page.goto('/sessions');
+  const side = sidebar(page);
+  await expect(side.locator('[data-flip="build"] .working-text')).toHaveText('Build the site');
+  await expect(side.locator('[data-flip="docs"] .working-text')).toHaveCount(0);
+  // The same words for a sighted and a voice-control user, and the chat's name for a screen reader.
+  await expect(side.getByRole('button', { name: '1 sub-chat of Build the site' })).toBeVisible();
+  await expect(side.getByRole('button', { name: '1 sub-chat of Write the docs' })).toBeVisible();
+});
+
+test('the Agents page lists a conversation\'s sub-chats under it, does not count them, and its delete names them', async ({ page }) => {
+  const sessions = [
+    sub('links', 'Check the links', 'build', 1, { status: 'running', workspace: '/a/ada', channel_key: '', channel: null }),
+    chat('build', 'Build the site', 10, { workspace: '/a/ada', channel_key: '', channel: null }),
+  ];
+  await mockPortal(page, ({ path: p, method }) => {
+    const a = { id: 'ada', name: 'Ada', home: '/a/ada', first: false, initialised: true, chats: 1, channels: [], orb: DEFAULT_ORB, voice: '', unread: 0 };
+    if (p === '/api/agents') return { agents: [a] };
+    if (p === '/api/agent/sessions') return { sessions, agentHome: '/a/ada' };
+    if (p === '/api/agents/ada/setup') return { initialised: true, home: '/a/ada', files: [] };
+    if (p === '/api/sessions' && method === 'GET') return { sessions, executor: 'host' };
+  }, { settings: true });
+  await page.goto('/agents?agent=ada');
+  const main = page.getByRole('main');
+  await expect(main.getByText('Build the site')).toBeVisible();
+  await expect(main.getByText(/^1\s*conversation$/)).toBeVisible();
+  // Not a row among the conversations; under its conversation, open as it runs.
+  await expect(main.getByRole('group', { name: 'Sub-chats of Build the site' }).getByText('Check the links')).toBeVisible();
+  await main.getByRole('button', { name: 'Delete Build the site' }).click({ force: true });
+  await expect(page.getByRole('alertdialog')).toContainText('Its sub-chat "Check the links" is deleted with it.');
 });

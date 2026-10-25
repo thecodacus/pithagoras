@@ -49,3 +49,9 @@ test("a sub-chat's run ending is not told on its own", () => {
   const now = [{ id: "a", status: "running" as const }, { id: "sub", status: "idle" as const, parent: "a" }];
   assert.deepEqual(finishedRuns(before, now), []);
 });
+
+test("a sub-chat whose chat is not in the list is shown as a chat, so its run ending is told", () => {
+  const before = new Map([["orphan", "running"]] as const);
+  const now = [{ id: "orphan", status: "idle" as const, parent: "a channel chat" }];
+  assert.deepEqual(finishedRuns(before, now).map((s) => s.id), ["orphan"]);
+});

@@ -205,7 +205,7 @@ export const SessionsPage = memo(function SessionsPage({
               />
             ) : (
               <p
-                className={`truncate text-sm text-fg ${workingText(s.status)}`}
+                className={`truncate text-sm text-fg ${workingText(status)}`}
                 onClick={(e) => {
                   e.stopPropagation();
                   window.clearTimeout(opening.current);
@@ -230,7 +230,7 @@ export const SessionsPage = memo(function SessionsPage({
         </div>
         <span className="shrink-0 text-[11px] text-fg-faint">{when(s.updated_at)}</span>
         <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100">
-          <SessionActions session={s} subChats={subChats} onPin={onPin} onStartRename={() => setRenaming(s.id)} onDelete={onDelete} onError={setError} />
+          <SessionActions session={s} subChats={subChats} nested={nested} onPin={onPin} onStartRename={() => setRenaming(s.id)} onDelete={onDelete} onError={setError} />
         </div>
       </li>
   );

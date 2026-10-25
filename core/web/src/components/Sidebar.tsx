@@ -32,7 +32,7 @@ import { titleOf, useSlot, type Registered } from "../extensions/slots";
 import { failedIn } from "../extensions/loader";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { SubChats } from "./SubChats";
-import { familiesFound, familyRunning, shownStatus, splitSubChats, topOf, type ShownStatus } from "../sub-chats";
+import { familiesFound, familyRunning, searchFolderOf, shownStatus, splitSubChats, topOf, type ShownStatus } from "../sub-chats";
 
 /** How many unpinned sessions the sidebar shows before deferring to Sessions. A chat's sub-chats come with it, uncounted. */
 const RECENTS_LIMIT = 12;
@@ -131,12 +131,12 @@ export const Sidebar = memo(function Sidebar({
   // Until the places are known, the chats are listed as they were: not held back for them.
   const byFolder = grouping === "folders" && hasPlaces;
   // The search goes by what the list shows: the name, and the folder's name where the chats are gathered under it.
-  // A pinned chat is listed at the top with no folder next to it, so it is found by its title only.
-  // A sub-chat that is found is shown under its chat (`under`).
+  // A pinned chat is listed at the top with no folder next to it, so it is found by its title only, and so are its
+  // sub-chats. A sub-chat that is found is shown under its chat (`under`).
   const { top: found, under } = useMemo(() => {
     if (!searching) return all;
     const nameOf = byFolder ? folderNameOf(sessions, places) : undefined;
-    return familiesFound(all, filterSessions(sessions, query, nameOf && ((s) => (s.pinned ? "" : nameOf(s)))));
+    return familiesFound(all, filterSessions(sessions, query, nameOf && searchFolderOf(sessions, nameOf)));
   }, [all, sessions, searching, query, byFolder, places]);
   const pinned = found.filter((s) => s.pinned);
   const recents = found.filter((s) => !s.pinned);
@@ -207,12 +207,13 @@ export const Sidebar = memo(function Sidebar({
     if (activeId) pick(list.current?.querySelector(`[data-flip="${CSS.escape(activeId)}"]`));
   }, [activeId]);
 
-  const row = (s: Session, status: ShownStatus, subChats?: readonly Session[]) => (
+  const row = (s: Session, status: ShownStatus, subChats?: readonly Session[], nested = false) => (
     <SessionItem
       key={s.id}
       session={s}
       status={status}
       subChats={subChats}
+      nested={nested}
       active={activeId === s.id}
       onSelect={() => onSelect(s.id)}
       onRename={onRename}
@@ -228,7 +229,7 @@ export const Sidebar = memo(function Sidebar({
       <Fragment key={s.id}>
         {row(s, shownStatus(s, subs), subs)}
         <SubChats title={s.title} subs={under.get(s.id) ?? []} open={openSubs.isOpen(s.id)} onToggle={() => openSubs.toggle(s.id)}>
-          {(c) => row(c, shownStatus(c))}
+          {(c) => row(c, shownStatus(c), undefined, true)}
         </SubChats>
       </Fragment>
     );
@@ -672,6 +673,7 @@ function SessionItem({
   session: s,
   status,
   subChats,
+  nested,
   active,
   onSelect,
   onRename,
@@ -684,6 +686,8 @@ function SessionItem({
   status: ShownStatus;
   /** Its sub-chats, which a delete names. */
   subChats?: readonly Session[];
+  /** It is shown under its chat. */
+  nested: boolean;
   active: boolean;
   onSelect: () => void;
   onRename: (id: string, title: string) => Promise<void>;
@@ -727,7 +731,7 @@ function SessionItem({
           />
         ) : (
           <span
-            className={`truncate text-sm text-fg ${workingText(s.status)}`}
+            className={`truncate text-sm text-fg ${workingText(status)}`}
             onDoubleClick={(e) => {
               e.stopPropagation();
               setRenaming(true);
@@ -739,7 +743,7 @@ function SessionItem({
 
         {/* Without a mouse there is no hover: the open chat's row keeps them. */}
         <div className={`ml-auto hidden shrink-0 items-center gap-0.5 group-focus-within:flex group-hover:flex ${active ? "[@media(hover:none)]:flex" : ""}`}>
-          <SessionActions session={s} subChats={subChats} small onPin={onPin} onStartRename={() => setRenaming(true)} onDelete={onDelete} onError={onError} />
+          <SessionActions session={s} subChats={subChats} nested={nested} small onPin={onPin} onStartRename={() => setRenaming(true)} onDelete={onDelete} onError={onError} />
         </div>
       </div>
     </div>

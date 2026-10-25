@@ -38,6 +38,8 @@ export function SubChats<S extends { id: string }>({
         type="button"
         aria-expanded={open}
         aria-controls={open ? body : undefined}
+        // Several chats have sub-chats: the button says whose, as the group does.
+        aria-label={tp(subs.length, "{n} sub-chat of {name}", "{n} sub-chats of {name}", { name: title })}
         onClick={onToggle}
         className={`flex items-center gap-1 rounded text-fg-subtle hover:text-fg-muted ${md ? "ml-3 px-1 py-0.5 text-xs" : "ml-6 px-1 py-px text-[11px]"}`}
       >

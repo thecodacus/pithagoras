@@ -52,6 +52,17 @@ export function familiesFound<S extends Chat>(all: Families<S>, hits: readonly S
   return { top, under };
 }
 
+/**
+ * The folder name a search matches a chat by, given how folders are named
+ * (`nameOf`): none for a pinned chat, which is listed at the top with no folder
+ * beside it, and none for its sub-chats either, or the folder would find the
+ * pinned chat through them.
+ */
+export function searchFolderOf<S extends Chat & { pinned?: boolean }>(sessions: readonly S[], nameOf: (s: S) => string): (s: S) => string {
+  const pinned = new Set(sessions.filter((s) => s.pinned).map((s) => s.id));
+  return (s) => (s.pinned || (s.parent && pinned.has(s.parent)) ? "" : nameOf(s));
+}
+
 /** How a chat shows in a list: as its status, or as waiting for you. */
 export type ShownStatus = SessionStatus | "asking";
 

@@ -59,6 +59,7 @@ const de: Locale = {
     "Its {n} sub-chats are deleted with it: {names}.": { one: "Sein Unterchat {names} wird mit gelöscht.", other: "Seine {n} Unterchats werden mit gelöscht: {names}." },
     // SubChats.tsx
     "{n} sub-chats": { one: "{n} Unterchat", other: "{n} Unterchats" },
+    "{n} sub-chats of {name}": { one: "{n} Unterchat von {name}", other: "{n} Unterchats von {name}" },
     "Sub-chats of {name}": "Unterchats von {name}",
     "Delete": "Löschen",
     "Agent": "Agent",

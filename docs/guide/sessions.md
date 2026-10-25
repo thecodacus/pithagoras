@@ -504,12 +504,16 @@ ringed dot while one waits for you, with a dialog or a question
 ([Status dots](#status-dots)) — on a page nobody may have open. A sub-chat has
 no pin; it is listed where its chat is. A search finds a sub-chat by its name
 and shows it under its chat; a chat found by its own name shows all its
-sub-chats.
+sub-chats. A search by a folder's name does not find a pinned chat through its
+sub-chats: a pinned chat is found by its title only.
 
 Deleting a chat deletes its sub-chats, and the chats its extension keeps out of
 the lists, with it: the question before it names the sub-chats. A sub-chat can
 be deleted on its own. One whose chat is not in the list — a conversation that
-came through a channel, say — is listed as a chat of its own.
+came through a channel, say — is listed as a chat of its own, and is treated as
+one: it can be pinned, and its run ending is told. An agent's page lists its
+conversations the same way, a sub-chat under its conversation and not counted
+with them.
 
 ## Using a phone
 

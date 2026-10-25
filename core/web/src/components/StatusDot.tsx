@@ -1,4 +1,3 @@
-import type { SessionStatus } from "../api";
 import { labelOf, msg } from "../i18n";
 import type { ShownStatus } from "../sub-chats";
 
@@ -43,5 +42,5 @@ export function StatusDot({
   return bare ? mark : <span className={`status-slot ${className}`}>{mark}</span>;
 }
 
-/** A chat's title while it works: it shimmers, as "Thinking" does in the chat. */
-export const workingText = (status: SessionStatus) => (status === "running" ? "working-text" : "");
+/** A chat's title while it works, as its row shows it (see shownStatus): it shimmers, as "Thinking" does in the chat. */
+export const workingText = (status: ShownStatus) => (status === "running" ? "working-text" : "");

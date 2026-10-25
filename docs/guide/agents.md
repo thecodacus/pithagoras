@@ -28,7 +28,8 @@ agent of another name is left alone: the new one gets the next free name,
 A card opens that agent (`/agents?agent=research-bot`), with **New
 conversation** to start a chat with it, the same as the **+** on its folder in the
 sidebar, and six tabs: **Conversations** (every chat in its home, however it was
-started, and the number above it counts them all),
+started, and the number above it counts them all; the [sub-chats](/guide/sessions#sub-chats) of a
+conversation are under it, not counted),
 **Activity** (what its heartbeat noticed, with the number unread),
 **Heartbeat**, **Tools** (see [below](#tools)), **Skills** and **Files** to edit. The tab is kept in the link (`&tab=files`). Its avatar is at
 the top beside its name; the palette on it opens the avatar customizer, which

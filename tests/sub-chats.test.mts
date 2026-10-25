@@ -1,10 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { familiesFound, familyRunning, shownStatus, splitSubChats, topOf } from "../core/web/src/sub-chats.ts";
+import { familiesFound, familyRunning, searchFolderOf, shownStatus, splitSubChats, topOf } from "../core/web/src/sub-chats.ts";
 import { groupByFolder } from "../core/web/src/session-folders.ts";
 import { filterSessions } from "../core/web/src/session-filter.ts";
 
-type Chat = { id: string; title: string; workspace: string; updated_at: string; status: "idle" | "running" | "error" | "interrupted"; parent?: string; asking?: boolean };
+type Chat = { id: string; title: string; workspace: string; updated_at: string; status: "idle" | "running" | "error" | "interrupted"; parent?: string; asking?: boolean; pinned?: boolean };
 const chat = (id: string, extra: Partial<Chat> = {}): Chat => ({ id, title: id, workspace: "/w/site", updated_at: "2026-10-01", status: "idle", ...extra });
 
 const list = [
@@ -75,4 +75,15 @@ test("the chat that holds a sub-chat is found by either id", () => {
   assert.equal(topOf(all, "build")?.id, "build");
   assert.equal(topOf(all, "gone"), undefined);
   assert.equal(topOf(all, null), undefined);
+});
+
+test("a search by folder does not find a pinned chat through its sub-chats", () => {
+  const chats = [
+    chat("notes", { title: "Notes", pinned: true }),
+    chat("draft", { title: "Draft", parent: "notes" }),
+    chat("plan", { title: "Plan" }),
+  ];
+  const folderOf = searchFolderOf(chats, () => "Billing");
+  assert.deepEqual(ids(familiesFound(splitSubChats(chats), filterSessions(chats, "billing", folderOf)).top), ["plan"]);
+  assert.deepEqual(ids(familiesFound(splitSubChats(chats), filterSessions(chats, "draft", folderOf)).top), ["notes"], "its title still finds it");
 });

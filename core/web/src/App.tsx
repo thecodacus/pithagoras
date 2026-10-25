@@ -26,6 +26,7 @@ import { usePlaces } from "./use-session-folders";
 import { fancy, keep, swapPages, type Leave } from "./motion";
 import { reconcile } from "./reconcile";
 import { useStable } from "./use-stable";
+import { splitSubChats } from "./sub-chats";
 import { useDialogFocus } from "./dialog-focus";
 import { t, useLanguage } from "./i18n";
 import { followInstalled, Here, setNavigate, startExtensions } from "./extensions/loader";
@@ -283,7 +284,7 @@ function Shell({
   useEffect(() => {
     if (!sessionsAsked || sessionId || settings || view !== "chat") return;
     // A chat of its own, not a sub-chat, which is listed under its chat.
-    const first = latestSessions.current.find((s) => !s.parent);
+    const first = splitSubChats(latestSessions.current).top[0];
     if (first) navigate(`/s/${first.id}`, { replace: true });
   }, [sessionsAsked, sessionId, settings, view]);
 
@@ -640,11 +641,13 @@ function Shell({
   const onDeleteChat = useStable(async (id: string) => {
     const gone = sessions.find((s) => s.id === id);
     // The chat open is this one, or one of its sub-chats, which go with it.
-    const open = sessionId === id || (!!sessionId && sessions.find((s) => s.id === sessionId)?.parent === id);
+    // It need not be listed: a sub-chat an extension keeps out of the list is fetched by its id (`active`).
+    const open = sessionId === id || active?.parent === id;
     await api.deleteSession(id);
     const list = await refreshSessions();
-    // A sub-chat gone takes its page back to its chat; a chat gone, to the latest chat of its own.
-    const next = gone?.parent ?? list.find((s) => !s.parent)?.id;
+    // A sub-chat gone takes its page back to its chat, if that is listed; a chat gone, to the latest chat of its own.
+    const parent = gone?.parent;
+    const next = parent && sessions.some((s) => s.id === parent) ? parent : splitSubChats(list).top[0]?.id;
     if (open) navigate(next ? `/s/${next}` : "/", { replace: true });
   });
   const onRenameChat = useStable(async (id: string, title: string) => {

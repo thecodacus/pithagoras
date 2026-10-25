@@ -15,7 +15,7 @@ const NAMED_SUB_CHATS = 5;
  * they are shut.
  */
 export function confirmDeleteSession(title: string, channel = false, subChats: readonly { title: string }[] = []): Promise<boolean> {
-  const named = subChats.slice(0, NAMED_SUB_CHATS).map((c) => `“${c.title}”`);
+  const named = subChats.slice(0, NAMED_SUB_CHATS).map((c) => `"${c.title}"`);
   const names = subChats.length > named.length ? [...named, "…"].join(", ") : named.join(", ");
   return confirmDialog({
     title: t("Delete \"{name}\"?", { name: title }),
@@ -47,11 +47,12 @@ export function sessionError(what: "pin" | "unpin" | "rename" | "delete", name: 
  * `onError` instead of being a promise nobody catches. `onError(null)` is the
  * start of the next try. The row is the nearest element with `data-flip`;
  * deleting it leaves a picture of it behind to break apart (see motion.ts).
- * A sub-chat is listed under its chat wherever that is, so it has no pin.
+ * A sub-chat shown under its chat is listed wherever that is, so it has no pin.
  */
 export function SessionActions({
   session: s,
   subChats,
+  nested = false,
   small = false,
   onPin,
   onStartRename,
@@ -61,6 +62,8 @@ export function SessionActions({
   session: Session;
   /** Its sub-chats, which a delete takes with it, and names. */
   subChats?: readonly Session[];
+  /** It is shown under its chat, which is where it is pinned. */
+  nested?: boolean;
   /** The sidebar's size; the Sessions page has room for more. */
   small?: boolean;
   onPin: (id: string, pinned: boolean) => Promise<void>;
@@ -72,7 +75,7 @@ export function SessionActions({
   const icon = small ? "h-3 w-3" : "h-3.5 w-3.5";
   return (
     <>
-      {!s.parent && (
+      {!nested && (
         <button
           type="button"
           onClick={(e) => {
