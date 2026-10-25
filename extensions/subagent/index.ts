@@ -157,8 +157,7 @@ const GRACE_MS = () => Number(process.env.PI_SUBAGENT_GRACE_MS) || 5000;
 
 /**
  * What the tool tells the model: the mode it runs in and how many run at
- * once, so it does not ask for more than will start and sets a timeout that
- * counts the wait.
+ * once, so it does not ask for more than will start.
  */
 export function describe(mode: Mode, limit: number): string {
   const room = limit === 1 ? "One runs at a time: further calls wait for it to finish." : `At most ${limit} run at once; further calls wait for a free one.`;
@@ -378,12 +377,13 @@ export default function (pi: any) {
           }
         })();
         // The takeSlot above has taken its place by now: a free slot is counted as running, a full one as waiting.
-        const counts = `${Math.min(slots.running, subagentLimit())} of ${subagentLimit()} running${waiting ? `, ${slots.waiting.length} waiting, this one included` : ""}`;
+        // More can run than the limit now says when it was lowered meanwhile, and that is what is reported.
+        const counts = `${slots.running} of ${subagentLimit()} running${waiting ? `, ${slots.waiting.length} waiting, this one included` : ""}`;
         return {
           content: [{
             type: "text",
             text: waiting
-              ? `Queued subagent "${label}" in the background (${counts}); it starts when one finishes. Its answer will arrive as a message when it is done; go on with other work meanwhile.`
+              ? `Queued subagent "${label}" in the background (${counts}); it starts when a slot is free. Its answer will arrive as a message when it is done; go on with other work meanwhile.`
               : `Started subagent "${label}" in the background (${counts}). Its answer will arrive as a message when it is done; go on with other work meanwhile.`,
           }],
           details: { phase: waiting ? "queued" : "background" },
@@ -413,7 +413,7 @@ export default function (pi: any) {
         signal?.removeEventListener("abort", stopped);
         if (failure) throw new Error(`The subagent could not start: ${failure}`);
         if (status === "error" && !answer) throw new Error("The subagent could not run — is `pi` on PATH? (PI_SUBAGENT_BIN)");
-        // Said at the end, so a timeout the model set can be judged: the wait was not the subagent's work.
+        // Said at the end, so the model can tell the wait from the subagent's own work time when it judges how long the task took.
         const note = hadToWait ? `\n\n(It waited ${waited(startedAt - queuedAt)} for a free subagent slot before it started.)` : "";
         return { content: [{ type: "text", text: (answer || "(the subagent gave no answer)") + note }], details: { phase: status } };
       } finally {

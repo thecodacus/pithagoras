@@ -28,6 +28,8 @@ require('node:readline').createInterface({input:process.stdin}).on('line',l=>{co
  if(c.type==='prompt'&&process.env.FAKE==='noisy'){process.stderr.write('warning: '.repeat(40000));out({type:'agent_start'});say('done despite the noise');out({type:'agent_end'});out({type:'agent_settled'});return;}
  if(c.type==='prompt'){out({type:'agent_start'});
   if(process.env.FAKE==='hang'){say('half of it');return;}
+  // A long run, for a second call that waits behind it.
+  if(process.env.FAKE==='slow'){setTimeout(()=>{say('the whole answer');out({type:'agent_end'});out({type:'agent_settled'});},1300);return;}
   say('');out({type:'agent_end',willRetry:true});
   setTimeout(()=>{out({type:'agent_start'});say('the whole answer');out({type:'agent_end'});out({type:'agent_settled'});},50);}
  if(c.type==='abort'){out({type:'agent_end'});out({type:'agent_settled'});}
@@ -389,14 +391,36 @@ test('a background call says how many are running and waiting, and a queue says 
  await until(()=>ends.length>=4);
  mode();
 });
-test('an interrupt call that had to wait says how long, and one that did not says nothing',{timeout:5000},async()=>{
+test('an interrupt call that had to wait says how long, and one that did not says nothing',{timeout:8000},async()=>{
  delete process.env.FAKE;mode();
- const {tool}=load();
+ const {tool,seen}=load();
  const alone=await tool.execute('a',{task:'one'},undefined,undefined,{cwd:dir});
  assert.equal(alone.content[0].text,'the whole answer');
- const both=await Promise.all([tool.execute('b',{task:'one'},undefined,undefined,{cwd:dir}),tool.execute('c',{task:'two'},undefined,undefined,{cwd:dir})]);
+ // The first run takes over a second and the second is quick, so the note has to tell the wait from the second's own run.
+ process.env.FAKE='slow';
+ const first=tool.execute('b',{task:'one'},undefined,undefined,{cwd:dir});
+ await until(()=>seen.includes('start b'));
+ delete process.env.FAKE;
+ const second=tool.execute('c',{task:'two'},undefined,undefined,{cwd:dir});
+ const both=await Promise.all([first,second]);
  assert.equal(both[0].content[0].text,'the whole answer');
- assert.match(both[1].content[0].text,/^the whole answer\n\n\(It waited (under a second|\d+ s) for a free subagent slot before it started\.\)$/);
+ assert.match(both[1].content[0].text,/^the whole answer\n\n\(It waited [12] s for a free subagent slot before it started\.\)$/);
+});
+test('after the limit is lowered, a background call reports how many really run',{timeout:5000},async()=>{
+ process.env.FAKE='hang';mode('background',{subagentMaxParallel:3});
+ const {tool,events,ends}=load();
+ const ids:string[]=[];events.on('subagent:v1:start',(d:any)=>ids.push(d.id));
+ for(const label of ['a','b','c'])await tool.execute(label,{task:'x',label},undefined,undefined,{cwd:dir});
+ mode('background',{subagentMaxParallel:1});
+ const d=await tool.execute('d',{task:'x',label:'d'},undefined,undefined,{cwd:dir});
+ assert.match(d.content[0].text,/Queued subagent "d" in the background \(3 of 1 running, 1 waiting, this one included\); it starts when a slot is free/);
+ for(const id of ids)events.emit('subagent:v1:stop',{id});
+ await until(()=>ends.length>=3);
+ // The queued one starts once the others are gone; stop it too.
+ await until(()=>ids.length>=4);
+ events.emit('subagent:v1:stop',{id:ids[3]});
+ await until(()=>ends.length>=4);
+ mode();
 });
 test('a wait is said in the units a person uses',()=>{
  assert.equal(waited(400),'under a second');
