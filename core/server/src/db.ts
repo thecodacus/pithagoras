@@ -17,7 +17,9 @@ import { handoffRoot, leaveHandoff, moveFolderTo, moveTo } from "./handoff.js";
 import { RUNS_AS_PRIMARY } from "./pi/runs-as-primary.js";
 import { CODEMODE_TOOL } from "./pi/codemode.js";
 import { INLINE_EXTENSIONS } from "./pi/inline-extensions.js";
-import { CORE_MODES, CUSTOM, type ChatModeEntry } from "./chat-modes.js";
+import { CORE_MODES, CUSTOM, providedModes, type ChatModeEntry } from "./chat-modes.js";
+import { EXECUTOR_KIND } from "./executor-kind.js";
+import { asksQuestions } from "./pi/ask-question.js";
 import { freeSlug } from "./slug.js";
 import { SCHEMA_VERSION, dbFile } from "./schema-version.js";
 import { debugLog } from "./logs.js";
@@ -82,6 +84,15 @@ export interface SessionRow {
   tools_on: string;
   /** The mode it was started in (chat-modes.ts); null is Standard. */
   mode: string | null;
+  /**
+   * The chat this one is a child of (a sub-chat a server half made: `chats.create`), or null for a chat of its own.
+   * One level only: a child has no children.
+   */
+  parent_id: string | null;
+  /** 0 for a child kept out of the chat lists, found only by its id; 1 for every other chat. */
+  listed: number;
+  /** The package whose server half made this child, which alone may prompt, stop or remove it; null for any other chat. */
+  creator: string | null;
 }
 
 /**
@@ -1020,6 +1031,13 @@ function migrate(d: Database.Database): void {
   }
   // The mode a chat works in (chat-modes.ts): NULL is Standard, which every chat before schema 11 was.
   if (!names.includes("mode")) d.exec("ALTER TABLE sessions ADD COLUMN mode TEXT");
+  // Child chats (schema 12): the chat a server half made one for, whether it is in the chat lists, and the package that
+  // made it. Every chat before was one of its own, and listed.
+  if (!names.includes("parent_id")) d.exec("ALTER TABLE sessions ADD COLUMN parent_id TEXT");
+  if (!names.includes("listed")) d.exec("ALTER TABLE sessions ADD COLUMN listed INTEGER NOT NULL DEFAULT 1");
+  if (!names.includes("creator")) d.exec("ALTER TABLE sessions ADD COLUMN creator TEXT");
+  // A chat's children are looked up as it is deleted, and as its pi asks whether one of them still works.
+  d.exec("CREATE INDEX IF NOT EXISTS idx_sessions_parent ON sessions(parent_id) WHERE parent_id IS NOT NULL");
   // Versions kept before pi's file was kept as the part after a checked start:
   // one could not tell whether the conversation it would go back to was still
   // there. Only ever on a test deploy; and the reload markers stored then.
@@ -1215,11 +1233,25 @@ export function createSession(row: {
   channel_key?: string | null;
   routine_slug?: string | null;
   auto_title?: number;
+  /** A child chat's (see child-chats.ts): what it starts from, taken from its parent. */
+  parent_id?: string | null;
+  listed?: number;
+  creator?: string | null;
+  role?: SessionRow["role"];
+  last_person_key?: string | null;
+  mode?: string | null;
+  provider?: string | null;
+  model?: string | null;
+  thinking_level?: string | null;
+  tools_off?: string;
+  tools_on?: string;
 }): void {
   getDb()
     .prepare(
-      `INSERT INTO sessions (id, title, workspace, executor, kind, channel_slug, channel_key, routine_slug, auto_title)
-       VALUES (@id, @title, @workspace, @executor, @kind, @channel_slug, @channel_key, @routine_slug, @auto_title)`
+      `INSERT INTO sessions (id, title, workspace, executor, kind, channel_slug, channel_key, routine_slug, auto_title,
+                             parent_id, listed, creator, role, last_person_key, mode, provider, model, thinking_level, tools_off, tools_on)
+       VALUES (@id, @title, @workspace, @executor, @kind, @channel_slug, @channel_key, @routine_slug, @auto_title,
+               @parent_id, @listed, @creator, @role, @last_person_key, @mode, @provider, @model, @thinking_level, @tools_off, @tools_on)`
     )
     .run({
       kind: "task",
@@ -1227,16 +1259,35 @@ export function createSession(row: {
       channel_slug: null,
       channel_key: null,
       routine_slug: null,
+      parent_id: null,
+      listed: 1,
+      creator: null,
+      role: "primary",
+      last_person_key: null,
+      mode: null,
+      provider: null,
+      model: null,
+      thinking_level: null,
+      tools_off: "",
+      tools_on: "",
       ...row,
     });
 }
 
-/** The sessions you create yourself. Agent sessions have their own tab. */
+/** A child chat that is kept out of the lists: it is found by its id alone. */
+const UNLISTED = "parent_id IS NOT NULL AND listed = 0";
+
+/** The sessions you create yourself, and the children of chats that are listed. Agent sessions have their own tab. */
 export function listSessions(): SessionRow[] {
   // Pinned first, then most recently touched — the order the sidebar shows.
   return getDb()
-    .prepare("SELECT * FROM sessions WHERE kind = 'task' ORDER BY pinned DESC, updated_at DESC")
+    .prepare(`SELECT * FROM sessions WHERE kind = 'task' AND NOT (${UNLISTED}) ORDER BY pinned DESC, updated_at DESC`)
     .all() as SessionRow[];
+}
+
+/** The children of a chat, listed or not: see child-chats.ts. */
+export function childSessions(parentId: string): SessionRow[] {
+  return getDb().prepare("SELECT * FROM sessions WHERE parent_id = ? ORDER BY created_at, id").all(parentId) as SessionRow[];
 }
 
 /**
@@ -1251,11 +1302,12 @@ export function sessionsByWorkspace(): SessionRow[] {
 /**
  * The chats the sidebar lists: the tasks, and the conversations started on the
  * Agent page, which are chats with that agent like any other. Those that came
- * through a channel stay on the Agent page.
+ * through a channel stay on the Agent page. A child chat is listed where it
+ * was made to be (its parent named on it), and left out otherwise.
  */
 export function listChatSessions(): SessionRow[] {
   return getDb()
-    .prepare("SELECT * FROM sessions WHERE kind = 'task' OR (kind = 'agent' AND channel_slug = ?) ORDER BY pinned DESC, updated_at DESC")
+    .prepare(`SELECT * FROM sessions WHERE (kind = 'task' OR (kind = 'agent' AND channel_slug = ?)) AND NOT (${UNLISTED}) ORDER BY pinned DESC, updated_at DESC`)
     .all(BROWSER_CHANNEL) as SessionRow[];
 }
 
@@ -1331,6 +1383,8 @@ export function updateSession(
       | "auto_title"
       | "pi_session_file"
       | "mode"
+      | "role"
+      | "last_person_key"
     >
   >
 ): void {
@@ -1353,6 +1407,9 @@ export const deleteSession = (id: string): void => getDb().transaction(() => rem
 
 function removeSession(id: string): void {
   const d = getDb();
+  // Its children go with it, in the same transaction: a child is the chat's own work, and has nothing to go on from
+  // without it. One level only, so a child has none of its own.
+  for (const child of childSessions(id)) removeSession(child.id);
   d.prepare("DELETE FROM events WHERE session_id = ?").run(id);
   d.prepare("DELETE FROM message_versions WHERE session_id = ?").run(id);
   d.prepare("DELETE FROM sessions WHERE id = ?").run(id);
@@ -1552,6 +1609,18 @@ export const customEntry = (row: ChatModeRow): ChatModeEntry => ({
   ...(row.model ? { model: row.model } : {}),
   ...(row.thinking_level ? { thinkingLevel: row.thinking_level } : {}),
 });
+
+/**
+ * The modes a chat may be put in: none where it may not choose. A chat with the person on the portal's pages (a task
+ * chat or an Agent-page chat, of the primary user: see asksQuestions), where pi runs in the portal's own process: a
+ * mode is carried out where the portal starts a chat's pi, which a container's pi is not. The portal's own first,
+ * then the ones the person made, by their names, then the extensions' in the order they were offered.
+ */
+export function modesFor(session: Pick<SessionRow, "kind" | "role" | "channel_slug">): readonly ChatModeEntry[] {
+  return EXECUTOR_KIND === "host" && asksQuestions(session, onChannel(session))
+    ? [...CORE_MODES, ...customModes().map(customEntry), ...providedModes()]
+    : [];
+}
 
 /** A chat's mode, as it stores it: none for Standard, and none for one that is not there now. */
 export function modeOf(stored: string | null | undefined): ChatModeEntry | undefined {

@@ -284,3 +284,17 @@ export function titleFrom(message: string): string | undefined {
 
 /** The name a chat has until its first message names it. */
 export const NEW_CHAT_TITLE = "New chat";
+
+/** The longest name a chat can be given: what the rename field takes. */
+const MAX_TITLE = 120;
+
+/**
+ * A name as it is kept: on one line and no longer than the field allows, however
+ * it came in — the rename field, /name, a chat made through the API, or a child
+ * chat a server half made. By character, so an emoji at the cut is not left in
+ * halves. Empty when there is no name in it.
+ */
+export const cleanTitle = (raw: unknown): string =>
+  typeof raw === "string"
+    ? Array.from(raw.replace(/\s+/g, " ").trim()).slice(0, MAX_TITLE).join("").trimEnd()
+    : "";

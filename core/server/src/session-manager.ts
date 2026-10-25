@@ -4,7 +4,7 @@ import type { Timings } from "./llama-progress.js";
 import { toolCallEnded, toolCallsCutOff, toolCallStarted } from "./tool-debug.js";
 import { ModelErrors, plainFailure } from "./model-errors.js";
 import { EventEmitter } from "node:events";
-import { hasPrimary, type PersonRow, type Role } from "./people.js";
+import { hasPrimary, lower, type PersonRow, type Role } from "./people.js";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { agentHome } from "./agent-home.js";
 import { agentAt } from "./agents.js";
@@ -99,7 +99,10 @@ import {
   lazyMarks,
   lazyToolNames,
   lazySetLabels,
+  childSessions,
+  deleteSession,
 } from "./db.js";
+import { newChildChat, type ChildRun } from "./child-chats.js";
 
 /**
  * Thinking markers that escape into the answer.
@@ -1961,10 +1964,9 @@ class SessionManager extends EventEmitter {
     if (this.isBusy(sessionId) || this.compacting.has(sessionId)) {
       throw new SessionEditError("busy", "Stop the run first — the agent is still working.");
     }
-    // Editing restarts the chat's pi, which a subagent in the background goes with.
-    if (this.backgroundWork(sessionId)) {
-      throw new SessionEditError("busy", "A subagent is still working in the background here. Wait for its answer, or stop it, first.");
-    }
+    // Editing restarts the chat's pi, which a subagent in the background goes with, and one of its child chats waits on.
+    const working = this.stillWorking(sessionId);
+    if (working) throw new SessionEditError("busy", working);
 
     const sent = sentMessages(sessionId);
     const ordinal = sent.findIndex((m) => m.seq === seq);
@@ -2021,9 +2023,8 @@ class SessionManager extends EventEmitter {
       throw e;
     }
     const undo = async () => {
-      if (this.backgroundWork(sessionId)) {
-        throw new SessionEditError("busy", "A subagent is still working in the background here. Wait for its answer, or stop it, first.");
-      }
+      const working = this.stillWorking(sessionId);
+      if (working) throw new SessionEditError("busy", working);
       // A client started since would hold the edited conversation in memory.
       await this.settleStart(sessionId);
       await this.stop(sessionId);
@@ -2619,9 +2620,24 @@ class SessionManager extends EventEmitter {
     return this.speaker.get(sessionId);
   }
 
-  /** Whether a subagent is working in the background here: its chat looks idle, and stopping it would end the subagent. */
+  /**
+   * Whether a subagent is working in the background here, or one of the chat's child chats is (see child-chats.ts):
+   * its chat looks idle, and stopping it, or loading it again, would end the subagent or cut off what waits on the child.
+   */
   backgroundWork(sessionId: string): boolean {
-    return (this.live.get(sessionId)?.client.subagentsRunning?.() ?? 0) > 0;
+    return (this.live.get(sessionId)?.client.subagentsRunning?.() ?? 0) > 0 || this.childWorking(sessionId);
+  }
+
+  /** Whether a child chat of this one has a run going, or a message on its way to one. */
+  private childWorking(sessionId: string): boolean {
+    return childSessions(sessionId).some((child) => this.isBusy(child.id) || this.prompting.has(child.id));
+  }
+
+  /** Why an edit of the chat has to wait for what works in its background, or nothing. */
+  private stillWorking(sessionId: string): string | undefined {
+    if ((this.live.get(sessionId)?.client.subagentsRunning?.() ?? 0) > 0) return "A subagent is still working in the background here. Wait for its answer, or stop it, first.";
+    if (this.childWorking(sessionId)) return "A child chat of this chat is still working. Wait for it to finish, or stop it, first.";
+    return undefined;
   }
 
   /** Whether anything at all is using the model: a turn running, or a message waiting for one. */
@@ -3183,6 +3199,12 @@ class SessionManager extends EventEmitter {
    */
   async discard(sessionId: string): Promise<void> {
     this.discarding.add(sessionId);
+    // Its child chats first, which go with it: a run of one is stopped before the parent's own, which may be waiting
+    // on it. Remembered, for their files and for a delete that did not go through: by then their rows may be gone.
+    // None can be made from here on (createChild).
+    const children = childSessions(sessionId).map((child) => child.id);
+    if (children.length) this.discardedChildren.set(sessionId, children);
+    for (const child of children) await this.discard(child);
     await this.settleStart(sessionId);
     await this.abort(sessionId).catch(() => {});
     // A prompt can have started a launch while the abort was being waited for.
@@ -3197,8 +3219,15 @@ class SessionManager extends EventEmitter {
    * Safe for one that did, whose rows are gone.
    */
   reopen(sessionIds: Iterable<string>): void {
-    for (const id of sessionIds) this.discarding.delete(id);
+    for (const id of sessionIds) {
+      this.discarding.delete(id);
+      this.reopen(this.discardedChildren.get(id) ?? []);
+      this.discardedChildren.delete(id);
+    }
   }
+
+  /** The child chats of a chat being deleted, by the chat: see discard. */
+  private discardedChildren = new Map<string, string[]>();
 
   private refuseIfDiscarded(sessionId: string): void {
     if (this.discarding.has(sessionId)) throw new Error("This chat is being deleted");
@@ -3210,6 +3239,9 @@ class SessionManager extends EventEmitter {
    * one a container wrote as another user — is a leftover, not an error.
    */
   removeFiles(sessionId: string): void {
+    // Its child chats' first, which went with its rows: each is told to the server halves as deleted, as it is.
+    for (const child of this.discardedChildren.get(sessionId) ?? []) this.removeFiles(child);
+    this.discardedChildren.delete(sessionId);
     this.discarding.delete(sessionId);
     this.drafts.delete(sessionId);
     this.stops.delete(sessionId);
@@ -3226,6 +3258,106 @@ class SessionManager extends EventEmitter {
       } catch (e) {
         console.error(`[portal] could not remove the ${what} of session ${sessionId}:`, (e as Error).message);
       }
+    }
+  }
+
+  /**
+   * Deletes a chat, its child chats with it: its runs stopped and its pi let go, then its rows, then its files. A
+   * delete that fails part way leaves the chat (and its children) taking messages again, as they were.
+   */
+  async deleteChat(sessionId: string): Promise<void> {
+    try {
+      await this.discard(sessionId);
+      deleteSession(sessionId);
+    } catch (e) {
+      this.reopen([sessionId]);
+      throw e;
+    }
+    this.removeFiles(sessionId);
+  }
+
+  /**
+   * Makes a child chat for the server half of `creator`: see child-chats.ts. Not of a chat that is being deleted,
+   * which would leave the child's pi and files behind it.
+   */
+  createChild(options: unknown, creator: string): SessionRow {
+    const parent = (options as { parent?: unknown } | null | undefined)?.parent;
+    if (typeof parent === "string" && this.discarding.has(parent)) throw new Error("This chat is being deleted");
+    return newChildChat(options, creator);
+  }
+
+  /**
+   * Sends a child chat a message and waits for the run that takes it in to end: how it ended, and the last thing it
+   * said. Mid-run, `steer` takes it in after the step the run is on; without, it waits for the run to end, as a
+   * person's message does. It is sent as the person its parent last heard from: a child is held to the role and the
+   * person of the chat it works for. A run that fails, or a message refused, resolves as an error: it never throws
+   * for the run's sake.
+   */
+  async runChild(childId: string, message: string, options: { steer?: boolean } = {}): Promise<ChildRun> {
+    const child = getSession(childId);
+    const parent = child?.parent_id ? getSession(child.parent_id) : undefined;
+    if (!child || !parent) throw new Error(`There is no child chat ${childId}`);
+    const person = this.speaker.get(parent.id);
+    if (person) this.setSpeaker(childId, person);
+    const role = lower(child.role, this.speakerRole(parent.id));
+    if (role !== child.role || parent.last_person_key !== child.last_person_key) {
+      updateSession(childId, { role, last_person_key: parent.last_person_key });
+      // Its context files are picked by its role as its pi starts: one that was up has to start again. Not mid-run,
+      // where the role of the speaker set above holds every call.
+      if (role !== child.role && !this.isBusy(childId)) await this.stop(childId);
+    }
+
+    let end!: (run: ChildRun) => void;
+    const ended = new Promise<ChildRun>((resolve) => (end = resolve));
+    let mine: number | undefined;
+    // Its message is in the run that is going: what is said from here is said to it.
+    let inRun = false;
+    let answer = "";
+    let failure: string | undefined;
+    const finish = (status: ChildRun["status"], error?: string) => end({ status, answer, ...(error ? { error } : {}) });
+    const key = `session:${childId}`;
+    const hear = (row: { seq?: number; type: string; payload: string }) => {
+      let p: any = {};
+      try {
+        p = JSON.parse(row.payload);
+      } catch {
+        return;
+      }
+      if (row.type === "portal_prompt" && mine === undefined && p.message === message) {
+        mine = row.seq;
+        // Sent while the chat was idle, it starts the run; sent into one, it waits until pi takes it in.
+        if (!p.queued) inRun = true;
+      } else if (row.type === "portal_taken" && mine !== undefined && p.seq === mine) inRun = true;
+      else if (row.type === "portal_unsent" && mine !== undefined && Array.isArray(p.seqs) && p.seqs.includes(mine)) finish("stopped", "It was stopped before the chat read the message");
+      else if (!inRun) return;
+      else if (row.type === "message_end" && p.message?.role === "assistant") {
+        if (p.message.stopReason === "error") failure = String(p.message.errorMessage ?? "The model answered with an error");
+        else {
+          failure = undefined;
+          const said = (Array.isArray(p.message.content) ? p.message.content : []).filter((c: any) => c?.type === "text").map((c: any) => c.text).join("");
+          if (said.trim()) answer = said;
+        }
+      } else if (row.type === "portal_status" && p.status === "error") finish("error", String(p.error ?? failure ?? "The run failed"));
+      else if (row.type === "portal_status" && p.status === "idle") finish(p.aborted ? "stopped" : failure ? "error" : "done", failure);
+    };
+    this.on(key, hear);
+    try {
+      let sent: boolean;
+      try {
+        sent = await this.prompt(childId, message, options.steer ? { steer: true } : undefined);
+      } catch (e) {
+        finish("error", (e as Error).message);
+        return await ended;
+      }
+      if (!sent) finish("stopped", "It was stopped before the message was sent");
+      // A command, which is no message of the chat's: what follows is its doing, and one that did not start a run is over.
+      else if (mine === undefined) {
+        inRun = true;
+        if (getSession(childId)?.status !== "running") finish("done");
+      }
+      return await ended;
+    } finally {
+      this.off(key, hear);
     }
   }
 
@@ -3286,6 +3418,10 @@ class SessionManager extends EventEmitter {
 export const sessions = new SessionManager();
 setChatBridge({
   tell: (chatId, extension, data) => sessions.tellExtension(chatId, extension, data),
+  create: (options, creator) => sessions.createChild(options, creator),
+  run: (chatId, message, options) => sessions.runChild(chatId, message, options),
+  abort: (chatId) => sessions.abort(chatId),
+  remove: (chatId) => sessions.deleteChat(chatId),
   offers: (chatId, tool) => sessions.toolOffered(chatId, tool),
   reload: () => sessions.reloadIdle(),
   model: (chatId) => sessions.currentModel(chatId),

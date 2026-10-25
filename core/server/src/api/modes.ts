@@ -1,43 +1,28 @@
 import express, { type Router } from "express";
-import { CORE_MODES, CUSTOM, providedModes, STANDARD, type ChatModeEntry } from "../chat-modes.js";
+import { CUSTOM, STANDARD } from "../chat-modes.js";
 import {
   chatSaid,
   createCustomMode,
-  customEntry,
   customMode,
   customModeTools,
   customModes,
   deleteCustomMode,
   getSession,
   modeOf,
-  onChannel,
+  modesFor,
   recordAudit,
   setCustomModeTools,
   toolDefaultsOff,
   updateCustomMode,
   updateSession,
   type ChatModeRow,
-  type SessionRow,
 } from "../db.js";
 import { EXECUTOR_KIND } from "../executor-kind.js";
-import { asksQuestions } from "../pi/ask-question.js";
 import { SessionEditError } from "../pi/session-edit.js";
 import { sessions } from "../session-manager.js";
 import { isToolList, layerExceptions, layerTools, toolsUnsupported } from "../tool-layers.js";
 import { defaultsFor, toolEnabled } from "../tool-policy.js";
 import { CODEMODE_TOOL } from "../pi/codemode.js";
-
-/**
- * The modes a chat may be put in: none where it may not choose. A chat with the person on the portal's pages (a task
- * chat or an Agent-page chat, of the primary user: see asksQuestions), where pi runs in the portal's own process: a
- * mode is carried out where the portal starts a chat's pi, which a container's pi is not. The portal's own first,
- * then the ones the person made, by their names, then the extensions' in the order they were offered.
- */
-export function modesFor(session: SessionRow): readonly ChatModeEntry[] {
-  return EXECUTOR_KIND === "host" && asksQuestions(session, onChannel(session))
-    ? [...CORE_MODES, ...customModes().map(customEntry), ...providedModes()]
-    : [];
-}
 
 const STARTED = "This chat has started, and its mode is fixed: start a new chat for another one.";
 

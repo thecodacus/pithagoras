@@ -127,6 +127,7 @@ import { getBuiltinCommands, picturesRefused } from "./pi/builtins.js";
 import { SessionEditError } from "./pi/session-edit.js";
 import {
   NEW_CHAT_TITLE,
+  cleanTitle,
   ProjectError,
   createProject,
   deleteProjectFolder,
@@ -870,23 +871,13 @@ app.delete("/api/agents/:id", async (req, res) => {
 
 // --- sessions ---
 
-/** The longest name a chat can be given: what the rename field takes. */
-const MAX_TITLE = 120;
-
 /**
- * A name as it is kept: on one line and no longer than the field allows, however
- * it came in — the rename field, /name, or a chat made through the API. By
- * character, so an emoji at the cut is not left in halves. Empty when there is
- * no name in it.
+ * SQLite stores pinned as 0/1; the API speaks booleans. A child chat names its parent, and says whether it is listed;
+ * which package made it is the portal's to know.
  */
-const cleanTitle = (raw: unknown): string =>
-  typeof raw === "string"
-    ? Array.from(raw.replace(/\s+/g, " ").trim()).slice(0, MAX_TITLE).join("").trimEnd()
-    : "";
-
-/** SQLite stores pinned as 0/1; the API speaks booleans. */
-const toApi = (s: ReturnType<typeof getSession> & {}) => ({
+const toApi = ({ parent_id, listed, creator: _creator, ...s }: ReturnType<typeof getSession> & {}) => ({
   ...s,
+  ...(parent_id ? { parent: parent_id, listed: listed === 1 } : {}),
   pinned: Boolean(s.pinned),
   live: sessions.isRunning(s.id),
   // The results flagged as a suspected prompt injection that the person trusted, for the chat to say so.
@@ -1033,15 +1024,8 @@ app.patch("/api/sessions/:id", (req, res) => {
 app.delete("/api/sessions/:id", async (req, res) => {
   const session = getSession(req.params.id);
   if (!session) return res.status(404).json({ error: "Not found" });
-  try {
-    await sessions.discard(session.id);
-    deleteSession(session.id);
-  } catch (e) {
-    // The chat stays: it takes messages again.
-    sessions.reopen([session.id]);
-    throw e;
-  }
-  sessions.removeFiles(session.id);
+  // Its child chats with it. One that fails leaves the chat, which takes messages again.
+  await sessions.deleteChat(session.id);
   res.json({ ok: true });
 });
 

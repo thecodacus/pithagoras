@@ -18,7 +18,9 @@ import { freePort, inProcessHome } from "./server-harness.mjs";
 // src/schema-version.ts (once for the release, not once for each change),
 // pin the new version and fingerprint here, and have an upgrade test for what
 // changed (below) that starts from a database made before it.
-const PINNED = { version: 11, fingerprint: "d118d40ea237b90e58c0ef97d6f1cdcb5e876ed739c3e2bbc6684f74a8aa653a" };
+const PINNED = { version: 12, fingerprint: "7a7fcf8359ff86a38fcb9060888fa9ed7816b18bb9cfb2d9da454a893c015bda" };
+/** The schema of version 11, the one pinned before: no chat is a child of another. */
+const V11_FINGERPRINT = "d118d40ea237b90e58c0ef97d6f1cdcb5e876ed739c3e2bbc6684f74a8aa653a";
 /** The schema of version 10, the one pinned before: chats with no mode, and no table of the modes the person made. */
 const V10_FINGERPRINT = "155cf58f87a19f0a102c8475bdceee87a98d9169c400d887a37411107f0a5ccf";
 /** The schema of version 9: a project's switch for the agent's memory named for Understory. */
@@ -29,10 +31,17 @@ const home = inProcessHome("pithagoras-schema-");
 const { SCHEMA_VERSION } = await import("../dist/schema-version.js");
 const { getDb } = await import("../dist/db.js");
 
-/** A database of the schema of version 10 at `file`, open: a fresh one, with no mode on a chat and no table of the person's modes. */
-function freshAt10(file) {
+/** A database of the schema of version 11 at `file`, open: a fresh one, whose chats have no parent, listing or maker. */
+function freshAt11(file) {
   getDb().exec(`VACUUM INTO '${file}'`);
   const d = new Database(file);
+  d.exec("DROP INDEX idx_sessions_parent; ALTER TABLE sessions DROP COLUMN parent_id; ALTER TABLE sessions DROP COLUMN listed; ALTER TABLE sessions DROP COLUMN creator;");
+  return d;
+}
+
+/** A database of the schema of version 10 at `file`, open: one of version 11, with no mode on a chat and no table of the person's modes. */
+function freshAt10(file) {
+  const d = freshAt11(file);
   d.exec("ALTER TABLE sessions DROP COLUMN mode; DROP TABLE chat_modes;");
   return d;
 }
@@ -1321,6 +1330,34 @@ test("a database of version 10 is backed up and given chat modes: every chat is 
   assert.deepEqual([now.pragma("user_version", { simple: true }), schemaFingerprint(now)], [SCHEMA_VERSION, PINNED.fingerprint]);
   now.close();
   assert.deepEqual(modesIn(dir), { chats: [{ id: "c1", mode: null }, { id: "c2", mode: null }], made: [] });
+});
+
+test("a database of version 11 is backed up and given child chats: every chat is one of its own, and listed", async () => {
+  const dir = path.join(home, "children-from-11");
+  mkdirSync(dir, { recursive: true });
+  const d = freshAt11(path.join(dir, "portal.db"));
+  d.pragma("user_version = 11");
+  assert.equal(schemaFingerprint(d), V11_FINGERPRINT, "the schema of version 11");
+  const chat = d.prepare("INSERT INTO sessions (id, title, workspace, kind) VALUES (?, ?, ?, ?)");
+  chat.run("c1", "Kites", "/w/site", "task");
+  chat.run("c2", "From a channel", "/w/notes", "agent");
+  d.close();
+  assert.deepEqual(upgradeCheck(path.join(dir, "portal.db")), { needed: true, from: 11 });
+  assert.match(await upgraded(dir), new RegExp(`upgrading the database from version 11 to ${SCHEMA_VERSION}`));
+  const backups = backupsIn(path.join(dir, "backups"));
+  assert.equal(backups.length, 1);
+  assert.match(path.basename(backups[0]), /^portal-v11-\d{8}-\d{6}\.db$/);
+
+  const now = new Database(path.join(dir, "portal.db"), { readonly: true });
+  try {
+    assert.deepEqual([now.pragma("user_version", { simple: true }), schemaFingerprint(now)], [SCHEMA_VERSION, PINNED.fingerprint]);
+    assert.deepEqual(now.prepare("SELECT id, parent_id, listed, creator FROM sessions ORDER BY id").all(), [
+      { id: "c1", parent_id: null, listed: 1, creator: null },
+      { id: "c2", parent_id: null, listed: 1, creator: null },
+    ]);
+  } finally {
+    now.close();
+  }
 });
 
 // A data folder of v0.1.0 that used every part an extension holds now, each kept as v0.1.0 kept it, on fixtures/portal-v3.db:
