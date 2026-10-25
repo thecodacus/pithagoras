@@ -26,6 +26,8 @@ export interface RoutineRow {
   run_at: string | null;
   instructions: string;
   fresh_session: number;
+  /** How many minutes a run may take, for this routine alone; null takes the portal's default. */
+  timeout_min: number | null;
   /** 0 turns off the injection guard's blocking rules for this routine's runs. */
   guard: number;
   /** Where its runs happen: null for Home, else a project's directory. */
@@ -46,8 +48,29 @@ export interface RoutineRow {
   updated_at: string;
 }
 
-/** How long a single run may take before it is abandoned. */
-const RUN_TIMEOUT_MS = 60 * 60_000;
+/** Past what a timer may hold there is nothing to wait for. */
+const LONGEST_WAIT_MS = 2_147_483_647;
+
+/**
+ * How long a single run may take before it is abandoned, unless the routine
+ * says otherwise: an hour, or the minutes ROUTINE_RUN_TIMEOUT_MIN says. A
+ * build, a download or a benchmark on local hardware can take longer than an
+ * hour, and the limit is not what keeps runs from stacking: the next slot of a
+ * routine still running is skipped. What is not a count of minutes above zero
+ * leaves the default.
+ */
+export const runTimeoutMs = (raw: string | undefined): number => {
+  const minutes = Number(raw);
+  return Number.isFinite(minutes) && minutes > 0 ? Math.min(minutes * 60_000, LONGEST_WAIT_MS) : 60 * 60_000;
+};
+const RUN_TIMEOUT_MS = runTimeoutMs(process.env.ROUTINE_RUN_TIMEOUT_MIN);
+
+/** The portal's default, in minutes, as a routine's page says it beside the routine's own. */
+export const DEFAULT_TIMEOUT_MIN = RUN_TIMEOUT_MS / 60_000;
+
+/** The limit a run of this routine gets: its own minutes, or the portal's default. */
+export const runLimitMs = (row: Pick<RoutineRow, "timeout_min">): number =>
+  row.timeout_min && row.timeout_min > 0 ? Math.min(row.timeout_min * 60_000, LONGEST_WAIT_MS) : RUN_TIMEOUT_MS;
 
 /** Enough of the outcome to see what happened without storing a transcript. */
 const MAX_OUTPUT = 4000;
@@ -204,7 +227,7 @@ class RoutineSupervisor {
       // so this would be recorded as ok, with half an answer.
       let stopped = false;
       const output = await sessions.ask(session.id, prompt(row, trigger), {
-        timeoutMs: RUN_TIMEOUT_MS,
+        timeoutMs: runLimitMs(row),
         onStopped: () => (stopped = true),
       });
       if (stopped) this.finish(row.id, "stopped", output ? `${STOPPED}\n\n${output}` : STOPPED, Date.now() - started);

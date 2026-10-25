@@ -5,8 +5,8 @@ import { channelSupervisor } from "../channels/supervisor.js";
 import { unscopeKey } from "../agent.js";
 import { isValidSlug, slugify } from "../slug.js";
 import { isValidCron, nextRun, parseCron } from "../routines/cron.js";
-import { isOneOff, oneOffDone, routineSupervisor, type RoutineRow } from "../routines/supervisor.js";
-import { insertRoutine, readTiming, timingSets } from "../routines/store.js";
+import { DEFAULT_TIMEOUT_MIN, isOneOff, oneOffDone, routineSupervisor, type RoutineRow } from "../routines/supervisor.js";
+import { insertRoutine, readTimeout, readTiming, timingSets } from "../routines/store.js";
 import { placeProblem, routinePlace } from "../workspaces.js";
 import { insideReal } from "../within.js";
 
@@ -28,6 +28,8 @@ const toApi = (row: RoutineRow) => ({
   done: oneOffDone(row) && row.last_status !== "interrupted" && row.last_status !== "stopped",
   instructions: row.instructions,
   freshSession: Boolean(row.fresh_session),
+  /** How many minutes a run may take; null takes the portal's default, `timeoutDefaultMin` on the list. */
+  timeoutMin: row.timeout_min,
   guard: row.guard === 1,
   /** The guard's rules its runs are exempt from, by name: set on the Guard page. */
   exempt: [...routineExemptions(row.slug)],
@@ -178,11 +180,12 @@ export function routinesRouter(): Router {
     const rows = getDb()
       .prepare("SELECT * FROM routines ORDER BY created_at ASC")
       .all() as RoutineRow[];
-    res.json({ routines: rows.map(toApi) });
+    // The minutes a run may take unless the routine says: for the page to say beside a routine's own.
+    res.json({ routines: rows.map(toApi), timeoutDefaultMin: DEFAULT_TIMEOUT_MIN });
   });
 
   router.post("/routines", (req, res) => {
-    const { name, schedule, runAt, instructions, freshSession } = req.body ?? {};
+    const { name, schedule, runAt, instructions, freshSession, timeoutMin } = req.body ?? {};
     const report = readReport(req.body);
     if (typeof name !== "string" || !name.trim()) {
       return res.status(400).json({ error: "name required" });
@@ -192,6 +195,8 @@ export function routinesRouter(): Router {
     if ("error" in timing) return res.status(400).json({ error: timing.error });
     const place = readWorkspace(req.body);
     if (place && "error" in place) return res.status(400).json({ error: place.error });
+    const limit = timeoutMin === undefined ? { timeoutMin: null } : readTimeout(timeoutMin);
+    if ("error" in limit) return res.status(400).json({ error: limit.error });
 
     const { id } = insertRoutine({
       name,
@@ -199,6 +204,7 @@ export function routinesRouter(): Router {
       timing,
       instructions: typeof instructions === "string" ? instructions : "",
       freshSession: Boolean(freshSession),
+      timeoutMin: limit.timeoutMin,
       reportChannel: report.channel,
       reportTarget: report.target,
       workspace: place?.workspace ?? null,
@@ -210,9 +216,16 @@ export function routinesRouter(): Router {
     const row = rowById(req.params.id);
     if (!row) return res.status(404).json({ error: "Not found" });
 
-    const { name, slug, schedule, runAt, instructions, enabled, freshSession } = req.body ?? {};
+    const { name, slug, schedule, runAt, instructions, enabled, freshSession, timeoutMin } = req.body ?? {};
     const sets: string[] = [];
     const values: unknown[] = [];
+
+    if (timeoutMin !== undefined) {
+      const limit = readTimeout(timeoutMin);
+      if ("error" in limit) return res.status(400).json({ error: limit.error });
+      sets.push("timeout_min = ?");
+      values.push(limit.timeoutMin);
+    }
 
     if (typeof slug === "string" && slug.trim() && slug.trim() !== row.slug) {
       const next = slugify(slug);

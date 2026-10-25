@@ -47,7 +47,14 @@ is still running: the agent is kept until that is over, as for an idle chat (see
 
 A run that is still going after an hour is listed as an error. In a fresh session
 it is stopped then, as pressing Stop in its chat would; in the session a routine
-keeps, it carries on there.
+keeps, it carries on there. **Run time limit** on a routine's page gives that
+routine another number of minutes, for work that takes longer — a build, a
+download, a benchmark on local hardware — without a stuck run elsewhere being
+allowed the same. Left empty, it takes the portal's default, which
+`ROUTINE_RUN_TIMEOUT_MIN`, where the portal starts, sets (see
+[Configuration](/reference/configuration#environment)). The limit is not what
+keeps runs from stacking: a routine whose run is still going skips its next slot
+whatever it is set to.
 
 ## Reporting back
 

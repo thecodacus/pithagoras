@@ -106,6 +106,8 @@ export interface Routine {
   done: boolean;
   instructions: string;
   freshSession: boolean;
+  /** How many minutes a run may take; null takes the portal's default, `timeoutDefaultMin` on the list. */
+  timeoutMin: number | null;
   /** False lets this routine act on what it read against at least one of the guard's rules — see `exempt`. */
   guard: boolean;
   /** The guard's rules its runs are exempt from, by name: set in Settings → Guard. */
@@ -902,7 +904,7 @@ export const api = {
   forgetPerson: (key: string, force = false) =>
     json<{ ok: true }>(`/api/people/${encodeURIComponent(key)}${force ? "?force=1" : ""}`, { method: "DELETE" }),
 
-  routines: () => json<{ routines: Routine[] }>("/api/routines"),
+  routines: () => json<{ routines: Routine[]; timeoutDefaultMin: number }>("/api/routines"),
   reportTargets: () =>
     json<{ targets: ReportTarget[]; default: ReportTo | null }>("/api/routines/report-targets"),
   setReportDefault: (to: ReportTo | null) =>
@@ -930,6 +932,7 @@ export const api = {
       instructions?: string;
       enabled?: boolean;
       freshSession?: boolean;
+      timeoutMin?: number | null;
       guard?: boolean;
       reportChannel?: string | null;
       reportTarget?: string | null;
