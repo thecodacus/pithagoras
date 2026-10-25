@@ -88,12 +88,12 @@ subagent another extension runs over the protocol is not drawn either.
 | Mode | What happens | When to use it |
 | --- | --- | --- |
 | **Interrupt** (default) | The tool call waits for the subagent's answer, so the agent's turn is held while it runs. Subagents asked for together run one after the other. | Local hosting, a single GPU: only one model call at a time. |
-| **Background** | The tool call returns at once and the agent goes on working. The subagent's answer arrives later as a message in the chat and starts a turn if the agent is idle. A subagent you stop does not start one. | Hosted models, or hardware that can serve two agents at once. |
+| **Background** | The tool call returns at once and the agent goes on working. The subagent's answer arrives later as a message in the chat and starts a turn if the agent is idle. A subagent you stop does not start one. Meanwhile the agent can list, message and stop its subagents (see [What the agent can do with its subagents](#what-the-agent-can-do-with-its-subagents)). | Hosted models, or hardware that can serve two agents at once. |
 
 Background runs two agents — two model processes — at the same time. With a
 local model that means two model calls at once, which a single GPU may not
 hold. Stopping the chat does not stop a background subagent; stop it from its
-window. Closing or reloading the chat does.
+window, or the agent stops it with `subagents`. Closing or reloading the chat does.
 
 ### Kept subagent chats
 
@@ -113,7 +113,7 @@ window. Closing or reloading the chat does.
 Either way a subagent's chat is deleted with its chat. With it on, the tool's
 description says that a finished one can be continued, and the tool takes an
 `id`: about 19 tokens more on every request, and the `subagents` tool below
-about 54 more.
+about 49 more.
 
 ### What the agent can do with its subagents
 
@@ -121,15 +121,20 @@ In the background, or with kept chats on, the agent can act while a subagent
 works, so it can also look after its subagents, as you can from the panel:
 
 - **List them**: the `subagents` tool (`action: list`) lists the chat's
-  subagents with their id: those at work, how long they have run and the start
-  of what each has said so far, those waiting for a slot, and those that have
-  ended (the latest 20), kept ones marked as such.
+  subagents with their id: those at work and how long they have run, those
+  waiting for a slot, and those that have ended (the latest 20), kept ones
+  marked as such. It shows nothing of what one at work has said: that comes
+  with its answer (see [Security](/guide/security#limiting-what-happens-next) for
+  why). A kept one you are working with in its own chat is listed as at work,
+  not on a task from the agent, and the agent cannot stop it.
 - **Send one a message**: a `subagent` call with the `id` of one at work sends
   it the task as a message, which it reads after the step it is on, as yours
   from the panel; it shows in its chat as a message. One still waiting for a
-  slot gets it with its task. Its answer comes as it would have.
+  slot gets it with its task. Its answer comes as it would have. A message
+  its chat does not take in (it is being deleted, or its run has just ended)
+  is refused with the reason, so the agent does not wait for it.
 - **Stop one** (`action: stop` with its `id`): it stops as with **Stop** in the
-  panel, and the agent is told what it had said so far. One still waiting for a
+  panel, and once its run has ended the agent is told what it had said so far. One still waiting for a
   slot is taken off the queue and never starts, so the next one gets the slot.
   A subagent the agent stopped itself sends no message later and starts no
   turn.
@@ -139,7 +144,7 @@ refused as unknown. In interrupt mode with kept chats off the `subagents` tool
 is not there, as the agent waits for each subagent's answer and has nothing to
 talk to meanwhile. In the background the `subagent` tool takes an `id` for
 messages, about 14 tokens more on every request, and `subagents` costs about
-54.
+49.
 
 ### Which model a subagent runs on
 

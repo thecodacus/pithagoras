@@ -76,7 +76,7 @@ const AGREED: Record<string, number> = {
   "subagent#background": 150,
   "subagent#kept": 136,
   "subagent#background+kept": 163,
-  subagents: 55,
+  subagents: 50,
 };
 
 test("every tool of the portal's own is within the length agreed for it", () => {

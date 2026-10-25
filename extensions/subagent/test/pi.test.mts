@@ -547,7 +547,7 @@ test('subagents is there where the agent can talk to its subagents: in the backg
  assert.match(load().tool.description,/Pass id to continue a finished one, with its context, or to message a running one\./);
  mode();
 });
-test('subagents lists the chat\'s subagents: one at work with what it said so far, one waiting for a slot, and kept ones that have ended',{timeout:5000},async()=>{
+test('subagents lists the chat\'s subagents: one at work, without what it has said, one waiting for a slot, and kept ones that have ended',{timeout:5000},async()=>{
  play='hang';mode('background',{keep:true});
  const f=fakeChats();
  // A kept one from before the chat's pi was loaded, and one of another chat's.
@@ -560,7 +560,9 @@ test('subagents lists the chat\'s subagents: one at work with what it said so fa
  await until(()=>prompts.length===1);
  await sleep(20);
  const text=(await subagents.execute('l',{action:'list'})).content[0].text;
- assert.match(text,/^- child-1 "Research": running for under a second; so far: half of it$/m);
+ assert.match(text,/^- child-1 "Research": running for under a second$/m);
+ // What it said may be what a page it read wants: the portal marks this chat with that only as its run ends.
+ assert.doesNotMatch(text,/half of it/);
  assert.match(text,/^- child-2 "Later": waiting for a free slot for under a second$/m);
  assert.match(text,/^- earlier "Earlier": kept, cut off by a restart$/m);
  assert.doesNotMatch(text,/theirs/);
@@ -569,7 +571,8 @@ test('subagents lists the chat\'s subagents: one at work with what it said so fa
  await until(()=>ends.length===2);
  const after=(await subagents.execute('l',{action:'list'})).content[0].text;
  assert.match(after,/^- child-1 "Research": stopped after under a second, kept$/m);
- assert.match(after,/^- child-2 "Later": stopped before it started, kept$/m);
+ // Its chat went as it never started: nothing is kept to continue.
+ assert.match(after,/^- child-2 "Later": stopped before it started$/m);
  mode();
 });
 test('subagents lists the latest of those that have ended, and says how many it left out',{timeout:5000},async()=>{
@@ -656,5 +659,75 @@ test('subagents and a message by id refuse an unknown id and another chat\'s sub
  assert.equal((await mine.subagents.execute('l',{action:'list'})).content[0].text,'This chat has no subagents.');
  theirs.events.emit('subagent:v1:stop',{id:'child-1'});
  await until(()=>theirs.ends.length===1);
+ mode();
+});
+test('subagents gives back what one it stopped had only once its run has ended, which is when the portal marks this chat with what it read',{timeout:5000},async()=>{
+ play='hang';mode('background');
+ const f=fakeChats();
+ // The run winds down later than the abort is asked for, as a tool call in it ends.
+ f.api.abort=async(id:string)=>{f.aborted.push(id);};
+ const {tool,subagents,prompts,ends}=load(f);
+ await tool.execute('a',{task:'one',label:'Research'},undefined,undefined,{});
+ await until(()=>prompts.length===1);
+ await sleep(20);
+ let back:any;
+ const stopping=subagents.execute('s',{action:'stop',id:'child-1'}).then((r:any)=>back=r);
+ await until(()=>f.aborted.length===1);
+ await sleep(30);
+ assert.equal(back,undefined,'nothing of what it said comes back while its run goes on');
+ f.chats.get('child-1').stop();
+ await stopping;
+ assert.equal(back.content[0].text,'Stopped subagent "Research" (child-1). What it had so far:\n\nhalf of it');
+ await until(()=>ends.length===1);
+ mode();
+});
+test('subagents says so when one it was asked to stop finished first, and its answer comes as it would have',{timeout:5000},async()=>{
+ play='slow';mode('background');
+ const f=fakeChats();
+ f.api.abort=async(id:string)=>{f.aborted.push(id);};
+ const {tool,subagents,prompts,sent}=load(f);
+ await tool.execute('a',{task:'one',label:'Research'},undefined,undefined,{});
+ await until(()=>prompts.length===1);
+ const result=await subagents.execute('s',{action:'stop',id:'child-1'});
+ assert.equal(result.content[0].text,'Subagent "Research" (child-1) ended before it could be stopped: its answer comes as it would have.');
+ await until(()=>sent.length===1);
+ assert.match(sent[0].message.content,/^Subagent "Research" finished:\n\nthe whole answer/);
+ mode();
+});
+test('a kept subagent at work on something the agent did not give it here is listed as at work, and is not stopped from here',{timeout:5000},async()=>{
+ play='retry';mode('background',{keep:true});
+ const f=fakeChats();
+ // One from before the chat's pi was loaded that the person is working with in its chat.
+ f.chats.set('earlier',{id:'earlier',title:'Earlier',status:'running',parent:'parent',listed:true});
+ const {tool,subagents,sent}=load(f);
+ await tool.execute('a',{task:'one',label:'Research'},undefined,undefined,{});
+ await until(()=>sent.length===1);
+ // The person gives the finished one more in its own chat.
+ f.chats.get('child-1').status='running';
+ const text=(await subagents.execute('l',{action:'list'})).content[0].text;
+ assert.match(text,/^- child-1 "Research": at work in its own chat, not on a task from you$/m);
+ assert.match(text,/^- earlier "Earlier": at work in its own chat, not on a task from you$/m);
+ assert.doesNotMatch(text,/finished|kept/);
+ for(const [id,label] of [['child-1','Research'],['earlier','Earlier']]){
+  await assert.rejects(subagents.execute('s',{action:'stop',id}),new RegExp(`Subagent "${label}" \\(${id}\\) is at work in its own chat, not on a task from you: it is not stopped from here\\.`));
+ }
+ assert.deepEqual(f.aborted,[]);
+ mode();
+});
+test('a message the portal does not take in is refused with its reason, not said to be sent',{timeout:5000},async()=>{
+ play='hang';mode('background');
+ const f=fakeChats();
+ const {tool,events,prompts,ends}=load(f);
+ await tool.execute('a',{task:'one',label:'Research'},undefined,undefined,{});
+ await until(()=>prompts.length===1);
+ const prompt=f.api.prompt;
+ const refusals=[()=>{throw new Error('This chat is being deleted');},()=>({status:'stopped',answer:'',error:'It was stopped before the chat read the message'})];
+ for(const refuse of refusals){
+  f.api.prompt=async(id:string,message:string,options:any={})=>options.steer?refuse():prompt(id,message,options);
+  await assert.rejects(tool.execute('m',{task:'Look at the tests too',id:'child-1'},undefined,undefined,{}),/^Error: Subagent "Research" \(child-1\) did not get the message: (This chat is being deleted|It was stopped before the chat read the message)$/);
+ }
+ f.api.prompt=prompt;
+ events.emit('subagent:v1:stop',{id:'child-1'});
+ await until(()=>ends.length===1);
  mode();
 });

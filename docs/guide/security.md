@@ -72,8 +72,8 @@ take it out, and it is no longer counted once the extension removes its server.
 A portal that ran Understory before it was an extension, where you had not said
 which servers are your own, has it in that list from the upgrade (see
 [Upgrading](/guide/upgrading#understory-is-an-extension)).
-The browser is always outside content, whoever runs it. The agent's own tools, a subagent's answer (and what
-`subagents` lists of it) and a routine's are not wrapped.
+The browser is always outside content, whoever runs it. The agent's own tools, a subagent's answer and
+a routine's are not wrapped.
 
 A [code mode](/guide/extensions#code-mode) script calls tools one at a time
 through the same guard, so each of its calls is checked by the rules below as the
@@ -150,7 +150,7 @@ problem are held: put to you where you are there to answer (see
 | `read-credentials` | `auth.json`, `.env`, `.ssh/`, tokens, also among the files a tool declares it takes |
 | `publish` | `git push` is not undoable from here, also with git's options before it (`git -C repo push`, `git -c k=v push`) |
 | `persist` | What outlives the conversation: a routine, `cron`, a systemd unit, a shell start-up file, and a change to what the agent loads as its own (`AGENTS.md`, `CLAUDE.md`, its context files, `WATCH.md`, `.pi/`, `.agents/`, `.mcp.json`; see [what a colleague may do](/people/roles#what-a-colleague-may-do)), by a tool or by a command that writes there (a redirect, `tee`, `cp`, `mv`, `ln`, `sed -i`, a download's `-o`, a clone) |
-| `delegate` | A `subagent` and a routine work in a conversation of their own, which has not read what this one read and so is not held back as it is: a tainted session may start neither, nor send a subagent at work a message (that is a `subagent` call too). Listing and stopping its subagents (`subagents`) stays open. A subagent's chat is guarded on its own, and marked by what it reads itself. When it was marked, the chat it worked for is marked as its answer comes back, so what it relays is held like outside content |
+| `delegate` | A `subagent` and a routine work in a conversation of their own, which has not read what this one read and so is not held back as it is: a tainted session may start neither, nor send a subagent at work a message (that is a `subagent` call too). Listing and stopping its subagents (`subagents`) stays open. A subagent's chat is guarded on its own, and marked by what it reads itself. When it was marked, the chat it worked for is marked as its answer comes back, so what it relays is held like outside content. Nothing it says reaches that chat before: `subagents` lists none of what one at work has said, and gives what one it stopped had only once its run has ended |
 
 A tool that declares that every call of it is the shape of one of these rules
 (`acts`), such as an extension's tool that sends mail declaring `upload`, is
