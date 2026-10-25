@@ -18,7 +18,7 @@ import { freePort, inProcessHome } from "./server-harness.mjs";
 // src/schema-version.ts (once for the release, not once for each change),
 // pin the new version and fingerprint here, and have an upgrade test for what
 // changed (below) that starts from a database made before it.
-const PINNED = { version: 12, fingerprint: "7a7fcf8359ff86a38fcb9060888fa9ed7816b18bb9cfb2d9da454a893c015bda" };
+const PINNED = { version: 12, fingerprint: "830934df6dce1dd977d16b086c0bbe883bfc18a3463f84e9f22f31efa43fc0cd" };
 /** The schema of version 11, the one pinned before: no chat is a child of another. */
 const V11_FINGERPRINT = "d118d40ea237b90e58c0ef97d6f1cdcb5e876ed739c3e2bbc6684f74a8aa653a";
 /** The schema of version 10, the one pinned before: chats with no mode, and no table of the modes the person made. */
@@ -35,7 +35,7 @@ const { getDb } = await import("../dist/db.js");
 function freshAt11(file) {
   getDb().exec(`VACUUM INTO '${file}'`);
   const d = new Database(file);
-  d.exec("DROP INDEX idx_sessions_parent; ALTER TABLE sessions DROP COLUMN parent_id; ALTER TABLE sessions DROP COLUMN listed; ALTER TABLE sessions DROP COLUMN creator;");
+  d.exec("DROP INDEX idx_events_questions; DROP INDEX idx_sessions_parent; ALTER TABLE sessions DROP COLUMN parent_id; ALTER TABLE sessions DROP COLUMN listed; ALTER TABLE sessions DROP COLUMN creator;");
   return d;
 }
 
