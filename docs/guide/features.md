@@ -40,7 +40,13 @@ chat that asked: in the same folder, in the chat's mode, with its tools and its
 model, under the [guard](/guide/security) and the [sandbox](/guide/sandbox) as
 the person the chat works for, and with a transcript of its own. You can watch
 it beside the chat, give it instructions while it works, open its chat, and stop
-it. A subagent's chat has no subagent tool of its own: there is one level.
+it. A subagent's chat has no subagent tool of its own: there is one level, and a
+heartbeat, which is held to reading, has none either. A subagent keeps to the
+tools of its chat as they are now: one you switch off in the chat after the
+subagent was made is off for it from its next task, which matters for a kept
+subagent that is continued. If it read something that looked like a prompt
+injection, the chat it works for is held back as well once its answer arrives
+([the guard](/guide/security)).
 
 It is the `pithagoras-subagent` extension, which comes with the portal in its
 `extensions/subagent` folder. Install it, or switch it on and off, in
@@ -66,7 +72,9 @@ any other extension's:
 - **Waiting for you**: a subagent's chat is under the guard, so it may ask you
   something there (a guard question, a dialog). Nobody may have that chat open,
   so its chip in the tray and its head in the panel say *waiting for you*, and
-  the panel has the link that opens its chat to answer.
+  the panel has the link that opens its chat to answer. Its slot stays taken
+  meanwhile (see *Subagents at once*), so with the default limit of 1 no other
+  chat's subagent starts until you answer, or stop it.
 - **Watch** beside the tool call that started one (**Open** once it is over),
   without opening the call's card.
 
@@ -128,7 +136,9 @@ every chat — each one is a model running. One asked for beyond it waits for a
 free slot: in interrupt mode its tool call waits (and gives up if the chat is
 stopped meanwhile); in the background the call returns saying it is queued,
 and it starts once another has finished. A queued one does not start once its
-chat has been closed or reloaded.
+chat has been closed or reloaded. A subagent holds its slot while it waits for
+you to answer a question in its chat, because its model is still the one in use:
+raise the limit if that is in your way.
 
 The mode, the limit, the model and whether chats are kept are kept in the
 extension's own folder of the portal's data folder

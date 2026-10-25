@@ -2338,16 +2338,22 @@ portal.chats.extend((pi, chat) => {
   or a mode it cannot have.
 - **It stands where its parent stands.** It takes its parent's role and the
   person the parent last heard from, so the guard holds each call to the person
-  who asked, and the tools the person switched off or on in the parent. A dialog
+  who asked, and the tools the person switched off or on in the parent. It is
+  held to them as they stand now: a tool switched off in the parent since is off
+  in the child before its next message, and one switched on in the parent later
+  is not given to it. A dialog
   it opens, and a question the guard asks, are drawn on its own page, where its
   parent's would be: for a child of a chat of the portal's pages (or of the
   agent's page) nobody may be looking, so say where it waits; for a child of a
   conversation on a channel or of a routine run, where nobody can answer, the
   guard refuses for the child too, as it does for its parent.
 - **`prompt(chatId, message, { steer? })`** resolves once the run that takes
-  the message in has ended, with `{ status, answer, error? }`: `status` is
+  the message in has ended, with `{ status, answer, marked?, error? }`: `status` is
   `"done"`, `"stopped"` (by `abort`, by the person's Stop, or because the chat
-  was deleted) or `"error"`. `answer` is the last thing it said. Sent while it
+  was deleted) or `"error"`. `answer` is the last thing it said. `marked` is
+  there when the guard had marked the child (it read something that looked like
+  a prompt injection): the parent is marked then too, so the guard's rules for a
+  marked chat hold what it does with the answer. Sent while it
   works, a message waits for the run to end, as the person's does; with
   `steer`, it is taken after the step the run is on, and both prompts resolve
   as that run ends. A run that fails resolves as an error, and so does a

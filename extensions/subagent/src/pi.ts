@@ -311,6 +311,8 @@ export default function subagentTool(pi: any, given: Given) {
             // Whatever went wrong, the slot is given back below and the parent is told.
             const why = (e as Error)?.message ?? String(e);
             if (waiting && !runner) say(END, { id, status: "error", error: why });
+            // Failed before its chat was given the task: it holds nothing, and is not left as an empty sub-chat.
+            if (!runner) unmade();
             tell("error", `Subagent "${label}" failed: ${why}`);
           } finally {
             offWait();
@@ -334,6 +336,7 @@ export default function subagentTool(pi: any, given: Given) {
       }
 
       let release: (() => void) | undefined;
+      let runner: Runner | undefined;
       try {
         // At most as many at once as allowed, even when the model asks for more
         // in one turn: each is a model running. Waits for a slot, unless the
@@ -360,8 +363,9 @@ export default function subagentTool(pi: any, given: Given) {
           return { content: [{ type: "text", text: "(stopped before the subagent started)" }], details: { phase: "stopped", id } };
         }
         const startedAt = Date.now();
-        const runner = run(id, params.task, label, toolCallId, detail, false, (answer, phase) => onUpdate?.({ content: [{ type: "text", text: answer }], details: { phase } }));
-        const stopped = () => runner.stop();
+        runner = run(id, params.task, label, toolCallId, detail, false, (answer, phase) => onUpdate?.({ content: [{ type: "text", text: answer }], details: { phase } }));
+        const running = runner;
+        const stopped = () => running.stop();
         signal?.addEventListener("abort", stopped, { once: true });
         const { status, answer, failure } = await runner.finished;
         signal?.removeEventListener("abort", stopped);
@@ -369,6 +373,10 @@ export default function subagentTool(pi: any, given: Given) {
         // Said at the end, so the model can tell the wait from the subagent's own work time when it judges how long the task took.
         const note = hadToWait ? `\n\n(It waited ${waited(startedAt - queuedAt)} for a free subagent slot before it started.)` : "";
         return { content: [{ type: "text", text: `${answer || "(the subagent gave no answer)"}${note}\n\n(${named(id, kept)})` }], details: { phase: status, id } };
+      } catch (e) {
+        // Failed before its chat was given the task (its start could not be said, say): no empty sub-chat is left.
+        if (!runner) unmade();
+        throw e;
       } finally {
         release?.();
         busy.delete(id);

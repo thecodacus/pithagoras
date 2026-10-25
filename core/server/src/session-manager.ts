@@ -22,7 +22,7 @@ import { isDialog, showsDialogs } from "./pi/ui-requests.js";
 import { ASK_QUESTION_TOOL, asksQuestions, describeAnswers, readAnswers, type Answers, type Question } from "./pi/ask-question.js";
 import { CODEMODE_TOOL } from "./pi/codemode.js";
 import { CHAT_QUESTION, CHAT_QUESTION_END, holdAnswers, openChatQuestion, openChatQuestions, takeHeldAnswers, type ChatQuestion, type QuestionOutcome } from "./questions.js";
-import { forgetTaint } from "./pi/guard.js";
+import { forgetTaint, sessionTainted, taintSession } from "./pi/guard.js";
 import { neutralise } from "./channels/framing.js";
 import { textOf } from "./pi/entries.js";
 import { removeSessionFiles } from "./session-files.js";
@@ -3316,6 +3316,31 @@ class SessionManager extends EventEmitter {
   }
 
   /**
+   * A child keeps no switch its parent has taken away since it was made: a tool the person switched off in the parent
+   * is off in the child before its next message (and in its pi, if that is up), and one the parent no longer has
+   * switched on is not on in the child. The other way, a child's own stricter switch stays, and a tool switched on
+   * in the parent later is not switched on for it. Its mode is the parent's from the start, and fixed from the
+   * parent's first message (api/modes.ts), so it cannot have moved.
+   */
+  private async holdToParentsTools(childId: string, parentId: string): Promise<void> {
+    const child = getSession(childId);
+    const parent = getSession(parentId);
+    if (!child || !parent) return;
+    const own = { off: parseToolsOff(child.tools_off), on: parseToolsOff(child.tools_on) };
+    const above = { off: parseToolsOff(parent.tools_off), on: parseToolsOff(parent.tools_on) };
+    const off = [...new Set([...own.off, ...above.off])];
+    const on = own.on.filter((name) => above.on.includes(name) && !off.includes(name));
+    if (off.length === own.off.length && on.length === own.on.length) return;
+    setSessionTools(childId, { off, on });
+    // A pi that is up has the old switches: told as setTools tells it.
+    const client = this.live.get(childId)?.client;
+    if (!client?.setToolsOff) return;
+    const reported = client.getTools ? await client.getTools() : [];
+    const piOff = this.piOff(childId, reported);
+    await client.setToolsOff(piOff, this.piLazy(piOff));
+  }
+
+  /**
    * Sends a child chat a message and waits for the run that takes it in to end: how it ended, and the last thing it
    * said. Mid-run, `steer` takes it in after the step the run is on; without, it waits for the run to end, as a
    * person's message does. It is sent as the person its parent last heard from: a child is held to the role and the
@@ -3335,6 +3360,7 @@ class SessionManager extends EventEmitter {
       // where the role of the speaker set above holds every call.
       if (role !== child.role && !this.isBusy(childId)) await this.stop(childId);
     }
+    await this.holdToParentsTools(childId, parent.id);
 
     let end!: (run: ChildRun) => void;
     const ended = new Promise<ChildRun>((resolve) => (end = resolve));
@@ -3343,7 +3369,13 @@ class SessionManager extends EventEmitter {
     let inRun = false;
     let answer = "";
     let failure: string | undefined;
-    const finish = (status: ChildRun["status"], error?: string) => end({ status, answer, ...(error ? { error } : {}) });
+    const finish = (status: ChildRun["status"], error?: string) => {
+      // What a child that was marked said is what a mark on it carried: the chat it worked for takes it in marked too, as a
+      // routine's report does, or its own words would be a way round the rules that hold a chat after outside content.
+      const marked = sessionTainted(childId);
+      if (marked) taintSession(parent.id);
+      end({ status, answer, ...(marked ? { marked: true as const } : {}), ...(error ? { error } : {}) });
+    };
     const key = `session:${childId}`;
     const hear = (row: { seq?: number; type: string; payload: string }) => {
       let p: any = {};

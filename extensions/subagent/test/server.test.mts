@@ -95,6 +95,13 @@ test("a child chat's pi has no subagent tool: its subagents would be a level the
   assert.equal(portal.toolsIn("chat-7-child").get("subagent"), undefined);
 });
 
+test("a heartbeat's pi has no subagent tool either: its child chat would be refused, and the tool would only cost tokens", async () => {
+  portal.db.createSession({ id: "chat-beat", title: "t", workspace: process.env.WORKSPACE_ROOT!, executor: "host", kind: "heartbeat" });
+  portal.db.createSession({ id: "chat-routine", title: "t", workspace: process.env.WORKSPACE_ROOT!, executor: "host", kind: "routine" });
+  assert.equal(portal.toolsIn("chat-beat").get("subagent"), undefined);
+  assert.ok(portal.toolsIn("chat-routine").get("subagent"), "a routine's run keeps it: its guard decides");
+});
+
 test("what a chat's subagents run on is kept for that chat at the extension's address, read as one starts, and the portal's old address sends there", async () => {
   portal.db.createSession({ id: "chat-2", title: "t", workspace: process.env.WORKSPACE_ROOT!, executor: "host", kind: "task" });
   const model = `${at}/chats/chat-2/model`;

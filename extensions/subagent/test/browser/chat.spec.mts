@@ -143,6 +143,121 @@ test('a subagent whose chat is gone says so, and offers no way to it', async ({ 
   await expect(panel(page).getByRole('button', { name: 'Open as chat' })).toHaveCount(0);
 });
 
+/** What the portal sends of an event of `kid1`'s stream. */
+const told = (seq: number, type: string, payload: unknown) => `id: ${seq}\ndata: ${JSON.stringify({ seq, type, at: Date.now() - 20_000, payload })}\n\n`;
+const run = (task: string, answer: string, from = 1) =>
+  told(from, 'portal_prompt', { message: task }) + told(from + 1, 'message_end', { message: { role: 'assistant', content: [{ type: 'text', text: answer }] } });
+
+/**
+ * `kid1`'s stream, one answer for each time the page connects (`answers[n](since)` is the body of the n-th; the last
+ * serves any later one), and the `since` of each. The page's clock is its own, so a reconnect does not wait for two
+ * seconds of the test's.
+ */
+async function serveStream(page: Page, answers: ((since: number) => string)[]) {
+  const connects: string[] = [];
+  await page.clock.install();
+  await page.route('**/api/sessions/kid1/events**', async (route) => {
+    const since = new URL(route.request().url()).searchParams.get('since') ?? '';
+    connects.push(since);
+    await route.fulfill({ headers: { 'content-type': 'text/event-stream' }, body: answers[Math.min(connects.length, answers.length) - 1](Number(since)) });
+  });
+  await page.route('**/api/sessions/kid1', (route) => route.fulfill({ json: { id: 'kid1', title: 'Backup check', parent: 'preview', listed: false, status: 'running' } }));
+  /** Lets the page's clock run until it has connected `n` times. */
+  const connected = (n: number) =>
+    expect
+      .poll(async () => {
+        await page.clock.runFor(2500);
+        return connects.length;
+      })
+      .toBeGreaterThanOrEqual(n);
+  return { connects, connected };
+}
+const head = (reloads: number) => `event: reloads\ndata: ${JSON.stringify({ reloads })}\n\nevent: live-reset\ndata: {}\n\n`;
+const caughtUp = (seq: number) => `event: caught-up\ndata: {"seq":${seq}}\n\n`;
+
+test('a reload of the child chat that happened while its stream was down is read again from the start', async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const { connects, connected } = await serveStream(page, [
+    () => head(0) + run('Old task', 'Old answer') + caughtUp(2),
+    // The portal has put events back under seqs the page read past: nothing is newer than seq 2.
+    () => head(1) + caughtUp(0),
+    () => head(1) + run('New task', 'New answer') + caughtUp(2),
+  ]);
+  await page.goto('/tests/chat.html?phase=child-agent');
+  await card(page, 'subagent').getByRole('button', { name: 'Watch' }).click();
+  await expect(panel(page).getByText('Old answer')).toBeVisible();
+  await connected(3);
+  await expect(panel(page).getByText('New answer')).toBeVisible();
+  await expect(panel(page).getByText('Old answer')).toHaveCount(0);
+  expect(connects).toEqual(['0', '2', '0']);
+});
+
+test('a child chat whose stream broke in the middle of its replay is read again from the start', async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const { connects, connected } = await serveStream(page, [
+    // Cut off before it caught up: the first message has been read, the second has not.
+    () => head(0) + told(1, 'portal_prompt', { message: 'The whole task' }),
+    (since) => head(0) + (since === 0 ? run('The whole task', 'The whole answer') : told(2, 'message_end', { message: { role: 'assistant', content: [{ type: 'text', text: 'Only the end' }] } })) + caughtUp(2),
+  ]);
+  await page.goto('/tests/chat.html?phase=child-agent');
+  await card(page, 'subagent').getByRole('button', { name: 'Watch' }).click();
+  await connected(2);
+  await expect(panel(page).getByText('The whole answer')).toBeVisible();
+  await expect(panel(page).locator('.side-transcript-prompt')).toHaveText('The whole task');
+  expect(connects).toEqual(['0', '0']);
+});
+
+test('a message taken out of the child chat leaves its stream, and the count it brings is not a missed reload', async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const { connects, connected } = await serveStream(page, [
+    () => head(0) + run('First task', 'First answer') + caughtUp(2) + told(3, 'portal_prompt', { message: 'Second task' }) + told(4, 'message_end', { message: { role: 'assistant', content: [{ type: 'text', text: 'Second answer' }] } }) + told(5, 'portal_removed', { from: 3, to: null, reloads: 1 }),
+    () => head(1) + caughtUp(5),
+  ]);
+  await page.goto('/tests/chat.html?phase=child-agent');
+  await card(page, 'subagent').getByRole('button', { name: 'Watch' }).click();
+  await expect(panel(page).getByText('First answer')).toBeVisible();
+  await expect(panel(page).getByText('Second answer')).toHaveCount(0);
+  await connected(2);
+   // Read on from where it was, not from the start: it had heard the reload that the count says.
+  expect(connects).toEqual(['0', '4']);
+  await expect(panel(page).getByText('First answer')).toBeVisible();
+  await expect(panel(page).getByText('Second answer')).toHaveCount(0);
+});
+
+test('the stream of a child chat is closed with the panel that draws it, and opened again with the next', async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const { connects, connected } = await serveStream(page, [() => head(0) + run('Task', 'Answered') + caughtUp(2)]);
+  await page.goto('/tests/chat.html?phase=child-agent');
+  await card(page, 'subagent').getByRole('button', { name: 'Watch' }).click();
+  await expect(panel(page).getByText('Answered')).toBeVisible();
+  // The body of a stream here ends at once, so an open one reconnects every few seconds.
+  await connected(2);
+  await page.locator('.chat-header').getByRole('button', { name: 'Subagents', exact: true }).click();
+  await expect(panel(page)).toHaveCount(0);
+  const before = connects.length;
+  for (let i = 0; i < 4; i++) await page.clock.runFor(5000);
+  expect(connects.length).toBe(before);
+  await card(page, 'subagent').getByRole('button', { name: 'Watch' }).click();
+  await expect(panel(page).getByText('Answered')).toBeVisible();
+  expect(connects.length).toBe(before + 1);
+});
+
+test('a subagent whose chat asks, and is answered, stops saying it waits for the person', async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  let asking = false;
+  await page.clock.install();
+  await page.route('**/api/sessions/kid1/events**', (route) => route.fulfill({ headers: { 'content-type': 'text/event-stream' }, body: head(0) + run('Check', 'Checked') + caughtUp(2) }));
+  await page.route('**/api/sessions/kid1', (route) => route.fulfill({ json: { id: 'kid1', title: 'Backup check', parent: 'preview', listed: false, status: 'running', ...(asking ? { asking: true } : {}) } }));
+  await page.goto('/tests/chat.html?phase=child-agent');
+  const chip = tray(page).getByRole('button', { name: /Backup check/ });
+  await expect(chip).toBeVisible();
+  await expect(chip).not.toContainText('waiting for you');
+  asking = true;
+  await expect.poll(async () => { await page.clock.runFor(4500); return chip.textContent(); }).toContain('waiting for you');
+  asking = false;
+  await expect.poll(async () => { await page.clock.runFor(4500); return chip.textContent(); }).not.toContain('waiting for you');
+});
+
 test.describe('without the extension', () => {
   test.use({ installed: [] });
 

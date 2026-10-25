@@ -29,6 +29,7 @@ writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR, "models.json"), JSON.st
 const host = await import("../dist/extension-host.js");
 const { createCustomMode, createSession, eventsSince, getDb, getSession, getSettings, listChatSessions, listSessions, setSettings, updateCustomMode, updateSession } = await import("../dist/db.js");
 const { SESSION_ROOT, sessions } = await import("../dist/session-manager.js");
+const { sessionTainted, taintSession } = await import("../dist/pi/guard.js");
 setSettings({ ...getSettings(), provider: "fake", model: "m" });
 
 /** Two server halves in the portal's process, each keeping its portal, and what each heard of the chats. */
@@ -366,4 +367,53 @@ test("a child's delete that is under way as its parent's begins is heard once to
   assert.equal((await run).status, "stopped");
   assert.deepEqual(globalThis.heard.filter((one) => one.startsWith("helper ")).sort(), [`helper ${child.id}`, `helper ${parent}`].sort());
   letGo();
+});
+
+test("a child is held to the tool switches its parent has now: what the person switched off in the parent since is off in the child's next run", async () => {
+  const parent = chat();
+  getDb().prepare("UPDATE sessions SET tools_on = 'web_search' WHERE id = ?").run(parent);
+  const child = helper.chats.create({ parent, title: "Follows" });
+  const tools = () => {
+    const row = getSession(child.id);
+    return [row.tools_off, row.tools_on];
+  };
+  const declaredIn = async (message) => {
+    const asked = model.requests.length;
+    assert.equal((await helper.chats.prompt(child.id, message)).status, "done");
+    return declared(model.requests[asked]);
+  };
+  assert.ok((await declaredIn("Answer once")).includes("bash"), "on in both to begin with");
+  assert.deepEqual(tools(), ["", "web_search"]);
+
+  // The person switches bash off in the parent, and the child's own stricter switch is a different one.
+  getDb().prepare("UPDATE sessions SET tools_off = 'bash', tools_on = '' WHERE id = ?").run(parent);
+  getDb().prepare("UPDATE sessions SET tools_off = 'read' WHERE id = ?").run(child.id);
+  const next = await declaredIn("Answer again");
+  assert.ok(!next.includes("bash"), "off in the child's pi, which was up already");
+  assert.ok(!next.includes("read"), "and what it had off itself stays off");
+  assert.deepEqual(tools(), ["bash\nread", ""], "written down, the child's own and the parent's; no tool the parent no longer has on");
+
+  // Switched on again in the parent: not given back to the child, which only ever follows the parent down.
+  getDb().prepare("UPDATE sessions SET tools_off = '' WHERE id = ?").run(parent);
+  assert.ok(!(await declaredIn("Answer a third time")).includes("bash"));
+  assert.deepEqual(tools(), ["bash\nread", ""]);
+});
+
+test("a child marked by the guard marks its parent when its answer comes back, and says so; one that is not marked does not", async () => {
+  const live = async () => {
+    const id = chat();
+    await sessions.prompt(id, "Answer please");
+    await until(() => eventsSince(id).some((e) => e.type === "portal_status" && JSON.parse(e.payload).status === "idle"), "the parent's run to end");
+    return id;
+  };
+  const parent = await live();
+  const child = helper.chats.create({ parent, title: "Reads the web" });
+  assert.deepEqual(await helper.chats.prompt(child.id, "Answer first"), { status: "done", answer: "The answer is 42." });
+  assert.equal(sessionTainted(parent), false, "an unmarked child leaves its parent as it was");
+
+  // Marked as a result that looked like a prompt injection would mark it, while its pi is up.
+  assert.equal(taintSession(child.id), true);
+  assert.equal(sessionTainted(parent), false, "the mark is on the child until its answer is passed on");
+  assert.deepEqual(await helper.chats.prompt(child.id, "Answer second"), { status: "done", answer: "The answer is 42.", marked: true });
+  assert.equal(sessionTainted(parent), true, "and what it relays is held like outside content");
 });

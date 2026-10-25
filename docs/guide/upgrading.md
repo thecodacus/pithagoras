@@ -1268,6 +1268,11 @@ you in its chat (the panel and the tray say so). Its run is in its chat's own
 transcript, not in the parent's: a subagent from before the upgrade still shows
 in the panel from what the parent kept.
 
+A heartbeat has no `subagent` tool any more: its subagent would be a chat the
+heartbeat's rules do not cover, and the guard already refused it. A chat's
+subagent is also held to the chat's tool switches as they are when it is given
+a task, and marks the chat it works for when the guard marked it.
+
 New: **Keep subagent chats** on the extension's page (off by default), which
 lists them as sub-chats and lets the agent continue one by its id. Gone:
 `PI_SUBAGENT_BIN` and `PI_SUBAGENT_GRACE_MS`, which nothing reads any more. The

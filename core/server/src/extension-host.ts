@@ -274,12 +274,13 @@ const crashes = new Map<string, ServerHalfCrash>();
 export const pagePushes = new EventEmitter();
 pagePushes.setMaxListeners(0);
 
-// No `mode` key for a chat in Standard, rather than one that is undefined.
+// No `mode` key for a chat in Standard, and no `kind` for a task, rather than one that is undefined.
 const chatOf = (row: SessionRow): Chat => ({
   id: row.id,
   title: row.title,
   workspace: row.workspace,
   status: row.status,
+  ...(row.kind !== "task" ? { kind: row.kind } : {}),
   ...(row.mode ? { mode: row.mode } : {}),
   ...(row.parent_id ? { parent: row.parent_id, listed: row.listed === 1 } : {}),
 });

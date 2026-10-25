@@ -34,6 +34,8 @@ export interface Chat {
   /** The folder the chat works in, as the chat names it. */
   workspace: string;
   status: "idle" | "running" | "error" | "interrupted";
+  /** What kind of chat it is. Not there for a task, a chat made on the portal's pages. */
+  kind?: Exclude<ChatKind, "task">;
   /**
    * The mode it was started in, as it stores it: "<package>/<id>" for an extension's (`modes.provide`), "custom/<id>"
    * for one the person made, the portal's own by name ("code"). Not there for Standard.
@@ -71,6 +73,11 @@ export interface ChildChatOptions {
 export interface ChildRun {
   status: "done" | "stopped" | "error";
   answer: string;
+  /**
+   * Set when the child had read outside content that holds a chat back (the guard marked it). The portal has marked its
+   * parent with it already, so its rules for a marked chat hold what the parent does with this answer.
+   */
+  marked?: true;
   error?: string;
 }
 

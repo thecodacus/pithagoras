@@ -7,7 +7,7 @@ import { chatModel, forgetChat, openChats, pruneChats, setChatModel, takeChats }
 import { checkChange, isModelChoice, MAX_PARALLEL, openStore, saveSettings, settings, settingsOf, takeSettings, type Settings } from "./settings";
 
 /**
- * The subagent extension's server half: the `subagent` tool in every chat's pi but a child chat's
+ * The subagent extension's server half: the `subagent` tool in every chat's pi but a child chat's and a heartbeat's
  * (`portal.chats.extend`, pi.ts), whose subagents work in child chats of that chat (`portal.chats.create`), with the
  * settings it keeps in its own folder (settings.ts) and what each chat says its subagents run on (per-chat.ts), and
  * the routes of its page in Settings and of the row in a chat's model menu, at /api/x/pithagoras-subagent/….
@@ -25,8 +25,9 @@ export default function subagent(portal: ServerPortal) {
   takeChatsHandoff(portal);
   const hear = hearChildren(portal);
   portal.chats.extend((pi, chat) => {
-    // A child chat has no subagents of its own: one level, as the portal's child chats are.
-    if (chat.parent) return;
+    // A child chat has no subagents of its own: one level, as the portal's child chats are. Nor has a heartbeat, which
+    // is held to reading, and whose child chat the portal refuses: the tool would only fail, at a cost in every request.
+    if (chat.parent || chat.kind === "heartbeat") return;
     subagentTool(pi, { chat, chats: portal.chats, settings, chatModel: () => chatModel(chat.id), hear });
   });
   portal.chats.on("deleted", (chatId) => {

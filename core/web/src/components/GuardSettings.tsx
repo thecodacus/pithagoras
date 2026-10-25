@@ -15,7 +15,7 @@ const RULE_TEXT: Record<string, string> = {
   "read-credentials": msg("Reading where keys and tokens are kept"),
   publish: msg("Pushing to a git remote, which cannot be undone from here"),
   persist: msg("Scheduling work, or changing what the agent loads as its own instructions, tools or code"),
-  delegate: msg("Starting a subagent or a routine, which work without this conversation's rules"),
+  delegate: msg("Starting a subagent or a routine, which work in a conversation of their own"),
 };
 
 /** What holds whatever is set here, and why it is no switch. */

@@ -245,7 +245,7 @@ const de: Locale = {
     "Reading where keys and tokens are kept": "Lesen, wo Schlüssel und Tokens liegen",
     "Pushing to a git remote, which cannot be undone from here": "Auf ein Git-Remote pushen, was sich von hier aus nicht rückgängig machen lässt",
     "Scheduling work, or changing what the agent loads as its own instructions, tools or code": "Arbeit planen oder ändern, was der Agent als eigene Anweisungen, Werkzeuge oder eigenen Code lädt",
-    "Starting a subagent or a routine, which work without this conversation's rules": "Einen Subagenten oder eine Routine starten, die ohne die Regeln dieser Unterhaltung arbeiten",
+    "Starting a subagent or a routine, which work in a conversation of their own": "Einen Subagenten oder eine Routine starten, die in einer eigenen Unterhaltung arbeiten",
     "Outside content is marked": "Inhalte von außen werden markiert",
     "Mail, web pages, MCP output and the browser reach the agent marked as somebody else's words, with a marker a page cannot fake. Marking refuses nothing.": "Mails, Webseiten, MCP-Ausgaben und der Browser erreichen den Agenten als Worte anderer markiert, mit einer Markierung, die eine Seite nicht fälschen kann. Markieren verweigert nichts.",
     "A suspected injection is flagged": "Ein Verdacht auf Injektion wird markiert",

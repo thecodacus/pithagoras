@@ -30,6 +30,8 @@ export interface ChildChatOptions {
 export interface ChildRun {
   status: "done" | "stopped" | "error";
   answer: string;
+  /** The child had read outside content that holds a chat back (the guard marked it): its parent is marked with it. */
+  marked?: true;
   error?: string;
 }
 

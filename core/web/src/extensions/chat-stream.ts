@@ -39,6 +39,9 @@ function open(chatId: string): Stream {
   };
   let closed = false;
   let seq = 0;
+  // How often the chat's events came back under seqs a reader had read past: the portal says it as a stream opens
+  // (`reloads`), and a count other than the last one heard is a reload that was missed while the stream was down.
+  let reloads: number | undefined;
   let failed = 0;
   let es: EventSource | undefined;
   let retry: ReturnType<typeof setTimeout> | undefined;
@@ -60,6 +63,15 @@ function open(chatId: string): Stream {
     const source = new EventSource(`/api/sessions/${encodeURIComponent(chatId)}/events?since=${seq}`);
     es = source;
     source.onopen = () => (failed = 0);
+    source.addEventListener("reloads", (m) => {
+      const now = (JSON.parse((m as MessageEvent).data) as { reloads: number }).reloads;
+      const missed = reloads !== undefined && now !== reloads && !fresh;
+      reloads = now;
+      if (!missed) return;
+      source.close();
+      seq = 0;
+      connect();
+    });
     source.addEventListener("live-reset", () => {
       drain();
       set({ events: resetLiveEvents(stream.state.events as PortalEvent[]) });
@@ -75,7 +87,9 @@ function open(chatId: string): Stream {
       // A message taken out of the conversation: what it covered goes (see the chat's own stream in App.tsx).
       if (ev.type === "portal_removed") {
         drain();
-        const { from, to, also = [], kept = [] } = ev.payload as { from: number; to: number | null; also?: number[]; kept?: number[] };
+        const { from, to, also = [], kept = [], reloads: now } = ev.payload as { from: number; to: number | null; also?: number[]; kept?: number[]; reloads?: number };
+        // Heard, so not missed: the count it brings is not a reason to read again.
+        if (now !== undefined) reloads = now;
         const covered = (at: number) => also.includes(at) || (at >= from && (to == null || at < to) && !kept.includes(at));
         if (replay) replay = replay.filter((e) => !covered(e.seq));
         else set({ events: stream.state.events.filter((e) => !covered(e.seq)) });
@@ -83,6 +97,7 @@ function open(chatId: string): Stream {
       }
       // Its events came back under seqs this stream has read past: read again from the start.
       if (ev.type === "portal_reload") {
+        reloads = (ev.payload as { reloads?: number }).reloads ?? reloads;
         drain();
         source.close();
         seq = 0;
@@ -104,6 +119,9 @@ function open(chatId: string): Stream {
       drain();
       source.close();
       if (closed) return;
+      // Cut off before the replay was all in: what was read sits in `replay`, which is gone, and `seq` is past it. Read
+      // from the start again, or the chat would show only what came after.
+      if (replay?.length) seq = 0;
       failed += 1;
       // Said by the portal: it has no such chat, which is not an outage to keep retrying.
       api.session(chatId).then(

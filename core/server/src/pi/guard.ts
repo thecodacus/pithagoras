@@ -56,8 +56,10 @@ const UNTRUSTED_COMMAND = /\b(himalaya|mutt|neomutt|notmuch|offlineimap|mbsync|c
  * Does what this call returned carry somebody else's words? Mail and the web
  * read through a command, an MCP server the portal does not control, and the
  * browser, which reads pages anyone can write. The agent's own tools, a
- * subagent's answer and a routine's included, do not mark the conversation:
- * a subagent's chat is marked by what it reads itself.
+ * subagent's answer and a routine's included, do not mark the conversation by
+ * themselves: a subagent's chat is marked by what it reads itself, and when it
+ * is, the portal marks the chat it worked for as its answer comes back
+ * (SessionManager.runChild).
  *
  * A server's tools are its words however they are called: through the adapter's
  * `mcp` tool, or under their own names (`jira_get_issue`), which the adapter
@@ -1944,6 +1946,7 @@ const taints = new Map<
   string,
   {
     mark: () => void;
+    tainted: () => boolean;
     refuses: (toolName: string, input: Record<string, unknown>, context: RuleContext) => Rule | undefined;
     trusted: (id: string) => void;
     untrusted: (id: string) => void;
@@ -1959,6 +1962,11 @@ export function taintSession(portalSessionId: string): boolean {
   const taint = taints.get(portalSessionId);
   taint?.mark();
   return Boolean(taint);
+}
+
+/** Whether the rules for a tainted conversation hold it now. False when no guard is running for it. */
+export function sessionTainted(portalSessionId: string): boolean {
+  return taints.get(portalSessionId)?.tainted() ?? false;
 }
 
 /**
@@ -2067,6 +2075,7 @@ export function guardExtension(
     if (portalSessionId) {
       const taint = {
         mark: () => { marked = true; },
+        tainted: isTainted,
         refuses: (toolName: string, input: Record<string, unknown>, context: RuleContext) => {
           if (!isTainted()) return undefined;
           const exempt = exemptNow();

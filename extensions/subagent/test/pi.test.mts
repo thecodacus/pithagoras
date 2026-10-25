@@ -495,6 +495,32 @@ test('after the limit is lowered, a background call reports how many really run'
  await until(()=>ends.length>=4);
  mode();
 });
+test('a child made for a call that fails before its chat is given the task is removed again, in either mode',{timeout:5000},async()=>{
+ play='retry';
+ for(const m of ['interrupt','background'] as const){
+  mode(m);
+  const f=fakeChats();
+  const {tool,events,sent}=load(f);
+  // The start cannot be said: the run fails before its chat has been asked anything.
+  events.on('subagent:v1:start',()=>{throw new Error('the bus is gone');});
+  if(m==='interrupt')await assert.rejects(tool.execute('a',{task:'x'},undefined,undefined,{}),/the bus is gone/);
+  else{await tool.execute('a',{task:'x'},undefined,undefined,{});await until(()=>sent.length===1);assert.match(sent[0].message.content,/failed: the bus is gone/);}
+  assert.deepEqual([f.prompts.length,f.removed,f.chats.size,slots().running],[0,['child-1'],0,0],m);
+ }
+ mode();
+});
+test('a kept child that the last portal left interrupted can be continued like one that is idle',async()=>{
+ play='retry';mode(undefined,{keep:true});
+ const f=fakeChats();
+ f.chats.set('cut-off',{id:'cut-off',title:'Cut off',status:'interrupted',parent:'parent',listed:true});
+ const {tool,prompts,created,starts}=load(f);
+ const again=await tool.execute('a',{task:'Go on',id:'cut-off'},undefined,undefined,{});
+ assert.deepEqual(prompts.map(p=>[p.id,p.message]),[['cut-off','Go on']]);
+ assert.equal(created.length,0,'no second chat');
+ assert.equal(starts[0].detail,'Continuing');
+ assert.match(again.content[0].text,/\(Its chat is kept as cut-off: pass that id to continue it\.\)$/);
+ mode();
+});
 test('a wait is said in the units a person uses',()=>{
  assert.equal(waited(400),'under a second');
  assert.equal(waited(12_000),'12 s');
