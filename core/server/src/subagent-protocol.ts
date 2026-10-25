@@ -8,7 +8,7 @@
  *
  * Extension → portal:
  *
- *   subagent:v1:start  { id, label, toolCallId?, input?: boolean, stop?: boolean, detail?, detached?: boolean }
+ *   subagent:v1:start  { id, label, toolCallId?, input?: boolean, stop?: boolean, detail?, detached?: boolean, chat? }
  *   subagent:v1:event  { id, event }       one of the child's pi events, as
  *                                          `pi --mode json` or `--mode rpc` print them
  *   subagent:v1:end    { id, status: "done" | "error" | "stopped", error? }
@@ -27,6 +27,10 @@
  *
  * `detached`: it runs on after the tool call that started it has returned (a
  * subagent in the background), so the end of that call is not its end.
+ *
+ * `chat`: it works in a chat of the portal's (a child chat, by its id), whose
+ * own transcript is its run: a page draws it from that chat, and nothing of
+ * it comes as `subagent:v1:event`.
  *
  * The child's events are drawn exactly like the main conversation's: text,
  * thinking, tool calls and their output.
@@ -160,6 +164,7 @@ export function bridgeSubagents(bus: Bus, emit: Emit): Bridge {
         input: data.input === true,
         stop: data.stop === true,
         ...(data.detached === true ? { detached: true } : {}),
+        ...(str(data.chat, 120) ? { chat: str(data.chat, 120) } : {}),
       });
     }),
     bus.on(SUBAGENT_EVENT, (data: any) => {

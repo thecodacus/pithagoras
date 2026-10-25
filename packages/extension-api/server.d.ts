@@ -311,6 +311,11 @@ export interface SubagentStart {
   detail?: string;
   /** It runs on after the tool call that started it has returned (in the background), so the end of that call is not its end. */
   detached?: boolean;
+  /**
+   * It works in a chat of the portal's (a child chat, `chats.create`), by that chat's id: its run is that chat's own
+   * transcript, which a page draws from there and opens at `/s/<chat>`, so it sends no `subagent:v1:event` of its own.
+   */
+  chat?: string;
 }
 
 export interface SubagentEvent {

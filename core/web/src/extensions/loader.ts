@@ -7,6 +7,7 @@ import { formatDate, formatDateTime, formatNumber, formatTime, useLanguage } fro
 import { formatElapsed } from "../transcript";
 import type { Portal } from "@pithagoras/extension-api";
 import { onChatFeed, useChatFeed } from "./chat-feed";
+import { useChatEvents } from "./chat-stream";
 import { hasCommand, registerCommand, runCommand } from "./commands";
 import { ui } from "./kit";
 import { panels } from "./panels";
@@ -200,7 +201,7 @@ async function activate(ext: ExtensionUi, told: Promise<void>[]): Promise<void> 
       locale: { add: (code, strings) => addStrings(ext.name, code, strings), use: useLanguage },
       commands: { register: (name, run) => kept(registerCommand(name, run, ext.name)), run: runCommand, has: hasCommand },
       panels,
-      chats: { use: useChatFeed, on: (chatId, handler) => kept(onChatFeed(chatId, handler)) },
+      chats: { use: useChatFeed, on: (chatId, handler) => kept(onChatFeed(chatId, handler)), useEvents: useChatEvents },
       shortcuts: { register: (shortcut) => kept(registerShortcut(ext.name, shortcut)) },
       server: { on: (handler) => kept(onServerPush(ext.name, handler)) },
       theme: {

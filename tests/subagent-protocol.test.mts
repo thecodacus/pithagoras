@@ -18,6 +18,16 @@ test('a subagent an extension announces reaches the portal as session events',()
  assert.equal(out[3].status,'done');
  off();b.emit('subagent:v1:start',{id:'r2'});assert.equal(out.length,4);
 });
+test('a subagent that works in a child chat names that chat on its start, and the portal keeps it',()=>{
+ const b=bus();const out:any[]=[];const bridge=bridgeSubagents(b,e=>out.push(e));
+ b.emit('subagent:v1:start',{id:'c1',label:'Research',toolCallId:'t1',input:true,stop:true,chat:'c1'});
+ b.emit('subagent:v1:start',{id:'c2',label:'Other',chat:''});
+ assert.equal(out[0].chat,'c1');
+ assert.equal('chat' in out[1],false,'an empty one is none');
+ assert.equal(bridge.takes('c1','stop'),true);
+ b.emit('subagent:v1:end',{id:'c1',status:'done'});
+ assert.deepEqual(out[2],{type:'portal_subagent',op:'end',id:'c1',toolCallId:'t1',status:'done'});
+});
 test('a subagent\'s finished message says how long it thought',()=>{
  const b=bus();const out:any[]=[];bridgeSubagents(b,e=>out.push(e));
  b.emit('subagent:v1:start',{id:'r',label:'R'});
