@@ -18,7 +18,9 @@ import { freePort, inProcessHome } from "./server-harness.mjs";
 // src/schema-version.ts (once for the release, not once for each change),
 // pin the new version and fingerprint here, and have an upgrade test for what
 // changed (below) that starts from a database made before it.
-const PINNED = { version: 14, fingerprint: "7a7fcf8359ff86a38fcb9060888fa9ed7816b18bb9cfb2d9da454a893c015bda" };
+const PINNED = { version: 15, fingerprint: "830934df6dce1dd977d16b086c0bbe883bfc18a3463f84e9f22f31efa43fc0cd" };
+/** The schema of version 14, the one pinned before: no index on the questions a chat asked. */
+const V14_FINGERPRINT = "7a7fcf8359ff86a38fcb9060888fa9ed7816b18bb9cfb2d9da454a893c015bda";
 /** The schema of version 13, which version 14 kept: it only left what each chat said its subagents run on for the subagent extension. */
 const V13_FINGERPRINT = "7a7fcf8359ff86a38fcb9060888fa9ed7816b18bb9cfb2d9da454a893c015bda";
 /** The schema of version 12: no chat is a child of another. */
@@ -35,10 +37,17 @@ const home = inProcessHome("pithagoras-schema-");
 const { SCHEMA_VERSION } = await import("../dist/schema-version.js");
 const { getDb } = await import("../dist/db.js");
 
-/** A database of the schema of version 12 at `file`, open: a fresh one, whose chats have no parent, listing or maker. */
-function freshAt12(file) {
+/** A database of the schema of version 13 (which 14 kept) at `file`, open: a fresh one, with no index on the questions a chat asked. */
+function freshAt13(file) {
   getDb().exec(`VACUUM INTO '${file}'`);
   const d = new Database(file);
+  d.exec("DROP INDEX idx_events_questions");
+  return d;
+}
+
+/** A database of the schema of version 12 at `file`, open: one of version 13, whose chats have no parent, listing or maker. */
+function freshAt12(file) {
+  const d = freshAt13(file);
   d.exec("DROP INDEX idx_sessions_parent; ALTER TABLE sessions DROP COLUMN parent_id; ALTER TABLE sessions DROP COLUMN listed; ALTER TABLE sessions DROP COLUMN creator;");
   return d;
 }
@@ -1486,8 +1495,7 @@ test("a database of version 12, or of 11, is backed up and given child chats at 
 function databaseAt13(name, said) {
   const dir = path.join(home, name);
   mkdirSync(dir, { recursive: true });
-  getDb().exec(`VACUUM INTO '${path.join(dir, "portal.db")}'`);
-  const d = new Database(path.join(dir, "portal.db"));
+  const d = freshAt13(path.join(dir, "portal.db"));
   assert.equal(schemaFingerprint(d), V13_FINGERPRINT, "the schema of version 13");
   d.pragma("user_version = 13");
   for (const [chat, model] of Object.entries(said)) d.prepare("INSERT INTO settings (key, value) VALUES (?, ?)").run(`subagent_model:${chat}`, model);
@@ -1553,6 +1561,38 @@ test("a chats' hand-off that cannot be left keeps what the chats said in the dat
   await upgraded(dir);
   assert.deepEqual(subagentRows(dir), []);
   assert.deepEqual(JSON.parse(readFileSync(path.join(dir, "handoff", "subagent-chats", "models.json"), "utf8")), { c1: "llama-swap/model-b" });
+});
+
+test("a database of version 14, or of 13, is backed up and given the index on the questions a chat asked at schema 15, its chats and questions kept", async () => {
+  for (const [version, fingerprint] of [[14, V14_FINGERPRINT], [13, V13_FINGERPRINT]]) {
+    const dir = path.join(home, `questions-from-${version}`);
+    mkdirSync(dir, { recursive: true });
+    const d = freshAt13(path.join(dir, "portal.db"));
+    d.pragma(`user_version = ${version}`);
+    assert.equal(schemaFingerprint(d), fingerprint, `the schema of version ${version}`);
+    d.prepare("INSERT INTO sessions (id, title, workspace, kind) VALUES ('c1', 'Kites', '/w/site', 'task')").run();
+    d.prepare("INSERT INTO sessions (id, title, workspace, kind, parent_id, listed) VALUES ('c2', 'Tails', '/w/site', 'task', 'c1', 0)").run();
+    d.prepare("INSERT INTO events (session_id, type, payload) VALUES ('c2', 'portal_question', '{}')").run();
+    d.close();
+    assert.deepEqual(upgradeCheck(path.join(dir, "portal.db")), { needed: true, from: version });
+    assert.match(await upgraded(dir), new RegExp(`upgrading the database from version ${version} to ${SCHEMA_VERSION}`));
+    const backups = backupsIn(path.join(dir, "backups"));
+    assert.equal(backups.length, 1, `one backup, of version ${version}`);
+    assert.match(path.basename(backups[0]), new RegExp(`^portal-v${version}-\\d{8}-\\d{6}\\.db$`));
+
+    const now = new Database(path.join(dir, "portal.db"), { readonly: true });
+    try {
+      assert.deepEqual([now.pragma("user_version", { simple: true }), schemaFingerprint(now)], [SCHEMA_VERSION, PINNED.fingerprint]);
+      assert.ok(now.prepare("SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'idx_events_questions'").get(), "the index is made");
+      assert.deepEqual(now.prepare("SELECT id, parent_id, listed FROM sessions ORDER BY id").all(), [
+        { id: "c1", parent_id: null, listed: 1 },
+        { id: "c2", parent_id: "c1", listed: 0 },
+      ]);
+      assert.deepEqual(now.prepare("SELECT session_id, type FROM events").all(), [{ session_id: "c2", type: "portal_question" }]);
+    } finally {
+      now.close();
+    }
+  }
 });
 
 // A data folder of v0.1.0 that used every part an extension holds now, each kept as v0.1.0 kept it, on fixtures/portal-v3.db:

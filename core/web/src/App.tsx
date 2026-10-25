@@ -26,6 +26,7 @@ import { usePlaces } from "./use-session-folders";
 import { fancy, keep, swapPages, type Leave } from "./motion";
 import { reconcile } from "./reconcile";
 import { useStable } from "./use-stable";
+import { splitSubChats } from "./sub-chats";
 import { useDialogFocus } from "./dialog-focus";
 import { t, useLanguage } from "./i18n";
 import { followInstalled, Here, setNavigate, startExtensions } from "./extensions/loader";
@@ -282,7 +283,8 @@ function Shell({
   latestSessions.current = sessions;
   useEffect(() => {
     if (!sessionsAsked || sessionId || settings || view !== "chat") return;
-    const first = latestSessions.current[0];
+    // A chat of its own, not a sub-chat, which is listed under its chat.
+    const first = splitSubChats(latestSessions.current).top[0];
     if (first) navigate(`/s/${first.id}`, { replace: true });
   }, [sessionsAsked, sessionId, settings, view]);
 
@@ -637,9 +639,16 @@ function Shell({
     navigate(`/s/${id}`);
   });
   const onDeleteChat = useStable(async (id: string) => {
+    const gone = sessions.find((s) => s.id === id);
+    // The chat open is this one, or one of its sub-chats, which go with it.
+    // It need not be listed: a sub-chat an extension keeps out of the list is fetched by its id (`active`).
+    const open = sessionId === id || active?.parent === id;
     await api.deleteSession(id);
     const list = await refreshSessions();
-    if (sessionId === id) navigate(list[0] ? `/s/${list[0].id}` : "/", { replace: true });
+    // A sub-chat gone takes its page back to its chat, if that is listed; a chat gone, to the latest chat of its own.
+    const parent = gone?.parent;
+    const next = parent && sessions.some((s) => s.id === parent) ? parent : splitSubChats(list).top[0]?.id;
+    if (open) navigate(next ? `/s/${next}` : "/", { replace: true });
   });
   const onRenameChat = useStable(async (id: string, title: string) => {
     await api.renameSession(id, title);
@@ -811,6 +820,7 @@ function Shell({
               await refreshSessions();
             }}
             onOpenNavigation={() => setMobileNav(true)}
+            parentTitle={active.parent ? sessions.find((s) => s.id === active.parent)?.title : undefined}
             onClientCommand={async (name, args) => {
               if (name === "settings") {
                 navigate(`/s/${active.id}/settings/general`);

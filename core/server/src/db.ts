@@ -1288,6 +1288,11 @@ function migrate(d: Database.Database): void {
     `CREATE INDEX IF NOT EXISTS idx_events_commands ON events(session_id, seq)
        WHERE type IN ('portal_command', 'portal_command_end')`,
   );
+  // The questions a chat has asked and their ends, read for every child chat in the chat list: see openChatQuestions.
+  d.exec(
+    `CREATE INDEX IF NOT EXISTS idx_events_questions ON events(session_id, seq)
+       WHERE type IN ('portal_question', 'portal_question_end')`,
+  );
   const ruleCols = (d.prepare("PRAGMA table_info(tool_rules)").all() as { name: string }[]).map(
     (c) => c.name
   );

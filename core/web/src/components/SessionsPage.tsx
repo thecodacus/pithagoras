@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, memo, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { LuFilter, LuMessagesSquare, LuPin, LuSearch, LuX } from "react-icons/lu";
 import { PageHeader, Stat } from "./PageHeader";
@@ -16,6 +16,8 @@ import { useFolderPrefs, useOpenFolders } from "../use-session-folders";
 import { useFlip } from "../motion";
 import { useNow } from "../use-now";
 import { t, useLanguage } from "../i18n";
+import { SubChats } from "./SubChats";
+import { familiesFound, familyRunning, shownStatus, splitSubChats, type ShownStatus } from "../sub-chats";
 
 /**
  * How long a click on a name waits for a second one. The chat opens on a click
@@ -27,7 +29,8 @@ const DOUBLE_CLICK_MS = 300;
  * Every session, not just the dozen the sidebar has room for — with search,
  * since the sidebar list is capped and old sessions otherwise become
  * unreachable once they fall off the end. Gathered by folder as the sidebar
- * has them, or as one list; `?folder=` shows only one folder's.
+ * has them, or as one list; `?folder=` shows only one folder's. A chat's
+ * sub-chats are under it, as in the sidebar, and counted nowhere on their own.
  */
 export const SessionsPage = memo(function SessionsPage({
   sessions,
@@ -79,12 +82,19 @@ export const SessionsPage = memo(function SessionsPage({
       .finally(() => setPending((p) => (p?.n === n ? null : p)));
   };
 
-  const running = sessions.filter((s) => s.status === "running").length;
-  const pinnedCount = sessions.filter((s) => s.pinned).length;
+  // The chats listed on their own, and the sub-chats under each (see sub-chats.ts): only the first are counted.
+  const all = useMemo(() => splitSubChats(sessions), [sessions]);
+  // A chat runs also while one of its sub-chats works.
+  const running = all.top.filter((s) => familyRunning(s, all.under.get(s.id))).length;
+  const pinnedCount = all.top.filter((s) => s.pinned).length;
 
-  // Each row names its folder (not the path it works in), and the search goes by that name.
+  // Each row names its folder (not the path it works in), and the search goes by that name. A sub-chat that is
+  // found is shown under its chat (`under`).
   const folderOf = useMemo(() => folderNameOf(sessions, places), [sessions, places]);
-  const matches = useMemo(() => filterSessions(sessions, query, folderOf), [sessions, query, folderOf]);
+  const { top: matches, under } = useMemo(
+    () => (query.trim() ? familiesFound(all, filterSessions(sessions, query, folderOf)) : all),
+    [all, sessions, query, folderOf],
+  );
 
   const { grouping, sort, order, setGrouping, setSort, move } = useFolderPrefs();
   const hasPlaces = !!places && hasMoreThanHome(places);
@@ -94,8 +104,8 @@ export const SessionsPage = memo(function SessionsPage({
   const asked = params.get("folder");
   const only = useMemo(
     // Elsewhere too while it is empty: a link to it is to a folder that is there, with nothing in it now.
-    () => (places && asked ? folderFrom(groupByFolder(sessions, places, { elsewhere: true }), asked) : null),
-    [sessions, places, asked],
+    () => (places && asked ? folderFrom(groupByFolder(all.top, places, { elsewhere: true }), asked) : null),
+    [all, places, asked],
   );
   /** A folder asked for by a link that is not there — a project deleted since — or cannot be told yet. */
   const gone = asked !== null && !only && places !== undefined;
@@ -112,10 +122,20 @@ export const SessionsPage = memo(function SessionsPage({
   // Every folder, not only those a search shows: what is kept for one hidden by it must not be let go.
   const allKeys = useMemo(() => (places ? folderKeys(places) : undefined), [places]);
   const openFolders = useOpenFolders("sessionsFoldersOpen", () => true, searching, allKeys);
+  // A chat's sub-chats are shut until opened, and open while one of them works or waits for you, as in the sidebar.
+  const parents = useMemo(() => [...all.under.keys()], [all]);
+  const openSubs = useOpenFolders("sessionsSubChatsOpen", (id) => (all.under.get(id) ?? []).some((c) => c.status === "running" || c.asking), searching, parents);
+  /** The sub-chats shown under a chat's row: none while they are shut. */
+  const subsShown = (id: string) => (openSubs.isOpen(id) ? (under.get(id) ?? []) : []);
   // A folder asked for shows only its chats — none while it cannot be told which they are.
-  const shown = useMemo(() => (only ? filterSessions(only.sessions, query, folderOf) : asked !== null ? [] : matches), [only, asked, query, matches, folderOf]);
-  // Rows slide to their new places (see motion.ts); a new one comes in with the list's own stagger.
-  const rowsOrder = [byFolder ? "folders" : "list", ...(byFolder ? folders.flatMap((f) => f.sessions) : shown).map((s) => s.id)].join();
+  const onlyFound = useMemo(() => {
+    const ids = new Set(only?.sessions.map((s) => s.id));
+    return matches.filter((s) => ids.has(s.id));
+  }, [only, matches]);
+  const shown = only ? onlyFound : asked !== null ? [] : matches;
+  // Rows slide to their new places (see motion.ts); a new one comes in with the list's own stagger. A chat's
+  // sub-chats are rows of their own once shown, after it.
+  const rowsOrder = [byFolder ? "folders" : "list", ...(byFolder ? folders.flatMap((f) => f.sessions) : shown).flatMap((s) => [s.id, ...subsShown(s.id).map((c) => c.id)])].join();
   const list = useFlip<HTMLDivElement>(rowsOrder, searching, false);
   const [startError, setStartError] = useState<string | null>(null);
   /** A chat on its way: a second press of + would start another. */
@@ -131,7 +151,21 @@ export const SessionsPage = memo(function SessionsPage({
       });
   };
 
-  const row = (s: Session) => (
+  /** A chat's row, and its sub-chats under it. */
+  const family = (s: Session) => {
+    const subs = all.under.get(s.id);
+    return (
+      <Fragment key={s.id}>
+        {row(s, shownStatus(s, subs), { subChats: subs })}
+        <SubChats size="md" title={s.title} subs={under.get(s.id) ?? []} open={openSubs.isOpen(s.id)} onToggle={() => openSubs.toggle(s.id)}>
+          {(c) => row(c, shownStatus(c), { nested: true })}
+        </SubChats>
+      </Fragment>
+    );
+  };
+
+  /** `subChats`: those a delete names; `nested`: shown under its chat. */
+  const row = (s: Session, status: ShownStatus, { subChats, nested = false }: { subChats?: readonly Session[]; nested?: boolean } = {}) => (
       <li
         key={s.id}
         data-flip={s.id}
@@ -158,7 +192,7 @@ export const SessionsPage = memo(function SessionsPage({
         }}
         className="group flex cursor-pointer items-center gap-3 rounded-xl border border-line bg-raised/40 px-3 py-2.5 transition hover:bg-fg/5"
       >
-        <StatusDot status={s.status} />
+        <StatusDot status={status} />
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-2">
             {renaming === s.id ? (
@@ -171,7 +205,7 @@ export const SessionsPage = memo(function SessionsPage({
               />
             ) : (
               <p
-                className={`truncate text-sm text-fg ${workingText(s.status)}`}
+                className={`truncate text-sm text-fg ${workingText(status)}`}
                 onClick={(e) => {
                   e.stopPropagation();
                   window.clearTimeout(opening.current);
@@ -191,12 +225,12 @@ export const SessionsPage = memo(function SessionsPage({
               <LuPin className="h-3 w-3 shrink-0 text-accent/70" title={t("Pinned")} />
             )}
           </div>
-          {/* Under a folder's heading, or on the one folder shown, its name is already there. */}
-          {!byFolder && !only && <p className="truncate text-[11px] text-fg-faint">{folderOf(s)}</p>}
+          {/* Under a folder's heading, or on the one folder shown, its name is already there; under its chat, too. */}
+          {!byFolder && !only && !nested && <p className="truncate text-[11px] text-fg-faint">{folderOf(s)}</p>}
         </div>
         <span className="shrink-0 text-[11px] text-fg-faint">{when(s.updated_at)}</span>
         <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100">
-          <SessionActions session={s} onPin={onPin} onStartRename={() => setRenaming(s.id)} onDelete={onDelete} onError={setError} />
+          <SessionActions session={s} subChats={subChats} nested={nested} onPin={onPin} onStartRename={() => setRenaming(s.id)} onDelete={onDelete} onError={setError} />
         </div>
       </li>
   );
@@ -215,7 +249,7 @@ export const SessionsPage = memo(function SessionsPage({
             }
           >
             <div className="mt-4 flex flex-wrap gap-2">
-              <Stat label={t("total")} value={sessions.length} />
+              <Stat label={t("total")} value={all.top.length} />
               <Stat label={t("running")} value={running} tone="text-accent" />
               <Stat label={t("pinned")} value={pinnedCount} />
             </div>
@@ -232,7 +266,7 @@ export const SessionsPage = memo(function SessionsPage({
             />
             {query && (
               <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-fg-faint">
-                {t("{n} of {all}", { n: shown.length, all: only ? only.sessions.length : sessions.length })}
+                {t("{n} of {all}", { n: shown.length, all: only ? only.sessions.length : all.top.length })}
               </span>
             )}
           </div>
@@ -264,7 +298,7 @@ export const SessionsPage = memo(function SessionsPage({
             <RowsSkeleton />
           ) : gone ? null : shown.length === 0 && !byFolder ? (
             <p className="py-12 text-center text-sm text-fg-subtle">
-              {sessions.length === 0 ? t("No sessions yet.") : only && !searching ? t("No chats in {name} yet.", { name: folderName(only) }) : t("Nothing matches that.")}
+              {all.top.length === 0 ? t("No sessions yet.") : only && !searching ? t("No chats in {name} yet.", { name: folderName(only) }) : t("Nothing matches that.")}
             </p>
           ) : byFolder ? (
             <div className="mt-2">
@@ -276,6 +310,7 @@ export const SessionsPage = memo(function SessionsPage({
                 folders={searching ? folders.filter((f) => f.sessions.length > 0) : folders}
                 isOpen={openFolders.isOpen}
                 onToggle={openFolders.toggle}
+                running={(s) => familyRunning(s, all.under.get(s.id))}
                 onMove={searching || !allKeys ? undefined : (keys, key, to) => move(keys, key, to, allKeys)}
                 onNewChat={onNewChat ? (f) => start(f.path || undefined) : undefined}
                 extra={(f) => (
@@ -294,13 +329,13 @@ export const SessionsPage = memo(function SessionsPage({
                   f.sessions.length === 0 ? (
                     <p className="px-3 py-1 text-xs text-fg-faint">{t("No chats yet.")}</p>
                   ) : (
-                    <ul className="space-y-1">{f.sessions.map(row)}</ul>
+                    <ul className="space-y-1">{f.sessions.map(family)}</ul>
                   )
                 }
               </FolderTree>
             </div>
           ) : (
-            <ul className="stagger-in mt-3 space-y-1">{shown.map(row)}</ul>
+            <ul className="stagger-in mt-3 space-y-1">{shown.map(family)}</ul>
           )}
         </div>
       </div>

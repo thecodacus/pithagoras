@@ -2318,7 +2318,10 @@ portal.chats.extend((pi, chat) => {
 ```
 
 - **`create({ parent, title, mode?, model?, listed? })`** makes it and returns
-  it as a `Chat`, with `parent` set. `listed: false` keeps it out of the chat
+  it as a `Chat`, with `parent` set. Listed, it shows under its parent's row in
+  the sidebar and on the Sessions page, as a
+  [sub-chat](/guide/sessions#sub-chats), and its parent's row says when it
+  works or waits for the person. `listed: false` keeps it out of the chat
   lists (and `chats.list()`): it is found by its id alone, or by
   `chats.children(parent)`, which gives the children of a chat that the package
   made, listed or not, oldest first: a half that lost its own record of them

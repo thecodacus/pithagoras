@@ -410,6 +410,18 @@ class SessionManager extends EventEmitter {
     });
   }
 
+  /**
+   * Whether the chat waits on a person: a dialog of an extension's, or a question of the agent's, is still open. Said
+   * of a child chat in the chat list, whose own page nobody may have open (see toApi in server.ts). It only reads: a
+   * question whose wait is up, and that no run waits on, does not count, but is left for the page to end when it is
+   * opened (openQuestions), since a poll of the list must not write.
+   */
+  waitsOnPerson(sessionId: string): boolean {
+    if ((this.live.get(sessionId)?.client.openDialogRequests?.() ?? []).length > 0) return true;
+    const now = Date.now();
+    return openChatQuestions(sessionId).some((q) => q.until === undefined || q.until > now || this.waitedOn(sessionId, q.id));
+  }
+
   /** Whether the run that asked a question is still waiting for its answer. */
   private waitedOn(sessionId: string, id: string): boolean {
     return (this.live.get(sessionId)?.client.openDialogRequests?.() ?? []).some((req) => req.id === id);

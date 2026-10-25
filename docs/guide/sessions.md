@@ -486,6 +486,38 @@ routines, projects, voices and channels alike. It is kept per browser.
 Discarding unsaved changes is still asked about. The Agents page's conversations
 can be renamed and deleted the same way, from the row.
 
+### Sub-chats
+
+An extension can give part of a chat's work to a chat of its own, a
+[child chat](/guide/extension-ui#child-chats). One it keeps listed is a
+sub-chat: it is not a chat among the others, but sits under its chat's row, in
+the sidebar and on the Sessions page, behind a line that says how many there
+are (*2 sub-chats*). That line opens and shuts them; they are indented, with a
+line beside them. They are shut until you open them, and open on their own
+while one of them works or waits for you, until you open or shut them by hand;
+each list remembers that per chat, in this browser. Opening a sub-chat opens its
+chat's in the sidebar, and its page names its chat at the top, a link back to
+it.
+
+A sub-chat is counted nowhere on its own: not in a folder's count or its
+latest change, not against the twelve recent chats or the eight of a folder,
+not in the Sessions page's totals, and its run ending is not a notification of
+its own. Its chat shows for it instead: the π while a sub-chat works, and the
+ringed dot while one waits for you, with a dialog or a question
+([Status dots](#status-dots)) — on a page nobody may have open. A sub-chat has
+no pin; it is listed where its chat is. A search finds a sub-chat by its name
+and shows it under its chat; a chat found by its own name shows all its
+sub-chats. A search by a folder's name does not find a pinned chat through its
+sub-chats: a pinned chat is found by its title only.
+
+Deleting a chat deletes its sub-chats, and the chats its extension keeps out of
+the lists, with it: the question before it names the sub-chats. A sub-chat can
+be deleted on its own. One whose chat is not in the list — a conversation that
+came through a channel, say — is listed as a chat of its own, and is treated as
+one: it can be pinned, and its run ending is told. An agent's page lists its
+conversations the same way, a sub-chat under its conversation and not counted
+with them.
+
 ## Using a phone
 
 Tap the navigation icon in the header to open the sidebar, then choose a
@@ -649,6 +681,7 @@ of trying to reconnect.
 | Grey | Idle |
 | Amber | Interrupted — the server restarted mid-run |
 | Red | Error; the message is in the transcript |
+| Cyan with a ring | Waiting for you: a [sub-chat](#sub-chats) has a dialog or a question open |
 
 ## Audit
 

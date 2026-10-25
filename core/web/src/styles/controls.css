@@ -36,6 +36,8 @@
 .status-dot { display: inline-block; width: 8px; height: 8px; flex-shrink: 0; border-radius: 50%; background: rgb(var(--fg-faint)); transition: background .3s; }
 .status-dot.is-error { background: rgb(var(--danger)); }
 .status-dot.is-interrupted { background: rgb(var(--warn)); }
+/* Waiting for you: a sub-chat asks something, on a page nobody may have open. A ring around the dot, which a colour alone would not say. */
+.status-dot.is-asking { background: rgb(var(--accent)); box-shadow: 0 0 0 2px rgb(var(--surface)), 0 0 0 3.5px rgb(var(--accent) / .7); }
 /* Working: the app's π on a small badge, breathing, with a glow behind it
    that swells and fades. Lists give every mark a 16px slot (status-slot), so
    nothing beside it moves when a chat starts or stops. */

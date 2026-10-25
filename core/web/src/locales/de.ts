@@ -56,6 +56,11 @@ const de: Locale = {
     "Delete \"{name}\"?": "„{name}“ löschen?",
     "The agent forgets this conversation, and the next message in that chat starts a new one.": "Der Agent vergisst dieses Gespräch, und die nächste Nachricht in diesem Chat beginnt ein neues.",
     "It is stopped if it is running, and its transcript is removed.": "Läuft es, wird es gestoppt, und sein Verlauf wird entfernt.",
+    "Its {n} sub-chats are deleted with it: {names}.": { one: "Sein Unterchat {names} wird mit gelöscht.", other: "Seine {n} Unterchats werden mit gelöscht: {names}." },
+    // SubChats.tsx
+    "{n} sub-chats": { one: "{n} Unterchat", other: "{n} Unterchats" },
+    "{n} sub-chats of {name}": { one: "{n} Unterchat von {name}", other: "{n} Unterchats von {name}" },
+    "Sub-chats of {name}": "Unterchats von {name}",
     "Delete": "Löschen",
     "Agent": "Agent",
     "Conversations that reached the agent through a channel. Each chat gets its own session, so a group and a DM never share a memory.": "Gespräche, die den Agenten über einen Kanal erreicht haben. Jeder Chat bekommt seine eigene Sitzung, damit eine Gruppe und eine Direktnachricht nie ein Gedächtnis teilen.",
@@ -414,6 +419,8 @@ const de: Locale = {
     "{panel}, floating": "{panel}, schwebend",
     "Chat name": "Name des Chats",
     "Rename this chat": "Diesen Chat umbenennen",
+    "Sub-chat of {name}": "Unterchat von {name}",
+    "Sub-chat: open its chat": "Unterchat: seinen Chat öffnen",
     "interrupted — send a message to resume": "unterbrochen — schick eine Nachricht, um fortzufahren",
     "Load earlier messages": "Frühere Nachrichten laden",
     "Give pi a task.": "Gib pi eine Aufgabe.",
@@ -1401,6 +1408,7 @@ const de: Locale = {
     "Nothing is executed by an import — a skill is markdown. But it is markdown the agent will follow, so take them from somewhere you would take instructions from.": "Beim Importieren wird nichts ausgeführt — ein Skill ist Markdown. Aber Markdown, dem der Agent folgt, also hol sie dir von dort, wo du auch Anweisungen annehmen würdest.",
     // components/StatusDot.tsx
     "idle": "bereit",
+    "waiting for you": "wartet auf dich",
     "interrupted — server restarted mid-run": "unterbrochen — der Server wurde mitten im Lauf neu gestartet",
     // components/UpdateSection.tsx and VoiceToolActivity.tsx
     "Failed": "Fehlgeschlagen",

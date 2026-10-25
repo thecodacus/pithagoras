@@ -48,6 +48,35 @@ test("the chat list has a listed child with its parent named, and not an unliste
   assert.deepEqual([hidden.body.parent, hidden.body.listed, hidden.body.title], ["parent", false, "Another part"]);
 });
 
+test("a child that waits on a person says so in the list, until its question has ended", async () => {
+  const asking = async () => {
+    const byId = Object.fromEntries((await call("GET", "/api/sessions")).body.sessions.map((s) => [s.id, s]));
+    return [byId.shown.asking, byId.parent.asking];
+  };
+  assert.deepEqual(await asking(), [undefined, undefined]);
+  appendEvent("shown", "portal_question", { id: "q1", questions: [{ id: "a", question: "Which one?", options: [{ label: "This" }] }] });
+  assert.deepEqual(await asking(), [true, undefined], "the child asks; its parent's row works that out from its children");
+  assert.equal((await call("GET", "/api/sessions/shown")).body.asking, true);
+  appendEvent("shown", "portal_question_end", { of: "q1", outcome: "answered" });
+  assert.deepEqual(await asking(), [undefined, undefined]);
+});
+
+test("the list reads a child's questions through their index, and a question whose wait is up does not count and is not ended by the poll", async () => {
+  const { QUESTION_EVENTS } = await import("../dist/questions.js");
+  const plan = getDb().prepare(`EXPLAIN QUERY PLAN ${QUESTION_EVENTS}`).all("shown").map((r) => r.detail).join("\n");
+  assert.match(plan, /idx_events_questions/, "not a walk through every event of the chat");
+
+  const events = () => getDb().prepare("SELECT COUNT(*) AS n FROM events WHERE session_id = 'shown'").get().n;
+  appendEvent("shown", "portal_question", { id: "q2", until: Date.now() - 1000, questions: [{ id: "a", question: "Still there?", options: [{ label: "Yes" }] }] });
+  const before = events();
+  const row = async () => (await call("GET", "/api/sessions")).body.sessions.find((s) => s.id === "shown");
+  assert.equal((await row()).asking, undefined);
+  assert.equal(events(), before, "listing the chats writes nothing");
+  appendEvent("shown", "portal_question", { id: "q3", until: Date.now() + 60_000, questions: [{ id: "a", question: "Which?", options: [{ label: "This" }] }] });
+  assert.equal((await row()).asking, true, "a question that still waits counts");
+  getDb().prepare("DELETE FROM events WHERE session_id = 'shown' AND type = 'portal_question'").run();
+});
+
 test("deleting a chat deletes its children and their transcripts, and leaves the other chats", async () => {
   assert.equal((await call("DELETE", "/api/sessions/parent")).status, 200);
   for (const id of ["parent", "shown", "hidden"]) assert.equal((await call("GET", `/api/sessions/${id}`)).status, 404, id);

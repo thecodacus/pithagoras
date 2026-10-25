@@ -1153,8 +1153,10 @@ leaves those that say a model under `handoff/subagent-chats` and takes them out
 of the database; the extension takes them up as it starts, into `chats.json` in
 its folder, and keeps them from then on, each until its chat is deleted. It
 comes after the step that gives chats a parent
-([Chats can have child chats](#chats-can-have-child-chats), schema 13), and a
-portal at schema 11 takes all three in one start.
+([Chats can have child chats](#chats-can-have-child-chats), schema 13) and
+before the one that indexes a chat's questions
+([Sub-chats in the chat list](#sub-chats-in-the-chat-list), schema 15), and a
+portal at schema 11 takes all four in one start.
 
 The subagents beside a chat are drawn by the extension too: the Subagents panel
 and its button in the chat's header, a chip in the running tray for each one at
@@ -1240,6 +1242,21 @@ needs what
 [Subagents' section](#going-back-to-a-version-before-subagents-were-an-extension)
 says for it, and an older backup what [Chats have a mode](#chats-have-a-mode)
 says.
+
+## Sub-chats in the chat list
+
+The sidebar and the Sessions page list a chat's
+[sub-chats](/guide/sessions#sub-chats) under it, and say when one waits for
+you. The upgrade (schema 15) adds an index on the questions a chat asked, so
+that the list finds them without reading every event of each sub-chat. It
+changes no data; nothing is left for an extension, and nothing needs doing.
+
+**Going back.** From `portal-v14-….db` it is only putting the backup in as
+under [Going back](#going-back). `portal-v13-….db`, which a portal that came
+straight from schema 13 has, also needs what
+[Subagents' section](#going-back-to-a-version-before-subagents-were-an-extension)
+says for it, and an older backup what
+[Chats can have child chats](#chats-can-have-child-chats) says.
 
 ## The guard
 

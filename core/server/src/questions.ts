@@ -168,11 +168,15 @@ export interface ChatQuestion {
 /** How a question ended: `expired` when its wait was up, `stopped` when its run was. */
 export type QuestionOutcome = "answered" | "cancelled" | "expired" | "stopped";
 
+/**
+ * The question events of a chat, oldest first. The types are written into the query rather than bound, since the
+ * partial index on them (idx_events_questions in db.ts) is used only by a query that repeats its WHERE.
+ */
+export const QUESTION_EVENTS = `SELECT type, payload FROM events WHERE session_id = ? AND type IN ('portal_question', 'portal_question_end') ORDER BY seq ASC`;
+
 /** The questions asked in a chat that have not ended, oldest first. */
 export function openChatQuestions(sessionId: string): ChatQuestion[] {
-  const rows = getDb()
-    .prepare(`SELECT type, payload FROM events WHERE session_id = ? AND type IN (?, ?) ORDER BY seq ASC`)
-    .all(sessionId, CHAT_QUESTION, CHAT_QUESTION_END) as { type: string; payload: string }[];
+  const rows = getDb().prepare(QUESTION_EVENTS).all(sessionId) as { type: string; payload: string }[];
   const open = new Map<string, ChatQuestion>();
   for (const row of rows) {
     const payload = JSON.parse(row.payload);
@@ -210,9 +214,9 @@ export function takeHeldAnswers(): { sessionId: string; questions: Question[]; a
   const list = held();
   if (!list.length) return [];
   putSetting(HELD_ANSWERS, "");
-  const events = getDb().prepare(`SELECT type, payload FROM events WHERE session_id = ? AND type IN (?, ?) ORDER BY seq ASC`);
+  const events = getDb().prepare(QUESTION_EVENTS);
   return list.flatMap(({ sessionId, id }) => {
-    const rows = (events.all(sessionId, CHAT_QUESTION, CHAT_QUESTION_END) as { type: string; payload: string }[]).map((r) => ({ type: r.type, ...JSON.parse(r.payload) }));
+    const rows = (events.all(sessionId) as { type: string; payload: string }[]).map((r) => ({ type: r.type, ...JSON.parse(r.payload) }));
     const asked = rows.find((r) => r.type === CHAT_QUESTION && r.id === id);
     const end = rows.find((r) => r.type === CHAT_QUESTION_END && r.of === id);
     return asked && end?.outcome === "answered" && end.answers ? [{ sessionId, questions: asked.questions as Question[], answers: end.answers as Answers }] : [];

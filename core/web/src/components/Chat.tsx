@@ -17,7 +17,8 @@ import { createPortal } from "react-dom";
 import { Fragment, memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { DiagramPlugin } from "streamdown";
 import { followPointer } from "../pointer-drag";
-import { LuGripVertical, LuMenu, LuArrowDown, LuSquare, LuArrowUp, LuPaperclip, LuPuzzle, LuX } from "react-icons/lu";
+import { LuGripVertical, LuMenu, LuArrowDown, LuSquare, LuArrowUp, LuPaperclip, LuPuzzle, LuX, LuCornerLeftUp } from "react-icons/lu";
+import { Link } from "react-router-dom";
 import { api, EXTENSIONS_CHANGED, MODES_CHANGED, type ChatMode, type PiCommand, type PortalEvent, type PromptOptions, type Session } from "../api";
 import { pending, refetchImage, sortFiles, uploadedNote, type Attachment } from "../attachments";
 import { activity, buildTranscript, keepItems, type Item, type SentImage } from "../transcript";
@@ -181,6 +182,7 @@ export function Chat({
   onRename,
   onSetMode,
   onOpenNavigation,
+  parentTitle,
   versions = {},
   loading,
   hasEarlier,
@@ -212,6 +214,8 @@ export function Chat({
   onSetMode: (mode: string, confirmed?: boolean) => Promise<void>;
   /** On a phone, where the sidebar is a drawer: opens it. */
   onOpenNavigation?: () => void;
+  /** For a sub-chat (see sub-chats.ts): its chat's title, where the list has that chat. */
+  parentTitle?: string;
   /**
    * The versions of messages edited or sent again, by the seq of the one
    * shown: the seqs of all of them, oldest first. Said by the chat's stream.
@@ -1818,6 +1822,16 @@ export function Chat({
           </button>
         )}
         <div className="min-w-0 flex-1">
+          {/* A sub-chat says whose it is, and leads back there: it may have been opened from a link, with its chat nowhere in view. */}
+          {session.parent && (
+            <Link
+              to={`/s/${session.parent}`}
+              className="chat-parent flex min-w-0 max-w-full items-center gap-1 text-[11px] leading-4 text-fg-subtle hover:text-accent"
+            >
+              <LuCornerLeftUp aria-hidden className="h-3 w-3 shrink-0" />
+              <span className="truncate">{parentTitle ? t("Sub-chat of {name}", { name: parentTitle }) : t("Sub-chat: open its chat")}</span>
+            </Link>
+          )}
           {renaming ? (
             <TitleInput
               value={session.title}

@@ -24,6 +24,12 @@ export interface Session {
   kind?: "task" | "agent" | "routine" | "heartbeat";
   /** The mode it was started in; null is Standard. */
   mode: string | null;
+  /** For a child chat (a sub-chat, see sub-chats.ts): the id of its chat. */
+  parent?: string;
+  /** For a child chat: whether it is in the chat list. One that is not is opened by its id alone. */
+  listed?: boolean;
+  /** For a child chat: it waits on a person, with a dialog or a question of its agent's open. */
+  asking?: boolean;
 }
 
 /** A mode a chat can be put in, as the portal offers it to that chat. */

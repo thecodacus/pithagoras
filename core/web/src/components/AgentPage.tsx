@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
 import { OrbStudio } from "./OrbStudio";
 import { ActivityFeed, HeartbeatSettings } from "./AgentHeartbeat";
@@ -30,12 +30,14 @@ import { confirmDeleteSession } from "./SessionActions";
 import { Modal } from "./Modal";
 import { ErrorBanner, LoadFailed, Switch, primarySmCls } from "./SettingsUi";
 import { StatusDot } from "./StatusDot";
+import { SubChats } from "./SubChats";
 import { TitleInput } from "./TitleInput";
 import { pollWhileVisible } from "../poll";
 import { msg, t, tp } from "../i18n";
 import { tabKeys } from "../tab-keys";
 import { useFlash } from "../use-flash";
 import { when } from "../time";
+import { familyRunning, shownStatus, splitSubChats, type ShownStatus } from "../sub-chats";
 
 /**
  * The agents: a card for each, with its avatar and name, and a way to make
@@ -329,7 +331,7 @@ function AgentView({
   };
 
   const remove = async (s: AgentSession) => {
-    if (!(await confirmDeleteSession(s.title, Boolean(s.channel && s.channel.slug !== BROWSER)))) return;
+    if (!(await confirmDeleteSession(s.title, Boolean(s.channel && s.channel.slug !== BROWSER), all.under.get(s.id)))) return;
     setError("");
     try {
       await api.deleteSession(s.id);
@@ -339,13 +341,20 @@ function AgentView({
     }
   };
 
+  // A conversation's sub-chats (see sub-chats.ts) are listed under it, not among the conversations and not counted
+  // with them, as the Agents page counts them. Shut until opened, and open while one of them works or waits for you.
+  const all = useMemo(() => splitSubChats(sessions), [sessions]);
+  const [subsOpened, setSubsOpened] = useState<ReadonlyMap<string, boolean>>(new Map());
+  const subsOpen = (id: string) => subsOpened.get(id) ?? (all.under.get(id) ?? []).some((c) => c.status === "running" || c.asking);
+  const toggleSubs = (id: string) => setSubsOpened((m) => new Map(m).set(id, !subsOpen(id)));
+
   // Grouped by the door each conversation came through.
   const groups = useMemo(() => {
     const out = new Map<
       string,
       { name: string; kind: string | null; present: boolean; items: AgentSession[] }
     >();
-    for (const s of sessions) {
+    for (const s of all.top) {
       // A chat the New or + button started has no channel: it is one of the portal's own.
       const key = s.channel?.slug ?? BROWSER;
       if (!out.has(key)) {
@@ -361,7 +370,7 @@ function AgentView({
       out.get(key)!.items.push(s);
     }
     return [...out.entries()];
-  }, [sessions]);
+  }, [all]);
 
   // Nothing else on this page means much until the agent has a character and
   // knows who it is talking to.
@@ -448,8 +457,8 @@ function AgentView({
             }
           >
             <div className="mt-4 flex flex-wrap items-center gap-2">
-              <Stat value={sessions.length} label={tp(sessions.length, "conversation", "conversations")} />
-              <Stat value={sessions.filter((s) => s.status === "running").length} label={t("running")} tone="text-accent" />
+              <Stat value={all.top.length} label={tp(all.top.length, "conversation", "conversations")} />
+              <Stat value={all.top.filter((s) => familyRunning(s, all.under.get(s.id))).length} label={t("running")} tone="text-accent" />
               <div className="flex min-w-0 items-center gap-1.5 rounded-lg bg-raised/60 px-2.5 py-1">
                 <LuFolder className="h-3 w-3 shrink-0 text-fg-faint" />
                 <span className="truncate font-mono text-[11px] text-fg-subtle">{agent.home}</span>
@@ -570,7 +579,8 @@ function AgentView({
 
                   <ul className="stagger-in mt-1.5 space-y-1">
                     {group.items.map((s) => (
-                      <li key={s.id} className="group relative">
+                      <Fragment key={s.id}>
+                      <li className="group relative">
                         {renaming === s.id ? (
                           // Not a button while the name is being typed: an input
                           // inside one cannot be focused reliably, and a click in
@@ -578,6 +588,7 @@ function AgentView({
                           <div className={ROW}>
                             <RowBody
                               s={s}
+                              status={shownStatus(s, all.under.get(s.id))}
                               title={
                                 <TitleInput
                                   value={s.title}
@@ -594,6 +605,7 @@ function AgentView({
                             <button onClick={() => onSelect(s.id)} className={`${ROW} hover:bg-fg/5`}>
                               <RowBody
                                 s={s}
+                                status={shownStatus(s, all.under.get(s.id))}
                                 title={<p className="truncate text-sm text-fg">{s.title}</p>}
                               />
                             </button>
@@ -620,6 +632,16 @@ function AgentView({
                           </>
                         )}
                       </li>
+                      <SubChats size="md" title={s.title} subs={all.under.get(s.id) ?? []} open={subsOpen(s.id)} onToggle={() => toggleSubs(s.id)}>
+                        {(c) => (
+                          <li key={c.id}>
+                            <button onClick={() => onSelect(c.id)} className={`${ROW} hover:bg-fg/5`}>
+                              <RowBody s={c} status={shownStatus(c)} title={<p className="truncate text-sm text-fg">{c.title}</p>} />
+                            </button>
+                          </li>
+                        )}
+                      </SubChats>
+                      </Fragment>
                     ))}
                   </ul>
                 </section>
@@ -749,10 +771,10 @@ const ROW =
   "flex w-full items-center gap-3 rounded-xl border border-line bg-raised/40 px-3 py-2.5 text-left transition";
 
 /** What a conversation row shows, whether or not its name is being edited. */
-function RowBody({ s, title }: { s: AgentSession; title: ReactNode }) {
+function RowBody({ s, status, title }: { s: AgentSession; status: ShownStatus; title: ReactNode }) {
   return (
     <>
-      <StatusDot status={s.status} />
+      <StatusDot status={status} />
       <div className="min-w-0 flex-1">
         {title}
         <p className="truncate font-mono text-[10px] text-fg-faint">{s.channel_key}</p>
