@@ -69,8 +69,8 @@ const AGREED: Record<string, number> = {
   routine_create: 209,
   routine_update: 142,
   routine_run: 41,
-  subagent: 103,
-  "subagent#background": 121,
+  subagent: 118,
+  "subagent#background": 136,
 };
 
 test("every tool of the portal's own is within the length agreed for it", () => {

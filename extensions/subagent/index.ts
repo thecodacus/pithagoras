@@ -28,6 +28,9 @@
  * every conversation in the process — the portal runs them all in one. One
  * asked for beyond it waits for a free slot: in interrupt mode its tool call
  * waits, in the background it starts once one of the others has finished.
+ * The tool's description names the mode and the limit, and its results say
+ * how many are running and how long a call waited: nothing is added to the
+ * system prompt, so its cache holds.
  *
  * PI_SUBAGENT_BIN picks the pi to run (default: `pi` on PATH).
  */
@@ -152,12 +155,24 @@ interface Run {
 /** How long a child told to stop is given before it is killed. */
 const GRACE_MS = () => Number(process.env.PI_SUBAGENT_GRACE_MS) || 5000;
 
-const DESCRIPTIONS: Record<Mode, string> = {
-  interrupt:
-    "Hand a self-contained task to a separate agent with its own context and get its final answer back. For research that would fill this chat. The person can watch and steer it.",
-  background:
-    "Hand a self-contained task to a separate agent with its own context. It runs in the background: this call returns at once and its final answer arrives later as a message. For research that would fill this chat. The person can watch and steer it.",
-};
+/**
+ * What the tool tells the model: the mode it runs in and how many run at
+ * once, so it does not ask for more than will start and sets a timeout that
+ * counts the wait.
+ */
+export function describe(mode: Mode, limit: number): string {
+  const room = limit === 1 ? "One runs at a time: further calls wait for it to finish." : `At most ${limit} run at once; further calls wait for a free one.`;
+  return mode === "background"
+    ? `Hand a self-contained task to a separate agent with its own context. It runs in the background: this call returns at once and its final answer arrives later as a message. For research that would fill this chat. The person can watch and steer it. ${room}`
+    : `Hand a self-contained task to a separate agent with its own context and get its final answer back. For research that would fill this chat. The person can watch and steer it. ${room}`;
+}
+
+/** A wait as a person says it: "under a second", "12 s", "3 min 5 s". */
+export function waited(ms: number): string {
+  const s = Math.round(ms / 1000);
+  if (s < 1) return "under a second";
+  return s < 60 ? `${s} s` : `${Math.floor(s / 60)} min${s % 60 ? ` ${s % 60} s` : ""}`;
+}
 
 /**
  * Set for the pi a subagent runs in. It gets no subagent tool of its own: its
@@ -169,8 +184,11 @@ export const CHILD_ENV = "PI_SUBAGENT_CHILD";
 export default function (pi: any) {
   if (process.env[CHILD_ENV] === "1") return;
   // Read once, as it is loaded: what the tool tells the model and what it
-  // does must agree. A change reaches a chat when it is reloaded.
+  // does must agree. A change reaches a chat when it is reloaded. The limit
+  // is also read live where it is enforced, so a change never lets more run
+  // than the settings say.
   const mode = subagentMode();
+  const limit = subagentLimit();
   // Background children still running, stopped with the session that started them.
   const detached = new Set<Run>();
   // Set once the session is over: what still waits for a slot does not start.
@@ -291,7 +309,7 @@ export default function (pi: any) {
   pi.registerTool({
     name: "subagent",
     label: "Subagent",
-    description: DESCRIPTIONS[mode],
+    description: describe(mode, limit),
     parameters: Type.Object({
       task: Type.String({ description: "The whole task with all it needs: it sees nothing of this chat" }),
       label: Type.Optional(Type.String({ description: "Short name, e.g. Research: vector DBs" })),
@@ -359,12 +377,14 @@ export default function (pi: any) {
             if (run) detached.delete(run);
           }
         })();
+        // The takeSlot above has taken its place by now: a free slot is counted as running, a full one as waiting.
+        const counts = `${Math.min(slots.running, subagentLimit())} of ${subagentLimit()} running${waiting ? `, ${slots.waiting.length} waiting, this one included` : ""}`;
         return {
           content: [{
             type: "text",
             text: waiting
-              ? `Queued subagent "${label}" in the background: ${waiting} ${waiting === 1 ? "subagent is" : "subagents are"} already running, the most allowed at once, and it starts when one finishes. Its answer will arrive as a message when it is done; go on with other work meanwhile.`
-              : `Started subagent "${label}" in the background. Its answer will arrive as a message when it is done; go on with other work meanwhile.`,
+              ? `Queued subagent "${label}" in the background (${counts}); it starts when one finishes. Its answer will arrive as a message when it is done; go on with other work meanwhile.`
+              : `Started subagent "${label}" in the background (${counts}). Its answer will arrive as a message when it is done; go on with other work meanwhile.`,
           }],
           details: { phase: waiting ? "queued" : "background" },
         };
@@ -373,7 +393,9 @@ export default function (pi: any) {
       // At most as many at once as allowed, even when the model asks for more
       // in one turn: each is a model running. Waits for a slot, unless the
       // parent is stopped meanwhile.
-      if (slots.running >= subagentLimit()) onUpdate?.({ content: [{ type: "text", text: "" }], details: { phase: "waiting for another subagent to finish" } });
+      const hadToWait = slots.running >= subagentLimit();
+      const queuedAt = Date.now();
+      if (hadToWait) onUpdate?.({ content: [{ type: "text", text: "" }], details: { phase: "waiting for another subagent to finish" } });
       const release = await takeSlot(
         () => signal?.aborted === true || shutDown,
         (wake) => {
@@ -383,6 +405,7 @@ export default function (pi: any) {
       );
       if (!release) return { content: [{ type: "text", text: "(stopped before the subagent started)" }], details: { phase: "stopped" } };
       try {
+        const startedAt = Date.now();
         const run = start(params.task, label, toolCallId, ctx, false, onUpdate);
         const stopped = () => run.stop();
         signal?.addEventListener("abort", stopped, { once: true });
@@ -390,7 +413,9 @@ export default function (pi: any) {
         signal?.removeEventListener("abort", stopped);
         if (failure) throw new Error(`The subagent could not start: ${failure}`);
         if (status === "error" && !answer) throw new Error("The subagent could not run — is `pi` on PATH? (PI_SUBAGENT_BIN)");
-        return { content: [{ type: "text", text: answer || "(the subagent gave no answer)" }], details: { phase: status } };
+        // Said at the end, so a timeout the model set can be judged: the wait was not the subagent's work.
+        const note = hadToWait ? `\n\n(It waited ${waited(startedAt - queuedAt)} for a free subagent slot before it started.)` : "";
+        return { content: [{ type: "text", text: (answer || "(the subagent gave no answer)") + note }], details: { phase: status } };
       } finally {
         release();
       }
