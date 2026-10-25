@@ -46,7 +46,7 @@ A page that cannot read what it shows, because the portal was restarting or coul
 not be reached, says so in red with the reason and a **Try again** button, in the
 place of its list. It does not show an empty list or "Nobody yet" as if that were
 what the portal holds. The same goes for the Projects, Audit and Agents pages and
-for **Subagents** in **Tools**. A refresh that fails while a page is already showing something
+for the **Subagents** page under **Extension settings**. A refresh that fails while a page is already showing something
 is a message at the top of the dialog instead, and what was shown stays.
 
 ## Defaults

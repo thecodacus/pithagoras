@@ -291,7 +291,7 @@ inside the folder, by its path relative to it.
 | `GET /api/sessions/:id/background` | `{ supported, jobs, …extension status, piRunning }` — background jobs are listed on the host executor on Linux only |
 | `GET /api/sessions/:id/background/:key/output` | A job's output; 404 when it is not in a file the portal can follow |
 | `POST /api/sessions/:id/background/:key/stop` · `/background/clear` | Stop one; clear the finished ones |
-| `POST /api/sessions/:id/subagents/:agent/input` | `{ text }` — say something to a running subagent. 409 when it cannot be reached |
+| `POST /api/sessions/:id/subagents/:agent/input` | `{ text }` — say something to a running subagent of the [subagent protocol](/guide/extensions#the-subagent-protocol), which the subagent extension's panel does. 409 when it cannot be reached |
 | `POST /api/sessions/:id/subagents/:agent/stop` | Stop it |
 | `POST /api/sessions/:id/extension-ui` | `{ extension, data }` — what an extension's browser half says to its own pi extension in the chat ([Building an extension](/guide/extension-ui)); starts the chat's agent if it was let go. 409 when the chat's agent does not run its extensions inside the portal |
 
@@ -306,7 +306,7 @@ inside the folder, by its path relative to it.
 | `DELETE /api/providers/:id` | Remove one |
 | `GET /api/models` | Every model pi can use now — the ones with a key |
 | `GET /api/packages/catalog?q=&topic=` | Packages published for pi; `topic=provider` narrows to provider packages |
-| `GET /api/features/flags` | Only which opt-in features are on — for the menus and the Projects page: `{ subagent: { enabled }, memory: { held, by } }`. `subagent.enabled` is whether the subagent extension's server half runs, which gives every chat the tool. `memory` says whether an extension holds the agent's memory in place of MEMORY.md ([`portal.memory.hold`](/guide/extension-ui#the-agent-s-memory)), and `by` its name (`null` while none does) |
+| `GET /api/features/flags` | Only what holds the agent's memory — for the Projects page: `{ memory: { held, by } }`, whether an extension holds it in place of MEMORY.md ([`portal.memory.hold`](/guide/extension-ui#the-agent-s-memory)), and `by` its name (`null` while none does) |
 
 See [Models and providers](/guide/models).
 
@@ -452,8 +452,9 @@ overrides; `defaults` is what an unset field falls back to. An empty string in
 | `GET /api/x/pithagoras-subagent/settings` | `{ mode, maxParallel, maxParallelLimit, model }` — the subagent extension's settings; there while the extension is on |
 | `PUT /api/x/pithagoras-subagent/settings` | `{ mode?: "interrupt" \| "background", maxParallel?: 1–16, model?: "auto" \| "provider/model" }` — each it names; reloads the open sessions, as the mode and the limit are in the tool's description, and answers the settings with `{ reloaded, waiting }`. `enabled: false` is refused: the extension is switched in Settings → Extensions (`PUT /api/extensions/enabled`) |
 | `GET`, `PUT /api/features/subagent` | Moved: a 307 (which no browser keeps) to `/api/x/pithagoras-subagent/settings`, the method and the body kept |
-| `GET /api/sessions/:id/subagent-model` | `{ model }` — what this chat's subagents run on: its own choice, `null` for the extension's `model` |
-| `PUT /api/sessions/:id/subagent-model` | `{ model: null \| "auto" \| "provider/model" }` |
+| `GET /api/x/pithagoras-subagent/chats/:id/model` | `{ model, default }` — what this chat's subagents run on: its own choice, `null` for `default`, the extension's `model`. 404 for a chat there is not |
+| `PUT /api/x/pithagoras-subagent/chats/:id/model` | `{ model: null \| "auto" \| "provider/model" }`; answers as `GET`. Read as a subagent starts: nothing is reloaded |
+| `GET`, `PUT /api/sessions/:id/subagent-model` | Moved: a 307 to `/api/x/pithagoras-subagent/chats/:id/model`, the method and the body kept |
 
 ## Understory
 
