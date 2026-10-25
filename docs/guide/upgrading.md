@@ -1149,6 +1149,18 @@ needs the steps that
 and [Understory's](#going-back-to-a-version-before-understory-was-an-extension)
 give for it.
 
+## Chats can have child chats
+
+An extension's server half can now make a
+[child chat](/guide/extension-ui#child-chats) of a chat, to give part of its
+work to; it is deleted with its parent. The upgrade (schema 12) gives every chat
+an empty parent, so every chat stays one of its own and listed. Nothing is left
+for an extension, and nothing needs doing.
+
+**Going back.** From `portal-v11-….db` it is only putting the backup in as
+under [Going back](#going-back): the child chats made since go with it. An
+older backup needs what [Chats have a mode](#chats-have-a-mode) says for it.
+
 ## The guard
 
 What the guard holds a chat to changed in this release
