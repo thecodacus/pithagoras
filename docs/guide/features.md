@@ -81,6 +81,24 @@ portal. `PI_SUBAGENT_BIN` picks the `pi` it starts (default: `pi` on `PATH`).
 Subagents need the host executor (`EXECUTOR=host`): only there does the portal
 share pi's event bus with the tool.
 
+### What the agent is told
+
+The `subagent` tool's description names the mode it runs in and the limit
+("One runs at a time: further calls wait for it to finish", or "At most 3 run
+at once; further calls wait for a free one"), so the agent does not ask for more
+than will start. The results carry the live numbers, counted across every chat:
+a background call says how many are running and how many wait ("2 of 2 running,
+1 waiting, this one included"), and an interrupt call that had to wait for a
+slot ends its answer with how long it waited, so the agent can tell the wait
+from the subagent's own work time. Nothing is added to the system prompt, so its
+cache holds.
+
+The description is read when a chat loads the tool, so a change under
+**Subagents at once** or **Mode** reaches an idle chat at once (it is reloaded),
+a busy one at its next step, and one with a subagent still working in the
+background once that is done. The limit is enforced live all the same, so a
+chat that has not yet taken the change never runs more than the settings say.
+
 ## Image generation
 
 **Settings → Extension settings → Media**, **Image model.** The image endpoint, and the switches for
