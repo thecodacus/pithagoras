@@ -16,18 +16,24 @@ inProcessHome("pithagoras-subagent-chats-");
 
 // The parent hands the riddle on, or asks the same subagent again; the child answers, knowing what it said before.
 let childId = "";
+// The parent whose child reads outside content as it works (the guard marks the child's chat), and whether the parent
+// has been told what a background child said.
+let marking = "";
+let relayed = false;
 const childRequests: any[] = [];
 const model = await fakeModel((request: any) => {
   const tools = (request.tools ?? []).map((tool: any) => tool.function?.name);
   const last = request.messages.at(-1);
   const said = JSON.stringify(last?.content ?? "");
   if (tools.includes("subagent")) {
+    if (said.includes("finished:")) relayed = true;
     if (last?.role === "tool") return "Done.";
     if (said.includes("Delegate")) return { name: "subagent", args: { task: "Answer the riddle", label: "Riddle" } };
     if (said.includes("Again")) return { name: "subagent", args: { id: childId, task: "What did you answer?" } };
     return "Done.";
   }
   childRequests.push(request);
+  if (marking) taintSession(db.childSessions(marking)[0].id);
   if (said.includes("riddle")) return "The answer is 42.";
   if (said.includes("What did you answer")) return JSON.stringify(request.messages).includes("The answer is 42") ? "I said 42." : "I do not know.";
   return "Done.";
@@ -36,6 +42,7 @@ writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR!, "models.json"), JSON.s
 
 const dist = (file: string) => new URL(`../../../core/server/dist/${file}`, import.meta.url).href;
 const db = await import(dist("db.js"));
+const { flaggedResult, sessionTainted, taintSession } = await import(dist("pi/guard.js"));
 const { sessions } = await import(dist("session-manager.js"));
 db.setSettings({ ...db.getSettings(), provider: "fake", model: "m" });
 const portal = await serveSubagent();
@@ -95,4 +102,32 @@ test("a subagent works in a child chat of its chat, which answers; kept, it is l
   const again = await ask("parent", "Again");
   assert.equal(db.childSessions("parent").length, 1, "no second child chat");
   assert.match(again, /^I said 42\./, "it knows what it answered before");
+});
+
+test("a subagent that read outside content marks its chat for good: the mark is in the chat's history, and holds when the chat's guard is made again", { timeout: 60_000 }, async () => {
+  for (const mode of ["interrupt", "background"]) {
+    assert.equal((await put(`${portal.at}/settings`, { mode })).status, 200);
+    const parent = `marked-${mode}`;
+    db.createSession({ id: parent, title: parent, workspace: process.env.WORKSPACE_ROOT!, executor: "host", kind: "task" });
+    marking = parent;
+    relayed = false;
+    try {
+      const first = await ask(parent, "Delegate it");
+      if (mode === "background") {
+        await until(() => relayed, "the answer to reach the chat");
+        await until(() => db.getSession(parent).status === "idle", "the chat to be idle again");
+      }
+      assert.equal(sessionTainted(parent), true, "the portal marked the chat as the answer came back");
+      if (mode === "interrupt") assert.deepEqual(flaggedResult(first)?.signals, ["came from a subagent that read outside content"], "and its result says so");
+    } finally {
+      marking = "";
+    }
+
+    // Its pi goes, and the next one has a guard that knows only what the history says.
+    await sessions.stop(parent);
+    assert.equal(sessionTainted(parent), false, "no guard, no mark in memory");
+    await ask(parent, "Hello");
+    assert.equal(sessionTainted(parent), true, `${mode}: the chat is still marked`);
+  }
+  assert.equal((await put(`${portal.at}/settings`, { mode: "interrupt" })).status, 200);
 });

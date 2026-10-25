@@ -25,6 +25,10 @@
  *   child's answer arrives later as a message, and starts a turn if the parent
  *   is idle. Two agents run at the same time.
  *
+ * What a subagent says after it read outside content (`ChildRun.marked`) goes to its chat in the form of a flagged
+ * result (flagged.ts), as the tool's result, the background message and what `subagents` stop says it had alike: the
+ * portal has marked the chat, and the form in its history keeps the mark when the guard is made again.
+ *
  * Kept or not, as the settings say ("Keep subagent chats", off by default): a
  * kept child is a sub-chat listed under its chat, and the agent gives it a
  * further task by its id once it has finished; one that is not kept is found by
@@ -50,6 +54,7 @@
  * so its cache holds.
  */
 import type { Chat, SubagentProtocol } from "@pithagoras/extension-api/server";
+import { flagged } from "./flagged";
 import { startRunner, type ChildChats, type Hear, type Runner, type Status } from "./runner";
 import { MAX_PARALLEL, type Mode, type Settings } from "./settings";
 
@@ -388,11 +393,11 @@ export default function subagentTool(pi: any, given: Given) {
          * What the parent is told when it is over: its answer starts a turn; a stop waits for the person. One the agent
          * stopped itself is not told again: its stop said what it had.
          */
-        const tell = (status: Status, said: string) => {
+        const tell = (status: Status, said: string, marked?: true) => {
           if (status === "stopped" && task.stoppedByAgent) return;
           try {
             pi.sendMessage(
-              { customType: "subagent", content: said, display: true, details: { id, status } },
+              { customType: "subagent", content: marked ? flagged(said) : said, display: true, details: { id, status } },
               status === "stopped" ? { deliverAs: "nextTurn" } : { deliverAs: "followUp", triggerTurn: true },
             );
           } catch {
@@ -413,7 +418,7 @@ export default function subagentTool(pi: any, given: Given) {
               return;
             }
             runner = run(task, params.task, toolCallId, detail);
-            const { status, answer, failure } = await runner.finished;
+            const { status, answer, failure, marked } = await runner.finished;
             tell(
               status,
               (status === "done"
@@ -421,6 +426,7 @@ export default function subagentTool(pi: any, given: Given) {
                 : status === "stopped"
                   ? `Subagent "${label}" was stopped before it finished.${answer ? ` What it had so far:\n\n${answer}` : ""}`
                   : `Subagent "${label}" failed: ${failure ?? "it ended early"}${answer ? `\n\nWhat it had so far:\n\n${answer}` : ""}`) + `\n\n(${named(id, kept)})`,
+              marked,
             );
           } catch (e) {
             // Whatever went wrong, the slot is given back below and the parent is told.
@@ -485,12 +491,16 @@ export default function subagentTool(pi: any, given: Given) {
         const running = runner;
         const stopped = () => running.stop();
         signal?.addEventListener("abort", stopped, { once: true });
-        const { status, answer, failure } = await runner.finished;
+        const { status, answer, failure, marked } = await runner.finished;
         signal?.removeEventListener("abort", stopped);
-        if (status === "error" && !answer) throw new Error(`The subagent failed: ${failure ?? "it ended early"} (${named(id, kept)})`);
+        if (status === "error" && !answer) {
+          const failed = `The subagent failed: ${failure ?? "it ended early"} (${named(id, kept)})`;
+          throw new Error(marked ? flagged(failed) : failed);
+        }
         // Said at the end, so the model can tell the wait from the subagent's own work time when it judges how long the task took.
         const note = hadToWait ? `\n\n(It waited ${waited(startedAt - queuedAt)} for a free subagent slot before it started.)` : "";
-        return { content: [{ type: "text", text: `${answer || "(the subagent gave no answer)"}${note}\n\n(${named(id, kept)})` }], details: { phase: status, id } };
+        const said = `${answer || "(the subagent gave no answer)"}${note}\n\n(${named(id, kept)})`;
+        return { content: [{ type: "text", text: marked ? flagged(said) : said }], details: { phase: status, id } };
       } catch (e) {
         // Failed before its chat was given the task (its start could not be said, say): no empty sub-chat is left.
         if (!runner) {
@@ -578,17 +588,14 @@ export default function subagentTool(pi: any, given: Given) {
       task.stoppedByAgent = true;
       stop(task);
       // What it had comes back once its run is over: a subagent that read outside content has marked this chat by then
-      // (the portal does as the run ends), so its words are held as what they are.
-      const { status, answer } = await ending;
-      return {
-        content: [{
-          type: "text",
-          text: status === "stopped"
-            ? `Stopped subagent "${label}" (${id}).${answer ? ` What it had so far:\n\n${answer}` : " It had said nothing yet."}`
-            : `Subagent "${label}" (${id}) ended before it could be stopped: its answer comes as it would have.`,
-        }],
-        details: { action: "stop", id },
-      };
+      // (the portal does as the run ends), so its words are held as what they are, and are handed on as a flagged result
+      // so that the mark is found again when the guard is made again, as with its answer.
+      const { status, answer, marked } = await ending;
+      if (status !== "stopped") {
+        return { content: [{ type: "text", text: `Subagent "${label}" (${id}) ended before it could be stopped: its answer comes as it would have.` }], details: { action: "stop", id } };
+      }
+      const said = `Stopped subagent "${label}" (${id}).${answer ? ` What it had so far:\n\n${answer}` : " It had said nothing yet."}`;
+      return { content: [{ type: "text", text: marked ? flagged(said) : said }], details: { action: "stop", id } };
     },
   });
 }

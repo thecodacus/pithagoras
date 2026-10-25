@@ -31,8 +31,11 @@ export interface Runner {
   send(text: string): Promise<string | undefined>;
   /** Stops its run, as the person's Stop in its chat does. */
   stop(): void;
-  /** Settles once its run has ended, with what it said last; `failure` is why it failed, where it did. Never rejects. */
-  finished: Promise<{ status: Status; answer: string; failure?: string }>;
+  /**
+   * Settles once its run has ended, with what it said last; `failure` is why it failed, where it did, and `marked` is set
+   * where it had read outside content that holds a chat back (`ChildRun.marked`). Never rejects.
+   */
+  finished: Promise<{ status: Status; answer: string; failure?: string; marked?: true }>;
 }
 
 const textOf = (message: any): string =>
@@ -63,7 +66,7 @@ export function startRunner(chats: ChildChats, id: string, task: string, hear?: 
       const run = await chats.prompt(id, task);
       if (run.answer) answer = run.answer;
       status = run.status;
-      return { status: run.status, answer, ...(run.status === "error" ? { failure: run.error || "The run failed" } : {}) };
+      return { status: run.status, answer, ...(run.status === "error" ? { failure: run.error || "The run failed" } : {}), ...(run.marked ? { marked: true as const } : {}) };
     } catch (e) {
       // Not its child, or no words: nothing ran.
       status = "error";
