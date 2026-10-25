@@ -40,7 +40,7 @@ test("what pi's settings said is the extension's, read as the tool read it, and 
   const { portal, logged, kept, leave, stored } = extension();
   leave({ subagentMode: "background", subagentMaxParallel: 3, subagentModel: "llama-swap/model-b" });
   takeHandoff(portal as any);
-  assert.deepEqual(settings(), { mode: "background", maxParallel: 3, model: "llama-swap/model-b" });
+  assert.deepEqual(settings(), { mode: "background", maxParallel: 3, model: "llama-swap/model-b", keep: false });
   // With a note of what came from pi's settings, for a later hand-off to tell it from what the person says.
   const given = { mode: "background", maxParallel: 3, model: "llama-swap/model-b" };
   assert.deepEqual(stored(), { ...given, handedOver: given });
@@ -83,14 +83,14 @@ test("a second hand-off, after going back and upgrading again, gives what pi's s
   // Back in the older version the limit became 4 and the model was chosen; the upgrade leaves them again.
   leave({ subagentMode: "background", subagentMaxParallel: 4, subagentModel: "llama-swap/model-b" });
   takeHandoff(portal as any);
-  assert.deepEqual(settings(), { mode: "background", maxParallel: 4, model: "llama-swap/model-b" });
+  assert.deepEqual(settings(), { mode: "background", maxParallel: 4, model: "llama-swap/model-b", keep: false });
   assert.equal(existsSync(kept), false);
   assert.equal(logged[1], "took up the subagent settings pi's settings held: maxParallel, model");
   // The person says another limit on the page; a third hand-off does not take it back.
   saveSettings({ ...settings(), maxParallel: 6 });
   leave({ subagentMode: "background", subagentMaxParallel: 5, subagentModel: "llama-swap/model-c" });
   takeHandoff(portal as any);
-  assert.deepEqual(settings(), { mode: "background", maxParallel: 6, model: "llama-swap/model-c" });
+  assert.deepEqual(settings(), { mode: "background", maxParallel: 6, model: "llama-swap/model-c", keep: false });
 });
 
 /**

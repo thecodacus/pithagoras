@@ -33,7 +33,7 @@ for (const id of ["chat-1", "chat-2"]) core.createSession({ id, title: "t", work
 const portal = await serveSubagent();
 
 test("the mode and the limit pi's settings held are the extension's after the upgrade, and the tool says them as before", async () => {
-  assert.deepEqual(await (await fetch(`${portal.at}/settings`)).json(), { mode: "background", maxParallel: 3, model: "auto", maxParallelLimit: 16 });
+  assert.deepEqual(await (await fetch(`${portal.at}/settings`)).json(), { mode: "background", maxParallel: 3, model: "auto", keep: false, maxParallelLimit: 16 });
   assert.equal(portal.toolsIn("chat-1").get("subagent")?.description, describe("background", 3));
   // Out of pi's file, and the rest of it as it was; the hand-off taken and done with.
   assert.deepEqual(JSON.parse(readFileSync(piSettings, "utf8")), { packages: ["../../extensions/subagent"], defaultProvider: "llama-swap" });
