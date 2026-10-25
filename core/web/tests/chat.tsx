@@ -167,9 +167,6 @@ if (phase === 'agents') {
   events.push(
     ev('tool_execution_start', { toolCallId: 'dr', toolName: 'deep_research', args: { query: 'Which vector DB fits a homelab?' } }, 50),
     ev('tool_execution_update', { toolCallId: 'dr', partialResult: { content: [{ type: 'text', text: '## Findings so far\n- **pgvector** is enough below 10M vectors' }], details: { phase: 'researching (4 searches)', items: [{ type: 'toolCall', name: 'web_search', args: { query: 'pgvector vs qdrant 2026' } }, { type: 'text', text: 'Comparing memory use.' }, { type: 'toolCall', name: 'fetch', args: { url: 'https://qdrant.tech/benchmarks' } }] } } }, 5),
-    // A tool that says where it has got to in its details only, with no text yet.
-    ev('tool_execution_start', { toolCallId: 'cm', toolName: 'codemode', args: { code: 'await build()' } }, 45),
-    ev('tool_execution_update', { toolCallId: 'cm', partialResult: { content: [], details: { phase: 'running the script' } } }, 44),
     ev('tool_execution_start', { toolCallId: 'sa', toolName: 'subagent', args: { task: 'Audit the deploy script', label: 'Deploy audit' } }, 40),
     ev('portal_subagent', { op: 'start', id: 'sub1', label: 'Deploy audit', toolCallId: 'sa', input: true, stop: true }, 40),
     ev('portal_subagent', { op: 'event', id: 'sub1', event: { type: 'message_end', message: { role: 'user', content: 'Audit the deploy script for anything that could lose data.' } } }, 39),

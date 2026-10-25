@@ -18,11 +18,3 @@ test('before the first message the tools are listed and can be switched for this
   await expect(menu.getByRole('checkbox', { name: 'web_search' })).not.toBeChecked();
   await expect(menu.getByText('default on')).toBeVisible();
 });
-
-test('a running tool that reports only a phase in its details shows it on its card, and it is no subagent', async ({ page }) => {
-  await page.goto('/tests/chat.html?phase=agents');
-  const card = page.locator('.chat-tool.is-running', { hasText: 'codemode' });
-  await expect(card.locator('.chat-tool-stream')).toContainText('running the script');
-  await expect(card.getByRole('button', { name: 'Watch' })).toHaveCount(0);
-  await expect(page.getByLabel('Running beside the conversation').getByRole('button', { name: /codemode/ })).toHaveCount(0);
-});

@@ -14,10 +14,9 @@ export const subagentName = (agent: { label: string }): string => (agent.label =
  * Only an extension that speaks the subagent protocol
  * (server/src/subagent-protocol.ts) has one: it hands over its child's own
  * events, so the child is drawn like the main conversation and can be spoken
- * to if it said so. No tool is taken for a subagent by what it does or how it
- * reports, however long it keeps reporting while it runs (code mode, a search,
- * a research tool): its progress stays on its own tool card in the transcript,
- * as its newest output lines or the phase it reports.
+ * to if it said so. No other tool is listed here, however long it keeps
+ * reporting while it runs (code mode, a search, a research tool): its output
+ * is on its own tool card in the transcript, as always.
  */
 export interface Subagent {
   /** The id the extension gave it. */

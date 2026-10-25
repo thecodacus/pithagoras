@@ -116,7 +116,7 @@ export type Item =
       output?: string;
       /** How many lines `output` had before it was cut to its end. */
       outputLines?: number;
-      /** What the tool reported about itself beside its text, such as the phase it has got to. */
+      /** What the tool reported about itself beside its text — an extension's progress, its subagent's steps. */
       details?: unknown;
       /** The guard flagged what it returned as a suspected prompt injection: its envelope's id, the signs, and the message of the turn it is in. */
       flagged?: { id: string; signals: string[]; turnSeq?: number };
