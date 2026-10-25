@@ -17,7 +17,7 @@ import { useFlip } from "../motion";
 import { useNow } from "../use-now";
 import { t, useLanguage } from "../i18n";
 import { SubChats } from "./SubChats";
-import { familiesFound, shownStatus, splitSubChats, type ShownStatus } from "../sub-chats";
+import { familiesFound, familyRunning, shownStatus, splitSubChats, type ShownStatus } from "../sub-chats";
 
 /**
  * How long a click on a name waits for a second one. The chat opens on a click
@@ -84,8 +84,8 @@ export const SessionsPage = memo(function SessionsPage({
 
   // The chats listed on their own, and the sub-chats under each (see sub-chats.ts): only the first are counted.
   const all = useMemo(() => splitSubChats(sessions), [sessions]);
-  // Running is how a chat shows: also while one of its sub-chats works.
-  const running = all.top.filter((s) => shownStatus(s, all.under.get(s.id)) === "running").length;
+  // A chat runs also while one of its sub-chats works.
+  const running = all.top.filter((s) => familyRunning(s, all.under.get(s.id))).length;
   const pinnedCount = all.top.filter((s) => s.pinned).length;
 
   // Each row names its folder (not the path it works in), and the search goes by that name. A sub-chat that is
@@ -128,7 +128,10 @@ export const SessionsPage = memo(function SessionsPage({
   /** The sub-chats shown under a chat's row: none while they are shut. */
   const subsShown = (id: string) => (openSubs.isOpen(id) ? (under.get(id) ?? []) : []);
   // A folder asked for shows only its chats — none while it cannot be told which they are.
-  const onlyFound = useMemo(() => (only ? matches.filter((s) => only.sessions.includes(s)) : []), [only, matches]);
+  const onlyFound = useMemo(() => {
+    const ids = new Set(only?.sessions.map((s) => s.id));
+    return matches.filter((s) => ids.has(s.id));
+  }, [only, matches]);
   const shown = only ? onlyFound : asked !== null ? [] : matches;
   // Rows slide to their new places (see motion.ts); a new one comes in with the list's own stagger. A chat's
   // sub-chats are rows of their own once shown, after it.
@@ -307,6 +310,7 @@ export const SessionsPage = memo(function SessionsPage({
                 folders={searching ? folders.filter((f) => f.sessions.length > 0) : folders}
                 isOpen={openFolders.isOpen}
                 onToggle={openFolders.toggle}
+                running={(s) => familyRunning(s, all.under.get(s.id))}
                 onMove={searching || !allKeys ? undefined : (keys, key, to) => move(keys, key, to, allKeys)}
                 onNewChat={onNewChat ? (f) => start(f.path || undefined) : undefined}
                 extra={(f) => (

@@ -67,7 +67,7 @@ test('a chat shows as running while a sub-chat runs, with its sub-chats open, an
     sub('links', 'Check the links', 'build', 1, { status: 'running' }),
     chat('build', 'Build the site', 10),
     sub('answer', 'Ask the owner', 'docs', 2, { asking: true }),
-    chat('docs', 'Write the docs', 20),
+    chat('docs', 'Write the docs', 20, { status: 'running' }),
   ]);
   await page.goto('/sessions');
   const side = sidebar(page);
@@ -77,10 +77,10 @@ test('a chat shows as running while a sub-chat runs, with its sub-chats open, an
   const docs = side.locator('[data-flip="docs"]');
   await expect(docs.getByRole('img', { name: 'waiting for you' })).toBeVisible();
   await expect(subChats(side, 'Write the docs').locator('[data-flip="answer"]').getByRole('img', { name: 'waiting for you' })).toBeVisible();
-  // The Sessions page counts a chat as running while its sub-chat runs, and the chat once.
+  // The Sessions page counts a chat as running while its sub-chat runs, and one that runs while its sub-chat asks.
   const main = page.getByRole('main');
   await expect(main.getByText('total').locator('..')).toContainText('2');
-  await expect(main.getByText('running', { exact: true }).locator('..')).toContainText('1');
+  await expect(main.getByText('running', { exact: true }).locator('..')).toContainText('2');
 });
 
 test('opening a sub-chat opens its chat\'s sub-chats, and its header leads back to its chat', async ({ page }) => {
@@ -113,14 +113,18 @@ test('the sidebar\'s limit and search count chats, not their sub-chats, and a se
   await expect(subChats(side, 'Chat 0').getByText('Sub two')).toBeVisible();
 });
 
-test('a folder counts its chats without their sub-chats', async ({ page }) => {
-  await portal(page, family().map((s) => (s.id === 'logo' ? s : { ...s, workspace: '/w/site' })), ['site']);
+test('a folder counts its chats without their sub-chats, and is marked running while one of those works', async ({ page }) => {
+  await portal(page, family().map((s) => (s.id === 'logo' ? s : { ...s, workspace: '/w/site', ...(s.id === 'images' ? { status: 'running' } : {}) })), ['site']);
   await page.goto('/sessions');
   const side = sidebar(page);
   const site = side.locator('[data-folder="project:site"]');
   await expect(site.getByText('1 chat', { exact: true })).toBeAttached();
+  await expect(site.getByRole('img', { name: 'running' })).toBeVisible();
   await site.getByRole('button', { name: 'site', exact: true }).click();
-  await expect(side.getByRole('group', { name: 'site' }).locator(':scope > [data-flip]')).toHaveText(['Build the site']);
+  // In it, the chat, and its sub-chats under it (open, as one of them works): none of them beside it.
+  const inSite = side.getByRole('group', { name: 'site' });
+  await expect(inSite.locator('[data-flip]')).toHaveCount(3);
+  await expect(subChats(inSite, 'Build the site').locator('[data-flip]')).toHaveText(['Check the links', /Shrink the images/]);
 });
 
 test('the Sessions page lists sub-chats under their chat, and counts chats without them', async ({ page }) => {

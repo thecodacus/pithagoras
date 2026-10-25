@@ -32,7 +32,7 @@ import { titleOf, useSlot, type Registered } from "../extensions/slots";
 import { failedIn } from "../extensions/loader";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { SubChats } from "./SubChats";
-import { familiesFound, shownStatus, splitSubChats, topOf, type ShownStatus } from "../sub-chats";
+import { familiesFound, familyRunning, shownStatus, splitSubChats, topOf, type ShownStatus } from "../sub-chats";
 
 /** How many unpinned sessions the sidebar shows before deferring to Sessions. A chat's sub-chats come with it, uncounted. */
 const RECENTS_LIMIT = 12;
@@ -181,10 +181,12 @@ export const Sidebar = memo(function Sidebar({
     searching,
     parents,
   );
+  // The chat whose sub-chat is open, where it is listed with its sub-chats under it.
   const activeParent = sessions.find((s) => s.id === activeId)?.parent;
+  const openedUnder = activeParent && all.under.has(activeParent) ? activeParent : null;
   useEffect(() => {
-    if (activeParent && all.under.has(activeParent)) openSubs.set(activeParent, true);
-  }, [activeId, activeParent && all.under.has(activeParent)]);
+    if (openedUnder) openSubs.set(openedUnder, true);
+  }, [activeId, openedUnder]);
   /** The sub-chats shown under a chat's row: none while they are shut. */
   const subsShown = (id: string) => (openSubs.isOpen(id) ? (under.get(id) ?? []) : []);
 
@@ -350,6 +352,7 @@ export const Sidebar = memo(function Sidebar({
               folders={folders}
               isOpen={openFolders.isOpen}
               onToggle={openFolders.toggle}
+              running={(s) => familyRunning(s, all.under.get(s.id))}
               onMove={searching || !allKeys ? undefined : (shown, key, to) => move(shown, key, to, allKeys)}
               onNewChat={(f) => newChat(f.path || undefined)}
             >

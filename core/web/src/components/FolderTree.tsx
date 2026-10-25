@@ -26,6 +26,7 @@ export function FolderTree<S extends { status: SessionStatus }>({
   children,
   size = "sm",
   extra,
+  running: runs = (s) => s.status === "running",
 }: {
   folders: readonly Folder<S>[];
   isOpen: (key: string) => boolean;
@@ -39,6 +40,8 @@ export function FolderTree<S extends { status: SessionStatus }>({
   size?: "sm" | "md";
   /** More to put on a folder's line, after its count. */
   extra?: (folder: Folder<S>) => ReactNode;
+  /** Whether a chat in it is working, for the mark on a shut folder: a chat's sub-chats work for it (see sub-chats.ts). */
+  running?: (s: S) => boolean;
 }) {
   const id = useId();
   const heads = useRef(new Map<string, HTMLElement>());
@@ -146,7 +149,7 @@ export function FolderTree<S extends { status: SessionStatus }>({
         // Where the line shows: before the folder that would come after the one carried.
         const before = drag && !carried && drag.to === other;
         if (!carried) other++;
-        const running = !open && f.sessions.some((s) => s.status === "running");
+        const running = !open && f.sessions.some(runs);
         // The house marks the agent that New starts chats with; every other agent's home is a bot. A server that does not say
         // which that is (no `newChats`) keeps the house on the first agent's.
         const Icon = f.kind === "home" ? ((f.newChats ?? f.key === HOME) ? LuHouse : LuBot) : f.kind === "elsewhere" ? LuFolderSearch : open ? LuFolderOpen : LuFolder;

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { familiesFound, shownStatus, splitSubChats, topOf } from "../core/web/src/sub-chats.ts";
+import { familiesFound, familyRunning, shownStatus, splitSubChats, topOf } from "../core/web/src/sub-chats.ts";
 import { groupByFolder } from "../core/web/src/session-folders.ts";
 import { filterSessions } from "../core/web/src/session-filter.ts";
 
@@ -60,6 +60,13 @@ test("a chat shows as running while a sub-chat runs, and as waiting for you whil
   assert.equal(shownStatus(chat("a"), [chat("b"), chat("c", { status: "running" })]), "running");
   assert.equal(shownStatus(chat("a", { status: "running" }), [chat("b", { asking: true })]), "asking", "a person is needed before anything else");
   assert.equal(shownStatus(chat("b", { status: "running", asking: true })), "asking", "a sub-chat's own row says so too");
+});
+
+test("a chat runs for a folder and a count while it or a sub-chat works, whatever its mark shows", () => {
+  assert.equal(familyRunning(chat("a")), false);
+  assert.equal(familyRunning(chat("a"), [chat("b", { status: "running" })]), true);
+  // Its mark says it waits for you; it still runs.
+  assert.equal(familyRunning(chat("a", { status: "running" }), [chat("b", { asking: true })]), true);
 });
 
 test("the chat that holds a sub-chat is found by either id", () => {

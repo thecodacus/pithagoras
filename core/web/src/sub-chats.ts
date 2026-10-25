@@ -70,6 +70,13 @@ export function shownStatus(
   return s.status;
 }
 
+/**
+ * Whether a chat works, or one of its sub-chats does: what a folder's mark and
+ * the Sessions page's count of running chats go by, whatever else it shows.
+ */
+export const familyRunning = (s: { status: SessionStatus }, subs: readonly { status: SessionStatus }[] = []) =>
+  s.status === "running" || subs.some((c) => c.status === "running");
+
 /** The chat listed on its own that holds `id`: the chat itself, or the chat of a sub-chat. */
 export const topOf = <S extends Chat>(all: Families<S>, id: string | null | undefined): S | undefined =>
   id ? all.top.find((s) => s.id === id || all.under.get(s.id)?.some((c) => c.id === id)) : undefined;
