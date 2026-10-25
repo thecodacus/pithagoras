@@ -48,6 +48,19 @@ test("the chat list has a listed child with its parent named, and not an unliste
   assert.deepEqual([hidden.body.parent, hidden.body.listed, hidden.body.title], ["parent", false, "Another part"]);
 });
 
+test("a child that waits on a person says so in the list, until its question has ended", async () => {
+  const asking = async () => {
+    const byId = Object.fromEntries((await call("GET", "/api/sessions")).body.sessions.map((s) => [s.id, s]));
+    return [byId.shown.asking, byId.parent.asking];
+  };
+  assert.deepEqual(await asking(), [undefined, undefined]);
+  appendEvent("shown", "portal_question", { id: "q1", questions: [{ id: "a", question: "Which one?", options: [{ label: "This" }] }] });
+  assert.deepEqual(await asking(), [true, undefined], "the child asks; its parent's row works that out from its children");
+  assert.equal((await call("GET", "/api/sessions/shown")).body.asking, true);
+  appendEvent("shown", "portal_question_end", { of: "q1", outcome: "answered" });
+  assert.deepEqual(await asking(), [undefined, undefined]);
+});
+
 test("deleting a chat deletes its children and their transcripts, and leaves the other chats", async () => {
   assert.equal((await call("DELETE", "/api/sessions/parent")).status, 200);
   for (const id of ["parent", "shown", "hidden"]) assert.equal((await call("GET", `/api/sessions/${id}`)).status, 404, id);
