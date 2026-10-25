@@ -25,7 +25,6 @@ const answers: Record<string, unknown> = {
   '/api/channels': { channels: [], kinds: [], agentHome: '/a/home' },
   '/api/skills': { skills: [{ name: 'release-notes', description: 'How releases are cut', editable: true, enabled: true, source: 'user', path: '/a/skills/release-notes' }], diagnostics: [], root: '/a/skills' },
   '/api/voice': { provider: '', ready: false, speech: true, voices: [], enabled: false },
-  '/api/features/subagent': { subagent: { available: true, installed: false, enabled: false, source: null, mode: 'interrupt', maxParallel: 1, model: 'auto' } },
   '/api/audit': { entries: [{ id: 2, at: '2026-10-01T09:00:00Z', kind: 'refused', tool: 'bash', subject: 'rm -rf /', reason: 'on the list', person_key: null, person_name: null, session_id: null }] },
   '/api/projects': { root: '/w', home: '/h', projects: [{ name: 'demo', path: '/w/demo', isGit: false, hasInstructions: false, hasTools: false, sessions: 0, lastActive: null }] },
   '/api/tools': { tools: [{ name: 'web_search', source: 'pi-web-access', defaultOn: true }], off: [], names: {} },
@@ -107,10 +106,6 @@ test('Settings → Channels does not say there are none when the list could not 
 
 test('Settings → Skills does not say there are none when the list could not be read', async ({ page }) => {
   await failsThenRecovers(page, 'skills', ['/api/skills'], { shown: 'release-notes', gone: 'None yet.' });
-});
-
-test('Settings → Tools: the subagent tool says what it could not read, and reads it again', async ({ page }) => {
-  await failsThenRecovers(page, 'tools', ['/api/features/subagent'], { shown: 'Off: the agent has no subagent tool.' });
 });
 
 test('Settings → Defaults → Voice mode says what it could not read, and reads it again', async ({ page }) => {

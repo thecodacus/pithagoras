@@ -1,5 +1,5 @@
 import { type Page } from '@playwright/test';
-import { test, expect, mockPortal } from '../../../../tests/browser/portal-mock';
+import { test, expect, mockPortal, reply } from '../../../../tests/browser/portal-mock';
 
 /**
  * The subagent extension's page in Settings (src/web/SubagentSettings.tsx), over what its server half would answer: how
@@ -10,14 +10,15 @@ test.use({ installed: ['extensions/subagent'] });
 const BASE = '/api/x/pithagoras-subagent';
 
 /** The server half as the page reaches it; what the page sent it, in order. */
-async function portal(page: Page) {
+async function portal(page: Page, { down = false } = {}) {
   const sent: unknown[] = [];
+  const failing = { down };
   const state = { mode: 'interrupt', maxParallel: 1, maxParallelLimit: 16, model: 'auto' };
   await mockPortal(page, ({ path, method, json }) => {
     // Settings lists the extension as the portal has it installed.
     if (path === '/api/extensions' && method === 'GET') return { settingsPath: '/a/settings.json', extensions: [{ spec: 'extensions/subagent', name: 'pithagoras-subagent', version: '0.2.0', settings: [] }] };
     if (path === '/api/models') return { models: [{ provider: 'p', id: 'm', name: 'M' }, { provider: 'llama-swap', id: 'model-b', name: 'Model B' }], providers: { p: 'p' } };
-    if (path === `${BASE}/settings` && method === 'GET') return state;
+    if (path === `${BASE}/settings` && method === 'GET') return failing.down ? reply(500, { error: 'The portal is starting up' }) : state;
     if (path === `${BASE}/settings` && method === 'PUT') {
       const change = json();
       sent.push(change);
@@ -26,7 +27,7 @@ async function portal(page: Page) {
     }
     return undefined;
   }, { settings: true });
-  return { sent };
+  return { sent, up: () => void (failing.down = false) };
 }
 
 const settings = (page: Page) => page.getByRole('dialog', { name: 'Settings' });
@@ -47,6 +48,18 @@ test("Subagents is a page of Settings, listed by the extension's title and mark,
   await expect(dialog.getByText(/one busy chat has it from its next step/)).toBeVisible();
   await expect(dialog.getByText(/two model calls at the same time/)).toBeVisible();
   expect(sent).toEqual([{ mode: 'background' }]);
+});
+
+test('a first read that fails says so, instead of a placeholder for ever, and the page comes when it is read again', async ({ page }) => {
+  const { up } = await portal(page, { down: true });
+  await page.goto('/settings/x/pithagoras-subagent');
+  const dialog = settings(page);
+  await expect(dialog.getByRole('alert')).toContainText('Could not load this: The portal is starting up');
+  await expect(dialog.getByRole('radio', { name: /^Interrupt/ })).toHaveCount(0);
+  up();
+  await dialog.getByRole('alert').getByRole('button', { name: 'Try again' }).click();
+  await expect(dialog.getByRole('radio', { name: /^Interrupt/ })).toBeChecked();
+  await expect(dialog.getByRole('alert')).toHaveCount(0);
 });
 
 test('one subagent at a time unless more are allowed, up and down by one', async ({ page }) => {
