@@ -9,7 +9,7 @@ import semver from "semver";
 import express, { type NextFunction, type Request, type RequestHandler, type Response, type Router } from "express";
 import { agentOf, defaultAgent, listAgents } from "./agents.js";
 import { dataDirOf } from "./extension-data.js";
-import { getSession, getSetting, listSessions, putSetting, recordAudit, sessionsByWorkspace, setServerHalfOffers, setServerHalvesAsked, setTrustedMcpServers, toolExceptions, trustedMcpServers, untrustMcpServer, type SessionRow } from "./db.js";
+import { childSessions, getSession, getSetting, listSessions, putSetting, recordAudit, sessionsByWorkspace, setServerHalfOffers, setServerHalvesAsked, setTrustedMcpServers, toolExceptions, trustedMcpServers, untrustMcpServer, type SessionRow } from "./db.js";
 import { EXECUTOR_KIND } from "./executor-kind.js";
 import { takes, type ServerHalf } from "./extension-ui.js";
 import { moduleAt } from "./half-modules.js";
@@ -774,6 +774,9 @@ function portalFor(ext: Running): ServerPortal {
       // A child chat is the package's that made it: only it prompts, stops or removes one. The person does all of
       // that on the child's own page, and its parent's delete takes it with it.
       create: (options) => chatOf(childChats.create(options, name)),
+      // Found again without the ids kept: the children of a chat this package made, listed or not (chats.list leaves
+      // the unlisted out), after a restart of the half or a lost record.
+      children: (parent) => childSessions(String(parent)).filter((row) => row.creator === name).map(chatOf),
       prompt: async (chatId, message, options = {}) => {
         ownChild(chatId);
         if (typeof message !== "string" || !message.trim()) throw new TypeError("A child chat is sent a message with words in it");

@@ -928,7 +928,7 @@ restart the portal.
 | `tools.exceptions(names)` | [Who has its tools](#who-has-its-tools): the chats and routines where those tools are not what the default says |
 | `chats.offers(chatId, tool)` | How the chat's model is offered a tool now: `"direct"`, `"lazy"` (through the `tools` tool) or nothing (switched off, out of reach, or the chat's pi not running here). In a chat whose mode works through the code tool ([Code mode](/guide/sessions#modes)), `"direct"` means that a script calls the tool by its name, with no streamed arguments of its own |
 | `chats.hold(chatId)` | Keeps the chat's pi from being let go for being idle, or reloaded, while work goes on; returns what lets it go |
-| `chats.create(options)`, `chats.prompt(chatId, message, options?)`, `chats.abort(chatId)`, `chats.remove(chatId)` | [Child chats](#child-chats): a chat of a chat, to give part of its work to, run until it answers, stopped and deleted |
+| `chats.create(options)`, `chats.children(parent)`, `chats.prompt(chatId, message, options?)`, `chats.abort(chatId)`, `chats.remove(chatId)` | [Child chats](#child-chats): a chat of a chat, to give part of its work to, run until it answers, stopped and deleted |
 | `sandbox.run(chatId, argv, options?)`, `sandbox.spawnAs(chatId)`, `sandbox.on()` | [Running things as the chat's agent](#running-things-as-the-chat-s-agent) |
 | `sandbox.personEnv()` | The portal's environment for a process the person starts, such as a shell of their own: without the mark the agent's processes carry, so it is not listed as a job the agent left running |
 | `files.inside(base, rel)` | A path checked to be inside a folder |
@@ -2266,29 +2266,43 @@ portal.chats.extend((pi, chat) => {
 
 - **`create({ parent, title, mode?, model?, listed? })`** makes it and returns
   it as a `Chat`, with `parent` set. `listed: false` keeps it out of the chat
-  lists (and `chats.list()`): it is found by its id alone. `mode` is one the
-  child may be put in, as a chat stores it ([Chat modes](#chat-modes)); a mode
-  that asks the person first only where its parent is in it. `model` is a
+  lists (and `chats.list()`): it is found by its id alone, or by
+  `chats.children(parent)`, which gives the children of a chat that the package
+  made, listed or not, oldest first: a half that lost its own record of them
+  finds them there to stop or remove them. Without a `mode`, the child is in
+  its parent's, so a mode that took tools away does not stop at a child; one
+  that is named is the half's own choice (`"standard"` for none), as a chat
+  stores it ([Chat modes](#chat-modes)), and a mode that asks the person first
+  only where its parent is in it. `model` is a
   `{ provider, id }`; without one it starts on its mode's model, or else on
-  its parent's. It throws, and says why, for a parent that is not there or is a
-  child itself (one level only), for no title, and for a model or a mode it
-  cannot have.
+  its parent's. It throws, and says why, for a parent that is not there, is a
+  child itself (one level only) or is a heartbeat (which is held to reading by a
+  role of its own that a child would not carry), for no title, and for a model
+  or a mode it cannot have.
 - **It stands where its parent stands.** It takes its parent's role and the
   person the parent last heard from, so the guard holds each call to the person
-  who asked, and the tools the person switched off or on in the parent. Its
-  kind is a chat's, so a dialog it opens is drawn on its own page, and the
-  guard can ask there: nobody may be looking, so say where it waits.
+  who asked, and the tools the person switched off or on in the parent. A dialog
+  it opens, and a question the guard asks, are drawn on its own page, where its
+  parent's would be: for a child of a chat of the portal's pages (or of the
+  agent's page) nobody may be looking, so say where it waits; for a child of a
+  conversation on a channel or of a routine run, where nobody can answer, the
+  guard refuses for the child too, as it does for its parent.
 - **`prompt(chatId, message, { steer? })`** resolves once the run that takes
   the message in has ended, with `{ status, answer, error? }`: `status` is
   `"done"`, `"stopped"` (by `abort`, by the person's Stop, or because the chat
   was deleted) or `"error"`. `answer` is the last thing it said. Sent while it
   works, a message waits for the run to end, as the person's does; with
   `steer`, it is taken after the step the run is on, and both prompts resolve
-  as that run ends. A run that fails resolves as an error; `prompt` throws only
-  for a chat that is not a child the package made, or a message with no words.
+  as that run ends. A run that fails resolves as an error, and so does a
+  command the child's speaker may not run; `prompt` throws only for a chat that
+  is not a child the package made, or a message with no words. A command the
+  speaker may run (`/compact`) is no message of the chat: `prompt` resolves as
+  `done` at once, with no answer, when it started no run, or when the run it
+  started ends.
 - **`abort(chatId)`** stops its run, as the person's Stop does.
   **`remove(chatId)`** deletes it, its run stopped first; its transcript and
-  files go, and `chats.on("deleted")` hears it.
+  files go, and `chats.on("deleted")` hears it once. While its parent is being
+  deleted `remove` throws: the parent's delete takes the child.
 - **The package that made a child** alone prompts, stops or removes it. The
   person can do all three on its own page.
 - **It goes with its parent.** Deleting the parent deletes its children, each
@@ -2298,7 +2312,7 @@ portal.chats.extend((pi, chat) => {
   done. A portal that restarts marks a child it cut off *interrupted*, as any
   chat.
 - **In a process of its own** (`"isolated": true`), `create` is answered at
-  once and the others later, as the other calls are.
+  once (`children` too) and the others later, as the other calls are.
 
 ## Panels and commands
 

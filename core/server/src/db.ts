@@ -108,6 +108,14 @@ export const BROWSER_CHANNEL = "browser";
 export const onChannel = (row: Pick<SessionRow, "channel_slug"> | undefined): boolean =>
   Boolean(row?.channel_slug) && row?.channel_slug !== BROWSER_CHANNEL;
 
+/**
+ * The chat whose people a chat's dialogs and questions are for: its own, and for a child chat its parent's. A child is
+ * unlisted or out of the way, so where its parent has nobody to answer (a channel conversation, a routine run) a
+ * question put on the child's page would wait for good, and with it the parent's work that waits on the child.
+ */
+export const dialogHost = (session: Pick<SessionRow, "kind" | "channel_slug"> & { parent_id?: string | null }): Pick<SessionRow, "kind" | "channel_slug"> =>
+  (session.parent_id && getSession(session.parent_id)) || session;
+
 export interface EventRow {
   seq: number;
   session_id: string;
@@ -1287,7 +1295,7 @@ export function listSessions(): SessionRow[] {
 
 /** The children of a chat, listed or not: see child-chats.ts. */
 export function childSessions(parentId: string): SessionRow[] {
-  return getDb().prepare("SELECT * FROM sessions WHERE parent_id = ? ORDER BY created_at, id").all(parentId) as SessionRow[];
+  return getDb().prepare("SELECT * FROM sessions WHERE parent_id = ? ORDER BY created_at, rowid").all(parentId) as SessionRow[];
 }
 
 /**
@@ -1616,8 +1624,9 @@ export const customEntry = (row: ChatModeRow): ChatModeEntry => ({
  * mode is carried out where the portal starts a chat's pi, which a container's pi is not. The portal's own first,
  * then the ones the person made, by their names, then the extensions' in the order they were offered.
  */
-export function modesFor(session: Pick<SessionRow, "kind" | "role" | "channel_slug">): readonly ChatModeEntry[] {
-  return EXECUTOR_KIND === "host" && asksQuestions(session, onChannel(session))
+export function modesFor(session: Pick<SessionRow, "kind" | "role" | "channel_slug"> & { parent_id?: string | null }): readonly ChatModeEntry[] {
+  const host = dialogHost(session);
+  return EXECUTOR_KIND === "host" && asksQuestions({ kind: host.kind, role: session.role }, onChannel(host))
     ? [...CORE_MODES, ...customModes().map(customEntry), ...providedModes()]
     : [];
 }

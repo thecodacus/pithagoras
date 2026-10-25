@@ -10,8 +10,10 @@ import { cleanTitle } from "./projects.js";
  * /s/<id>. Its kind is `task`, so its dialogs are drawn on its own page and the guard can ask there.
  *
  * It starts where its parent stands: the parent's role and last speaker, so the guard holds it to the person who
- * asked; the parent's model and effort unless it is given its own; and the tools the person switched off or on in the
- * parent. One level only: a child has no children. It is deleted with its parent (db.ts removeSession, and
+ * asked; the parent's mode, model and effort unless it is given its own; and the tools the person switched off or on in
+ * the parent. Its dialogs and the guard's questions go where its parent's would (db.ts dialogHost): where nobody can
+ * answer on the portal's pages, the guard refuses for the child too, rather than waiting on a page nobody opens. One
+ * level only: a child has no children. It is deleted with its parent (db.ts removeSession, and
  * SessionManager.discard for its pi and files).
  */
 
@@ -35,8 +37,8 @@ const text = (value: unknown): value is string => typeof value === "string" && v
 
 /**
  * Makes a child chat of `options.parent` for the package `creator`, and returns its row. Throws a TypeError for a
- * request that cannot be one, and says why: no such parent, a parent that is a child itself, no title, a model that
- * is not a provider and an id, or a mode the child may not be put in.
+ * request that cannot be one, and says why: no such parent, a parent that is a child itself or a heartbeat, no title,
+ * a model that is not a provider and an id, or a mode the child may not be put in.
  */
 export function newChildChat(options: unknown, creator: string): SessionRow {
   const asked = (options ?? {}) as Partial<Record<keyof ChildChatOptions, unknown>>;
@@ -44,6 +46,9 @@ export function newChildChat(options: unknown, creator: string): SessionRow {
   const parent = getSession(asked.parent);
   if (!parent) throw new TypeError(`There is no chat ${asked.parent}`);
   if (parent.parent_id) throw new TypeError("A child chat cannot have children of its own: make it a child of its parent instead");
+  // A heartbeat is held to reading by a role of its own, which a chat started under it would not carry: its row says
+  // primary, and the child would run with the primary user's rights, on whatever WATCH.md made the heartbeat read.
+  if (parent.kind === "heartbeat") throw new TypeError("A heartbeat cannot have child chats: it looks around on its own, held to reading, which a child chat would not be");
   const title = cleanTitle(asked.title);
   if (!title) throw new TypeError("A child chat needs a title");
   if (asked.listed !== undefined && typeof asked.listed !== "boolean") throw new TypeError("listed is true or false");
@@ -52,9 +57,11 @@ export function newChildChat(options: unknown, creator: string): SessionRow {
     throw new TypeError("A child chat's model is a provider and an id, as pi names them");
   }
 
-  // As the child will be: what decides the modes it may be put in, as for a chat the person starts.
-  const draft = { kind: "task" as const, role: parent.role, channel_slug: null };
-  let mode: string | null = null;
+  // As the child will be: modesFor looks to the parent for where the person can answer (dialogHost).
+  const draft = { kind: "task" as const, role: parent.role, channel_slug: null, parent_id: parent.id };
+  // With no mode asked for, the parent's: a child is not a way out of the tools a mode took away. The parent's own
+  // model and effort stay (the parent may have been moved off its mode's since); a mode that is named is its own choice.
+  let mode: string | null = asked.mode === undefined ? parent.mode : null;
   let fromMode: { provider?: string; model?: string; thinkingLevel?: string } = {};
   if (asked.mode !== undefined && asked.mode !== STANDARD) {
     const entry = modesFor(draft).find((one) => one.id === asked.mode);

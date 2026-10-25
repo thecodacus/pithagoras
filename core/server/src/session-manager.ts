@@ -96,6 +96,7 @@ import {
   sessionSubagentModel,
   anySessionRunning,
   onChannel,
+  dialogHost,
   lazyMarks,
   lazyToolNames,
   lazySetLabels,
@@ -175,6 +176,12 @@ export interface PromptOptions {
   images?: Attached[];
   /** Mid-run, go into the run that is going instead of waiting for it to end. */
   steer?: boolean;
+  /**
+   * Told the seq of the transcript line that records the message, and whether it waits for a run that is going,
+   * as soon as it is recorded: a caller that waits for what happens to this message (runChild) cannot tell it from
+   * another with the same words by reading the transcript. Not told for a command, which has no such line.
+   */
+  onRecorded?: (seq: number, queued: boolean) => void;
 }
 
 /** A message sent into a run, until pi takes it in: see SessionManager.waiting. */
@@ -272,7 +279,10 @@ const hasRoutineTools = (session: SessionRow) =>
   session.kind === "agent" || (session.kind === "task" && agentAt(session.workspace) !== undefined);
 
 /** Whether the conversation gets the ask_question tool: see asksQuestions. */
-const canAsk = (session: SessionRow) => asksQuestions(session, onChannel(session));
+const canAsk = (session: SessionRow) => {
+  const host = dialogHost(session);
+  return asksQuestions({ kind: host.kind, role: session.role }, onChannel(host));
+};
 
 /**
  * The chat's own switches turning the code tool off where its mode switches it on (modeHoldsCodemode): refused. With a
@@ -1193,7 +1203,8 @@ class SessionManager extends EventEmitter {
       sessionFile: session.pi_session_file || undefined,
       routineTools: hasRoutineTools(session),
       questions: canAsk(session),
-      dialogs: showsDialogs(session, onChannel(session)),
+      // A child chat's go where its parent's would: see dialogHost.
+      dialogs: showsDialogs(dialogHost(session), onChannel(dialogHost(session))),
       // A routine run gets the report tool instead: it is the one kind of
       // session with nobody on the other end to read what it found.
       routineSlug: session.kind === "routine" ? session.routine_slug : undefined,
@@ -1754,6 +1765,7 @@ class SessionManager extends EventEmitter {
     const row = isCommand ? undefined : this.record(sessionId, "portal_prompt", prompt);
     if (row) {
       logged.images = images.length > 0;
+      options?.onRecorded?.(row.seq, queued);
       if (queued) {
         waiting = { seq: row.seq, message, images: images.length, prompt };
         this.waiting.set(sessionId, [...(this.waiting.get(sessionId) ?? []), waiting]);
@@ -3266,6 +3278,10 @@ class SessionManager extends EventEmitter {
    * delete that fails part way leaves the chat (and its children) taking messages again, as they were.
    */
   async deleteChat(sessionId: string): Promise<void> {
+    // A child chat of one that is being deleted goes with it: its delete would remove its files, and tell the server
+    // halves it is deleted, a second time.
+    const parent = getSession(sessionId)?.parent_id;
+    if (parent) this.refuseIfDiscarded(parent);
     try {
       await this.discard(sessionId);
       deleteSession(sessionId);
@@ -3273,6 +3289,9 @@ class SessionManager extends EventEmitter {
       this.reopen([sessionId]);
       throw e;
     }
+    // Its parent's delete began while this one's discard was going: it has this child among its own and removes the
+    // files, and says deleted, in its turn (removeFiles).
+    if (parent && this.discarding.has(parent)) return;
     this.removeFiles(sessionId);
   }
 
@@ -3323,11 +3342,9 @@ class SessionManager extends EventEmitter {
       } catch {
         return;
       }
-      if (row.type === "portal_prompt" && mine === undefined && p.message === message) {
-        mine = row.seq;
-        // Sent while the chat was idle, it starts the run; sent into one, it waits until pi takes it in.
-        if (!p.queued) inRun = true;
-      } else if (row.type === "portal_taken" && mine !== undefined && p.seq === mine) inRun = true;
+      // Its own line is told by prompt() (onRecorded below), not found by its words: another message with the same ones
+      // can be recorded first while pi starts.
+      if (row.type === "portal_taken" && mine !== undefined && p.seq === mine) inRun = true;
       else if (row.type === "portal_unsent" && mine !== undefined && Array.isArray(p.seqs) && p.seqs.includes(mine)) finish("stopped", "It was stopped before the chat read the message");
       else if (!inRun) return;
       else if (row.type === "message_end" && p.message?.role === "assistant") {
@@ -3344,7 +3361,14 @@ class SessionManager extends EventEmitter {
     try {
       let sent: boolean;
       try {
-        sent = await this.prompt(childId, message, options.steer ? { steer: true } : undefined);
+        sent = await this.prompt(childId, message, {
+          ...(options.steer ? { steer: true } : {}),
+          onRecorded: (seq, queued) => {
+            mine = seq;
+            // Sent while the chat was idle, it starts the run; sent into one, it waits until pi takes it in.
+            if (!queued) inRun = true;
+          },
+        });
       } catch (e) {
         finish("error", (e as Error).message);
         return await ended;

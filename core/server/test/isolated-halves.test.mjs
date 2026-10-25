@@ -659,9 +659,10 @@ test("a child chat made, run, stopped and removed from its process, as the packa
         const child = portal.chats.create({ parent: "a", title: "Helper", listed: false });
         const run = await portal.chats.prompt(child.id, "Answer", { steer: true });
         await portal.chats.abort(child.id);
+        const found = portal.chats.children("a");
         const theirs = await portal.chats.remove("a").catch((e) => e.message);
         await portal.chats.remove(child.id);
-        res.json({ child, run, theirs });
+        res.json({ child, run, theirs, found });
       });
     `),
   ]);
@@ -669,6 +670,7 @@ test("a child chat made, run, stopped and removed from its process, as the packa
     child: { id: "kid", title: "Helper", workspace: work, status: "idle", parent: "a", listed: false },
     run: { status: "done", answer: "42" },
     theirs: "a is no child chat",
+    found: [{ id: "kid", title: "Helper", workspace: work, status: "idle", parent: "a", listed: false }],
   });
   assert.deepEqual(asked, [["create", "a", "maker"], ["run", "kid", "Answer", { steer: true }], ["abort", "kid"], ["remove", "kid"]]);
   await host.syncServerHalves([]);

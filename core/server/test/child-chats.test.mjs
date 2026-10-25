@@ -27,7 +27,7 @@ const letGo = () => {
 writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR, "models.json"), JSON.stringify(model.models()));
 
 const host = await import("../dist/extension-host.js");
-const { createSession, eventsSince, getDb, getSession, getSettings, listChatSessions, listSessions, setSettings, updateSession } = await import("../dist/db.js");
+const { createCustomMode, createSession, eventsSince, getDb, getSession, getSettings, listChatSessions, listSessions, setSettings, updateCustomMode, updateSession } = await import("../dist/db.js");
 const { SESSION_ROOT, sessions } = await import("../dist/session-manager.js");
 setSettings({ ...getSettings(), provider: "fake", model: "m" });
 
@@ -45,7 +45,18 @@ function half(name) {
 `);
   return { name, version: "1.0.0", file, rev: `${statSync(file).size}` };
 }
-await host.syncServerHalves([half("helper"), half("other")]);
+// A third half offers a mode that asks the person first, for what a child may be put in.
+const moded = (() => {
+  const dir = path.join(home, "packages", "moded");
+  mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, "server.js");
+  writeFileSync(file, `export default function (portal) {
+  portal.modes.provide({ id: "focus", label: "Focus mode", description: "Asks first.", confirm: "Focus mode works with fewer checks." });
+}
+`);
+  return { name: "moded", version: "1.0.0", file, rev: `${statSync(file).size}` };
+})();
+await host.syncServerHalves([half("helper"), half("other"), moded]);
 const helper = globalThis.portals.helper;
 const other = globalThis.portals.other;
 test.after(async () => {
@@ -227,4 +238,132 @@ test("a child the last portal left running is marked interrupted on the next sta
   updateSession(child.id, { status: "running" });
   sessions.recoverOrphans();
   assert.equal(getSession(child.id).status, "interrupted");
+});
+
+/** The names of the tools a request declared to the model. */
+const declared = (request) => (request.tools ?? []).map((t) => t.function?.name ?? t.name);
+
+test("a child of a heartbeat is refused: the heartbeat is held to reading by a role its row does not carry", () => {
+  const heartbeat = chat({ kind: "heartbeat" });
+  assert.throws(() => helper.chats.create({ parent: heartbeat, title: "Sneaky" }), /heartbeat cannot have child chats/);
+  assert.equal(getDb().prepare("SELECT COUNT(*) AS n FROM sessions WHERE parent_id = ?").get(heartbeat).n, 0);
+});
+
+test("a child asks, and opens dialogs, only where its parent's people can answer: not for a channel conversation or a routine run", async () => {
+  const asks = async (id) => (await sessions.getTools(id)).tools.some((tool) => tool.name === "ask_question");
+  const plain = helper.chats.create({ parent: chat(), title: "On the page" });
+  assert.equal(await asks(plain.id), true, "a chat of the person's pages asks");
+  const viaChannel = helper.chats.create({ parent: chat({ kind: "agent", channel_slug: "telegram", channel_key: "42" }), title: "From a channel" });
+  assert.equal(await asks(viaChannel.id), false, "nobody answers on /s/<child> for a conversation on a channel");
+  const routine = helper.chats.create({ parent: chat({ kind: "routine", routine_slug: "nightly" }), title: "From a routine" });
+  assert.equal(await asks(routine.id), false, "nor for a routine run");
+  const agentPage = helper.chats.create({ parent: chat({ kind: "agent" }), title: "From the agent's page" });
+  assert.equal(await asks(agentPage.id), true, "the agent's own page is the person's");
+  // And no mode is offered where the person cannot say yes to it.
+  assert.throws(() => helper.chats.create({ parent: chat({ kind: "agent", channel_slug: "telegram", channel_key: "43" }), title: "Moded", mode: "code" }), /no mode "code"/);
+});
+
+test("prompts with the same words are told apart by the line each was recorded as, not found by their words", async () => {
+  const child = helper.chats.create({ parent: chat(), title: "Twins" });
+  const row = (type, payload) => sessions.record(child.id, type, payload);
+  const prompt = sessions.prompt;
+  // Another caller's message with the same words is recorded first, and its run ends before this one's is taken in.
+  sessions.prompt = async (id, message, options) => {
+    row("portal_prompt", { message });
+    const mine = row("portal_prompt", { message, queued: true });
+    options.onRecorded(mine.seq, true);
+    row("message_end", { message: { role: "assistant", content: [{ type: "text", text: "the other's answer" }] } });
+    row("portal_status", { status: "idle" });
+    setTimeout(() => {
+      row("portal_taken", { seq: mine.seq });
+      row("message_end", { message: { role: "assistant", content: [{ type: "text", text: "my answer" }] } });
+      row("portal_status", { status: "idle" });
+    }, 20);
+    return true;
+  };
+  try {
+    assert.deepEqual(await helper.chats.prompt(child.id, "same words"), { status: "done", answer: "my answer" });
+  } finally {
+    sessions.prompt = prompt;
+  }
+});
+
+test("a child takes its parent's mode unless it is asked into another, and its pi is started in it", async () => {
+  const parent = chat();
+  updateSession(parent, { mode: "code" });
+  const inherited = helper.chats.create({ parent, title: "Same mode" });
+  assert.equal(inherited.mode, "code");
+  assert.equal(helper.chats.create({ parent, title: "Standard", mode: "standard" }).mode, undefined, "asked for Standard, it is in none");
+  const asked = model.requests.length;
+  assert.equal((await helper.chats.prompt(inherited.id, "Answer please")).status, "done");
+  const tools = declared(model.requests[asked]);
+  assert.ok(tools.includes("codemode"), "the code tool is declared");
+  assert.ok(!tools.includes("bash"), "and the chat's own tools are behind it");
+});
+
+test("a mode that asks the person first is for a child only where its parent is in it; a mode with a model gives it to the child", () => {
+  const parent = chat();
+  assert.throws(() => helper.chats.create({ parent, title: "Focus", mode: "moded/focus" }), /asks the person first/);
+  const focused = chat();
+  updateSession(focused, { mode: "moded/focus" });
+  assert.equal(helper.chats.create({ parent: focused, title: "Focus", mode: "moded/focus" }).mode, "moded/focus");
+
+  const mine = createCustomMode({ label: "Careful", description: "Thinks a lot" });
+  updateCustomMode(mine.id, { provider: "fake", model: "careful", thinking_level: "high" });
+  const careful = `custom/${mine.id}`;
+  updateSession(parent, { provider: "fake", model: "m", thinking_level: "low" });
+  const fromMode = getSession(helper.chats.create({ parent, title: "Careful", mode: careful }).id);
+  assert.deepEqual([fromMode.mode, fromMode.provider, fromMode.model, fromMode.thinking_level], [careful, "fake", "careful", "high"], "its mode's model and effort, over its parent's");
+  const given = getSession(helper.chats.create({ parent, title: "Given", mode: careful, model: { provider: "other", id: "big" } }).id);
+  assert.deepEqual([given.provider, given.model, given.thinking_level], ["other", "big", "high"], "a model it is given, over its mode's");
+});
+
+test("a command a child's speaker may not run resolves as an error, not as done", async () => {
+  const parent = chat();
+  getDb().prepare("UPDATE sessions SET role = 'colleague', last_person_key = 'tg:7' WHERE id = ?").run(parent);
+  const child = helper.chats.create({ parent, title: "Theirs" });
+  const run = await helper.chats.prompt(child.id, "/compact");
+  assert.equal(run.status, "error");
+  assert.match(run.error, /primary user/);
+});
+
+test("children finds the ones a package made, listed or not, and no other's", () => {
+  const parent = chat();
+  const elsewhere = chat();
+  const shown = helper.chats.create({ parent, title: "Shown" });
+  const hidden = helper.chats.create({ parent, title: "Hidden", listed: false });
+  other.chats.create({ parent, title: "Theirs" });
+  helper.chats.create({ parent: elsewhere, title: "Elsewhere" });
+  assert.deepEqual(helper.chats.children(parent).map((one) => one.id), [shown.id, hidden.id]);
+  assert.deepEqual(helper.chats.children("nowhere"), []);
+});
+
+test("a child removed as its parent is deleted is deleted, and heard so, once", async () => {
+  const parent = chat();
+  const child = helper.chats.create({ parent, title: "Twice" });
+  const run = helper.chats.prompt(child.id, "Hold it");
+  await until(() => held.length === 1, "the child's run to be held at the model");
+  globalThis.heard.length = 0;
+  const deleting = sessions.deleteChat(parent);
+  // The parent's delete has the child; the half's own is refused rather than racing it.
+  await assert.rejects(helper.chats.remove(child.id), /being deleted/);
+  await deleting;
+  assert.equal((await run).status, "stopped");
+  assert.equal(getSession(child.id), undefined);
+  assert.deepEqual(globalThis.heard.filter((one) => one.startsWith("helper ")).sort(), [`helper ${child.id}`, `helper ${parent}`].sort());
+  letGo();
+});
+
+test("a child's delete that is under way as its parent's begins is heard once too", async () => {
+  const parent = chat();
+  const child = helper.chats.create({ parent, title: "Under way" });
+  const run = helper.chats.prompt(child.id, "Hold it");
+  await until(() => held.length === 1, "the child's run to be held at the model");
+  globalThis.heard.length = 0;
+  const removing = helper.chats.remove(child.id);
+  const deleting = sessions.deleteChat(parent);
+  await Promise.all([removing, deleting]);
+  assert.equal((await run).status, "stopped");
+  assert.deepEqual(globalThis.heard.filter((one) => one.startsWith("helper ")).sort(), [`helper ${child.id}`, `helper ${parent}`].sort());
+  letGo();
 });

@@ -133,7 +133,8 @@ installed can be called by the next, in the same run. pi tells the model which
 tools came and went.
 
 Not while a subagent works in the background, which a reload would stop, nor
-while an extension holds the chat (`chats.hold`): the chat is then reloaded
+while one of the chat's child chats works, nor while an extension holds the
+chat (`chats.hold`): the chat is then reloaded
 once neither does any more, at a later step, as its run ends, or before the
 next message starts a run. A chat whose pi runs in a container of its own
 (`EXECUTOR=container`) is reloaded once its run is over. A reload keeps the
