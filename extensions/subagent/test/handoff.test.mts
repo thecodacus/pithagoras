@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { scratch } from "../../../tests/helpers.mts";
-import { takeHandoff } from "../src/server.ts";
+import { takeChatsHandoff, takeHandoff } from "../src/server.ts";
+import { chatModel, openChats, setChatModel } from "../src/per-chat.ts";
 import { openStore, saveSettings, settings } from "../src/settings.ts";
 
 /**
@@ -90,4 +91,58 @@ test("a second hand-off, after going back and upgrading again, gives what pi's s
   leave({ subagentMode: "background", subagentMaxParallel: 5, subagentModel: "llama-swap/model-c" });
   takeHandoff(portal as any);
   assert.deepEqual(settings(), { mode: "background", maxParallel: 6, model: "llama-swap/model-c" });
+});
+
+/**
+ * What each chat said its subagents run on, as the upgrade to schema 13 leaves it (core's side is in
+ * schema-fingerprint.test.mjs, both together in upgrade.test.mts), taken up the same way.
+ */
+function chatsExtension({ removes = true } = {}) {
+  const data = realpathSync(scratch("subagent-chats-handoff-"));
+  const logged: string[] = [];
+  const kept = path.join(data, "handoff-subagent-chats");
+  const portal = {
+    log: (line: string) => logged.push(line),
+    handoffs: {
+      take: (name: string) => (name === "subagent-chats" && existsSync(kept) ? kept : undefined),
+      done: (name: string) => void (removes && name === "subagent-chats" && rmSync(kept, { recursive: true, force: true })),
+    },
+  };
+  openChats(data);
+  const leave = (models: unknown, format = 1) => {
+    mkdirSync(kept, { recursive: true });
+    writeFileSync(path.join(kept, "handoff.json"), JSON.stringify({ format, name: "subagent-chats", schema: 13, made: "2026-10-25T10:00:00.000Z" }));
+    writeFileSync(path.join(kept, "models.json"), JSON.stringify(models));
+  };
+  const stored = () => JSON.parse(readFileSync(path.join(data, "chats.json"), "utf8"));
+  return { portal, logged, kept, leave, stored };
+}
+
+test("what each chat said its subagents run on is the extension's, and the hand-off is done with", () => {
+  const { portal, logged, kept, leave, stored } = chatsExtension();
+  leave({ "chat-1": "llama-swap/model-b", "chat-2": "auto" });
+  takeChatsHandoff(portal as any);
+  assert.deepEqual([chatModel("chat-1"), chatModel("chat-2"), chatModel("chat-3")], ["llama-swap/model-b", "auto", undefined]);
+  assert.deepEqual(stored(), { "chat-1": "llama-swap/model-b", "chat-2": "auto" });
+  assert.equal(existsSync(kept), false);
+  assert.deepEqual(logged, ["took up what 2 chats said their subagents run on"]);
+});
+
+test("taken up twice comes to the same, and a chat that said another since in its model menu keeps that", () => {
+  const { portal, leave, stored } = chatsExtension({ removes: false });
+  setChatModel("chat-1", "vllm/model-c");
+  leave({ "chat-1": "llama-swap/model-b", "chat-2": "auto", "chat-3": "no model" });
+  takeChatsHandoff(portal as any);
+  takeChatsHandoff(portal as any);
+  // What is no model was never one the portal took: nothing to take.
+  assert.deepEqual(stored(), { "chat-1": "vllm/model-c", "chat-2": "auto" });
+});
+
+test("a chats' hand-off in a format this does not read is kept for a later version, and says why", () => {
+  const { portal, logged, kept, leave } = chatsExtension();
+  leave({ "chat-1": "auto" }, 2);
+  takeChatsHandoff(portal as any);
+  assert.equal(chatModel("chat-1"), undefined);
+  assert.ok(existsSync(kept));
+  assert.deepEqual(logged, ["could not take up what the chats said their subagents run on, which is kept for the next start: it is in a format this version does not read (2)"]);
 });

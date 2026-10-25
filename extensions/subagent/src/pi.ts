@@ -20,10 +20,9 @@
  *   is idle. Two agents run at the same time.
  *
  * The model a child runs on: the one its parent is on now, unless the chat
- * says otherwise (the portal answers `subagent:v1:config` with the chat's
- * choice) or the settings name one ("provider/model"; "auto" is the
- * parent's). The model already loaded is the one to use: a second one is a
- * second model in memory.
+ * says otherwise (its model menu, kept by the server half: per-chat.ts) or the
+ * settings name one ("provider/model"; "auto" is the parent's). The model
+ * already loaded is the one to use: a second one is a second model in memory.
  *
  * The limit (default 1) is how many children run at once, across every
  * conversation in the process — the portal runs them all in one. One asked
@@ -49,8 +48,6 @@ const EVENT = "subagent:v1:event" satisfies keyof SubagentProtocol;
 const END = "subagent:v1:end" satisfies keyof SubagentProtocol;
 const INPUT = "subagent:v1:input" satisfies keyof SubagentProtocol;
 const STOP = "subagent:v1:stop" satisfies keyof SubagentProtocol;
-/** Asked by the extension, answered at once by whoever runs it: `{ reply({ model? }) }`. */
-const CONFIG = "subagent:v1:config" satisfies keyof SubagentProtocol;
 
 /** "provider/model" as a model to hand the child, or undefined for pi's own default. */
 export function parseModel(choice: unknown): { provider: string; id: string } | undefined {
@@ -162,9 +159,11 @@ export const CHILD_ENV = "PI_SUBAGENT_CHILD";
 
 /**
  * Registers the `subagent` tool in a chat's pi. `settings` is asked for what
- * the extension keeps now (settings.ts).
+ * the extension keeps now (settings.ts), and `chatModel` for what this chat
+ * says its subagents run on, when it says (per-chat.ts): each as a subagent
+ * starts, so a change needs no reload.
  */
-export default function subagentTool(pi: any, settings: () => Settings) {
+export default function subagentTool(pi: any, settings: () => Settings, chatModel: () => string | undefined = () => undefined) {
   if (process.env[CHILD_ENV] === "1") return;
   // Read once, as it is loaded: what the tool tells the model and what it
   // does must agree. A change reaches a chat when it is reloaded. The limit
@@ -186,20 +185,13 @@ export default function subagentTool(pi: any, settings: () => Settings) {
     wakeAll();
   });
 
-  /** What the chat says its subagents run on, when something answers for it. */
-  function chatChoice(): string | undefined {
-    let said: string | undefined;
-    say(CONFIG, { reply: (config) => void (typeof config?.model === "string" && (said = config.model)) });
-    return said;
-  }
-
   /**
    * Starts a child for the task and hands over what watching it needs.
    * `announced`: the id it was announced under while it waited for a slot.
    */
   function start(task: string, label: string, toolCallId: string, ctx: any, background: boolean, onUpdate?: any, announced?: string): Run {
     const id = announced ?? randomUUID();
-    const model = childModel(chatChoice(), ctx?.model, settings().model);
+    const model = childModel(chatModel(), ctx?.model, settings().model);
     // Its stderr goes nowhere: a pipe nobody reads fills, and the child
     // blocks on its next warning for good.
     const child = spawn(process.env.PI_SUBAGENT_BIN || "pi", ["--mode", "rpc", "--no-session", ...(model ? ["--provider", model.provider, "--model", model.id] : [])], {

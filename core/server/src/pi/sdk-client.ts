@@ -503,8 +503,6 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     exemptNow?: () => ReadonlySet<string>;
     /** The sites the agent's tools may reach, read at each tool call, so a change takes effect without a restart. */
     allowlistNow?: () => string[];
-    /** What this chat's subagents run on, asked when one starts: see subagent-protocol.ts. */
-    subagentModel?: () => string | undefined;
     /** The agent whose heartbeat this is: gives it the note tool. See heartbeat.ts. */
     heartbeatAgent?: string;
     /** Told the chat's model when a spoken turn is about to run on another: see useVoiceModel. */
@@ -721,14 +719,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     client.canReloadNow = opts.canReloadNow;
     if (eventBus && resourceLoader) {
       client.bus = eventBus;
-      client.unbridge = bridgeSubagents(
-        eventBus,
-        (event) => client.emit("event", event),
-        () => {
-          const model = opts.subagentModel?.();
-          return model ? { model } : {};
-        },
-      );
+      client.unbridge = bridgeSubagents(eventBus, (event) => client.emit("event", event));
       client.unbridgeUi = bridgeExtensionUi(eventBus, (event) => client.emit("event", event));
     }
     if (resourceLoader) {

@@ -18,7 +18,7 @@ import { freePort, inProcessHome } from "./server-harness.mjs";
 // src/schema-version.ts (once for the release, not once for each change),
 // pin the new version and fingerprint here, and have an upgrade test for what
 // changed (below) that starts from a database made before it.
-const PINNED = { version: 12, fingerprint: "d118d40ea237b90e58c0ef97d6f1cdcb5e876ed739c3e2bbc6684f74a8aa653a" };
+const PINNED = { version: 13, fingerprint: "d118d40ea237b90e58c0ef97d6f1cdcb5e876ed739c3e2bbc6684f74a8aa653a" };
 /** The schema of version 10, the one pinned before: chats with no mode, and no table of the modes the person made. */
 const V10_FINGERPRINT = "155cf58f87a19f0a102c8475bdceee87a98d9169c400d887a37411107f0a5ccf";
 /** The schema of version 9: a project's switch for the agent's memory named for Understory. */
@@ -1437,6 +1437,78 @@ test("a copy of the subagent tool that is no extension keeps its settings in pi'
     assert.deepEqual(JSON.parse(readFileSync(file, "utf8")), { packages: [copy] });
   });
   assert.deepEqual(leftAt(dir), ["subagent"]);
+});
+
+/** A database of version 12 in its own folder `name`, with what chats said their subagents run on: `said`, by chat id. */
+function databaseAt12(name, said) {
+  const dir = path.join(home, name);
+  mkdirSync(dir, { recursive: true });
+  getDb().exec(`VACUUM INTO '${path.join(dir, "portal.db")}'`);
+  const d = new Database(path.join(dir, "portal.db"));
+  d.pragma("user_version = 12");
+  for (const [chat, model] of Object.entries(said)) d.prepare("INSERT INTO settings (key, value) VALUES (?, ?)").run(`subagent_model:${chat}`, model);
+  d.close();
+  return dir;
+}
+const subagentRows = (dir) => {
+  const d = new Database(path.join(dir, "portal.db"), { readonly: true });
+  try {
+    return d.prepare("SELECT key, value FROM settings WHERE key LIKE 'subagent%' ORDER BY key").all();
+  } finally {
+    d.close();
+  }
+};
+
+test("what each chat said its subagents run on is left for the subagent extension at schema 13, and leaves the database", async () => {
+  const dir = databaseAt12("subagent-chats-out", { c1: "llama-swap/model-b", c2: "auto", c3: "" });
+  assert.deepEqual(upgradeCheck(path.join(dir, "portal.db")), { needed: true, from: 12 });
+  assert.match(await upgraded(dir), new RegExp(`upgrading the database from version 12 to ${SCHEMA_VERSION}`));
+  assert.match(path.basename(backupsIn(path.join(dir, "backups"))[0]), /^portal-v12-\d{8}-\d{6}\.db$/);
+  const now = new Database(path.join(dir, "portal.db"), { readonly: true });
+  assert.deepEqual([now.pragma("user_version", { simple: true }), schemaFingerprint(now)], [SCHEMA_VERSION, PINNED.fingerprint]);
+  now.close();
+  assert.deepEqual(subagentRows(dir), []);
+  assert.deepEqual(leftAt(dir), ["subagent-chats"], "nothing half done beside it");
+  const left = (name) => path.join(dir, "handoff", "subagent-chats", name);
+  const { made: _made, ...about } = JSON.parse(readFileSync(left("handoff.json"), "utf8"));
+  assert.deepEqual(about, { format: 1, name: "subagent-chats", schema: 13 });
+  // The chat that said the default again ("") said nothing.
+  assert.deepEqual(JSON.parse(readFileSync(left("models.json"), "utf8")), { c1: "llama-swap/model-b", c2: "auto" });
+  assert.equal(modeOf(left("models.json")), 0o600);
+});
+
+test("chats that only ever went back to the default leave nothing for the subagent extension, and their settings go", async () => {
+  const dir = databaseAt12("subagent-chats-none", { c1: "", c2: "" });
+  await upgraded(dir);
+  assert.deepEqual(subagentRows(dir), []);
+  assert.deepEqual(leftAt(dir), []);
+});
+
+test("a chats' hand-off that waits from an earlier upgrade keeps what it has, with what the chats say now over it", async () => {
+  const dir = databaseAt12("subagent-chats-again", { c1: "llama-swap/model-b", c2: "auto" });
+  await upgraded(dir);
+  // Gone back to the older version, the person chose again in two chats, one of them new; the database is at 12 again.
+  const d = new Database(path.join(dir, "portal.db"));
+  d.pragma("user_version = 12");
+  d.prepare("INSERT INTO settings (key, value) VALUES (?, ?)").run("subagent_model:c2", "vllm/model-c");
+  d.prepare("INSERT INTO settings (key, value) VALUES (?, ?)").run("subagent_model:c4", "auto");
+  d.close();
+  await upgraded(dir);
+  assert.deepEqual(JSON.parse(readFileSync(path.join(dir, "handoff", "subagent-chats", "models.json"), "utf8")), { c1: "llama-swap/model-b", c2: "vllm/model-c", c4: "auto" });
+  assert.deepEqual(subagentRows(dir), []);
+  assert.deepEqual(leftAt(dir), ["subagent-chats"]);
+});
+
+test("a chats' hand-off that cannot be left keeps what the chats said in the database, for the next start", async () => {
+  const dir = databaseAt12("subagent-chats-kept", { c1: "llama-swap/model-b" });
+  // A file where the hand-off's folder would go: nothing can be left in it.
+  writeFileSync(path.join(dir, "handoff"), "");
+  assert.match(await upgraded(dir), /could not be left for the subagent extension, and is kept for the next start/);
+  assert.deepEqual(subagentRows(dir), [{ key: "subagent_model:c1", value: "llama-swap/model-b" }]);
+  rmSync(path.join(dir, "handoff"));
+  await upgraded(dir);
+  assert.deepEqual(subagentRows(dir), []);
+  assert.deepEqual(JSON.parse(readFileSync(path.join(dir, "handoff", "subagent-chats", "models.json"), "utf8")), { c1: "llama-swap/model-b" });
 });
 
 // A data folder of v0.1.0 that used every part an extension holds now, each kept as v0.1.0 kept it, on fixtures/portal-v3.db:

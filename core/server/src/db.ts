@@ -1001,6 +1001,45 @@ function handOffSubagent(): void {
 }
 
 /**
+ * What a chat said its subagents run on (its model menu) is the subagent extension's to keep from schema 13, as the
+ * settings are (handOffSubagent). The portal kept it as a setting for each chat, `subagent_model:<chat id>`: "auto", or
+ * "provider/model", or "" for nothing said. Each said is left for the extension in the data folder (see handoff.ts),
+ * which takes them up when it starts: `models.json`, by chat id. The settings go once they are left, and a try that
+ * fails keeps them for the next start. A hand-off that waits already (left by an earlier upgrade, and the person went
+ * back) keeps what it has, and what the settings say now is added over it. The database was backed up before this
+ * ran (db-upgrade.ts); docs/guide/upgrading.md says how to go back.
+ */
+function handOffSubagentChats(d: Database.Database): void {
+  const rows = d.prepare("SELECT key, value FROM settings WHERE key GLOB 'subagent_model:*'").all() as { key: string; value: string }[];
+  if (!rows.length) return;
+  // As the portal checked a choice when it was made. Written out here, as an upgrade step does not change with the code after it.
+  const said = (value: string) => value === "auto" || /^[^/\s]+\/\S+$/.test(value);
+  const models = Object.fromEntries(rows.filter((row) => said(row.value)).map((row) => [row.key.slice("subagent_model:".length), row.value]));
+  // Only chats that said nothing (each one set back to the default leaves ""): nothing to leave.
+  if (!Object.keys(models).length) return void d.prepare("DELETE FROM settings WHERE key GLOB 'subagent_model:*'").run();
+  try {
+    const fill = (dir: string) => {
+      const file = path.join(dir, "models.json");
+      let before: Record<string, unknown> = {};
+      try {
+        const read = JSON.parse(readFileSync(file, "utf8"));
+        if (read && typeof read === "object" && !Array.isArray(read)) before = read;
+      } catch {
+        // Not written yet.
+      }
+      // Written last, and anew on each try, from the settings as they are.
+      writeFileAtomic(file, JSON.stringify({ ...before, ...models }), 0o600);
+      writeFileAtomic(path.join(dir, "handoff.json"), JSON.stringify({ format: 1, name: "subagent-chats", schema: 13, made: new Date().toISOString() }), 0o600);
+    };
+    if (leaveHandoff("subagent-chats", fill) === "there") fill(path.join(handoffRoot(), "subagent-chats"));
+  } catch (e) {
+    console.warn(`[portal] what the chats said their subagents run on could not be left for the subagent extension, and is kept for the next start: ${(e as Error).message}`);
+    return;
+  }
+  d.prepare("DELETE FROM settings WHERE key GLOB 'subagent_model:*'").run();
+}
+
+/**
  * A set of the portal's own tools that are an extension's now, whose are filed
  * under its package's name: a lazy mark on the set, and a name somebody gave
  * its box, go with them.
@@ -1145,6 +1184,7 @@ function migrate(d: Database.Database): void {
   handOffVoice(d);
   handOffUnderstory(d);
   handOffSubagent();
+  handOffSubagentChats(d);
   // Whether a project does without the agent's memory was named for what held it, Understory, until schema 10:
   // anything may hold it now (portal.memory.hold).
   const agentLinkCols = (d.prepare("PRAGMA table_info(project_agent)").all() as { name: string }[]).map((c) => c.name);
@@ -1418,7 +1458,6 @@ function removeSession(id: string): void {
   d.prepare("DELETE FROM events WHERE session_id = ?").run(id);
   d.prepare("DELETE FROM message_versions WHERE session_id = ?").run(id);
   d.prepare("DELETE FROM sessions WHERE id = ?").run(id);
-  setSessionSubagentModel(id, null);
   d.prepare("DELETE FROM open_subagents WHERE session_id = ?").run(id);
   d.prepare("DELETE FROM settings WHERE key = ?").run(trustedKey(id));
 }
@@ -3738,18 +3777,6 @@ export function setTrustedMcpServers(names: readonly string[]): void {
 export function untrustMcpServer(name: string): void {
   const trusted = trustedMcpServers();
   if (trusted.delete(name)) setTrustedMcpServers([...trusted]);
-}
-
-/**
- * The model a chat's subagents run on, where the chat says one: "provider/model",
- * or "auto" for the one the chat is on. Null follows the portal's default.
- */
-export function sessionSubagentModel(sessionId: string): string | null {
-  return getSetting(`subagent_model:${sessionId}`) ?? null;
-}
-
-export function setSessionSubagentModel(sessionId: string, model: string | null): void {
-  putSetting(`subagent_model:${sessionId}`, model ?? "");
 }
 
 /** A background subagent's start or end, as written: kept in open_subagents while it runs. */
