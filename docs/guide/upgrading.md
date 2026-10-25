@@ -1130,6 +1130,39 @@ for d in handoff/voice-service handoff/.voice-service.* handoff/voice-addresses 
 done'
 ```
 
+## Subagents are an extension
+
+The subagent tool, switched on and set up in Settings → Tools → Subagents until
+0.2.0, is the `pithagoras-subagent` extension now, which comes with the portal
+([Subagents](/guide/features#subagents)). **A portal that had it on keeps it on**:
+its folder was in pi's packages already, and is loaded as an extension. It is
+switched in **Settings → Extensions**, and set up under **Extension settings →
+Subagents**. It stays off where it was off.
+
+Its settings were in pi's `settings.json`. The upgrade to schema 12 leaves
+`subagentMode`, `subagentMaxParallel` and `subagentModel` in the data folder,
+under `handoff/subagent`, and then takes them out of pi's file, which is kept
+as it was beside it, as `settings.json.bak`. The extension takes them up as it
+starts, into its own folder (`extension-data/pithagoras-subagent`). A chat's own
+choice in its model menu stays as it was.
+
+| Before | Now |
+| --- | --- |
+| `GET`, `PUT /api/features/subagent` | `/api/x/pithagoras-subagent/settings`, `{ mode, maxParallel, model }`; the old address answers with a 308 to it |
+| `PUT /api/features/subagent` with `enabled` | Settings → Extensions: `POST /api/packages` with the `extensions/subagent` folder to install it, `PUT /api/extensions/enabled` to switch it |
+| `GET /api/sessions/:id/subagent-model` answered `{ model, default }` | `{ model }`; the default is the extension's `model` |
+
+### Going back to a version before subagents were an extension
+
+The database only changed its version: put the backup the upgrade made,
+`backups/portal-v11-….db`, in as under [Going back](#going-back). The older
+version reads the subagent's settings from pi's `settings.json` again: put
+`subagentMode`, `subagentMaxParallel` and `subagentModel` back there, from
+`settings.json.bak` where nothing was changed since, or from
+`extension-data/pithagoras-subagent/settings.json` (`mode`, `maxParallel` and
+`model`). The tool's folder stays in pi's packages, and the older version
+loads it as it did.
+
 ## Chats have a mode
 
 A chat has a [mode](/guide/sessions#modes) now, chosen above the message box

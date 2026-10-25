@@ -510,7 +510,11 @@ one extension.
 
 An extension that runs an agent of its own tells the portal about it on pi's
 event bus (`pi.events`). No dependency on the portal: outside it, nobody is
-listening and nothing changes.
+listening and nothing changes. The protocol is the portal's, open to any
+extension; `@pithagoras/extension-api/server` types it (`SubagentProtocol`, each
+channel by its name with what is sent on it: `SubagentStart`, `SubagentEvent`,
+`SubagentEnd`, `SubagentInput`, `SubagentStop`, `SubagentConfig`). The names
+are text on both sides, so a pi extension that imports nothing speaks it too.
 
 | Channel | Direction | Payload |
 |---|---|---|
@@ -533,8 +537,12 @@ not reloaded when a package is switched: it is reloaded later, see
 
 `extensions/subagent` in this repository is a complete example: a `subagent`
 tool that hands a task to a second pi and can be steered while it works, in
-the foreground or the background. It ships with the portal and is switched on
-in Settings → Tools → Subagents (see [Opt-in features](/guide/features));
-outside the portal, install it like any local package
-(`pi install ./extensions/subagent`). Only the in-process executor
-(`EXECUTOR=host`) shares the event bus with the portal.
+the foreground or the background. It is a Pithagoras extension like the others
+that ship with the portal, switched on in Settings → Extensions (see
+[Opt-in features](/guide/features#subagents)): its server half gives every
+chat's pi the tool (`portal.chats.extend`, in `src/pi.ts`, which speaks the
+protocol through its types) and keeps its settings, and its browser half draws
+its page in Settings. Only the in-process executor (`EXECUTOR=host`) shares the
+event bus with the portal, and so a server half that speaks the protocol runs
+in the portal's own process, not in one of its own (`isolated`), whose pi has
+no `events`.
