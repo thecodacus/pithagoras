@@ -1,9 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import subagent, {childModel, describe, subagentLimit, waited} from '../extensions/subagent/index.ts';
-import { scratch } from "./helpers.mts";
+import subagentTool, {childModel, describe, waited} from '../src/pi.ts';
+import { settingsOf, type Settings } from '../src/settings.ts';
+import { scratch } from "../../../tests/helpers.mts";
+/**
+ * The `subagent` tool in a chat's pi (src/pi.ts), over a stand-in for pi and a stand-in for the child pi, with the
+ * settings the server half would hand it: what `mode` says, read as the extension's store reads it.
+ */
 // A child pi in RPC mode, as far as the extension can tell. `retry`: its first run fails and is retried. `hang`: it works until stopped.
 const dir=scratch('subagent-');
 const bin=path.join(dir,'pi');
@@ -37,11 +42,11 @@ require('node:readline').createInterface({input:process.stdin}).on('line',l=>{co
 `);
 chmodSync(bin,0o755);
 process.env.PI_SUBAGENT_BIN=bin;
-// pi's settings, as the extension reads them: interrupt unless they say otherwise.
-const agentDir=path.join(dir,'agent');
-mkdirSync(agentDir);
-process.env.PI_CODING_AGENT_DIR=agentDir;
-const mode=(m?:string,more:Record<string,unknown>={})=>writeFileSync(path.join(agentDir,'settings.json'),JSON.stringify({...(m?{subagentMode:m}:{}),...more}));
+// The extension's settings, as its store hands them over: interrupt unless they say otherwise.
+let current:Settings=settingsOf({});
+const mode=(m?:string,more:Record<string,unknown>={})=>{current=settingsOf({...(m?{mode:m}:{}),...more});};
+const settings=()=>current;
+const subagent=(pi:any)=>subagentTool(pi,settings);
 mode();
 function load(){
  const h=new Map<string,((d:any)=>void)[]>();
@@ -161,15 +166,14 @@ test('background subagents end with the session that started them',{timeout:5000
  mode();
 });
 test('how many subagents may run at once: 1 unless the settings say more, and never past 16',()=>{
- mode();assert.equal(subagentLimit(),1);
- mode(undefined,{subagentMaxParallel:3});assert.equal(subagentLimit(),3);
- mode(undefined,{subagentMaxParallel:0});assert.equal(subagentLimit(),1);
- mode(undefined,{subagentMaxParallel:'lots'});assert.equal(subagentLimit(),1);
- mode(undefined,{subagentMaxParallel:99});assert.equal(subagentLimit(),16);
- mode();
+ assert.equal(settingsOf({}).maxParallel,1);
+ assert.equal(settingsOf({maxParallel:3}).maxParallel,3);
+ assert.equal(settingsOf({maxParallel:0}).maxParallel,1);
+ assert.equal(settingsOf({maxParallel:'lots'}).maxParallel,1);
+ assert.equal(settingsOf({maxParallel:99}).maxParallel,16);
 });
 test('with two allowed at once, two subagents asked for together run side by side',{timeout:5000},async()=>{
- delete process.env.FAKE;mode(undefined,{subagentMaxParallel:2});
+ delete process.env.FAKE;mode(undefined,{maxParallel:2});
  const {tool,seen}=load();
  await Promise.all([tool.execute('a',{task:'one'},undefined,undefined,{cwd:dir}),tool.execute('b',{task:'two'},undefined,undefined,{cwd:dir})]);
  assert.deepEqual(seen,['start a','start b','end','end']);
@@ -276,9 +280,9 @@ test('a child runs on the model its parent is on, unless the chat or the setting
  assert.equal((await tool.execute('b',{task:'x'},undefined,undefined,parent)).content[0].text,'--mode rpc --no-session --provider vllm --model model-c');
  off();
  // The settings' choice, and auto there is the parent's again.
- mode(undefined,{subagentModel:'openrouter/deepseek/deepseek-chat'});
+ mode(undefined,{model:'openrouter/deepseek/deepseek-chat'});
  assert.equal((await tool.execute('c',{task:'x'},undefined,undefined,parent)).content[0].text,'--mode rpc --no-session --provider openrouter --model deepseek/deepseek-chat');
- mode(undefined,{subagentModel:'auto'});
+ mode(undefined,{model:'auto'});
  assert.match((await tool.execute('d',{task:'x'},undefined,undefined,parent)).content[0].text,/--model model-b$/);
  // No model known at all: pi's own default.
  assert.equal((await tool.execute('e',{task:'x'},undefined,undefined,{cwd:dir})).content[0].text,'--mode rpc --no-session');
@@ -366,19 +370,19 @@ test('the tool tells the model how many subagents run at once, in both modes',()
   assert.match(describe(m,3),/At most 3 run at once; further calls wait for a free one\./);
  }
  delete process.env.FAKE;
- mode(undefined,{subagentMaxParallel:3});
+ mode(undefined,{maxParallel:3});
  assert.match(load().tool.description,/At most 3 run at once/);
- mode('background',{subagentMaxParallel:1});
+ mode('background',{maxParallel:1});
  const background=load().tool.description;
  assert.match(background,/runs in the background/);
  assert.match(background,/One runs at a time/);
  // Over the cap it says what is enforced.
- mode(undefined,{subagentMaxParallel:99});
+ mode(undefined,{maxParallel:99});
  assert.match(load().tool.description,/At most 16 run at once/);
  mode();
 });
 test('a background call says how many are running and waiting, and a queue says how many are ahead',{timeout:5000},async()=>{
- process.env.FAKE='hang';mode('background',{subagentMaxParallel:2});
+ process.env.FAKE='hang';mode('background',{maxParallel:2});
  const {tool,events,ends}=load();
  const ids:string[]=[];events.on('subagent:v1:start',(d:any)=>ids.push(d.id));
  const results=[];
@@ -407,11 +411,11 @@ test('an interrupt call that had to wait says how long, and one that did not say
  assert.match(both[1].content[0].text,/^the whole answer\n\n\(It waited [12] s for a free subagent slot before it started\.\)$/);
 });
 test('after the limit is lowered, a background call reports how many really run',{timeout:5000},async()=>{
- process.env.FAKE='hang';mode('background',{subagentMaxParallel:3});
+ process.env.FAKE='hang';mode('background',{maxParallel:3});
  const {tool,events,ends}=load();
  const ids:string[]=[];events.on('subagent:v1:start',(d:any)=>ids.push(d.id));
  for(const label of ['a','b','c'])await tool.execute(label,{task:'x',label},undefined,undefined,{cwd:dir});
- mode('background',{subagentMaxParallel:1});
+ mode('background',{maxParallel:1});
  const d=await tool.execute('d',{task:'x',label:'d'},undefined,undefined,{cwd:dir});
  assert.match(d.content[0].text,/Queued subagent "d" in the background \(3 of 1 running, 1 waiting, this one included\); it starts when a slot is free/);
  for(const id of ids)events.emit('subagent:v1:stop',{id});

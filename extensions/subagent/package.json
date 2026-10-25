@@ -1,9 +1,11 @@
 {
   "name": "pithagoras-subagent",
-  "version": "0.1.0",
-  "description": "A subagent tool for pi that the Pithagoras portal can show and steer, over the subagent protocol",
+  "version": "0.2.0",
+  "description": "Subagents for Pithagoras: a subagent tool that hands a self-contained task to a second agent, which the portal shows and steers over the subagent protocol, with its settings page",
   "type": "module",
   "keywords": ["pi-package"],
-  "pi": { "extensions": ["./index.ts"] },
+  "pi": {},
+  "pithagoras": { "client": "./web/client.js", "style": "./web/client.css", "server": "./server.js" },
+  "scripts": { "build": "node build.mjs && tsc --noEmit -p ." },
   "license": "Apache-2.0"
 }
