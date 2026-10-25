@@ -16,6 +16,7 @@ const held = new Map<string, Choice>();
 const askedAt = new Map<string, number>();
 const watchers = new Set<() => void>();
 
+/** Where the server half keeps it. The portal throws for this where the half is not running: that is no choice known, not a failure of this half. */
 const url = (chatId: string) => portal.api.url(`/chats/${encodeURIComponent(chatId)}/model`);
 /** Only an answer that is one: a server that says something else leaves the menu as it was. */
 const isChoice = (value: unknown): value is Choice =>
@@ -32,10 +33,13 @@ export function fetchChoice(chatId: string, freshMs = 30_000): void {
   const at = askedAt.get(chatId);
   if (at !== undefined && Date.now() - at < freshMs) return;
   askedAt.set(chatId, Date.now());
-  portal.api.json<unknown>(url(chatId)).then(
-    (answer) => isChoice(answer) && put(chatId, answer),
-    () => askedAt.delete(chatId),
-  );
+  // Built inside the chain: with the server half down there is no address, which is the same as an answer that failed.
+  Promise.resolve()
+    .then(() => portal.api.json<unknown>(url(chatId)))
+    .then(
+      (answer) => isChoice(answer) && put(chatId, answer),
+      () => askedAt.delete(chatId),
+    );
 }
 
 /** What every chat holds is asked again when next shown: the default changed. */

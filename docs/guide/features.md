@@ -89,8 +89,9 @@ model there is. A choice is read when a subagent starts, so it needs no restart.
 
 Both are the extension's own: the page's in its settings (`"provider/model"`, or
 absent for the chat's own), each chat's in `chats.json` beside them, by chat id,
-removed with the chat (`/api/x/pithagoras-subagent/chats/:id/model`, see the
-[API](/reference/api)). The portal no longer keeps a chat's choice, and answers
+removed with the chat (or at the extension's next start, where it was deleted
+while the extension was off; `/api/x/pithagoras-subagent/chats/:id/model`, see
+the [API](/reference/api)). The portal no longer keeps a chat's choice, and answers
 the protocol's `subagent:v1:config` with nothing.
 
 ### Subagents at once

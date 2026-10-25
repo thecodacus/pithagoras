@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import type { ServerPortal } from "@pithagoras/extension-api/server";
 import subagentTool from "./pi";
-import { chatModel, forgetChat, openChats, setChatModel, takeChats } from "./per-chat";
+import { chatModel, forgetChat, openChats, pruneChats, setChatModel, takeChats } from "./per-chat";
 import { checkChange, isModelChoice, MAX_PARALLEL, openStore, saveSettings, settings, settingsOf, takeSettings, type Settings } from "./settings";
 
 /**
@@ -18,6 +18,7 @@ import { checkChange, isModelChoice, MAX_PARALLEL, openStore, saveSettings, sett
 export default function subagent(portal: ServerPortal) {
   openStore(portal.dataDir());
   openChats(portal.dataDir());
+  forgetGoneChats(portal);
   takeHandoff(portal);
   takeChatsHandoff(portal);
   portal.chats.extend((pi, chat) => subagentTool(pi, settings, () => chatModel(chat.id)));
@@ -72,9 +73,11 @@ export function takeHandoff(portal: Pick<ServerPortal, "handoffs" | "log">): voi
  *   models.json     {"<chat id>": "auto" | "provider/model"}, for each chat that said one
  *
  * Each is taken for a chat that says nothing here yet: one said since in its model menu is the person's latest word.
- * What cannot be taken up stays where it is, for the next start.
+ * One that an earlier hand-off gave and nobody has set since is not: the person went back meanwhile, and what the older
+ * version holds now is newer (as with the settings). Chats the portal no longer has are not taken. What cannot be
+ * taken up stays where it is, for the next start.
  */
-export function takeChatsHandoff(portal: Pick<ServerPortal, "handoffs" | "log">): void {
+export function takeChatsHandoff(portal: Pick<ServerPortal, "handoffs" | "log" | "chats">): void {
   try {
     const dir = portal.handoffs.take("subagent-chats");
     if (!dir) return;
@@ -82,11 +85,24 @@ export function takeChatsHandoff(portal: Pick<ServerPortal, "handoffs" | "log">)
     const { format } = read("handoff.json");
     if (format !== 1) throw new Error(`it is in a format this version does not read (${format})`);
     const kept = read("models.json");
-    const taken = takeChats(kept && typeof kept === "object" && !Array.isArray(kept) ? kept : {});
+    const { taken, left } = takeChats(kept && typeof kept === "object" && !Array.isArray(kept) ? kept : {}, (chatId) => !!portal.chats.get(chatId));
     portal.handoffs.done("subagent-chats");
-    portal.log(`took up what ${taken.length === 1 ? "one chat" : `${taken.length} chats`} said ${taken.length === 1 ? "its" : "their"} subagents run on`);
+    portal.log(
+      `took up what ${taken.length === 1 ? "one chat" : `${taken.length} chats`} said ${taken.length === 1 ? "its" : "their"} subagents run on` +
+        (left.length ? `, and left ${left.length === 1 ? "one chat" : `${left.length} chats`} with ${left.length === 1 ? "its" : "their"} own choice` : ""),
+    );
   } catch (e) {
     portal.log(`could not take up what the chats said their subagents run on, which is kept for the next start: ${(e as Error).message}`);
+  }
+}
+
+/** A chat deleted while the half was off told it nothing: what it said is forgotten as the half starts. */
+function forgetGoneChats(portal: Pick<ServerPortal, "chats" | "log">): void {
+  try {
+    const gone = pruneChats((chatId) => !!portal.chats.get(chatId));
+    if (gone.length) portal.log(`forgot what ${gone.length === 1 ? "one deleted chat" : `${gone.length} deleted chats`} said its subagents run on`);
+  } catch (e) {
+    portal.log(`could not forget what deleted chats said their subagents run on: ${(e as Error).message}`);
   }
 }
 

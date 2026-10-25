@@ -95,7 +95,7 @@ test("what a chat's subagents run on is kept for that chat at the extension's ad
   const said = await put(model, { model: "llama-swap/model-b" });
   assert.deepEqual([said.status, await said.json()], [200, { model: "llama-swap/model-b", default: "auto" }]);
   const file = path.join(portal.data, "chats.json");
-  assert.deepEqual(JSON.parse(readFileSync(file, "utf8")), { "chat-2": "llama-swap/model-b" });
+  assert.deepEqual(JSON.parse(readFileSync(file, "utf8")), { chats: { "chat-2": "llama-swap/model-b" } });
   assert.equal(statSync(file).mode & 0o777, 0o600);
   // The tool asks as a subagent starts: what the chat's pi has is the extension's own, not the portal's.
   const started = await subagentStarts("chat-2");
@@ -110,7 +110,7 @@ test("what a chat's subagents run on is kept for that chat at the extension's ad
 
   // Back to the default: nothing said, and nothing kept.
   assert.deepEqual(await (await put(model, { model: null })).json(), { model: null, default: "auto" });
-  assert.deepEqual(JSON.parse(readFileSync(file, "utf8")), {});
+  assert.deepEqual(JSON.parse(readFileSync(file, "utf8")), { chats: {} });
 });
 
 test("a chat's model that is no model, or a chat there is not, is refused", async () => {
@@ -129,7 +129,20 @@ test("a chat that is deleted takes what it said with it", async () => {
   await put(`${at}/chats/chat-4/model`, { model: "llama-swap/model-b" });
   portal.db.deleteSession("chat-4");
   portal.host.chatLife("deleted", "chat-4");
-  assert.deepEqual(JSON.parse(readFileSync(path.join(portal.data, "chats.json"), "utf8")), {});
+  assert.deepEqual(JSON.parse(readFileSync(path.join(portal.data, "chats.json"), "utf8")), { chats: {} });
+});
+
+test("a chat deleted while the extension was off is forgotten as it starts again", async () => {
+  portal.db.createSession({ id: "chat-5", title: "t", workspace: process.env.WORKSPACE_ROOT!, executor: "host", kind: "task" });
+  portal.db.createSession({ id: "chat-6", title: "t", workspace: process.env.WORKSPACE_ROOT!, executor: "host", kind: "task" });
+  await put(`${at}/chats/chat-5/model`, { model: "auto" });
+  await put(`${at}/chats/chat-6/model`, { model: "llama-swap/model-b" });
+  await portal.stop();
+  // No `deleted` reaches the half that is off.
+  portal.db.deleteSession("chat-5");
+  await portal.start();
+  assert.deepEqual(JSON.parse(readFileSync(path.join(portal.data, "chats.json"), "utf8")), { chats: { "chat-6": "llama-swap/model-b" } });
+  await put(`${at}/chats/chat-6/model`, { model: null });
 });
 
 /**

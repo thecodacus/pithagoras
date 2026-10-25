@@ -26,11 +26,14 @@ old.prepare("INSERT INTO settings (key, value) VALUES (?, ?)").run("subagent_mod
 old.prepare("INSERT INTO settings (key, value) VALUES (?, ?)").run("subagent_model:chat-2", "");
 old.pragma("user_version = 12");
 old.close();
+// The chats are in the database, as they are in a real one: the extension takes up only those the portal has.
+const core = await import(new URL("../../../core/server/dist/db.js", import.meta.url).href);
+core.getDb();
+for (const id of ["chat-1", "chat-2"]) core.createSession({ id, title: "t", workspace: process.env.WORKSPACE_ROOT!, executor: "host", kind: "task" });
 const portal = await serveSubagent();
 
 test("the mode and the limit pi's settings held are the extension's after the upgrade, and the tool says them as before", async () => {
   assert.deepEqual(await (await fetch(`${portal.at}/settings`)).json(), { mode: "background", maxParallel: 3, model: "auto", maxParallelLimit: 16 });
-  portal.db.createSession({ id: "chat-1", title: "t", workspace: process.env.WORKSPACE_ROOT!, executor: "host", kind: "task" });
   assert.equal(portal.toolsIn("chat-1").get("subagent")?.description, describe("background", 3));
   // Out of pi's file, and the rest of it as it was; the hand-off taken and done with.
   assert.deepEqual(JSON.parse(readFileSync(piSettings, "utf8")), { packages: ["../../extensions/subagent"], defaultProvider: "llama-swap" });
@@ -39,7 +42,6 @@ test("the mode and the limit pi's settings held are the extension's after the up
 });
 
 test("what each chat said its subagents run on is the extension's after the upgrade, and out of the portal's database", async () => {
-  portal.db.createSession({ id: "chat-2", title: "t", workspace: process.env.WORKSPACE_ROOT!, executor: "host", kind: "task" });
   assert.deepEqual(await (await fetch(`${portal.at}/chats/chat-1/model`)).json(), { model: "llama-swap/model-b", default: "auto" });
   assert.deepEqual(await (await fetch(`${portal.at}/chats/chat-2/model`)).json(), { model: null, default: "auto" });
   assert.deepEqual(portal.db.getDb().prepare("SELECT key FROM settings WHERE key LIKE 'subagent%'").all(), []);

@@ -1,5 +1,6 @@
+import path from 'node:path';
 import { type Page } from '@playwright/test';
-import { test, expect } from '../../../../tests/browser/portal-mock';
+import { test, expect, extensionOnDisk } from '../../../../tests/browser/portal-mock';
 
 /**
  * What the subagent extension draws beside a chat (src/client.tsx, src/Panel.tsx, src/ModelRow.tsx), on the portal's
@@ -150,5 +151,23 @@ test.describe("the row in the chat's model menu", () => {
     await page.getByRole('option', { name: /This chat's model/ }).click();
     await expect(page.getByRole('alert')).toContainText('model must be null');
     await expect(picker).toContainText('Default — llama-swap/model-b');
+  });
+
+  test('with the extension\'s server half not running, the chat opens without the row and the extension is not reported as failed', async ({ page }) => {
+    // The page's list of extensions without the `server` of this one, as while its half is crashed or held off.
+    const { server: _, ...listing } = extensionOnDisk(path.resolve('extensions/subagent')).listing as { server?: string };
+    await page.route('**/api/extension-ui', (route) => route.fulfill({ json: { extensions: [listing] } }));
+    const failures: unknown[] = [];
+    await page.route('**/api/extension-ui/failures', async (route) => {
+      failures.push(route.request().postDataJSON());
+      await route.fulfill({ json: { ok: true } });
+    });
+    await page.goto('/tests/chat.html?phase=model');
+    await page.getByTitle('Model A', { exact: true }).click();
+    // The menu is there, the row is not, and nothing was told the portal.
+    await expect(page.getByRole('button', { name: 'Refresh models' })).toBeVisible();
+    await expect(page.getByRole('combobox', { name: 'Subagents in this chat run on' })).toHaveCount(0);
+    await page.waitForTimeout(500);
+    expect(failures).toEqual([]);
   });
 });

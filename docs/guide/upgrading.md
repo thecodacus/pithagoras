@@ -1183,7 +1183,7 @@ Put the backup the upgrade made in as under [Going back](#going-back):
 `backups/portal-v11-….db`, or `backups/portal-v12-….db` from a version that
 had the subagent as an extension already. It holds each chat's choice of model
 as it was at the upgrade; one made since is in
-`extension-data/pithagoras-subagent/chats.json`, by chat id, to choose again in
+`extension-data/pithagoras-subagent/chats.json`, by chat id under `chats`, to choose again in
 the chat's model menu. The older version reads the subagent's settings from pi's
 `settings.json` again: put
 `subagentMode`, `subagentMaxParallel` and `subagentModel` back there, from
@@ -1194,7 +1194,10 @@ loads it as it did. Upgrading again takes up what pi's settings hold then: it
 leaves the settings again, and the extension takes each one that you have not
 changed on its page since it took them up before. A chat's choice made in the
 older version is taken up again too, where the chat has none of its own in the
-extension.
+extension or still has the one the first upgrade gave it; one you chose in the
+chat's model menu since stays. A chat that is gone is not taken up.
+A choice you cleared in the older version (back to the default) does not reach
+the extension: the chat keeps the one it has until you choose again.
 
 ## Chats have a mode
 
