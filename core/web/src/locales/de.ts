@@ -452,6 +452,7 @@ const de: Locale = {
     "contains chat-format markers that pretend to be another speaker": "enthält Chat-Formatmarker, die einen anderen Sprecher vortäuschen",
     "hides text in invisible characters": "versteckt Text in unsichtbaren Zeichen",
     "asks for keys, passwords or private files to be sent somewhere": "verlangt, dass Schlüssel, Passwörter oder private Dateien irgendwohin geschickt werden",
+    "came from a subagent that read outside content": "stammt von einem Subagenten, der Inhalte von außen gelesen hat",
     "You trusted this result.": "Du hast diesem Ergebnis vertraut.",
     "This result looks like a prompt injection": "Dieses Ergebnis sieht nach einer Prompt-Injection aus",
     "It {signs}. Until you trust it or remove the turn it came in, this chat does not push, upload, read keys, start subagents or set up anything that runs later unless you say yes when it asks.": "Es {signs}. Bis du ihm vertraust oder die Runde entfernst, in der es kam, pusht dieser Chat nichts, lädt nichts hoch, liest keine Schlüssel, startet keine Subagenten und richtet nichts ein, das später läuft, außer du sagst Ja, wenn er fragt.",

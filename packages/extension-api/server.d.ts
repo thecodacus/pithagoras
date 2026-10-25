@@ -77,7 +77,9 @@ export interface ChildRun {
   answer: string;
   /**
    * Set when the child had read outside content that holds a chat back (the guard marked it). The portal has marked its
-   * parent with it already, so its rules for a marked chat hold what the parent does with this answer.
+   * parent with it already, so its rules for a marked chat hold what the parent does with this answer. That mark is in
+   * the guard that runs now: an answer handed on is written in the form of a flagged result for it to be found again
+   * when the guard is made again (see "Child chats" in the guide).
    */
   marked?: true;
   error?: string;
