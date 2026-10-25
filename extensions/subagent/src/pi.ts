@@ -23,7 +23,11 @@
  * says otherwise (the portal answers `subagent:v1:config` with the chat's
  * choice) or the settings name one ("provider/model"; "auto" is the
  * parent's). The model already loaded is the one to use: a second one is a
- * second model in memory.
+ * second model in memory. With the settings' model per call on, one call may
+ * name another in the tool's `model` ("provider/model"): a chat on a local
+ * model handing a step to a hosted one, or the other way round. It has to be
+ * one pi's registry knows; one it does not is refused, and nothing runs on
+ * another in its place. Off, the tool has no such parameter.
  *
  * The limit (default 1) is how many children run at once, across every
  * conversation in the process — the portal runs them all in one. One asked
@@ -67,6 +71,23 @@ export function childModel(chat: string | undefined, parent: { provider?: string
   const choice = chat ?? given;
   if (choice !== "auto") return parseModel(choice);
   return parent?.provider && parent.id ? { provider: parent.provider, id: parent.id } : undefined;
+}
+
+/**
+ * The model one call asks for, if it does: "provider/model", and one pi's
+ * registry knows. Anything else is refused here, before a child is started: a
+ * child on a model pi does not have would refuse the task later and less
+ * clearly, and running it on another model instead is not what was asked.
+ */
+export function askedModel(choice: string | undefined, registry: { find(provider: string, id: string): unknown } | undefined): { provider: string; id: string } | undefined {
+  const said = choice?.trim();
+  if (!said) return undefined;
+  const model = parseModel(said);
+  if (!model) throw new Error(`The subagent's model must be "provider/model", not "${said}"`);
+  if (registry && !registry.find(model.provider, model.id)) {
+    throw new Error(`pi has no model "${said}": the subagent was not started. Leave the model out for the chat's choice.`);
+  }
+  return model;
 }
 
 /**
@@ -170,7 +191,7 @@ export default function subagentTool(pi: any, settings: () => Settings) {
   // does must agree. A change reaches a chat when it is reloaded. The limit
   // is also read live where it is enforced, so a change never lets more run
   // than the settings say.
-  const { mode, maxParallel: limit } = settings();
+  const { mode, maxParallel: limit, modelPerCall } = settings();
   const liveLimit = () => settings().maxParallel;
   /** Says something on the chat's bus, as the protocol has it. */
   const say = <C extends keyof SubagentProtocol>(channel: C, data: SubagentProtocol[C]) => pi.events.emit(channel, data);
@@ -196,10 +217,11 @@ export default function subagentTool(pi: any, settings: () => Settings) {
   /**
    * Starts a child for the task and hands over what watching it needs.
    * `announced`: the id it was announced under while it waited for a slot.
+   * `asked`: the model this call named, over the chat's and the settings' choice.
    */
-  function start(task: string, label: string, toolCallId: string, ctx: any, background: boolean, onUpdate?: any, announced?: string): Run {
+  function start(task: string, label: string, toolCallId: string, ctx: any, background: boolean, onUpdate?: any, announced?: string, asked?: { provider: string; id: string }): Run {
     const id = announced ?? randomUUID();
-    const model = childModel(chatChoice(), ctx?.model, settings().model);
+    const model = asked ?? childModel(chatChoice(), ctx?.model, settings().model);
     // Its stderr goes nowhere: a pipe nobody reads fills, and the child
     // blocks on its next warning for good.
     const child = spawn(process.env.PI_SUBAGENT_BIN || "pi", ["--mode", "rpc", "--no-session", ...(model ? ["--provider", model.provider, "--model", model.id] : [])], {
@@ -302,14 +324,23 @@ export default function subagentTool(pi: any, settings: () => Settings) {
       properties: {
         task: { type: "string", description: "The whole task with all it needs: it sees nothing of this chat" },
         label: { type: "string", description: "Short name, e.g. Research: vector DBs" },
+        // Only while the settings allow it: off, nothing of it is in what the model reads.
+        ...(modelPerCall
+          ? { model: { type: "string", description: "\"provider/model\" to run it on instead of the chat's choice; one pi does not have is refused. Leave it out on a single local GPU: a second model would be loaded." } }
+          : {}),
       },
     },
     // What it hands on runs without this conversation's rules: after a suspected prompt injection, a call waits for
     // the person, as the guard's rule for a tool of this name says too.
     guard: { acts: ["delegate"] },
 
-    async execute(toolCallId: string, params: { task: string; label?: string }, signal: AbortSignal | undefined, onUpdate: any, ctx: any) {
+    async execute(toolCallId: string, params: { task: string; label?: string; model?: string }, signal: AbortSignal | undefined, onUpdate: any, ctx: any) {
       const label = params.label?.trim() || "Subagent";
+      // Refused here, before a slot is waited for or the call returns: a child
+      // on a model pi does not have would never start. Named while the settings
+      // say no, it is not quietly run on the chat's choice either.
+      if (!modelPerCall && params.model?.trim()) throw new Error("Naming a model per call is off: the subagent runs on the chat's choice. Model per call under Subagents in Settings switches it on.");
+      const asked = modelPerCall ? askedModel(params.model, ctx?.modelRegistry) : undefined;
 
       if (mode === "background") {
         // Whether it starts now or waits for one of the others: said now, since the call does not wait.
@@ -348,7 +379,7 @@ export default function subagentTool(pi: any, settings: () => Settings) {
               if (cancelled && !shutDown) tell("stopped", `Subagent "${label}" was stopped before it started.`);
               return;
             }
-            run = start(params.task, label, toolCallId, ctx, true, undefined, id);
+            run = start(params.task, label, toolCallId, ctx, true, undefined, id, asked);
             detached.add(run);
             const { status, answer, failure } = await run.finished;
             tell(
@@ -401,7 +432,7 @@ export default function subagentTool(pi: any, settings: () => Settings) {
       if (!release) return { content: [{ type: "text", text: "(stopped before the subagent started)" }], details: { phase: "stopped" } };
       try {
         const startedAt = Date.now();
-        const run = start(params.task, label, toolCallId, ctx, false, onUpdate);
+        const run = start(params.task, label, toolCallId, ctx, false, onUpdate, undefined, asked);
         const stopped = () => run.stop();
         signal?.addEventListener("abort", stopped, { once: true });
         const { status, answer, failure } = await run.finished;

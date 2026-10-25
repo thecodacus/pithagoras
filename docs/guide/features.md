@@ -69,6 +69,18 @@ Stored in the extension's own settings (`"provider/model"`, or absent for the
 chat's own); a chat's own is the portal's, and reaches the tool over the
 protocol's `subagent:v1:config`.
 
+**Let the agent name a model per call**, off unless you switch it on, lets one
+call ask for another: the tool then takes an optional `model`
+(`"provider/model"`) and runs that subagent on it, whatever the chat or the
+settings say — a chat on a local model handing a research step to a hosted one,
+or to a smaller one on another machine, or the other way round. It has to be a
+model pi knows, one the model menu offers; one it does not is refused with a
+message that says so, and nothing is started on another model instead. The
+parameter's text tells the agent to leave it out on a single local GPU, where a
+second model would be loaded. Off, the tool has no such parameter, so nothing is
+added to what the agent reads, and a model named all the same is refused, naming
+the switch.
+
 ### Subagents at once
 
 **Subagents at once** (default 1) is how many run at the same time, across
@@ -78,9 +90,10 @@ stopped meanwhile); in the background the call returns saying it is queued,
 and it starts once another has finished. A queued one does not start once its
 chat has been closed or reloaded.
 
-The mode, the limit and the model are kept in the extension's own folder of the
-portal's data folder (`extension-data/pithagoras-subagent/settings.json`), each
-left out while it is the default. Before it was an extension, the tool read
+The mode, the limit, the model and the switch for a model per call are kept in
+the extension's own folder of the portal's data folder
+(`extension-data/pithagoras-subagent/settings.json`), each left out while it is
+the default. Before it was an extension, the tool read
 them from pi's `settings.json` (`subagentMode`, `subagentMaxParallel`,
 `subagentModel`): the upgrade hands them over once, and takes them out of pi's
 file. They are set on its page or through its own address
@@ -104,7 +117,8 @@ from the subagent's own work time. Nothing is added to the system prompt, so its
 cache holds.
 
 The description is read when a chat loads the tool, so a change under
-**Subagents at once** or **Mode** reaches an idle chat at once (it is reloaded),
+**Subagents at once**, **Mode** or **Model per call** reaches an idle chat at
+once (it is reloaded),
 a busy one at its next step, and one with a subagent still working in the
 background once that is done. The limit is enforced live all the same, so a
 chat that has not yet taken the change never runs more than the settings say.

@@ -449,8 +449,8 @@ overrides; `defaults` is what an unset field falls back to. An empty string in
 
 | | |
 | --- | --- |
-| `GET /api/x/pithagoras-subagent/settings` | `{ mode, maxParallel, maxParallelLimit, model }` — the subagent extension's settings; there while the extension is on |
-| `PUT /api/x/pithagoras-subagent/settings` | `{ mode?: "interrupt" \| "background", maxParallel?: 1–16, model?: "auto" \| "provider/model" }` — each it names; reloads the open sessions, as the mode and the limit are in the tool's description, and answers the settings with `{ reloaded, waiting }`. `enabled: false` is refused: the extension is switched in Settings → Extensions (`PUT /api/extensions/enabled`) |
+| `GET /api/x/pithagoras-subagent/settings` | `{ mode, maxParallel, maxParallelLimit, model, modelPerCall }` — the subagent extension's settings; there while the extension is on |
+| `PUT /api/x/pithagoras-subagent/settings` | `{ mode?: "interrupt" \| "background", maxParallel?: 1–16, model?: "auto" \| "provider/model", modelPerCall?: boolean }` — each it names; reloads the open sessions, as the mode and the limit are in the tool's description and the model per call in its schema, and answers the settings with `{ reloaded, waiting }`. `enabled: false` is refused: the extension is switched in Settings → Extensions (`PUT /api/extensions/enabled`) |
 | `GET`, `PUT /api/features/subagent` | Moved: a 307 (which no browser keeps) to `/api/x/pithagoras-subagent/settings`, the method and the body kept |
 | `GET /api/sessions/:id/subagent-model` | `{ model }` — what this chat's subagents run on: its own choice, `null` for the extension's `model` |
 | `PUT /api/sessions/:id/subagent-model` | `{ model: null \| "auto" \| "provider/model" }` |

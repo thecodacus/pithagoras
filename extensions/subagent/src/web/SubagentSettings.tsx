@@ -3,7 +3,8 @@ import { Select, msg, portal, t, tp, tx } from "../portal";
 
 /**
  * The subagent extension's page in Settings: how a subagent runs against the agent, what it runs on unless its chat
- * says otherwise, and how many run at once. It is switched on and off in Settings → Extensions, like any extension.
+ * says otherwise, whether a call may name a model of its own, and how many run at once. It is switched on and off in
+ * Settings → Extensions, like any extension.
  */
 
 type Mode = "interrupt" | "background";
@@ -16,7 +17,12 @@ interface Shown {
   maxParallelLimit: number;
   /** "auto", the model the chat is on, or "provider/model". */
   model: string;
+  /** Whether the tool takes a model for one call. */
+  modelPerCall: boolean;
 }
+
+/** What the page may change. */
+type Change = Partial<Pick<Shown, "mode" | "maxParallel" | "model" | "modelPerCall">>;
 
 /** A model pi can use now, as the portal lists them (GET /api/models). */
 interface Model {
@@ -27,7 +33,7 @@ interface Model {
 
 const settingsUrl = () => portal.api.url("/settings");
 const readSettings = () => portal.api.json<Shown>(settingsUrl());
-const saveSettings = (change: Partial<Pick<Shown, "mode" | "maxParallel" | "model">>) =>
+const saveSettings = (change: Change) =>
   portal.api.json<Shown & { reloaded: number; waiting: number }>(settingsUrl(), { method: "PUT", body: JSON.stringify(change) });
 
 /** What a change did to the chats that are open. */
@@ -79,7 +85,7 @@ export function SubagentSettings() {
   if (!shown) return failed ? <ui.LoadFailed error={failed} onRetry={read} /> : <p className="text-sm text-fg-subtle">{t("Loading…")}</p>;
   const s = shown;
 
-  const change = async (patch: Partial<Pick<Shown, "mode" | "maxParallel" | "model">>) => {
+  const change = async (patch: Change) => {
     setBusy(true);
     setNote(null);
     setError(null);
@@ -143,6 +149,15 @@ export function SubagentSettings() {
               ...(models.some((m) => `${m.provider}/${m.id}` === s.model) || s.model === "auto" ? [] : [{ value: s.model, label: s.model }]),
               ...models.map((m) => ({ value: `${m.provider}/${m.id}`, label: m.name || m.id, hint: `${m.provider}/${m.id}` })),
             ]}
+          />
+        </div>
+        <div data-setting={t("Model per call")}>
+          <ui.SwitchRow
+            title={t("Let the agent name a model per call")}
+            detail={t("Off, a subagent runs on the model above or the chat's. On, the tool takes a model for one call, for a step that wants another: a hosted one from a chat on a local model, say. Only a model pi has; the agent is told to leave it out on a single GPU.")}
+            on={s.modelPerCall}
+            disabled={busy}
+            onChange={(modelPerCall) => void change({ modelPerCall })}
           />
         </div>
         <div data-setting={t("Subagents at once")} className="flex items-start gap-3 rounded-xl border border-line bg-raised/40 p-3">

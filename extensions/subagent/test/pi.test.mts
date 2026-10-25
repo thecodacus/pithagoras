@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { chmodSync, existsSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import subagentTool, {childModel, describe, waited} from '../src/pi.ts';
+import subagentTool, {askedModel, childModel, describe, waited} from '../src/pi.ts';
 import { settingsOf, type Settings } from '../src/settings.ts';
 import { scratch } from "../../../tests/helpers.mts";
 /**
@@ -431,4 +431,49 @@ test('a wait is said in the units a person uses',()=>{
  assert.equal(waited(12_000),'12 s');
  assert.equal(waited(180_000),'3 min');
  assert.equal(waited(185_000),'3 min 5 s');
+});
+test('with model per call on, a call may name the model it runs on, if pi knows it; one pi does not is refused, not run on another',{timeout:5000},async()=>{
+ process.env.FAKE='argv';mode(undefined,{modelPerCall:true});
+ const {tool,events,seen}=load();
+ assert.equal(tool.parameters.properties.model.type,'string','the tool takes one');
+ const known=['openrouter/deepseek/deepseek-chat'];
+ const registry={find:(p:string,m:string)=>known.includes(`${p}/${m}`)?{provider:p,id:m}:undefined};
+ const parent={cwd:dir,model:{provider:'llama-swap',id:'model-b'},modelRegistry:registry};
+ const hosted='--mode rpc --no-session --provider openrouter --model deepseek/deepseek-chat';
+ assert.equal((await tool.execute('a',{task:'x',model:'openrouter/deepseek/deepseek-chat'},undefined,undefined,parent)).content[0].text,hosted);
+ // Over the chat's own choice, and the settings', too.
+ const off=events.on('subagent:v1:config',(d:any)=>d.reply({model:'vllm/model-c'}));
+ mode(undefined,{modelPerCall:true,model:'vllm/model-d'});
+ assert.equal((await tool.execute('b',{task:'x',model:'openrouter/deepseek/deepseek-chat'},undefined,undefined,parent)).content[0].text,hosted);
+ off();mode(undefined,{modelPerCall:true});
+ // One pi does not have, and one that is not "provider/model": refused, and no child started.
+ await assert.rejects(tool.execute('c',{task:'x',model:'vllm/nothing'},undefined,undefined,parent),/no model "vllm\/nothing"/);
+ await assert.rejects(tool.execute('d',{task:'x',model:'nonsense'},undefined,undefined,parent),/"provider\/model"/);
+ assert.deepEqual(seen,['start a','end','start b','end']);
+ // Left empty, it is no choice: the parent's model as before.
+ assert.match((await tool.execute('e',{task:'x',model:''},undefined,undefined,parent)).content[0].text,/--model model-b$/);
+ // With no registry to ask there is nothing to refuse on, and the model goes to pi as said.
+ assert.deepEqual(askedModel(' p/m ',undefined),{provider:'p',id:'m'});
+ assert.equal(askedModel(undefined,undefined),undefined);
+ mode();
+});
+test('with model per call off, as it starts, the tool takes no model, and one named all the same is refused rather than run on the chat\'s choice',{timeout:5000},async()=>{
+ process.env.FAKE='argv';mode();
+ const {tool,seen}=load();
+ assert.equal('model' in tool.parameters.properties,false);
+ const parent={cwd:dir,model:{provider:'llama-swap',id:'model-b'},modelRegistry:{find:()=>({})}};
+ await assert.rejects(tool.execute('a',{task:'x',model:'openrouter/deepseek/deepseek-chat'},undefined,undefined,parent),/Naming a model per call is off/);
+ assert.deepEqual(seen,[]);
+ assert.match((await tool.execute('b',{task:'x'},undefined,undefined,parent)).content[0].text,/--model model-b$/);
+});
+test('in the background a model pi does not have is refused by the call itself, not by a message later',{timeout:5000},async()=>{
+ delete process.env.FAKE;mode('background',{modelPerCall:true});
+ const {tool,seen,sent}=load();
+ const parent={cwd:dir,modelRegistry:{find:()=>undefined}};
+ await assert.rejects(tool.execute('a',{task:'x',model:'vllm/nothing'},undefined,undefined,parent),/no model "vllm\/nothing"/);
+ // Nothing was announced, started or sent, which only waiting shows.
+ await new Promise(r=>setTimeout(r,100));
+ assert.deepEqual(seen,[]);
+ assert.equal(sent.length,0);
+ mode();
 });

@@ -20,18 +20,18 @@ const put = (url: string, body: unknown) => fetch(url, { method: "PUT", headers:
 const shown = async () => (await fetch(`${at}/settings`)).json();
 
 test("the settings start as the tool does without being told, are saved for their owner alone, and reload the chats", async () => {
-  assert.deepEqual(await shown(), { mode: "interrupt", maxParallel: 1, model: "auto", maxParallelLimit: 16 });
-  const saved = await put(`${at}/settings`, { mode: "background", maxParallel: 3, model: "llama-swap/model-b" });
+  assert.deepEqual(await shown(), { mode: "interrupt", maxParallel: 1, model: "auto", modelPerCall: false, maxParallelLimit: 16 });
+  const saved = await put(`${at}/settings`, { mode: "background", maxParallel: 3, model: "llama-swap/model-b", modelPerCall: true });
   assert.equal(saved.status, 200);
-  assert.deepEqual(await saved.json(), { mode: "background", maxParallel: 3, model: "llama-swap/model-b", maxParallelLimit: 16, reloaded: 0, waiting: 0 });
-  assert.deepEqual(await shown(), { mode: "background", maxParallel: 3, model: "llama-swap/model-b", maxParallelLimit: 16 });
+  assert.deepEqual(await saved.json(), { mode: "background", maxParallel: 3, model: "llama-swap/model-b", modelPerCall: true, maxParallelLimit: 16, reloaded: 0, waiting: 0 });
+  assert.deepEqual(await shown(), { mode: "background", maxParallel: 3, model: "llama-swap/model-b", modelPerCall: true, maxParallelLimit: 16 });
   const file = path.join(portal.data, "settings.json");
-  assert.deepEqual(JSON.parse(readFileSync(file, "utf8")), { mode: "background", maxParallel: 3, model: "llama-swap/model-b" });
+  assert.deepEqual(JSON.parse(readFileSync(file, "utf8")), { mode: "background", maxParallel: 3, model: "llama-swap/model-b", modelPerCall: true });
   assert.equal(statSync(file).mode & 0o777, 0o600);
   // One change at a time keeps the rest; a default is left out of the file.
   await put(`${at}/settings`, { mode: "interrupt" });
-  assert.deepEqual(JSON.parse(readFileSync(file, "utf8")), { maxParallel: 3, model: "llama-swap/model-b" });
-  await put(`${at}/settings`, { maxParallel: 1, model: "auto" });
+  assert.deepEqual(JSON.parse(readFileSync(file, "utf8")), { maxParallel: 3, model: "llama-swap/model-b", modelPerCall: true });
+  await put(`${at}/settings`, { maxParallel: 1, model: "auto", modelPerCall: false });
   assert.deepEqual(JSON.parse(readFileSync(file, "utf8")), {});
 });
 
@@ -45,6 +45,7 @@ test("what is not a mode, a limit from 1 to 16 or a model is refused, and nothin
     [{ maxParallel: "3" }, "maxParallel must be a whole number from 1 to 16"],
     [{ model: "no-slash" }, 'model must be "auto" or provider/model'],
     [{ model: 3 }, 'model must be "auto" or provider/model'],
+    [{ modelPerCall: "yes" }, "modelPerCall must be true or false"],
     // The switch is Settings → Extensions': off is not this address's to do.
     [{ enabled: false, mode: "background" }, "The subagent tool is switched off in Settings → Extensions (PUT /api/extensions/enabled)"],
   ] as const) {
@@ -75,7 +76,12 @@ test("while it runs every chat's pi has the subagent tool, held to the guard's d
   assert.ok(tool, "the chat's pi has it");
   assert.deepEqual(tool.guard, { acts: ["delegate"] });
   assert.equal(tool.description, describe("background", 3));
+  assert.equal("model" in tool.parameters.properties, false, "no model per call unless the settings say so");
   assert.deepEqual((await (await fetch(`${api}/features/flags`)).json()).subagent, { enabled: true });
+  // Switched on, the tool takes a model for one call, which is in its schema: the chats are loaded again for it.
+  await put(`${at}/settings`, { modelPerCall: true });
+  assert.equal(portal.toolsIn("chat-1").get("subagent")?.parameters.properties.model?.type, "string");
+  await put(`${at}/settings`, { modelPerCall: false });
 
   // Settings → Extensions' switch (PUT /api/extensions/enabled), which brings the server halves in line with pi's settings.
   await portal.stop();

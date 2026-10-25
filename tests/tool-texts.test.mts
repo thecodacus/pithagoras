@@ -52,8 +52,14 @@ load((pi) => subagentTool(pi, () => settingsOf({ mode: "interrupt" })), all);
 // The shape that depends on a setting is looked at as well: a subagent that runs in the background.
 const subagentBackground: Registered[] = [];
 load((pi) => subagentTool(pi, () => settingsOf({ mode: "background" })), subagentBackground);
+// And one that takes a model per call, which is a parameter more.
+const subagentModel: Registered[] = [];
+load((pi) => subagentTool(pi, () => settingsOf({ mode: "interrupt", modelPerCall: true })), subagentModel);
 
-/** The most each tool may cost, in tokens: what was agreed, as the review of issue #183 measured it, and 10 for a changed word. */
+/**
+ * The most each tool may cost, in tokens: what was agreed, as the review of issue #183 measured it, and 10 for a changed word.
+ * The subagent's model per call came after the review and is off unless switched on: its parameter is counted in a shape of its own.
+ */
 const ROOM = 10;
 const AGREED: Record<string, number> = {
   tools: 154,
@@ -67,12 +73,14 @@ const AGREED: Record<string, number> = {
   routine_run: 41,
   subagent: 118,
   "subagent#background": 136,
+  "subagent#model": 169,
 };
 
 test("every tool of the portal's own is within the length agreed for it", () => {
   const tools: [string, Registered][] = [
     ...all.map((tool): [string, Registered] => [tool.name, tool]),
     ["subagent#background", subagentBackground[0]],
+    ["subagent#model", subagentModel[0]],
   ];
   assert.deepEqual(tools.map(([key]) => key).sort(), Object.keys(AGREED).sort(), "a tool without an agreed length, or an agreed length without a tool");
   for (const [key, tool] of tools) {

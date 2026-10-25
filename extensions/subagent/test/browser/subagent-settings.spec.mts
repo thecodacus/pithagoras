@@ -13,7 +13,7 @@ const BASE = '/api/x/pithagoras-subagent';
 async function portal(page: Page, { down = false } = {}) {
   const sent: unknown[] = [];
   const failing = { down };
-  const state = { mode: 'interrupt', maxParallel: 1, maxParallelLimit: 16, model: 'auto' };
+  const state = { mode: 'interrupt', maxParallel: 1, maxParallelLimit: 16, model: 'auto', modelPerCall: false };
   await mockPortal(page, ({ path, method, json }) => {
     // Settings lists the extension as the portal has it installed.
     if (path === '/api/extensions' && method === 'GET') return { settingsPath: '/a/settings.json', extensions: [{ spec: 'extensions/subagent', name: 'pithagoras-subagent', version: '0.2.0', settings: [] }] };
@@ -85,6 +85,16 @@ test("subagents run on the chat's model unless one is named", async ({ page }) =
   await page.getByRole('option', { name: /Model B/ }).click();
   await expect(model).toContainText('Model B');
   expect(sent).toEqual([{ model: 'llama-swap/model-b' }]);
+});
+
+test('a call may name a model once the switch says so, and the switch is saved as it is flipped', async ({ page }) => {
+  const { sent } = await portal(page);
+  await page.goto('/settings/x/pithagoras-subagent');
+  const perCall = settings(page).getByRole('switch', { name: 'Let the agent name a model per call' });
+  await expect(perCall).toHaveAttribute('aria-checked', 'false');
+  await perCall.click();
+  await expect(perCall).toHaveAttribute('aria-checked', 'true');
+  expect(sent).toEqual([{ modelPerCall: true }]);
 });
 
 test('the search of Settings finds the subagents on their page, and lights up the part it leads to', async ({ page }) => {

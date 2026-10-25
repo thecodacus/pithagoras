@@ -19,9 +19,13 @@ export const de: Record<string, string | Plural> = {
     other: "Chats ohne laufende Aufgabe haben es jetzt; {n} beschäftigte Chats haben es ab ihrem nächsten Schritt.",
   },
   "Interrupt": "Unterbrechen",
+  "Let the agent name a model per call": "Den Agenten pro Aufruf ein Modell nennen lassen",
   "Loading…": "Wird geladen…",
   "Model": "Modell",
+  "Model per call": "Modell pro Aufruf",
   "More at once": "Mehr gleichzeitig",
+  "Off, a subagent runs on the model above or the chat's. On, the tool takes a model for one call, for a step that wants another: a hosted one from a chat on a local model, say. Only a model pi has; the agent is told to leave it out on a single GPU.":
+    "Aus: Ein Subagent läuft auf dem Modell oben oder dem des Chats. An: Das Tool nimmt für einen Aufruf ein Modell entgegen, für einen Schritt, der ein anderes braucht – etwa ein gehostetes aus einem Chat mit lokalem Modell. Nur ein Modell, das pi hat; der Agent wird angewiesen, es auf einer einzelnen GPU wegzulassen.",
   "Same as the chat": "Wie der Chat",
   "Subagent model": "Modell der Subagents",
   "Subagents": "Subagents",

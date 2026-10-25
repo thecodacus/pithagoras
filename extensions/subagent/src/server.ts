@@ -57,10 +57,11 @@ export function takeHandoff(portal: Pick<ServerPortal, "handoffs" | "log">): voi
 /**
  * The page in Settings, behind the portal's login:
  *
- *   GET /settings   {mode, maxParallel, maxParallelLimit, model}
- *   PUT /settings   {mode?, maxParallel?, model?}: each it names; the open chats are loaded again, as the mode and the
- *                   limit are in what the tool tells the model, and the answer says how many were (`reloaded`) and how
- *                   many have it from their next step (`waiting`)
+ *   GET /settings   {mode, maxParallel, maxParallelLimit, model, modelPerCall}
+ *   PUT /settings   {mode?, maxParallel?, model?, modelPerCall?}: each it names; the open chats are loaded again, as
+ *                   the mode and the limit are in what the tool tells the model and the model per call in its schema,
+ *                   and the answer says how many were (`reloaded`) and how many have it from their next step
+ *                   (`waiting`)
  *
  * The portal's old address for them, /api/features/subagent, sends here. `enabled` there was the switch, which is
  * Settings → Extensions' now: `true` asks for nothing this does not have already, as it answers; `false` is refused.
@@ -82,7 +83,7 @@ function routes(portal: ServerPortal): void {
     }
     try {
       saveSettings({ ...settings(), ...change });
-      // The mode and the limit are in the tool's description, which a chat reads as its pi is loaded.
+      // The mode and the limit are in the tool's description, and the model per call in its schema, which a chat reads as its pi is loaded.
       const { reloaded, waiting } = await portal.chats.reload();
       res.json({ ...shown(), reloaded, waiting });
     } catch (e) {

@@ -22,6 +22,7 @@ export default function subagent(given: Portal) {
       { title: msg("Subagents"), section: msg("How a subagent runs against the agent"), words: "subagent subagents mode background interrupt teilagenten modus hintergrund unterbrechen" },
       { title: msg("Subagents at once"), section: msg("Subagents at once"), words: "subagent parallel limit slots at once teilagenten gleichzeitig" },
       { title: msg("Subagent model"), section: msg("Subagent model"), words: "subagent model llm teilagenten modell" },
+      { title: msg("Model per call"), section: msg("Model per call"), words: "subagent model per call hosted local teilagenten modell pro aufruf" },
     ],
     component: () => (
       <Suspense fallback={<p className="text-sm text-fg-subtle">{t("Loading…")}</p>}>

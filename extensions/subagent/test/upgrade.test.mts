@@ -18,7 +18,7 @@ writeFileSync(piSettings, JSON.stringify({ packages: ["../../extensions/subagent
 const portal = await serveSubagent();
 
 test("the mode and the limit pi's settings held are the extension's after the upgrade, and the tool says them as before", async () => {
-  assert.deepEqual(await (await fetch(`${portal.at}/settings`)).json(), { mode: "background", maxParallel: 3, model: "auto", maxParallelLimit: 16 });
+  assert.deepEqual(await (await fetch(`${portal.at}/settings`)).json(), { mode: "background", maxParallel: 3, model: "auto", modelPerCall: false, maxParallelLimit: 16 });
   portal.db.createSession({ id: "chat-1", title: "t", workspace: process.env.WORKSPACE_ROOT!, executor: "host", kind: "task" });
   assert.equal(portal.toolsIn("chat-1").get("subagent")?.description, describe("background", 3));
   // Out of pi's file, and the rest of it as it was; the hand-off taken and done with.
