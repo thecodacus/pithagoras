@@ -417,6 +417,15 @@ const chatsIn = (dir: string, all = listSessions()) =>
   all.filter((s) => isWithinText(dir, s.workspace));
 
 /**
+ * Without the child chats whose parent is among them: each goes with its parent, which stands for it (see
+ * SessionManager.discard), and a chat's children are no chats of the project's own to count.
+ */
+const withoutChildren = <T extends { id: string; parent_id: string | null }>(rows: T[]): T[] => {
+  const ids = new Set(rows.map((row) => row.id));
+  return rows.filter((row) => !row.parent_id || !ids.has(row.parent_id));
+};
+
+/**
  * The same, and those that reach the folder through a link too: what deleting
  * it would take from under them. Each place is looked at once, since many
  * chats share one, and only this one project's are followed.
@@ -457,7 +466,7 @@ app.get("/api/projects", (req, res) => {
     const all = listSessions();
     const withTools = projectsWithTools();
     const projects = listProjects(WORKSPACE_ROOT).map((p) => {
-      const chats = chatsIn(p.path, all);
+      const chats = withoutChildren(chatsIn(p.path, all));
       return {
         ...p,
         ...linkOf(p.name),
@@ -597,7 +606,7 @@ app.get("/api/projects/:name", async (req, res) => {
     res.json({
       ...project,
       ...(unsaved ? { unsaved } : {}),
-      sessions: workingIn(project.path, listSessions()).length,
+      sessions: withoutChildren(workingIn(project.path, listSessions())).length,
       // The ones a delete would switch off: one already off is not changed by it.
       routines: routinesIn(project.path).filter((r) => r.enabled).map((r) => r.name),
       ...describeProject(WORKSPACE_ROOT, project.name),
@@ -753,7 +762,7 @@ app.delete("/api/projects/:name", async (req, res) => {
       const unsaved = await unsavedWork(project.path);
       if (unsaved && holdsWork(unsaved)) return res.status(409).json(unsavedRefusal(unsaved));
     }
-    const chats = workingIn(project.path, listSessions());
+    const chats = withoutChildren(workingIn(project.path, listSessions()));
     if (chats.some((s) => sessions.isBusy(s.id) || sessions.backgroundWork(s.id))) {
       return res.status(409).json({ error: "A chat in this project is still working. Stop it first." });
     }
@@ -823,7 +832,7 @@ app.delete("/api/agents/:id", async (req, res) => {
     const agent = deletable(req.params.id);
     // Its chats and its conversations — those started on the Agent page and
     // through channels — and the one its heartbeat looks around in.
-    const chats = workingIn(agent.home, [...listSessions(), ...listAgentSessions(), ...listHeartbeatSessions()]);
+    const chats = withoutChildren(workingIn(agent.home, [...listSessions(), ...listAgentSessions(), ...listHeartbeatSessions()]));
     if (chats.some((s) => sessions.isBusy(s.id) || sessions.backgroundWork(s.id))) {
       return res.status(409).json({ error: "A chat with this agent is still working. Stop it first." });
     }

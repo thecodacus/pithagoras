@@ -1,5 +1,7 @@
 import { test, before } from "node:test";
 import assert from "node:assert/strict";
+import { mkdirSync } from "node:fs";
+import path from "node:path";
 import { freePort, inProcessHome, serverEnv, startServer } from "./server-harness.mjs";
 
 /**
@@ -15,6 +17,12 @@ createSession({ id: "shown", title: "A part of it", workspace, executor: "host",
 createSession({ id: "hidden", title: "Another part", workspace, executor: "host", parent_id: "parent", listed: 0, creator: "helper" });
 createSession({ id: "other", title: "Something else", workspace, executor: "host" });
 appendEvent("hidden", "portal_prompt", { message: "Look it up" });
+// A project with a chat and its listed child, and a chat of the project's own.
+const site = path.join(workspace, "site");
+mkdirSync(site, { recursive: true });
+createSession({ id: "site-chat", title: "Build the site", workspace: site, executor: "host" });
+createSession({ id: "site-child", title: "Check the links", workspace: site, executor: "host", parent_id: "site-chat", listed: 1, creator: "helper" });
+createSession({ id: "site-other", title: "Fix the logo", workspace: site, executor: "host" });
 
 let base;
 before(async () => {
@@ -28,7 +36,7 @@ const call = async (method, url) => {
 };
 
 test("the chat list has a listed child with its parent named, and not an unlisted one, which is found by its id", async () => {
-  const { sessions } = (await call("GET", "/api/sessions")).body;
+  const sessions = (await call("GET", "/api/sessions")).body.sessions.filter((s) => s.workspace === workspace);
   const byId = Object.fromEntries(sessions.map((s) => [s.id, s]));
   assert.deepEqual(Object.keys(byId).sort(), ["other", "parent", "shown"]);
   assert.deepEqual([byId.shown.parent, byId.shown.listed], ["parent", true]);
@@ -45,4 +53,13 @@ test("deleting a chat deletes its children and their transcripts, and leaves the
   for (const id of ["parent", "shown", "hidden"]) assert.equal((await call("GET", `/api/sessions/${id}`)).status, 404, id);
   assert.equal(getDb().prepare("SELECT COUNT(*) AS n FROM events WHERE session_id = 'hidden'").get().n, 0);
   assert.equal((await call("GET", "/api/sessions/other")).status, 200);
+});
+
+test("a project counts its chats without their children, and deleting it deletes them with their parents", async () => {
+  const { projects } = (await call("GET", "/api/projects")).body;
+  assert.equal(projects.find((p) => p.name === "site").sessions, 2, "the two chats of its own");
+  assert.equal((await call("GET", "/api/projects/site")).body.sessions, 2);
+  const deleted = await call("DELETE", "/api/projects/site?discard=1");
+  assert.deepEqual([deleted.status, deleted.body.sessionsDeleted], [200, 2]);
+  for (const id of ["site-chat", "site-child", "site-other"]) assert.equal((await call("GET", `/api/sessions/${id}`)).status, 404, id);
 });

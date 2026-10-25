@@ -64,6 +64,8 @@ export function agentsRouter(): Router {
     const agents = listAgents();
     const counts = new Map<string, number>();
     for (const s of [...listSessions(), ...listAgentSessions()]) {
+      // A child chat is part of its parent's work, not a chat of the agent's of its own.
+      if (s.parent_id) continue;
       const a = agentOf(s.workspace, agents);
       if (a) counts.set(a.id, (counts.get(a.id) ?? 0) + 1);
     }
