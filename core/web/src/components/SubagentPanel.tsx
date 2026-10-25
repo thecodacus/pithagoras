@@ -4,7 +4,7 @@ import { Markdown } from "./Markdown";
 import { LuArrowUp, LuBot, LuSquare } from "react-icons/lu";
 import { api } from "../api";
 import { buildTranscript, formatElapsed, type Item } from "../transcript";
-import { reportedSteps, subagentName, type Subagent } from "../subagents";
+import { subagentName, type Subagent } from "../subagents";
 import { useFollowBottom } from "../use-follow-bottom";
 import { CompactionMarker, Ring, Shimmer, ThinkingBlock, ToolCall } from "./ChatActivity";
 import { isEnter } from "../shortcuts";
@@ -19,25 +19,20 @@ import { tabKeys } from "../tab-keys";
 export function SubagentPanel({
   sessionId,
   agents,
-  items,
   selected,
   onSelect,
 }: {
   sessionId: string;
   agents: Subagent[];
-  /** The main conversation, where a tool-reported subagent's output is. */
-  items: Item[];
   selected: string | null;
   onSelect: (id: string) => void;
 }) {
   const agent = agents.find((a) => a.id === selected) ?? agents[agents.length - 1];
-  // Only its own entry goes down: the rest of the conversation changes with every word, and is not its business.
-  const tool = agent?.kind === "tool" ? items.find((i): i is Extract<Item, { kind: "tool" }> => i.kind === "tool" && `tool:${i.callId ?? i.id}` === agent.id) : undefined;
   if (!agents.length || !agent) {
     return (
       <div className="sub-panel">
         <p className="bg-jobs-empty">
-          {t("No subagents in this chat yet. An extension's agent shows up here while it works — and takes messages if the extension speaks the subagent protocol.")}
+          {t("No subagents in this chat yet. An extension's agent shows up here while it works, if the extension speaks the subagent protocol.")}
         </p>
       </div>
     );
@@ -54,18 +49,18 @@ export function SubagentPanel({
           ))}
         </div>
       )}
-      <AgentView key={agent.id} sessionId={sessionId} agent={agent} tool={tool} />
+      <AgentView key={agent.id} sessionId={sessionId} agent={agent} />
     </div>
   );
 }
 
-const AgentView = memo(function AgentView({ sessionId, agent, tool }: { sessionId: string; agent: Subagent; tool?: Extract<Item, { kind: "tool" }> }) {
+const AgentView = memo(function AgentView({ sessionId, agent }: { sessionId: string; agent: Subagent }) {
   useLanguage();
   const running = agent.status === "running";
   const now = useNow(running);
   const { attach, onScroll, follow } = useFollowBottom<HTMLDivElement>();
-  const childItems = useMemo(() => (agent.kind === "protocol" ? buildTranscript(agent.events) : []), [agent]);
-  useLayoutEffect(() => follow(), [childItems, tool?.output, tool?.details]);
+  const childItems = useMemo(() => buildTranscript(agent.events), [agent]);
+  useLayoutEffect(() => follow(), [childItems]);
   const seconds = agent.since ? Math.max(0, Math.floor(((running ? now : agent.until ?? now) - agent.since) / 1000)) : undefined;
 
   return (
@@ -86,11 +81,7 @@ const AgentView = memo(function AgentView({ sessionId, agent, tool }: { sessionI
         )}
       </div>
       <div ref={attach} onScroll={onScroll} className="sub-body">
-        {agent.kind === "protocol" ? (
-          childItems.length ? childItems.map((item) => <ChildItem key={item.id} item={item} running={running} />) : <p className="bg-jobs-empty"><Shimmer>{t("Starting…")}</Shimmer></p>
-        ) : (
-          tool && <ToolReport tool={tool} running={running} />
-        )}
+        {childItems.length ? childItems.map((item) => <ChildItem key={item.id} item={item} running={running} />) : <p className="bg-jobs-empty"><Shimmer>{t("Starting…")}</Shimmer></p>}
       </div>
       <AgentInput sessionId={sessionId} agent={agent} />
     </>
@@ -128,30 +119,6 @@ const ChildItem = memo(function ChildItem({ item, running }: { item: Item; runni
   }
 });
 
-/** A tool that is not on the protocol: its steps where its details list them, and its text. */
-function ToolReport({ tool, running }: { tool: Extract<Item, { kind: "tool" }>; running: boolean }) {
-  const steps = reportedSteps(tool.details);
-  return (
-    <>
-      {steps.map((s, i) =>
-        s.type === "toolCall" ? (
-          <div key={i} className="tool-row">
-            <ToolCall item={{ kind: "tool", id: `s${i}`, name: s.name!, status: running && i === steps.length - 1 ? "running" : "done", args: s.args }} />
-          </div>
-        ) : (
-          <div key={i} className="md text-[13px] text-fg-muted"><Markdown>{s.text!}</Markdown></div>
-        ),
-      )}
-      {tool.output && (
-        <div className="md text-[13px] leading-relaxed text-fg">
-          <Markdown parseIncompleteMarkdown>{tool.output}</Markdown>
-        </div>
-      )}
-      {!steps.length && !tool.output && running && <p className="bg-jobs-empty"><Shimmer>{t("Working…")}</Shimmer></p>}
-    </>
-  );
-}
-
 function AgentInput({ sessionId, agent }: { sessionId: string; agent: Subagent }) {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
@@ -160,11 +127,7 @@ function AgentInput({ sessionId, agent }: { sessionId: string; agent: Subagent }
   if (agent.status !== "running") return null;
   if (!agent.input) {
     return (
-      <p className="sub-input-note">
-        {agent.kind === "tool"
-          ? t("This extension does not take messages for its agent. It can, by speaking the subagent protocol.")
-          : t("This subagent does not take messages.")}
-      </p>
+      <p className="sub-input-note">{t("This subagent does not take messages.")}</p>
     );
   }
   const send = async () => {

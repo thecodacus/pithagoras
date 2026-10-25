@@ -52,7 +52,7 @@ test('a protocol subagent whose end never came stops with its tool call, or with
     ev(3, 'portal_subagent', { op: 'start', id: 'b', label: 'Loose', input: true }),
   ] as any;
   const running = subagents(events, buildTranscript(events));
-  assert.deepEqual(running.filter((s) => s.kind === 'protocol').map((s) => s.status), ['running', 'running']);
+  assert.deepEqual(running.map((s) => s.status), ['running', 'running']);
 
   const ended = [...events, ev(4, 'tool_execution_end', { toolCallId: 'call', toolName: 'delegate', result: { content: [] } })];
   const afterTool = subagents(ended, buildTranscript(ended));
@@ -62,7 +62,7 @@ test('a protocol subagent whose end never came stops with its tool call, or with
   assert.equal(afterTool.find((s) => s.id === 'b')!.status, 'running', 'not tied to a tool: it may outlive the call');
 
   const gone = subagents(events, buildTranscript(events, { ended: true }), true);
-  assert.deepEqual(gone.filter((s) => s.kind === 'protocol').map((s) => s.status), ['stopped', 'stopped']);
+  assert.deepEqual(gone.map((s) => s.status), ['stopped', 'stopped']);
 });
 
 test('a tool is pictured from the words in its name, whichever extension it comes from', async () => {

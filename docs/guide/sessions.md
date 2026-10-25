@@ -415,9 +415,11 @@ message does not follow you into the next chat, and survives a reload of the
 page (in the browser's session storage, so not a new browser). An extension that
 asks for what is in the box is told it.
 
-Above the box, a small tray lists what runs beside the conversation: subagents,
-background jobs the agent left running, and the status lines extensions set.
-Each opens its own window — see
+Above the box, a small tray lists what runs beside the conversation: subagents
+(only those an extension runs through the subagent protocol; other tools, such
+as code mode or a web search, are not listed and show their output on their own
+card), background jobs the agent left running, and the status lines extensions
+set. Each opens its own window — see
 [Subagents and background jobs](/guide/extensions#subagents-and-background-jobs).
 A status that names one of the chat's slash commands runs it when clicked.
 

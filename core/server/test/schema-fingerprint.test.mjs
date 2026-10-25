@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
 import { schemaFingerprint } from "./schema-fingerprint.mjs";
@@ -18,8 +18,12 @@ import { freePort, inProcessHome } from "./server-harness.mjs";
 // src/schema-version.ts (once for the release, not once for each change),
 // pin the new version and fingerprint here, and have an upgrade test for what
 // changed (below) that starts from a database made before it.
-const PINNED = { version: 12, fingerprint: "830934df6dce1dd977d16b086c0bbe883bfc18a3463f84e9f22f31efa43fc0cd" };
-/** The schema of version 11, the one pinned before: no chat is a child of another. */
+const PINNED = { version: 15, fingerprint: "830934df6dce1dd977d16b086c0bbe883bfc18a3463f84e9f22f31efa43fc0cd" };
+/** The schema of version 13, the one pinned before: no index on the questions a chat asked. */
+const V13_FINGERPRINT = "7a7fcf8359ff86a38fcb9060888fa9ed7816b18bb9cfb2d9da454a893c015bda";
+/** The schema of version 12: no chat is a child of another. */
+const V12_FINGERPRINT = "d118d40ea237b90e58c0ef97d6f1cdcb5e876ed739c3e2bbc6684f74a8aa653a";
+/** The schema of version 11, which version 12 kept: it only left the subagent's settings for its extension. */
 const V11_FINGERPRINT = "d118d40ea237b90e58c0ef97d6f1cdcb5e876ed739c3e2bbc6684f74a8aa653a";
 /** The schema of version 10, the one pinned before: chats with no mode, and no table of the modes the person made. */
 const V10_FINGERPRINT = "155cf58f87a19f0a102c8475bdceee87a98d9169c400d887a37411107f0a5ccf";
@@ -31,17 +35,24 @@ const home = inProcessHome("pithagoras-schema-");
 const { SCHEMA_VERSION } = await import("../dist/schema-version.js");
 const { getDb } = await import("../dist/db.js");
 
-/** A database of the schema of version 11 at `file`, open: a fresh one, whose chats have no parent, listing or maker. */
-function freshAt11(file) {
+/** A database of the schema of version 13 at `file`, open: a fresh one, with no index on the questions a chat asked. */
+function freshAt13(file) {
   getDb().exec(`VACUUM INTO '${file}'`);
   const d = new Database(file);
-  d.exec("DROP INDEX idx_events_questions; DROP INDEX idx_sessions_parent; ALTER TABLE sessions DROP COLUMN parent_id; ALTER TABLE sessions DROP COLUMN listed; ALTER TABLE sessions DROP COLUMN creator;");
+  d.exec("DROP INDEX idx_events_questions");
   return d;
 }
 
-/** A database of the schema of version 10 at `file`, open: one of version 11, with no mode on a chat and no table of the person's modes. */
+/** A database of the schema of version 12 at `file`, open: one of version 13, whose chats have no parent, listing or maker. */
+function freshAt12(file) {
+  const d = freshAt13(file);
+  d.exec("DROP INDEX idx_sessions_parent; ALTER TABLE sessions DROP COLUMN parent_id; ALTER TABLE sessions DROP COLUMN listed; ALTER TABLE sessions DROP COLUMN creator;");
+  return d;
+}
+
+/** A database of the schema of version 10 at `file`, open: one of version 11 (whose schema 12 kept), with no mode on a chat and no table of the person's modes. */
 function freshAt10(file) {
-  const d = freshAt11(file);
+  const d = freshAt12(file);
   d.exec("ALTER TABLE sessions DROP COLUMN mode; DROP TABLE chat_modes;");
   return d;
 }
@@ -1332,29 +1343,177 @@ test("a database of version 10 is backed up and given chat modes: every chat is 
   assert.deepEqual(modesIn(dir), { chats: [{ id: "c1", mode: null }, { id: "c2", mode: null }], made: [] });
 });
 
-test("a database of version 11 is backed up and given child chats: every chat is one of its own, and listed", async () => {
-  const dir = path.join(home, "children-from-11");
+/**
+ * pi's settings.json while the test runs `work`, holding `text`; what was there before is put back after. The upgrade
+ * reads it from where every test's pi has its folder.
+ */
+async function withPiSettings(text, work) {
+  const file = path.join(process.env.PI_CODING_AGENT_DIR, "settings.json");
+  mkdirSync(path.dirname(file), { recursive: true });
+  const before = existsSync(file) ? readFileSync(file, "utf8") : undefined;
+  writeFileSync(file, text);
+  try {
+    return await work(file);
+  } finally {
+    if (before === undefined) rmSync(file, { force: true });
+    else writeFileSync(file, before);
+    rmSync(`${file}.bak`, { force: true });
+  }
+}
+
+/** A database of version 11 in its own folder `name`, with one chat: the schema of version 11, which 12 kept. */
+function databaseAt11(name) {
+  const dir = path.join(home, name);
   mkdirSync(dir, { recursive: true });
-  const d = freshAt11(path.join(dir, "portal.db"));
+  const d = freshAt12(path.join(dir, "portal.db"));
   d.pragma("user_version = 11");
   assert.equal(schemaFingerprint(d), V11_FINGERPRINT, "the schema of version 11");
-  const chat = d.prepare("INSERT INTO sessions (id, title, workspace, kind) VALUES (?, ?, ?, ?)");
-  chat.run("c1", "Kites", "/w/site", "task");
-  chat.run("c2", "From a channel", "/w/notes", "agent");
+  d.prepare("INSERT INTO sessions (id, title, workspace, kind) VALUES ('c1', 'Kites', '/w/site', 'task')").run();
   d.close();
+  return dir;
+}
+
+test("the subagent settings in pi's settings.json are left for its extension at schema 12, and leave pi's file, the rest of it kept", async () => {
+  const dir = databaseAt11("subagent-out");
   assert.deepEqual(upgradeCheck(path.join(dir, "portal.db")), { needed: true, from: 11 });
-  assert.match(await upgraded(dir), new RegExp(`upgrading the database from version 11 to ${SCHEMA_VERSION}`));
+  const others = { packages: ["../../extensions/subagent"], defaultProvider: "llama-swap" };
+  await withPiSettings(JSON.stringify({ ...others, subagentMode: "background", subagentMaxParallel: 3 }), async (file) => {
+    assert.match(await upgraded(dir), new RegExp(`upgrading the database from version 11 to ${SCHEMA_VERSION}`));
+    assert.deepEqual(JSON.parse(readFileSync(file, "utf8")), others);
+    // What pi's file was is kept beside it, as every change of it keeps it.
+    assert.deepEqual(JSON.parse(readFileSync(`${file}.bak`, "utf8")), { ...others, subagentMode: "background", subagentMaxParallel: 3 });
+  });
+  assert.match(path.basename(backupsIn(path.join(dir, "backups"))[0]), /^portal-v11-\d{8}-\d{6}\.db$/);
+  const now = new Database(path.join(dir, "portal.db"), { readonly: true });
+  assert.deepEqual([now.pragma("user_version", { simple: true }), schemaFingerprint(now)], [SCHEMA_VERSION, PINNED.fingerprint]);
+  now.close();
+  assert.deepEqual(leftAt(dir), ["subagent"], "nothing half done beside it");
+  const left = (name) => path.join(dir, "handoff", "subagent", name);
+  const { made: _made, ...about } = JSON.parse(readFileSync(left("handoff.json"), "utf8"));
+  assert.deepEqual(about, { format: 1, name: "subagent", schema: 12 });
+  assert.deepEqual(JSON.parse(readFileSync(left("settings.json"), "utf8")), { subagentMode: "background", subagentMaxParallel: 3, subagentModel: null });
+  assert.equal(modeOf(left("settings.json")), 0o600);
+});
+
+test("pi's settings with none of the subagent's, or that cannot be read, leave nothing and are not changed", async () => {
+  for (const [name, text] of [["subagent-none", JSON.stringify({ defaultProvider: "llama-swap" })], ["subagent-unreadable", '{ "subagentMode": "background", ']]) {
+    const dir = databaseAt11(name);
+    await withPiSettings(text, async (file) => {
+      await upgraded(dir);
+      assert.equal(readFileSync(file, "utf8"), text, name);
+    });
+    assert.deepEqual(leftAt(dir), [], name);
+  }
+});
+
+test("pi's settings that cannot be written keep the subagent's for the next start, which takes them out and leaves them once", async () => {
+  const dir = databaseAt11("subagent-kept");
+  const agentDir = process.env.PI_CODING_AGENT_DIR;
+  const text = JSON.stringify({ subagentModel: "llama-swap/model-b" });
+  await withPiSettings(text, async (file) => {
+    chmodSync(agentDir, 0o555);
+    try {
+      assert.match(await upgraded(dir), /could not be left for its extension, and are kept for the next start/);
+    } finally {
+      chmodSync(agentDir, 0o755);
+    }
+    assert.equal(readFileSync(file, "utf8"), text);
+    await upgraded(dir);
+    assert.deepEqual(JSON.parse(readFileSync(file, "utf8")), {});
+  });
+  assert.deepEqual(leftAt(dir), ["subagent"]);
+  assert.deepEqual(JSON.parse(readFileSync(path.join(dir, "handoff", "subagent", "settings.json"), "utf8")), { subagentMode: null, subagentMaxParallel: null, subagentModel: "llama-swap/model-b" });
+});
+
+test("a subagent hand-off that waits from an earlier upgrade is written anew from the keys pi's settings hold now", async () => {
+  const dir = databaseAt11("subagent-again");
+  const left = (name) => path.join(dir, "handoff", "subagent", name);
+  await withPiSettings(JSON.stringify({ subagentMode: "background" }), () => upgraded(dir));
+  assert.deepEqual(JSON.parse(readFileSync(left("settings.json"), "utf8")), { subagentMode: "background", subagentMaxParallel: null, subagentModel: null });
+  // Gone back to the older version, the person raised the limit there; the database is at 11 again, as its backup is put in.
+  const d = new Database(path.join(dir, "portal.db"));
+  d.pragma("user_version = 11");
+  d.close();
+  await withPiSettings(JSON.stringify({ subagentMode: "background", subagentMaxParallel: 4 }), async (file) => {
+    await upgraded(dir);
+    assert.deepEqual(JSON.parse(readFileSync(file, "utf8")), {});
+  });
+  assert.deepEqual(JSON.parse(readFileSync(left("settings.json"), "utf8")), { subagentMode: "background", subagentMaxParallel: 4, subagentModel: null });
+  assert.deepEqual(leftAt(dir), ["subagent"]);
+});
+
+test("a copy of the subagent tool that is no extension keeps its settings in pi's file, which it still reads, and says so", async () => {
+  const dir = databaseAt11("subagent-copy");
+  const copy = path.join(home, "subagent-clone");
+  mkdirSync(copy, { recursive: true });
+  writeFileSync(path.join(copy, "package.json"), JSON.stringify({ name: "pithagoras-subagent", version: "0.1.0", pi: { extensions: ["./index.ts"] } }));
+  const text = JSON.stringify({ packages: [copy], subagentMode: "background" });
+  await withPiSettings(text, async (file) => {
+    assert.match(await upgraded(dir), /subagent settings stay in pi's settings\.json/);
+    assert.equal(readFileSync(file, "utf8"), text);
+    // The same folder with a server half is the extension, and the settings go.
+    writeFileSync(path.join(copy, "package.json"), JSON.stringify({ name: "pithagoras-subagent", version: "0.2.0", pithagoras: { server: "server.js" } }));
+    await upgraded(dir);
+    assert.deepEqual(JSON.parse(readFileSync(file, "utf8")), { packages: [copy] });
+  });
+  assert.deepEqual(leftAt(dir), ["subagent"]);
+});
+
+test("a database of version 12, or of 11, is backed up and given child chats at schema 13: every chat is one of its own, and listed", async () => {
+  for (const [version, fingerprint] of [[12, V12_FINGERPRINT], [11, V11_FINGERPRINT]]) {
+    const dir = path.join(home, `children-from-${version}`);
+    mkdirSync(dir, { recursive: true });
+    const d = freshAt12(path.join(dir, "portal.db"));
+    d.pragma(`user_version = ${version}`);
+    assert.equal(schemaFingerprint(d), fingerprint, `the schema of version ${version}`);
+    const chat = d.prepare("INSERT INTO sessions (id, title, workspace, kind) VALUES (?, ?, ?, ?)");
+    chat.run("c1", "Kites", "/w/site", "task");
+    chat.run("c2", "From a channel", "/w/notes", "agent");
+    d.close();
+    assert.deepEqual(upgradeCheck(path.join(dir, "portal.db")), { needed: true, from: version });
+    assert.match(await upgraded(dir), new RegExp(`upgrading the database from version ${version} to ${SCHEMA_VERSION}`));
+    const backups = backupsIn(path.join(dir, "backups"));
+    assert.equal(backups.length, 1, `one backup, of version ${version}`);
+    assert.match(path.basename(backups[0]), new RegExp(`^portal-v${version}-\\d{8}-\\d{6}\\.db$`));
+
+    const now = new Database(path.join(dir, "portal.db"), { readonly: true });
+    try {
+      assert.deepEqual([now.pragma("user_version", { simple: true }), schemaFingerprint(now)], [SCHEMA_VERSION, PINNED.fingerprint]);
+      assert.deepEqual(now.prepare("SELECT id, parent_id, listed, creator FROM sessions ORDER BY id").all(), [
+        { id: "c1", parent_id: null, listed: 1, creator: null },
+        { id: "c2", parent_id: null, listed: 1, creator: null },
+      ]);
+    } finally {
+      now.close();
+    }
+  }
+});
+
+test("a database of version 13 is backed up and given the index on the questions a chat asked at schema 15, its chats and questions kept", async () => {
+  const dir = path.join(home, "questions-from-13");
+  mkdirSync(dir, { recursive: true });
+  const d = freshAt13(path.join(dir, "portal.db"));
+  d.pragma("user_version = 13");
+  assert.equal(schemaFingerprint(d), V13_FINGERPRINT, "the schema of version 13");
+  d.prepare("INSERT INTO sessions (id, title, workspace, kind) VALUES ('c1', 'Kites', '/w/site', 'task')").run();
+  d.prepare("INSERT INTO sessions (id, title, workspace, kind, parent_id, listed) VALUES ('c2', 'Tails', '/w/site', 'task', 'c1', 0)").run();
+  d.prepare("INSERT INTO events (session_id, type, payload) VALUES ('c2', 'portal_question', '{}')").run();
+  d.close();
+  assert.deepEqual(upgradeCheck(path.join(dir, "portal.db")), { needed: true, from: 13 });
+  assert.match(await upgraded(dir), new RegExp(`upgrading the database from version 13 to ${SCHEMA_VERSION}`));
   const backups = backupsIn(path.join(dir, "backups"));
-  assert.equal(backups.length, 1);
-  assert.match(path.basename(backups[0]), /^portal-v11-\d{8}-\d{6}\.db$/);
+  assert.equal(backups.length, 1, "one backup, of version 13");
+  assert.match(path.basename(backups[0]), /^portal-v13-\d{8}-\d{6}\.db$/);
 
   const now = new Database(path.join(dir, "portal.db"), { readonly: true });
   try {
     assert.deepEqual([now.pragma("user_version", { simple: true }), schemaFingerprint(now)], [SCHEMA_VERSION, PINNED.fingerprint]);
-    assert.deepEqual(now.prepare("SELECT id, parent_id, listed, creator FROM sessions ORDER BY id").all(), [
-      { id: "c1", parent_id: null, listed: 1, creator: null },
-      { id: "c2", parent_id: null, listed: 1, creator: null },
+    assert.ok(now.prepare("SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'idx_events_questions'").get(), "the index is made");
+    assert.deepEqual(now.prepare("SELECT id, parent_id, listed FROM sessions ORDER BY id").all(), [
+      { id: "c1", parent_id: null, listed: 1 },
+      { id: "c2", parent_id: "c1", listed: 0 },
     ]);
+    assert.deepEqual(now.prepare("SELECT session_id, type FROM events").all(), [{ session_id: "c2", type: "portal_question" }]);
   } finally {
     now.close();
   }

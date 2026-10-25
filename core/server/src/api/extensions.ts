@@ -12,7 +12,6 @@ import { sessions } from "../session-manager.js";
 import { clientHalf, packageKinds, requiresOf, staticImports, packageThemes, serverHalf, type ClientHalf, type PackageKind, type PackageThemes, type ServerHalf } from "../extension-ui.js";
 import { sendCompressed } from "../compressed-file.js";
 import { bundledPath } from "../bundled.js";
-import { SUBAGENT_PACKAGE } from "../features.js";
 import { isServing, serverFailure, serverHalfStatus, serverHalvesStanding, serversSettled, syncServerHalves } from "../extension-host.js";
 import { logFileLine } from "../logs.js";
 import { planInstall, type InstalledExtension } from "../install-plan.js";
@@ -62,11 +61,7 @@ export interface ShippedExtension {
   requires?: Record<string, string>;
 }
 
-/**
- * The extensions in the portal's own `extensions` folder, each a package in a
- * folder of its own. Not the subagent tool: that one is switched in Settings →
- * Tools, which also keeps its settings.
- */
+/** The extensions in the portal's own `extensions` folder, each a package in a folder of its own. */
 export function shippedExtensions(dir = bundledPath("extensions")): ShippedExtension[] {
   if (!dir) return [];
   const out: ShippedExtension[] = [];
@@ -79,7 +74,7 @@ export function shippedExtensions(dir = bundledPath("extensions")): ShippedExten
     } catch {
       continue;
     }
-    if (typeof meta?.name !== "string" || meta.name === SUBAGENT_PACKAGE) continue;
+    if (typeof meta?.name !== "string") continue;
     const requires = requiresOf(meta);
     out.push({
       name: meta.name,

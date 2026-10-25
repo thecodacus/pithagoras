@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, type PiModel } from "../api";
+import { api, EXTENSIONS_CHANGED, type PiModel } from "../api";
 import { load, peek, useCached } from "../settings-cache";
 import { Select } from "./Select";
 import { t } from "../i18n";
@@ -38,12 +38,12 @@ export function useSubagentChoice(sessionId: string, onError?: (e: string) => vo
   const [picked, setPicked] = useState<{ model: string | null } | null>(null);
   useEffect(() => setPicked(null), [sessionId]);
 
-  // Settings → Tools says when it switches the tool on or off.
+  // The tool is the subagent extension's, switched in Settings → Extensions, which says when what is installed changed.
   const reloadFeatures = features.reload;
   useEffect(() => {
     const again = () => void reloadFeatures();
-    window.addEventListener("features-changed", again);
-    return () => window.removeEventListener("features-changed", again);
+    window.addEventListener(EXTENSIONS_CHANGED, again);
+    return () => window.removeEventListener(EXTENSIONS_CHANGED, again);
   }, [reloadFeatures]);
 
   // Only an answer that is one: a server that says something else leaves the menu as it was.
