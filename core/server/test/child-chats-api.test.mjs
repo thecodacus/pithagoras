@@ -61,6 +61,22 @@ test("a child that waits on a person says so in the list, until its question has
   assert.deepEqual(await asking(), [undefined, undefined]);
 });
 
+test("the list reads a child's questions through their index, and a question whose wait is up does not count and is not ended by the poll", async () => {
+  const { QUESTION_EVENTS } = await import("../dist/questions.js");
+  const plan = getDb().prepare(`EXPLAIN QUERY PLAN ${QUESTION_EVENTS}`).all("shown").map((r) => r.detail).join("\n");
+  assert.match(plan, /idx_events_questions/, "not a walk through every event of the chat");
+
+  const events = () => getDb().prepare("SELECT COUNT(*) AS n FROM events WHERE session_id = 'shown'").get().n;
+  appendEvent("shown", "portal_question", { id: "q2", until: Date.now() - 1000, questions: [{ id: "a", question: "Still there?", options: [{ label: "Yes" }] }] });
+  const before = events();
+  const row = async () => (await call("GET", "/api/sessions")).body.sessions.find((s) => s.id === "shown");
+  assert.equal((await row()).asking, undefined);
+  assert.equal(events(), before, "listing the chats writes nothing");
+  appendEvent("shown", "portal_question", { id: "q3", until: Date.now() + 60_000, questions: [{ id: "a", question: "Which?", options: [{ label: "This" }] }] });
+  assert.equal((await row()).asking, true, "a question that still waits counts");
+  getDb().prepare("DELETE FROM events WHERE session_id = 'shown' AND type = 'portal_question'").run();
+});
+
 test("deleting a chat deletes its children and their transcripts, and leaves the other chats", async () => {
   assert.equal((await call("DELETE", "/api/sessions/parent")).status, 200);
   for (const id of ["parent", "shown", "hidden"]) assert.equal((await call("GET", `/api/sessions/${id}`)).status, 404, id);
