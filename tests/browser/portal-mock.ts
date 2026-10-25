@@ -105,7 +105,7 @@ const portalBase = ({ path, method, url }: Ask): Answer => {
   if (method !== 'GET') return undefined;
   if (path === '/api/auth/status') return { authed: true, authRequired: false };
   if (path === '/api/sessions') return { sessions: [], executor: 'host' };
-  if (path === '/api/features/flags') return { subagent: { enabled: false }, memory: { held: false, by: null } };
+  if (path === '/api/features/flags') return { memory: { held: false, by: null } };
   if (path === '/api/voice') return { provider: '', ready: false, speech: true, voices: [], enabled: false };
   // A portal that is not run from a checkout: nothing to update, no notice.
   if (path === '/api/update') return { kind: 'none', boot: 'boot-a' };

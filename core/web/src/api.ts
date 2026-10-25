@@ -832,21 +832,8 @@ export const api = {
     json<{ ok: true }>(`/api/skills/${encodeURIComponent(name)}`, { method: "DELETE" }),
 
   people: () => json<{ people: Person[] }>("/api/people"),
-  /** Only whether the subagent tool is on, and what holds the agent's memory, by its label — cheap, for the chat's menus and the Projects page. */
-  featureFlags: () => json<{ subagent: { enabled: boolean }; memory: { held: boolean; by: string | null } }>("/api/features/flags"),
-  /**
-   * What a chat's subagents run on: its own choice (null follows `default`), and what the subagent extension's settings
-   * say for every chat, from its own address. Asked only while the extension is on.
-   */
-  subagentModel: async (id: string) => {
-    const [own, extension] = await Promise.all([
-      json<{ model: string | null }>(`/api/sessions/${id}/subagent-model`),
-      json<{ model: string }>("/api/x/pithagoras-subagent/settings"),
-    ]);
-    return { model: own.model, default: extension.model };
-  },
-  setSubagentModel: (id: string, model: string | null) =>
-    json<{ model: string | null }>(`/api/sessions/${id}/subagent-model`, { method: "PUT", body: JSON.stringify({ model }) }),
+  /** What holds the agent's memory, by its label, where something does — cheap, for the Projects page. */
+  featureFlags: () => json<{ memory: { held: boolean; by: string | null } }>("/api/features/flags"),
   sandbox: () => json<SandboxState>("/api/sandbox"),
   guard: () => json<GuardState>("/api/guard"),
   setGuardServer: (name: string, trusted: boolean) =>
@@ -1019,15 +1006,6 @@ export const api = {
 
   /** Jobs the agent left running in the chat's folder, and what extensions show about themselves. */
   background: (id: string) => json<BackgroundState>(`/api/sessions/${id}/background`),
-  /** A message for a subagent that said it takes them (subagent protocol, input: true). */
-  subagentInput: (id: string, agent: string, text: string) =>
-    json<{ ok: true }>(`/api/sessions/${id}/subagents/${encodeURIComponent(agent)}/input`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text }),
-    }),
-  subagentStop: (id: string, agent: string) =>
-    json<{ ok: true }>(`/api/sessions/${id}/subagents/${encodeURIComponent(agent)}/stop`, { method: "POST" }),
 
   /** Cheap: never starts pi. Stats are null when the session is not live. */
   config: (id: string) => json<PiConfig>(`/api/sessions/${id}/config`),

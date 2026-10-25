@@ -92,6 +92,14 @@ export interface ToolCallView {
   files?: CallFile[];
 }
 
+/** A model the chat's model menu lists: see `chat.model.menu`. */
+export interface MenuModel {
+  provider: string;
+  id: string;
+  /** What it is called, where its provider says. */
+  name?: string;
+}
+
 /** A picture for `ui.ImageViewer`. */
 export interface ViewerPicture {
   /** Tells it from the others in the list, and is what `from` of another points at. */
@@ -182,8 +190,7 @@ export interface SlotMap {
    * button. `useButton` is a hook, called as the chat's header is drawn: how
    * its button is for this chat. `name` is a name of its own that
    * `portal.panels.open(name, params)` reaches it by, from anywhere: the
-   * portal's own panel goes by "agents", and while that is the
-   * portal's, it is the one.
+   * subagent extension's goes by "agents", the terminal's by "terminal".
    * Of two extensions that name a panel alike, the one first in the slot's
    * order has it (a lower `order`, then the one whose extension is first in the list of installed extensions).
    * `bleed` makes its body black from edge to edge, and not a box that
@@ -210,6 +217,22 @@ export interface SlotMap {
   /** Above the message box: what is running, what waits. */
   "chat.composer.above": { entry: {}; props: ChatProps };
   /**
+   * Chips in the running tray, just above the message box, before the
+   * chat's background jobs and the statuses extensions set: what the
+   * extension has going in this chat, each a way into where it is shown
+   * (`ui.TrayChip`). The component draws nothing while nothing is going; the
+   * tray shows only while something in it is drawn.
+   */
+  "chat.tray": { entry: {}; props: ChatProps };
+  /**
+   * A row in the chat's model menu, under its models: something else of the
+   * chat's that runs on a model (what its subagents run on). `models` are
+   * those the menu lists. It is drawn as the menu opens, so what it shows is
+   * best fetched with the chat (`chat.background`), not then: a row that
+   * arrives a moment later pushes the rest of the menu down.
+   */
+  "chat.model.menu": { entry: {}; props: { chat: Chat; models: readonly MenuModel[] } };
+  /**
    * How a call of one tool is drawn in the conversation, in place of the
    * portal's card for it. `card` is that card.
    *
@@ -233,9 +256,12 @@ export interface SlotMap {
    * `cut` is whether the card shows only the end of the output. `chat` is
    * the chat whose conversation the card is in; a card elsewhere, such as a
    * subagent's run, has none. The component draws nothing for a call it has
-   * nothing for. `ui.ToolLink` is the portal's own look for it.
+   * nothing for. `ui.ToolLink` is the portal's own look for it. With `head`
+   * it is drawn beside the card's head instead, where it shows while the card
+   * is folded too: a way in that should not wait for the card to be opened
+   * (Watch, on a call that started a subagent).
    */
-  "chat.tool.action": { entry: { tool?: string | RegExp }; props: { call: ToolCallView; cut: boolean; panels: Panels; chat?: Chat } };
+  "chat.tool.action": { entry: { tool?: string | RegExp; head?: boolean }; props: { call: ToolCallView; cut: boolean; panels: Panels; chat?: Chat } };
   /**
    * A window in voice mode, placed and sized like the portal's own. `place`
    * is where it goes when it has the choice: at the side, or in the middle.
@@ -529,6 +555,25 @@ export interface Ui {
   /** A link on a tool call's card, as the portal's own are drawn: for `chat.tool.action`. */
   ToolLink: ComponentType<{ icon?: ComponentType<{ "aria-hidden"?: boolean }>; onClick: () => void; children: ReactNode }>;
   /**
+   * A conversation as the chat draws its own, from its events (`PortalEvent`s, as a chat's stream carries them: pi's,
+   * and `portal_prompt` for what was asked): what was asked, the replies with their thinking, each tool call on its
+   * card, compactions and notices. A call of a tool an extension draws (`chat.tool`) is drawn by that extension, as in
+   * `chat`, where one is given. A question asked of the person is left out: only a chat's own agent asks one. `running`:
+   * it is still being written, and its last reply streams in. `empty` is drawn while there is nothing yet to show. The
+   * rows are drawn one under the other; the box that scrolls them is the caller's.
+   */
+  Transcript: ComponentType<{ events: readonly PortalEvent[]; running?: boolean; chat?: Chat; empty?: ReactNode }>;
+  /**
+   * A chip for `chat.tray`, as the portal draws a background job there: a ring that spins, `icon`, `label`, `detail`
+   * in a quieter colour, and how long it has run since `since` (ms since the epoch), counting. `onClick` opens where
+   * it is shown; without it the chip is only a label.
+   */
+  TrayChip: ComponentType<{ icon?: ComponentType<{ "aria-hidden"?: boolean; className?: string }>; label: string; detail?: string; since?: number; title?: string; onClick?: () => void }>;
+  /** The small ring that spins beside what is running, as on a tool call's card; given a fraction from 0 to 1, it fills instead. */
+  Ring: ComponentType<{ value?: number; className?: string }>;
+  /** Text that shimmers, as "Thinking" does while the agent thinks: for what is going on now. */
+  Shimmer: ComponentType<{ children: ReactNode }>;
+  /**
    * A picture as the conversation shows one a tool makes: the place it will
    * be in while it is made (`making`, with how long it has taken), the picture
    * once it is there (`done`), or why it is not (`failed`, `reason`). An edit
@@ -720,6 +765,8 @@ export interface Portal {
     date(d: Date | number | string, options?: Intl.DateTimeFormatOptions): string;
     dateTime(d: Date | number | string, options?: Intl.DateTimeFormatOptions): string;
     time(d: Date | number | string, options?: Intl.DateTimeFormatOptions): string;
+    /** How long something has run, in whole seconds, as the chat says it: "42s", "3m 05s". */
+    elapsed(seconds: number): string;
   };
   locale: {
     /** The package's texts in a language ("de"), each by what the code says in English: a text, or a count's forms (see `tp`). */
@@ -734,7 +781,7 @@ export interface Portal {
     run(name: string, ...args: unknown[]): unknown;
     has(name: string): boolean;
   };
-  /** The panels of the chat on screen, any of them: the portal's ("agents") and an extension's ("<package>/<id>", or the name it gave itself, as Files' is "files"). */
+  /** The panels of the chat on screen, any of them: an extension's, by "<package>/<id>" or by the name it gave itself, as Files' is "files". */
   panels: PanelController;
   chats: {
     /**

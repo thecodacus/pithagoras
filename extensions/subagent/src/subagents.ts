@@ -1,22 +1,16 @@
-import type { PortalEvent } from "./api";
-import type { Item } from "./transcript";
+import type { ChatFeed, PortalEvent } from "@pithagoras/extension-api";
 
-import { msg, t } from "./i18n";
 /** What a subagent that gives no name is called: kept as the English, said where it is drawn. */
-const UNNAMED = msg("Subagent");
-
-/** A subagent's name as it is shown. */
-export const subagentName = (agent: { label: string }): string => (agent.label === UNNAMED ? t(UNNAMED) : agent.label);
+export const UNNAMED = "Subagent";
 
 /**
- * The agents working beside the main one, as the chat shows them.
+ * The agents working beside a chat's own, as the chat's events say them: every one an extension announced over the
+ * subagent protocol, this extension's and any other's. The portal stores what the protocol says as `portal_subagent`
+ * events (its finished messages, and the start and end) and passes the rest on live as `portal_subagent_live`: the
+ * child's own events, which are drawn as the chat draws its own (`ui.Transcript`).
  *
- * Only an extension that speaks the subagent protocol
- * (server/src/subagent-protocol.ts) has one: it hands over its child's own
- * events, so the child is drawn like the main conversation and can be spoken
- * to if it said so. No other tool is listed here, however long it keeps
- * reporting while it runs (code mode, a search, a research tool): its output
- * is on its own tool card in the transcript, as always.
+ * No other tool is listed here, however long it keeps reporting while it runs (code mode, a search, a research tool):
+ * its output is on its own tool card in the conversation.
  */
 export interface Subagent {
   /** The id the extension gave it. */
@@ -34,9 +28,12 @@ export interface Subagent {
   /** Runs on after its tool call has returned: a subagent in the background. */
   detached?: boolean;
   error?: string;
-  /** The child's events, in the shape the main transcript reads. */
+  /** The child's events, in the shape the chat's own conversation is drawn from. */
   events: PortalEvent[];
 }
+
+/** A row of the chat's conversation, as far as this reads one: a tool call, with how it stands. */
+type Row = { kind: string; callId?: unknown; status?: unknown; until?: unknown };
 
 const textOf = (content: unknown): string =>
   typeof content === "string"
@@ -45,7 +42,7 @@ const textOf = (content: unknown): string =>
       ? content.filter((c: any) => c?.type === "text").map((c: any) => c.text ?? "").join("")
       : "";
 
-/** A child's event as the main transcript would read it: what was asked of it is a prompt. */
+/** A child's event as the chat's conversation would read it: what was asked of it is a prompt. */
 function asPortalEvent(seq: number, at: number | undefined, event: any): PortalEvent | undefined {
   if (event?.type === "message_start" && event.message?.role === "user") return undefined;
   if (event?.type === "message_end" && event.message?.role === "user") {
@@ -55,10 +52,11 @@ function asPortalEvent(seq: number, at: number | undefined, event: any): PortalE
 }
 
 /**
- * `ended`: the process that ran the extensions is gone (an error, a restart),
- * so no protocol subagent can still be running, whatever it last said.
+ * `items` are the chat's conversation (`ChatFeed.items`), for how the tool calls that started them stand. `ended`: the
+ * process that ran the extensions is gone (an error, a restart), so no protocol subagent can still be running,
+ * whatever it last said.
  */
-export function subagents(events: PortalEvent[], items: Item[], ended = false): Subagent[] {
+export function subagents(events: readonly PortalEvent[], items: readonly Row[], ended = false): Subagent[] {
   const byId = new Map<string, Subagent>();
   const order: Subagent[] = [];
   for (const ev of events) {
@@ -125,13 +123,13 @@ export function subagents(events: PortalEvent[], items: Item[], ended = false): 
   // on in the background: its call returns at once, and the chat going into
   // error is a turn that failed, not its pi gone — the portal writes its end
   // when that pi goes.
-  const tools = new Map(items.flatMap((i) => (i.kind === "tool" && i.callId ? [[i.callId, i] as const] : [])));
+  const tools = new Map(items.flatMap((i) => (i.kind === "tool" && typeof i.callId === "string" ? [[i.callId, i] as const] : [])));
   for (const sub of order) {
     if (sub.status !== "running" || sub.detached) continue;
     const tool = sub.toolCallId ? tools.get(sub.toolCallId) : undefined;
     if (ended || (tool && tool.status !== "running")) {
       sub.status = "stopped";
-      sub.until ??= tool?.until;
+      sub.until ??= typeof tool?.until === "number" ? tool.until : undefined;
       sub.input = false;
       sub.stop = false;
     }
@@ -145,7 +143,7 @@ export function subagents(events: PortalEvent[], items: Item[], ended = false): 
  * object it was: nothing about it differs, nor how many events it has, nor
  * the last of them.
  */
-export function stableSubagents(prev: Subagent[], next: Subagent[]): Subagent[] {
+export function stableSubagents(prev: readonly Subagent[], next: Subagent[]): Subagent[] {
   const before = new Map(prev.map((s) => [s.id, s]));
   const same = (a: Subagent, b: Subagent) => {
     if (a.events.length !== b.events.length || a.events.at(-1)?.seq !== b.events.at(-1)?.seq) return false;
@@ -157,4 +155,26 @@ export function stableSubagents(prev: Subagent[], next: Subagent[]): Subagent[] 
     const was = before.get(s.id);
     return was && same(was, s) ? was : s;
   });
+}
+
+// Worked out once for each state of a chat however many parts ask (the panel, its button, the tray, a card for each
+// call): the chat changes with every token of a reply, and its events are read through each time.
+const worked = new WeakMap<ChatFeed, Subagent[]>();
+const lastOf = new Map<string, Subagent[]>();
+
+/**
+ * A chat's subagents as its feed has them now, each that has not changed the object it was: an open panel draws a
+ * subagent's run again only when there is more of it, not on every word of the chat's own reply.
+ */
+export function agentsOf(chatId: string, feed: ChatFeed): Subagent[] {
+  let agents = worked.get(feed);
+  if (!agents) {
+    const ended = feed.status === "interrupted" || feed.status === "error";
+    agents = stableSubagents(lastOf.get(chatId) ?? [], subagents(feed.events, feed.items, ended));
+    worked.set(feed, agents);
+    // Only the chat on screen has a feed: another's last list is not kept.
+    for (const other of lastOf.keys()) if (other !== chatId) lastOf.delete(other);
+    lastOf.set(chatId, agents);
+  }
+  return agents;
 }

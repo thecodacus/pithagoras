@@ -17,7 +17,7 @@ async function portal(page: Page, opts: { agent?: string; held?: boolean; memory
   ];
   await mockPortal(page, async ({ path: p, method, json }) => {
     if (p === '/api/sessions') return { sessions: [], executor: 'host' };
-    if (p === '/api/features/flags') return { subagent: { enabled: false }, memory: { held: !!opts.held, by: opts.held ? 'Notebook' : null } };
+    if (p === '/api/features/flags') return { memory: { held: !!opts.held, by: opts.held ? 'Notebook' : null } };
     if (p === '/api/projects' && method === 'POST') {
       made.push(json());
       return { name: 'fresh', path: '/w/fresh', isGit: false, hasInstructions: false };

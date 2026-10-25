@@ -174,6 +174,12 @@ if (phase === 'agents') {
     ev('portal_subagent', { op: 'event', id: 'sub1', event: { type: 'tool_execution_end', toolCallId: 'x1', toolName: 'read', result: { content: [{ type: 'text', text: '#!/bin/sh…' }] } } }, 37),
     ev('portal_subagent', { op: 'event', id: 'sub1', event: { type: 'message_end', message: { role: 'assistant', content: [{ type: 'thinking', thinking: 'rm -rf on the old dir runs before the copy is verified.' }, { type: 'text', text: 'The script deletes `/opt/pithagoras.old` **before** checking that the new build started. I will look at the restart step next.' }] } } }, 20),
     ev('portal_subagent_live', { op: 'event', id: 'sub1', event: { type: 'message_update', assistantMessageEvent: { type: 'thinking_delta', delta: 'Now the systemd restart: does it wait for health?' } } }, 2),
+    // Another extension's agent, over the same protocol, from a tool of its own: done already.
+    ev('tool_execution_start', { toolCallId: 'dl', toolName: 'delegate', args: { task: 'Write the changelog' } }, 35),
+    ev('portal_subagent', { op: 'start', id: 'other1', label: 'Changelog', toolCallId: 'dl' }, 35),
+    ev('portal_subagent', { op: 'event', id: 'other1', event: { type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text: 'The changelog lists three fixes.' }] } } }, 31),
+    ev('portal_subagent', { op: 'end', id: 'other1', status: 'done' }, 30),
+    ev('tool_execution_end', { toolCallId: 'dl', toolName: 'delegate', result: { content: [{ type: 'text', text: 'The changelog lists three fixes.' }] } }, 30),
   );
   const jobs = { supported: true, statuses: [{ key: 'background-tasks', text: 'bg 1 running' }, { key: 'bg-update', text: 'bg ⬆ v2.6.5 /bg-update' }, { key: 'paths', text: 'logs in /tmp/bg' }], widgets: [], jobs: [
     { key: 'j1', sid: 4242, pids: [4242, 4250], command: 'npm run dev -- --port 5173', startedAt: now - 754_000, state: 'running', hasOutput: true, attached: false },

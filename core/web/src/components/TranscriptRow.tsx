@@ -47,7 +47,6 @@ function ContextChip({ label, body }: { label: string; body: string }) {
 /** What a row can do, for the chat to answer: one object that stays the same, so that a row is not told it has changed (see useStableActions). */
 export type RowActions = {
   openPicture: (id: string) => void;
-  openAgent: (id: string) => void;
   edit: (seq: number) => void;
   cancelEdit: () => void;
   saveEdit: (seq: number, text: string) => Promise<void>;
@@ -129,7 +128,6 @@ export const TranscriptRow = memo(function TranscriptRow({
   chat,
   mermaid,
   mermaidOptions,
-  agent,
   act,
 }: {
   item: Item;
@@ -151,8 +149,6 @@ export const TranscriptRow = memo(function TranscriptRow({
   chat?: Chat;
   mermaid: DiagramPlugin | null;
   mermaidOptions: MarkdownProps["mermaid"];
-  /** The subagent this tool call started, if it did. */
-  agent?: string;
   act: RowActions;
 }) {
   // What it says is in the language chosen: a row that is not drawn for the chat's draws is drawn for that.
@@ -395,7 +391,7 @@ export const TranscriptRow = memo(function TranscriptRow({
       <div data-key={item.id} className={`tool-row${enter}`}>
       {/* The card for it with the files the call gave, or what an extension draws for its own tool: see extensions/ToolView.tsx. */}
       <ToolView item={item} chat={chat} openPicture={act.openPicture}>
-        <ToolCall item={item} chat={chat} onOpenAgent={agent ? () => act.openAgent(agent) : undefined} />
+        <ToolCall item={item} chat={chat} />
         <CallFiles item={item} sessionId={sessionId} onOpenPicture={act.openPicture} />
       </ToolView>
       {item.flagged && <FlaggedNotice flag={item.flagged} act={act} />}

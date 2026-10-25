@@ -86,22 +86,20 @@ const forTool = (tool: unknown, name: string) => {
 
 /**
  * What the installed extensions offer to do with a call (`chat.tool.action`),
- * under what it returned on the portal's card. `cut` is whether the card shows
- * only the end of the output, and `chat` the chat whose conversation the card
- * is in (none for a subagent's). One that fails to draw is left out, alone.
+ * under what it returned on the portal's card, or, with `head`, those that
+ * asked for it beside the card's head. `cut` is whether the card shows only
+ * the end of the output, and `chat` the chat whose conversation the card is in
+ * (none for a subagent's). One that fails to draw is left out, alone.
  */
-export function ToolActions({ item, cut, chat }: { item: ToolItem; cut: boolean; chat?: Chat }) {
+export function ToolActions({ item, cut, chat, head = false }: { item: ToolItem; cut: boolean; chat?: Chat; head?: boolean }) {
   const entries = useSlot("chat.tool.action");
   const call = useCallView(item, chat?.id);
-  const offered = entries.filter((entry) => forTool(entry.tool, call.name));
+  const offered = entries.filter((entry) => (entry.head === true) === head && forTool(entry.tool, call.name));
   if (!offered.length) return null;
-  return (
-    <>
-      {offered.map((entry) => (
-        <ErrorBoundary key={entry.key} resetKey={`${entry.key}:${item.id}`} fallback={() => null} onError={failedIn(entry.extension)}>
-          <entry.component call={call} cut={cut} chat={chat} panels={panelsFor(entry.extension)} />
-        </ErrorBoundary>
-      ))}
-    </>
-  );
+  const actions = offered.map((entry) => (
+    <ErrorBoundary key={entry.key} resetKey={`${entry.key}:${item.id}`} fallback={() => null} onError={failedIn(entry.extension)}>
+      <entry.component call={call} cut={cut} chat={chat} panels={panelsFor(entry.extension)} />
+    </ErrorBoundary>
+  ));
+  return head ? <span className="chat-tool-heads">{actions}</span> : <>{actions}</>;
 }

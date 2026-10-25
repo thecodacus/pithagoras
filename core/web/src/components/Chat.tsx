@@ -6,8 +6,6 @@ import { splitContext } from "../context-blocks";
 import { workingText } from "./StatusDot";
 import { RunningTray } from "./RunningTray";
 import { mentionsCommand } from "../status-commands";
-import { SubagentPanel } from "./SubagentPanel";
-import { stableSubagents, subagents, type Subagent } from "../subagents";
 import { useBackground } from "../use-background";
 import { useWorkPanels } from "../use-work-panels";
 import { useFollowBottom } from "../use-follow-bottom";
@@ -19,7 +17,7 @@ import { createPortal } from "react-dom";
 import { Fragment, memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { DiagramPlugin } from "streamdown";
 import { followPointer } from "../pointer-drag";
-import { LuGripVertical, LuMenu, LuBot, LuArrowDown, LuSquare, LuArrowUp, LuPaperclip, LuPuzzle, LuX } from "react-icons/lu";
+import { LuGripVertical, LuMenu, LuArrowDown, LuSquare, LuArrowUp, LuPaperclip, LuPuzzle, LuX } from "react-icons/lu";
 import { api, EXTENSIONS_CHANGED, MODES_CHANGED, type ChatMode, type PiCommand, type PortalEvent, type PromptOptions, type Session } from "../api";
 import { pending, refetchImage, sortFiles, uploadedNote, type Attachment } from "../attachments";
 import { activity, buildTranscript, keepItems, type Item, type SentImage } from "../transcript";
@@ -73,16 +71,11 @@ const ASIDE: Record<Dock, string> = {
   float: "absolute z-20 rounded-xl border border-line bg-surface shadow-pop",
 };
 
-type OwnPanel = "agents";
-/** A panel an extension brought (the `chat.panel` slot), by its entry's key: `x:<extension>/<id>`. */
-type ExtensionPanel = `x:${string}`;
-/** The panels that sit beside the conversation, each in a place of its own. */
-type AsidePanel = OwnPanel | ExtensionPanel;
-const isOwn = (kind: AsidePanel): kind is OwnPanel => !kind.startsWith("x:");
-/** What each of the portal's own panels is called: in its header, and on its close button. */
-const PANEL: Record<OwnPanel, { label: string; close: string }> = {
-  agents: { label: msg("Subagents"), close: msg("Close the subagents") },
-};
+/**
+ * The panels that sit beside the conversation, each in a place of its own: those the extensions brought (the
+ * `chat.panel` slot), by their entries' keys, `x:<extension>/<id>`.
+ */
+type AsidePanel = `x:${string}`;
 
 /** Where a slash command comes from; one a newer portal adds is shown as it is named. */
 const COMMAND_SOURCE: Record<string, string> = {
@@ -273,12 +266,6 @@ export function Chat({
   const [panelRequest, setPanelRequest] = useState<"model" | "effort" | null>(null);
   const resizeCleanupRef = useRef<(() => void) | null>(null);
   const [composerHeight, setComposerHeight] = useState(storedComposerHeight);
-  const [agentsOpen, setAgentsOpen] = useState(false);
-  const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
-  const openAgent = (id: string) => {
-    setSelectedAgent(id);
-    setAgentsOpen(true);
-  };
   // A job in the running tray is shown where an extension says jobs are shown (`jobs.show`); while none does, a job
   // there is only listed.
   const jobsShown = useHasCommand("jobs.show");
@@ -296,6 +283,7 @@ export function Chat({
   const backgrounds = useSlot("chat.background");
   const overlays = useSlot("chat.overlay");
   const aboveComposer = useSlot("chat.composer.above");
+  const trayEntries = useSlot("chat.tray");
   const [extensionsOpen, setExtensionsOpen] = useState<readonly string[]>([]);
   // What each was last opened with, what its body and its head share, and which are not to be closed to make room.
   const [panelParams, setPanelParams] = useState<Record<string, unknown>>({});
@@ -400,11 +388,8 @@ export function Chat({
   };
   const toggleExtensionPanel = useStable((key: string, open: boolean) => (open ? void closeExtensionPanel(key) : showExtensionPanel(key, true)));
   useWorkPanels(
-    {
-      agents: !voiceMode && agentsOpen,
-      ...Object.fromEntries(extensionPanels.map((key) => [`x:${key}`, !voiceMode])),
-    },
-    panel => { if (panel === "agents") setAgentsOpen(false); else if (panel.startsWith("x:")) showExtensionPanel(panel.slice(2), false); },
+    Object.fromEntries(extensionPanels.map((key) => [`x:${key}`, !voiceMode])),
+    panel => { if (panel.startsWith("x:")) showExtensionPanel(panel.slice(2), false); },
     // A third panel closes another one instead of one an extension says holds
     // something that would be lost (an edit not saved), and of one that has
     // just opened the third.
@@ -414,7 +399,7 @@ export function Chat({
     ],
   );
   // Beside the conversation, top to bottom in this order.
-  const asidePanels = [agentsOpen && "agents", ...extensionPanels.map((key) => `x:${key}`)].filter(Boolean) as AsidePanel[];
+  const asidePanels = extensionPanels.map((key) => `x:${key}` as AsidePanel);
 
   // Kept across reloads: a width you dragged is a preference, and losing it on
   // every refresh makes the handle feel decorative. Where each panel goes, the
@@ -1049,14 +1034,8 @@ export function Chat({
   // What it is doing, and for how long. The clock ticks only while something is
   // running, so an idle session re-renders no more than it used to.
   const phase = useMemo(() => (running ? activity(events) : null), [running, events]);
-  // Beside the conversation: subagents, jobs left running, extension statuses.
-  // The same entry for a subagent whose own events have not changed: an open
-  // panel draws its transcript again only when there is more of it, not on
-  // every word of the main chat.
-  const lastAgents = useRef<Subagent[]>([]);
-  const agents = useMemo(() => (lastAgents.current = stableSubagents(lastAgents.current, subagents(events, items, ended))), [events, items, ended]);
+  // Beside the conversation: what extensions have going, jobs left running, extension statuses.
   const [background, refreshBackground] = useBackground(session.id, running, events);
-  const agentFor = (callId?: string) => (callId ? agents.find((a) => a.toolCallId === callId) : undefined);
   // The thinking block and the compaction marker already say so, animated,
   // where it is happening; the status pill would say it twice.
   const statusShownElsewhere = useMemo(() => {
@@ -1430,7 +1409,6 @@ export function Chat({
   const trustedHere = useRef(new Set<string>());
   const rowActions = useStableActions<RowActions>({
     openPicture: pictures.open,
-    openAgent,
     edit: setEditing,
     cancelEdit: () => setEditing(null),
     saveEdit: (seq, next) => {
@@ -1624,15 +1602,11 @@ export function Chat({
     if (voiceMode) void dictation.stop();
   }, [voiceMode, dictation.stop]);
 
-  const closeOwn: Record<OwnPanel, () => void> = {
-    agents: () => setAgentsOpen(false),
-  };
-  const closePanel = (kind: AsidePanel) => (isOwn(kind) ? closeOwn[kind]() : void closeExtensionPanel(kind.slice(2)));
+  const closePanel = (kind: AsidePanel) => void closeExtensionPanel(kind.slice(2));
   /** The entry an extension's panel is drawn from. */
-  const entryOf = (kind: AsidePanel) => (isOwn(kind) ? undefined : panelEntries.find((entry) => entry.key === kind.slice(2)));
+  const entryOf = (kind: AsidePanel) => panelEntries.find((entry) => entry.key === kind.slice(2));
   /** What a panel is called: in its header, and on its close button. */
   const panelName = (kind: AsidePanel) => {
-    if (isOwn(kind)) return { label: t(PANEL[kind].label), close: t(PANEL[kind].close) };
     const entry = entryOf(kind);
     const title = entry ? titleOf(entry) : "";
     return { label: title, close: t("Close {panel}", { panel: title }) };
@@ -1669,7 +1643,7 @@ export function Chat({
     );
   };
   /** The parts of the installed extensions that are drawn in the chat itself, each alone in what it does when it fails. */
-  const extensionParts = (entries: readonly Registered<"chat.header.action" | "chat.background" | "chat.overlay" | "chat.composer.above">[]) =>
+  const extensionParts = (entries: readonly Registered<"chat.header.action" | "chat.background" | "chat.overlay" | "chat.composer.above" | "chat.tray">[]) =>
     entries.map((entry) => (
       <ErrorBoundary key={entry.key} resetKey={`${entry.key}:${session.id}`} fallback={() => null} onError={failedIn(entry.extension)}>
         <entry.component key={session.id} chat={chat} channel={channelFor(session.id, entry.extension)} panels={panelsOf(entry.extension)} />
@@ -1678,25 +1652,18 @@ export function Chat({
 
   // The panels by name, for anything in the page: see extensions/panels.ts. Read as they are when asked.
   // An extension's panel goes by its key ("<package>/<id>") or by the name it gave itself (`name`), the first
-  // loaded having a name two give; the portal's own names are the portal's while those panels are its own.
+  // loaded having a name two give.
   const panelKey = (key: string) => (panelEntries.some((entry) => entry.key === key) ? key : panelEntries.find((entry) => entry.name === key)?.key);
   const panelControl = useRef<ChatPanels>({ isOpen: () => false, open: () => {}, close: () => {} });
   panelControl.current = {
-    isOpen: (key) => (key === "agents" ? agentsOpen : extensionPanels.includes(panelKey(key) ?? key)),
+    isOpen: (key) => extensionPanels.includes(panelKey(key) ?? key),
     open: (key, params) => {
-      const given = (params ?? {}) as { id?: unknown };
-      if (key === "agents") typeof given.id === "string" ? openAgent(given.id) : setAgentsOpen(true);
-      else {
-        const found = panelKey(key);
-        if (!found) throw new Error(`There is no panel called "${key}"`);
-        showExtensionPanel(found, true, params);
-      }
+      const found = panelKey(key);
+      if (!found) throw new Error(`There is no panel called "${key}"`);
+      showExtensionPanel(found, true, params);
     },
     // As by hand: what an extension's panel asks before it is closed is asked.
-    close: (key) => {
-      if (key in closeOwn) closeOwn[key as OwnPanel]();
-      else void closeExtensionPanel(panelKey(key) ?? key);
-    },
+    close: (key) => void closeExtensionPanel(panelKey(key) ?? key),
   };
   useEffect(() => {
     setPanelController({ isOpen: (key) => panelControl.current.isOpen(key), open: (key, params) => panelControl.current.open(key, params), close: (key) => panelControl.current.close(key) });
@@ -1739,11 +1706,6 @@ export function Chat({
           </button>
         </div>
       </div>
-      {kind === "agents" && (
-        <div className="min-h-0 flex-1 bg-surface">
-          <SubagentPanel sessionId={session.id} agents={agents} selected={selectedAgent} onSelect={setSelectedAgent} />
-        </div>
-      )}
       {extensionBody(kind)}
     </>
   );
@@ -1892,17 +1854,6 @@ export function Chat({
           {started && session.mode && modes?.chat === session.id && <ModePill stored={session.mode} modes={modeList} />}
           {/* The installed extensions' own controls. One that fails to draw is left out, and the header stays. */}
           {extensionParts(headerActions)}
-          {agents.length > 0 && (
-            <PanelToggle
-              open={agentsOpen}
-              onClick={() => setAgentsOpen((v) => !v)}
-              label={t("Subagents")}
-              title={agentsOpen ? t("Hide the subagents") : t("The agents working beside this one")}
-              live={agents.some((a) => a.status === "running")}
-            >
-              <LuBot />
-            </PanelToggle>
-          )}
           {panelEntries.map((entry) => (
             // Its button is its own to say about (hidden, live): one whose say fails is left out, and the header stays.
             <ErrorBoundary key={entry.key} resetKey={`${entry.key}:${session.id}`} fallback={() => null} onError={failedIn(entry.extension)}>
@@ -1987,7 +1938,6 @@ export function Chat({
               chat={chat}
               mermaid={mermaid}
               mermaidOptions={mermaidOptions}
-              agent={item.kind === "tool" ? agentFor(item.callId)?.id : undefined}
               act={rowActions}
             />
           );
@@ -2119,11 +2069,10 @@ export function Chat({
         {/* What the installed extensions say above the message box. */}
         {extensionParts(aboveComposer)}
         <RunningTray
-          agents={agents}
+          extensions={trayEntries.length ? extensionParts(trayEntries) : undefined}
           jobs={background.jobs}
           statuses={background.statuses}
           commands={commandNames}
-          onAgent={openAgent}
           onJob={jobsShown ? showJob : undefined}
           onCommand={(command) => attempt(() => submit(command, false))}
         />
@@ -2277,6 +2226,7 @@ export function Chat({
           <ComposerBar
             sessionId={session.id}
             session={session}
+            chat={chat}
             running={running}
             turns={turns}
             started={started}

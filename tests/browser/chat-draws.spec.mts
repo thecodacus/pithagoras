@@ -74,19 +74,4 @@ test.describe('the panels beside the conversation', () => {
     await expect(page.getByRole('textbox').first()).toHaveValue('hello there');
     expect((await drawn(page)).ConsolePanel).toBe(before);
   });
-
-  test('a subagent that is timed is not drawn again for each second', async ({ page }) => {
-    await page.setViewportSize({ width: 1300, height: 800 });
-    await page.clock.install();
-    await page.goto('/tests/chat.html?phase=agents&count=1');
-    const tray = page.getByLabel('Running beside the conversation');
-    await tray.getByRole('button', { name: /Deploy audit/ }).click();
-    await expect(page.locator('.sub-head')).toContainText('Deploy audit');
-    await expect.poll(async () => (await drawn(page)).ChildItem ?? 0).toBeGreaterThan(0);
-    // Settled: the clock stands still until it is run.
-    await page.clock.runFor(200);
-    const before = await drawn(page);
-    await page.clock.runFor(3500);
-    expect((await drawn(page)).ChildItem).toBe(before.ChildItem);
-  });
 });

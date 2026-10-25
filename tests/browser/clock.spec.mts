@@ -13,10 +13,9 @@ test('what starts running after a long quiet is timed from the moment it starts,
   await page.clock.pauseAt(new Date('2026-01-01T10:00:05Z'));
   await page.clock.runFor(40_000);
   await page.getByRole('button', { name: 'Start' }).click();
-  await expect(page.locator('.running-chip.is-agent .running-chip-time')).toHaveText('3s');
+  await expect(page.locator('.running-chip.is-extension .running-chip-time')).toHaveText('3s');
   await expect(page.locator('.running-chip.is-job .running-chip-time')).toHaveText('3s');
-  await expect(page.locator('.sub-head')).toContainText('· 3s');
   // And it counts on from there.
   await page.clock.runFor(2000);
-  await expect(page.locator('.running-chip.is-agent .running-chip-time')).toHaveText('5s');
+  await expect(page.locator('.running-chip.is-extension .running-chip-time')).toHaveText('5s');
 });

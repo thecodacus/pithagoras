@@ -1,7 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useNow } from "../use-now";
 import {
-  LuBot,
   LuBrain,
   LuChevronRight,
   LuCircleSlash,
@@ -55,8 +54,13 @@ export function Collapse({ open, children, className = "" }: { open: boolean; ch
   );
 }
 
-/** Text that shimmers while it is still true: "Thinking", "Loading model". */
-export const Shimmer = ({ children }: { children: ReactNode }) => <span className="chat-shimmer">{children}</span>;
+/**
+ * Text that shimmers while it is still true: "Thinking", "Loading model". A function, not a constant: `ui.Shimmer`
+ * (extensions/kit.ts) is taken from here while the modules are still loading, which a function already is.
+ */
+export function Shimmer({ children }: { children: ReactNode }) {
+  return <span className="chat-shimmer">{children}</span>;
+}
 
 /** A small ring that spins — or, given a fraction, fills. */
 export function Ring({ value, className = "" }: { value?: number; className?: string }) {
@@ -283,13 +287,10 @@ const INLINE_OUTPUT = 6000;
 export function ToolCall({
   item,
   chat,
-  onOpenAgent,
 }: {
   item: ToolItem;
   /** The chat whose conversation the card is in: none for a subagent's run. */
   chat?: Chat;
-  /** The tool runs an agent of its own, which has a window: a way into it. */
-  onOpenAgent?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   // Whatever extension it came from: nothing below is keyed to one tool but
@@ -358,11 +359,8 @@ export function ToolCall({
         )}
         <LuChevronRight className="chat-chevron" aria-hidden />
       </button>
-      {onOpenAgent && (
-        <button type="button" className="chat-tool-agent" onClick={onOpenAgent}>
-          <LuBot aria-hidden /> {running ? t("Watch") : t("Open")}
-        </button>
-      )}
+      {/* What is offered without opening the card: Watch, on a call that started a subagent. */}
+      <ToolActions item={item} cut={clipped} chat={chat} head />
       {recent.length > 0 && (
         // Keyed by place, not by text: a new line moves the others up
         // without anything being drawn afresh.

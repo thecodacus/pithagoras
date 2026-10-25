@@ -1,7 +1,9 @@
 import { LuBlocks, LuRefreshCw } from "react-icons/lu";
 import { StatusDot } from "./StatusDot";
 import { ToolSwitches } from "./ToolSwitches";
-import { SubagentModelPicker, useSubagentChoice } from "./SubagentModelPicker";
+import { ErrorBoundary } from "./ErrorBoundary";
+import { failedIn } from "../extensions/loader";
+import { useSlot, type Chat } from "../extensions/slots";
 import { useDismiss } from "../use-dismiss";
 import { useLeaveRef } from "../motion";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -168,6 +170,7 @@ function OriginTag({ provider }: { provider: string }) {
 export function ComposerBar({
   sessionId,
   session,
+  chat,
   running,
   turns,
   started = true,
@@ -178,6 +181,8 @@ export function ComposerBar({
   sessionId: string;
   /** What the sidebar already knows, so the pills can paint immediately. */
   session: Session;
+  /** The chat, as what the installed extensions put in its model menu is told of it (`chat.model.menu`). */
+  chat: Chat;
   running: boolean;
   /** How many turns the transcript holds; each one that ends leaves pi with a new token count. */
   turns?: number;
@@ -391,8 +396,8 @@ export function ComposerBar({
     trigger,
   );
 
-  // With the chat, not with the menu: ready by the time the menu opens.
-  const subagents = useSubagentChoice(sessionId);
+  // What the installed extensions put in the model menu, under the models: what the chat's subagents run on, say.
+  const menuRows = useSlot("chat.model.menu");
   const models = cfg.models.models ?? [];
   const byKey = useMemo(() => new Map(models.map((m) => [modelKey(m), m])), [models]);
 
@@ -665,7 +670,11 @@ export function ComposerBar({
             </>
           )}
           {pickError && <p role="alert" className="px-3 py-1 text-xs text-danger">{pickError}</p>}
-          <SubagentModelPicker subagents={subagents} models={models} />
+          {menuRows.map((entry) => (
+            <ErrorBoundary key={entry.key} resetKey={`${entry.key}:${sessionId}`} fallback={() => null} onError={failedIn(entry.extension)}>
+              <entry.component key={sessionId} chat={chat} models={models} />
+            </ErrorBoundary>
+          ))}
           <div className="my-1 border-t border-line" />
           <button
             type="button"

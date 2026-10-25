@@ -17,9 +17,12 @@ import { createContext, createElement, memo, useSyncExternalStore, type Componen
 import type { Entry, SlotName } from "@pithagoras/extension-api";
 import { byRank, onRanked } from "./rank";
 import { translate } from "./strings";
-export type { Channel, Chat, ChatProps, Entry, PanelHandle, PanelProps, Panels, SlotMap, SlotName, ToolCallView, VoiceWindowOpened } from "@pithagoras/extension-api";
+export type { Channel, Chat, ChatProps, Entry, MenuModel, PanelHandle, PanelProps, Panels, SlotMap, SlotName, ToolCallView, VoiceWindowOpened } from "@pithagoras/extension-api";
 
-const SLOTS: readonly SlotName[] = ["chat.panel", "chat.header.action", "chat.background", "chat.overlay", "chat.composer.above", "chat.tool", "chat.tool.action", "voice.window", "voice.avatar", "nav.page", "settings.page"];
+const SLOTS: readonly SlotName[] = [
+  "chat.panel", "chat.header.action", "chat.background", "chat.overlay", "chat.composer.above", "chat.tray", "chat.model.menu", "chat.tool", "chat.tool.action",
+  "voice.window", "voice.avatar", "nav.page", "settings.page",
+];
 
 /** An entry as the portal holds it. `key` is its name among all the slot's entries. */
 export type Registered<S extends SlotName> = Entry<S> & { extension: string; key: string };

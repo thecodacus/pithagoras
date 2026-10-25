@@ -209,7 +209,6 @@ const de: Locale = {
     "Nothing recorded. The guard writes here when it refuses something, lets something through on a rule or an approval, or turns a stranger away.": "Nichts aufgezeichnet. Der Wächter schreibt hierher, wenn er etwas ablehnt, etwas per Regel oder Freigabe durchlässt oder einen Fremden abweist.",
     // components/RunningTray.tsx, SubagentPanel.tsx and others
     "paused": "pausiert",
-    "Stop": "Stoppen",
     "Waiting for output…": "Warte auf Ausgabe…",
     // components/SandboxSettings.tsx
     "Sandbox": "Sandbox",
@@ -393,8 +392,6 @@ const de: Locale = {
     "Resize {panel}": "Größe von {panel} ändern",
     "The arrow keys make the window larger or smaller, Home gives it its first size back.": "Die Pfeiltasten machen das Fenster größer oder kleiner, Pos1 gibt ihm seine erste Größe zurück.",
     "The run has finished.": "Der Lauf ist beendet.",
-    "Subagents": "Subagents",
-    "Close the subagents": "Subagents schließen",
     "Files": "Dateien",
     "Close {panel}": "{panel} schließen",
     "Hide {panel}": "{panel} ausblenden",
@@ -418,8 +415,6 @@ const de: Locale = {
     "Chat name": "Name des Chats",
     "Rename this chat": "Diesen Chat umbenennen",
     "interrupted — send a message to resume": "unterbrochen — schick eine Nachricht, um fortzufahren",
-    "Hide the subagents": "Subagents ausblenden",
-    "The agents working beside this one": "Die Agenten, die neben diesem arbeiten",
     "Load earlier messages": "Frühere Nachrichten laden",
     "Give pi a task.": "Gib pi eine Aufgabe.",
     "You can close this tab — it keeps working.": "Du kannst diesen Tab schließen — er arbeitet weiter.",
@@ -505,7 +500,6 @@ const de: Locale = {
     "Thought process": "Gedankengang",
     "timed out · {n}s": "Zeitüberschreitung · {n} s",
     "failed": "fehlgeschlagen",
-    "Watch": "Zusehen",
     "Open": "Öffnen",
     "(no command)": "(kein Befehl)",
     "Error": "Fehler",
@@ -837,7 +831,6 @@ const de: Locale = {
     "the portal's time ({zone})": "Zeit des Portals ({zone})",
     "How often": "Wie oft",
     "Next: {when}": "Nächstes Mal: {when}",
-    "Starting…": "Wird gestartet…",
     "Save or discard the changes first.": "Speichere die Änderungen zuerst oder verwirf sie.",
     // A file that changed under an edit: components/AgentPage.tsx, ProjectsPage.tsx
     "This file changed after you opened it.": "Diese Datei hat sich geändert, nachdem du sie geöffnet hast.",
@@ -1410,20 +1403,8 @@ const de: Locale = {
     "idle": "bereit",
     "interrupted — server restarted mid-run": "unterbrochen — der Server wurde mitten im Lauf neu gestartet",
     // components/SubagentModelPicker.tsx
-    "this chat's model": "das Modell dieses Chats",
-    "Subagents in this chat run on": "Subagents in diesem Chat laufen auf",
-    "Default — {model}": "Standard — {model}",
-    "This chat's model": "Das Modell dieses Chats",
-    "The one it is on when it starts one": "Das Modell, das er hat, wenn er einen startet",
     // components/SubagentPanel.tsx
-    "No subagents in this chat yet. An extension's agent shows up here while it works, if the extension speaks the subagent protocol.": "In diesem Chat gibt es noch keine Subagents. Der Agent einer Erweiterung erscheint hier, während er arbeitet, wenn die Erweiterung das Subagent-Protokoll spricht.",
-    "Stopped": "Gestoppt",
     "Failed": "Fehlgeschlagen",
-    "This subagent does not take messages.": "Dieser Subagent nimmt keine Nachrichten an.",
-    "Sent: “{text}”": "Gesendet: „{text}“",
-    "Tell {name} something…": "Sag {name} etwas…",
-    "Message for {name}": "Nachricht an {name}",
-    "Send to the subagent": "An den Subagent senden",
     // components/ThemeSwitcher.tsx
     "Match system": "Wie das System",
     // components/ToolDefaults.tsx
@@ -1793,7 +1774,6 @@ const de: Locale = {
     "settings.json": "settings.json",
     "Update the portal": "Das Portal aktualisieren",
     // subagents.ts
-    "Subagent": "Subagent",
     // tool-activity.ts
     "Opening a page": "Öffnet eine Seite",
     "a file": "eine Datei",

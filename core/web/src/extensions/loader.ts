@@ -4,6 +4,7 @@ import * as ReactDOM from "react-dom";
 import * as jsxRuntime from "react/jsx-runtime";
 import { api, ApiError, EXTENSIONS_CHANGED, json, type ExtensionUi, type ServerCrash } from "../api";
 import { formatDate, formatDateTime, formatNumber, formatTime, useLanguage } from "../i18n";
+import { formatElapsed } from "../transcript";
 import type { Portal } from "@pithagoras/extension-api";
 import { onChatFeed, useChatFeed } from "./chat-feed";
 import { hasCommand, registerCommand, runCommand } from "./commands";
@@ -195,7 +196,7 @@ async function activate(ext: ExtensionUi, told: Promise<void>[]): Promise<void> 
       tp: (n, one, other, vars) => translateCount(ext.name, n, one, other, vars),
       tc: (text, context, vars) => translateInContext(ext.name, text, context, vars),
       tx: (text, vars) => translateWithParts(ext.name, text, vars),
-      format: { number: formatNumber, date: formatDate, dateTime: formatDateTime, time: formatTime },
+      format: { number: formatNumber, date: formatDate, dateTime: formatDateTime, time: formatTime, elapsed: formatElapsed },
       locale: { add: (code, strings) => addStrings(ext.name, code, strings), use: useLanguage },
       commands: { register: (name, run) => kept(registerCommand(name, run, ext.name)), run: runCommand, has: hasCommand },
       panels,
