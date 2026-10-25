@@ -9,7 +9,7 @@ import semver from "semver";
 import express, { type NextFunction, type Request, type RequestHandler, type Response, type Router } from "express";
 import { agentOf, defaultAgent, listAgents } from "./agents.js";
 import { dataDirOf } from "./extension-data.js";
-import { getSession, getSetting, listSessions, putSetting, recordAudit, sessionsByWorkspace, setServerHalfOffers, setServerHalvesAsked, setTrustedMcpServers, toolExceptions, trustedMcpServers, untrustMcpServer, type SessionRow } from "./db.js";
+import { childSessions, getSession, getSetting, listSessions, putSetting, recordAudit, sessionsByWorkspace, setServerHalfOffers, setServerHalvesAsked, setTrustedMcpServers, toolExceptions, trustedMcpServers, untrustMcpServer, type SessionRow } from "./db.js";
 import { EXECUTOR_KIND } from "./executor-kind.js";
 import { takes, type ServerHalf } from "./extension-ui.js";
 import { moduleAt } from "./half-modules.js";
@@ -31,6 +31,7 @@ import { holdMemory } from "./memory-holder.js";
 import { provideMode } from "./chat-modes.js";
 import { logFileLine, onLogLine, scrubSecrets, type LogLine } from "./logs.js";
 import type { Chat, ChatLife as Life, Ran, ServerPortal, Upgrade, VoiceProvider } from "@pithagoras/extension-api/server";
+import type { ChildRun } from "./child-chats.js";
 
 /**
  * An extension's server half: a module of the package's that the portal loads
@@ -274,7 +275,14 @@ export const pagePushes = new EventEmitter();
 pagePushes.setMaxListeners(0);
 
 // No `mode` key for a chat in Standard, rather than one that is undefined.
-const chatOf = (row: SessionRow): Chat => ({ id: row.id, title: row.title, workspace: row.workspace, status: row.status, ...(row.mode ? { mode: row.mode } : {}) });
+const chatOf = (row: SessionRow): Chat => ({
+  id: row.id,
+  title: row.title,
+  workspace: row.workspace,
+  status: row.status,
+  ...(row.mode ? { mode: row.mode } : {}),
+  ...(row.parent_id ? { parent: row.parent_id, listed: row.listed === 1 } : {}),
+});
 const say = (name: string, text: string) => console.log(`[extension ${name}] ${text}`);
 /**
  * An extension's handler failing is the extension's: said, and nothing of the
@@ -478,11 +486,28 @@ let tellChat: (chatId: string, extension: string, data: unknown) => Promise<bool
 let toolOffered: (chatId: string, tool: string) => "direct" | "lazy" | undefined = () => undefined;
 let reloadChats: () => Promise<{ reloaded: number; waiting: number }> = async () => ({ reloaded: 0, waiting: 0 });
 let liveModel: LiveModel = async () => undefined;
-export function setChatBridge(bridge: { tell: typeof tellChat; offers: typeof toolOffered; reload: typeof reloadChats; model: LiveModel }): void {
+/** Child chats (child-chats.ts): made, run, stopped and deleted by the session manager. */
+let childChats: {
+  create: (options: unknown, creator: string) => SessionRow;
+  run: (chatId: string, message: string, options: { steer?: boolean }) => Promise<ChildRun>;
+  abort: (chatId: string) => Promise<void>;
+  remove: (chatId: string) => Promise<void>;
+} = {
+  create: () => {
+    throw new Error("Child chats are not available here");
+  },
+  run: async () => ({ status: "error", answer: "", error: "Child chats are not available here" }),
+  abort: async () => {},
+  remove: async () => {},
+};
+export function setChatBridge(
+  bridge: { tell: typeof tellChat; offers: typeof toolOffered; reload: typeof reloadChats; model: LiveModel } & typeof childChats,
+): void {
   tellChat = bridge.tell;
   toolOffered = bridge.offers;
   reloadChats = bridge.reload;
   liveModel = bridge.model;
+  childChats = { create: bridge.create, run: bridge.run, abort: bridge.abort, remove: bridge.remove };
 }
 /** How a server half chooses voice mode's source, and asks which it is: the voice settings are the voice routes', which import the host. */
 let voiceSource: { choose(name: string, chosen: boolean): void; chosen(): string } = { choose: () => {}, chosen: () => "" };
@@ -520,6 +545,12 @@ function portalFor(ext: Running): ServerPortal {
     const row = getSession(id);
     if (!row) throw new Error("No such chat");
     return baseDir(row.workspace);
+  };
+  /** A child chat this package made, or a refusal that says why it is not one. */
+  const ownChild = (id: string) => {
+    const row = getSession(id);
+    if (!row?.parent_id) throw new Error(`${id} is no child chat`);
+    if (row.creator !== name) throw new Error(`The child chat ${id} was made by another package: only that one may prompt, stop or remove it`);
   };
   const dataDir = () => {
     const dir = dataDirOf(name);
@@ -740,6 +771,25 @@ function portalFor(ext: Running): ServerPortal {
       reload: () => scope.exit(() => reloadChats()),
       offers: (chatId, tool) => toolOffered(chatId, tool),
       extend: (factory) => void ext.factories.push(factory),
+      // A child chat is the package's that made it: only it prompts, stops or removes one. The person does all of
+      // that on the child's own page, and its parent's delete takes it with it.
+      create: (options) => chatOf(childChats.create(options, name)),
+      // Found again without the ids kept: the children of a chat this package made, listed or not (chats.list leaves
+      // the unlisted out), after a restart of the half or a lost record.
+      children: (parent) => childSessions(String(parent)).filter((row) => row.creator === name).map(chatOf),
+      prompt: async (chatId, message, options = {}) => {
+        ownChild(chatId);
+        if (typeof message !== "string" || !message.trim()) throw new TypeError("A child chat is sent a message with words in it");
+        return scope.exit(() => childChats.run(chatId, message, { steer: options?.steer === true }));
+      },
+      abort: async (chatId) => {
+        ownChild(chatId);
+        await scope.exit(() => childChats.abort(chatId));
+      },
+      remove: async (chatId) => {
+        ownChild(chatId);
+        await scope.exit(() => childChats.remove(chatId));
+      },
       hold: (chatId) => {
         ext.holds.set(chatId, (ext.holds.get(chatId) ?? 0) + 1);
         let held = true;

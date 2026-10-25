@@ -66,7 +66,7 @@ export function takeHandoff(portal: Pick<ServerPortal, "handoffs" | "log">): voi
 }
 
 /**
- * What each chat said its subagents run on, as the portal kept it before the extension did: the upgrade to schema 13
+ * What each chat said its subagents run on, as the portal kept it before the extension did: the upgrade to schema 14
  * left it in the portal's data folder under the name "subagent-chats", taken as the settings are (takeHandoff). In it:
  *
  *   handoff.json    what it is: {"format": 1, …}, the format this reads

@@ -20,7 +20,7 @@ const home = inProcessHome("isolated-halves-");
 const { installLogCapture } = await import("../dist/logs.js");
 installLogCapture();
 const host = await import("../dist/extension-host.js");
-const { createSession, installNotes, listAudit, updateSession } = await import("../dist/db.js");
+const { createSession, getSession, installNotes, listAudit, updateSession } = await import("../dist/db.js");
 const { memoryHolder } = await import("../dist/memory-holder.js");
 const { eventsRouter } = await import("../dist/api/events.js");
 const { extensionsRouter, followPackages } = await import("../dist/api/extensions.js");
@@ -630,6 +630,49 @@ test("a row in Audit, at once with its TypeError, and an install and where an ex
   const asked = (await get("/api/x/auditor/asked")).body;
   assert.deepEqual({ ...asked, install: undefined }, { refused: "TypeError", status: null, install: undefined });
   assert.match(asked.install, /ENOENT.*\/nowhere/);
+  await host.syncServerHalves([]);
+});
+
+test("a child chat made, run, stopped and removed from its process, as the package that made it, and no other chat", async () => {
+  // The session manager is not loaded here: what it is asked, and as which package, is written down.
+  const asked = [];
+  host.setChatBridge({
+    tell: async () => false,
+    offers: () => undefined,
+    reload: async () => ({ reloaded: 0, waiting: 0 }),
+    model: async () => undefined,
+    create: (options, creator) => {
+      asked.push(["create", options.parent, creator]);
+      createSession({ id: "kid", title: options.title, workspace: work, executor: "host", parent_id: options.parent, listed: 0, creator });
+      return getSession("kid");
+    },
+    run: async (id, message, options) => {
+      asked.push(["run", id, message, options]);
+      return { status: "done", answer: "42" };
+    },
+    abort: async (id) => void asked.push(["abort", id]),
+    remove: async (id) => void asked.push(["remove", id]),
+  });
+  await host.syncServerHalves([
+    half("maker", `
+      portal.router.post("/go", async (req, res) => {
+        const child = portal.chats.create({ parent: "a", title: "Helper", listed: false });
+        const run = await portal.chats.prompt(child.id, "Answer", { steer: true });
+        await portal.chats.abort(child.id);
+        const found = portal.chats.children("a");
+        const theirs = await portal.chats.remove("a").catch((e) => e.message);
+        await portal.chats.remove(child.id);
+        res.json({ child, run, theirs, found });
+      });
+    `),
+  ]);
+  assert.deepEqual((await get("/api/x/maker/go", { method: "POST" })).body, {
+    child: { id: "kid", title: "Helper", workspace: work, status: "idle", parent: "a", listed: false },
+    run: { status: "done", answer: "42" },
+    theirs: "a is no child chat",
+    found: [{ id: "kid", title: "Helper", workspace: work, status: "idle", parent: "a", listed: false }],
+  });
+  assert.deepEqual(asked, [["create", "a", "maker"], ["run", "kid", "Answer", { steer: true }], ["abort", "kid"], ["remove", "kid"]]);
   await host.syncServerHalves([]);
 });
 

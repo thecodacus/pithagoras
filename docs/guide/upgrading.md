@@ -1148,10 +1148,13 @@ as it was beside it, as `settings.json.bak`. The extension takes them up as it
 starts, into its own folder (`extension-data/pithagoras-subagent`).
 
 What each chat said its subagents run on (*Subagents in this chat run on* in its
-model menu) was the portal's, a setting for each chat. The upgrade to schema 13
+model menu) was the portal's, a setting for each chat. The upgrade to schema 14
 leaves those that say a model under `handoff/subagent-chats` and takes them out
 of the database; the extension takes them up as it starts, into `chats.json` in
-its folder, and keeps them from then on, each until its chat is deleted.
+its folder, and keeps them from then on, each until its chat is deleted. It
+comes after the step that gives chats a parent
+([Chats can have child chats](#chats-can-have-child-chats), schema 13), and a
+portal at schema 11 takes all three in one start.
 
 The subagents beside a chat are drawn by the extension too: the Subagents panel
 and its button in the chat's header, a chip in the running tray for each one at
@@ -1181,11 +1184,12 @@ settings up.
 ### Going back to a version before subagents were an extension
 
 Put the backup the upgrade made in as under [Going back](#going-back):
-`backups/portal-v11-….db`, or `backups/portal-v12-….db` from a version that
-had the subagent as an extension already. It holds each chat's choice of model
-as it was at the upgrade; one made since is in
+`backups/portal-v11-….db`, or `backups/portal-v12-….db` or
+`backups/portal-v13-….db` from a version that had the subagent as an extension
+already, which kept each chat's choice of model in the portal still. It holds
+each chat's choice as it was at the upgrade; one made since is in
 `extension-data/pithagoras-subagent/chats.json`, by chat id under `chats`, to choose again in
-the chat's model menu. The older version reads the subagent's settings from pi's
+the chat's model menu. A version before schema 12 reads the subagent's settings from pi's
 `settings.json` again: put
 `subagentMode`, `subagentMaxParallel` and `subagentModel` back there, from
 `settings.json.bak` where nothing was changed since, or from
@@ -1218,6 +1222,24 @@ needs the steps that
 [Voice's section](#going-back-to-a-version-before-voice-was-an-extension)
 and [Understory's](#going-back-to-a-version-before-understory-was-an-extension)
 give for it.
+
+## Chats can have child chats
+
+An extension's server half can now make a
+[child chat](/guide/extension-ui#child-chats) of a chat, to give part of its
+work to; it is deleted with its parent. The upgrade (schema 13) gives every chat
+an empty parent, so every chat stays one of its own and listed. It comes after
+the step that [leaves the subagent's settings](#subagents-are-an-extension)
+(schema 12), and a portal at schema 11 takes both in one start. Nothing is left
+for an extension, and nothing needs doing.
+
+**Going back.** From `portal-v12-….db` it is only putting the backup in as
+under [Going back](#going-back): the child chats made since go with it.
+`portal-v11-….db`, which a portal that came straight from schema 11 has, also
+needs what
+[Subagents' section](#going-back-to-a-version-before-subagents-were-an-extension)
+says for it, and an older backup what [Chats have a mode](#chats-have-a-mode)
+says.
 
 ## The guard
 

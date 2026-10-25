@@ -300,11 +300,11 @@ flourish of your own under it, and it follows the switch as the portal's do:
 | `asksBeforeDeleting()` | Whether the person wants to be asked before something is deleted (Settings → This browser): ask first when it is true |
 | `storage.local`, `storage.session` | The browser's storage, which never throws |
 | `useFollowBottom`, `useNow`, `tabKeys` | A box that follows its end; the time, each second; arrow keys for a row of tabs |
+| `useLeaveRef(how)` | A hook: the ref for the one element a part draws, so that when it goes a picture of it leaves as the portal's own do, `how` saying as what: `"dialog"`, `"menu"`, `"panel"`, `"row"`, `"message"`, `"page"`, or `"gone"` for something that no longer exists. It plays only while the person has [the animations](/guide/interface#animations) on. `how` may be a function, asked as the element goes, that says `null` for not this time |
 
 `portal.format` writes numbers, dates and times the page's language's way
 (`number`, `date`, `dateTime`, `time`), and how long something has run as the
 chat says it: `format.elapsed(seconds)`, "42s", "3m 05s".
-| `useLeaveRef(how)` | A hook: the ref for the one element a part draws, so that when it goes a picture of it leaves as the portal's own do, `how` saying as what: `"dialog"`, `"menu"`, `"panel"`, `"row"`, `"message"`, `"page"`, or `"gone"` for something that no longer exists. It plays only while the person has [the animations](/guide/interface#animations) on. `how` may be a function, asked as the element goes, that says `null` for not this time |
 
 The portal's own utility classes (Tailwind) exist only for what the portal
 itself uses, so do not rely on one being there. Style your markup in your own
@@ -969,7 +969,7 @@ restart the portal.
 | `http.upgrade(handler)` | WebSocket upgrades under the package's routes |
 | `http.endWithLogin(end)` | Ends a long response, such as a stream, when the login it was opened under ends (the password changed, single sign-on was set up anew), so what it showed is not shown to whoever signs in next. Returns what stops the watching, for a response that ended by itself |
 | `http.send(req, res, file, options?)` | [Sends a file](#sending-a-file) opened by `files.open` as the portal sends its own: a version, the part a player asks for, or to be saved |
-| `chats.get(id)`, `chats.list()` | A chat: `{ id, title, workspace, status, mode? }` |
+| `chats.get(id)`, `chats.list()` | A chat: `{ id, title, workspace, status, mode?, parent?, listed? }`. `list` leaves out the [child chats](#child-chats) made to be found by their id alone |
 | `chats.folder(id)` | The folder the chat's pi works in, on this disk |
 | `chats.inFolder(folder)` | The sessions of every kind that work in a folder: tasks, and also routine runs, Agent-page and channel conversations and heartbeats, which `chats.list()` leaves out and which have the package's tools in their pi. One for each agent that has some there (what an agent can reach is the same from each of its sessions; none is removed, and a stored path can be a link an agent made) |
 | `chats.send(chatId, data)`, `chats.onOpen(fn)` | [Telling the pages open on a chat](#telling-the-pages-open-on-a-chat) |
@@ -981,6 +981,7 @@ restart the portal.
 | `tools.exceptions(names)` | [Who has its tools](#who-has-its-tools): the chats and routines where those tools are not what the default says |
 | `chats.offers(chatId, tool)` | How the chat's model is offered a tool now: `"direct"`, `"lazy"` (through the `tools` tool) or nothing (switched off, out of reach, or the chat's pi not running here). In a chat whose mode works through the code tool ([Code mode](/guide/sessions#modes)), `"direct"` means that a script calls the tool by its name, with no streamed arguments of its own |
 | `chats.hold(chatId)` | Keeps the chat's pi from being let go for being idle, or reloaded, while work goes on; returns what lets it go |
+| `chats.create(options)`, `chats.children(parent)`, `chats.prompt(chatId, message, options?)`, `chats.abort(chatId)`, `chats.remove(chatId)` | [Child chats](#child-chats): a chat of a chat, to give part of its work to, run until it answers, stopped and deleted |
 | `sandbox.run(chatId, argv, options?)`, `sandbox.spawnAs(chatId)`, `sandbox.on()` | [Running things as the chat's agent](#running-things-as-the-chat-s-agent) |
 | `sandbox.personEnv()` | The portal's environment for a process the person starts, such as a shell of their own: without the mark the agent's processes carry, so it is not listed as a job the agent left running |
 | `files.inside(base, rel)` | A path checked to be inside a folder |
@@ -2293,6 +2294,78 @@ portal.chats.extend((pi, chat) => {
 worked out this way: its tools and its skill (given through pi's
 `resources_discover`) only in its chats, and its texts in German
 (`extensions/creator/src`).
+
+### Child chats
+
+A server half can give part of a chat's work to a chat of its own: a child
+chat. It is a chat like any other. The portal starts its pi in its parent's
+folder, with the guard, the sandbox, the tool switches and its mode, and it
+keeps a transcript of its own, which the person opens at `/s/<id>`. The half
+sends it a message, waits for the run to end, and has the last thing it said:
+
+```js
+portal.chats.extend((pi, chat) => {
+  pi.registerTool({
+    name: "look_it_up",
+    /* … */
+    async execute(_id, { question }) {
+      const child = portal.chats.create({ parent: chat.id, title: "Look it up", listed: false });
+      const run = await portal.chats.prompt(child.id, question);
+      return { content: [{ type: "text", text: run.status === "done" ? run.answer : `It ${run.status}: ${run.error ?? ""}` }] };
+    },
+  });
+});
+```
+
+- **`create({ parent, title, mode?, model?, listed? })`** makes it and returns
+  it as a `Chat`, with `parent` set. `listed: false` keeps it out of the chat
+  lists (and `chats.list()`): it is found by its id alone, or by
+  `chats.children(parent)`, which gives the children of a chat that the package
+  made, listed or not, oldest first: a half that lost its own record of them
+  finds them there to stop or remove them. Without a `mode`, the child is in
+  its parent's, so a mode that took tools away does not stop at a child; one
+  that is named is the half's own choice (`"standard"` for none), as a chat
+  stores it ([Chat modes](#chat-modes)), and a mode that asks the person first
+  only where its parent is in it. `model` is a
+  `{ provider, id }`; without one it starts on its mode's model, or else on
+  its parent's. It throws, and says why, for a parent that is not there, is a
+  child itself (one level only) or is a heartbeat (which is held to reading by a
+  role of its own that a child would not carry), for no title, and for a model
+  or a mode it cannot have.
+- **It stands where its parent stands.** It takes its parent's role and the
+  person the parent last heard from, so the guard holds each call to the person
+  who asked, and the tools the person switched off or on in the parent. A dialog
+  it opens, and a question the guard asks, are drawn on its own page, where its
+  parent's would be: for a child of a chat of the portal's pages (or of the
+  agent's page) nobody may be looking, so say where it waits; for a child of a
+  conversation on a channel or of a routine run, where nobody can answer, the
+  guard refuses for the child too, as it does for its parent.
+- **`prompt(chatId, message, { steer? })`** resolves once the run that takes
+  the message in has ended, with `{ status, answer, error? }`: `status` is
+  `"done"`, `"stopped"` (by `abort`, by the person's Stop, or because the chat
+  was deleted) or `"error"`. `answer` is the last thing it said. Sent while it
+  works, a message waits for the run to end, as the person's does; with
+  `steer`, it is taken after the step the run is on, and both prompts resolve
+  as that run ends. A run that fails resolves as an error, and so does a
+  command the child's speaker may not run; `prompt` throws only for a chat that
+  is not a child the package made, or a message with no words. A command the
+  speaker may run (`/compact`) is no message of the chat: `prompt` resolves as
+  `done` at once, with no answer, when it started no run, or when the run it
+  started ends.
+- **`abort(chatId)`** stops its run, as the person's Stop does.
+  **`remove(chatId)`** deletes it, its run stopped first; its transcript and
+  files go, and `chats.on("deleted")` hears it once. While its parent is being
+  deleted `remove` throws: the parent's delete takes the child.
+- **The package that made a child** alone prompts, stops or removes it. The
+  person can do all three on its own page.
+- **It goes with its parent.** Deleting the parent deletes its children, each
+  heard as `deleted`; a run of one is stopped first. While a child works, its
+  parent counts as busy in the background: its pi is not let go for being idle
+  or loaded again, and a message in it cannot be edited until the child is
+  done. A portal that restarts marks a child it cut off *interrupted*, as any
+  chat.
+- **In a process of its own** (`"isolated": true`), `create` is answered at
+  once (`children` too) and the others later, as the other calls are.
 
 ## Panels and commands
 

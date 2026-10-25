@@ -232,6 +232,11 @@ function portalOf(init: { name: string; executor: string }): ServerPortal {
         factories.push(factory);
       },
       hold: (chatId) => callNow("chats.hold", chatId),
+      create: (options) => callNow("chats.create", options),
+      children: (parent) => callNow("chats.children", parent),
+      prompt: (chatId, message, options) => callLater("chats.prompt", [chatId, message, options]),
+      abort: (chatId) => callLater("chats.abort", [chatId]),
+      remove: (chatId) => callLater("chats.remove", [chatId]),
     },
     sandbox: {
       on: () => callNow("sandbox.on"),

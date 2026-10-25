@@ -94,7 +94,7 @@ test("a second hand-off, after going back and upgrading again, gives what pi's s
 });
 
 /**
- * What each chat said its subagents run on, as the upgrade to schema 13 leaves it (core's side is in
+ * What each chat said its subagents run on, as the upgrade to schema 14 leaves it (core's side is in
  * schema-fingerprint.test.mjs, both together in upgrade.test.mts), taken up the same way.
  */
 function chatsExtension({ removes = true, gone = [] as string[] } = {}) {
@@ -113,7 +113,7 @@ function chatsExtension({ removes = true, gone = [] as string[] } = {}) {
   openChats(data);
   const leave = (models: unknown, format = 1) => {
     mkdirSync(kept, { recursive: true });
-    writeFileSync(path.join(kept, "handoff.json"), JSON.stringify({ format, name: "subagent-chats", schema: 13, made: "2026-10-25T10:00:00.000Z" }));
+    writeFileSync(path.join(kept, "handoff.json"), JSON.stringify({ format, name: "subagent-chats", schema: 14, made: "2026-10-25T10:00:00.000Z" }));
     writeFileSync(path.join(kept, "models.json"), JSON.stringify(models));
   };
   const stored = () => JSON.parse(readFileSync(path.join(data, "chats.json"), "utf8"));

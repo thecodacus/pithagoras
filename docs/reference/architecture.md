@@ -76,7 +76,7 @@ stray file would attach the wrong conversation.
 
 | Table | Holds |
 | --- | --- |
-| `sessions` | Title, workspace, status, per-session model and effort, pinned, pi session file, and the channel or routine it belongs to |
+| `sessions` | Title, workspace, status, per-session model and effort, pinned, pi session file, the channel or routine it belongs to, and for a child chat its parent, whether it is listed, and the package that made it |
 | `events` | Append-only log, one row per event, indexed by `(session_id, seq)` |
 | `message_versions` | The earlier versions of an edited message, and what followed them |
 | `agents` | Each agent's name, home, avatar, voice and heartbeat schedule |
@@ -115,7 +115,9 @@ terminal runs a pty for each terminal itself. The containers of Browser, of the 
 Understory, the agent's memory, are run through the
 [Docker](/guide/docker) extension, which every extension that runs containers builds on; the voice and Understory containers share the
 portal's network namespace so their services need no published ports. An extension's container that runs code from
-elsewhere is on a network of its own instead (Docker's `networks`). The extensions the
+elsewhere is on a network of its own instead (Docker's `networks`). A server half can give part of a chat's work to a
+[child chat](/guide/extension-ui#child-chats) (`core/server/src/child-chats.ts`): a session of its own with a
+parent, run by the session manager as any chat is, and deleted with its parent. The extensions the
 portal ships (`extensions/`, the subagent tool among them) are installed as local pi
 packages from that folder; the ones a fresh portal starts with are in `extensions/defaults.json`. The server holds one socket in its data
 directory so only one portal runs on it.

@@ -81,6 +81,8 @@ const NOW = new Set([
   "chats.on",
   "chats.onEvent",
   "chats.hold",
+  "chats.create",
+  "chats.children",
   "folders.list",
   "folders.allowed",
   "folders.label",
@@ -104,7 +106,7 @@ const NOW = new Set([
   "agentAccess",
 ]);
 /** What it calls and is answered later. */
-const LATER = new Set(["models.of", "models.endpoint", "mcp.set", "chats.tell", "chats.reload", "sandbox.run", "extensions.install", "extensions.remove", "extensions.status"]);
+const LATER = new Set(["models.of", "models.endpoint", "mcp.set", "chats.tell", "chats.reload", "chats.prompt", "chats.abort", "chats.remove", "sandbox.run", "extensions.install", "extensions.remove", "extensions.status"]);
 
 /** A member of `portal` by its path, called on what it belongs to. */
 function member(portal: ServerPortal, path: string): (...args: unknown[]) => unknown {

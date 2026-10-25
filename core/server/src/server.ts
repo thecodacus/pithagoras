@@ -127,6 +127,7 @@ import { getBuiltinCommands, picturesRefused } from "./pi/builtins.js";
 import { SessionEditError } from "./pi/session-edit.js";
 import {
   NEW_CHAT_TITLE,
+  cleanTitle,
   ProjectError,
   createProject,
   deleteProjectFolder,
@@ -416,6 +417,15 @@ const chatsIn = (dir: string, all = listSessions()) =>
   all.filter((s) => isWithinText(dir, s.workspace));
 
 /**
+ * Without the child chats whose parent is among them: each goes with its parent, which stands for it (see
+ * SessionManager.discard), and a chat's children are no chats of the project's own to count.
+ */
+const withoutChildren = <T extends { id: string; parent_id: string | null }>(rows: T[]): T[] => {
+  const ids = new Set(rows.map((row) => row.id));
+  return rows.filter((row) => !row.parent_id || !ids.has(row.parent_id));
+};
+
+/**
  * The same, and those that reach the folder through a link too: what deleting
  * it would take from under them. Each place is looked at once, since many
  * chats share one, and only this one project's are followed.
@@ -456,7 +466,7 @@ app.get("/api/projects", (req, res) => {
     const all = listSessions();
     const withTools = projectsWithTools();
     const projects = listProjects(WORKSPACE_ROOT).map((p) => {
-      const chats = chatsIn(p.path, all);
+      const chats = withoutChildren(chatsIn(p.path, all));
       return {
         ...p,
         ...linkOf(p.name),
@@ -596,7 +606,7 @@ app.get("/api/projects/:name", async (req, res) => {
     res.json({
       ...project,
       ...(unsaved ? { unsaved } : {}),
-      sessions: workingIn(project.path, listSessions()).length,
+      sessions: withoutChildren(workingIn(project.path, listSessions())).length,
       // The ones a delete would switch off: one already off is not changed by it.
       routines: routinesIn(project.path).filter((r) => r.enabled).map((r) => r.name),
       ...describeProject(WORKSPACE_ROOT, project.name),
@@ -752,7 +762,7 @@ app.delete("/api/projects/:name", async (req, res) => {
       const unsaved = await unsavedWork(project.path);
       if (unsaved && holdsWork(unsaved)) return res.status(409).json(unsavedRefusal(unsaved));
     }
-    const chats = workingIn(project.path, listSessions());
+    const chats = withoutChildren(workingIn(project.path, listSessions()));
     if (chats.some((s) => sessions.isBusy(s.id) || sessions.backgroundWork(s.id))) {
       return res.status(409).json({ error: "A chat in this project is still working. Stop it first." });
     }
@@ -822,7 +832,7 @@ app.delete("/api/agents/:id", async (req, res) => {
     const agent = deletable(req.params.id);
     // Its chats and its conversations — those started on the Agent page and
     // through channels — and the one its heartbeat looks around in.
-    const chats = workingIn(agent.home, [...listSessions(), ...listAgentSessions(), ...listHeartbeatSessions()]);
+    const chats = withoutChildren(workingIn(agent.home, [...listSessions(), ...listAgentSessions(), ...listHeartbeatSessions()]));
     if (chats.some((s) => sessions.isBusy(s.id) || sessions.backgroundWork(s.id))) {
       return res.status(409).json({ error: "A chat with this agent is still working. Stop it first." });
     }
@@ -870,23 +880,13 @@ app.delete("/api/agents/:id", async (req, res) => {
 
 // --- sessions ---
 
-/** The longest name a chat can be given: what the rename field takes. */
-const MAX_TITLE = 120;
-
 /**
- * A name as it is kept: on one line and no longer than the field allows, however
- * it came in — the rename field, /name, or a chat made through the API. By
- * character, so an emoji at the cut is not left in halves. Empty when there is
- * no name in it.
+ * SQLite stores pinned as 0/1; the API speaks booleans. A child chat names its parent, and says whether it is listed;
+ * which package made it is the portal's to know.
  */
-const cleanTitle = (raw: unknown): string =>
-  typeof raw === "string"
-    ? Array.from(raw.replace(/\s+/g, " ").trim()).slice(0, MAX_TITLE).join("").trimEnd()
-    : "";
-
-/** SQLite stores pinned as 0/1; the API speaks booleans. */
-const toApi = (s: ReturnType<typeof getSession> & {}) => ({
+const toApi = ({ parent_id, listed, creator: _creator, ...s }: ReturnType<typeof getSession> & {}) => ({
   ...s,
+  ...(parent_id ? { parent: parent_id, listed: listed === 1 } : {}),
   pinned: Boolean(s.pinned),
   live: sessions.isRunning(s.id),
   // The results flagged as a suspected prompt injection that the person trusted, for the chat to say so.
@@ -1033,15 +1033,8 @@ app.patch("/api/sessions/:id", (req, res) => {
 app.delete("/api/sessions/:id", async (req, res) => {
   const session = getSession(req.params.id);
   if (!session) return res.status(404).json({ error: "Not found" });
-  try {
-    await sessions.discard(session.id);
-    deleteSession(session.id);
-  } catch (e) {
-    // The chat stays: it takes messages again.
-    sessions.reopen([session.id]);
-    throw e;
-  }
-  sessions.removeFiles(session.id);
+  // Its child chats with it. One that fails leaves the chat, which takes messages again.
+  await sessions.deleteChat(session.id);
   res.json({ ok: true });
 });
 

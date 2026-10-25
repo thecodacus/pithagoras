@@ -18,7 +18,13 @@ import { freePort, inProcessHome } from "./server-harness.mjs";
 // src/schema-version.ts (once for the release, not once for each change),
 // pin the new version and fingerprint here, and have an upgrade test for what
 // changed (below) that starts from a database made before it.
-const PINNED = { version: 13, fingerprint: "d118d40ea237b90e58c0ef97d6f1cdcb5e876ed739c3e2bbc6684f74a8aa653a" };
+const PINNED = { version: 14, fingerprint: "7a7fcf8359ff86a38fcb9060888fa9ed7816b18bb9cfb2d9da454a893c015bda" };
+/** The schema of version 13, which version 14 kept: it only left what each chat said its subagents run on for the subagent extension. */
+const V13_FINGERPRINT = "7a7fcf8359ff86a38fcb9060888fa9ed7816b18bb9cfb2d9da454a893c015bda";
+/** The schema of version 12: no chat is a child of another. */
+const V12_FINGERPRINT = "d118d40ea237b90e58c0ef97d6f1cdcb5e876ed739c3e2bbc6684f74a8aa653a";
+/** The schema of version 11, which version 12 kept: it only left the subagent's settings for its extension. */
+const V11_FINGERPRINT = "d118d40ea237b90e58c0ef97d6f1cdcb5e876ed739c3e2bbc6684f74a8aa653a";
 /** The schema of version 10, the one pinned before: chats with no mode, and no table of the modes the person made. */
 const V10_FINGERPRINT = "155cf58f87a19f0a102c8475bdceee87a98d9169c400d887a37411107f0a5ccf";
 /** The schema of version 9: a project's switch for the agent's memory named for Understory. */
@@ -29,10 +35,17 @@ const home = inProcessHome("pithagoras-schema-");
 const { SCHEMA_VERSION } = await import("../dist/schema-version.js");
 const { getDb } = await import("../dist/db.js");
 
-/** A database of the schema of version 10 at `file`, open: a fresh one, with no mode on a chat and no table of the person's modes. */
-function freshAt10(file) {
+/** A database of the schema of version 12 at `file`, open: a fresh one, whose chats have no parent, listing or maker. */
+function freshAt12(file) {
   getDb().exec(`VACUUM INTO '${file}'`);
   const d = new Database(file);
+  d.exec("DROP INDEX idx_sessions_parent; ALTER TABLE sessions DROP COLUMN parent_id; ALTER TABLE sessions DROP COLUMN listed; ALTER TABLE sessions DROP COLUMN creator;");
+  return d;
+}
+
+/** A database of the schema of version 10 at `file`, open: one of version 11 (whose schema 12 kept), with no mode on a chat and no table of the person's modes. */
+function freshAt10(file) {
+  const d = freshAt12(file);
   d.exec("ALTER TABLE sessions DROP COLUMN mode; DROP TABLE chat_modes;");
   return d;
 }
@@ -1341,13 +1354,13 @@ async function withPiSettings(text, work) {
   }
 }
 
-/** A database of version 11 in its own folder `name`, with one chat: the schema of this version, before it was raised. */
+/** A database of version 11 in its own folder `name`, with one chat: the schema of version 11, which 12 kept. */
 function databaseAt11(name) {
   const dir = path.join(home, name);
   mkdirSync(dir, { recursive: true });
-  getDb().exec(`VACUUM INTO '${path.join(dir, "portal.db")}'`);
-  const d = new Database(path.join(dir, "portal.db"));
+  const d = freshAt12(path.join(dir, "portal.db"));
   d.pragma("user_version = 11");
+  assert.equal(schemaFingerprint(d), V11_FINGERPRINT, "the schema of version 11");
   d.prepare("INSERT INTO sessions (id, title, workspace, kind) VALUES ('c1', 'Kites', '/w/site', 'task')").run();
   d.close();
   return dir;
@@ -1439,13 +1452,44 @@ test("a copy of the subagent tool that is no extension keeps its settings in pi'
   assert.deepEqual(leftAt(dir), ["subagent"]);
 });
 
-/** A database of version 12 in its own folder `name`, with what chats said their subagents run on: `said`, by chat id. */
-function databaseAt12(name, said) {
+test("a database of version 12, or of 11, is backed up and given child chats at schema 13: every chat is one of its own, and listed", async () => {
+  for (const [version, fingerprint] of [[12, V12_FINGERPRINT], [11, V11_FINGERPRINT]]) {
+    const dir = path.join(home, `children-from-${version}`);
+    mkdirSync(dir, { recursive: true });
+    const d = freshAt12(path.join(dir, "portal.db"));
+    d.pragma(`user_version = ${version}`);
+    assert.equal(schemaFingerprint(d), fingerprint, `the schema of version ${version}`);
+    const chat = d.prepare("INSERT INTO sessions (id, title, workspace, kind) VALUES (?, ?, ?, ?)");
+    chat.run("c1", "Kites", "/w/site", "task");
+    chat.run("c2", "From a channel", "/w/notes", "agent");
+    d.close();
+    assert.deepEqual(upgradeCheck(path.join(dir, "portal.db")), { needed: true, from: version });
+    assert.match(await upgraded(dir), new RegExp(`upgrading the database from version ${version} to ${SCHEMA_VERSION}`));
+    const backups = backupsIn(path.join(dir, "backups"));
+    assert.equal(backups.length, 1, `one backup, of version ${version}`);
+    assert.match(path.basename(backups[0]), new RegExp(`^portal-v${version}-\\d{8}-\\d{6}\\.db$`));
+
+    const now = new Database(path.join(dir, "portal.db"), { readonly: true });
+    try {
+      assert.deepEqual([now.pragma("user_version", { simple: true }), schemaFingerprint(now)], [SCHEMA_VERSION, PINNED.fingerprint]);
+      assert.deepEqual(now.prepare("SELECT id, parent_id, listed, creator FROM sessions ORDER BY id").all(), [
+        { id: "c1", parent_id: null, listed: 1, creator: null },
+        { id: "c2", parent_id: null, listed: 1, creator: null },
+      ]);
+    } finally {
+      now.close();
+    }
+  }
+});
+
+/** A database of version 13 in its own folder `name`, with what chats said their subagents run on: `said`, by chat id. */
+function databaseAt13(name, said) {
   const dir = path.join(home, name);
   mkdirSync(dir, { recursive: true });
   getDb().exec(`VACUUM INTO '${path.join(dir, "portal.db")}'`);
   const d = new Database(path.join(dir, "portal.db"));
-  d.pragma("user_version = 12");
+  assert.equal(schemaFingerprint(d), V13_FINGERPRINT, "the schema of version 13");
+  d.pragma("user_version = 13");
   for (const [chat, model] of Object.entries(said)) d.prepare("INSERT INTO settings (key, value) VALUES (?, ?)").run(`subagent_model:${chat}`, model);
   d.close();
   return dir;
@@ -1459,11 +1503,11 @@ const subagentRows = (dir) => {
   }
 };
 
-test("what each chat said its subagents run on is left for the subagent extension at schema 13, and leaves the database", async () => {
-  const dir = databaseAt12("subagent-chats-out", { c1: "llama-swap/model-b", c2: "auto", c3: "" });
-  assert.deepEqual(upgradeCheck(path.join(dir, "portal.db")), { needed: true, from: 12 });
-  assert.match(await upgraded(dir), new RegExp(`upgrading the database from version 12 to ${SCHEMA_VERSION}`));
-  assert.match(path.basename(backupsIn(path.join(dir, "backups"))[0]), /^portal-v12-\d{8}-\d{6}\.db$/);
+test("what each chat said its subagents run on is left for the subagent extension at schema 14, and leaves the database", async () => {
+  const dir = databaseAt13("subagent-chats-out", { c1: "llama-swap/model-b", c2: "auto", c3: "" });
+  assert.deepEqual(upgradeCheck(path.join(dir, "portal.db")), { needed: true, from: 13 });
+  assert.match(await upgraded(dir), new RegExp(`upgrading the database from version 13 to ${SCHEMA_VERSION}`));
+  assert.match(path.basename(backupsIn(path.join(dir, "backups"))[0]), /^portal-v13-\d{8}-\d{6}\.db$/);
   const now = new Database(path.join(dir, "portal.db"), { readonly: true });
   assert.deepEqual([now.pragma("user_version", { simple: true }), schemaFingerprint(now)], [SCHEMA_VERSION, PINNED.fingerprint]);
   now.close();
@@ -1471,25 +1515,25 @@ test("what each chat said its subagents run on is left for the subagent extensio
   assert.deepEqual(leftAt(dir), ["subagent-chats"], "nothing half done beside it");
   const left = (name) => path.join(dir, "handoff", "subagent-chats", name);
   const { made: _made, ...about } = JSON.parse(readFileSync(left("handoff.json"), "utf8"));
-  assert.deepEqual(about, { format: 1, name: "subagent-chats", schema: 13 });
+  assert.deepEqual(about, { format: 1, name: "subagent-chats", schema: 14 });
   // The chat that said the default again ("") said nothing.
   assert.deepEqual(JSON.parse(readFileSync(left("models.json"), "utf8")), { c1: "llama-swap/model-b", c2: "auto" });
   assert.equal(modeOf(left("models.json")), 0o600);
 });
 
 test("chats that only ever went back to the default leave nothing for the subagent extension, and their settings go", async () => {
-  const dir = databaseAt12("subagent-chats-none", { c1: "", c2: "" });
+  const dir = databaseAt13("subagent-chats-none", { c1: "", c2: "" });
   await upgraded(dir);
   assert.deepEqual(subagentRows(dir), []);
   assert.deepEqual(leftAt(dir), []);
 });
 
 test("a chats' hand-off that waits from an earlier upgrade keeps what it has, with what the chats say now over it", async () => {
-  const dir = databaseAt12("subagent-chats-again", { c1: "llama-swap/model-b", c2: "auto" });
+  const dir = databaseAt13("subagent-chats-again", { c1: "llama-swap/model-b", c2: "auto" });
   await upgraded(dir);
-  // Gone back to the older version, the person chose again in two chats, one of them new; the database is at 12 again.
+  // Gone back to the older version, the person chose again in two chats, one of them new; the database is at 13 again.
   const d = new Database(path.join(dir, "portal.db"));
-  d.pragma("user_version = 12");
+  d.pragma("user_version = 13");
   d.prepare("INSERT INTO settings (key, value) VALUES (?, ?)").run("subagent_model:c2", "vllm/model-c");
   d.prepare("INSERT INTO settings (key, value) VALUES (?, ?)").run("subagent_model:c4", "auto");
   d.close();
@@ -1500,7 +1544,7 @@ test("a chats' hand-off that waits from an earlier upgrade keeps what it has, wi
 });
 
 test("a chats' hand-off that cannot be left keeps what the chats said in the database, for the next start", async () => {
-  const dir = databaseAt12("subagent-chats-kept", { c1: "llama-swap/model-b" });
+  const dir = databaseAt13("subagent-chats-kept", { c1: "llama-swap/model-b" });
   // A file where the hand-off's folder would go: nothing can be left in it.
   writeFileSync(path.join(dir, "handoff"), "");
   assert.match(await upgraded(dir), /could not be left for the subagent extension, and is kept for the next start/);

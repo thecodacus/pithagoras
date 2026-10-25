@@ -39,6 +39,39 @@ export interface Chat {
    * for one the person made, the portal's own by name ("code"). Not there for Standard.
    */
   mode?: string;
+  /**
+   * A child chat's (`chats.create`): the chat it was made for. A child is deleted with its parent, and has no children
+   * of its own.
+   */
+  parent?: string;
+  /** A child chat's: whether it shows in the chat lists, under its parent. One that does not is found by its id alone. */
+  listed?: boolean;
+}
+
+/** What a child chat is made with: see `chats.create`. */
+export interface ChildChatOptions {
+  /** The chat it works for: its folder is the child's, and so are its role, its last speaker and its tool switches. */
+  parent: string;
+  title: string;
+  /**
+   * A mode the child may be put in, as a chat stores it (see `Chat.mode`). Left out, it is in its parent's, so a mode
+   * that took tools away does not stop at a child; "standard" puts it in none.
+   */
+  mode?: string;
+  /** The model it runs on; its mode's, or else its parent's, when left out. */
+  model?: ModelRef;
+  /** Whether it shows in the chat lists, under its parent (the default), or is found by its id alone. */
+  listed?: boolean;
+}
+
+/**
+ * How a run of a child chat ended (`chats.prompt`): `done`, `stopped` (by `chats.abort`, by the person, or because the
+ * chat was deleted), or `error`, with what went wrong. `answer` is the last thing it said, which may be nothing.
+ */
+export interface ChildRun {
+  status: "done" | "stopped" | "error";
+  answer: string;
+  error?: string;
 }
 
 /**
@@ -757,6 +790,40 @@ export interface ServerPortal {
     offers(chatId: string, tool: string): "direct" | "lazy" | undefined;
     /** Keeps a chat's pi from being let go, or reloaded, while work of the package's goes on. Returns what lets it go again. */
     hold(chatId: string): () => void;
+    /**
+     * Makes a child chat of a chat, to give part of its work to: a chat like any other, in its parent's folder, whose
+     * pi the portal starts with the guard, the sandbox, the tool layers and its mode, and with a transcript of its own
+     * that the person opens at `/s/<id>`. It takes its parent's role and last speaker, so it is held to the person who
+     * asked, its parent's mode unless it is given one, and the tools the person switched off or on in the parent. A
+     * dialog it opens, and a question the guard asks, go where its parent's would: where nobody can answer on the
+     * portal's pages (a channel conversation, a routine run) the guard refuses for the child too. One level only:
+     * refused for a parent that is a child itself, and for a heartbeat, which is held to reading by a role of its own.
+     * Deleted with its parent, and each child's `deleted` is heard as the parent's is. Throws for options that cannot
+     * be one: no such parent, no title, a model that is not a provider and an id, or a mode the child may not be put in
+     * (one that asks the person first only where the parent is in it).
+     */
+    create(options: ChildChatOptions): Chat;
+    /**
+     * The child chats of a chat that this package made, listed or not, oldest first: `chats.list` leaves the unlisted
+     * out, so this is how a half finds the ones it made once it has lost its own record of them, to stop or remove them.
+     */
+    children(parent: string): Chat[];
+    /**
+     * Sends a child chat this package made a message, and resolves once the run that takes it in has ended. A child
+     * that is working takes it after the run it is on, as a person's message does; with `steer`, after the step it is
+     * on. It is sent as the person its parent last heard from. A run that fails resolves as an `error`, and so does a
+     * command its speaker may not run; a command it may run is no message of the chat, and resolves as `done` at
+     * once when it started no run (with no answer), or when the run it started ends. This throws only for a chat that is not a child
+     * this package made, or a message with no words.
+     */
+    prompt(chatId: string, message: string, options?: { steer?: boolean }): Promise<ChildRun>;
+    /** Stops the run of a child chat this package made, as the person's Stop does: its `prompt` resolves as `stopped`. */
+    abort(chatId: string): Promise<void>;
+    /**
+     * Deletes a child chat this package made, stopping its run first: its transcript and files go, and `deleted` is
+     * heard once. Throws while the child's parent is being deleted, which takes the child with it.
+     */
+    remove(chatId: string): Promise<void>;
   };
   sandbox: {
     /** Whether agents run as users of their own. */

@@ -62,8 +62,8 @@ any other extension's:
   without opening the call's card.
 
 Code mode, a web search, a fetch and other tools that report while they run are
-not subagents: they are not in the panel or the tray, and keep their progress on
-their own card. With the extension switched off, a chat shows none of this, and a
+not subagents: they are not in the panel or the tray, and show their output on
+their own card, as always. With the extension switched off, a chat shows none of this, and a
 subagent another extension runs over the protocol is not drawn either.
 
 ### How it runs against the agent
