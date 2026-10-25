@@ -288,6 +288,8 @@ flourish of your own under it, and it follows the switch as the portal's do:
 | `ErrorBoundary`, `PartFailed` | A part that fails to draw, failing alone |
 | `StatusDot` | A chat's state as a dot |
 | `ToolLink`, `ImagePreview` | A link on a call's card; a picture as the conversation shows one a tool makes ([a tool's call](#a-tool-s-call)), which `pictureId` marks for a viewer's `anchor` to find |
+| `Transcript` | A conversation drawn from its events as the chat draws its own: `events` (a chat's, as `portal.chats.use` has them, `portal_prompt` for what was asked), `running` while it is still written, `chat` for an extension's own card of a tool (`chat.tool`) to be drawn as in that chat, `empty` while there is nothing yet. The rows only: the box that scrolls them is yours ([beside the conversation](#beside-the-conversation)) |
+| `TrayChip`, `Ring`, `Shimmer` | A chip in the running tray as the portal draws a job there (`icon?`, `label`, `detail?`, `since?` counted from, `title?`, `onClick?`); the ring that spins beside what runs; text that shimmers while it goes on |
 | `ImageViewer` | The portal's picture viewer, over the page: the `pictures` to step through, each `{ id, src, alt, caption?, fileName?, from? }` (`from` the `id` of the picture it was edited from), opened at `startId`, with zoom, Open in a new tab and Download. `actions(picture)` are more buttons beside Close for the picture shown, and `anchor(id)` the element focus goes back to when it closes |
 | `Modal` | A dialog over the page, as the portal's own (`title`, `subtitle?`, `footer?`, `wide?`): Escape and a click beside it close it, after asking when `unsaved` says something typed in it is not saved |
 | `DetailsGroup` | A group of settings that folds, as Settings' own: its `title`, and a `summary` of what is set in it while it is folded. Settings' search opens it when what it finds is in it |
@@ -299,6 +301,10 @@ flourish of your own under it, and it follows the switch as the portal's do:
 | `storage.local`, `storage.session` | The browser's storage, which never throws |
 | `useFollowBottom`, `useNow`, `tabKeys` | A box that follows its end; the time, each second; arrow keys for a row of tabs |
 | `useLeaveRef(how)` | A hook: the ref for the one element a part draws, so that when it goes a picture of it leaves as the portal's own do, `how` saying as what: `"dialog"`, `"menu"`, `"panel"`, `"row"`, `"message"`, `"page"`, or `"gone"` for something that no longer exists. It plays only while the person has [the animations](/guide/interface#animations) on. `how` may be a function, asked as the element goes, that says `null` for not this time |
+
+`portal.format` writes numbers, dates and times the page's language's way
+(`number`, `date`, `dateTime`, `time`), and how long something has run as the
+chat says it: `format.elapsed(seconds)`, "42s", "3m 05s".
 
 The portal's own utility classes (Tailwind) exist only for what the portal
 itself uses, so do not rely on one being there. Style your markup in your own
@@ -341,8 +347,10 @@ puts it before entries with a higher one, or none.
 | `chat.panel` | Beside the conversation, docked, floated and sized like Files and Git | `title`, `icon?`, `header?`, `actions?`, `useButton?`, `name?`, `bleed?` | `chat`, `channel`, `panels`, `close()`, `panel` |
 | `chat.header.action` | The chat's header, before the panels' buttons | | `chat`, `channel`, `panels` |
 | `chat.tool` | A call of one tool in the conversation, in place of the portal's card | `tool` (its name), `tile?` (drawn small on its card in voice mode), `describe?` (what that card says of it) | `chat`, `channel`, `panels`, `call`, `card` |
-| `chat.tool.action` | On the portal's card of a call, under what it returned, when the card is opened | `tool?` (a name or a pattern; every call without it) | `call`, `cut`, `panels` |
+| `chat.tool.action` | On the portal's card of a call, under what it returned, when the card is opened; with `head`, beside the card's head, folded or not | `tool?` (a name or a pattern; every call without it), `head?` | `call`, `cut`, `panels` |
 | `chat.composer.above` | Above the message box | | `chat`, `channel`, `panels` |
+| `chat.tray` | The running tray above the message box, before the chat's jobs and statuses: chips for what you have going in the chat | | `chat`, `channel`, `panels` |
+| `chat.model.menu` | A row in the chat's model menu, under the models | | `chat`, `models` (those the menu lists, each `{ provider, id, name? }`) |
 | `chat.overlay` | Over the chat, placed by you | | `chat`, `channel`, `panels` |
 | `chat.background` | Nowhere: there while the chat is on screen, drawing nothing | | `chat`, `channel`, `panels` |
 | `voice.window` | A window in voice mode, placed and sized like the portal's own | `title`, `icon?`, `place?`, `maximizable?`, `keepLoaded?`, `useAutoOpen?`, `useButton?`, `opensFor?`, `describe?` | `chat`, `channel`, `panels`, `close()`, `opened`, `maximized`, `maximize()`, `restore()` |
@@ -381,8 +389,8 @@ portal.slots.register("chat.panel", {
 ```
 
 `useButton` may return `hidden` (no button until there is something to open:
-the portal's Subagents button is like this), `live` (a dot that says something
-in it is running) and `title`.
+the subagent extension's Subagents button is like this), `live` (a dot that
+says something in it is running) and `title`.
 
 `bleed: true` is for a panel whose body is filled by what it draws, a frame or
 another program's screen, as the browser's is: its body is black from edge to
@@ -495,6 +503,51 @@ calls. `ui.ToolLink` is the portal's own look for a link on a card. Draw
 nothing for a call you have nothing for. The `panels` the component is given are your own, by id;
 `portal.panels` reaches any panel by name, as `my-shell` above is reached by
 the `name` its `chat.panel` entry gave it.
+
+A way in that should not wait for the card to be opened goes beside the card's
+head instead, with `head: true`: there with the card folded, as a small pill.
+The subagent extension's *Watch* is one, on any call that started a subagent,
+so it leaves out `tool` and draws nothing on the others:
+
+```js
+portal.slots.register("chat.tool.action", {
+  id: "watch",
+  head: true,
+  component: ({ call, chat, panels }) => {
+    const id = portal.chats.use(chat?.id ?? "", (feed) => agentFor(feed, call.callId));
+    return id ? h(portal.ui.ToolLink, { onClick: () => panels.open("agents", { id }) }, call.status === "running" ? "Watch" : "Open") : null;
+  },
+});
+```
+
+### Beside the conversation
+
+Two more places in the chat are for what an extension has going there.
+
+**The running tray** (`chat.tray`), just above the message box, holds chips
+before the chat's background jobs and statuses: one for each thing at work,
+which opens where it is shown. `ui.TrayChip` draws one as the portal draws its
+own, with the time counting from `since`. Draw nothing while nothing is going:
+the tray is shown only while something in it is drawn.
+
+```js
+portal.slots.register("chat.tray", { id: "running", component: ({ chat, panels }) => {
+  const running = portal.chats.use(chat.id, runningOnes);
+  return running.map((one) => h(portal.ui.TrayChip, { key: one.id, label: one.name, detail: one.doing, since: one.since, onClick: () => panels.open("mine", { id: one.id }) }));
+} });
+```
+
+**The model menu** (`chat.model.menu`) has a row of yours under the chat's
+models: something else of the chat's that runs on a model. It is given the
+chat and the models the menu lists. The menu draws it as it opens, so fetch
+what it shows with the chat (a [`chat.background`](#a-part-that-only-listens)
+entry), not then: a row that arrives a moment later pushes the menu about.
+
+`ui.Transcript` draws a conversation from its events as the chat draws its own
+— what was asked, the replies and their thinking, each call on its card,
+compactions — for one that runs beside the chat, such as a subagent's. Hand it
+the events in the shape a chat's are (a prompt as `portal_prompt`); the box
+that scrolls it is yours, with `ui.useFollowBottom` to keep it at its end.
 
 ### A window in voice mode
 
@@ -2322,27 +2375,23 @@ portal.chats.extend((pi, chat) => {
 `portal.panels` is the panels of the chat on screen, any of them, by name:
 `isOpen(name)`, `open(name, params?)`, `close(name)`, which asks what the panel
 asks before it is closed by hand (`guardClose`). `has(name)` says whether
-there is a panel by that name at all, the portal's or an installed
-extension's, and `useHas(name)` is the same as a hook, drawn again when an
-extension comes or goes: Git offers "Open in Files" only where there is a
-Files, which may be switched off or replaced. An extension's panel is
-`<package>/<id>`, and also the `name` it gave itself, if any: that is how one
-extension's panel takes the place of another's that went by the name. The
-portal's own names are the portal's while those panels are its own. Of two
-extensions that name a panel alike, the one first in the slot's order has the
-name: a lower `order` first, then the one whose extension comes first in the
-list of installed extensions. The portal's own are:
-
-| Name | `open` takes |
-| --- | --- |
-| `agents` | `{ id }`: a subagent to show |
+there is a panel by that name at all, and `useHas(name)` is the same as a
+hook, drawn again when an extension comes or goes: Git offers "Open in Files"
+only where there is a Files, which may be switched off or replaced. Every
+panel beside a chat is an extension's: `<package>/<id>`, and also the `name`
+it gave itself, if any. That is how one extension's panel takes the place of
+another's that went by the name. Of two extensions that name a panel alike,
+the one first in the slot's order has the name: a lower `order` first, then
+the one whose extension comes first in the list of installed extensions.
 
 Extensions a fresh portal installs go by names too. Files is `files` and takes
 `{ path }`, a file in the chat's folder to show. The terminal is `terminal`
 and takes `{ callId }`, a command of the agent's to bring into view, or
 `{ job }`, a background job to follow. Git is `git`, and Canvases `canvas`;
 neither takes anything. [Browser](/guide/browser), which comes with the portal
-and is installed by hand, is `browser`, and takes nothing.
+and is installed by hand, is `browser`, and takes nothing. So is
+[Subagents](/guide/features#watching-a-subagent), `agents`, which takes
+`{ id }`, a subagent to show.
 
 The `title` of a panel, a voice window or a page is drawn in the page's
 language as your own `t` would say it: give its German in `locale.add`, and
@@ -2687,10 +2736,11 @@ portal can be removed without a spec of the portal's failing.
 
 ## What the portal's own apps use
 
-The terminal, Git, Files, Canvases, Media, Browser, Voice and Understory are
-extensions (`extensions/terminal`, `extensions/git`, `extensions/files`,
-`extensions/canvas`, `extensions/media`, `extensions/browser`,
-`extensions/voice`, `extensions/understory`). This is what each of them takes
+The terminal, Git, Files, Canvases, Media, Browser, Voice, Understory and
+Subagents are extensions (`extensions/terminal`, `extensions/git`,
+`extensions/files`, `extensions/canvas`, `extensions/media`,
+`extensions/browser`, `extensions/voice`, `extensions/understory`,
+`extensions/subagent`). This is what each of them takes
 from the portal, and what gives the same to an extension:
 
 | The portal's app uses | An extension has |
@@ -2729,6 +2779,10 @@ from the portal, and what gives the same to an extension:
 | A viewer of its own over the whole page, styled with its utilities, leaving as the portal's dialogs do | `createPortal` into an element with its `data-extension`, `ui.useLeaveRef("dialog")` |
 | "Delete this document?" only for someone who wants to be asked | `ui.asksBeforeDeleting()` |
 | "Open in the agent terminal" on the card of a shell call | `chat.tool.action` |
+| Watch on the call that started a subagent, without opening its card | `chat.tool.action` with `head` |
+| A chip in the running tray for each subagent at work | `chat.tray`, `ui.TrayChip` |
+| Its row in the chat's model menu, there as the menu opens | `chat.model.menu`, fetched with the chat in `chat.background` |
+| A subagent's run drawn as the chat draws its own, with the tool cards extensions bring | `ui.Transcript`, `ui.Ring`, `ui.Shimmer`, `format.elapsed` |
 | A key in voice mode (T for the terminal) | `portal.shortcuts.register` |
 | Being opened by name from anywhere (`terminal`) | `name` on its `chat.panel` |
 | The running tray's jobs opening its Jobs tab, and the jobs themselves | The `jobs.show` command; `background` in `portal.chats.use` |

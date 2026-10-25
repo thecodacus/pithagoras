@@ -1,7 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildTranscript } from '../core/web/src/transcript.ts';
-import { subagents } from '../core/web/src/subagents.ts';
+import { buildTranscript } from '../../../core/web/src/transcript.ts';
+import { agentsOf, subagents } from '../src/subagents.ts';
+
+/**
+ * The agents beside a chat, as the extension reads them from the chat's events (src/subagents.ts): every one of the
+ * subagent protocol, and nothing else, with the conversation as the portal draws it (`ChatFeed.items`).
+ */
 
 const ev = (seq: number, type: string, payload: any = {}) => ({ seq, at: seq * 1000, type, payload });
 const call = (seq: number, id: string, name: string, args: any = {}) => ev(seq, 'tool_execution_start', { toolCallId: id, toolName: name, args });
@@ -48,4 +53,34 @@ test('a subagent of the protocol is listed with its status, among tools that are
   assert.deepEqual(running.map((s) => [s.id, s.label, s.status, s.events.length]), [['a', 'Helper', 'running', 1]]);
   const over = [...events, ev(6, 'portal_subagent', { op: 'end', id: 'a', status: 'done' })];
   assert.deepEqual(list(over).map((s) => [s.id, s.status]), [['a', 'done']]);
+});
+
+test('one whose tool call ended without its end is stopped, at the call\'s end; one in the background runs on', () => {
+  const start = (seq: number, id: string, callId: string, detached = false) => ev(seq, 'portal_subagent', { op: 'start', id, label: id, toolCallId: callId, ...(detached ? { detached: true } : {}) });
+  const events = [
+    call(1, 'c1', 'subagent'), start(2, 'a', 'c1'),
+    call(3, 'c2', 'subagent'), start(4, 'b', 'c2', true),
+    ev(5, 'tool_execution_end', { toolCallId: 'c1', toolName: 'subagent', result: { content: [] } }),
+    ev(6, 'tool_execution_end', { toolCallId: 'c2', toolName: 'subagent', result: { content: [] } }),
+  ];
+  assert.deepEqual(list(events).map((s) => [s.id, s.status, s.until]), [['a', 'stopped', 5000], ['b', 'running', undefined]]);
+  // The chat in error: the one in the background is not taken for over, as the portal writes its end when its pi goes.
+  assert.deepEqual(list(events, true).map((s) => [s.id, s.status]), [['a', 'stopped'], ['b', 'running']]);
+});
+
+test('a chat\'s subagents are worked out once for each state of the chat, and one that has not changed is the object it was', () => {
+  const events = [
+    call(1, 'c1', 'subagent'),
+    ev(2, 'portal_subagent', { op: 'start', id: 'a', label: 'One', toolCallId: 'c1' }),
+    call(3, 'c2', 'subagent'),
+    ev(4, 'portal_subagent', { op: 'start', id: 'b', label: 'Two', toolCallId: 'c2' }),
+  ];
+  const feed = (evs: any[]) => ({ events: evs, items: buildTranscript(evs), status: 'running' }) as any;
+  const first = feed(events);
+  const one = agentsOf('chat', first);
+  assert.equal(agentsOf('chat', first), one, 'asked again of the same state: the same list');
+  // A word of the chat's own reply, and a step of the second subagent's.
+  const next = agentsOf('chat', feed([...events, ev(5, 'message_update', {}), ev(6, 'portal_subagent', { op: 'event', id: 'b', event: { type: 'turn_start' } })]));
+  assert.equal(next[0], one[0], 'the first has not changed');
+  assert.notEqual(next[1], one[1], 'the second has');
 });

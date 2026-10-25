@@ -132,18 +132,18 @@ test('a poll that finds the chats as they were does not draw the sidebar again',
   expect(await measured(page)).toBe(before);
 });
 
-test('going from chat to chat does not ask for the list and the feature flags again', async ({ page }) => {
+test('going from chat to chat does not ask for the list again, nor a chat for the feature flags at all', async ({ page }) => {
   const { asked } = await portal(page);
   await page.goto('/s/a');
   const side = page.getByRole('complementary', { name: 'Sidebar' });
   await expect(side.getByText('Chat B')).toBeVisible();
-  await expect.poll(() => asked['/api/features/flags']).toBeGreaterThan(0);
-  const [flags, list] = [asked['/api/features/flags'], asked['/api/sessions']];
+  const list = asked['/api/sessions'];
   for (const name of ['Chat B', 'Chat C', 'Chat D']) {
     await side.getByText(name).click();
     await expect(page.getByRole('heading', { name })).toBeVisible();
   }
-  expect([asked['/api/features/flags'], asked['/api/sessions']]).toEqual([flags, list]);
+  // What a chat's menus once asked of them (whether the subagent tool was on) is the subagent extension's to draw.
+  expect([asked['/api/features/flags'] ?? 0, asked['/api/sessions']]).toEqual([0, list]);
 });
 
 test('a chat the portal has none of says so, and is not retried as a lost connection', async ({ page }) => {

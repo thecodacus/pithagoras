@@ -46,7 +46,9 @@ process.env.PI_SUBAGENT_BIN=bin;
 let current:Settings=settingsOf({});
 const mode=(m?:string,more:Record<string,unknown>={})=>{current=settingsOf({...(m?{mode:m}:{}),...more});};
 const settings=()=>current;
-const subagent=(pi:any)=>subagentTool(pi,settings);
+// What the chat says its subagents run on, as the server half keeps it for the chat (per-chat.ts): nothing unless a test says.
+let chatSaid:string|undefined;
+const subagent=(pi:any)=>subagentTool(pi,settings,()=>chatSaid);
 mode();
 function load(){
  const h=new Map<string,((d:any)=>void)[]>();
@@ -307,10 +309,11 @@ test('a child runs on the model its parent is on, unless the chat or the setting
  let started:any;events.on('subagent:v1:start',d=>started=d);
  assert.equal((await tool.execute('a',{task:'x'},undefined,undefined,parent)).content[0].text,'--mode rpc --no-session --provider llama-swap --model model-b');
  assert.equal(started.detail,'Starting on llama-swap/model-b');
- // The chat's own choice, answered on the bus.
- const off=events.on('subagent:v1:config',(d:any)=>d.reply({model:'vllm/model-c'}));
+ // The chat's own choice, as its server half keeps it: asked as each starts. Not what a voice on the bus says.
+ chatSaid='vllm/model-c';
+ const off=events.on('subagent:v1:config',(d:any)=>d.reply({model:'other/model-d'}));
  assert.equal((await tool.execute('b',{task:'x'},undefined,undefined,parent)).content[0].text,'--mode rpc --no-session --provider vllm --model model-c');
- off();
+ off();chatSaid=undefined;
  // The settings' choice, and auto there is the parent's again.
  mode(undefined,{model:'openrouter/deepseek/deepseek-chat'});
  assert.equal((await tool.execute('c',{task:'x'},undefined,undefined,parent)).content[0].text,'--mode rpc --no-session --provider openrouter --model deepseek/deepseek-chat');

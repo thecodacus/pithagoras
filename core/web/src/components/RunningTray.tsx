@@ -1,35 +1,38 @@
-import { useState } from "react";
+import { useState, type ComponentType, type ReactNode } from "react";
 import { useNow } from "../use-now";
-import { LuBot, LuPlay, LuRefreshCw, LuSquareTerminal } from "react-icons/lu";
+import { LuPlay, LuRefreshCw, LuSquareTerminal } from "react-icons/lu";
 import type { BackgroundJob } from "../api";
-import { subagentName, type Subagent } from "../subagents";
 import { formatElapsed } from "../transcript";
 import { Ring } from "./ChatActivity";
 import { statusParts } from "../status-commands";
 import { t } from "../i18n";
 
 /**
- * What is running beside the conversation, just above the box: subagents,
- * jobs the agent left running, and the status lines extensions set. Each opens
- * its window (a job, where an extension shows jobs); the tray itself says only
- * that it is going and for how long. A status that names one of the chat's
- * commands runs it when clicked.
+ * What is running beside the conversation, just above the box: what the
+ * installed extensions have going in the chat (`chat.tray`: its subagents,
+ * say), jobs the agent left running, and the status lines extensions set.
+ * Each opens its window (a job, where an extension shows jobs); the tray
+ * itself says only that it is going and for how long. A status that names one
+ * of the chat's commands runs it when clicked.
+ *
+ * The extensions' chips are theirs to draw or not: the tray is on the page
+ * while there are any, and shown only while something in it is drawn (see
+ * chat.css).
  */
 export function RunningTray({
-  agents,
+  extensions,
   jobs,
   statuses,
   commands = new Set(),
-  onAgent,
   onJob,
   onCommand,
 }: {
-  agents: Subagent[];
+  /** What the `chat.tray` entries draw, each in its own element: nothing, where there are none. */
+  extensions?: ReactNode;
   jobs: BackgroundJob[];
   statuses: { key: string; text: string }[];
   /** The chat's commands, by name without the slash. */
   commands?: ReadonlySet<string>;
-  onAgent: (id: string) => void;
   /** Where a job is shown. Without it, a job is only listed. */
   onJob?: (key: string) => void;
   onCommand?: (command: string) => Promise<void>;
@@ -44,24 +47,14 @@ export function RunningTray({
       setRunningCommand(null);
     }
   };
-  const runningAgents = agents.filter((a) => a.status === "running");
   const runningJobs = jobs.filter((j) => j.state !== "exited" && !j.attached);
-  const any = runningAgents.length + runningJobs.length + statuses.length > 0;
-  const now = useNow(runningAgents.length > 0 || runningJobs.length > 0);
-  if (!any) return null;
+  const now = useNow(runningJobs.length > 0);
+  if (!extensions && runningJobs.length + statuses.length === 0) return null;
   const since = (at?: number) => (at ? formatElapsed(Math.max(0, Math.floor((now - at) / 1000))) : "");
 
   return (
     <div className="running-tray" role="group" aria-label={t("Running beside the conversation")}>
-      {runningAgents.map((a) => (
-        <button key={a.id} type="button" className="running-chip is-agent" onClick={() => onAgent(a.id)} title={a.detail ? `${subagentName(a)} — ${a.detail}` : subagentName(a)}>
-          <span className="running-chip-icon"><Ring /></span>
-          <LuBot className="running-chip-kind" aria-hidden />
-          <span className="running-chip-label">{subagentName(a)}</span>
-          {a.detail && <span className="running-chip-detail">{a.detail}</span>}
-          <span className="running-chip-time">{since(a.since)}</span>
-        </button>
-      ))}
+      {extensions}
       {runningJobs.map((j) => {
         const chip = (
           <>
@@ -108,5 +101,39 @@ export function RunningTray({
         );
       })}
     </div>
+  );
+}
+
+/**
+ * A chip of an extension's in the tray (`ui.TrayChip`), drawn as the portal draws its own: what it is, what it is
+ * doing, and how long it has run, counting.
+ */
+export function TrayChip({ icon: Icon, label, detail, since, title, onClick }: {
+  icon?: ComponentType<{ "aria-hidden"?: boolean; className?: string }>;
+  label: string;
+  detail?: string;
+  since?: number;
+  title?: string;
+  onClick?: () => void;
+}) {
+  const now = useNow(since !== undefined);
+  const chip = (
+    <>
+      <span className="running-chip-icon"><Ring /></span>
+      {Icon && <Icon className="running-chip-kind" aria-hidden />}
+      <span className="running-chip-label">{label}</span>
+      {detail && <span className="running-chip-detail">{detail}</span>}
+      {since !== undefined && <span className="running-chip-time">{formatElapsed(Math.max(0, Math.floor((now - since) / 1000)))}</span>}
+    </>
+  );
+  const named = title ?? (detail ? `${label} — ${detail}` : label);
+  return onClick ? (
+    <button type="button" className="running-chip is-extension" onClick={onClick} title={named}>
+      {chip}
+    </button>
+  ) : (
+    <span className="running-chip is-extension" title={named}>
+      {chip}
+    </span>
   );
 }

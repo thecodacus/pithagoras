@@ -289,7 +289,10 @@ export interface SubagentProtocol {
   "subagent:v1:input": SubagentInput;
   /** Portal → extension, only where `start` said `stop: true`. */
   "subagent:v1:stop": SubagentStop;
-  /** Asked by the extension, answered at once, as the bus is synchronous: what the chat says its subagents run on. */
+  /**
+   * Asked by the extension, answered at once, as the bus is synchronous. The portal answers `{}`: what a chat's
+   * subagents run on is the extension's own to keep (the bundled subagent extension keeps it per chat).
+   */
   "subagent:v1:config": SubagentConfig;
 }
 
@@ -333,7 +336,7 @@ export interface SubagentStop {
 }
 
 export interface SubagentConfig {
-  /** Called at once with the chat's choice: `model` is "provider/model" or "auto", and not there when the chat has none of its own. */
+  /** Called at once: `model` is "provider/model" or "auto" where whoever answers says one, and not there otherwise (the portal says none). */
   reply(config: { model?: string }): void;
 }
 

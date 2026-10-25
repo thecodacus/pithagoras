@@ -1,0 +1,10 @@
+{
+  "name": "test-tray",
+  "version": "0.1.0",
+  "description": "The portal's tests' stand-in for an extension that draws in the running tray, in the model menu, beside a call card's head, and a conversation in a panel",
+  "type": "module",
+  "keywords": ["pi-package"],
+  "pi": {},
+  "pithagoras": { "client": "./web/client.js" },
+  "license": "Apache-2.0"
+}

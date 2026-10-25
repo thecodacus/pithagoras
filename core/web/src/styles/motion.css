@@ -185,7 +185,7 @@
 /* Panels' buttons pop as they are switched on. */
 [data-motion="fancy"] .panel-toggle.is-open { animation: fx-toggle .55s var(--spring-loose); }
 @keyframes fx-toggle { from { transform: scale(.82); } to { transform: none; } }
-[data-motion="fancy"] .sub-tab[aria-selected="true"], [data-motion="fancy"] [role="tablist"] > [role="tab"][aria-selected="true"] { animation: fx-toggle .45s var(--spring-loose); }
+[data-motion="fancy"] [role="tablist"] > [role="tab"][aria-selected="true"] { animation: fx-toggle .45s var(--spring-loose); }
 
 /* ── A picture being made: a light drifts over its frame, a sheen passes, the mark breathes (ImagePreview.tsx) ──
  * Layers that are only ever moved — transform and opacity, never a size — so that

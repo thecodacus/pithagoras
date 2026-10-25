@@ -5,6 +5,8 @@ import { confirmDialog } from "../components/ConfirmDialog";
 import { ErrorBoundary, PartFailed } from "../components/ErrorBoundary";
 import { ImageViewer, iconButton, viewerButton } from "../components/ImageViewer";
 import { Markdown } from "../components/Markdown";
+import { Ring, Shimmer } from "../components/ChatActivity";
+import { TrayChip } from "../components/RunningTray";
 import { Modal, useUnsavedDraft } from "../components/Modal";
 import { PageHeader, Stat } from "../components/PageHeader";
 import { Select } from "../components/Select";
@@ -21,6 +23,7 @@ import { tabKeys } from "../tab-keys";
 import { useFollowBottom } from "../use-follow-bottom";
 import { useNow } from "../use-now";
 import { ToolLink } from "./ToolView";
+import { Transcript } from "./Transcript";
 import { CallImagePreview } from "./call-pictures";
 import { DrawnFor } from "./slots";
 import type { Ui, ViewerPicture } from "@pithagoras/extension-api";
@@ -71,6 +74,13 @@ export const ui: Ui = {
   lazy: lazyComponent,
   /** A link on a tool call's card, as the portal's own are drawn: for `chat.tool.action`. */
   ToolLink,
+  /** A conversation drawn from its events as the chat draws its own: a subagent's run, beside the chat. */
+  Transcript,
+  /** A chip in the running tray, as the portal draws a background job there: for `chat.tray`. */
+  TrayChip,
+  /** The ring that spins beside what is running, and the text that shimmers while it goes on. */
+  Ring,
+  Shimmer,
   /** A picture being made, made or not made, as the conversation shows one a tool makes: opens the chat's viewer for a picture a call gave. */
   ImagePreview: CallImagePreview,
   /** The pictures over the whole page, to zoom and step through, as the chat shows its own. */

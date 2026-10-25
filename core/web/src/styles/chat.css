@@ -187,6 +187,8 @@ button.chat-compaction-pill:disabled { cursor: default; }
 @media (prefers-reduced-motion: reduce) { .chat-tool-badge { animation: none; } }
 /* ── Running beside the conversation: the tray in the composer ── */
 .running-tray { display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 4px 8px; }
+/* Only extensions' chips, and none of them drawing anything now: no tray. Each is in an element of its own (slots.ts). */
+.running-tray:not(:has(> :not([data-extension]:empty))) { display: none; }
 .running-chip { display: inline-flex; align-items: center; gap: 6px; max-width: min(100%, 22rem); padding: 3px 10px 3px 6px; border-radius: 999px; border: 1px solid rgb(var(--line)); background: rgb(var(--raised) / .55); font-size: 11.5px; color: rgb(var(--fg-muted)); animation: chat-pill-in .4s var(--ease-out) both; transition: background .18s, border-color .18s, color .18s; }
 button.running-chip:hover { background: rgb(var(--raised)); border-color: rgb(var(--fg-faint)); color: rgb(var(--fg)); }
 .running-chip.is-status { padding-left: 10px; color: rgb(var(--fg-subtle)); border-style: dashed; }
@@ -206,45 +208,19 @@ button.running-chip-command:hover { text-decoration: underline; }
 .running-dot { display: block; width: 7px; height: 7px; border-radius: 50%; background: #3fe1c6; box-shadow: 0 0 0 0 rgb(63 225 198 / .5); animation: running-ping 1.6s ease-out infinite; }
 @keyframes running-ping { 0% { box-shadow: 0 0 0 0 rgb(63 225 198 / .55); } 80%, 100% { box-shadow: 0 0 0 6px rgb(63 225 198 / 0); } }
 .header-live-dot { position: absolute; top: -3px; right: -3px; width: 7px; height: 7px; border-radius: 50%; background: rgb(var(--accent)); border: 1.5px solid rgb(var(--canvas)); animation: voice-pulse 1s ease-in-out infinite alternate; }
-.chat-tool-agent { display: inline-flex; align-items: center; gap: 4px; margin-left: 4px; padding: 2px 8px; border-radius: 999px; font-size: 11px; color: rgb(var(--accent)); background: rgb(var(--accent) / .08); vertical-align: middle; transition: background .18s; }
-.chat-tool-agent:hover { background: rgb(var(--accent) / .16); }
-.chat-tool-agent svg { width: 12px; height: 12px; }
+/* What an extension offers beside a card's head (`chat.tool.action` with `head`): a small pill on the same line. */
+.chat-tool-heads { display: inline-flex; align-items: center; gap: 4px; margin-left: 4px; vertical-align: middle; }
+.chat-tool-heads:not(:has(> :not(:empty))) { display: none; }
+.chat-tool-heads .chat-tool-link { padding: 2px 8px; border-radius: 999px; font-size: 11px; }
+.chat-tool-heads .chat-tool-link svg { width: 12px; height: 12px; }
 
-/* ── The subagents panel: a line of text, a dot for each agent, a stop button ── */
-.bg-jobs-empty { padding: 20px; color: #8a91a0; font-size: 12px; line-height: 1.6; }
-.bg-jobs-error { padding: 6px 14px; color: #eda6a6; font-size: 11.5px; }
-.bg-job-dot { flex-shrink: 0; width: 7px; height: 7px; border-radius: 50%; background: #6f7684; }
-.sub-tab.is-running .bg-job-dot { background: #3fe1c6; animation: running-ping 1.6s ease-out infinite; }
-.sub-tab.is-error .bg-job-dot { background: #ef8686; }
-.bg-job-stop { flex-shrink: 0; display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border-radius: 7px; font-size: 11px; color: #f0b4b4; background: rgb(239 134 134 / .1); border: 1px solid rgb(239 134 134 / .25); transition: background .15s; }
-.bg-job-stop:hover { background: rgb(239 134 134 / .2); }
-.bg-job-stop svg { width: 9px; height: 9px; }
-
-/* ── Subagents panel ── */
-.sub-panel { display: flex; flex-direction: column; height: 100%; min-height: 0; }
-.sub-tabs { display: flex; gap: 4px; padding: 8px 10px; border-bottom: 1px solid rgb(var(--line)); overflow-x: auto; flex-shrink: 0; }
-.sub-tab { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; padding: 4px 10px; border-radius: 999px; font-size: 11.5px; color: rgb(var(--fg-subtle)); transition: background .15s, color .15s; }
-.sub-tab .chat-ring { width: 11px; height: 11px; }
-.sub-tab:hover { color: rgb(var(--fg)); background: rgb(var(--fg) / .05); }
-.sub-tab[aria-selected="true"] { color: rgb(var(--fg)); background: rgb(var(--fg) / .08); }
-.sub-head { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid rgb(var(--line)); flex-shrink: 0; }
-.sub-head-icon { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 9px; background: rgb(var(--accent) / .1); color: rgb(var(--accent)); flex-shrink: 0; }
-.sub-head-icon svg { width: 15px; height: 15px; }
-.sub-head-title { font-size: 13px; font-weight: 600; color: rgb(var(--fg)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sub-head-detail { font-size: 11.5px; color: rgb(var(--fg-subtle)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sub-body { flex: 1; min-height: 0; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
-.sub-body > .tool-row + .tool-row { margin-top: -8px; }
-.sub-prompt { align-self: flex-end; max-width: 85%; padding: 7px 12px; border-radius: 14px 14px 4px 14px; background: rgb(var(--accent) / .1); font-size: 12.5px; color: rgb(var(--fg)); white-space: pre-wrap; animation: chat-enter .45s var(--ease-out) both; }
-.sub-reply { animation: chat-enter .45s var(--ease-out) both; }
-.sub-notice { font-size: 11.5px; color: rgb(var(--fg-subtle)); }
-.sub-input-note { padding: 10px 14px; border-top: 1px solid rgb(var(--line)); font-size: 11.5px; color: rgb(var(--fg-faint)); flex-shrink: 0; }
-.sub-input { padding: 10px 12px 12px; border-top: 1px solid rgb(var(--line)); flex-shrink: 0; }
-.sub-input-sent { margin: 0 4px 6px; font-size: 11px; color: rgb(var(--fg-subtle)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; animation: chat-ticker .4s var(--ease-out) both; }
-.sub-input-box { display: flex; align-items: flex-end; gap: 8px; padding: 6px 6px 6px 12px; border-radius: 16px; border: 1px solid rgb(var(--line)); background: rgb(var(--raised) / .5); transition: border-color .18s; }
-.sub-input-box:focus-within { border-color: rgb(var(--fg-faint)); }
-.sub-input-box textarea { flex: 1; resize: none; border: 0; background: transparent; outline: none; font-size: 13px; line-height: 1.5; color: rgb(var(--fg)); padding: 4px 0; }
-.sub-input-box .prompt-action { width: 30px; height: 30px; border-radius: 10px; }
-@media (prefers-reduced-motion: reduce) { .running-chip, .running-dot, .header-live-dot, .sub-prompt, .sub-reply, .sub-input-sent { animation: none; } }
+/* ── A conversation drawn beside the chat (`ui.Transcript`): a subagent's run ── */
+.side-transcript { display: flex; flex-direction: column; gap: 10px; }
+.side-transcript > .tool-row + .tool-row { margin-top: -8px; }
+.side-transcript-prompt { align-self: flex-end; max-width: 85%; padding: 7px 12px; border-radius: 14px 14px 4px 14px; background: rgb(var(--accent) / .1); font-size: 12.5px; color: rgb(var(--fg)); white-space: pre-wrap; animation: chat-enter .45s var(--ease-out) both; }
+.side-transcript-reply { animation: chat-enter .45s var(--ease-out) both; }
+.side-transcript-notice { font-size: 11.5px; color: rgb(var(--fg-subtle)); }
+@media (prefers-reduced-motion: reduce) { .running-chip, .running-dot, .header-live-dot, .side-transcript-prompt, .side-transcript-reply { animation: none; } }
 
 /* ── A chat with nothing in it yet: the mark floats, lit from behind ── */
 .chat-empty { animation: chat-enter .6s var(--ease-out) both; }

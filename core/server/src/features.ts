@@ -3,9 +3,8 @@ import { fileURLToPath } from "node:url";
 import { piAgentDir } from "./pi-settings.js";
 
 /**
- * Packages as pi's settings list them by their source, and what a chat's subagents may be told to run on. The subagent
- * tool itself is an extension (extensions/subagent), switched in Settings → Extensions like any other, with its own
- * settings.
+ * Packages as pi's settings list them by their source. The subagent tool is an extension (extensions/subagent),
+ * switched in Settings → Extensions like any other, with its own settings.
  */
 
 /** Whether pi takes a package source for a folder: the ones it knows by a prefix are not (the prefixes of its isLocalPath). */
@@ -34,6 +33,3 @@ export function localPackagePath(source: string, agentDir = piAgentDir()): strin
 export const piPackageArg = (source: string, agentDir = piAgentDir()): string =>
   isLocalSource(source) ? localPackagePath(source, agentDir) : source;
 
-/** "auto", or "provider/model". */
-export const isModelChoice = (value: unknown): value is string =>
-  typeof value === "string" && (value === "auto" || /^[^/\s]+\/\S+$/.test(value));

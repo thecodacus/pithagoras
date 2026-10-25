@@ -21,7 +21,8 @@ has, so a third-party equivalent can take their place without changing the
 portal:
 
 - the subagent tool speaks the [subagent protocol](/guide/extensions#the-subagent-protocol);
-  any extension that does is shown and steered the same way;
+  any extension that does is shown and steered the same way, in the subagent
+  extension's panel;
 - Understory is an [MCP server](/guide/mcp); any memory server can be attached
   the same way.
 
@@ -34,15 +35,36 @@ in the background once that is done: see
 
 **Settings → Extension settings → Subagents.** The `subagent` tool hands a
 self-contained task to a second pi with a context of its own and gets its answer
-back. You can watch it beside the chat (the robot button in the chat's header),
-give it instructions while it works, and stop it.
+back. You can watch it beside the chat, give it instructions while it works, and
+stop it.
 
 It is the `pithagoras-subagent` extension, which comes with the portal in its
 `extensions/subagent` folder. Install it, or switch it on and off, in
 **Settings → Extensions**: switched off, no chat has the tool, and its page is
-gone from Settings. Its server half gives every chat's pi the tool and keeps
-its settings. A portal that had the tool on before it was an extension keeps it
-on, with the settings it had (see [Upgrading](/guide/upgrading)).
+gone from Settings, and so is everything it draws beside a chat. Its server half
+gives every chat's pi the tool and keeps its settings. A portal that had the
+tool on before it was an extension keeps it on, with the settings it had (see
+[Upgrading](/guide/upgrading)).
+
+### Watching a subagent
+
+What the extension draws beside a chat, for every subagent of the
+[subagent protocol](/guide/extensions#the-subagent-protocol) — its own and
+any other extension's:
+
+- **The Subagents panel** (its button in the chat's header, there once the chat
+  has had one, with a dot while one is working): a tab for each subagent, what
+  it was asked, its replies and tool calls drawn as the chat draws its own, how
+  long it has run, a box to tell it something while it works, and **Stop**.
+- **A chip in the running tray** above the message box for each one at work,
+  which opens it in the panel.
+- **Watch** beside the tool call that started one (**Open** once it is over),
+  without opening the call's card.
+
+Code mode, a web search, a fetch and other tools that report while they run are
+not subagents: they are not in the panel or the tray, and show their output on
+their own card, as always. With the extension switched off, a chat shows none of this, and a
+subagent another extension runs over the protocol is not drawn either.
 
 ### How it runs against the agent
 
@@ -61,13 +83,16 @@ window. Closing or reloading the chat does.
 By default a subagent runs on **the model its chat is on** when it starts one —
 the one already loaded, so a local server does not have to load a second one.
 **Model** on its page names another for every chat instead, and each
-chat can say its own in its model menu (*Subagents in this chat run on*):
-the default, this chat's model, or any model there is. A choice is read when a
-subagent starts, so it needs no restart.
+chat can say its own in its model menu (*Subagents in this chat run on*, a row
+the extension adds under the models): the default, this chat's model, or any
+model there is. A choice is read when a subagent starts, so it needs no restart.
 
-Stored in the extension's own settings (`"provider/model"`, or absent for the
-chat's own); a chat's own is the portal's, and reaches the tool over the
-protocol's `subagent:v1:config`.
+Both are the extension's own: the page's in its settings (`"provider/model"`, or
+absent for the chat's own), each chat's in `chats.json` beside them, by chat id,
+removed with the chat (or at the extension's next start, where it was deleted
+while the extension was off; `/api/x/pithagoras-subagent/chats/:id/model`, see
+the [API](/reference/api)). The portal no longer keeps a chat's choice, and answers
+the protocol's `subagent:v1:config` with nothing.
 
 ### Subagents at once
 

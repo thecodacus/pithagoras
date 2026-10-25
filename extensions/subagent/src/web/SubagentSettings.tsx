@@ -1,4 +1,5 @@
 import { useEffect, useId, useState } from "react";
+import { forgetChoices } from "../chat-model";
 import { Select, msg, portal, t, tp, tx } from "../portal";
 
 /**
@@ -27,8 +28,12 @@ interface Model {
 
 const settingsUrl = () => portal.api.url("/settings");
 const readSettings = () => portal.api.json<Shown>(settingsUrl());
-const saveSettings = (change: Partial<Pick<Shown, "mode" | "maxParallel" | "model">>) =>
-  portal.api.json<Shown & { reloaded: number; waiting: number }>(settingsUrl(), { method: "PUT", body: JSON.stringify(change) });
+const saveSettings = async (change: Partial<Pick<Shown, "mode" | "maxParallel" | "model">>) => {
+  const saved = await portal.api.json<Shown & { reloaded: number; waiting: number }>(settingsUrl(), { method: "PUT", body: JSON.stringify(change) });
+  // Each chat's model menu says what its default is: asked again when next shown.
+  if (change.model !== undefined) forgetChoices();
+  return saved;
+};
 
 /** What a change did to the chats that are open. */
 function reloadNote(waiting: number): string {

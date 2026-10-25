@@ -1145,8 +1145,27 @@ Its settings were in pi's `settings.json`. The upgrade to schema 12 leaves
 `subagentMode`, `subagentMaxParallel` and `subagentModel` in the data folder,
 under `handoff/subagent`, and then takes them out of pi's file, which is kept
 as it was beside it, as `settings.json.bak`. The extension takes them up as it
-starts, into its own folder (`extension-data/pithagoras-subagent`). A chat's own
-choice in its model menu stays as it was.
+starts, into its own folder (`extension-data/pithagoras-subagent`).
+
+What each chat said its subagents run on (*Subagents in this chat run on* in its
+model menu) was the portal's, a setting for each chat. The upgrade to schema 14
+leaves those that say a model under `handoff/subagent-chats` and takes them out
+of the database; the extension takes them up as it starts, into `chats.json` in
+its folder, and keeps them from then on, each until its chat is deleted. It
+comes after the step that gives chats a parent
+([Chats can have child chats](#chats-can-have-child-chats), schema 13) and
+before the one that indexes a chat's questions
+([Sub-chats in the chat list](#sub-chats-in-the-chat-list), schema 15), and a
+portal at schema 11 takes all four in one start.
+
+The subagents beside a chat are drawn by the extension too: the Subagents panel
+and its button in the chat's header, a chip in the running tray for each one at
+work, *Watch* on the call that started one, and the row in the model menu. They
+look the same, apart from the panel's remembered place: a dock side or width
+you gave the Subagents panel starts at the default once. Switched off, the
+extension takes all of it with it, and a subagent another extension runs over
+the [subagent protocol](/guide/extensions#the-subagent-protocol) is not drawn
+either.
 
 **A copy of the tool that you installed by hand** from an old clone of the
 repository (a folder named `pithagoras-subagent` in pi's packages, without a
@@ -1160,20 +1179,32 @@ settings up.
 | --- | --- |
 | `GET`, `PUT /api/features/subagent` | `/api/x/pithagoras-subagent/settings`, `{ mode, maxParallel, model }`; the old address answers with a 307 to it |
 | `PUT /api/features/subagent` with `enabled` | Settings → Extensions: `POST /api/packages` with the `extensions/subagent` folder to install it, `PUT /api/extensions/enabled` to switch it |
-| `GET /api/sessions/:id/subagent-model` answered `{ model, default }` | `{ model }`; the default is the extension's `model` |
+| `GET`, `PUT /api/sessions/:id/subagent-model` | `/api/x/pithagoras-subagent/chats/:id/model`, `{ model, default }` (`default` the extension's `model`); the old address answers with a 307 to it |
+| `GET /api/features/flags` with `subagent: { enabled }` | Without `subagent`: whether the extension is on is in `GET /api/extensions` |
+| The portal answering `subagent:v1:config` with a chat's choice | It answers `{}`; the bundled extension keeps each chat's choice itself |
 
 ### Going back to a version before subagents were an extension
 
-The database only changed its version: put the backup the upgrade made,
-`backups/portal-v11-….db`, in as under [Going back](#going-back). The older
-version reads the subagent's settings from pi's `settings.json` again: put
+Put the backup the upgrade made in as under [Going back](#going-back):
+`backups/portal-v11-….db`, or `backups/portal-v12-….db` or
+`backups/portal-v13-….db` from a version that had the subagent as an extension
+already, which kept each chat's choice of model in the portal still. It holds
+each chat's choice as it was at the upgrade; one made since is in
+`extension-data/pithagoras-subagent/chats.json`, by chat id under `chats`, to choose again in
+the chat's model menu. A version before schema 12 reads the subagent's settings from pi's
+`settings.json` again: put
 `subagentMode`, `subagentMaxParallel` and `subagentModel` back there, from
 `settings.json.bak` where nothing was changed since, or from
 `extension-data/pithagoras-subagent/settings.json` (`mode`, `maxParallel` and
 `model`). The tool's folder stays in pi's packages, and the older version
 loads it as it did. Upgrading again takes up what pi's settings hold then: it
 leaves the settings again, and the extension takes each one that you have not
-changed on its page since it took them up before.
+changed on its page since it took them up before. A chat's choice made in the
+older version is taken up again too, where the chat has none of its own in the
+extension or still has the one the first upgrade gave it; one you chose in the
+chat's model menu since stays. A chat that is gone is not taken up.
+A choice you cleared in the older version (back to the default) does not reach
+the extension: the chat keeps the one it has until you choose again.
 
 ## Chats have a mode
 
@@ -1220,9 +1251,12 @@ you. The upgrade (schema 15) adds an index on the questions a chat asked, so
 that the list finds them without reading every event of each sub-chat. It
 changes no data; nothing is left for an extension, and nothing needs doing.
 
-**Going back.** From `portal-v13-….db` it is only putting the backup in as
-under [Going back](#going-back). An older backup also needs what
-[Chats can have child chats](#chats-can-have-child-chats) says for it.
+**Going back.** From `portal-v14-….db` it is only putting the backup in as
+under [Going back](#going-back). `portal-v13-….db`, which a portal that came
+straight from schema 13 has, also needs what
+[Subagents' section](#going-back-to-a-version-before-subagents-were-an-extension)
+says for it, and an older backup what
+[Chats can have child chats](#chats-can-have-child-chats) says.
 
 ## The guard
 

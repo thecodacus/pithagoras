@@ -48,8 +48,6 @@ export interface LaunchOptions {
   codemode?: "only";
   /** Said after the portal's rules each time the prompt is built: the chat's mode's instructions. */
   modeLines?: () => string[];
-  /** What its subagents run on, when it says: asked each time one starts. */
-  subagentModel?: () => string | undefined;
   /** The agent whose heartbeat this session is, when it is one: gives it the note tool. */
   heartbeatAgent?: string;
   /** Told the chat's model when a spoken turn is about to run on another. */
@@ -117,7 +115,6 @@ export class HostExecutor implements Executor {
       lazySets: opts.lazySets,
       codemode: opts.codemode,
       modeLines: opts.modeLines,
-      subagentModel: opts.subagentModel,
       heartbeatAgent: opts.heartbeatAgent,
       rememberChatModel: opts.rememberChatModel,
       canReloadNow: opts.canReloadNow,

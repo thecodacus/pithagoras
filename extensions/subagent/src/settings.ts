@@ -83,9 +83,8 @@ const handedOver = (): Record<string, unknown> => {
 export const said = (key: keyof Settings): boolean => kept[key] !== undefined && kept[key] !== handedOver()[key];
 
 /**
- * Saves `next`, each left out where it is the default, for its owner alone (0600), put in place at once: a reader finds
- * the old file or the new one, and a crash after leaves the new one whole, not empty. `given` is what a hand-off gave
- * with it; of what an earlier one gave, what is still kept as it was given stays marked so.
+ * Saves `next`, each left out where it is the default (writeOwn). `given` is what a hand-off gave with it; of what an
+ * earlier one gave, what is still kept as it was given stays marked so.
  */
 export function saveSettings(next: Settings, given: Partial<Settings> = {}): void {
   if (!file) throw new Error("The subagent's settings are not open");
@@ -95,15 +94,23 @@ export function saveSettings(next: Settings, given: Partial<Settings> = {}): voi
   if (next.model !== DEFAULTS.model) stored.model = next.model;
   const handed = Object.fromEntries(Object.entries({ ...handedOver(), ...given }).filter(([key, value]) => stored[key] === value));
   if (Object.keys(handed).length) stored.handedOver = handed;
+  writeOwn(file, stored);
+  kept = stored;
+}
+
+/**
+ * Writes `value` as JSON to `file`, for its owner alone (0600), put in place at once: a reader finds the old file or
+ * the new one, and a crash after leaves the new one whole, not empty.
+ */
+export function writeOwn(file: string, value: unknown): void {
   const fd = openSync(`${file}.tmp`, "w", 0o600);
   try {
-    writeFileSync(fd, JSON.stringify(stored, null, 2) + "\n");
+    writeFileSync(fd, JSON.stringify(value, null, 2) + "\n");
     fsyncSync(fd);
   } finally {
     closeSync(fd);
   }
   renameSync(`${file}.tmp`, file);
-  kept = stored;
 }
 
 /**

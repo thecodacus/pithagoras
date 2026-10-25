@@ -75,15 +75,94 @@ test("while it runs every chat's pi has the subagent tool, held to the guard's d
   assert.ok(tool, "the chat's pi has it");
   assert.deepEqual(tool.guard, { acts: ["delegate"] });
   assert.equal(tool.description, describe("background", 3));
-  assert.deepEqual((await (await fetch(`${api}/features/flags`)).json()).subagent, { enabled: true });
 
   // Settings → Extensions' switch (PUT /api/extensions/enabled), which brings the server halves in line with pi's settings.
   await portal.stop();
   assert.equal(portal.toolsIn("chat-1").size, 0, "off: nothing of it in the chat");
-  assert.deepEqual((await (await fetch(`${api}/features/flags`)).json()).subagent, { enabled: false });
   assert.equal((await fetch(`${at}/settings`)).status, 404, "nor its address");
+  assert.equal((await fetch(`${at}/chats/chat-1/model`)).status, 404, "nor the model menu's");
 
   await portal.start();
   assert.equal(portal.toolsIn("chat-1").get("subagent")?.description, describe("background", 3), "on again, with the settings it kept");
   await put(`${at}/settings`, { mode: "interrupt", maxParallel: 1 });
 });
+
+test("what a chat's subagents run on is kept for that chat at the extension's address, read as one starts, and the portal's old address sends there", async () => {
+  portal.db.createSession({ id: "chat-2", title: "t", workspace: process.env.WORKSPACE_ROOT!, executor: "host", kind: "task" });
+  const model = `${at}/chats/chat-2/model`;
+  // Nothing said: the settings' model, for every chat.
+  assert.deepEqual(await (await fetch(model)).json(), { model: null, default: "auto" });
+  const said = await put(model, { model: "llama-swap/model-b" });
+  assert.deepEqual([said.status, await said.json()], [200, { model: "llama-swap/model-b", default: "auto" }]);
+  const file = path.join(portal.data, "chats.json");
+  assert.deepEqual(JSON.parse(readFileSync(file, "utf8")), { chats: { "chat-2": "llama-swap/model-b" } });
+  assert.equal(statSync(file).mode & 0o777, 0o600);
+  // The tool asks as a subagent starts: what the chat's pi has is the extension's own, not the portal's.
+  const started = await subagentStarts("chat-2");
+  assert.equal(started, "llama-swap/model-b");
+
+  // At the portal's old address: sent on, the method and the body kept.
+  const old = `${api}/sessions/chat-2/subagent-model`;
+  const asked = await fetch(old, { redirect: "manual" });
+  assert.deepEqual([asked.status, asked.headers.get("location")], [307, "/api/x/pithagoras-subagent/chats/chat-2/model"]);
+  assert.deepEqual(await (await put(old, { model: "auto" })).json(), { model: "auto", default: "auto" });
+  assert.deepEqual(await (await fetch(old)).json(), { model: "auto", default: "auto" });
+
+  // Back to the default: nothing said, and nothing kept.
+  assert.deepEqual(await (await put(model, { model: null })).json(), { model: null, default: "auto" });
+  assert.deepEqual(JSON.parse(readFileSync(file, "utf8")), { chats: {} });
+});
+
+test("a chat's model that is no model, or a chat there is not, is refused", async () => {
+  portal.db.createSession({ id: "chat-3", title: "t", workspace: process.env.WORKSPACE_ROOT!, executor: "host", kind: "task" });
+  for (const model of ["no-slash", 3, ""]) {
+    const answer = await put(`${at}/chats/chat-3/model`, { model });
+    assert.deepEqual([answer.status, (await answer.json()).error], [400, 'model must be null, "auto" or provider/model'], JSON.stringify(model));
+  }
+  assert.equal((await fetch(`${at}/chats/nobody/model`)).status, 404);
+  assert.equal((await put(`${at}/chats/nobody/model`, { model: "auto" })).status, 404);
+  assert.deepEqual(await (await fetch(`${at}/chats/chat-3/model`)).json(), { model: null, default: "auto" });
+});
+
+test("a chat that is deleted takes what it said with it", async () => {
+  portal.db.createSession({ id: "chat-4", title: "t", workspace: process.env.WORKSPACE_ROOT!, executor: "host", kind: "task" });
+  await put(`${at}/chats/chat-4/model`, { model: "llama-swap/model-b" });
+  portal.db.deleteSession("chat-4");
+  portal.host.chatLife("deleted", "chat-4");
+  assert.deepEqual(JSON.parse(readFileSync(path.join(portal.data, "chats.json"), "utf8")), { chats: {} });
+});
+
+test("a chat deleted while the extension was off is forgotten as it starts again", async () => {
+  portal.db.createSession({ id: "chat-5", title: "t", workspace: process.env.WORKSPACE_ROOT!, executor: "host", kind: "task" });
+  portal.db.createSession({ id: "chat-6", title: "t", workspace: process.env.WORKSPACE_ROOT!, executor: "host", kind: "task" });
+  await put(`${at}/chats/chat-5/model`, { model: "auto" });
+  await put(`${at}/chats/chat-6/model`, { model: "llama-swap/model-b" });
+  await portal.stop();
+  // No `deleted` reaches the half that is off.
+  portal.db.deleteSession("chat-5");
+  await portal.start();
+  assert.deepEqual(JSON.parse(readFileSync(path.join(portal.data, "chats.json"), "utf8")), { chats: { "chat-6": "llama-swap/model-b" } });
+  await put(`${at}/chats/chat-6/model`, { model: null });
+});
+
+/**
+ * The model a subagent of `chatId` would start on, as the tool in the chat's pi works it out: over a stand-in for pi
+ * whose child is never started, as the start is said on the chat's bus with the model in it before the child runs.
+ */
+async function subagentStarts(chatId: string): Promise<string | undefined> {
+  const said: any[] = [];
+  const events = { on: () => () => {}, emit: (channel: string, data: any) => channel === "subagent:v1:start" && said.push(data) };
+  const pi = { registerTool: (tool: any) => (registered = tool), on: () => {}, events, sendMessage: () => {} };
+  let registered: any;
+  for (const { name, factory } of portal.host.hostExtensions(chatId)) if (name === "pithagoras-subagent") factory(pi);
+  // A child that cannot be started: the call fails at once, after the start was said.
+  const bin = process.env.PI_SUBAGENT_BIN;
+  process.env.PI_SUBAGENT_BIN = "/nonexistent/pi";
+  try {
+    await registered.execute("call", { task: "x" }, undefined, undefined, { cwd: process.env.WORKSPACE_ROOT, model: { provider: "p", id: "parent" } }).catch(() => undefined);
+  } finally {
+    if (bin === undefined) delete process.env.PI_SUBAGENT_BIN;
+    else process.env.PI_SUBAGENT_BIN = bin;
+  }
+  return said[0]?.detail?.replace(/^Starting on /, "");
+}

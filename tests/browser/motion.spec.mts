@@ -77,7 +77,7 @@ async function portal(page: Page, { off = false, confirms = true, places, many =
     if (p === '/api/projects') return { root: '/w', home: '/w', projects: [] };
     if (p === '/api/workspaces') return { root: '/w', workspaces: [] };
     if (p === '/api/models') return { models: [], providers: {} };
-    if (p === '/api/features/flags') return { subagent: { enabled: false }, memory: { held: false, by: null } };
+    if (p === '/api/features/flags') return { memory: { held: false, by: null } };
     if (p === '/api/settings') return { settings: {}, defaults: {}, stored: {}, executor: 'host', workspaceRoot: '/w', piSettingsPath: '/p/settings.json', compaction: { keepRecentTokens: 20000 }, contextDefault: null };
     if (p === '/api/extensions') return { extensions: [], settingsPath: '/p/settings.json' };
     if (/report/.test(p)) return { targets: [], default: null };

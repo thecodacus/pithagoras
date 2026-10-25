@@ -1,0 +1,36 @@
+/* The panel of a chat's subagents (Panel.tsx): a tab for each, its head with a stop button, its run, and a box to tell it something. */
+.sub-panel { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.sub-empty { padding: 20px; color: rgb(var(--fg-subtle)); font-size: 12px; line-height: 1.6; }
+.sub-error { padding: 6px 14px; color: rgb(var(--danger)); font-size: 11.5px; }
+
+.sub-tabs { display: flex; gap: 4px; padding: 8px 10px; border-bottom: 1px solid rgb(var(--line)); overflow-x: auto; flex-shrink: 0; }
+.sub-tab { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; padding: 4px 10px; border-radius: 999px; font-size: 11.5px; color: rgb(var(--fg-subtle)); transition: background .15s, color .15s; }
+.sub-tab .chat-ring { width: 11px; height: 11px; }
+.sub-tab:hover { color: rgb(var(--fg)); background: rgb(var(--fg) / .05); }
+.sub-tab[aria-selected="true"] { color: rgb(var(--fg)); background: rgb(var(--fg) / .08); }
+.sub-dot { flex-shrink: 0; width: 7px; height: 7px; border-radius: 50%; background: #6f7684; }
+.sub-tab.is-error .sub-dot { background: #ef8686; }
+
+.sub-head { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid rgb(var(--line)); flex-shrink: 0; }
+.sub-head-icon { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 9px; background: rgb(var(--accent) / .1); color: rgb(var(--accent)); flex-shrink: 0; }
+.sub-head-icon svg { width: 15px; height: 15px; }
+.sub-head-title { font-size: 13px; font-weight: 600; color: rgb(var(--fg)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sub-head-detail { font-size: 11.5px; color: rgb(var(--fg-subtle)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sub-stop { flex-shrink: 0; display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border-radius: 7px; font-size: 11px; color: #f0b4b4; background: rgb(239 134 134 / .1); border: 1px solid rgb(239 134 134 / .25); transition: background .15s; }
+.sub-stop:hover { background: rgb(239 134 134 / .2); }
+.sub-stop svg { width: 9px; height: 9px; }
+
+.sub-body { flex: 1; min-height: 0; overflow-y: auto; padding: 14px; }
+
+.sub-input-note { padding: 10px 14px; border-top: 1px solid rgb(var(--line)); font-size: 11.5px; color: rgb(var(--fg-faint)); flex-shrink: 0; }
+.sub-input { padding: 10px 12px 12px; border-top: 1px solid rgb(var(--line)); flex-shrink: 0; }
+.sub-input-sent { margin: 0 4px 6px; font-size: 11px; color: rgb(var(--fg-subtle)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sub-input-box { display: flex; align-items: flex-end; gap: 8px; padding: 6px 6px 6px 12px; border-radius: 16px; border: 1px solid rgb(var(--line)); background: rgb(var(--raised) / .5); transition: border-color .18s; }
+.sub-input-box:focus-within { border-color: rgb(var(--fg-faint)); }
+.sub-input-box textarea { flex: 1; resize: none; border: 0; background: transparent; outline: none; font-size: 13px; line-height: 1.5; color: rgb(var(--fg)); padding: 4px 0; }
+/* As the chat's own send button. */
+.sub-send { display: grid; place-items: center; width: 30px; height: 30px; flex-shrink: 0; border-radius: 10px; background: rgb(var(--fg)); color: rgb(var(--canvas)); border: 1px solid rgb(var(--fg) / .1); transition: background .18s, transform .18s; }
+.sub-send:hover { background: rgb(var(--fg) / .85); }
+.sub-send:active { transform: scale(.94); }
+.sub-send:disabled { background: rgb(var(--fg) / .075); color: rgb(var(--fg-faint)); border-color: transparent; cursor: default; }
+.sub-send svg { width: 17px; height: 17px; }

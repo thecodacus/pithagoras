@@ -1,18 +1,54 @@
-import { Suspense } from "react";
-import type { Portal } from "@pithagoras/extension-api";
+import { Suspense, useEffect } from "react";
+import type { ChatFeed, ChatProps, Portal, SlotMap } from "@pithagoras/extension-api";
+import { fetchChoice } from "./chat-model";
+import { AgentIcon, AgentsIcon } from "./icons";
+import { ModelRow } from "./ModelRow";
+import { nameOf, SubagentPanel, useAgents } from "./Panel";
 import { msg, portal, setPortal, t } from "./portal";
+import { agentsOf } from "./subagents";
 import { de } from "./de";
+import "./client.css";
 
 /**
- * The subagent extension's browser half: its page in Settings, where how a subagent runs against the agent, the model
- * it runs on and how many run at once are set (web/SubagentSettings.tsx). Its texts in German are in de.ts.
+ * The subagent extension's browser half. Beside a chat: the panel of its subagents, with its button in the chat's
+ * header while it has any; a chip in the running tray for each one at work; Watch on the call that started one; and
+ * the row in the chat's model menu that says what its subagents run on. Every subagent of the protocol is drawn, this
+ * extension's and any other's. In Settings, its page, where how a subagent runs against the agent, the model it runs
+ * on and how many run at once are set (web/SubagentSettings.tsx). Its texts in German are in de.ts.
  */
 export default function subagent(given: Portal) {
   setPortal(given);
   portal.locale.add("de", de);
+
+  // The panel goes by "agents" for anything in the page to open it by (`portal.panels.open("agents", { id })`).
+  portal.slots.register("chat.panel", {
+    id: "agents",
+    name: "agents",
+    title: msg("Subagents"),
+    icon: AgentsIcon,
+    component: SubagentPanel,
+    useButton: ({ chat }) => {
+      portal.locale.use();
+      const shown = portal.chats.use(chat.id, (feed: ChatFeed) => {
+        const agents = agentsOf(chat.id, feed);
+        return { any: agents.length > 0, live: agents.some((a) => a.status === "running") };
+      });
+      // A chat that never had one has no button for it.
+      return { hidden: !shown.any, live: shown.live, title: t("The agents working beside this one") };
+    },
+  });
+
+  portal.slots.register("chat.tray", { id: "running", component: Running });
+
+  // Beside the card's head, so it is there without opening the card: on any call that started a subagent.
+  portal.slots.register("chat.tool.action", { id: "watch", head: true, component: Watch });
+
+  portal.slots.register("chat.model.menu", { id: "model", component: ModelRow });
+  // What the chat's subagents run on, fetched with the chat: the model menu opens with it already there.
+  portal.slots.register("chat.background", { id: "model", component: FetchChoice });
+
   // Only fetched once it is opened.
   const Settings = portal.ui.lazy(() => import("./web/SubagentSettings"), "SubagentSettings");
-
   portal.slots.register("settings.page", {
     id: "subagent",
     title: msg("Subagents"),
@@ -31,14 +67,32 @@ export default function subagent(given: Portal) {
   });
 }
 
-/** Its mark in Settings' list: one agent handing on to two. Drawn here, as the extension brings no icons of its own. */
-function AgentsIcon() {
+/** A chip in the running tray for each subagent at work, which opens it in the panel. */
+function Running({ chat, panels }: ChatProps) {
+  portal.locale.use();
+  const running = useAgents(chat.id).filter((a) => a.status === "running");
   return (
-    <svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <circle cx="6" cy="6" r="3" />
-      <circle cx="18" cy="6" r="3" />
-      <circle cx="18" cy="18" r="3" />
-      <path d="M9 6h6M8.1 8.1l7.8 7.8" />
-    </svg>
+    <>
+      {running.map((a) => (
+        <portal.ui.TrayChip key={a.id} icon={AgentIcon} label={nameOf(a)} detail={a.detail} since={a.since} onClick={() => panels.open("agents", { id: a.id })} />
+      ))}
+    </>
   );
+}
+
+/** Watch, or Open once it is over: the subagent a call started, in the panel. Nothing on any other call. */
+function Watch({ call, chat, panels }: SlotMap["chat.tool.action"]["props"]) {
+  portal.locale.use();
+  const id = portal.chats.use(chat?.id ?? "", (feed: ChatFeed) => (chat && call.callId ? agentsOf(chat.id, feed).find((a) => a.toolCallId === call.callId)?.id : undefined));
+  if (!id) return null;
+  return (
+    <portal.ui.ToolLink icon={AgentIcon} onClick={() => panels.open("agents", { id })}>
+      {call.status === "running" ? t("Watch") : t("Open")}
+    </portal.ui.ToolLink>
+  );
+}
+
+function FetchChoice({ chat }: ChatProps) {
+  useEffect(() => fetchChoice(chat.id), [chat.id]);
+  return null;
 }

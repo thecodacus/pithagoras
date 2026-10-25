@@ -3,10 +3,10 @@ import { slotEntries, useSlot } from "./slots";
 
 /**
  * The panels beside the conversation on screen, opened and closed by name
- * from anywhere in the page: the portal's own ("agents") and an
- * extension's ("<package>/<id>", or the `name` its entry gave it, as the
- * terminal's is "terminal", Git's "git", Files' "files" and Canvases'
- * "canvas": the chat resolves it, see Chat.tsx).
+ * from anywhere in the page: an extension's, by "<package>/<id>" or by the
+ * `name` its entry gave it, as the terminal's is "terminal", Git's "git",
+ * Files' "files", Canvases' "canvas" and the subagents' "agents" (the chat
+ * resolves it, see Chat.tsx).
  *
  * What is handed over with `open` is the panel's to read: a path for Files to
  * show, anything an extension's panel says it takes.
@@ -26,10 +26,7 @@ const onScreen = (): ChatPanels => {
   return current;
 };
 
-/** The portal's own panels' names: see Chat.tsx. */
-const OWN = ["agents"];
-const named = (entries: ReturnType<typeof slotEntries<"chat.panel">>, key: string) =>
-  OWN.includes(key) || entries.some((entry) => entry.key === key || entry.name === key);
+const named = (entries: ReturnType<typeof slotEntries<"chat.panel">>, key: string) => entries.some((entry) => entry.key === key || entry.name === key);
 
 export const panels: PanelController = {
   isOpen: (key) => current?.isOpen(key) ?? false,
