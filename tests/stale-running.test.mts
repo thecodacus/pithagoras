@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildTranscript } from '../core/web/src/transcript.ts';
-import { subagents } from '../core/web/src/subagents.ts';
+import { subagents } from '../extensions/subagent/src/subagents.ts';
 import { shellOutcome } from '../core/web/src/components/ChatActivity.tsx';
 
 const ev = (seq: number, type: string, payload: any = {}) => ({ seq, at: seq * 1000, type, payload });

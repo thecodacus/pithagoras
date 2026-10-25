@@ -72,7 +72,7 @@ test("while an extension holds the memory, MEMORY.md is not read and its rule is
   // Someone who is not the person never read MEMORY.md, and is not told of a memory that replaces it.
   assert.deepEqual(memoryRule(nova.home, "guest"), []);
   assert.deepEqual({ memory: agentFileStatus(nova.home).memory, by: agentFileStatus(nova.home).by }, { memory: "extension", by: "Keeper" });
-  assert.deepEqual(await flags(), { subagent: { enabled: false }, memory: { held: true, by: "Keeper" } });
+  assert.deepEqual(await flags(), { memory: { held: true, by: "Keeper" } });
 
   globalThis.holding.keeper = false;
   assert.deepEqual(names(nova.home), ["MEMORY.md", "PrimaryUser.md", "SOUL.md"]);

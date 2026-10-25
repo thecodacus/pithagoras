@@ -93,7 +93,8 @@ test('the protocol is the same in the portal, in the typed API and in the subage
   assert.ok(said,`${channel} is in the portal's header`);
   assert.deepEqual(said![1].split(',').map(f=>f.trim().replace(/:.*$/,'').replace(/\(.*$/,'')),want,channel);
  }
- // The extension's: the channels it speaks on, by their names.
+ // The extension's: the channels it speaks on, by their names. All but the config, which it does not ask: it keeps
+ // each chat's model itself, and the portal answers nothing there.
  const ext=fs.readFileSync('extensions/subagent/src/pi.ts','utf8');
- assert.deepEqual([...ext.matchAll(/"(subagent:v1:\w+)" satisfies keyof SubagentProtocol/g)].map(m=>m[1]).sort(),Object.keys(typed).sort(),'the extension\'s channels');
+ assert.deepEqual([...ext.matchAll(/"(subagent:v1:\w+)" satisfies keyof SubagentProtocol/g)].map(m=>m[1]).sort(),Object.keys(typed).filter(c=>c!=='subagent:v1:config').sort(),'the extension\'s channels');
 });

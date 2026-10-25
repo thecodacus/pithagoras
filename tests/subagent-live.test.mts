@@ -2,7 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {LiveEvents} from '../core/server/src/live-events.ts';
 import {buildTranscript} from '../core/web/src/transcript.ts';
-import {stableSubagents, subagents} from '../core/web/src/subagents.ts';
+import {stableSubagents, subagents} from '../extensions/subagent/src/subagents.ts';
 import {markOf, withLiveUi} from '../core/web/src/use-background.ts';
 function stream(){let seq=0;const stored:any[]=[];const live=new LiveEvents((session:string,type:string,payload:any)=>{const row={seq:++seq,session_id:session,type,payload:JSON.stringify(payload),created_at:''};stored.push(row);return row;});return {live,stored};}
 const delta=(id:string,type:string,text:string)=>({type:'portal_subagent_live',op:'event',id,event:{type:'message_update',assistantMessageEvent:{type,delta:text}}});
