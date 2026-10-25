@@ -41,6 +41,10 @@ move, Enter picks one, Esc closes the menu. With no extension page there is no
 group and no button. [Media](/guide/media) is one of them, listed while an
 image or a video endpoint is set up.
 
+A chat that an extension gave sub-chats has them under its row, behind a line
+that opens and shuts them, rather than among the chats
+([Sub-chats](/guide/sessions#sub-chats)).
+
 ## Theme
 
 **Settings → This browser → Theme** is light, dark or **System**, the default,
