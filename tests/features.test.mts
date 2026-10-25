@@ -1,47 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import path from "node:path";
 import { inProcessHome } from "./helpers.mts";
 
 inProcessHome("pitha-features-");
-
-const { SUBAGENT_PACKAGE, bundledSubagentDir, findSubagent, subagentModeOf, subagentLimitOf } = await import("../core/server/src/features.ts");
-
-test("the subagent tool ships with the portal, as a pi package", () => {
-  const dir = bundledSubagentDir();
-  assert.ok(dir, "found from source");
-  assert.equal(path.basename(dir!), "subagent");
-});
-
-test("the subagent tool is found in pi's packages by its folder, or by its name from anywhere else", () => {
-  const bundled = "/app/extensions/subagent";
-  const names: Record<string, string> = { "/src/clone/extensions/subagent": SUBAGENT_PACKAGE, "/x/other": "something-else" };
-  const nameOf = (dir: string) => names[dir];
-  assert.equal(findSubagent(["npm:pi-mcp-adapter", "/x/other"], "/home/.pi/agent", bundled, nameOf), undefined);
-  assert.deepEqual(findSubagent(["npm:x", bundled], "/home/.pi/agent", bundled, nameOf), { source: bundled, enabled: true });
-  // Relative to the settings file's folder, as pi reads it.
-  assert.deepEqual(findSubagent(["../../../app/extensions/subagent"], "/home/.pi/agent", bundled, nameOf), {
-    source: "../../../app/extensions/subagent",
-    enabled: true,
-  });
-  assert.deepEqual(findSubagent(["/src/clone/extensions/subagent"], "/home/.pi/agent", bundled, nameOf)?.source, "/src/clone/extensions/subagent");
-  // Switched off in Extensions: there, and off.
-  const off = { source: bundled, extensions: [], skills: [], prompts: [], themes: [] };
-  assert.deepEqual(findSubagent([off], "/home/.pi/agent", bundled, nameOf), { source: bundled, enabled: false });
-});
-
-test("a subagent interrupts unless pi's settings say background", () => {
-  assert.equal(subagentModeOf({}), "interrupt");
-  assert.equal(subagentModeOf({ subagentMode: "sideways" }), "interrupt");
-  assert.equal(subagentModeOf({ subagentMode: "background" }), "background");
-});
-
-test("one subagent at a time unless pi's settings allow more, as the tool reads it", () => {
-  assert.equal(subagentLimitOf({}), 1);
-  assert.equal(subagentLimitOf({ subagentMaxParallel: 4 }), 4);
-  assert.equal(subagentLimitOf({ subagentMaxParallel: 2.5 }), 1);
-  assert.equal(subagentLimitOf({ subagentMaxParallel: 40 }), 16);
-});
 
 test("background subagents the last server left running are found by their start without an end", async () => {
   const { appendEvent, openDetachedSubagents } = await import("../core/server/src/db.ts");

@@ -38,17 +38,19 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { createInterface } from "node:readline";
+import type { SubagentProtocol } from "@pithagoras/extension-api/server";
 import { MAX_PARALLEL, type Mode, type Settings } from "./settings";
 
 export { MAX_PARALLEL, type Mode };
 
-const START = "subagent:v1:start";
-const EVENT = "subagent:v1:event";
-const END = "subagent:v1:end";
-const INPUT = "subagent:v1:input";
-const STOP = "subagent:v1:stop";
+// The protocol's channels, as @pithagoras/extension-api/server types them: names as text, as the portal has them too.
+const START = "subagent:v1:start" satisfies keyof SubagentProtocol;
+const EVENT = "subagent:v1:event" satisfies keyof SubagentProtocol;
+const END = "subagent:v1:end" satisfies keyof SubagentProtocol;
+const INPUT = "subagent:v1:input" satisfies keyof SubagentProtocol;
+const STOP = "subagent:v1:stop" satisfies keyof SubagentProtocol;
 /** Asked by the extension, answered at once by whoever runs it: `{ reply({ model? }) }`. */
-const CONFIG = "subagent:v1:config";
+const CONFIG = "subagent:v1:config" satisfies keyof SubagentProtocol;
 
 /** "provider/model" as a model to hand the child, or undefined for pi's own default. */
 export function parseModel(choice: unknown): { provider: string; id: string } | undefined {
@@ -170,6 +172,8 @@ export default function subagentTool(pi: any, settings: () => Settings) {
   // than the settings say.
   const { mode, maxParallel: limit } = settings();
   const liveLimit = () => settings().maxParallel;
+  /** Says something on the chat's bus, as the protocol has it. */
+  const say = <C extends keyof SubagentProtocol>(channel: C, data: SubagentProtocol[C]) => pi.events.emit(channel, data);
   // Background children still running, stopped with the session that started them.
   const detached = new Set<Run>();
   // Set once the session is over: what still waits for a slot does not start.
@@ -185,7 +189,7 @@ export default function subagentTool(pi: any, settings: () => Settings) {
   /** What the chat says its subagents run on, when something answers for it. */
   function chatChoice(): string | undefined {
     let said: string | undefined;
-    pi.events.emit(CONFIG, { reply: (config: any) => typeof config?.model === "string" && (said = config.model) });
+    say(CONFIG, { reply: (config) => void (typeof config?.model === "string" && (said = config.model)) });
     return said;
   }
 
@@ -225,7 +229,7 @@ export default function subagentTool(pi: any, settings: () => Settings) {
       pi.events.on(INPUT, (d: any) => d?.id === id && typeof d.text === "string" && send({ type: "steer", message: d.text })),
       pi.events.on(STOP, (d: any) => d?.id === id && stop()),
     ];
-    pi.events.emit(START, {
+    say(START, {
       id,
       label,
       toolCallId,
@@ -253,7 +257,7 @@ export default function subagentTool(pi: any, settings: () => Settings) {
           }
           return;
         }
-        pi.events.emit(EVENT, { id, event });
+        say(EVENT, { id, event });
         if (event.type === "tool_execution_start") {
           steps++;
           onUpdate?.({ content: [{ type: "text", text: answer }], details: { phase: `${event.toolName} (${steps} steps)` } });
@@ -275,7 +279,7 @@ export default function subagentTool(pi: any, settings: () => Settings) {
     const finished = status.then((status) => {
       child.kill();
       off.forEach((f: () => void) => f());
-      pi.events.emit(END, { id, status, ...(failure ? { error: failure } : {}) });
+      say(END, { id, status, ...(failure ? { error: failure } : {}) });
       return { status, answer, ...(failure ? { failure } : {}) };
     });
     const end = () => {
@@ -321,7 +325,7 @@ export default function subagentTool(pi: any, settings: () => Settings) {
               wakeAll();
             })
           : () => {};
-        if (waiting) pi.events.emit(START, { id, label, toolCallId, input: true, stop: true, detail: "Waiting for a free slot", detached: true });
+        if (waiting) say(START, { id, label, toolCallId, input: true, stop: true, detail: "Waiting for a free slot", detached: true });
         /** What the parent is told when it is over: its answer starts a turn; a stop waits for the person. */
         const tell = (status: Status, said: string) => {
           try {
@@ -340,7 +344,7 @@ export default function subagentTool(pi: any, settings: () => Settings) {
             release = await takeSlot(liveLimit, () => shutDown || cancelled, () => {});
             offWait();
             if (!release) {
-              if (waiting) pi.events.emit(END, { id, status: "stopped" });
+              if (waiting) say(END, { id, status: "stopped" });
               if (cancelled && !shutDown) tell("stopped", `Subagent "${label}" was stopped before it started.`);
               return;
             }
@@ -358,7 +362,7 @@ export default function subagentTool(pi: any, settings: () => Settings) {
           } catch (e) {
             // Whatever went wrong, the slot is given back below and the parent is told.
             const why = (e as Error)?.message ?? String(e);
-            if (waiting && !run) pi.events.emit(END, { id, status: "error", error: why });
+            if (waiting && !run) say(END, { id, status: "error", error: why });
             tell("error", `Subagent "${label}" failed: ${why}`);
           } finally {
             offWait();

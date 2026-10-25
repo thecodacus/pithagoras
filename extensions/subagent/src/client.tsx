@@ -20,6 +20,7 @@ export default function subagent(given: Portal) {
     search: [
       {
         title: msg("Subagents"),
+        section: msg("Subagents"),
         words: "subagent subagents parallel background interrupt model at once teilagenten parallel hintergrund",
       },
     ],

@@ -1,5 +1,5 @@
 import Database from "better-sqlite3";
-import { inTurnWithSettings, piSetting, readPiSettings, readProjectPiSettings } from "./pi-settings.js";
+import { inTurnWithSettings, piSetting, readPiSettings, readProjectPiSettings, updatePiSettingsNow } from "./pi-settings.js";
 import { packageIndex, packageKey, packageLabel, toolAvailability } from "./extension-switch.js";
 import { GUARD_RULE_NAMES } from "./pi/guard-rule-names.js";
 import { BUILT_IN_SET, PI_BUILT_IN_TOOLS, defaultsFor, lazyToolEntry, mcpServerOf, toolEnabled, toolSetOf } from "./tool-policy.js";
@@ -939,6 +939,35 @@ function handOffUnderstory(d: Database.Database): void {
   d.prepare(`DELETE FROM settings WHERE key IN (${UNDERSTORY_SETTINGS.map(() => "?").join(", ")})`).run(...UNDERSTORY_SETTINGS);
 }
 
+/** What the subagent tool read from pi's settings.json while it was a pi package alone. Written out here, as an upgrade step does not change with the code after it. */
+const SUBAGENT_PI_KEYS = ["subagentMode", "subagentMaxParallel", "subagentModel"];
+
+/**
+ * The subagent tool is an extension with a server half now (extensions/subagent), with settings of its own. What it
+ * read from pi's settings.json is left for it in the data folder (see handoff.ts), and the extension takes it up when it
+ * starts, which may be long after this, or never: the three keys as pi's settings held them, each null where they held
+ * none. They leave pi's settings only once they are left, and a try that fails keeps them for the next start, as it does
+ * a settings file that cannot be read. They were never in the database, so its backup does not hold them:
+ * docs/guide/upgrading.md says how to put them back to go back.
+ */
+function handOffSubagent(): void {
+  const pi = readPiSettings();
+  if (!SUBAGENT_PI_KEYS.some((key) => pi[key] !== undefined)) return;
+  try {
+    const kept = Object.fromEntries(SUBAGENT_PI_KEYS.map((key) => [key, pi[key] ?? null]));
+    leaveHandoff("subagent", (dir) => {
+      // Written last, and anew on each try, from the settings as they are.
+      writeFileAtomic(path.join(dir, "settings.json"), JSON.stringify(kept), 0o600);
+      writeFileAtomic(path.join(dir, "handoff.json"), JSON.stringify({ format: 1, name: "subagent", schema: 12, made: new Date().toISOString() }), 0o600);
+    });
+    updatePiSettingsNow((all) => {
+      for (const key of SUBAGENT_PI_KEYS) delete all[key];
+    });
+  } catch (e) {
+    console.warn(`[portal] the subagent settings in pi's settings.json could not be left for its extension, and are kept for the next start: ${(e as Error).message}`);
+  }
+}
+
 /**
  * A set of the portal's own tools that are an extension's now, whose are filed
  * under its package's name: a lazy mark on the set, and a name somebody gave
@@ -1083,6 +1112,7 @@ function migrate(d: Database.Database): void {
   handOffBrowser(d);
   handOffVoice(d);
   handOffUnderstory(d);
+  handOffSubagent();
   // Whether a project does without the agent's memory was named for what held it, Understory, until schema 10:
   // anything may hold it now (portal.memory.hold).
   const agentLinkCols = (d.prepare("PRAGMA table_info(project_agent)").all() as { name: string }[]).map((c) => c.name);

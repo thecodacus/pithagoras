@@ -72,3 +72,28 @@ test('a process going ends every subagent it still ran, each once',()=>{
  b.emit('subagent:v1:end',{id:'r',status:'stopped'});
  assert.equal(out.filter(e=>e.op==='end').length,2);
 });
+
+test('the protocol is the same in the portal, in the typed API and in the subagent extension: each channel, and what is sent on it',async()=>{
+ const fs=await import('node:fs');
+ const ts=(await import('typescript')).default;
+ const core=await import('../core/server/src/subagent-protocol.ts');
+ // The typed API: each channel of SubagentProtocol, with the fields of the interface it names, `?` on those it may leave out.
+ const file='packages/extension-api/server.d.ts';
+ const api=ts.createSourceFile(file,fs.readFileSync(file,'utf8'),ts.ScriptTarget.Latest,true);
+ const interfaces=new Map<string,ts.InterfaceDeclaration>();
+ api.forEachChild(n=>{if(ts.isInterfaceDeclaration(n))interfaces.set(n.name.text,n);});
+ const fields=(name:string)=>interfaces.get(name)!.members.map(m=>`${(m.name as ts.Identifier).text}${m.questionToken?'?':''}`);
+ const typed=Object.fromEntries(interfaces.get('SubagentProtocol')!.members.map(m=>[(m.name as ts.StringLiteral).text,fields(((m as ts.PropertySignature).type as ts.TypeReferenceNode).typeName.getText(api))]));
+ // The portal's: its constants, and the payloads its header says, as `{ id, label, toolCallId?, … }`.
+ const constants=Object.entries(core).filter(([k])=>k.startsWith('SUBAGENT_')).map(([,v])=>v as string).sort();
+ assert.deepEqual(constants,Object.keys(typed).sort(),'the portal\'s channels');
+ const header=fs.readFileSync('core/server/src/subagent-protocol.ts','utf8');
+ for(const [channel,want] of Object.entries(typed)){
+  const said=new RegExp(`\\* +${channel} +\\{ ([^}]*) \\}`).exec(header);
+  assert.ok(said,`${channel} is in the portal's header`);
+  assert.deepEqual(said![1].split(',').map(f=>f.trim().replace(/:.*$/,'').replace(/\(.*$/,'')),want,channel);
+ }
+ // The extension's: the channels it speaks on, by their names.
+ const ext=fs.readFileSync('extensions/subagent/src/pi.ts','utf8');
+ assert.deepEqual([...ext.matchAll(/"(subagent:v1:\w+)" satisfies keyof SubagentProtocol/g)].map(m=>m[1]).sort(),Object.keys(typed).sort(),'the extension\'s channels');
+});
