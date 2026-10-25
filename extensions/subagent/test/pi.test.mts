@@ -15,7 +15,7 @@ const sleep=(ms:number)=>new Promise(r=>setTimeout(r,ms));
 /** The portal's child chats, as far as the tool can tell: each made one is a child of `parent`, run as `play` says. */
 function fakeChats(){
  const chats=new Map<string,any>();
- const created:any[]=[],prompts:{id:string,message:string,options:any}[]=[],aborted:string[]=[],removed:string[]=[];
+ const created:any[]=[],tried:any[]=[],prompts:{id:string,message:string,options:any}[]=[],aborted:string[]=[],removed:string[]=[];
  const hearing=new Map<string,Set<(e:any)=>void>>();
  const tell=(id:string,e:any)=>hearing.get(id)?.forEach(h=>h(e));
  const say=(id:string,text:string)=>tell(id,{type:'message_end',message:{role:'assistant',content:[{type:'text',text}]}});
@@ -24,7 +24,9 @@ function fakeChats(){
   get:(id:string)=>chats.get(id)&&{...chats.get(id)},
   children:(parent:string)=>[...chats.values()].filter(c=>c.parent===parent).map(c=>({...c})),
   create:(o:any)=>{
+   tried.push(o);
    if(o.parent==='gone')throw new TypeError('There is no chat gone');
+   if(o.mode==='custom/gone')throw new TypeError('There is no mode "custom/gone" for this child chat');
    const c={id:`child-${++n}`,title:o.title,workspace:'/w',status:'idle',parent:o.parent,listed:o.listed!==false};
    chats.set(c.id,c);created.push(o);return {...c};
   },
@@ -51,7 +53,7 @@ function fakeChats(){
   remove:async(id:string)=>{removed.push(id);chats.delete(id);},
  };
  const hear=(id:string,h:(e:any)=>void)=>{const set=hearing.get(id)??new Set();hearing.set(id,set);set.add(h);return()=>{set.delete(h);};};
- return {api,hear,chats,created,prompts,aborted,removed};
+ return {api,hear,chats,created,tried,prompts,aborted,removed};
 }
 // The extension's settings, as its store hands them over: interrupt unless they say otherwise.
 let current:Settings=settingsOf({});
@@ -526,4 +528,61 @@ test('a wait is said in the units a person uses',()=>{
  assert.equal(waited(12_000),'12 s');
  assert.equal(waited(180_000),'3 min');
  assert.equal(waited(185_000),'3 min 5 s');
+});
+
+test('a child chat is asked for in its chat\'s mode, or in Standard when the setting says so; a chat in no mode asks for none',async()=>{
+ play='retry';
+ const f=fakeChats();f.chats.set('parent',{id:'parent',title:'P',status:'idle',mode:'code'});f.chats.set('plain',{id:'plain',title:'P',status:'idle'});
+ mode(undefined,{});
+ await load(f,'parent').tool.execute('a',{task:'x'},undefined,undefined,{});
+ await load(f,'plain').tool.execute('b',{task:'x'},undefined,undefined,{});
+ assert.deepEqual(f.created.map(o=>[o.parent,o.mode]),[['parent','code'],['plain',undefined]],'on unless the settings say');
+ assert.ok(!('mode' in f.created[1]),'none asked for, so the portal\'s own default');
+ mode(undefined,{inheritMode:false});
+ await load(f,'parent').tool.execute('c',{task:'x'},undefined,undefined,{});
+ await load(f,'plain').tool.execute('d',{task:'x'},undefined,undefined,{});
+ assert.deepEqual(f.created.slice(2).map(o=>[o.parent,o.mode]),[['parent','standard'],['plain',undefined]]);
+ mode();
+});
+test('the setting is read as each subagent starts, so a change needs no reload of the chat',async()=>{
+ play='retry';mode();
+ const f=fakeChats();f.chats.set('parent',{id:'parent',title:'P',status:'idle',mode:'code'});
+ const {tool}=load(f);
+ await tool.execute('a',{task:'x'},undefined,undefined,{});
+ mode(undefined,{inheritMode:false});
+ await tool.execute('b',{task:'x'},undefined,undefined,{});
+ assert.deepEqual(f.created.map(o=>o.mode),['code','standard']);
+ mode();
+});
+test('a mode the portal will not put a child in is worked in as Standard, and the result says so, in both ways to run',async()=>{
+ play='retry';mode();
+ const f=fakeChats();f.chats.set('parent',{id:'parent',title:'P',status:'idle',mode:'custom/gone'});
+ const {tool,starts}=load(f);
+ const result=await tool.execute('a',{task:'x'},undefined,undefined,{});
+ assert.deepEqual(f.tried.map(o=>o.mode),['custom/gone','standard']);
+ assert.deepEqual(f.created.map(o=>o.mode),['standard']);
+ assert.equal(result.content[0].text,'the whole answer\n\n(Subagent child-1. The chat\'s mode, custom/gone, is not there for it, so it works in Standard mode.)');
+ assert.equal(starts.length,1);
+ mode('background');
+ const queued=await load(f).tool.execute('b',{task:'x'},undefined,undefined,{});
+ assert.match(queued.content[0].text,/Subagent child-2\. The chat's mode, custom\/gone, is not there for it, so it works in Standard mode\.$/);
+ await until(()=>f.prompts.length===2);
+ mode();
+});
+test('a refusal that is not about the mode is not hidden by the fall back to Standard',async()=>{
+ play='retry';mode();
+ const f=fakeChats();f.chats.set('gone',{id:'gone',title:'P',status:'idle',mode:'code'});
+ await assert.rejects(load(f,'gone').tool.execute('a',{task:'x'},undefined,undefined,{}),/There is no chat gone/);
+ assert.deepEqual(f.tried.map(o=>o.mode),['code','standard'],'tried again in Standard, and refused again');
+ assert.equal(f.created.length,0);
+});
+test('a kept subagent continued keeps the mode it was made in: the setting is not asked again',async()=>{
+ play='retry';mode(undefined,{keep:true});
+ const f=fakeChats();f.chats.set('parent',{id:'parent',title:'P',status:'idle',mode:'code'});
+ const {tool}=load(f);
+ await tool.execute('a',{task:'x',label:'K'},undefined,undefined,{});
+ mode(undefined,{keep:true,inheritMode:false});
+ await tool.execute('b',{task:'y',id:'child-1'},undefined,undefined,{});
+ assert.deepEqual(f.tried.map(o=>o.mode),['code'],'no second child chat, so no second mode asked');
+ mode();
 });

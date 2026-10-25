@@ -36,7 +36,8 @@ in the background once that is done: see
 **Settings → Extension settings → Subagents.** The `subagent` tool hands a
 self-contained task to a second agent with a context of its own and gets its
 answer back. The subagent works in a **chat of its own**, a child chat of the
-chat that asked: in the same folder, in the chat's mode, with its tools and its
+chat that asked: in the same folder, in the chat's mode (see *The mode a subagent
+works in*), with its tools and its
 model, under the [guard](/guide/security) and the [sandbox](/guide/sandbox) as
 the person the chat works for, and with a transcript of its own. You can watch
 it beside the chat, give it instructions while it works, open its chat, and stop
@@ -113,6 +114,29 @@ Either way a subagent's chat is deleted with its chat. With it on, the tool's
 description says that a finished one can be continued, and the tool takes an
 `id`: about 19 tokens more on every request.
 
+### The mode a subagent works in
+
+**Subagents work in the chat's mode**, on by default: a subagent's chat is made
+in the [mode](/guide/sessions#modes) of the chat it works for, with that
+mode's tools and instructions. In a chat in **Code mode** the subagent works
+through the code tool as well, in a mode you made it has the mode's tool layer
+and instructions, and in an extension's mode it is in that mode. Off, every
+subagent works in Standard mode, with the tools Standard gives, whatever mode its
+chat is in; the tools you switched off in the chat itself still hold for it.
+
+- A subagent that is **kept** keeps the mode it was made in when it is continued
+  (a chat's mode is fixed once it has said something), so a change of the
+  setting reaches the subagents made after it.
+- Where the chat's mode is not there for a child — the extension that offers it
+  is off, or the mode you made was deleted — the subagent works in Standard
+  mode, and its result says so ("The chat's mode, custom/x, is not there for it,
+  so it works in Standard mode.").
+- A mode that asks you first (an extension's) is given to a subagent because its
+  chat is in it already.
+
+The setting is read when a subagent starts, so it needs no restart and the chats
+are not reloaded.
+
 ### Which model a subagent runs on
 
 By default a subagent runs on **the model its chat is on** when it starts one —
@@ -140,8 +164,8 @@ chat has been closed or reloaded. A subagent holds its slot while it waits for
 you to answer a question in its chat, because its model is still the one in use:
 raise the limit if that is in your way.
 
-The mode, the limit, the model and whether chats are kept are kept in the
-extension's own folder of the portal's data folder
+The mode, the limit, the model, whether chats are kept and whether subagents
+work in the chat's mode are kept in the extension's own folder of the portal's data folder
 (`extension-data/pithagoras-subagent/settings.json`), each left out while it is
 the default. Before it was an extension, the tool read
 them from pi's `settings.json` (`subagentMode`, `subagentMaxParallel`,

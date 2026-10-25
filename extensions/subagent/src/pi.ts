@@ -31,6 +31,12 @@
  * its id alone and is not continued, though its transcript stays to be read
  * beside the chat. Either goes when its chat is deleted.
  *
+ * The mode a child works in: its chat's (code mode, a mode the person made, an
+ * extension's), with that mode's tools and instructions, unless the settings
+ * say Standard ("Subagents work in the chat's mode", on by default). Where the
+ * chat's mode is not there for a child, it works in Standard, and the result
+ * says so.
+ *
  * The model a child runs on: the one its parent is on now, unless the chat
  * says otherwise (its model menu, kept by the server half: per-chat.ts) or the
  * settings name one ("provider/model"; "auto" is the parent's). The model
@@ -165,7 +171,12 @@ export interface Given {
 }
 
 /** How a result names the subagent: by its id, and, where its chat is kept, how to give it more. */
-const named = (id: string, kept: boolean) => (kept ? `Its chat is kept as ${id}: pass that id to continue it.` : `Subagent ${id}.`);
+const named = (id: string, kept: boolean, fell?: string) =>
+  (kept ? `Its chat is kept as ${id}: pass that id to continue it.` : `Subagent ${id}.`) +
+  (fell ? ` The chat's mode, ${fell}, is not there for it, so it works in Standard mode.` : "");
+
+/** What a chat that is in no mode stores, and what a child chat is put in to be in none. */
+const STANDARD = "standard";
 
 /**
  * Registers the `subagent` tool in a chat's pi. A change to the settings needs
@@ -249,7 +260,24 @@ export default function subagentTool(pi: any, given: Given) {
       const again = typeof params.id === "string" && params.id.trim() ? toContinue(params.id.trim()) : undefined;
       const label = params.label?.trim() || again?.title || "Subagent";
       const model = again ? undefined : childModel(chatModel(), ctx?.model, settings().model);
-      const child = again ?? chats.create({ parent: chat.id, title: label, listed: keep, ...(model ? { model } : {}) });
+      // Made in the chat's mode, as the settings say; in Standard where it is not there for a child (its extension is
+      // off, the person's mode is gone), which the result says. A kept child keeps the mode it was made in.
+      const parentMode = chats.get(chat.id)?.mode;
+      const asked = again || !parentMode ? undefined : settings().inheritMode ? parentMode : STANDARD;
+      let fell: string | undefined;
+      const make = (into: string | undefined) => chats.create({ parent: chat.id, title: label, listed: keep, ...(model ? { model } : {}), ...(into ? { mode: into } : {}) });
+      const child =
+        again ??
+        (() => {
+          try {
+            return make(asked);
+          } catch (e) {
+            // Any other reason is the same for Standard, and thrown from there.
+            if (!asked || asked === STANDARD) throw e;
+            fell = asked;
+            return make(STANDARD);
+          }
+        })();
       const id = child.id;
       const kept = again ? true : keep;
       const detail = again ? "Continuing" : model ? `Starting on ${model.provider}/${model.id}` : "Starting";
@@ -305,7 +333,7 @@ export default function subagentTool(pi: any, given: Given) {
                 ? `Subagent "${label}" finished:\n\n${answer || "(it gave no answer)"}`
                 : status === "stopped"
                   ? `Subagent "${label}" was stopped before it finished.${answer ? ` What it had so far:\n\n${answer}` : ""}`
-                  : `Subagent "${label}" failed: ${failure ?? "it ended early"}${answer ? `\n\nWhat it had so far:\n\n${answer}` : ""}`) + `\n\n(${named(id, kept)})`,
+                  : `Subagent "${label}" failed: ${failure ?? "it ended early"}${answer ? `\n\nWhat it had so far:\n\n${answer}` : ""}`) + `\n\n(${named(id, kept, fell)})`,
             );
           } catch (e) {
             // Whatever went wrong, the slot is given back below and the parent is told.
@@ -329,7 +357,7 @@ export default function subagentTool(pi: any, given: Given) {
             type: "text",
             text: (waiting
               ? `Queued subagent "${label}" in the background (${counts}); it starts when a slot is free. Its answer will arrive as a message when it is done; go on with other work meanwhile.`
-              : `Started subagent "${label}" in the background (${counts}). Its answer will arrive as a message when it is done; go on with other work meanwhile.`) + ` ${named(id, kept)}`,
+              : `Started subagent "${label}" in the background (${counts}). Its answer will arrive as a message when it is done; go on with other work meanwhile.`) + ` ${named(id, kept, fell)}`,
           }],
           details: { phase: waiting ? "queued" : "background", id },
         };
@@ -369,10 +397,10 @@ export default function subagentTool(pi: any, given: Given) {
         signal?.addEventListener("abort", stopped, { once: true });
         const { status, answer, failure } = await runner.finished;
         signal?.removeEventListener("abort", stopped);
-        if (status === "error" && !answer) throw new Error(`The subagent failed: ${failure ?? "it ended early"} (${named(id, kept)})`);
+        if (status === "error" && !answer) throw new Error(`The subagent failed: ${failure ?? "it ended early"} (${named(id, kept, fell)})`);
         // Said at the end, so the model can tell the wait from the subagent's own work time when it judges how long the task took.
         const note = hadToWait ? `\n\n(It waited ${waited(startedAt - queuedAt)} for a free subagent slot before it started.)` : "";
-        return { content: [{ type: "text", text: `${answer || "(the subagent gave no answer)"}${note}\n\n(${named(id, kept)})` }], details: { phase: status, id } };
+        return { content: [{ type: "text", text: `${answer || "(the subagent gave no answer)"}${note}\n\n(${named(id, kept, fell)})` }], details: { phase: status, id } };
       } catch (e) {
         // Failed before its chat was given the task (its start could not be said, say): no empty sub-chat is left.
         if (!runner) unmade();

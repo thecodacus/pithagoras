@@ -20,22 +20,22 @@ const put = (url: string, body: unknown) => fetch(url, { method: "PUT", headers:
 const shown = async () => (await fetch(`${at}/settings`)).json();
 
 test("the settings start as the tool does without being told, are saved for their owner alone, and reload the chats", async () => {
-  assert.deepEqual(await shown(), { mode: "interrupt", maxParallel: 1, model: "auto", keep: false, maxParallelLimit: 16 });
-  const saved = await put(`${at}/settings`, { mode: "background", maxParallel: 3, model: "llama-swap/model-b", keep: true });
+  assert.deepEqual(await shown(), { mode: "interrupt", maxParallel: 1, model: "auto", keep: false, inheritMode: true, maxParallelLimit: 16 });
+  const saved = await put(`${at}/settings`, { mode: "background", maxParallel: 3, model: "llama-swap/model-b", keep: true, inheritMode: false });
   assert.equal(saved.status, 200);
-  assert.deepEqual(await saved.json(), { mode: "background", maxParallel: 3, model: "llama-swap/model-b", keep: true, maxParallelLimit: 16, reloaded: 0, waiting: 0 });
-  assert.deepEqual(await shown(), { mode: "background", maxParallel: 3, model: "llama-swap/model-b", keep: true, maxParallelLimit: 16 });
+  assert.deepEqual(await saved.json(), { mode: "background", maxParallel: 3, model: "llama-swap/model-b", keep: true, inheritMode: false, maxParallelLimit: 16, reloaded: 0, waiting: 0 });
+  assert.deepEqual(await shown(), { mode: "background", maxParallel: 3, model: "llama-swap/model-b", keep: true, inheritMode: false, maxParallelLimit: 16 });
   const file = path.join(portal.data, "settings.json");
-  assert.deepEqual(JSON.parse(readFileSync(file, "utf8")), { mode: "background", maxParallel: 3, model: "llama-swap/model-b", keep: true });
+  assert.deepEqual(JSON.parse(readFileSync(file, "utf8")), { mode: "background", maxParallel: 3, model: "llama-swap/model-b", keep: true, inheritMode: false });
   assert.equal(statSync(file).mode & 0o777, 0o600);
   // One change at a time keeps the rest; a default is left out of the file.
   await put(`${at}/settings`, { mode: "interrupt" });
-  assert.deepEqual(JSON.parse(readFileSync(file, "utf8")), { maxParallel: 3, model: "llama-swap/model-b", keep: true });
-  await put(`${at}/settings`, { maxParallel: 1, model: "auto", keep: false });
+  assert.deepEqual(JSON.parse(readFileSync(file, "utf8")), { maxParallel: 3, model: "llama-swap/model-b", keep: true, inheritMode: false });
+  await put(`${at}/settings`, { maxParallel: 1, model: "auto", keep: false, inheritMode: true });
   assert.deepEqual(JSON.parse(readFileSync(file, "utf8")), {});
 });
 
-test("what is not a mode, a limit from 1 to 16, a model or a yes or no for keeping is refused, and nothing is saved", async () => {
+test("what is not a mode, a limit from 1 to 16, a model or a yes or no for keeping or the chat's mode is refused, and nothing is saved", async () => {
   const before = await shown();
   for (const [body, error] of [
     [{ mode: "sideways" }, "mode must be interrupt or background"],
@@ -46,6 +46,7 @@ test("what is not a mode, a limit from 1 to 16, a model or a yes or no for keepi
     [{ model: "no-slash" }, 'model must be "auto" or provider/model'],
     [{ model: 3 }, 'model must be "auto" or provider/model'],
     [{ keep: "yes" }, "keep must be true or false"],
+    [{ inheritMode: "yes" }, "inheritMode must be true or false"],
     // The switch is Settings → Extensions': off is not this address's to do.
     [{ enabled: false, mode: "background" }, "The subagent tool is switched off in Settings → Extensions (PUT /api/extensions/enabled)"],
   ] as const) {
@@ -160,29 +161,85 @@ test("a chat deleted while the extension was off is forgotten as it starts again
   await put(`${at}/chats/chat-6/model`, { model: null });
 });
 
-/**
- * The model a subagent of `chatId` would start on, as the tool in the chat's pi works it out: over a stand-in for pi,
- * and with child chats that are asked for and not made, as the model is said in what the child chat is asked to be.
- */
-async function subagentStarts(chatId: string): Promise<string | undefined> {
-  const asked: any[] = [];
-  const pi = { registerTool: (tool: any) => (registered = tool), on: () => {}, events: { on: () => () => {}, emit: () => {} }, sendMessage: () => {} };
-  let registered: any;
-  for (const { name, factory } of portal.host.hostExtensions(chatId)) if (name === "pithagoras-subagent") factory(pi);
-  portal.host.setChatBridge({
+test("a subagent's chat is asked for in its chat's mode, or in Standard when the setting says so; a chat in no mode asks for none", async () => {
+  portal.db.createSession({ id: "chat-code", title: "t", workspace: process.env.WORKSPACE_ROOT!, executor: "host", kind: "task", mode: "code" });
+  portal.db.createSession({ id: "chat-plain", title: "t", workspace: process.env.WORKSPACE_ROOT!, executor: "host", kind: "task" });
+  assert.equal((await shown()).inheritMode, true, "on unless it is switched off");
+  assert.equal((await subagentAsks("chat-code"))[0].mode, "code");
+  assert.equal((await subagentAsks("chat-plain"))[0].mode, undefined);
+  assert.equal((await put(`${at}/settings`, { inheritMode: false })).status, 200);
+  assert.equal((await subagentAsks("chat-code"))[0].mode, "standard");
+  assert.equal((await subagentAsks("chat-plain"))[0].mode, undefined, "Standard is what a chat in none has to start with");
+  await put(`${at}/settings`, { inheritMode: true });
+  assert.equal((await subagentAsks("chat-code"))[0].mode, "code", "the switch is read as a subagent starts");
+});
+
+test("a mode the portal will not put a child in is worked in as Standard", async () => {
+  portal.db.createSession({ id: "chat-gone", title: "t", workspace: process.env.WORKSPACE_ROOT!, executor: "host", kind: "task", mode: "custom/gone" });
+  const asked = await subagentAsks("chat-gone", (options) => {
+    if (options.mode !== "standard") throw new TypeError('There is no mode "custom/gone" for this child chat');
+  });
+  assert.deepEqual(asked.map((o) => o.mode), ["custom/gone", "standard"]);
+});
+
+test("the chats are loaded again where the mode, the limit or keeping changed, not for what is read as a subagent starts", async () => {
+  let reloads = 0;
+  portal.host.setChatBridge(bridge({ reload: async () => (reloads++, { reloaded: 2, waiting: 1 }) }) as any);
+  const change = async (body: unknown) => (await put(`${at}/settings`, body)).json();
+  assert.deepEqual(await change({ inheritMode: false }), { ...(await shown()), reloaded: 0, waiting: 0 });
+  await change({ model: "llama-swap/model-b" });
+  await change({ mode: "interrupt", maxParallel: 1, keep: false });
+  assert.equal(reloads, 0, "nothing the tool tells the model changed");
+  assert.deepEqual(await change({ keep: true }), { ...(await shown()), reloaded: 2, waiting: 1 });
+  await change({ maxParallel: 2 });
+  await change({ mode: "background" });
+  assert.equal(reloads, 3);
+  await change({ mode: "interrupt", maxParallel: 1, keep: false, model: "auto", inheritMode: true });
+});
+
+/** The portal's side of the chat bridge, over stand-ins that make no chats: `over` replaces what it says. */
+function bridge(over: Record<string, unknown> = {}) {
+  return {
     tell: async () => false,
     offers: () => undefined,
     reload: async () => ({ reloaded: 0, waiting: 0 }),
     model: async () => undefined,
-    create: (options: unknown) => {
-      asked.push(options);
+    create: () => {
       throw new Error("No child chats in this test");
     },
     run: async () => ({ status: "error", answer: "", error: "No child chats in this test" }),
     abort: async () => {},
     remove: async () => {},
-  });
+    ...over,
+  };
+}
+
+/**
+ * What a subagent of `chatId` would ask the portal's child chats for, each time it asks (it asks again, in Standard,
+ * where the portal refuses a mode), as the tool in the chat's pi
+ * works it out: over a stand-in for pi, and with child chats that are asked for and not made. `refuse` is told each
+ * request and throws where the portal would refuse it.
+ */
+async function subagentAsks(chatId: string, refuse: (options: any) => void = () => {}): Promise<any[]> {
+  const asked: any[] = [];
+  const pi = { registerTool: (tool: any) => (registered = tool), on: () => {}, events: { on: () => () => {}, emit: () => {} }, sendMessage: () => {} };
+  let registered: any;
+  for (const { name, factory } of portal.host.hostExtensions(chatId)) if (name === "pithagoras-subagent") factory(pi);
+  portal.host.setChatBridge(
+    bridge({
+      create: (options: unknown) => {
+        asked.push(options);
+        refuse(options);
+        throw new Error("No child chats in this test");
+      },
+    }) as any,
+  );
   await registered.execute("call", { task: "x" }, undefined, undefined, { model: { provider: "p", id: "parent" } }).catch(() => undefined);
-  const model = asked[0]?.model;
+  return asked;
+}
+
+/** The model a subagent of `chatId` would start on. */
+async function subagentStarts(chatId: string): Promise<string | undefined> {
+  const model = (await subagentAsks(chatId))[0]?.model;
   return model ? `${model.provider}/${model.id}` : undefined;
 }

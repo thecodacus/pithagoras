@@ -1274,7 +1274,10 @@ subagent is also held to the chat's tool switches as they are when it is given
 a task, and marks the chat it works for when the guard marked it.
 
 New: **Keep subagent chats** on the extension's page (off by default), which
-lists them as sub-chats and lets the agent continue one by its id. Gone:
+lists them as sub-chats and lets the agent continue one by its id, and
+**Subagents work in the chat's mode** (on): a subagent's chat is in the mode of
+the chat it works for, code mode and your own modes included, and in Standard
+mode where you switch it off. Gone:
 `PI_SUBAGENT_BIN` and `PI_SUBAGENT_GRACE_MS`, which nothing reads any more. The
 database is not changed, so going back needs nothing but the older version; the
 subagents' chats it made stay, as chats of their own.

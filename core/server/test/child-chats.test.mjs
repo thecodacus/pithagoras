@@ -300,6 +300,13 @@ test("a child takes its parent's mode unless it is asked into another, and its p
   const tools = declared(model.requests[asked]);
   assert.ok(tools.includes("codemode"), "the code tool is declared");
   assert.ok(!tools.includes("bash"), "and the chat's own tools are behind it");
+
+  // Asked into code mode by name, as the subagent extension asks for its chat's mode: its pi is started in it as well.
+  const named = helper.chats.create({ parent: chat(), title: "Named", mode: "code" });
+  assert.equal(named.mode, "code");
+  const before = model.requests.length;
+  assert.equal((await helper.chats.prompt(named.id, "Answer please")).status, "done");
+  assert.ok(declared(model.requests[before]).includes("codemode") && !declared(model.requests[before]).includes("bash"));
 });
 
 test("a mode that asks the person first is for a child only where its parent is in it; a mode with a model gives it to the child", () => {

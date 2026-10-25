@@ -136,9 +136,10 @@ function forgetGoneChats(portal: Pick<ServerPortal, "chats" | "log">): void {
 /**
  * The page in Settings, and the row in a chat's model menu, behind the portal's login:
  *
- *   GET /settings   {mode, maxParallel, maxParallelLimit, model, keep}
- *   PUT /settings   {mode?, maxParallel?, model?, keep?}: each it names; the open chats are loaded again, as the mode,
- *                   the limit and whether chats are kept are in what the tool tells the model, and the answer says how
+ *   GET /settings   {mode, maxParallel, maxParallelLimit, model, keep, inheritMode}
+ *   PUT /settings   {mode?, maxParallel?, model?, keep?, inheritMode?}: each it names; the open chats are loaded again
+ *                   where the mode, the limit or whether chats are kept changed, as they are in what the tool tells the
+ *                   model (the model and the mode a subagent works in are read as one starts), and the answer says how
  *                   many were (`reloaded`) and how many have it from their next step (`waiting`)
  *
  * The portal's old address for them, /api/features/subagent, sends here. `enabled` there was the switch, which is
@@ -178,9 +179,12 @@ function routes(portal: ServerPortal): void {
       return res.status(400).json({ error: (e as Error).message });
     }
     try {
-      saveSettings({ ...settings(), ...change });
+      const before = settings();
+      saveSettings({ ...before, ...change });
+      const now = settings();
       // The mode, the limit and keeping are in the tool's description, which a chat reads as its pi is loaded.
-      const { reloaded, waiting } = await portal.chats.reload();
+      const told = before.mode !== now.mode || before.maxParallel !== now.maxParallel || before.keep !== now.keep;
+      const { reloaded, waiting } = told ? await portal.chats.reload() : { reloaded: 0, waiting: 0 };
       res.json({ ...shown(), reloaded, waiting });
     } catch (e) {
       res.status(500).json({ error: (e as Error).message });

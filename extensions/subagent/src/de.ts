@@ -5,6 +5,8 @@ import type { Plural } from "@pithagoras/extension-api";
  * `tp`). Those the portal says the same way are here as well, as the portal has them.
  */
 export const de: Record<string, string | Plural> = {
+  "A subagent's chat is made in the mode of the chat it works for — code mode, a mode you made, an extension's — with that mode's tools and instructions. Off, it works in Standard mode. One kept keeps the mode it was made in.":
+    "Der Chat eines Subagents wird im Modus des Chats angelegt, für den er arbeitet — Code-Modus, ein eigener Modus, der einer Erweiterung — mit den Tools und Anweisungen dieses Modus. Aus, arbeitet er im Standardmodus. Ein behaltener behält den Modus, in dem er angelegt wurde.",
   "A {tool} tool: the agent hands a self-contained task to a second agent, which works in a chat of its own with the chat's folder, tools and checks, and gets its answer back. You can watch it beside the chat and give it instructions while it works.":
     "Ein {tool}-Tool: Der Agent gibt eine abgeschlossene Aufgabe an einen zweiten Agenten weiter, der in einem eigenen Chat mit dem Ordner, den Tools und den Prüfungen des Chats arbeitet, und bekommt dessen Antwort zurück. Du kannst ihm neben dem Chat zusehen und ihm Anweisungen geben, während er arbeitet.",
   "Across every chat. One asked for beyond it waits for a free slot — its call waits in interrupt mode, and in the background it starts once another has finished. Each one is a model running.":
@@ -48,6 +50,7 @@ export const de: Record<string, string | Plural> = {
   "Subagent model": "Modell der Subagents",
   "Subagents": "Subagents",
   "Subagents at once": "Subagents gleichzeitig",
+  "Subagents work in the chat's mode": "Subagents arbeiten im Modus des Chats",
   "Subagents in this chat run on": "Subagents in diesem Chat laufen auf",
   "Tell {name} something…": "Sag {name} etwas…",
   "The agent goes on working while the subagent runs, and its answer arrives as a message when it is done. The agent and its subagent run at once: on local hosting that is two model calls at the same time.":

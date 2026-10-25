@@ -3,8 +3,8 @@ import { test, expect, mockPortal, reply } from '../../../../tests/browser/porta
 
 /**
  * The subagent extension's page in Settings (src/web/SubagentSettings.tsx), over what its server half would answer: how
- * a subagent runs against the agent, how many run at once, the model, and whether their chats are kept, each saved as
- * it is chosen.
+ * a subagent runs against the agent, how many run at once, the model, whether their chats are kept, and whether they work
+ * in their chat's mode, each saved as it is chosen.
  */
 test.use({ installed: ['extensions/subagent'] });
 
@@ -14,7 +14,7 @@ const BASE = '/api/x/pithagoras-subagent';
 async function portal(page: Page, { down = false } = {}) {
   const sent: unknown[] = [];
   const failing = { down };
-  const state = { mode: 'interrupt', maxParallel: 1, maxParallelLimit: 16, model: 'auto', keep: false };
+  const state = { mode: 'interrupt', maxParallel: 1, maxParallelLimit: 16, model: 'auto', keep: false, inheritMode: true };
   await mockPortal(page, ({ path, method, json }) => {
     // Settings lists the extension as the portal has it installed.
     if (path === '/api/extensions' && method === 'GET') return { settingsPath: '/a/settings.json', extensions: [{ spec: 'extensions/subagent', name: 'pithagoras-subagent', version: '0.2.0', settings: [] }] };
@@ -90,7 +90,7 @@ test("subagents run on the chat's model unless one is named", async ({ page }) =
 
 test('the search of Settings finds the subagents on their page, and lights up the part it leads to', async ({ page }) => {
   await portal(page);
-  for (const [words, part] of [['teilagenten', 'How a subagent runs against the agent'], ['parallel', 'Subagents at once'], ['unterchats', 'Keep subagent chats']]) {
+  for (const [words, part] of [['teilagenten', 'How a subagent runs against the agent'], ['parallel', 'Subagents at once'], ['unterchats', 'Keep subagent chats'], ['erben', "Subagents work in the chat's mode"]]) {
     await page.goto('/settings/general');
     const dialog = settings(page);
     await expect(dialog.getByLabel('Default model')).toBeVisible();
@@ -118,4 +118,18 @@ test('subagent chats are not kept unless switched on here', async ({ page }) => 
   await keep.click();
   await expect(keep).toBeChecked();
   expect(sent).toEqual([{ keep: true }]);
+});
+
+test("subagents work in the chat's mode unless switched off here", async ({ page }) => {
+  const { sent } = await portal(page);
+  await page.goto('/settings/x/pithagoras-subagent');
+  const inherit = settings(page).getByRole('switch', { name: "Subagents work in the chat's mode" });
+  await expect(inherit).toBeChecked();
+  await expect(settings(page).getByText(/Off, it works in Standard mode\./)).toBeVisible();
+  await inherit.click();
+  await expect(inherit).not.toBeChecked();
+  expect(sent).toEqual([{ inheritMode: false }]);
+  await inherit.click();
+  await expect(inherit).toBeChecked();
+  expect(sent).toEqual([{ inheritMode: false }, { inheritMode: true }]);
 });

@@ -60,6 +60,7 @@ export default function subagent(given: Portal) {
       { title: msg("Subagents at once"), section: msg("Subagents at once"), words: "subagent parallel limit slots at once teilagenten gleichzeitig" },
       { title: msg("Subagent model"), section: msg("Subagent model"), words: "subagent model llm teilagenten modell" },
       { title: msg("Keep subagent chats"), section: msg("Keep subagent chats"), words: "subagent keep chats sub-chats continue persistent teilagenten behalten unterchats fortsetzen" },
+      { title: msg("Subagents work in the chat's mode"), section: msg("Subagents work in the chat's mode"), words: "subagent mode code custom standard inherit teilagenten modus erben" },
     ],
     component: () => (
       <Suspense fallback={<p className="text-sm text-fg-subtle">{t("Loading…")}</p>}>

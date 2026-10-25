@@ -131,7 +131,9 @@ said nothing again, and its mode can be chosen again. Changing it before then
 lets the chat's pi go if one was started (opening the model menu starts it), so
 that the first message starts it again in the mode chosen; nothing is lost, as
 the chat has said nothing. A [subagent](/guide/features#subagents) the chat
-starts works in a chat of its own in the same mode.
+starts works in a chat of its own in the same mode, unless you switch off
+[**Subagents work in the chat's mode**](/guide/features#the-mode-a-subagent-works-in),
+and then in Standard mode.
 
 Modes are offered in the chats you start on the portal's pages, and in the
 conversations started on an agent's page, where pi runs in the portal's own

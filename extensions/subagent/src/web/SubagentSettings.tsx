@@ -4,7 +4,7 @@ import { Select, msg, portal, t, tp, tx } from "../portal";
 
 /**
  * The subagent extension's page in Settings: how a subagent runs against the agent, what it runs on unless its chat
- * says otherwise, how many run at once, and whether their chats are kept. It is switched on and off in Settings →
+ * says otherwise, how many run at once, whether their chats are kept, and whether they work in their chat's mode. It is switched on and off in Settings →
  * Extensions, like any extension.
  */
 
@@ -20,6 +20,8 @@ interface Shown {
   model: string;
   /** Whether a subagent's chat is kept: listed under its chat, and continued by its id. */
   keep: boolean;
+  /** Whether a subagent's chat is made in the mode of the chat it works for, rather than in Standard. */
+  inheritMode: boolean;
 }
 
 /** A model pi can use now, as the portal lists them (GET /api/models). */
@@ -31,7 +33,7 @@ interface Model {
 
 const settingsUrl = () => portal.api.url("/settings");
 const readSettings = () => portal.api.json<Shown>(settingsUrl());
-const saveSettings = async (change: Partial<Pick<Shown, "mode" | "maxParallel" | "model" | "keep">>) => {
+const saveSettings = async (change: Partial<Pick<Shown, "mode" | "maxParallel" | "model" | "keep" | "inheritMode">>) => {
   const saved = await portal.api.json<Shown & { reloaded: number; waiting: number }>(settingsUrl(), { method: "PUT", body: JSON.stringify(change) });
   // Each chat's model menu says what its default is: asked again when next shown.
   if (change.model !== undefined) forgetChoices();
@@ -87,7 +89,7 @@ export function SubagentSettings() {
   if (!shown) return failed ? <ui.LoadFailed error={failed} onRetry={read} /> : <p className="text-sm text-fg-subtle">{t("Loading…")}</p>;
   const s = shown;
 
-  const change = async (patch: Partial<Pick<Shown, "mode" | "maxParallel" | "model" | "keep">>) => {
+  const change = async (patch: Partial<Pick<Shown, "mode" | "maxParallel" | "model" | "keep" | "inheritMode">>) => {
     setBusy(true);
     setNote(null);
     setError(null);
@@ -189,6 +191,15 @@ export function SubagentSettings() {
             on={s.keep}
             disabled={busy}
             onChange={(keep) => void change({ keep })}
+          />
+        </div>
+        <div data-setting={t("Subagents work in the chat's mode")} className="rounded-xl border border-line bg-raised/40 p-3">
+          <ui.SwitchRow
+            title={t("Subagents work in the chat's mode")}
+            detail={t("A subagent's chat is made in the mode of the chat it works for — code mode, a mode you made, an extension's — with that mode's tools and instructions. Off, it works in Standard mode. One kept keeps the mode it was made in.")}
+            on={s.inheritMode}
+            disabled={busy}
+            onChange={(inheritMode) => void change({ inheritMode })}
           />
         </div>
         {busy && <p className="text-xs text-fg-subtle">{t("Applying…")}</p>}
