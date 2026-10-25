@@ -1,14 +1,20 @@
 /**
- * `subagent`: hand a task to a second pi, and let the person watch it and
+ * `subagent`: hand a task to a second agent, and let the person watch it and
  * talk to it from the portal. The pi half of the subagent extension: its server
- * half (server.ts) registers it in every chat's pi (`portal.chats.extend`),
- * and hands it the settings it keeps (settings.ts).
+ * half (server.ts) registers it in every chat's pi but a child chat's
+ * (`portal.chats.extend`), and hands it the settings it keeps (settings.ts).
+ *
+ * The subagent works in a child chat of the chat that calls it
+ * (`portal.chats.create`): a chat of the portal's like any other, in the same
+ * folder, under the guard and the sandbox as the person the chat works for,
+ * with the chat's mode and tools and a transcript of its own. Its id is the
+ * chat's, and every result names it.
  *
  * The reference for the subagent protocol (`subagent:v1:*`, typed in
- * @pithagoras/extension-api/server). The child runs `pi --mode rpc`, so it can
- * be steered while it works: what the person types for it arrives as an RPC
- * `steer`. Every event the child prints is passed on unchanged, and the portal
- * draws it like the main conversation.
+ * @pithagoras/extension-api/server). Its start names the child chat (`chat`),
+ * whose own transcript is the subagent's run: the portal draws it from there,
+ * so nothing of it goes on the bus. What the person types for it arrives as
+ * `subagent:v1:input`, and is sent into its run after the step it is on.
  *
  * Two ways to run, set by the mode in its settings:
  *
@@ -18,6 +24,12 @@
  * - "background": the tool call returns at once and the parent goes on; the
  *   child's answer arrives later as a message, and starts a turn if the parent
  *   is idle. Two agents run at the same time.
+ *
+ * Kept or not, as the settings say ("Keep subagent chats", off by default): a
+ * kept child is a sub-chat listed under its chat, and the agent gives it a
+ * further task by its id once it has finished; one that is not kept is found by
+ * its id alone and is not continued, though its transcript stays to be read
+ * beside the chat. Either goes when its chat is deleted.
  *
  * The model a child runs on: the one its parent is on now, unless the chat
  * says otherwise (its model menu, kept by the server half: per-chat.ts) or the
@@ -31,20 +43,15 @@
  * description names the mode and the limit, and its results say how many are
  * running and how long a call waited: nothing is added to the system prompt,
  * so its cache holds.
- *
- * PI_SUBAGENT_BIN picks the pi to run (default: `pi` on PATH).
  */
-import { spawn } from "node:child_process";
-import { randomUUID } from "node:crypto";
-import { createInterface } from "node:readline";
-import type { SubagentProtocol } from "@pithagoras/extension-api/server";
+import type { Chat, SubagentProtocol } from "@pithagoras/extension-api/server";
+import { startRunner, type ChildChats, type Hear, type Runner, type Status } from "./runner";
 import { MAX_PARALLEL, type Mode, type Settings } from "./settings";
 
 export { MAX_PARALLEL, type Mode };
 
 // The protocol's channels, as @pithagoras/extension-api/server types them: names as text, as the portal has them too.
 const START = "subagent:v1:start" satisfies keyof SubagentProtocol;
-const EVENT = "subagent:v1:event" satisfies keyof SubagentProtocol;
 const END = "subagent:v1:end" satisfies keyof SubagentProtocol;
 const INPUT = "subagent:v1:input" satisfies keyof SubagentProtocol;
 const STOP = "subagent:v1:stop" satisfies keyof SubagentProtocol;
@@ -117,28 +124,23 @@ async function takeSlot(limit: () => number, givenUp: () => boolean, onGiveUp: (
 /** Everyone waiting looks again: one of them has given up. */
 const wakeAll = () => slots.waiting.splice(0).forEach((wake) => wake());
 
-type Status = "done" | "error" | "stopped";
-interface Run {
-  id: string;
-  /** Settles once the child has, with what it said last. */
-  finished: Promise<{ status: Status; answer: string; failure?: string }>;
-  stop(): void;
-  /** Stopped, and killed if it has not ended a little later: for when nobody is left to wait on it. */
-  end(): void;
-}
-
-/** How long a child told to stop is given before it is killed. */
-const GRACE_MS = () => Number(process.env.PI_SUBAGENT_GRACE_MS) || 5000;
+/**
+ * The child chats busy with a task here: made or continued, and not over yet. Shared as the slots are, for every chat
+ * in the process: one that is busy is not given a second task by a chat's pi loaded again meanwhile.
+ */
+const busy: Set<string> = ((globalThis as any)[Symbol.for("pithagoras-subagent:busy")] ??= new Set<string>());
 
 /**
  * What the tool tells the model: the mode it runs in and how many run at
- * once, so it does not ask for more than will start.
+ * once, so it does not ask for more than will start, and, where the chats are
+ * kept, that one can be given more.
  */
-export function describe(mode: Mode, limit: number): string {
+export function describe(mode: Mode, limit: number, keep = false): string {
   const room = limit === 1 ? "One runs at a time: further calls wait for it to finish." : `At most ${limit} run at once; further calls wait for a free one.`;
+  const again = keep ? " Pass id to continue a finished one, with its context." : "";
   return mode === "background"
-    ? `Hand a self-contained task to a separate agent with its own context. It runs in the background: this call returns at once and its final answer arrives later as a message. For research that would fill this chat. The person can watch and steer it. ${room}`
-    : `Hand a self-contained task to a separate agent with its own context and get its final answer back. For research that would fill this chat. The person can watch and steer it. ${room}`;
+    ? `Hand a self-contained task to a separate agent with its own context. It runs in the background: this call returns at once and its final answer arrives later as a message. For research that would fill this chat. The person can watch and steer it. ${room}${again}`
+    : `Hand a self-contained task to a separate agent with its own context and get its final answer back. For research that would fill this chat. The person can watch and steer it. ${room}${again}`;
 }
 
 /** A wait as a person says it: "under a second", "12 s", "3 min 5 s". */
@@ -148,145 +150,85 @@ export function waited(ms: number): string {
   return s < 60 ? `${s} s` : `${Math.floor(s / 60)} min${s % 60 ? ` ${s % 60} s` : ""}`;
 }
 
-/**
- * Set for the pi a subagent runs in, which gets no subagent tool of its own:
- * its children would have slots of their own, in their own process, and the
- * limit on models running at once would not reach them. That pi loads nothing
- * of this package, which gives pi nothing of its own (the portal registers
- * this half), and a portal started inside it offers no subagent tool either.
- */
-export const CHILD_ENV = "PI_SUBAGENT_CHILD";
+/** What the server half gives the tool of a chat's pi. */
+export interface Given {
+  /** The chat whose pi it is: the parent of the chats its subagents work in. */
+  chat: Pick<Chat, "id">;
+  /** The portal's child chats (`portal.chats`). */
+  chats: ChildChats;
+  /** What the extension keeps now (settings.ts), asked as a subagent starts. */
+  settings: () => Settings;
+  /** What this chat says its subagents run on, when it says (per-chat.ts), asked as a subagent starts. */
+  chatModel?: () => string | undefined;
+  /** What a child chat's pi says, for the card of the call that waits on it. */
+  hear?: Hear;
+}
+
+/** How a result names the subagent: by its id, and, where its chat is kept, how to give it more. */
+const named = (id: string, kept: boolean) => (kept ? `Its chat is kept as ${id}: pass that id to continue it.` : `Subagent ${id}.`);
 
 /**
- * Registers the `subagent` tool in a chat's pi. `settings` is asked for what
- * the extension keeps now (settings.ts), and `chatModel` for what this chat
- * says its subagents run on, when it says (per-chat.ts): each as a subagent
- * starts, so a change needs no reload.
+ * Registers the `subagent` tool in a chat's pi. A change to the settings needs
+ * no reload for the model and the limit, which are asked as each starts.
  */
-export default function subagentTool(pi: any, settings: () => Settings, chatModel: () => string | undefined = () => undefined) {
-  if (process.env[CHILD_ENV] === "1") return;
+export default function subagentTool(pi: any, given: Given) {
+  const { chat, chats, settings } = given;
+  const chatModel = given.chatModel ?? (() => undefined);
   // Read once, as it is loaded: what the tool tells the model and what it
   // does must agree. A change reaches a chat when it is reloaded. The limit
   // is also read live where it is enforced, so a change never lets more run
   // than the settings say.
-  const { mode, maxParallel: limit } = settings();
+  const { mode, maxParallel: limit, keep } = settings();
   const liveLimit = () => settings().maxParallel;
   /** Says something on the chat's bus, as the protocol has it. */
   const say = <C extends keyof SubagentProtocol>(channel: C, data: SubagentProtocol[C]) => pi.events.emit(channel, data);
   // Background children still running, stopped with the session that started them.
-  const detached = new Set<Run>();
+  const detached = new Set<Runner>();
   // Set once the session is over: what still waits for a slot does not start.
   let shutDown = false;
 
   pi.on?.("session_shutdown", () => {
     shutDown = true;
-    // Ended for sure: a child that does not stop keeps its slot, which is every chat's.
-    for (const run of detached) run.end();
+    // Nobody is left to hear their answers: their chats stop, and their slots are every chat's.
+    for (const run of detached) run.stop();
     wakeAll();
   });
 
   /**
-   * Starts a child for the task and hands over what watching it needs.
-   * `announced`: the id it was announced under while it waited for a slot.
+   * The child chat `id` names, to be given another task: one this chat's subagent worked in, that was kept, and that
+   * is not at work. Throws, saying why, for any other.
    */
-  function start(task: string, label: string, toolCallId: string, ctx: any, background: boolean, onUpdate?: any, announced?: string): Run {
-    const id = announced ?? randomUUID();
-    const model = childModel(chatModel(), ctx?.model, settings().model);
-    // Its stderr goes nowhere: a pipe nobody reads fills, and the child
-    // blocks on its next warning for good.
-    const child = spawn(process.env.PI_SUBAGENT_BIN || "pi", ["--mode", "rpc", "--no-session", ...(model ? ["--provider", model.provider, "--model", model.id] : [])], {
-      cwd: ctx.cwd,
-      env: { ...process.env, [CHILD_ENV]: "1" },
-      stdio: ["pipe", "pipe", "ignore"],
-    });
-    // A child that died, or never started, closes the pipe under the next
-    // write. Unheard, that error takes down whatever runs this extension —
-    // the portal, for everyone. As pi's own bash tool does: heard, and let go.
-    child.stdin.on("error", () => {});
-    const send = (command: Record<string, unknown>) => {
-      if (child.stdin.writable) child.stdin.write(JSON.stringify(command) + "\n");
-    };
-    // Why it failed, when the child said.
-    let failure: string | undefined;
-    let answer = "";
-    let steps = 0;
-    // Stopped by the person in the portal, or by the parent's own stop: either
-    // way what it has is not its whole answer.
-    let stopped = false;
-    const stop = () => {
-      stopped = true;
-      send({ type: "abort" });
-    };
+  function toContinue(id: string): Chat {
+    const child = chats.children(chat.id).find((c) => c.id === id);
+    if (!child) throw new Error(`There is no subagent ${id} in this chat.`);
+    if (child.listed === false) throw new Error(`Subagent "${child.title}" (${id}) was not kept, so it cannot be continued: start a new one with the whole task.`);
+    if (busy.has(id) || child.status === "running") throw new Error(`Subagent "${child.title}" (${id}) is still working: wait for its answer before you give it more.`);
+    return child;
+  }
+
+  /**
+   * Gives the task to the child chat, says so on the bus, and says how it ended once it has; the slot is the
+   * caller's. `progress` is the call's own card, for one that waits on it.
+   */
+  function run(id: string, task: string, label: string, toolCallId: string, detail: string, background: boolean, progress?: (answer: string, phase: string) => void): Runner {
+    say(START, { id, label, toolCallId, input: true, stop: true, detail, chat: id, ...(background ? { detached: true } : {}) });
+    const runner = startRunner(chats, id, task, given.hear, progress);
     const off = [
-      pi.events.on(INPUT, (d: any) => d?.id === id && typeof d.text === "string" && send({ type: "steer", message: d.text })),
-      pi.events.on(STOP, (d: any) => d?.id === id && stop()),
+      pi.events.on(INPUT, (d: any) => d?.id === id && typeof d.text === "string" && runner.send(d.text)),
+      pi.events.on(STOP, (d: any) => d?.id === id && runner.stop()),
     ];
-    say(START, {
-      id,
-      label,
-      toolCallId,
-      input: true,
-      stop: true,
-      detail: model ? `Starting on ${model.provider}/${model.id}` : "Starting",
-      ...(background ? { detached: true } : {}),
-    });
-
-    const status = new Promise<Status>((resolve) => {
-      const lines = createInterface({ input: child.stdout });
-      lines.on("line", (line) => {
-        let event: any;
-        try {
-          event = JSON.parse(line);
-        } catch {
-          return;
-        }
-        // The task refused — no model, no key: no run follows, so nothing
-        // would ever settle it, and the child would wait on its input for good.
-        if (event.type === "response") {
-          if (event.command === "prompt" && event.success === false) {
-            failure = String(event.error ?? "The subagent refused the task");
-            resolve("error");
-          }
-          return;
-        }
-        say(EVENT, { id, event });
-        if (event.type === "tool_execution_start") {
-          steps++;
-          onUpdate?.({ content: [{ type: "text", text: answer }], details: { phase: `${event.toolName} (${steps} steps)` } });
-        }
-        if (event.type === "message_end" && event.message?.role === "assistant") {
-          const text = (event.message.content ?? []).filter((c: any) => c.type === "text").map((c: any) => c.text).join("");
-          if (text) answer = text;
-          onUpdate?.({ content: [{ type: "text", text: answer }], details: { phase: "thinking" } });
-        }
-        // Settled, not ended: pi ends a run and then retries it, or compacts
-        // and goes on, and only settles once it has nothing left to do.
-        if (event.type === "agent_settled") resolve(stopped ? "stopped" : "done");
-      });
-      child.on("exit", (code) => resolve(stopped ? "stopped" : code === 0 ? "done" : "error"));
-      child.on("error", () => resolve("error"));
-      send({ type: "prompt", message: task });
-    });
-
-    const finished = status.then((status) => {
-      child.kill();
+    const finished = runner.finished.then((ended) => {
       off.forEach((f: () => void) => f());
-      say(END, { id, status, ...(failure ? { error: failure } : {}) });
-      return { status, answer, ...(failure ? { failure } : {}) };
+      say(END, { id, status: ended.status, ...(ended.failure ? { error: ended.failure } : {}) });
+      return ended;
     });
-    const end = () => {
-      stop();
-      const kill = setTimeout(() => child.kill("SIGKILL"), GRACE_MS());
-      kill.unref?.();
-      void finished.finally(() => clearTimeout(kill));
-    };
-    return { id, finished, stop, end };
+    return { ...runner, finished };
   }
 
   pi.registerTool({
     name: "subagent",
     label: "Subagent",
-    description: describe(mode, limit),
+    description: describe(mode, limit, keep),
     // As JSON schema: a server half is plain Node, with no typebox of pi's to write it with.
     parameters: {
       type: "object",
@@ -294,21 +236,34 @@ export default function subagentTool(pi: any, settings: () => Settings, chatMode
       properties: {
         task: { type: "string", description: "The whole task with all it needs: it sees nothing of this chat" },
         label: { type: "string", description: "Short name, e.g. Research: vector DBs" },
+        // Said in the description: a description of its own would cost as much again.
+        ...(keep ? { id: { type: "string" } } : {}),
       },
     },
-    // What it hands on runs without this conversation's rules: after a suspected prompt injection, a call waits for
-    // the person, as the guard's rule for a tool of this name says too.
+    // What it hands on goes to a chat that has not read what this one read: after a suspected prompt injection, a call
+    // waits for the person, as the guard's rule for a tool of this name says too.
     guard: { acts: ["delegate"] },
 
-    async execute(toolCallId: string, params: { task: string; label?: string }, signal: AbortSignal | undefined, onUpdate: any, ctx: any) {
-      const label = params.label?.trim() || "Subagent";
+    async execute(toolCallId: string, params: { task: string; label?: string; id?: string }, signal: AbortSignal | undefined, onUpdate: any, ctx: any) {
+      // One to continue is looked at before anything is made or a slot is taken: one that cannot be is refused at once.
+      const again = typeof params.id === "string" && params.id.trim() ? toContinue(params.id.trim()) : undefined;
+      const label = params.label?.trim() || again?.title || "Subagent";
+      const model = again ? undefined : childModel(chatModel(), ctx?.model, settings().model);
+      const child = again ?? chats.create({ parent: chat.id, title: label, listed: keep, ...(model ? { model } : {}) });
+      const id = child.id;
+      const kept = again ? true : keep;
+      const detail = again ? "Continuing" : model ? `Starting on ${model.provider}/${model.id}` : "Starting";
+      busy.add(id);
+      /** A chat made for a task that never started holds nothing: it goes, rather than be left as an empty sub-chat. */
+      const unmade = () => {
+        if (!again) void chats.remove(id).catch(() => undefined);
+      };
 
       if (mode === "background") {
         // Whether it starts now or waits for one of the others: said now, since the call does not wait.
         const waiting = slots.running >= liveLimit() ? slots.running : 0;
         // One that waits is announced at once: counted as running, so its chat
         // is not reloaded from under it, and it can be stopped before it starts.
-        const id = randomUUID();
         let cancelled = false;
         const offWait = waiting
           ? pi.events.on(STOP, (d: any) => {
@@ -317,7 +272,7 @@ export default function subagentTool(pi: any, settings: () => Settings, chatMode
               wakeAll();
             })
           : () => {};
-        if (waiting) say(START, { id, label, toolCallId, input: true, stop: true, detail: "Waiting for a free slot", detached: true });
+        if (waiting) say(START, { id, label, toolCallId, input: false, stop: true, detail: "Waiting for a free slot", detached: true, chat: id });
         /** What the parent is told when it is over: its answer starts a turn; a stop waits for the person. */
         const tell = (status: Status, said: string) => {
           try {
@@ -331,35 +286,37 @@ export default function subagentTool(pi: any, settings: () => Settings, chatMode
         };
         void (async () => {
           let release: (() => void) | undefined;
-          let run: Run | undefined;
+          let runner: Runner | undefined;
           try {
             release = await takeSlot(liveLimit, () => shutDown || cancelled, () => {});
             offWait();
             if (!release) {
               if (waiting) say(END, { id, status: "stopped" });
+              unmade();
               if (cancelled && !shutDown) tell("stopped", `Subagent "${label}" was stopped before it started.`);
               return;
             }
-            run = start(params.task, label, toolCallId, ctx, true, undefined, id);
-            detached.add(run);
-            const { status, answer, failure } = await run.finished;
+            runner = run(id, params.task, label, toolCallId, detail, true);
+            detached.add(runner);
+            const { status, answer, failure } = await runner.finished;
             tell(
               status,
-              status === "done"
+              (status === "done"
                 ? `Subagent "${label}" finished:\n\n${answer || "(it gave no answer)"}`
                 : status === "stopped"
                   ? `Subagent "${label}" was stopped before it finished.${answer ? ` What it had so far:\n\n${answer}` : ""}`
-                  : `Subagent "${label}" failed: ${failure ?? (answer ? "it ended early" : "it could not run — is `pi` on PATH? (PI_SUBAGENT_BIN)")}${answer ? `\n\nWhat it had so far:\n\n${answer}` : ""}`,
+                  : `Subagent "${label}" failed: ${failure ?? "it ended early"}${answer ? `\n\nWhat it had so far:\n\n${answer}` : ""}`) + `\n\n(${named(id, kept)})`,
             );
           } catch (e) {
             // Whatever went wrong, the slot is given back below and the parent is told.
             const why = (e as Error)?.message ?? String(e);
-            if (waiting && !run) say(END, { id, status: "error", error: why });
+            if (waiting && !runner) say(END, { id, status: "error", error: why });
             tell("error", `Subagent "${label}" failed: ${why}`);
           } finally {
             offWait();
             release?.();
-            if (run) detached.delete(run);
+            if (runner) detached.delete(runner);
+            busy.delete(id);
           }
         })();
         // The takeSlot above has taken its place by now: a free slot is counted as running, a full one as waiting.
@@ -368,53 +325,53 @@ export default function subagentTool(pi: any, settings: () => Settings, chatMode
         return {
           content: [{
             type: "text",
-            text: waiting
+            text: (waiting
               ? `Queued subagent "${label}" in the background (${counts}); it starts when a slot is free. Its answer will arrive as a message when it is done; go on with other work meanwhile.`
-              : `Started subagent "${label}" in the background (${counts}). Its answer will arrive as a message when it is done; go on with other work meanwhile.`,
+              : `Started subagent "${label}" in the background (${counts}). Its answer will arrive as a message when it is done; go on with other work meanwhile.`) + ` ${named(id, kept)}`,
           }],
-          details: { phase: waiting ? "queued" : "background" },
+          details: { phase: waiting ? "queued" : "background", id },
         };
       }
 
-      // At most as many at once as allowed, even when the model asks for more
-      // in one turn: each is a model running. Waits for a slot, unless the
-      // parent is stopped meanwhile.
-      const hadToWait = slots.running >= liveLimit();
-      const queuedAt = Date.now();
-      // Said through the protocol as well, so the chat lists it while it waits;
-      // the start that follows merges into this one.
-      let waitingId: string | undefined;
-      if (hadToWait) {
-        waitingId = randomUUID();
-        pi.events.emit(START, { id: waitingId, label, toolCallId, input: false, stop: false, detail: "Waiting for a free slot" });
-        onUpdate?.({ content: [{ type: "text", text: "" }], details: { phase: "waiting for another subagent to finish" } });
-      }
-      const release = await takeSlot(
-        liveLimit,
-        () => signal?.aborted === true || shutDown,
-        (wake) => {
-          signal?.addEventListener("abort", wake, { once: true });
-          return () => signal?.removeEventListener("abort", wake);
-        },
-      );
-      if (!release) {
-        if (waitingId) pi.events.emit(END, { id: waitingId, status: "stopped" });
-        return { content: [{ type: "text", text: "(stopped before the subagent started)" }], details: { phase: "stopped" } };
-      }
+      let release: (() => void) | undefined;
       try {
+        // At most as many at once as allowed, even when the model asks for more
+        // in one turn: each is a model running. Waits for a slot, unless the
+        // parent is stopped meanwhile.
+        const hadToWait = slots.running >= liveLimit();
+        const queuedAt = Date.now();
+        // Said through the protocol as well, so the chat lists it while it waits;
+        // the start that follows merges into this one.
+        if (hadToWait) {
+          say(START, { id, label, toolCallId, input: false, stop: false, detail: "Waiting for a free slot", chat: id });
+          onUpdate?.({ content: [{ type: "text", text: "" }], details: { phase: "waiting for another subagent to finish" } });
+        }
+        release = await takeSlot(
+          liveLimit,
+          () => signal?.aborted === true || shutDown,
+          (wake) => {
+            signal?.addEventListener("abort", wake, { once: true });
+            return () => signal?.removeEventListener("abort", wake);
+          },
+        );
+        if (!release) {
+          if (hadToWait) say(END, { id, status: "stopped" });
+          unmade();
+          return { content: [{ type: "text", text: "(stopped before the subagent started)" }], details: { phase: "stopped", id } };
+        }
         const startedAt = Date.now();
-        const run = start(params.task, label, toolCallId, ctx, false, onUpdate, waitingId);
-        const stopped = () => run.stop();
+        const runner = run(id, params.task, label, toolCallId, detail, false, (answer, phase) => onUpdate?.({ content: [{ type: "text", text: answer }], details: { phase } }));
+        const stopped = () => runner.stop();
         signal?.addEventListener("abort", stopped, { once: true });
-        const { status, answer, failure } = await run.finished;
+        const { status, answer, failure } = await runner.finished;
         signal?.removeEventListener("abort", stopped);
-        if (failure) throw new Error(`The subagent could not start: ${failure}`);
-        if (status === "error" && !answer) throw new Error("The subagent could not run — is `pi` on PATH? (PI_SUBAGENT_BIN)");
+        if (status === "error" && !answer) throw new Error(`The subagent failed: ${failure ?? "it ended early"} (${named(id, kept)})`);
         // Said at the end, so the model can tell the wait from the subagent's own work time when it judges how long the task took.
         const note = hadToWait ? `\n\n(It waited ${waited(startedAt - queuedAt)} for a free subagent slot before it started.)` : "";
-        return { content: [{ type: "text", text: (answer || "(the subagent gave no answer)") + note }], details: { phase: status } };
+        return { content: [{ type: "text", text: `${answer || "(the subagent gave no answer)"}${note}\n\n(${named(id, kept)})` }], details: { phase: status, id } };
       } finally {
-        release();
+        release?.();
+        busy.delete(id);
       }
     },
   });

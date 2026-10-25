@@ -48,10 +48,15 @@ load(askQuestionTool(), all);
 load(heartbeatTool("a", "s"), all);
 load(reportTool(null), all);
 load(routineTools("s"), all);
-load((pi) => subagentTool(pi, () => settingsOf({ mode: "interrupt" })), all);
-// The shape that depends on a setting is looked at as well: a subagent that runs in the background.
+// What the subagent tool is given of the portal: none of it is asked for as the tool is registered.
+const subagentIn = (settings: object) => (pi: any) => subagentTool(pi, { chat: { id: "s" }, chats: {} as any, settings: () => settingsOf(settings) });
+load(subagentIn({ mode: "interrupt" }), all);
+// The shapes that depend on a setting are looked at as well: a subagent that runs in the background, and one whose
+// chats are kept, which takes an id.
 const subagentBackground: Registered[] = [];
-load((pi) => subagentTool(pi, () => settingsOf({ mode: "background" })), subagentBackground);
+load(subagentIn({ mode: "background" }), subagentBackground);
+const subagentKept: Registered[] = [];
+load(subagentIn({ mode: "interrupt", keep: true }), subagentKept);
 
 /** The most each tool may cost, in tokens: what was agreed, as the review of issue #183 measured it, and 10 for a changed word. */
 const ROOM = 10;
@@ -67,12 +72,14 @@ const AGREED: Record<string, number> = {
   routine_run: 41,
   subagent: 118,
   "subagent#background": 136,
+  "subagent#kept": 136,
 };
 
 test("every tool of the portal's own is within the length agreed for it", () => {
   const tools: [string, Registered][] = [
     ...all.map((tool): [string, Registered] => [tool.name, tool]),
     ["subagent#background", subagentBackground[0]],
+    ["subagent#kept", subagentKept[0]],
   ];
   assert.deepEqual(tools.map(([key]) => key).sort(), Object.keys(AGREED).sort(), "a tool without an agreed length, or an agreed length without a tool");
   for (const [key, tool] of tools) {

@@ -2,13 +2,15 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import type { ServerPortal } from "@pithagoras/extension-api/server";
 import subagentTool from "./pi";
+import type { Hear } from "./runner";
 import { chatModel, forgetChat, openChats, pruneChats, setChatModel, takeChats } from "./per-chat";
 import { checkChange, isModelChoice, MAX_PARALLEL, openStore, saveSettings, settings, settingsOf, takeSettings, type Settings } from "./settings";
 
 /**
- * The subagent extension's server half: the `subagent` tool in every chat's pi (`portal.chats.extend`, pi.ts), with
- * the settings it keeps in its own folder (settings.ts) and what each chat says its subagents run on (per-chat.ts),
- * and the routes of its page in Settings and of the row in a chat's model menu, at /api/x/pithagoras-subagent/….
+ * The subagent extension's server half: the `subagent` tool in every chat's pi but a child chat's
+ * (`portal.chats.extend`, pi.ts), whose subagents work in child chats of that chat (`portal.chats.create`), with the
+ * settings it keeps in its own folder (settings.ts) and what each chat says its subagents run on (per-chat.ts), and
+ * the routes of its page in Settings and of the row in a chat's model menu, at /api/x/pithagoras-subagent/….
  *
  * In the portal's own process, never in one of its own: the tool speaks the subagent protocol on the chat's event bus
  * (`pi.events`), which a pi given to a half in a process of its own does not have.
@@ -21,7 +23,12 @@ export default function subagent(portal: ServerPortal) {
   forgetGoneChats(portal);
   takeHandoff(portal);
   takeChatsHandoff(portal);
-  portal.chats.extend((pi, chat) => subagentTool(pi, settings, () => chatModel(chat.id)));
+  const hear = hearChildren(portal);
+  portal.chats.extend((pi, chat) => {
+    // A child chat has no subagents of its own: one level, as the portal's child chats are.
+    if (chat.parent) return;
+    subagentTool(pi, { chat, chats: portal.chats, settings, chatModel: () => chatModel(chat.id), hear });
+  });
   portal.chats.on("deleted", (chatId) => {
     try {
       forgetChat(chatId);
@@ -96,6 +103,25 @@ export function takeChatsHandoff(portal: Pick<ServerPortal, "handoffs" | "log" |
   }
 }
 
+/** What a child chat's pi says, to whoever listens for that chat: the card of a call that waits on its subagent. */
+function hearChildren(portal: Pick<ServerPortal, "chats">): Hear {
+  const listening = new Map<string, Set<(event: Record<string, unknown>) => void>>();
+  // Every chat's every event comes here, a token at a time: only a chat somebody listens for is looked at.
+  portal.chats.onEvent((chatId, event) => {
+    const handlers = listening.get(chatId);
+    if (handlers) for (const handler of [...handlers]) handler(event);
+  });
+  return (chatId, handler) => {
+    let handlers = listening.get(chatId);
+    if (!handlers) listening.set(chatId, (handlers = new Set()));
+    handlers.add(handler);
+    return () => {
+      handlers.delete(handler);
+      if (!handlers.size && listening.get(chatId) === handlers) listening.delete(chatId);
+    };
+  };
+}
+
 /** A chat deleted while the half was off told it nothing: what it said is forgotten as the half starts. */
 function forgetGoneChats(portal: Pick<ServerPortal, "chats" | "log">): void {
   try {
@@ -109,10 +135,10 @@ function forgetGoneChats(portal: Pick<ServerPortal, "chats" | "log">): void {
 /**
  * The page in Settings, and the row in a chat's model menu, behind the portal's login:
  *
- *   GET /settings   {mode, maxParallel, maxParallelLimit, model}
- *   PUT /settings   {mode?, maxParallel?, model?}: each it names; the open chats are loaded again, as the mode and the
- *                   limit are in what the tool tells the model, and the answer says how many were (`reloaded`) and how
- *                   many have it from their next step (`waiting`)
+ *   GET /settings   {mode, maxParallel, maxParallelLimit, model, keep}
+ *   PUT /settings   {mode?, maxParallel?, model?, keep?}: each it names; the open chats are loaded again, as the mode,
+ *                   the limit and whether chats are kept are in what the tool tells the model, and the answer says how
+ *                   many were (`reloaded`) and how many have it from their next step (`waiting`)
  *
  * The portal's old address for them, /api/features/subagent, sends here. `enabled` there was the switch, which is
  * Settings → Extensions' now: `true` asks for nothing this does not have already, as it answers; `false` is refused.
@@ -152,7 +178,7 @@ function routes(portal: ServerPortal): void {
     }
     try {
       saveSettings({ ...settings(), ...change });
-      // The mode and the limit are in the tool's description, which a chat reads as its pi is loaded.
+      // The mode, the limit and keeping are in the tool's description, which a chat reads as its pi is loaded.
       const { reloaded, waiting } = await portal.chats.reload();
       res.json({ ...shown(), reloaded, waiting });
     } catch (e) {

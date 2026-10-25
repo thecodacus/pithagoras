@@ -3,9 +3,9 @@ import path from "node:path";
 
 /**
  * The subagents' settings, the same for every chat: how a subagent runs against its parent, how many run at once,
- * and the model they run on unless a chat says another. Kept in `settings.json` in the extension's own folder
- * (`portal.dataDir()`), each left out while it is what the tool does without being told: interrupt, one at a time,
- * the chat's own model.
+ * the model they run on unless a chat says another, and whether their chats are kept. Kept in `settings.json` in the
+ * extension's own folder (`portal.dataDir()`), each left out while it is what the tool does without being told:
+ * interrupt, one at a time, the chat's own model, chats not kept.
  */
 
 /** How a subagent runs against its parent: the call waits for its answer, or returns at once and the answer comes later. */
@@ -17,12 +17,17 @@ export interface Settings {
   maxParallel: number;
   /** What they run on unless a chat says: "auto", the model the chat is on, or "provider/model". */
   model: string;
+  /**
+   * Whether a subagent's chat is kept: listed under its chat as a sub-chat, and continued by its id. Otherwise it is
+   * found by its id alone, and not continued once it has ended. Either way it goes when its chat is deleted.
+   */
+  keep: boolean;
 }
 
 /** The most that may run at once: each is a model running. */
 export const MAX_PARALLEL = 16;
 
-export const DEFAULTS: Settings = { mode: "interrupt", maxParallel: 1, model: "auto" };
+export const DEFAULTS: Settings = { mode: "interrupt", maxParallel: 1, model: "auto", keep: false };
 
 /** "auto", or "provider/model". */
 export const isModelChoice = (value: unknown): value is string => typeof value === "string" && (value === "auto" || /^[^/\s]+\/\S+$/.test(value));
@@ -38,18 +43,25 @@ export function settingsOf(stored: unknown): Settings {
     mode: kept.mode === "background" ? "background" : "interrupt",
     maxParallel: Number.isInteger(n) && n >= 1 ? Math.min(n, MAX_PARALLEL) : 1,
     model: isModelChoice(kept.model) ? kept.model : "auto",
+    keep: kept.keep === true,
   };
 }
 
 /** What a change asks for, checked: each it names, valid, or an Error that says what is wrong. */
 export function checkChange(body: unknown): Partial<Settings> {
-  const { mode, maxParallel, model } = (body && typeof body === "object" ? body : {}) as Record<string, unknown>;
+  const { mode, maxParallel, model, keep } = (body && typeof body === "object" ? body : {}) as Record<string, unknown>;
   if (mode !== undefined && mode !== "interrupt" && mode !== "background") throw new Error("mode must be interrupt or background");
   if (maxParallel !== undefined && !(Number.isInteger(maxParallel) && (maxParallel as number) >= 1 && (maxParallel as number) <= MAX_PARALLEL)) {
     throw new Error(`maxParallel must be a whole number from 1 to ${MAX_PARALLEL}`);
   }
   if (model !== undefined && !isModelChoice(model)) throw new Error('model must be "auto" or provider/model');
-  return { ...(mode !== undefined ? { mode } : {}), ...(maxParallel !== undefined ? { maxParallel: maxParallel as number } : {}), ...(model !== undefined ? { model } : {}) };
+  if (keep !== undefined && typeof keep !== "boolean") throw new Error("keep must be true or false");
+  return {
+    ...(mode !== undefined ? { mode } : {}),
+    ...(maxParallel !== undefined ? { maxParallel: maxParallel as number } : {}),
+    ...(model !== undefined ? { model } : {}),
+    ...(keep !== undefined ? { keep } : {}),
+  };
 }
 
 let file: string | undefined;
@@ -92,6 +104,7 @@ export function saveSettings(next: Settings, given: Partial<Settings> = {}): voi
   if (next.mode !== DEFAULTS.mode) stored.mode = next.mode;
   if (next.maxParallel !== DEFAULTS.maxParallel) stored.maxParallel = next.maxParallel;
   if (next.model !== DEFAULTS.model) stored.model = next.model;
+  if (next.keep !== DEFAULTS.keep) stored.keep = next.keep;
   const handed = Object.fromEntries(Object.entries({ ...handedOver(), ...given }).filter(([key, value]) => stored[key] === value));
   if (Object.keys(handed).length) stored.handedOver = handed;
   writeOwn(file, stored);
