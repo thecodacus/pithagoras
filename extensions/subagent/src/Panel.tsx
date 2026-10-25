@@ -1,6 +1,7 @@
 import { memo, useLayoutEffect, useState, type KeyboardEvent } from "react";
 import type { ChatFeed, PanelHandle, PanelProps } from "@pithagoras/extension-api";
-import { AgentIcon, SendIcon, StopIcon } from "./icons";
+import { useAsking } from "./asking";
+import { AgentIcon, OpenIcon, SendIcon, StopIcon } from "./icons";
 import { portal, t } from "./portal";
 import { agentsOf, UNNAMED, type Subagent } from "./subagents";
 
@@ -19,7 +20,8 @@ export const useAgents = (chatId: string) => portal.chats.use(chatId, (feed: Cha
 /**
  * The subagents of a chat, one at a time, in the panel beside it: what it is doing, drawn like the conversation
  * itself, and — where its extension takes messages — a box to tell it something. Every subagent of the protocol is
- * here, this extension's and any other's.
+ * here, this extension's and any other's. One that works in a chat of the portal's (this extension's: a child chat)
+ * is drawn from that chat's own transcript, with the way to open it as a chat.
  */
 export function SubagentPanel({ chat, panel }: PanelProps) {
   portal.locale.use();
@@ -60,9 +62,15 @@ export function SubagentPanel({ chat, panel }: PanelProps) {
 const AgentView = memo(function AgentView({ chat, agent }: { chat: PanelProps["chat"]; agent: Subagent }) {
   portal.locale.use();
   const running = agent.status === "running";
+  // Its run, where it works in a chat: that chat's own transcript, streamed while it is shown.
+  const own = portal.chats.useEvents(agent.chat);
+  const events = agent.chat ? own.events : agent.events;
+  // Nobody may have its chat open: a dialog or a question there is said here, with the way to it.
+  const asking = useAsking(agent.chat, running);
   const now = portal.ui.useNow(running);
   const { attach, onScroll, follow } = portal.ui.useFollowBottom<HTMLDivElement>();
-  useLayoutEffect(() => follow(), [agent.events]);
+  useLayoutEffect(() => follow(), [events]);
+  const open = agent.chat && !own.missing ? () => portal.navigate(`/s/${encodeURIComponent(agent.chat!)}`) : undefined;
   const seconds = agent.since ? Math.max(0, Math.floor(((running ? now : agent.until ?? now) - agent.since) / 1000)) : undefined;
 
   return (
@@ -72,18 +80,42 @@ const AgentView = memo(function AgentView({ chat, agent }: { chat: PanelProps["c
         <div className="min-w-0 flex-1">
           <div className="sub-head-title">{nameOf(agent)}</div>
           <div className="sub-head-detail">
-            {running ? <portal.ui.Shimmer>{agent.detail ?? t("Working")}</portal.ui.Shimmer> : agent.status === "done" ? t("Finished") : agent.status === "stopped" ? t("Stopped") : agent.error ?? t("Failed")}
+            {running ? (
+              asking ? <span className="sub-asking">{t("Waiting for you")}</span> : <portal.ui.Shimmer>{agent.detail ?? t("Working")}</portal.ui.Shimmer>
+            ) : agent.status === "done" ? t("Finished") : agent.status === "stopped" ? t("Stopped") : agent.error ?? t("Failed")}
             {seconds !== undefined && ` · ${portal.format.elapsed(seconds)}`}
           </div>
         </div>
+        {open && (
+          <button type="button" className="sub-open" onClick={open} title={t("Open its chat, to read it whole or go on with it")}>
+            <OpenIcon /> {t("Open as chat")}
+          </button>
+        )}
         {agent.stop && running && (
           <button type="button" className="sub-stop" onClick={() => void stopAgent(chat.id, agent.id).catch(() => undefined)}>
             <StopIcon /> {t("Stop")}
           </button>
         )}
       </div>
+      {asking && open && (
+        <p className="sub-asking-note" role="status">
+          {t("It waits for you in its chat.")}{" "}
+          <button type="button" onClick={open}>{t("Open it to answer")}</button>
+        </p>
+      )}
       <div ref={attach} onScroll={onScroll} className="sub-body">
-        <portal.ui.Transcript events={agent.events} running={running} chat={chat} empty={<p className="sub-empty"><portal.ui.Shimmer>{t("Starting…")}</portal.ui.Shimmer></p>} />
+        <portal.ui.Transcript
+          events={events}
+          running={running}
+          chat={chat}
+          empty={
+            own.missing ? (
+              <p className="sub-empty">{t("Its chat is gone: it was deleted, or the subagent was stopped before it started.")}</p>
+            ) : (
+              <p className="sub-empty"><portal.ui.Shimmer>{t("Starting…")}</portal.ui.Shimmer></p>
+            )
+          }
+        />
       </div>
       <AgentInput chatId={chat.id} agent={agent} />
     </>

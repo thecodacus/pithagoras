@@ -1,6 +1,6 @@
 {
   "name": "pithagoras-subagent",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Subagents for Pithagoras: a subagent tool that hands a self-contained task to a second agent, the panel beside a chat where every subagent of the protocol is watched and told what to do, and its settings page",
   "type": "module",
   "keywords": ["pi-package"],

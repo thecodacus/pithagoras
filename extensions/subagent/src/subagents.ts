@@ -25,10 +25,14 @@ export interface Subagent {
   input: boolean;
   stop: boolean;
   toolCallId?: string;
+  /** Every tool call that started it, the latest last: one whose chat is kept is given more by a later call. */
+  calls: string[];
   /** Runs on after its tool call has returned: a subagent in the background. */
   detached?: boolean;
+  /** The chat it works in, whose own transcript is its run: drawn from there, not from `events`. */
+  chat?: string;
   error?: string;
-  /** The child's events, in the shape the chat's own conversation is drawn from. */
+  /** The child's events that came over the protocol, in the shape the chat's own conversation is drawn from. */
   events: PortalEvent[];
 }
 
@@ -76,13 +80,22 @@ export function subagents(events: readonly PortalEvent[], items: readonly Row[],
         input: p.input === true,
         stop: p.stop === true,
         ...(typeof p.toolCallId === "string" ? { toolCallId: p.toolCallId } : {}),
+        calls: typeof p.toolCallId === "string" ? [p.toolCallId] : [],
         ...(p.detached === true ? { detached: true } : {}),
+        ...(typeof p.chat === "string" && p.chat ? { chat: p.chat } : {}),
         events: [],
       };
-      // Said again — one that waited for a slot, now starting: the same
-      // subagent, told anew what it is doing, and where it began.
       if (had) {
-        Object.assign(had, { ...sub, events: had.events, since: had.since ?? sub.since });
+        const calls = [...had.calls, ...sub.calls.filter((c) => !had.calls.includes(c))];
+        // Said again — one that waited for a slot, now starting: the same
+        // subagent, told anew what it is doing, and where it began.
+        if (had.status === "running") Object.assign(had, { ...sub, events: had.events, calls, since: had.since ?? sub.since });
+        // One that had ended, given more in its kept chat: the same subagent at work again, from now. What it is no
+        // longer (failed, stopped) goes; what it said before stays.
+        else {
+          for (const key of Object.keys(had) as (keyof Subagent)[]) if (!(key in sub)) delete had[key];
+          Object.assign(had, { ...sub, events: had.events, calls });
+        }
         continue;
       }
       byId.set(id, sub);
@@ -100,6 +113,7 @@ export function subagents(events: readonly PortalEvent[], items: readonly Row[],
         stop: false,
         // Tied to its tool call all the same: listed once, and over when it is.
         ...(typeof p.toolCallId === "string" ? { toolCallId: p.toolCallId } : {}),
+        calls: typeof p.toolCallId === "string" ? [p.toolCallId] : [],
         ...(p.detached === true ? { detached: true } : {}),
         events: [],
       };
@@ -148,7 +162,8 @@ export function stableSubagents(prev: readonly Subagent[], next: Subagent[]): Su
   const same = (a: Subagent, b: Subagent) => {
     if (a.events.length !== b.events.length || a.events.at(-1)?.seq !== b.events.at(-1)?.seq) return false;
     const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
-    for (const k of keys) if (k !== "events" && (a as any)[k] !== (b as any)[k]) return false;
+    if (a.calls.join("\n") !== b.calls.join("\n")) return false;
+    for (const k of keys) if (k !== "events" && k !== "calls" && (a as any)[k] !== (b as any)[k]) return false;
     return true;
   };
   return next.map((s) => {

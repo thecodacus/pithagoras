@@ -1,5 +1,5 @@
 // Development-only fixture: the chat's activity, thinking, tools and compaction, without a server.
-// Open /tests/chat.html?phase=model|prefill|thinking|reasoning|compacting|tools|agents|interrupted|turns to see each state,
+// Open /tests/chat.html?phase=model|prefill|thinking|reasoning|compacting|tools|agents|child-agent|interrupted|turns to see each state,
 // and add &loading=1 for the conversation still arriving.
 import React from 'react';
 import { createRoot } from 'react-dom/client';
@@ -14,7 +14,7 @@ import { installTooltips } from '../src/tooltips';
 import { installMotion } from '../src/motion';
 import { mockFetch } from './mock-fetch';
 import { setLanguage } from '../src/i18n';
-import { startExtensions } from '../src/extensions/loader';
+import { setNavigate, startExtensions } from '../src/extensions/loader';
 // Offers the languages, as the app does: `setLang('de')` fetches German.
 import '../src/locales';
 installTooltips();
@@ -23,6 +23,9 @@ installMotion();
 // The installed extensions, loaded as the app loads them: those the browser test says are installed (`installed` in
 // tests/browser/portal-mock.ts).
 startExtensions();
+// Where an extension takes the page (`portal.navigate`): kept for a test to read, as this page has no others.
+(window as any).navigated = [];
+setNavigate((path) => (window as any).navigated.push(path));
 
 const phase = new URLSearchParams(location.search).get('phase') ?? 'tools';
 const now = Date.now();
@@ -190,6 +193,14 @@ if (phase === 'agents') {
     if (u.includes('/commands')) return { commands: [{ name: 'bg-update', description: 'Update pi-background', source: 'extension' }] };
     if (u.includes('/background/') && u.includes('/output')) return { text: u.includes('from=') ? '' : '> vite\n\n  VITE v5.4  ready in 312 ms\n\n  ➜  Local:   http://localhost:5173/\n  ➜  Network: use --host to expose\n', from: 0, size: 120 };
   });
+}
+// A subagent that works in a child chat, as the subagent extension's do: its run is that chat's own transcript, which
+// the test serves at /api/sessions/kid1/events, and not on the protocol.
+if (phase === 'child-agent') {
+  events.push(
+    ev('tool_execution_start', { toolCallId: 'sc', toolName: 'subagent', args: { task: 'Check the backups', label: 'Backup check' } }, 30),
+    ev('portal_subagent', { op: 'start', id: 'kid1', label: 'Backup check', toolCallId: 'sc', input: true, stop: true, detail: 'Starting on local/model-a', chat: 'kid1' }, 30),
+  );
 }
 
 // An extension fills the chat box twice at once, the way pi's RPC mode names it and then as a paste: delivered as the page does, on arrival.

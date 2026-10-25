@@ -84,6 +84,65 @@ test('a running subagent is timed from its start in the panel, and its run is no
   expect((await page.evaluate(() => (window as any).drawn)).ChildItem).toBe(before.ChildItem);
 });
 
+/** The child chat `kid1` (`?phase=child-agent`) as the portal serves it: its stream, and the chat itself, `asking` or not. */
+async function serveChild(page: Page, { asking = false } = {}) {
+  const streams: string[] = [];
+  const said = (seq: number, type: string, payload: unknown) => `id: ${seq}\ndata: ${JSON.stringify({ seq, type, at: Date.now() - 20_000, payload })}\n\n`;
+  await page.route('**/api/sessions/kid1/events**', async (route) => {
+    streams.push(new URL(route.request().url()).search);
+    await route.fulfill({
+      headers: { 'content-type': 'text/event-stream' },
+      body:
+        'event: live-reset\ndata: {}\n\n' +
+        said(1, 'portal_prompt', { message: 'Check that last night\'s backup can be restored.' }) +
+        said(2, 'tool_execution_start', { toolCallId: 'k1', toolName: 'bash', args: { command: 'restic snapshots' } }) +
+        said(3, 'tool_execution_end', { toolCallId: 'k1', toolName: 'bash', result: { content: [{ type: 'text', text: 'snapshot 4f2a' }] } }) +
+        said(4, 'message_end', { message: { role: 'assistant', content: [{ type: 'text', text: 'The latest snapshot is from 02:00.' }] } }) +
+        'event: caught-up\ndata: {"seq":4}\n\n',
+    });
+  });
+  await page.route('**/api/sessions/kid1', (route) => route.fulfill({ json: { id: 'kid1', title: 'Backup check', parent: 'preview', listed: false, status: 'running', ...(asking ? { asking: true } : {}) } }));
+  return streams;
+}
+
+test('a subagent that works in a child chat is drawn from that chat\'s own transcript, and opens as that chat', async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const streams = await serveChild(page);
+  await page.goto('/tests/chat.html?phase=child-agent');
+  await card(page, 'subagent').getByRole('button', { name: 'Watch' }).click();
+  await expect(panel(page).locator('.sub-head')).toContainText('Backup check');
+  await expect(panel(page).locator('.side-transcript-prompt')).toHaveText("Check that last night's backup can be restored.");
+  await expect(panel(page).locator('.chat-tool')).toContainText('restic snapshots');
+  await expect(panel(page).getByText('The latest snapshot is from 02:00.')).toBeVisible();
+  // Read from the start, as a page that opens a chat reads it.
+  expect(streams[0]).toBe('?since=0');
+  await expect(panel(page).locator('.sub-head')).not.toContainText('Waiting for you');
+  await panel(page).getByRole('button', { name: 'Open as chat' }).click();
+  await expect.poll(() => page.evaluate(() => (window as any).navigated)).toEqual(['/s/kid1']);
+});
+
+test('a subagent whose chat waits for the person says so in the panel and the tray, with the way to its chat', async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  await serveChild(page, { asking: true });
+  await page.goto('/tests/chat.html?phase=child-agent');
+  await expect(tray(page).getByRole('button', { name: /Backup check/ })).toContainText('waiting for you');
+  await tray(page).getByRole('button', { name: /Backup check/ }).click();
+  await expect(panel(page).locator('.sub-head')).toContainText('Waiting for you');
+  await expect(panel(page).getByRole('status')).toContainText('It waits for you in its chat.');
+  await panel(page).getByRole('button', { name: 'Open it to answer' }).click();
+  await expect.poll(() => page.evaluate(() => (window as any).navigated)).toEqual(['/s/kid1']);
+});
+
+test('a subagent whose chat is gone says so, and offers no way to it', async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  await page.route('**/api/sessions/kid1/events**', (route) => route.fulfill({ status: 404, json: { error: 'Not found' } }));
+  await page.route('**/api/sessions/kid1', (route) => route.fulfill({ status: 404, json: { error: 'Not found' } }));
+  await page.goto('/tests/chat.html?phase=child-agent');
+  await card(page, 'subagent').getByRole('button', { name: 'Watch' }).click();
+  await expect(panel(page).getByText('Its chat is gone: it was deleted, or the subagent was stopped before it started.')).toBeVisible();
+  await expect(panel(page).getByRole('button', { name: 'Open as chat' })).toHaveCount(0);
+});
+
 test.describe('without the extension', () => {
   test.use({ installed: [] });
 

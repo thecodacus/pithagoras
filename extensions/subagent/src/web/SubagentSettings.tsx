@@ -4,7 +4,8 @@ import { Select, msg, portal, t, tp, tx } from "../portal";
 
 /**
  * The subagent extension's page in Settings: how a subagent runs against the agent, what it runs on unless its chat
- * says otherwise, and how many run at once. It is switched on and off in Settings → Extensions, like any extension.
+ * says otherwise, how many run at once, and whether their chats are kept. It is switched on and off in Settings →
+ * Extensions, like any extension.
  */
 
 type Mode = "interrupt" | "background";
@@ -17,6 +18,8 @@ interface Shown {
   maxParallelLimit: number;
   /** "auto", the model the chat is on, or "provider/model". */
   model: string;
+  /** Whether a subagent's chat is kept: listed under its chat, and continued by its id. */
+  keep: boolean;
 }
 
 /** A model pi can use now, as the portal lists them (GET /api/models). */
@@ -28,7 +31,7 @@ interface Model {
 
 const settingsUrl = () => portal.api.url("/settings");
 const readSettings = () => portal.api.json<Shown>(settingsUrl());
-const saveSettings = async (change: Partial<Pick<Shown, "mode" | "maxParallel" | "model">>) => {
+const saveSettings = async (change: Partial<Pick<Shown, "mode" | "maxParallel" | "model" | "keep">>) => {
   const saved = await portal.api.json<Shown & { reloaded: number; waiting: number }>(settingsUrl(), { method: "PUT", body: JSON.stringify(change) });
   // Each chat's model menu says what its default is: asked again when next shown.
   if (change.model !== undefined) forgetChoices();
@@ -84,7 +87,7 @@ export function SubagentSettings() {
   if (!shown) return failed ? <ui.LoadFailed error={failed} onRetry={read} /> : <p className="text-sm text-fg-subtle">{t("Loading…")}</p>;
   const s = shown;
 
-  const change = async (patch: Partial<Pick<Shown, "mode" | "maxParallel" | "model">>) => {
+  const change = async (patch: Partial<Pick<Shown, "mode" | "maxParallel" | "model" | "keep">>) => {
     setBusy(true);
     setNote(null);
     setError(null);
@@ -107,7 +110,7 @@ export function SubagentSettings() {
       {error && <ui.ErrorBanner onClose={() => setError(null)}>{error}</ui.ErrorBanner>}
       {/* The page's head, drawn by Settings, has the extension's name and mark already. Each part is named for Settings' search (client.tsx). */}
       <p className="text-xs text-fg-faint">
-        {tx("A {tool} tool: the agent hands a self-contained task to a second agent with a context of its own, and gets its answer back. You can watch it beside the chat and give it instructions while it works.", { tool: <code>subagent</code> })}
+        {tx("A {tool} tool: the agent hands a self-contained task to a second agent, which works in a chat of its own with the chat's folder, tools and checks, and gets its answer back. You can watch it beside the chat and give it instructions while it works.", { tool: <code>subagent</code> })}
       </p>
       <div className="space-y-3">
         <fieldset data-setting={t("How a subagent runs against the agent")} className="rounded-xl border border-line bg-raised/40 p-3" disabled={busy}>
@@ -178,6 +181,15 @@ export function SubagentSettings() {
               <Sign plus />
             </button>
           </div>
+        </div>
+        <div data-setting={t("Keep subagent chats")} className="rounded-xl border border-line bg-raised/40 p-3">
+          <ui.SwitchRow
+            title={t("Keep subagent chats")}
+            detail={t("Each subagent's chat is listed under its chat as a sub-chat, and the agent can give it a further task by its id. Off, it is only opened from the agents panel, and is not given more. Either way it is deleted with its chat.")}
+            on={s.keep}
+            disabled={busy}
+            onChange={(keep) => void change({ keep })}
+          />
         </div>
         {busy && <p className="text-xs text-fg-subtle">{t("Applying…")}</p>}
         {note && !busy && <p role="status" className="text-xs text-fg-muted">{note()}</p>}

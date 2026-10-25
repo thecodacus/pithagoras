@@ -5,7 +5,8 @@ import { AgentIcon, AgentsIcon } from "./icons";
 import { ModelRow } from "./ModelRow";
 import { nameOf, SubagentPanel, useAgents } from "./Panel";
 import { msg, portal, setPortal, t } from "./portal";
-import { agentsOf } from "./subagents";
+import { useAsking } from "./asking";
+import { agentsOf, type Subagent } from "./subagents";
 import { de } from "./de";
 import "./client.css";
 
@@ -58,6 +59,7 @@ export default function subagent(given: Portal) {
       { title: msg("Subagents"), section: msg("How a subagent runs against the agent"), words: "subagent subagents mode background interrupt teilagenten modus hintergrund unterbrechen" },
       { title: msg("Subagents at once"), section: msg("Subagents at once"), words: "subagent parallel limit slots at once teilagenten gleichzeitig" },
       { title: msg("Subagent model"), section: msg("Subagent model"), words: "subagent model llm teilagenten modell" },
+      { title: msg("Keep subagent chats"), section: msg("Keep subagent chats"), words: "subagent keep chats sub-chats continue persistent teilagenten behalten unterchats fortsetzen" },
     ],
     component: () => (
       <Suspense fallback={<p className="text-sm text-fg-subtle">{t("Loading…")}</p>}>
@@ -74,16 +76,23 @@ function Running({ chat, panels }: ChatProps) {
   return (
     <>
       {running.map((a) => (
-        <portal.ui.TrayChip key={a.id} icon={AgentIcon} label={nameOf(a)} detail={a.detail} since={a.since} onClick={() => panels.open("agents", { id: a.id })} />
+        <RunningChip key={a.id} agent={a} onClick={() => panels.open("agents", { id: a.id })} />
       ))}
     </>
   );
 }
 
+/** One subagent at work in the tray: what it is doing, or that it waits for the person in its chat. */
+function RunningChip({ agent, onClick }: { agent: Subagent; onClick: () => void }) {
+  const asking = useAsking(agent.chat, true);
+  return <portal.ui.TrayChip icon={AgentIcon} label={nameOf(agent)} detail={asking ? t("waiting for you") : agent.detail} since={agent.since} onClick={onClick} />;
+}
+
 /** Watch, or Open once it is over: the subagent a call started, in the panel. Nothing on any other call. */
 function Watch({ call, chat, panels }: SlotMap["chat.tool.action"]["props"]) {
   portal.locale.use();
-  const id = portal.chats.use(chat?.id ?? "", (feed: ChatFeed) => (chat && call.callId ? agentsOf(chat.id, feed).find((a) => a.toolCallId === call.callId)?.id : undefined));
+  // Any call that started it: one whose chat is kept is given more by later calls, each of which opens it.
+  const id = portal.chats.use(chat?.id ?? "", (feed: ChatFeed) => (chat && call.callId ? agentsOf(chat.id, feed).find((a) => a.calls.includes(call.callId!))?.id : undefined));
   if (!id) return null;
   return (
     <portal.ui.ToolLink icon={AgentIcon} onClick={() => panels.open("agents", { id })}>
