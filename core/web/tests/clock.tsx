@@ -11,13 +11,13 @@ import '../src/styles';
 
 function Page() {
   const [began, setBegan] = useState<number | null>(null);
-  const agent: Subagent = { id: 'a1', kind: 'protocol', label: 'Helper', status: began ? 'running' : 'done', since: began ?? undefined, until: began ? undefined : 1, input: false, stop: false, events: [] };
+  const agent: Subagent = { id: 'a1', label: 'Helper', status: began ? 'running' : 'done', since: began ?? undefined, until: began ? undefined : 1, input: false, stop: false, events: [] };
   const job: BackgroundJob = { key: 'j1', sid: 1, pids: [], command: 'sleep 100', startedAt: began ?? 0, state: began ? 'running' : 'exited', exitedAt: began ? undefined : 1, hasOutput: false, attached: false };
   return (
     <>
       <button onClick={() => setBegan(Date.now() - 3000)}>Start</button>
       <RunningTray agents={[agent]} jobs={[job]} statuses={[]} onAgent={() => {}} onJob={() => {}} />
-      <SubagentPanel sessionId="clock" agents={[agent]} items={[]} selected="a1" onSelect={() => {}} />
+      <SubagentPanel sessionId="clock" agents={[agent]} selected="a1" onSelect={() => {}} />
     </>
   );
 }
