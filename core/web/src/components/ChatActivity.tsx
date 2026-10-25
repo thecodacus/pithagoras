@@ -196,6 +196,16 @@ function lastLines(text: string, n = 3): string[] {
     .slice(-n);
 }
 
+/** Where a tool says it has got to, beside its text: a short line under the keys tools use for it. */
+function phaseLine(details: unknown): string[] {
+  const d = details as Record<string, unknown> | null | undefined;
+  for (const key of ["phase", "status", "stage", "step"]) {
+    const v = d?.[key];
+    if (typeof v === "string" && v.trim() && v.length <= 160) return [v.trim()];
+  }
+  return [];
+}
+
 /**
  * What a tool is, as a picture. Guessed from the words in its name — pi's tools
  * and whatever an extension adds — so `brave_web_search`, `webFetch` and
@@ -324,7 +334,9 @@ export function ToolCall({
   // Counted on the whole output: what is kept of it is only the end.
   const lines = shell ? (item.outputLines ?? lineCount(output)) : 0;
   // Any tool that streams what it is doing shows its newest lines while it runs.
-  const recent = running && !open ? lastLines(output) : [];
+  // One that sends no text yet says where it has got to in its details.
+  const tail = running && !open ? lastLines(output) : [];
+  const recent = tail.length || !running || open ? tail : phaseLine(item.details);
 
   return (
     <div className={`chat-tool is-${item.status} ${item.interrupted ? "is-interrupted" : ""} ${open ? "is-open" : ""}`}>

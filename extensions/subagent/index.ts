@@ -373,7 +373,14 @@ export default function (pi: any) {
       // At most as many at once as allowed, even when the model asks for more
       // in one turn: each is a model running. Waits for a slot, unless the
       // parent is stopped meanwhile.
-      if (slots.running >= subagentLimit()) onUpdate?.({ content: [{ type: "text", text: "" }], details: { phase: "waiting for another subagent to finish" } });
+      // Said through the protocol as well, so the chat lists it while it waits;
+      // the start that follows merges into this one.
+      let waitingId: string | undefined;
+      if (slots.running >= subagentLimit()) {
+        waitingId = randomUUID();
+        pi.events.emit(START, { id: waitingId, label, toolCallId, input: false, stop: false, detail: "Waiting for a free slot" });
+        onUpdate?.({ content: [{ type: "text", text: "" }], details: { phase: "waiting for another subagent to finish" } });
+      }
       const release = await takeSlot(
         () => signal?.aborted === true || shutDown,
         (wake) => {
@@ -381,9 +388,12 @@ export default function (pi: any) {
           return () => signal?.removeEventListener("abort", wake);
         },
       );
-      if (!release) return { content: [{ type: "text", text: "(stopped before the subagent started)" }], details: { phase: "stopped" } };
+      if (!release) {
+        if (waitingId) pi.events.emit(END, { id: waitingId, status: "stopped" });
+        return { content: [{ type: "text", text: "(stopped before the subagent started)" }], details: { phase: "stopped" } };
+      }
       try {
-        const run = start(params.task, label, toolCallId, ctx, false, onUpdate);
+        const run = start(params.task, label, toolCallId, ctx, false, onUpdate, waitingId);
         const stopped = () => run.stop();
         signal?.addEventListener("abort", stopped, { once: true });
         const { status, answer, failure } = await run.finished;

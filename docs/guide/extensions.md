@@ -494,7 +494,9 @@ one extension.
   shows the subagent like the main conversation, and it can be given
   instructions and stopped from there. Only the protocol makes a subagent:
   another tool's progress (code mode, a web search, a research tool) stays on
-  its own card in the conversation, however long it reports while it runs.
+  its own card in the conversation, however long it reports while it runs:
+  its newest output lines, or the phase it says it has got to when it has no
+  text yet. A subagent that waits for a free slot is listed while it waits.
 - **Background jobs.** Processes the agent started in the chat's folder that
   are still running — a dev server, a watcher, an extension's job — are listed
   under *Background* in the terminal panel, with how long they have run. One

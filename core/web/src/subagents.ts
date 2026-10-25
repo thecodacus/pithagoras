@@ -16,7 +16,8 @@ export const subagentName = (agent: { label: string }): string => (agent.label =
  * events, so the child is drawn like the main conversation and can be spoken
  * to if it said so. No tool is taken for a subagent by what it does or how it
  * reports, however long it keeps reporting while it runs (code mode, a search,
- * a research tool): its progress stays on its own tool card in the transcript.
+ * a research tool): its progress stays on its own tool card in the transcript,
+ * as its newest output lines or the phase it reports.
  */
 export interface Subagent {
   /** The id the extension gave it. */
