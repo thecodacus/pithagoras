@@ -1056,7 +1056,7 @@ export function Chat({
   const lastAgents = useRef<Subagent[]>([]);
   const agents = useMemo(() => (lastAgents.current = stableSubagents(lastAgents.current, subagents(events, items, ended))), [events, items, ended]);
   const [background, refreshBackground] = useBackground(session.id, running, events);
-  const agentFor = (callId?: string) => (callId ? agents.find((a) => a.toolCallId === callId || a.id === `tool:${callId}`) : undefined);
+  const agentFor = (callId?: string) => (callId ? agents.find((a) => a.toolCallId === callId) : undefined);
   // The thinking block and the compaction marker already say so, animated,
   // where it is happening; the status pill would say it twice.
   const statusShownElsewhere = useMemo(() => {
@@ -1741,7 +1741,7 @@ export function Chat({
       </div>
       {kind === "agents" && (
         <div className="min-h-0 flex-1 bg-surface">
-          <SubagentPanel sessionId={session.id} agents={agents} items={items} selected={selectedAgent} onSelect={setSelectedAgent} />
+          <SubagentPanel sessionId={session.id} agents={agents} selected={selectedAgent} onSelect={setSelectedAgent} />
         </div>
       )}
       {extensionBody(kind)}

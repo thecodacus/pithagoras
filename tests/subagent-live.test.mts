@@ -21,7 +21,7 @@ test('a page that opens while a subagent is mid-message gets what it has said so
  live.record('s','portal_subagent',{type:'portal_subagent',op:'event',id:'r',event:{type:'tool_execution_end',toolCallId:'t1'}});
  assert.deepEqual(live.snapshot('s'),[]);
 });
-test('a tool that reported as it ran is still one worth watching once the page is loaded again',()=>{
+test('a tool that reported as it ran is not a subagent, whether the page is live or loaded again',()=>{
  const {live,stored}=stream();
  live.record('s','tool_execution_start',{toolCallId:'d',toolName:'deep_research',args:{}});
  live.record('s','tool_execution_update',{toolCallId:'d',toolName:'deep_research',partialResult:{details:{phase:'searching'}}});
@@ -30,7 +30,7 @@ test('a tool that reported as it ran is still one worth watching once the page i
  // Loaded again: only what was stored.
  const events=stored.map(r=>({seq:r.seq,type:r.type,at:0,payload:JSON.parse(r.payload)}));
  const items=buildTranscript(events);
- assert.deepEqual(subagents(events,items).map(s=>[s.kind,s.label,s.status]),[['tool','deep_research','done']]);
+ assert.deepEqual(subagents(events,items),[]);
 });
 test('a subagent whose start is further up than the page has loaded is still shown',()=>{
  const events:any[]=[
@@ -47,7 +47,7 @@ test('a subagent whose start is not loaded is listed once, by its tool call, and
   {seq:12,type:'tool_execution_end',at:0,payload:{toolCallId:'call-7',toolName:'subagent',updates:4,result:{content:[{type:'text',text:'done'}]}}},
  ];
  const found=subagents(events,buildTranscript(events));
- assert.deepEqual(found.map(s=>[s.kind,s.id,s.status]),[['protocol','s','stopped']]);
+ assert.deepEqual(found.map(s=>[s.id,s.status]),[['s','stopped']]);
 });
 test('a subagent that has not changed is the same entry, so its panel is not drawn again',()=>{
  const ev=(seq:number,text:string)=>({seq,type:'portal_subagent',at:0,payload:{op:'event',id:'s',event:{type:'message_end',message:{role:'assistant',content:[{type:'text',text}]}}}});
@@ -83,9 +83,9 @@ test('a subagent in the background goes on after the tool call that started it h
   {seq:13,type:'portal_subagent',at:0,payload:{op:'event',id:'far',toolCallId:'call-8',detached:true,event:{type:'message_end',message:{role:'assistant',content:[]}}}},
  ];
  const found=subagents(events,buildTranscript(events));
- assert.deepEqual(found.filter(s=>s.kind==='protocol').map(s=>[s.id,s.status]),[['bg','running'],['far','running']]);
+ assert.deepEqual(found.map(s=>[s.id,s.status]),[['bg','running'],['far','running']]);
  // A turn of the chat failing is not its pi gone: the portal writes the end of one when that pi goes.
- assert.deepEqual(subagents(events,buildTranscript(events),true).filter(s=>s.kind==='protocol').map(s=>s.status),['running','running']);
+ assert.deepEqual(subagents(events,buildTranscript(events),true).map(s=>s.status),['running','running']);
 });
 test('a subagent announced while it waited, and again as it starts, is one subagent with its new line',()=>{
  const events:any[]=[

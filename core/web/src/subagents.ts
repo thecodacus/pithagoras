@@ -1,6 +1,5 @@
 import type { PortalEvent } from "./api";
 import type { Item } from "./transcript";
-import { SHELL_TOOL } from "./tool-activity";
 
 import { msg, t } from "./i18n";
 /** What a subagent that gives no name is called: kept as the English, said where it is drawn. */
@@ -12,17 +11,16 @@ export const subagentName = (agent: { label: string }): string => (agent.label =
 /**
  * The agents working beside the main one, as the chat shows them.
  *
- * Two kinds, neither known by name. An extension that speaks the subagent
- * protocol (server/src/subagent-protocol.ts) hands over its child's own
+ * Only an extension that speaks the subagent protocol
+ * (server/src/subagent-protocol.ts) has one: it hands over its child's own
  * events, so the child is drawn like the main conversation and can be spoken
- * to if it said so. Any other tool that keeps reporting while it runs — a
- * research tool, a delegate — is shown by what it reports: its text, and the
- * steps in its details where they look like steps.
+ * to if it said so. No other tool is listed here, however long it keeps
+ * reporting while it runs (code mode, a search, a research tool): its output
+ * is on its own tool card in the transcript, as always.
  */
 export interface Subagent {
-  /** The protocol's id, or `tool:<call id>`. */
+  /** The id the extension gave it. */
   id: string;
-  kind: "protocol" | "tool";
   label: string;
   status: "running" | "done" | "error" | "stopped";
   /** A line on what it is doing: the extension's own words where it gave some. */
@@ -36,12 +34,9 @@ export interface Subagent {
   /** Runs on after its tool call has returned: a subagent in the background. */
   detached?: boolean;
   error?: string;
-  /** Protocol subagents: the child's events, in the shape the main transcript reads. */
+  /** The child's events, in the shape the main transcript reads. */
   events: PortalEvent[];
 }
-
-type ToolItem = Extract<Item, { kind: "tool" }>;
-
 
 const textOf = (content: unknown): string =>
   typeof content === "string"
@@ -58,19 +53,6 @@ function asPortalEvent(seq: number, at: number | undefined, event: any): PortalE
   }
   return { seq, at, type: String(event?.type), payload: event };
 }
-
-/** A line saying where a tool that reports its own progress has got to. */
-function toolDetail(item: ToolItem): string | undefined {
-  const d = item.details as any;
-  for (const key of ["phase", "status", "stage", "step"]) if (typeof d?.[key] === "string" && d[key]) return d[key];
-  const lines = item.output?.trim().split("\n");
-  const last = lines?.[lines.length - 1]?.trim();
-  return last && last.length <= 160 ? last : undefined;
-}
-
-/** A tool whose run is worth a window of its own: it kept reporting, and it is not a shell (that has the terminal). */
-const watchable = (item: ToolItem) =>
-  !SHELL_TOOL.test(item.name) && ((item.updates ?? 0) > 0 || (item.details !== undefined && item.status === "running"));
 
 /**
  * `ended`: the process that ran the extensions is gone (an error, a restart),
@@ -89,7 +71,6 @@ export function subagents(events: PortalEvent[], items: Item[], ended = false): 
       const had = sub;
       sub = {
         id,
-        kind: "protocol",
         label: String(p.label ?? UNNAMED),
         status: "running",
         ...(typeof p.detail === "string" ? { detail: p.detail } : {}),
@@ -115,7 +96,6 @@ export function subagents(events: PortalEvent[], items: Item[], ended = false): 
     if (!sub) {
       sub = {
         id,
-        kind: "protocol",
         label: UNNAMED,
         status: "running",
         input: false,
@@ -157,34 +137,7 @@ export function subagents(events: PortalEvent[], items: Item[], ended = false): 
     }
   }
 
-  // A tool the protocol already covers is not listed twice.
-  const covered = new Set(order.map((s) => s.toolCallId).filter(Boolean));
-  for (const item of items) {
-    if (item.kind !== "tool" || !watchable(item) || (item.callId && covered.has(item.callId))) continue;
-    order.push({
-      id: `tool:${item.callId ?? item.id}`,
-      kind: "tool",
-      label: item.name,
-      status: item.status,
-      detail: toolDetail(item),
-      since: item.since,
-      until: item.until,
-      input: false,
-      stop: false,
-      toolCallId: item.callId,
-      events: [],
-    });
-  }
   return order.sort((a, b) => (a.since ?? 0) - (b.since ?? 0));
-}
-
-/** The steps a tool reports in its details, where they look like steps: `items` or `steps` of text and tool calls. */
-export function reportedSteps(details: unknown): { type: "text" | "toolCall"; text?: string; name?: string; args?: unknown }[] {
-  const d = details as any;
-  const list = Array.isArray(d?.items) ? d.items : Array.isArray(d?.steps) ? d.steps : [];
-  return list
-    .filter((s: any) => (s?.type === "text" && typeof s.text === "string") || (s?.type === "toolCall" && typeof s.name === "string"))
-    .map((s: any) => (s.type === "text" ? { type: "text", text: s.text } : { type: "toolCall", name: s.name, args: s.args }));
 }
 
 /**

@@ -123,7 +123,38 @@ test('in interrupt mode two subagents asked for at once run one after the other'
  assert.equal(both[0].content[0].text,'the whole answer');
  // The second waited for the first, and says so.
  assert.match(both[1].content[0].text,/^the whole answer\n\n\(It waited/);
- assert.deepEqual(seen,['start a','end','start b','end']);
+ // The second says at once that it waits (the first has its slot but is not started yet), then starts under the same id.
+ assert.deepEqual(seen,['start b','start a','end','start b','end']);
+});
+test('in interrupt mode one that waits for a slot is announced as waiting, and starts under the same id',{timeout:5000},async()=>{
+ delete process.env.FAKE;mode();
+ const {tool,events}=load();
+ const starts:any[]=[];events.on('subagent:v1:start',d=>starts.push(d));
+ await Promise.all([tool.execute('a',{task:'one'},undefined,undefined,{cwd:dir}),tool.execute('b',{task:'two',label:'Second'},undefined,undefined,{cwd:dir})]);
+ const b=starts.filter(d=>d.toolCallId==='b');
+ assert.equal(b.length,2);
+ assert.equal(b[0].detail,'Waiting for a free slot');
+ assert.equal(b[0].label,'Second');
+ assert.equal(b[0].stop,false);
+ assert.equal(b[1].id,b[0].id);
+ assert.equal(starts.find(d=>d.toolCallId==='a').detail!=='Waiting for a free slot',true);
+});
+test('in interrupt mode one that is stopped while it waits for a slot is ended, not left listed',{timeout:5000},async()=>{
+ process.env.FAKE='hang';mode();
+ const {tool,events,ends}=load();
+ const said=spoken(events);
+ const first=tool.execute('a',{task:'one'},undefined,undefined,{cwd:dir});
+ await until(()=>said.length===1);
+ const starts:any[]=[];events.on('subagent:v1:start',d=>d.toolCallId==='b'&&starts.push(d));
+ const stop=new AbortController();
+ const second=tool.execute('b',{task:'two'},stop.signal,undefined,{cwd:dir});
+ await until(()=>starts.length===1);
+ stop.abort();
+ assert.deepEqual((await second).details,{phase:'stopped'});
+ assert.deepEqual(ends.filter(d=>d.id===starts[0].id),[{id:starts[0].id,status:'stopped'}]);
+ events.emit('subagent:v1:stop',{id:said[0]});
+ await first;
+ mode();
 });
 test('in background mode the call returns at once, and the answer arrives later as a message that starts a turn',{timeout:5000},async()=>{
  delete process.env.FAKE;mode('background');
@@ -257,7 +288,8 @@ test('an interrupt subagent waiting for a slot gives up when its parent is stopp
  assert.deepEqual(phases,['waiting for another subagent to finish']);
  events.emit('subagent:v1:stop',{id});
  await first;
- assert.deepEqual(seen,['start a','end']);
+ // The waiting one was announced and ended, the first one started and ended.
+ assert.deepEqual(seen,['start b','start a','end','end']);
 });
 test('the limit holds across conversations: two chats share it',{timeout:5000},async()=>{
  delete process.env.FAKE;mode();
@@ -266,7 +298,7 @@ test('the limit holds across conversations: two chats share it',{timeout:5000},a
  one.events.on('subagent:v1:start',()=>order.push('start one'));one.events.on('subagent:v1:end',()=>order.push('end one'));
  two.events.on('subagent:v1:start',()=>order.push('start two'));two.events.on('subagent:v1:end',()=>order.push('end two'));
  await Promise.all([one.tool.execute('a',{task:'x'},undefined,undefined,{cwd:dir}),two.tool.execute('b',{task:'y'},undefined,undefined,{cwd:dir})]);
- assert.deepEqual(order,['start one','end one','start two','end two']);
+ assert.deepEqual(order,['start two','start one','end one','start two','end two']);
 });
 test('a child runs on the model its parent is on, unless the chat or the settings say another',{timeout:5000},async()=>{
  process.env.FAKE='argv';mode();

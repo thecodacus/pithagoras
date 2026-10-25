@@ -1416,11 +1416,9 @@ const de: Locale = {
     "This chat's model": "Das Modell dieses Chats",
     "The one it is on when it starts one": "Das Modell, das er hat, wenn er einen startet",
     // components/SubagentPanel.tsx
-    "No subagents in this chat yet. An extension's agent shows up here while it works — and takes messages if the extension speaks the subagent protocol.": "In diesem Chat gibt es noch keine Subagents. Der Agent einer Erweiterung erscheint hier, während er arbeitet — und nimmt Nachrichten an, wenn die Erweiterung das Subagent-Protokoll spricht.",
+    "No subagents in this chat yet. An extension's agent shows up here while it works, if the extension speaks the subagent protocol.": "In diesem Chat gibt es noch keine Subagents. Der Agent einer Erweiterung erscheint hier, während er arbeitet, wenn die Erweiterung das Subagent-Protokoll spricht.",
     "Stopped": "Gestoppt",
     "Failed": "Fehlgeschlagen",
-    "Working…": "Arbeitet…",
-    "This extension does not take messages for its agent. It can, by speaking the subagent protocol.": "Diese Erweiterung nimmt für ihren Agenten keine Nachrichten an. Sie kann es, wenn sie das Subagent-Protokoll spricht.",
     "This subagent does not take messages.": "Dieser Subagent nimmt keine Nachrichten an.",
     "Sent: “{text}”": "Gesendet: „{text}“",
     "Tell {name} something…": "Sag {name} etwas…",

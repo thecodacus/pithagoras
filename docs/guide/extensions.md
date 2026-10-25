@@ -489,11 +489,13 @@ box: subagents, jobs the agent left running, and the status lines extensions
 set (the ones pi's terminal shows in its footer). Nothing there is specific to
 one extension.
 
-- **Subagents.** Any tool that keeps reporting while it runs — a research tool,
-  a delegate — gets a window (the robot button in the chat's header, or
-  *Watch* on its call) showing its output and the steps it reports. An
-  extension that speaks the *subagent protocol* below is shown like the main
-  conversation, and can be given instructions and stopped from there.
+- **Subagents.** An extension that speaks the *subagent protocol* below gets a
+  window (the robot button in the chat's header, or *Watch* on its call). It
+  shows the subagent like the main conversation, and it can be given
+  instructions and stopped from there. Only the protocol makes a subagent:
+  other tools (code mode, a web search, a research tool) are not listed in the
+  window, and show their output on their own card in the conversation, as
+  always. A subagent that waits for a free slot is listed while it waits.
 - **Background jobs.** Processes the agent started in the chat's folder that
   are still running — a dev server, a watcher, an extension's job — are listed
   under *Background* in the terminal panel, with how long they have run. One

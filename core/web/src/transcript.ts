@@ -118,8 +118,6 @@ export type Item =
       outputLines?: number;
       /** What the tool reported about itself beside its text — an extension's progress, its subagent's steps. */
       details?: unknown;
-      /** How many updates it streamed while it ran: a tool that reports as it goes is doing something worth watching. */
-      updates?: number;
       /** The guard flagged what it returned as a suspected prompt injection: its envelope's id, the signs, and the message of the turn it is in. */
       flagged?: { id: string; signals: string[]; turnSeq?: number };
       /** The run ended with this call still open: it never said how it came out. */
@@ -525,10 +523,7 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
         const partial = p.partialResult ?? p.result;
         const text = toolOutputText(partial);
         if (tool && typeof text === "string") setToolOutput(tool, text);
-        if (tool) {
-          tool.updates = (tool.updates ?? 0) + 1;
-          if (partial?.details !== undefined) tool.details = partial.details;
-        }
+        if (tool && partial?.details !== undefined) tool.details = partial.details;
         break;
       }
 
@@ -572,8 +567,6 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
               it.flagged = { ...flag, ...(turn ? { turnSeq: turn.seq } : {}) };
             }
             if (p.result?.details !== undefined) it.details = p.result.details;
-            // Its updates were live only; how many there were is kept on its end.
-            if (typeof p.updates === "number") it.updates = Math.max(it.updates ?? 0, p.updates);
             const files = shownFiles(p);
             if (files.length) {
               it.files = files;

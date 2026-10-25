@@ -389,7 +389,14 @@ export default function subagentTool(pi: any, settings: () => Settings) {
       // parent is stopped meanwhile.
       const hadToWait = slots.running >= liveLimit();
       const queuedAt = Date.now();
-      if (hadToWait) onUpdate?.({ content: [{ type: "text", text: "" }], details: { phase: "waiting for another subagent to finish" } });
+      // Said through the protocol as well, so the chat lists it while it waits;
+      // the start that follows merges into this one.
+      let waitingId: string | undefined;
+      if (hadToWait) {
+        waitingId = randomUUID();
+        pi.events.emit(START, { id: waitingId, label, toolCallId, input: false, stop: false, detail: "Waiting for a free slot" });
+        onUpdate?.({ content: [{ type: "text", text: "" }], details: { phase: "waiting for another subagent to finish" } });
+      }
       const release = await takeSlot(
         liveLimit,
         () => signal?.aborted === true || shutDown,
@@ -398,10 +405,13 @@ export default function subagentTool(pi: any, settings: () => Settings) {
           return () => signal?.removeEventListener("abort", wake);
         },
       );
-      if (!release) return { content: [{ type: "text", text: "(stopped before the subagent started)" }], details: { phase: "stopped" } };
+      if (!release) {
+        if (waitingId) pi.events.emit(END, { id: waitingId, status: "stopped" });
+        return { content: [{ type: "text", text: "(stopped before the subagent started)" }], details: { phase: "stopped" } };
+      }
       try {
         const startedAt = Date.now();
-        const run = start(params.task, label, toolCallId, ctx, false, onUpdate);
+        const run = start(params.task, label, toolCallId, ctx, false, onUpdate, waitingId);
         const stopped = () => run.stop();
         signal?.addEventListener("abort", stopped, { once: true });
         const { status, answer, failure } = await run.finished;
