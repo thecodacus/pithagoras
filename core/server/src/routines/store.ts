@@ -54,6 +54,20 @@ export function timingSets(
   return { sets, values: [timing.schedule, timing.runAt] };
 }
 
+/** The most minutes a routine may be given for a run: what a timer may hold. */
+export const MAX_TIMEOUT_MIN = 35_791;
+
+/**
+ * A routine's own limit on how long a run may take, as sent: a whole number of
+ * minutes from 1 to MAX_TIMEOUT_MIN sets it; null, "" or 0 clears it, back to
+ * the portal's default; anything else is refused, said as such.
+ */
+export function readTimeout(raw: unknown): { timeoutMin: number | null } | { error: string } {
+  if (raw === null || raw === "" || raw === 0) return { timeoutMin: null };
+  if (typeof raw === "number" && Number.isInteger(raw) && raw >= 1 && raw <= MAX_TIMEOUT_MIN) return { timeoutMin: raw };
+  return { error: `timeoutMin must be a whole number of minutes from 1 to ${MAX_TIMEOUT_MIN}, or 0 for the portal's default` };
+}
+
 export interface NewRoutine {
   name: string;
   /** A slug that reconnects the routine to the sessions that slug had; without one it is made from the name. */
@@ -61,6 +75,8 @@ export interface NewRoutine {
   timing: Timing;
   instructions: string;
   freshSession: boolean;
+  /** How many minutes a run may take; null takes the portal's default. */
+  timeoutMin: number | null;
   /** Where its reports go: null inherits the portal default, "" never reports. */
   reportChannel: string | null;
   reportTarget: string | null;
@@ -88,9 +104,9 @@ export function insertRoutine(r: NewRoutine): { id: string; slug: string } {
   getDb()
     .prepare(
       `INSERT INTO routines
-         (id, slug, name, schedule, run_at, instructions, fresh_session, next_run,
+         (id, slug, name, schedule, run_at, instructions, fresh_session, timeout_min, next_run,
           report_channel, report_target, workspace)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       id,
@@ -100,6 +116,7 @@ export function insertRoutine(r: NewRoutine): { id: string; slug: string } {
       r.timing.runAt,
       r.instructions.trim(),
       r.freshSession ? 1 : 0,
+      r.timeoutMin,
       r.timing.schedule ? (nextRun(parseCron(r.timing.schedule))?.toISOString() ?? null) : r.timing.runAt,
       r.reportChannel,
       r.reportTarget,

@@ -1258,6 +1258,18 @@ straight from schema 13 has, also needs what
 says for it, and an older backup what
 [Chats can have child chats](#chats-can-have-child-chats) says.
 
+## A routine's own run time limit
+
+A routine's page sets how many minutes its runs may take
+([Routines](/guide/routines#scheduling)), where every run had the portal's hour.
+The upgrade (schema 16) adds the column that holds it, empty for every routine
+there is, so each keeps the portal's default. It changes no data; nothing is
+left for an extension, and nothing needs doing.
+
+**Going back.** From `portal-v15-….db` it is only putting the backup in as
+under [Going back](#going-back); an older backup also needs what
+[Sub-chats in the chat list](#sub-chats-in-the-chat-list) says for it.
+
 ## The guard
 
 What the guard holds a chat to changed in this release

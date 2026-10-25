@@ -160,6 +160,8 @@ const labelFor = (targets: ReportTarget[], to: ReportTo) =>
  */
 export function RoutinesPage({ onOpenSession }: { onOpenSession: (id: string) => void }) {
   const [routines, setRoutines] = useState<Routine[]>([]);
+  // The minutes a run may take unless the routine says, said beside the routine's own field.
+  const [timeoutDefault, setTimeoutDefault] = useState(60);
   const [openId, setOpenId] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -174,6 +176,7 @@ export function RoutinesPage({ onOpenSession }: { onOpenSession: (id: string) =>
       .routines()
       .then((r) => {
         setRoutines(r.routines);
+        setTimeoutDefault(r.timeoutDefaultMin ?? 60);
         setLoadError(null);
       })
       .catch((e) => setLoadError((e as Error).message))
@@ -206,6 +209,7 @@ export function RoutinesPage({ onOpenSession }: { onOpenSession: (id: string) =>
             onError={setError}
             onOpenSession={onOpenSession}
             places={places}
+            timeoutDefaultMin={timeoutDefault}
           />
         </div>
       </div>
@@ -352,6 +356,9 @@ function usePlaces(): Places {
 }
 
 /** Home, an agent, or where under the projects' root it runs: "site", or "site/docs" for a folder in one. */
+/** A routine's own minutes as the field shows them: none is empty, the portal's default. */
+const minutesText = (minutes: number | null) => (minutes ? String(minutes) : "");
+
 const placeName = (workspace: string | null, root: string | null, agents: readonly Agent[] = []) => {
   if (!workspace) return agents.find((a) => a.first)?.name ?? t("Home");
   const agent = agents.find((a) => a.home === workspace);
@@ -581,6 +588,7 @@ function RoutineDetail({
   onError,
   onOpenSession,
   places,
+  timeoutDefaultMin,
 }: {
   routine: Routine;
   onBack: () => void;
@@ -588,6 +596,8 @@ function RoutineDetail({
   onError: (e: string) => void;
   onOpenSession: (id: string) => void;
   places: Places;
+  /** The minutes a run may take unless the routine says. */
+  timeoutDefaultMin: number;
 }) {
   const [name, setName] = useState(r.name);
   const [mode, setMode] = useState<"repeats" | "once">(r.mode);
@@ -595,6 +605,8 @@ function RoutineDetail({
   const [runAt, setRunAt] = useState(toLocalInput(r.runAt));
   const [instructions, setInstructions] = useState(r.instructions);
   const [fresh, setFresh] = useState(r.freshSession);
+  // Minutes, as typed; "" takes the portal's default.
+  const [limit, setLimit] = useState(minutesText(r.timeoutMin));
   const [workspace, setWorkspace] = useState(r.workspace ?? "");
   // "" = inherit the portal default, "off" = stay quiet, else "channel\u0000target".
   const [report, setReport] = useState(reportValue(r));
@@ -611,6 +623,7 @@ function RoutineDetail({
     (mode === "repeats" ? schedule !== from.schedule : toLocalInput(from.runAt) !== runAt) ||
     instructions !== from.instructions ||
     fresh !== from.freshSession ||
+    limit !== minutesText(from.timeoutMin) ||
     workspace !== (from.workspace ?? "") ||
     report !== reportValue(from);
   const dirty = differs(r);
@@ -623,12 +636,13 @@ function RoutineDetail({
     setRunAt(toLocalInput(from.runAt));
     setInstructions(from.instructions);
     setFresh(from.freshSession);
+    setLimit(minutesText(from.timeoutMin));
     setWorkspace(from.workspace ?? "");
     setReport(reportValue(from));
   };
   // The fields as they are now, for a save that finishes after more was typed.
-  const live = useRef({ name, mode, schedule, runAt, instructions, fresh, workspace, report });
-  live.current = { name, mode, schedule, runAt, instructions, fresh, workspace, report };
+  const live = useRef({ name, mode, schedule, runAt, instructions, fresh, limit, workspace, report });
+  live.current = { name, mode, schedule, runAt, instructions, fresh, limit, workspace, report };
 
   // What the form was last filled from: the fields are filled again from the routine
   // for another routine, after this form's own save (see the Save button), or when
@@ -759,6 +773,23 @@ function RoutineDetail({
           <SwitchTrack on={fresh} />
         </button>
 
+        <label className="block">
+          <span className="text-xs text-fg-muted">{t("Run time limit (minutes)")}</span>
+          <input
+            type="number"
+            min={1}
+            step={1}
+            inputMode="numeric"
+            value={limit}
+            onChange={(e) => setLimit(e.target.value)}
+            placeholder={t("{n} (portal default)", { n: timeoutDefaultMin })}
+            className={`${inputCls} mt-1`}
+          />
+          <p className="mt-1 text-[11px] text-fg-faint">
+            {t("A run still going after this is listed as an error, and stopped in a fresh session. Empty takes the portal's default, which ROUTINE_RUN_TIMEOUT_MIN sets.")}
+          </p>
+        </label>
+
         {/* The rules one at a time are Settings → Guard's: what it says here is what holds for this routine. */}
         <div className="flex w-full items-center gap-3 px-1 py-1.5">
           <div className="min-w-0 flex-1">
@@ -887,6 +918,7 @@ function RoutineDetail({
                   : { schedule: "", runAt: new Date(runAt).toISOString() }),
                 instructions,
                 freshSession: fresh,
+                timeoutMin: limit.trim() ? Number(limit) : null,
                 // Only when it changed: a place that has gone would refuse the save.
                 ...(workspace !== (r.workspace ?? "") ? { workspace: workspace || null } : {}),
                 ...reportPatch(report),
