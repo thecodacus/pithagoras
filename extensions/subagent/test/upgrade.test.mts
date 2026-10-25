@@ -4,7 +4,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { inProcessHome } from "../../../tests/helpers.mts";
 import { describe } from "../src/pi.ts";
-import { serveSubagent } from "./portal.mts";
+import { SPEC, serveSubagent } from "./portal.mts";
 
 /**
  * A portal whose subagent tool was a pi package, with its settings in pi's settings.json, upgraded: the database's
@@ -25,4 +25,22 @@ test("the mode and the limit pi's settings held are the extension's after the up
   assert.deepEqual(JSON.parse(readFileSync(piSettings, "utf8")), { packages: ["../../extensions/subagent"], defaultProvider: "llama-swap" });
   assert.equal(existsSync(path.join(process.env.DATA_DIR!, "handoff", "subagent")), false);
   assert.equal(existsSync(path.join(portal.data, "handoff-subagent")), false);
+});
+
+test("an upgraded portal whose pi listed the folder lists the extension as on, serving, with its browser and server halves, and as off where the entry is switched off", async () => {
+  const flag = async () => (await (await fetch(`${portal.api}/features/flags`)).json()).subagent.enabled;
+  const listed = async () => (await portal.list()).find((e) => e.spec === SPEC);
+  // Nothing was done but the upgrade and the start: the entry pi had is the extension, on.
+  assert.deepEqual({ name: (await listed())?.name, enabled: (await listed())?.enabled, kinds: (await listed())?.kinds }, { name: "pithagoras-subagent", enabled: true, kinds: ["pithagoras"] });
+  assert.equal(portal.host.isServing("pithagoras-subagent"), true);
+  assert.equal(await flag(), true);
+
+  // The entry as pi writes one that was switched off (`pi config`, Settings → Extensions): the extension is off.
+  await portal.install({ source: SPEC, extensions: [], skills: [], prompts: [], themes: [] });
+  assert.equal((await listed())?.enabled, false);
+  assert.equal(portal.host.isServing("pithagoras-subagent"), false);
+  assert.equal(await flag(), false);
+  await portal.install(SPEC);
+  assert.equal(portal.host.isServing("pithagoras-subagent"), true);
+  assert.equal(await flag(), true);
 });

@@ -13,7 +13,7 @@ import { serveSubagent } from "./portal.mts";
 
 inProcessHome("pithagoras-subagent-server-");
 const portal = await serveSubagent();
-const { at, api, data } = portal;
+const { at, api } = portal;
 
 const json = { "content-type": "application/json" };
 const put = (url: string, body: unknown) => fetch(url, { method: "PUT", headers: json, body: JSON.stringify(body) });
@@ -25,7 +25,7 @@ test("the settings start as the tool does without being told, are saved for thei
   assert.equal(saved.status, 200);
   assert.deepEqual(await saved.json(), { mode: "background", maxParallel: 3, model: "llama-swap/model-b", maxParallelLimit: 16, reloaded: 0, waiting: 0 });
   assert.deepEqual(await shown(), { mode: "background", maxParallel: 3, model: "llama-swap/model-b", maxParallelLimit: 16 });
-  const file = path.join(data, "settings.json");
+  const file = path.join(portal.data, "settings.json");
   assert.deepEqual(JSON.parse(readFileSync(file, "utf8")), { mode: "background", maxParallel: 3, model: "llama-swap/model-b" });
   assert.equal(statSync(file).mode & 0o777, 0o600);
   // One change at a time keeps the rest; a default is left out of the file.
@@ -77,6 +77,7 @@ test("while it runs every chat's pi has the subagent tool, held to the guard's d
   assert.equal(tool.description, describe("background", 3));
   assert.deepEqual((await (await fetch(`${api}/features/flags`)).json()).subagent, { enabled: true });
 
+  // Settings → Extensions' switch (PUT /api/extensions/enabled), which brings the server halves in line with pi's settings.
   await portal.stop();
   assert.equal(portal.toolsIn("chat-1").size, 0, "off: nothing of it in the chat");
   assert.deepEqual((await (await fetch(`${api}/features/flags`)).json()).subagent, { enabled: false });
