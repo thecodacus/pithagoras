@@ -211,9 +211,9 @@ test("of two installed under one name, the one switched on is the one a plan fin
   }
 });
 
-test("what comes with the portal is listed to install from its own folder, without the subagent tool, which has a switch of its own in Settings → Tools", async () => {
+test("what comes with the portal is listed to install from its own folder, the subagent tool among them", async () => {
   const { extensions } = await (await fetch(at("/api/extensions/shipped"))).json();
-  assert.deepEqual(extensions.map((e) => [e.name, e.kinds]), [["pithagoras-browser", ["pithagoras"]], ["pithagoras-canvas", ["pithagoras"]], ["pithagoras-creator", ["pithagoras"]], ["pithagoras-docker", ["pithagoras"]], ["pithagoras-docs", ["pithagoras"]], ["pithagoras-files", ["pithagoras"]], ["pithagoras-git", ["pithagoras"]], ["pithagoras-kanban", ["pithagoras"]], ["pithagoras-media", ["pithagoras"]], ["pithagoras-terminal", ["pithagoras"]], ["pithagoras-themes", ["themes"]], ["pithagoras-understory", ["pithagoras"]], ["pithagoras-voice", ["pithagoras"]], ["pithagoras-voice-servers", ["pithagoras"]]]);
+  assert.deepEqual(extensions.map((e) => [e.name, e.kinds]), [["pithagoras-browser", ["pithagoras"]], ["pithagoras-canvas", ["pithagoras"]], ["pithagoras-creator", ["pithagoras"]], ["pithagoras-docker", ["pithagoras"]], ["pithagoras-docs", ["pithagoras"]], ["pithagoras-files", ["pithagoras"]], ["pithagoras-git", ["pithagoras"]], ["pithagoras-kanban", ["pithagoras"]], ["pithagoras-media", ["pithagoras"]], ["pithagoras-subagent", ["pithagoras"]], ["pithagoras-terminal", ["pithagoras"]], ["pithagoras-themes", ["themes"]], ["pithagoras-understory", ["pithagoras"]], ["pithagoras-voice", ["pithagoras"]], ["pithagoras-voice-servers", ["pithagoras"]]]);
   for (const shipped of extensions) {
     assert.ok(path.isAbsolute(shipped.spec) && shipped.spec.endsWith(path.join("extensions", shipped.name.replace(/^pithagoras-/, ""))), shipped.spec);
     assert.ok(shipped.version && shipped.description, shipped.name);

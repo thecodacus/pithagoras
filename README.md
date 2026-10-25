@@ -62,7 +62,7 @@ Browsers install the portal as an app (PWA) only over HTTPS or on `localhost`.
   extension, with Docker) or speech servers of your own (the Voice servers extension), pictures
   both ways, push-to-talk.
 - **Opt-in features** — the agent's own browser (the Browser extension, with Docker, both installed from
-  Settings → Extensions), a subagent tool (switched on in Settings → Tools), Understory
+  Settings → Extensions), a subagent tool (the Subagents extension, switched on in Settings → Extensions), Understory
   memory with a Memory page (the Understory extension, with Docker, installed from Settings →
   Extensions), and, from the Media extension the portal installs, image generation
   and editing through an endpoint you choose and video generation through a stable-diffusion.cpp

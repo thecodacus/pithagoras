@@ -117,9 +117,9 @@ Understory, the agent's memory, are run through the
 portal's network namespace so their services need no published ports. An extension's container that runs code from
 elsewhere is on a network of its own instead (Docker's `networks`). A server half can give part of a chat's work to a
 [child chat](/guide/extension-ui#child-chats) (`core/server/src/child-chats.ts`): a session of its own with a
-parent, run by the session manager as any chat is, and deleted with its parent. Opt-in pi extensions the
-portal ships (`extensions/`, the subagent tool) are installed as local pi
-packages only when switched on. The server holds one socket in its data
+parent, run by the session manager as any chat is, and deleted with its parent. The extensions the
+portal ships (`extensions/`, the subagent tool among them) are installed as local pi
+packages from that folder; the ones a fresh portal starts with are in `extensions/defaults.json`. The server holds one socket in its data
 directory so only one portal runs on it.
 
 Two things run on a clock of their own. The routine supervisor

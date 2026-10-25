@@ -47,7 +47,6 @@ import { useNotifyState } from "../notify";
 import { setCommandTrigger, typedCharacter, useCommandTrigger, validTrigger } from "../command-trigger";
 import { DEFAULT_TRIGGER } from "../slash-palette";
 import { PeoplePanel } from "./PeoplePanel";
-import { SubagentSettings } from "./SubagentSettings";
 import { VoiceModeSettings } from "./VoiceModeSettings";
 import { RestartSection } from "./RestartSection";
 import { UpdateSection } from "./UpdateSection";
@@ -375,7 +374,7 @@ export const ConfigModal = memo(function ConfigModal({
       {nav.kind === "tab" && nav.id === "about" && <AboutPanel onError={setError} />}
       {nav.kind === "tab" && nav.id === "channels" && <ChannelsPanel onError={setError} />}
       {nav.kind === "tab" && nav.id === "people" && <PeoplePanel onError={setError} />}
-      {nav.kind === "tab" && nav.id === "tools" && <><ToolDefaults onError={setError} /><SubagentSettings onError={setError} /></>}
+      {nav.kind === "tab" && nav.id === "tools" && <ToolDefaults onError={setError} />}
       {nav.kind === "tab" && nav.id === "modes" && <ModesPanel onError={setError} />}
       {nav.kind === "tab" && nav.id === "sandbox" && <SandboxSettings onError={setError} />}
       {nav.kind === "tab" && nav.id === "guard" && <GuardSettings onError={setError} onOpen={(id) => setNav({ kind: "tab", id })} />}

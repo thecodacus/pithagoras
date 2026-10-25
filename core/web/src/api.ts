@@ -832,19 +832,21 @@ export const api = {
     json<{ ok: true }>(`/api/skills/${encodeURIComponent(name)}`, { method: "DELETE" }),
 
   people: () => json<{ people: Person[] }>("/api/people"),
-  /** The subagent tool. */
-  subagentFeature: () => json<{ subagent: SubagentFeature }>("/api/features/subagent"),
   /** Only whether the subagent tool is on, and what holds the agent's memory, by its label — cheap, for the chat's menus and the Projects page. */
   featureFlags: () => json<{ subagent: { enabled: boolean }; memory: { held: boolean; by: string | null } }>("/api/features/flags"),
-  /** What a chat's subagents run on: its own choice (null follows `default`). */
-  subagentModel: (id: string) => json<{ model: string | null; default: string }>(`/api/sessions/${id}/subagent-model`),
+  /**
+   * What a chat's subagents run on: its own choice (null follows `default`), and what the subagent extension's settings
+   * say for every chat, from its own address. Asked only while the extension is on.
+   */
+  subagentModel: async (id: string) => {
+    const [own, extension] = await Promise.all([
+      json<{ model: string | null }>(`/api/sessions/${id}/subagent-model`),
+      json<{ model: string }>("/api/x/pithagoras-subagent/settings"),
+    ]);
+    return { model: own.model, default: extension.model };
+  },
   setSubagentModel: (id: string, model: string | null) =>
-    json<{ model: string | null; default: string }>(`/api/sessions/${id}/subagent-model`, { method: "PUT", body: JSON.stringify({ model }) }),
-  setSubagentFeature: (patch: { enabled?: boolean; mode?: SubagentMode; maxParallel?: number; model?: string }) =>
-    json<{ subagent: SubagentFeature; reloaded: number; waiting: number }>("/api/features/subagent", {
-      method: "PUT",
-      body: JSON.stringify(patch),
-    }),
+    json<{ model: string | null }>(`/api/sessions/${id}/subagent-model`, { method: "PUT", body: JSON.stringify({ model }) }),
   sandbox: () => json<SandboxState>("/api/sandbox"),
   guard: () => json<GuardState>("/api/guard"),
   setGuardServer: (name: string, trusted: boolean) =>
@@ -1556,25 +1558,6 @@ export interface AuditEntry {
   person_key: string | null;
   person_name: string | null;
   session_id: string | null;
-}
-
-export type SubagentMode = "interrupt" | "background";
-
-/** The subagent tool the portal ships, off until switched on. */
-export interface SubagentFeature {
-  /** This install carries it. */
-  available: boolean;
-  installed: boolean;
-  enabled: boolean;
-  /** How pi's packages list names it. */
-  source: string | null;
-  mode: SubagentMode;
-  /** How many may run at once, across every chat. */
-  maxParallel: number;
-  /** The most that may be set. */
-  maxParallelLimit?: number;
-  /** What they run on unless a chat says: "auto", the model the chat is on, or "provider/model". */
-  model: string;
 }
 
 /** A skill an agent wrote for itself, in its home's skills folder. */
