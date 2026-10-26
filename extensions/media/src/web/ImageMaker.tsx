@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { LuChevronLeft, LuChevronRight, LuImagePlus, LuLoader, LuPlus, LuSlidersHorizontal, LuSparkles, LuUpload, LuWandSparkles, LuX } from "react-icons/lu";
 import { Link, Select, local, portal, settingsPage, t, tp, tx } from "../portal";
 import { api, type GalleryPicture, type ImagesFeature, type PictureJob } from "./api";
@@ -156,9 +156,11 @@ export function ImageMaker({
   };
   const invalid = (field: FieldName) => problem?.field === field;
   const multiple = features.editMultiple;
-  // The pictures as the last of the ones put in meanwhile left them: a drop while another is being uploaded adds to that.
+  // The pictures as the last of the ones put in meanwhile left them: a drop while another is being uploaded adds to that. Brought up to date with what was committed, not with a render that may be dropped.
   const listsNow = useRef({ sources, references });
-  listsNow.current = { sources, references };
+  useLayoutEffect(() => {
+    listsNow.current = { sources, references };
+  }, [sources, references]);
   const setters: Record<Into, (list: GalleryPicture[]) => void> = { sources: onSources, references: onReferences };
   // Making and changing have a switch and an address each: either can be on without the other.
   const generating = features.ready;

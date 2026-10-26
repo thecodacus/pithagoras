@@ -5,7 +5,7 @@ import { portal } from "../host";
 import { GENERATED_DIR, recordChatPicture } from "../image-gallery";
 import { MAX_EDIT_PICTURES, checkCount, editImage } from "../image-editing";
 import { GENERATE_IMAGE_TOOL, MAX_PROMPT, generateImage, imageEditingReady, imageEditingTarget, imageGenerationConfig, imageGenerationReady, type ImageGenerationConfig } from "../image-generation";
-import { parseSize } from "../image-settings";
+import { nativeConflict, parseSize } from "../image-settings";
 import { readChatPictures } from "./chat-pictures";
 import { list, object, text } from "./schema";
 import { pictureIn } from "./show-image-tool";
@@ -87,6 +87,10 @@ async function fromReferences(chat: Chat, config: ImageGenerationConfig, named: 
   checkCount(named.length, config.editMultiple);
   const { paths, images } = readChatPictures(chat, named, "Reference", "used as a reference");
   const target = imageEditingTarget(config);
+  // A block of the prompt's own would be the one the server reads, and the picture would start from the first reference after all.
+  if (target.sdExtras && nativeConflict(prompt, { fromNoise: true })) {
+    throw new Error("The prompt has an sd_cpp_extra_args block of its own, which would hide the one that makes a picture with references start from noise: take it out of the prompt.");
+  }
   // A size always where there is one, the add-on's when the agent gives none: without it stable-diffusion.cpp makes the picture in the first reference's size.
   const { bytes, ext, notes } = await editImage(target, { prompt, image: images.length > 1 ? images : images[0], ...(size ? { size } : {}), native: { fromNoise: true } }, { signal });
   const rel = saveGenerated(chat, bytes, ext);

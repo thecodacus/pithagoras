@@ -578,7 +578,8 @@ it back here for a new picture.
 - **Refused, with what to switch on.** References while editing is off or has no address (switched off since the chat
   loaded, or given to a tool loaded without them) are refused with that, and that **Image editing** is switched on under
   Media in Settings; more than one while **Several pictures per edit** is off is refused with the count and that switch,
-  as for `edit_image`. Nothing is sent and nothing is kept.
+  as for `edit_image`. So, with the switch on, is a prompt that has an `<sd_cpp_extra_args>` block of its own: the server
+  would read that one and not the one that starts from noise. Nothing is sent and nothing is kept.
 - **A new picture.** It is saved as any generated picture is, `image-20261001-101500-a1b2c3.png`, never named after a
   reference, and the answer names it with its title as `generate_image`'s does, with no picture it was "made from":
   the chat draws it as a picture of its own. In the [gallery](/guide/media#reference-pictures) it is *Made from a

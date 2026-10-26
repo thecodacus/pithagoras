@@ -1961,6 +1961,10 @@ test("references are refused before anything is sent: editing off, several where
     await refused(["a.png", "notes.txt"], /^Reference 2 \(notes\.txt\): .*not a PNG, JPEG, GIF or WebP/);
     await refused(["huge.png"], /^The picture is over 25 MB, which is more than can be read to be scaled down for an edit/);
     await refused(["a.png", 5], /^Reference 2 \(5\): Name the picture by its path/);
+    // With the Stable Diffusion switch on, a block of the prompt's own would hide the one that starts from noise.
+    gen.saveImageGeneration({ sdExtras: true });
+    await assert.rejects(call({ prompt: 'the fox <sd_cpp_extra_args>{"seed":1}</sd_cpp_extra_args>', references: ["a.png"] }), (e: Error) => (assert.match(e.message, /^The prompt has an sd_cpp_extra_args block of its own, which would hide the one that makes a picture with references start from noise/), true));
+    gen.saveImageGeneration({ sdExtras: false });
 
     // Editing switched off since the tool was loaded: it says what to switch on, and makes nothing without them.
     gen.saveImageGeneration({ editEnabled: false });

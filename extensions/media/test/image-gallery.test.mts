@@ -870,6 +870,11 @@ test("references on the page are refused before anything is sent: editing off, s
     assert.equal(two.status, 400);
     assert.match(two.body.error, /not set up to take several pictures, so none was sent \(2 were given\).*"Several pictures per edit"/);
     settings({ baseUrl: origin, editEnabled: true, editMultiple: true });
+    settings({ baseUrl: origin, editEnabled: true, editMultiple: true, sdExtras: true });
+    const block = await call("POST", "/images/generate", { prompt: 'x <sd_cpp_extra_args>{"seed":1}</sd_cpp_extra_args>', references: [sheet.id] });
+    assert.equal(block.status, 400);
+    assert.match(block.body.error, /^The description has an sd_cpp_extra_args block of its own, which would hide the one that makes a picture with references start from noise/);
+    settings({ baseUrl: origin, editEnabled: true, editMultiple: true });
     const missing = await call("POST", "/images/generate", { prompt: "x", references: [sheet.id, "ffffffffffff"] });
     assert.equal(missing.status, 400);
     assert.match(missing.body.error, /^Reference 2: There is no such picture/);

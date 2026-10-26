@@ -13,7 +13,7 @@ import {
   type ImageEditingTarget,
   type ImageGenerationConfig,
 } from "./image-generation";
-import { forPicture, hasNative, type PictureSettings } from "./image-settings";
+import { forPicture, hasNative, nativeConflict, type PictureSettings } from "./image-settings";
 import { MAX_PICTURE_BYTES } from "./picture-files";
 
 /**
@@ -248,6 +248,10 @@ export function startGenerations(request: GenerateJob): PictureJob[] {
   if (!config.sdExtras && hasNative(request)) throw new JobRefusal(SD_OFF, 409);
   room(request.count);
   const refs = request.references ? referencesOf(config, request.references) : undefined;
+  // A block of the description's own would be the one the server reads, and the picture would start from the first reference after all.
+  if (refs?.target.sdExtras && nativeConflict(request.prompt, { fromNoise: true })) {
+    throw new JobRefusal("The description has an sd_cpp_extra_args block of its own, which would hide the one that makes a picture with references start from noise: take it out of the description", 400);
+  }
   return Array.from({ length: request.count }, (_, i) => {
     const settings = forPicture(request, i);
     if (refs) {

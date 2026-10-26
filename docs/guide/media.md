@@ -144,6 +144,8 @@ edit's — the references as `image` or `image[]`, checked, limited and scaled l
   the pictures of an edit as references either way, but a stable-diffusion.cpp server then starts from the first
   reference, and the picture may come out as a reworked copy of it. The form says so in a warning under the row, with
   a link to the switch; with it on it says the picture starts from noise, and **Details** lists **Start from: Noise only**.
+  With it on, a description that has an `<sd_cpp_extra_args>` block of its own is refused with references, since the
+  server would read that block and not the one that starts from noise.
 
 The other settings (format, compression, and the Stable Diffusion ones while that switch is on) go as for any
 picture; there is no strength and no mask. **Run again** on such a picture makes it again with the same references,
