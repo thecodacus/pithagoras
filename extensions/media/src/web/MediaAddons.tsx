@@ -197,7 +197,7 @@ export function ImagesAddon({ onError }: { onError: (e: string) => void }) {
           />
           <ui.SwitchRow
             title={t("Image editing")}
-            detail={images.editEnabled ? t("On: pictures are changed on the Media page and by the agent.") : t("Off: no pictures are changed.")}
+            detail={images.editEnabled ? t("On: pictures are changed, and used as references for new ones, on the Media page and by the agent.") : t("Off: no pictures are changed or used as references.")}
             on={images.editEnabled}
             onChange={(editEnabled) => void change({ editEnabled })}
             disabled={busy || !!editDraft || (!(images.editBaseUrl || images.baseUrl) && !images.editEnabled)}
@@ -421,7 +421,7 @@ export function ImagesAddon({ onError }: { onError: (e: string) => void }) {
           disabled={busy || !!draft || !!editDraft}
         />
         <p className="text-[11px] text-fg-faint">
-          {t("Only for a stable-diffusion.cpp server: it adds a seed, steps, a negative prompt and, for edits, a strength and starting from noise, as a block in the description. Any other endpoint would take the block as part of the description. The agent does not use these settings.")}
+          {t("Only for a stable-diffusion.cpp server: it adds a seed, steps, a negative prompt and, for edits, a strength and starting from noise, as a block in the description. Any other endpoint would take the block as part of the description. A new picture made with reference pictures, on the Media page or by the agent, starts from noise only while this is on: off, a stable-diffusion.cpp server starts from the first reference.")}
         </p>
       </ui.DetailsGroup>
     </ui.CollapsibleSection>

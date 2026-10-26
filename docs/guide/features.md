@@ -273,7 +273,7 @@ in.
 | **Model** | Sent as `model`. Empty sends none, for a server that has only one. |
 | **Picture size** | Sent as `size`, such as `1024x1024`, each side a whole number from 64 to 8192 (or `auto`): the same sizes the [Media page](/guide/media) takes. Empty sends none. The agent can ask for another size in a call, within the same limits. A size saved before there were limits, outside them, counts as none. |
 | **Time limit** | How long the portal waits for one picture, in whole seconds: **300** (five minutes) unless you set another, from 30 to 3600. It is one limit for making and for [editing](#editing-a-picture), and counts the endpoint's answer and the picture's arrival together. A setup saved before there was a limit has the default. When it runs out, the error names the limit and this setting. A slow or local model, or an edit of several pictures, may need more. |
-| **Stable Diffusion extra settings** | A switch for the endpoint, for making and for editing, **off** by default. It says the endpoint is a **stable-diffusion.cpp** server, and lets the [Media page](/guide/media#stable-diffusion-settings) offer, under **Advanced**, and send, the settings only that server reads: a negative prompt, a seed, the sampler's steps and, for an edit, a strength and starting from noise. They go inside the prompt, in a `<sd_cpp_extra_args>` block, since the OpenAI image format has no fields for them. **Only stable-diffusion.cpp servers understand it:** any other endpoint takes the block as part of the description, so leave it off for those. Off, nothing of this kind is ever sent, however it came to be set. It is said of the endpoint, so it goes **off again when the generation address or the editing address moves to another server** (unless the same save switches it on), as **Several pictures per edit** does: the new server is not assumed to be stable-diffusion.cpp. Not for the agent's tools: they send none of these settings, on or off. Read at each request, so a change needs no reload. A setup saved without it has it off. While an address is typed and not saved, the switch waits for the save, as the other switches of the endpoint do. |
+| **Stable Diffusion extra settings** | A switch for the endpoint, for making and for editing, **off** by default. It says the endpoint is a **stable-diffusion.cpp** server, and lets the [Media page](/guide/media#stable-diffusion-settings) offer, under **Advanced**, and send, the settings only that server reads: a negative prompt, a seed, the sampler's steps and, for an edit, a strength and starting from noise. They go inside the prompt, in a `<sd_cpp_extra_args>` block, since the OpenAI image format has no fields for them. **Only stable-diffusion.cpp servers understand it:** any other endpoint takes the block as part of the description, so leave it off for those. Off, nothing of this kind is ever sent, however it came to be set. It also decides how a new picture made with [reference pictures](#reference-pictures) starts, by the agent or on the Media page: on, from noise (`"init_image": null`), with the references as references; off, nothing is added, and a stable-diffusion.cpp server starts from the first reference. It is said of the endpoint, so it goes **off again when the generation address or the editing address moves to another server** (unless the same save switches it on), as **Several pictures per edit** does: the new server is not assumed to be stable-diffusion.cpp. The agent's tools send none of the other settings, on or off. Read at each request, so a change needs no reload. A setup saved without it has it off. While an address is typed and not saved, the switch waits for the save, as the other switches of the endpoint do. |
 
 The request is `{ model?, prompt, n: 1, size?, output_format?, output_compression? }`, the fields
 the OpenAI image format has, and a field the page was not given is left out. The answer's first picture is
@@ -289,8 +289,8 @@ in-process agent (`EXECUTOR=host`), as `show_image` does.
 
 ### What the agent gets
 
-`generate_image(prompt, title?, size?)` makes one picture, saves it, and shows
-it. The picture is written to a `generated-images` folder inside the chat's
+`generate_image(prompt, title?, size?, references?)` makes one picture, saves it, and shows
+it (`references` only while [editing](#editing-a-picture) is on as well: see [Reference pictures](#reference-pictures)). The picture is written to a `generated-images` folder inside the chat's
 folder — the one place the page serves pictures from — under a name the portal
 makes (`image-20261001-101500-a1b2c3.png`), never one the agent or the endpoint
 chose, and never over an existing file. Its answer names the picture as a [file it gave](/guide/extension-ui#files-a-tool-gives),
@@ -361,8 +361,8 @@ On the same page, under the generation settings:
 | **Editing key** | Sent as `Authorization: Bearer …` to the editing address, and nowhere else. **Empty:** the key above goes along when edits go to the same server as generation (an empty address, or the same scheme, name and port), and no key goes to another server: a key belongs to the server it was given for. A saved key is never shown again, and a new address of another server without a key drops it, as for the key above. |
 | **Editing model** | Sent as `model`. Empty sends none. It is never the model above, which may be one that only makes pictures. |
 | **Maximum picture size** | The most pixels a picture sent to be edited may have, as `WIDTHxHEIGHT` such as `2048x2048`: the box it must fit, whichever way up it is (a `1024x2048` picture fits a `2048x1024` limit). Empty is no limit, as an empty size sends none. It applies to the picture, to each of [several pictures](#several-pictures) and to a mask, and is what an endpoint with a limit on its input needs; an edit comes out about as large as the picture it is made from. A picture beyond it is scaled down to fit: see below. Read at each call, so a change needs no restart. A setup saved before there was one has none. |
-| **Image editing** | The switch of the feature, as **Image generation** is for making pictures: on the Media page, and for the `edit_image` tool being there at all (which chats get it is set in the tool lists). It needs an address, its own or generation's; like generation's it is decided when a chat loads, so a change reloads the idle open chats. |
-| **Several pictures per edit** | Off by default. Switch it on only if the editing endpoint takes more than one picture in a request. Then `edit_image` is given a list of pictures instead of one, and the [Media page](/guide/media#changing-a-picture) takes up to eight (see [several pictures](#several-pictures)). **While it is off, an edit uses exactly one picture** — if the agent or the Media page seems to use only one of several, this switch is the first thing to check — and both say so (below). It is said of this endpoint: when edits move to another server (a new editing address, or a new generation address while editing has none of its own), it goes off again until you say the new one takes them. The tool's shape is decided when a chat loads, so a change reloads the idle open chats. |
+| **Image editing** | The switch of the feature, as **Image generation** is for making pictures: on the Media page, and for the `edit_image` tool being there at all (which chats get it is set in the tool lists), and for [reference pictures](#reference-pictures) in `generate_image` and on the Media page. It needs an address, its own or generation's; like generation's it is decided when a chat loads, so a change reloads the idle open chats. |
+| **Several pictures per edit** | Off by default. Switch it on only if the editing endpoint takes more than one picture in a request. Then `edit_image` is given a list of pictures instead of one, `generate_image` takes up to eight [references](#reference-pictures), and the [Media page](/guide/media#changing-a-picture) takes up to eight (see [several pictures](#several-pictures)). **While it is off, an edit uses exactly one picture** — if the agent or the Media page seems to use only one of several, this switch is the first thing to check — and both say so (below). It is said of this endpoint: when edits move to another server (a new editing address, or a new generation address while editing has none of its own), it goes off again until you say the new one takes them. The tool's shape is decided when a chat loads, so a change reloads the idle open chats. |
 
 The request is the OpenAI-style `images/edits` one: a `multipart/form-data` form
 with `image`, `prompt`, `n` (always 1), `model` when there is one, and `mask`
@@ -370,7 +370,7 @@ when a caller gives one. The picture is sent under a neutral name (`image.png`,
 with the type its bytes say), never under the name or the place it has in the
 chat's folder. With [several pictures](#several-pictures) switched on, a request
 of more than one picture has `image[]` once for each, in order (`image-1.png`,
-`image-2.jpg`, …); one picture is always sent as `image`, whatever the setting. The tool sends no `size`, and the Media page only one that was set in its form: what an edit comes out as is the endpoint's to
+`image-2.jpg`, …); one picture is always sent as `image`, whatever the setting. `edit_image` sends no `size`, and the Media page's edit only one that was set in its form: what an edit comes out as is the endpoint's to
 say, usually the picture's own, and the size set for generation need not be one
 an edit takes. The answer is read as a generation's is — the first picture from
 `data[0].b64_json` or `data[0].url`, with the same rules for where an address may
@@ -485,12 +485,10 @@ endpoint sees them in that order and nothing else about them, so the prompt says
 picture: the OpenAI-style form has no field for one, and putting one in the prompt
 would change what the agent wrote.
 
-The same call also makes **a new picture from references**. The route cannot tell
-the two apart — the prompt does — so there is no second tool for it, and
-`generate_image` stays as it is: `images/generations` takes no pictures, and an
-agent with a reference picks `edit_image`. A single reference works with the
-switch off, too; the switch only adds more than one. It needs editing switched on,
-since the references go to the editing endpoint with its key.
+The same call also **combines pictures into a new one**, starting from the first. For
+a new picture of the same character, object or style, the agent is sent to
+`generate_image` with [references](#reference-pictures) instead (while generation is on
+too), which starts from noise; `edit_image`'s description says so.
 
 What was decided for it:
 
@@ -544,6 +542,55 @@ What was decided for it:
 - **The setting is read at each call.** A list is refused when the endpoint is no
   longer said to take it, and a path still does where the tool was loaded with a
   list. Only the tool's shape is decided when a chat loads.
+
+### Reference pictures
+
+A character sheet as reference, and a completely new picture of that character in another scene or pose: that is
+not an edit. With stable-diffusion.cpp the first picture of an edit is its **starting picture** (`init_image`), so an
+edit of the sheet comes out as a reworked copy of the sheet. So `generate_image` takes **references**: pictures of the
+chat's folder that the new picture takes a character, an object or a style from.
+
+`generate_image(prompt, title?, size?, references?)` has `references`, a list of one to eight paths in the chat's
+folder, **only while editing is on as well**, since the picture is then asked of the editing endpoint — the one route
+of the OpenAI image format that takes pictures (`images/edits`, with `image` or `image[]`). Without editing the tool is
+exactly what it was, in its parameters and its description. Its description tells the agent to give references "for the
+same character, object or style in a new picture" and to use `edit_image` to change a picture, and `edit_image`'s sends
+it back here for a new picture.
+
+- **Without references nothing changes.** The request is the `images/generations` one it always was, byte for byte,
+  whatever the switches say.
+- **With references** the picture is asked of the editing address, with the editing key and model, and with the
+  references read and checked as `edit_image`'s pictures are: only from the chat's folder (as the agent, so not a
+  picture the sandbox closed to it), only PNG, JPEG, GIF or WebP by their bytes, at most 25 MB each and 50 MB
+  together, scaled down to the [maximum picture size](#editing-a-picture) where they are over it (the answer says so),
+  all of them before anything is sent; one that is refused refuses the call, naming it (`Reference 2 (style.jpg): …`).
+  A size always goes where there is one: the agent's, else the one saved for generation. Without one a
+  stable-diffusion.cpp server makes the picture in the size and shape of the first reference.
+- **From noise.** The request asks for a new picture, not a change: `"init_image": null` in the
+  `<sd_cpp_extra_args>` block, which stable-diffusion.cpp reads to start from noise, with every picture still sent as
+  a reference. That block goes only while **Stable Diffusion extra settings** is on: the portal cannot tell a
+  stable-diffusion.cpp server from another, and another would read it as words of the description. **With the switch
+  off** nothing is added: an OpenAI-style server takes the pictures of an edit as references either way, but a
+  stable-diffusion.cpp server starts from the first reference. The tool's answer then says so ("Stable Diffusion extra
+  settings are off, so a stable-diffusion.cpp endpoint started from the first reference: if the picture looks like a
+  reworked copy of it, tell the person to switch them on under Media in Settings."), and the parameter's description
+  says it in a few words, so that the agent can pass it on rather than present a copy as a new picture.
+- **Refused, with what to switch on.** References while editing is off or has no address (switched off since the chat
+  loaded, or given to a tool loaded without them) are refused with that, and that **Image editing** is switched on under
+  Media in Settings; more than one while **Several pictures per edit** is off is refused with the count and that switch,
+  as for `edit_image`. Nothing is sent and nothing is kept.
+- **A new picture.** It is saved as any generated picture is, `image-20261001-101500-a1b2c3.png`, never named after a
+  reference, and the answer names it with its title as `generate_image`'s does, with no picture it was "made from":
+  the chat draws it as a picture of its own. In the [gallery](/guide/media#reference-pictures) it is *Made from a
+  description*, with the references it was made with, those the gallery knows, and **Start from: Noise only** where
+  that was sent.
+
+The tool declares no files for [approvals](/people/approvals): a call without references must be approved as it
+always was, and the guard allows nothing for a call of a tool that declares files and names none. A
+[tool rule](/people/rules) for `generate_image` is matched against its arguments whole, references included.
+
+The [Media page](/guide/media#reference-pictures) has the same, in **Generate**: the same request, the same checks,
+the same switch.
 
 ## Video generation
 

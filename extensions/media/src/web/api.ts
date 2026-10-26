@@ -149,6 +149,8 @@ export interface GalleryPicture {
     extra?: Record<string, string | number | boolean>;
     sources?: string[];
     masked?: boolean;
+    /** A new picture's references, by their ids in the gallery, in order: those still there. */
+    references?: string[];
   };
   /** The picture an edit was made from, when that one is in the gallery. */
   from: string | null;
@@ -207,10 +209,11 @@ export interface PictureSettingsBody {
   fromNoise?: boolean;
 }
 
-/** What the page asks the portal to make. */
+/** What the page asks the portal to make: `references` are pictures of the gallery, by their ids, that the new picture is made with, through the editing endpoint. */
 export interface PictureRequest extends PictureSettingsBody {
   prompt: string;
   count?: number;
+  references?: string[];
 }
 
 /** What the page asks the portal to change: `mask` is a PNG as base64, and the transparent part is what changes. */

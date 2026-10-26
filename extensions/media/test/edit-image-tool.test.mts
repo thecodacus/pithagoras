@@ -10,7 +10,7 @@ import { startMedia } from "./portal.mts";
 import { saveImageGeneration } from "../src/server/image-generation.ts";
 
 /**
- * The edit_image tool as pi runs it: a model that calls it, an endpoint that
+ * The edit_image tool, and generate_image with references, which go to the same endpoint, as pi runs them: a model that calls it, an endpoint that
  * answers, and what the chat sees come back. Registered through the portal's
  * own client, as Media's server half gives it to a chat, so the tool's
  * parameters are checked by pi as they are for a real model.
@@ -231,5 +231,42 @@ test("with it off the model gets one path, and a list of several is not somethin
     assert.equal((await run(folder))[0].isError, false, "one picture is as it was");
   } finally {
     saveImageGeneration({ baseUrl: "", apiKey: "", editEnabled: false });
+  }
+});
+
+test("a model that calls generate_image with references gets a new picture made from them by the editing endpoint, and pi holds the list to its bounds", async () => {
+  const folder = chat();
+  writeFileSync(path.join(folder, "style.jpg"), JPEG);
+  saveImageGeneration({ baseUrl: `http://127.0.0.1:${endpoint.address().port}/v1`, enabled: true, editEnabled: true, editMultiple: true, editModel: "edit-model" });
+  named = "generate_image";
+  try {
+    call = { prompt: "the character from the first picture, on a boat", title: "Boat", references: ["photo.png", "style.jpg"] };
+    const before = asked.length;
+    const [result, ...more] = await run(folder);
+    assert.equal(more.length, 0);
+    assert.ok(offered.at(-1).includes("generate_image") && offered.at(-1).includes("edit_image"));
+    const tool = definitions.at(-1).find((t) => t.function?.name === "generate_image").function;
+    assert.deepEqual(Object.keys(tool.parameters.properties).sort(), ["prompt", "references", "size", "title"]);
+    assert.equal(result.isError, false, JSON.stringify(result.result));
+    const made = result.result.details.files[0].path;
+    assert.match(made, /^generated-images\/image-\d{8}-\d{6}-[0-9a-f]{6}\.jpg$/, "a new picture, named as one, not after a reference");
+    // What it gave is a picture of its own, made from nothing the chat would draw as its original.
+    assert.deepEqual(withFiles(result, folder).portalFiles, [{ path: made, kind: "picture", title: "Boat" }]);
+    assert.equal(asked.length, before + 1);
+    assert.equal(asked.at(-1).url, "/v1/images/edits");
+    const body = asked.at(-1).body;
+    assert.ok(body.indexOf(PNG) >= 0 && body.indexOf(PNG) < body.indexOf(JPEG), "the references, in order");
+    assert.equal(body.toString("latin1").split('name="image[]"').length - 1, 2);
+
+    // An empty list, or more than an edit takes, is pi's to refuse before the tool runs.
+    for (const references of [[], Array(9).fill("photo.png")]) {
+      call = { prompt: "x", references };
+      const [bad] = await run(chat());
+      assert.equal(bad.isError, true, JSON.stringify(references));
+    }
+    assert.equal(asked.length, before + 1, "nothing was sent");
+  } finally {
+    named = "edit_image";
+    saveImageGeneration({ baseUrl: "", apiKey: "", enabled: false, editEnabled: false, editMultiple: false, editModel: "" });
   }
 });

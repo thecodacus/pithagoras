@@ -55,7 +55,7 @@ export interface PictureParams {
   seed?: number;
   sampleSteps?: number;
   strength?: number;
-  /** The edit started from noise, with its pictures as references only. */
+  /** The edit, or the new picture made from references, started from noise, with its pictures as references only. */
   fromNoise?: boolean;
   /** Fields an older version of the page sent as they were typed, which is not done any more: kept to show what the picture was made with. */
   extra?: Record<string, ExtraValue>;
@@ -63,6 +63,11 @@ export interface PictureParams {
   sources?: string[];
   /** The edit had a mask. The mask itself is not kept. */
   masked?: boolean;
+  /**
+   * A new picture's references, in the order they were given, by their ids here: it was made from a description and
+   * these pictures, and none of them is what it was changed from. Those that are not in the list are not here either.
+   */
+  references?: string[];
 }
 
 /** A picture as the page is told of it. */
@@ -128,6 +133,7 @@ function readParams(text: string): PictureParams {
   if (raw.extra && typeof raw.extra === "object" && !Array.isArray(raw.extra)) params.extra = raw.extra as Record<string, ExtraValue>;
   if (Array.isArray(raw.sources)) params.sources = raw.sources.filter((s): s is string => typeof s === "string");
   if (raw.masked === true) params.masked = true;
+  if (Array.isArray(raw.references)) params.references = raw.references.filter((s): s is string => typeof s === "string");
   return params;
 }
 
@@ -251,10 +257,12 @@ export function addPagePicture(picture: { bytes: Buffer; ext: string; kind: Pict
  * Lists a picture the agent has just made in a chat, with what it was asked
  * for. The picture is already where the chat's folder has it; this only says
  * so, with the chat's folder as it is now, which the picture is kept in when the
- * chat goes. `from` are the pictures an edit was made from, as paths in the chat's
- * folder: those the list knows are linked, the others are not.
+ * chat goes. `from` are the pictures an edit was made from, and `references` those
+ * a new picture was made with, as paths in the chat's folder: those the list knows
+ * are linked, the others are not. A reference is not what the picture was changed
+ * from, so it is no `source_id`.
  */
-export function recordChatPicture(picture: { sessionId: string; path: string; kind: "generated" | "edited"; prompt: string; params: PictureParams; from?: string[]; bytes: number }): void {
+export function recordChatPicture(picture: { sessionId: string; path: string; kind: "generated" | "edited"; prompt: string; params: PictureParams; from?: string[]; references?: string[]; bytes: number }): void {
   // A picture that was made is made: that it could not be listed is not the tool's failure, and the agent has nothing to do about it.
   try {
     // Chats share a folder — every chat of a project, every one in Home — so a path names a file for all of them: the rows of the chats whose folder is this one, this chat's first. A picture that was found in this folder before it was recorded (the page looked in between) is the same file, and goes last.
@@ -273,7 +281,9 @@ export function recordChatPicture(picture: { sessionId: string; path: string; ki
     const known = (file: string) => rowsOf(file)[0];
     // A file name that comes back — an edit is named after its original — is a new picture: its file was taken away by something that did not tell the list, and the old rows are not this file's.
     const before = rowsOf(picture.path);
-    const sources = (picture.from ?? []).map(known).filter((id): id is string => !!id && !before.includes(id));
+    const ids = (paths: string[] = []) => paths.map(known).filter((id): id is string => !!id && !before.includes(id));
+    const sources = ids(picture.from);
+    const references = ids(picture.references);
     const first = picture.from?.[0] !== undefined ? known(picture.from[0]) : undefined;
     getDb().transaction(() => {
       if (before.length) forget(before);
@@ -285,7 +295,7 @@ export function recordChatPicture(picture: { sessionId: string; path: string; ki
         path: picture.path,
         kind: picture.kind,
         prompt: picture.prompt,
-        params: JSON.stringify({ ...picture.params, ...(sources.length ? { sources } : {}) }),
+        params: JSON.stringify({ ...picture.params, ...(sources.length ? { sources } : {}), ...(references.length ? { references } : {}) }),
         // The first of them, as the picture the edit is named after: only when that very one is in the list.
         source_id: first && !before.includes(first) ? first : null,
         bytes: picture.bytes,

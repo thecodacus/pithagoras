@@ -29,16 +29,20 @@ export interface MediaTool {
 
 /**
  * The tools there are as the settings are now, read once, so that a tool and its shape are of the same reading:
- * show_image always, generate_image while image generation is ready, edit_image while editing is (with one picture or
- * a list, as the endpoint takes), and generate_video and show_video while video generation is.
+ * show_image always, generate_image while image generation is ready (taking references while editing is ready too,
+ * one or a list as the editing endpoint takes), edit_image while editing is (with one picture or a list, as the
+ * endpoint takes, and sending the agent to generate_image for a new picture where that takes references), and
+ * generate_video and show_video while video generation is.
  */
 export function mediaTools(): MediaTool[] {
   const images = imageGenerationConfig();
   const videos = videoGenerationReady();
+  const generating = imageGenerationReady(images);
+  const editing = imageEditingReady(images);
   return [
     showImageTool,
-    ...(imageGenerationReady(images) ? [generateImageTool] : []),
-    ...(imageEditingReady(images) ? [editImageTool(imageEditingMultiple(images))] : []),
+    ...(generating ? [generateImageTool(editing && { several: imageEditingMultiple(images) })] : []),
+    ...(editing ? [editImageTool(imageEditingMultiple(images), generating)] : []),
     ...(videos ? [generateVideoTool, showVideoTool] : []),
   ];
 }

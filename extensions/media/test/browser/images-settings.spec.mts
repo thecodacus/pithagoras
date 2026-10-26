@@ -173,7 +173,7 @@ test('image editing has a switch and an endpoint of its own: it needs an address
   const editing = panel.getByRole('switch', { name: 'Image editing', exact: true });
   await expect(editing).toHaveAttribute('aria-checked', 'false');
   await expect(editing).toBeDisabled();
-  await expect(panel.getByText('Off: no pictures are changed.')).toBeVisible();
+  await expect(panel.getByText('Off: no pictures are changed or used as references.')).toBeVisible();
   await openGroup(panel, 'Editing endpoint');
 
   // Generation's address is enough, and its key is the one used: the form says so.
@@ -186,7 +186,7 @@ test('image editing has a switch and an endpoint of its own: it needs an address
   await expect(editing).toBeEnabled();
   await editing.click();
   await expect(editing).toHaveAttribute('aria-checked', 'true');
-  await expect(panel.getByText('On: pictures are changed on the Media page and by the agent.')).toBeVisible();
+  await expect(panel.getByText('On: pictures are changed, and used as references for new ones, on the Media page and by the agent.')).toBeVisible();
   await expect(panel.getByText(/one busy chat has it from its next step/)).toBeVisible();
   expect(sent.at(-1)!.body).toEqual({ editEnabled: true });
   // Generation is its own switch: still off.
@@ -308,7 +308,8 @@ test('Stable Diffusion extra settings is a switch of its own, off by default, th
   // What it does, and that only one kind of server understands it: any other would read the block as words of the description.
   await expect(panel.getByText(/Only for a stable-diffusion\.cpp server/)).toBeVisible();
   await expect(panel.getByText(/Any other endpoint would take the block as part of the description/)).toBeVisible();
-  await expect(panel.getByText(/The agent does not use these settings/)).toBeVisible();
+  // And what it means for a new picture made with references, by the page or the agent: from noise only while it is on.
+  await expect(panel.getByText(/starts from noise only while this is on: off, a stable-diffusion\.cpp server starts from the first reference/)).toBeVisible();
 
   // It is a setting of the endpoint, not of a tool: no address is needed to say it, and nothing reloads.
   await sd.click();

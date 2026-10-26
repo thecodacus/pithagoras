@@ -61,17 +61,27 @@ function parseCount(value: unknown): number | string {
 /** What a request that still has the free extra fields of an older page is told: none is sent, so that it is not thought to be. */
 const NO_EXTRA = "Free extra fields are not sent any more: the settings of a picture are named fields (outputFormat, seed, sampleSteps, negativePrompt, …)";
 
-/** A request to make pictures, checked; the reason when it may not be made. */
+/**
+ * A request to make pictures, checked; the reason when it may not be made. `references` are pictures of the gallery,
+ * by their ids, that the new picture is made from as well as the description, in the order it refers to them: as
+ * many as an edit takes, since they go to the editing endpoint (see image-jobs.ts). Left out, the request is the one
+ * it always was.
+ */
 export function parseGenerate(body: unknown): GenerateJob | string {
   const b = object(body);
   if (b.extra !== undefined) return NO_EXTRA;
   const prompt = parsePrompt(b.prompt);
   if (typeof prompt !== "string") return prompt.error;
+  if (b.references !== undefined) {
+    if (!Array.isArray(b.references) || !b.references.length) return "The references are a list of pictures of the gallery: leave them out to make a picture from the description alone";
+    if (b.references.length > MAX_EDIT_PICTURES) return `A picture takes at most ${MAX_EDIT_PICTURES} references, and ${b.references.length} were given`;
+    if (!b.references.every((id) => typeof id === "string" && IDS.test(id))) return "The references are named by their ids in the gallery";
+  }
   const count = parseCount(b.count);
   if (typeof count === "string") return count;
   const settings = parsePictureSettings(b, false, count);
   if (typeof settings === "string") return settings;
-  return nativeConflict(prompt, settings) ?? { ...settings, prompt, count };
+  return nativeConflict(prompt, settings) ?? { ...settings, prompt, count, ...(b.references !== undefined ? { references: b.references as string[] } : {}) };
 }
 
 /** A mask as the page sends it, base64 or a data: URL, decoded. */
@@ -177,7 +187,7 @@ export function imagesRoutes(router: Router): void {
 
   const refused = (res: Response, e: unknown) => (e instanceof JobRefusal ? res.status(e.status).json({ error: e.message }) : fail(res, e));
 
-  /** Makes pictures from a description: one request, and one job, for each; answers at once, without waiting for any. */
+  /** Makes pictures from a description, and references where it has some: one request, and one job, for each; answers at once, without waiting for any. */
   router.post("/images/generate", json, (req, res) => {
     const job = parseGenerate(req.body);
     if (typeof job === "string") return res.status(400).json({ error: job });

@@ -111,6 +111,10 @@ test('the tools follow the settings: offered and registered alike, with their vo
     assert.match(tools.edit_image.voiceGuidelines[0], /^To change a picture in the chat folder, call edit_image/);
     assert.deepEqual(tools.edit_image.approvalFiles, ['path', 'paths']);
     assert.deepEqual(tools.edit_image.parameters.required, ['paths', 'prompt'], 'several pictures, as the endpoint takes them');
+    // With editing ready generate_image takes references, which stay optional; it declares no files, so a call without them is approved as it always was.
+    assert.equal(tools.generate_image.parameters.properties.references.type, 'array');
+    assert.deepEqual(tools.generate_image.parameters.required, ['prompt']);
+    assert.equal(tools.generate_image.approvalFiles, undefined);
     assert.deepEqual((await json(`${p.base}/state`)).body.images, { enabled: true });
 
     // What is read at each call needs no reload.
@@ -118,6 +122,7 @@ test('the tools follow the settings: offered and registered alike, with their vo
     assert.deepEqual([model.body.changed, model.body.images.model, p.reloads()], [false, 'flux', 1]);
     assert.deepEqual((await json(`${p.base}/settings/images`, { method: 'PUT', body: { editMultiple: false } })).body.changed, true, 'the shape of edit_image is a change');
     assert.deepEqual(p.registered().edit_image.parameters.required, ['path', 'prompt']);
+    assert.match(p.registered().generate_image.parameters.properties.references.description, /^One picture in the chat's folder \(this endpoint takes one\)/, 'and generate_image is told the endpoint takes one');
     assert.deepEqual((await json(`${p.base}/settings/images`, { method: 'PUT', body: { enabled: 'yes' } })).status, 400);
 
     const videos = await json(`${p.base}/settings/videos`, { method: 'PUT', body: { enabled: true, baseUrl: 'http://127.0.0.1:9' } });
