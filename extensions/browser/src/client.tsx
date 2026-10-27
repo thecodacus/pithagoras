@@ -87,7 +87,8 @@ export default function browser(given: Portal) {
     id: "browser",
     title: msg("Browser"),
     icon: LuGlobe,
-    place: "middle",
+    // No place of its own: alone it stands at the side, as Files' window does, and beside the conversation or the
+    // pictures it has the middle.
     maximizable: true,
     keepLoaded: true,
     useButton,
