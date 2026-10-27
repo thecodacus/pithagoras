@@ -441,7 +441,9 @@ export function MediaPage() {
       if (picture.kind === "generated") {
         // The settings it was made with, as they are recorded; the free fields an older version sent are not sent again.
         // What only stable-diffusion.cpp reads is sent only while the add-on says the endpoint is one: the picture keeps it, and it is not sent otherwise.
-        const { extra: _older, sources: _sources, masked: _masked, negativePrompt, seed, sampleSteps, strength: _strength, fromNoise: _noise, references: refs, ...settings } = picture.params;
+        const { extra: _older, sources: _sources, masked: _masked, negativePrompt, seed, sampleSteps, strength: _strength, fromNoise: _noise, references: refs, model, ...rest } = picture.params;
+        // With references the model is always the editing endpoint's, and is not sent.
+        const settings = refs?.length ? rest : { ...rest, ...(model ? { model } : {}) };
         // Made with references: with the same ones, all of them still in the gallery, or not again.
         const found = refs?.length ? (await api.galleryPictures(refs)).pictures : [];
         if (refs?.length && found.length < refs.length) throw new Error(t("The reference pictures this was made with are not all in the gallery any more."));
@@ -594,10 +596,23 @@ export function MediaPage() {
         )}
         {pictures.notes.length > 0 && (
           <ui.WarnBanner onClose={pictures.clearNotes}>
-            <p>{t("A picture was changed to fit what an edit takes.")}</p>
-            {[...new Set(pictures.notes)].map((note) => (
-              <p key={note}>{note}</p>
-            ))}
+            {/* An edit's pictures are what is changed; a new picture's references (a job that makes one) are only what it is made with, and are said to be. */}
+            {(
+              [
+                ["edit", t("A picture was changed to fit what an edit takes.")],
+                ["generate", t("A reference picture was scaled down to fit what the editing endpoint takes.")],
+              ] as const
+            ).map(([kind, title]) => {
+              const said = [...new Set(pictures.notes.filter((note) => note.job.kind === kind).map((note) => note.text))];
+              return said.length ? (
+                <div key={kind}>
+                  <p>{title}</p>
+                  {said.map((note) => (
+                    <p key={note}>{note}</p>
+                  ))}
+                </div>
+              ) : null;
+            })}
           </ui.WarnBanner>
         )}
 

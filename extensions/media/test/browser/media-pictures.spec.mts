@@ -2533,10 +2533,65 @@ test('a picture made from references says so under Details, and Run again makes 
   }
   await viewer(page).getByRole('button', { name: 'Run again' }).click();
   await expect.poll(() => p.state.generated.length).toBe(1);
-  expect(p.state.generated[0]).toEqual({ prompt: 'The fox, skiing', model: 'edit-model', size: '1024x1024', references: [sheet.id, style.id] });
+  // The model is the editing endpoint's, always: it is not sent.
+  expect(p.state.generated[0]).toEqual({ prompt: 'The fox, skiing', size: '1024x1024', references: [sheet.id, style.id] });
 
   await tile(page, 'The fox, sailing').click();
   await viewer(page).getByRole('button', { name: 'Run again' }).click();
   await expect(page.getByText('The reference pictures this was made with are not all in the gallery any more.')).toBeVisible();
   expect(p.state.generated).toHaveLength(1);
+});
+
+test('with references the Model field shows the editing model and is off: a model typed for making pictures is kept, and not sent', async ({ page }) => {
+  const sheet = pic({ prompt: 'A fox sheet' });
+  const p = await portal(page, { pictures: [sheet], images: feature({ model: 'image-model', editModel: 'edit-model', editMultiple: true }) });
+  await page.goto('/x/pithagoras-media/media');
+  const model = page.locator('#image-model');
+  await model.fill('generation-only-model');
+  await maker(page).getByRole('button', { name: 'Use reference pictures' }).click();
+  // Open and empty, the picture is made as ever, with the model typed.
+  await expect(model).toBeEnabled();
+  await tick(page, 'A fox sheet');
+  await expect(model).toBeDisabled();
+  await expect(model).toHaveValue('edit-model');
+  await expect(model).toHaveAccessibleDescription('Reference pictures use the editing model: edit-model');
+  await page.getByPlaceholder('Describe the picture').fill('The fox, sailing');
+  await page.getByRole('button', { name: 'Make the picture' }).click();
+  await expect.poll(() => p.state.generated.length).toBe(1);
+  expect(p.state.generated[0]).toEqual({ prompt: 'The fox, sailing', count: 1, references: [sheet.id] });
+  // Without references the typed one is back, and sent.
+  await maker(page).getByRole('button', { name: 'Leave out the reference pictures' }).click();
+  await expect(model).toBeEnabled();
+  await expect(model).toHaveValue('generation-only-model');
+  await expect(maker(page).getByText(/Reference pictures use the editing/)).toHaveCount(0);
+  await page.getByRole('button', { name: 'Make the picture' }).click();
+  await expect.poll(() => p.state.generated.length).toBe(2);
+  expect(p.state.generated[1]).toEqual({ prompt: 'The fox, sailing', model: 'generation-only-model', count: 1 });
+});
+
+test('with no editing model set, the Model field says references use the editing endpoint’s own', async ({ page }) => {
+  await portal(page, { pictures: [pic({ prompt: 'A fox sheet' })], images: feature({ editModel: '' }) });
+  await page.goto('/x/pithagoras-media/media');
+  await maker(page).getByRole('button', { name: 'Use reference pictures' }).click();
+  await tick(page, 'A fox sheet');
+  await expect(page.locator('#image-model')).toBeDisabled();
+  await expect(page.locator('#image-model')).toHaveValue('');
+  await expect(maker(page).getByText("Reference pictures use the editing endpoint's own model.")).toBeVisible();
+});
+
+test('a reference that was scaled down is said to be one in the warning, not a picture changed for an edit', async ({ page }) => {
+  const sheet = pic({ prompt: 'A fox sheet' });
+  const p = await portal(page, { pictures: [sheet] });
+  await page.goto('/x/pithagoras-media/media');
+  await maker(page).getByRole('button', { name: 'Use reference pictures' }).click();
+  await tick(page, 'A fox sheet');
+  await page.getByPlaceholder('Describe the picture').fill('The fox, skiing');
+  await page.getByRole('button', { name: 'Make the picture' }).click();
+  await expect.poll(() => p.state.jobs.length).toBe(1);
+  const note = 'The reference was scaled down from 4000x500 pixels (1.2 MB) to 2048x256 pixels (0.3 MB) to fit what the editing endpoint takes.';
+  p.finish(p.state.jobs[0].id, {}, [note]);
+  const warning = page.getByRole('status').filter({ hasText: 'A reference picture was scaled down to fit what the editing endpoint takes.' });
+  await expect(warning).toBeVisible();
+  await expect(warning).toContainText(note);
+  await expect(page.getByText('A picture was changed to fit what an edit takes.')).toHaveCount(0);
 });

@@ -834,14 +834,14 @@ test("a picture made on the page from references: the editing endpoint, the refe
       assert.equal(picture.params.size, "1024x1024");
     }
 
-    // A size and a model of the request's own go as asked; with the switch off, no block, and nothing said of noise.
-    settings({ baseUrl: origin, size: "", editEnabled: true, editMultiple: true, sdExtras: false });
-    await call("POST", "/images/generate", { prompt: "plain", references: [style.id], size: "768x1344", model: "other" });
+    // A size of the request's own goes as asked, a model of its own does not: it is always the editing endpoint's. With the switch off, no block, and nothing said of noise.
+    settings({ baseUrl: origin, size: "", editEnabled: true, editMultiple: true, editModel: "edit-model", sdExtras: false });
+    await call("POST", "/images/generate", { prompt: "plain", references: [style.id], size: "768x1344", model: "generation-only-model" });
     const [one] = await settled();
     assert.equal(one.state, "done", one.error);
-    assert.deepEqual(partList(seen[2]).map((p) => [p.name, p.name === "image" ? p.bytes : p.bytes.toString()]), [["image", png("style")], ["prompt", "plain"], ["model", "other"], ["n", "1"], ["size", "768x1344"]]);
+    assert.deepEqual(partList(seen[2]).map((p) => [p.name, p.name === "image" ? p.bytes : p.bytes.toString()]), [["image", png("style")], ["prompt", "plain"], ["model", "edit-model"], ["n", "1"], ["size", "768x1344"]]);
     const plain = (await listed()).pictures.find((p: any) => p.id === one.pictureId);
-    assert.deepEqual(plain.params, { model: "other", size: "768x1344", references: [style.id] });
+    assert.deepEqual(plain.params, { model: "edit-model", size: "768x1344", references: [style.id] });
 
     // Without references the request is the one it always was.
     await clearJobs();
@@ -851,6 +851,36 @@ test("a picture made on the page from references: the editing endpoint, the refe
     assert.deepEqual(seen[3].body, { model: "image-model", prompt: "no references", n: 1 });
   } finally {
     server.close();
+    gone();
+  }
+});
+
+test("a reference that was scaled down to fit is said to be a reference, not a picture that was changed", async () => {
+  const { origin, server } = await answering(png("made"));
+  await clearJobs();
+  try {
+    const wide = await sharp({ create: { width: 128, height: 64, channels: 3, background: "#c33" } }).png().toBuffer();
+    const sheet = (await call("POST", "/images/upload?name=sheet.png", undefined, { raw: wide })).body.picture;
+    const style = (await call("POST", "/images/upload?name=style.png", undefined, { raw: wide })).body.picture;
+    settings({ baseUrl: origin, editEnabled: true, editMultiple: true, editMaxSize: "64x64" });
+    await call("POST", "/images/generate", { prompt: "the fox", references: [sheet.id] });
+    const [one] = await settled();
+    assert.equal(one.state, "done", one.error);
+    assert.equal(one.kind, "generate");
+    assert.equal(one.notes.length, 1);
+    assert.match(one.notes[0], /^The reference was scaled down from 128x64 pixels \([^)]+\) to 64x32 pixels \([^)]+\) to fit what the editing endpoint takes\.$/);
+    await clearJobs();
+    await call("POST", "/images/generate", { prompt: "the fox", references: [sheet.id, style.id] });
+    const [two] = await settled();
+    assert.deepEqual(two.notes.map((note: string) => note.split(" was ")[0]), ["Reference 1", "Reference 2"]);
+    // An edit's notes are as they were.
+    await clearJobs();
+    await call("POST", "/images/edit", { prompt: "brighter", sources: [sheet.id] });
+    const [edit] = await settled();
+    assert.match(edit.notes[0], /^The image was scaled down .* to fit what an edit takes\. The result is not scaled back up\.$/);
+  } finally {
+    server.close();
+    gen.saveImageGeneration({ editMaxSize: "" });
     gone();
   }
 });

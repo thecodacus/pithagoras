@@ -237,8 +237,8 @@ function referencesOf(config: ImageGenerationConfig, ids: string[]): { target: I
  * the one before it, so that a seed does not make the same picture several times.
  *
  * With references the pictures are read now, and each picture is asked of the
- * editing endpoint with them, from noise (see pi/generate-image-tool.ts), with
- * the editing model where the request has none and always with a size where
+ * editing endpoint with them, from noise (see pi/generate-image-tool.ts), always
+ * with the editing model, whatever model the request names, and with a size where
  * there is one: the add-on's where the request has none, as without one
  * stable-diffusion.cpp makes the picture in the first reference's size.
  */
@@ -256,15 +256,13 @@ export function startGenerations(request: GenerateJob): PictureJob[] {
     const settings = forPicture(request, i);
     if (refs) {
       const size = settings.size || config.size;
-      // From noise is recorded only where it was sent: the block goes only while the switch is on.
-      const params: PictureParams = {
-        ...paramsOf({ ...settings, model: settings.model || refs.target.model, size, ...(refs.target.sdExtras ? { fromNoise: true } : {}) }),
-        references: request.references,
-      };
+      // Always the editing model: a model typed for making pictures need not be one the editing endpoint has. From noise is recorded only where it was sent: the block goes only while the switch is on.
+      const withRefs = { ...settings, model: refs.target.model, size };
+      const params: PictureParams = { ...paramsOf({ ...withRefs, ...(refs.target.sdExtras ? { fromNoise: true } : {}) }), references: request.references };
       const { images } = refs;
       return start({ kind: "generate", prompt: request.prompt, ...(size ? { size } : {}) }, async (signal) => {
-        const asked = requestOf({ ...settings, size, fromNoise: true });
-        const { bytes, ext, notes } = await editImage(refs.target, { prompt: request.prompt, image: images.length > 1 ? images : images[0], ...asked }, { signal });
+        const asked = requestOf({ ...withRefs, fromNoise: true });
+        const { bytes, ext, notes } = await editImage(refs.target, { prompt: request.prompt, image: images.length > 1 ? images : images[0], ...asked, references: true }, { signal });
         return { pictureId: addPagePicture({ bytes, ext, kind: "generated", prompt: request.prompt, params }).id, notes };
       });
     }

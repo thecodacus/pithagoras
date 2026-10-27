@@ -92,7 +92,7 @@ async function fromReferences(chat: Chat, config: ImageGenerationConfig, named: 
     throw new Error("The prompt has an sd_cpp_extra_args block of its own, which would hide the one that makes a picture with references start from noise: take it out of the prompt.");
   }
   // A size always where there is one, the add-on's when the agent gives none: without it stable-diffusion.cpp makes the picture in the first reference's size.
-  const { bytes, ext, notes } = await editImage(target, { prompt, image: images.length > 1 ? images : images[0], ...(size ? { size } : {}), native: { fromNoise: true } }, { signal });
+  const { bytes, ext, notes } = await editImage(target, { prompt, image: images.length > 1 ? images : images[0], ...(size ? { size } : {}), native: { fromNoise: true }, references: true }, { signal });
   const rel = saveGenerated(chat, bytes, ext);
   recordChatPicture({
     sessionId: chat.id,

@@ -559,10 +559,11 @@ it back here for a new picture.
 
 - **Without references nothing changes.** The request is the `images/generations` one it always was, byte for byte,
   whatever the switches say.
-- **With references** the picture is asked of the editing address, with the editing key and model, and with the
+- **With references** the picture is asked of the editing address, with the editing key and always the editing model, and with the
   references read and checked as `edit_image`'s pictures are: only from the chat's folder (as the agent, so not a
   picture the sandbox closed to it), only PNG, JPEG, GIF or WebP by their bytes, at most 25 MB each and 50 MB
-  together, scaled down to the [maximum picture size](#editing-a-picture) where they are over it (the answer says so),
+  together, scaled down to the [maximum picture size](#editing-a-picture) where they are over it (the answer says so, of
+  the reference: "The reference was scaled down from … to fit what the editing endpoint takes."),
   all of them before anything is sent; one that is refused refuses the call, naming it (`Reference 2 (style.jpg): …`).
   A size always goes where there is one: the agent's, else the one saved for generation. Without one a
   stable-diffusion.cpp server makes the picture in the size and shape of the first reference.

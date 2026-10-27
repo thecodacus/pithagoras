@@ -93,8 +93,8 @@ export function useGalleryFeed<Item extends FeedItem, Job extends FeedJob, Filte
   const [gone, setGone] = useState<ReadonlySet<string>>(new Set());
   const goneRef = useRef(gone);
   goneRef.current = gone;
-  // What an edit that is done was made to fit (scaled down, compressed): it went ahead, so it is a warning and not an error.
-  const [notes, setNotes] = useState<string[]>([]);
+  // What an edit that is done was made to fit (scaled down, compressed): it went ahead, so it is a warning and not an error. Each with the job it is of, which says what the pictures were for.
+  const [notes, setNotes] = useState<{ job: Job; text: string }[]>([]);
 
   useEffect(() => {
     const mine = ++asked.current;
@@ -198,7 +198,7 @@ export function useGalleryFeed<Item extends FeedItem, Job extends FeedJob, Filte
         // An item that was being made and is done now is in the gallery, and the list asks for it.
         const finished = shown.filter((j) => j.state === "done" && running.current.has(j.id));
         if (finished.length) refreshTop();
-        const said = finished.flatMap((j) => source.notes?.(j) ?? []);
+        const said = finished.flatMap((job) => (source.notes?.(job) ?? []).map((text) => ({ job, text })));
         if (said.length) setNotes(said);
         running.current = new Set(shown.filter((j) => j.state === "running").map((j) => j.id));
         setLimit(r.limit);

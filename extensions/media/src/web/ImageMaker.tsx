@@ -169,6 +169,8 @@ export function ImageMaker({
   const referring = !editing && generating && referencesOpen;
   const list = editing ? sources : references;
   const setList = editing ? onSources : onReferences;
+  // A new picture with references is made by the editing endpoint, always with its model: the one typed for making pictures is kept, and neither shown nor sent.
+  const referenceModel = referring && references.length > 0;
   const full = running >= limit;
   const count = Math.min(form.count, Math.max(1, limit - running));
   const refused = editing || referring ? refusal(list, multiple) : undefined;
@@ -236,7 +238,8 @@ export function ImageMaker({
         const { jobs } = await api.changePicture({ prompt: said, sources: sources.map((p) => p.id), ...settings.body, ...(painted ? { mask: painted } : {}), count });
         onStarted(jobs);
       } else {
-        const { jobs } = await api.makePictures({ prompt: said, ...settings.body, count, ...(references.length ? { references: references.map((p) => p.id) } : {}) });
+        const { model: _typed, ...withoutModel } = settings.body;
+        const { jobs } = await api.makePictures({ prompt: said, ...(references.length ? { ...withoutModel, references: references.map((p) => p.id) } : settings.body), count });
         onStarted(jobs);
       }
     } catch (e) {
@@ -331,14 +334,15 @@ export function ImageMaker({
           {t("Model")}
           <input
             id="image-model"
-            value={fields.model}
+            value={referenceModel ? features.editModel : fields.model}
             onChange={(e) => setField({ model: e.target.value })}
-            // A new picture with references is made by the editing endpoint, with its model where none is typed.
-            placeholder={(editing || (referring && references.length > 0) ? features.editModel : features.model) || empty}
+            placeholder={(editing || referenceModel ? features.editModel : features.model) || empty}
+            disabled={referenceModel}
+            aria-describedby={referenceModel ? "image-model-hint" : undefined}
             maxLength={200}
             spellCheck={false}
             autoComplete="off"
-            className={numberCls}
+            className={`${numberCls} disabled:opacity-50`}
           />
         </label>
         {numberField("width", t("Width"), shownSize.width || empty)}
@@ -355,6 +359,11 @@ export function ImageMaker({
           />
         </div>
       </div>
+      {referenceModel && (
+        <p id="image-model-hint" className="mt-1 text-[11px] text-fg-faint">
+          {features.editModel ? t("Reference pictures use the editing model: {name}", { name: features.editModel }) : t("Reference pictures use the editing endpoint's own model.")}
+        </p>
+      )}
 
       <button type="button" onClick={() => change({ open: !form.open })} aria-expanded={form.open} className={`${ghostCls} mt-2`}>
         <LuSlidersHorizontal aria-hidden className="h-3.5 w-3.5" />

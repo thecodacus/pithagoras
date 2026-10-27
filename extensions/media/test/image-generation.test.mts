@@ -1993,7 +1993,9 @@ test("a reference beyond the maximum size of an edit is scaled down to fit, and 
     gen.saveImageGeneration({ baseUrl: origin, enabled: true, editEnabled: true, editMaxSize: "128x128", sdExtras: true });
     const result = await load(folder).call({ prompt: "the character, on a beach", references: ["sheet.png"] });
     assert.equal(await dimensions(sentImages(seen[0])[0].bytes), "128x64");
-    assert.match(result.content[0].text, /The image was scaled down from 256x128 pixels \([^)]+\) to 128x64 pixels \([^)]+\) to fit what an edit takes\./);
+    // Said of a reference, which is not what the result is made of: nothing of a result scaled back up.
+    assert.match(result.content[0].text, /The reference was scaled down from 256x128 pixels \([^)]+\) to 128x64 pixels \([^)]+\) to fit what the editing endpoint takes\./);
+    assert.doesNotMatch(result.content[0].text, /The image was|edit takes|scaled back up/);
     assert.match(result.content[0].text, /as references \(in this order\), and shown to the user/);
     assert.deepEqual(readFileSync(path.join(folder, "sheet.png")), await real(256, 128), "the reference stays as it was");
   } finally {

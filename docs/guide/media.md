@@ -59,7 +59,7 @@ next visit (the description is not kept), **Generate** and **Edit** each with th
 
 | Field | Sent as | Meaning |
 | --- | --- | --- |
-| **Model** | `model` | Instead of the model saved for the add-on (for **Edit**, and for a picture with [reference pictures](#reference-pictures), the model saved for editing). Empty uses that one. |
+| **Model** | `model` | Instead of the model saved for the add-on (for **Edit**, the model saved for editing). Empty uses that one. With [reference pictures](#reference-pictures) it is always the model saved for editing: the field shows it and is off. |
 | **Width** and **Height** | `size`, as `1024x768` | Both, or neither: a size needs both sides, each a whole number from 64 to 8192. Empty uses the size saved for the add-on, with reference pictures too; an edit has none of its own, and an empty size sends none, since what an edit comes out as is the endpoint's to say. |
 | **How many** | `n` (1 for each) | One to four. Each is a request of its own for one picture, so an endpoint that makes one at a time is not asked for a number it may refuse. |
 
@@ -133,7 +133,11 @@ picture**: in the gallery it is *Made from a description*, kept under a name of 
 an edit is to its original, and **Details** lists how many reference pictures it was made with. The request is the
 edit's — the references as `image` or `image[]`, checked, limited and scaled like an edit's pictures — with:
 
-- **The editing model**, where the **Model** field is empty (its placeholder shows it once there are references).
+- **Always the editing model.** A model typed for making pictures need not be one the editing endpoint has, so while
+  there are references the **Model** field shows the editing model and is off, with a note under it ("Reference
+  pictures use the editing model: …", or the endpoint's own where none is saved). What you typed is kept, and comes
+  back and is sent again once the references are left out. The portal ignores a `model` sent with references, so the
+  agent's tool, the form and **Run again** all use the editing model.
 - **A size, always where there is one**: the field's, else the size saved for the add-on. Without one, a
   stable-diffusion.cpp server makes the picture in the size and shape of the first reference, and the form says
   so while no size is set anywhere.
@@ -148,7 +152,11 @@ edit's — the references as `image` or `image[]`, checked, limited and scaled l
   server would read that block and not the one that starts from noise.
 
 The other settings (format, compression, and the Stable Diffusion ones while that switch is on) go as for any
-picture; there is no strength and no mask. **Run again** on such a picture makes it again with the same references,
+picture; there is no strength and no mask. A reference over the [maximum picture size](/guide/features#editing-a-picture)
+or the weight an edit takes is scaled down as an edit's picture is, and the warning above the form then says **A
+reference picture was scaled down to fit what the editing endpoint takes.**, with which one and how ("The reference was
+scaled down from … to fit what the editing endpoint takes."): it is not a picture that was changed, so the words for an
+edit are not used. **Run again** on such a picture makes it again with the same references,
 when they are all still in the gallery, and says so when they are not. Without references the request is the
 `images/generations` one it always was.
 
