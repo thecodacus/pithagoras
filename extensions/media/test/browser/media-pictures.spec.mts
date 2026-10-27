@@ -2595,3 +2595,14 @@ test('a reference that was scaled down is said to be one in the warning, not a p
   await expect(warning).toContainText(note);
   await expect(page.getByText('A picture was changed to fit what an edit takes.')).toHaveCount(0);
 });
+
+test('Run again of a picture made with the same reference twice makes it again with both', async ({ page }) => {
+  const sheet = pic({ prompt: 'A fox sheet', age: 2 });
+  const twice = pic({ prompt: 'Two foxes', params: { references: [sheet.id, sheet.id] }, age: 1 });
+  const p = await portal(page, { pictures: [sheet, twice], images: feature({ editMultiple: true }) });
+  await page.goto('/x/pithagoras-media/media');
+  await tile(page, 'Two foxes').click();
+  await viewer(page).getByRole('button', { name: 'Run again' }).click();
+  await expect.poll(() => p.state.generated.length).toBe(1);
+  expect(p.state.generated[0]).toEqual({ prompt: 'Two foxes', references: [sheet.id, sheet.id] });
+});

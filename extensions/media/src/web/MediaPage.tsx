@@ -446,7 +446,8 @@ export function MediaPage() {
         const settings = refs?.length ? rest : { ...rest, ...(model ? { model } : {}) };
         // Made with references: with the same ones, all of them still in the gallery, or not again.
         const found = refs?.length ? (await api.galleryPictures(refs)).pictures : [];
-        if (refs?.length && found.length < refs.length) throw new Error(t("The reference pictures this was made with are not all in the gallery any more."));
+        // Each by its id: the same picture may be a reference twice, and the gallery answers it once.
+        if (refs?.some((id) => !found.some((p) => p.id === id))) throw new Error(t("The reference pictures this was made with are not all in the gallery any more."));
         const { jobs: made } = await api.makePictures({
           prompt: picture.prompt,
           ...settings,
