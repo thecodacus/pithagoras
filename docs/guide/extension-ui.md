@@ -982,7 +982,7 @@ restart the portal.
 | `tools.exceptions(names)` | [Who has its tools](#who-has-its-tools): the chats and routines where those tools are not what the default says |
 | `chats.offers(chatId, tool)` | How the chat's model is offered a tool now: `"direct"`, `"lazy"` (through the `tools` tool) or nothing (switched off, out of reach, or the chat's pi not running here). In a chat whose mode works through the code tool ([Code mode](/guide/sessions#modes)), `"direct"` means that a script calls the tool by its name, with no streamed arguments of its own |
 | `chats.hold(chatId)` | Keeps the chat's pi from being let go for being idle, or reloaded, while work goes on; returns what lets it go |
-| `chats.create(options)`, `chats.children(parent)`, `chats.start(options)`, `chats.prompt(chatId, message, options?)`, `chats.abort(chatId)`, `chats.remove(chatId)` | [Child chats](#child-chats): a chat of a chat, to give part of its work to, or a chat of an agent's or a project's folder; run until it answers, stopped and deleted |
+| `chats.create(options)`, `chats.children(parent)`, `chats.start(options)`, `chats.prompt(chatId, message, options?)`, `chats.lastAnswer(chatId)`, `chats.abort(chatId)`, `chats.remove(chatId)` | [Child chats](#child-chats): a chat of a chat, to give part of its work to, or a chat of an agent's or a project's folder; run until it answers, stopped and deleted |
 | `sandbox.run(chatId, argv, options?)`, `sandbox.spawnAs(chatId)`, `sandbox.on()` | [Running things as the chat's agent](#running-things-as-the-chat-s-agent) |
 | `sandbox.personEnv()` | The portal's environment for a process the person starts, such as a shell of their own: without the mark the agent's processes carry, so it is not listed as a job the agent left running |
 | `files.inside(base, rel)` | A path checked to be inside a folder |
@@ -2385,6 +2385,17 @@ portal.chats.extend((pi, chat) => {
   speaker may run (`/compact`) is no message of the chat: `prompt` resolves as
   `done` at once, with no answer, when it started no run, or when the run it
   started ends.
+- **`lastAnswer(chatId)`** says where the last run stands, from what the
+  portal keeps of the chat: `{ status, answer, marked?, error? }`, with
+  `status` `"running"` while it goes on and else as for `prompt` (a run the
+  portal's restart cut off is `"stopped"`, with an `error` that says so), and
+  nothing for a chat that never ran. It holds across a restart of the server
+  half or of the portal: a half that lost the `prompt` it waited on tells a
+  run that goes on from one that ended while it was away, and has its answer.
+  `marked` is there while the guard holds the chat as marked, by a result it
+  flagged that the person has not trusted, also when no pi runs for it now:
+  hold such an answer back as outside content. For a child, its parent is
+  marked with it, as `prompt` marks it.
 - **`abort(chatId)`** stops its run, as the person's Stop does.
   **`remove(chatId)`** deletes it, its run stopped first; its transcript and
   files go, and `chats.on("deleted")` hears it once. While its parent is being
@@ -2403,7 +2414,7 @@ portal.chats.extend((pi, chat) => {
   names the child on its [protocol](/guide/extensions#the-subagent-protocol)
   start (`chat`).
 - **In a process of its own** (`"isolated": true`), `create` is answered at
-  once (`children` and `start` too) and the others later, as the other calls are.
+  once (`children`, `start` and `lastAnswer` too) and the others later, as the other calls are.
 
 #### A chat of a folder
 

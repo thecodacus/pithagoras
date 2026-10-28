@@ -651,6 +651,10 @@ test("a child chat made, a chat started, run, stopped and removed from its proce
       createSession({ id: "own", title: options.title, workspace: work, executor: "host", listed: 0, creator, unattended: 1 });
       return getSession("own");
     },
+    lastAnswer: (id) => {
+      asked.push(["lastAnswer", id]);
+      return { status: "done", answer: "42", marked: true };
+    },
     run: async (id, message, options) => {
       asked.push(["run", id, message, options]);
       return { status: "done", answer: "42" };
@@ -664,23 +668,25 @@ test("a child chat made, a chat started, run, stopped and removed from its proce
         const child = portal.chats.create({ parent: "a", title: "Helper", listed: false });
         const run = await portal.chats.prompt(child.id, "Answer", { steer: true });
         await portal.chats.abort(child.id);
+        const last = portal.chats.lastAnswer(child.id);
         const found = portal.chats.children("a");
         const theirs = await portal.chats.remove("a").catch((e) => e.message);
         await portal.chats.remove(child.id);
         const started = portal.chats.start({ folder: "/somewhere", title: "Of a folder", listed: false, unattended: true });
         await portal.chats.remove(started.id);
-        res.json({ child, run, theirs, found, started });
+        res.json({ child, run, last, theirs, found, started });
       });
     `),
   ]);
   assert.deepEqual((await get("/api/x/maker/go", { method: "POST" })).body, {
     child: { id: "kid", title: "Helper", workspace: work, status: "idle", parent: "a", listed: false },
     run: { status: "done", answer: "42" },
+    last: { status: "done", answer: "42", marked: true },
     theirs: "a is no chat a package made: only a child chat or a chat a package started is prompted, stopped or removed",
     found: [{ id: "kid", title: "Helper", workspace: work, status: "idle", parent: "a", listed: false }],
     started: { id: "own", title: "Of a folder", workspace: work, status: "idle", listed: false, unattended: true },
   });
-  assert.deepEqual(asked, [["create", "a", "maker"], ["run", "kid", "Answer", { steer: true }], ["abort", "kid"], ["remove", "kid"], ["start", "/somewhere", "maker"], ["remove", "own"]]);
+  assert.deepEqual(asked, [["create", "a", "maker"], ["run", "kid", "Answer", { steer: true }], ["abort", "kid"], ["lastAnswer", "kid"], ["remove", "kid"], ["start", "/somewhere", "maker"], ["remove", "own"]]);
   await host.syncServerHalves([]);
 });
 

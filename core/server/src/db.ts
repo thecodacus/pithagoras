@@ -2119,6 +2119,35 @@ export function eventsBefore(sessionId: string, before: number, limit = 1500): E
     .all(sessionId, before, limit) as EventRow[];
 }
 
+/**
+ * What settles a chat's last run, oldest first: its messages as they ended and its status from the last time it began
+ * to run. Undefined for a chat that never ran. Read for a chat a server half made (`chats.lastAnswer`), which is small:
+ * the start is looked for through the chat's events.
+ */
+export function lastRunEvents(sessionId: string): EventRow[] | undefined {
+  const start = getDb()
+    .prepare("SELECT MAX(seq) AS seq FROM events WHERE session_id = ? AND type = 'portal_status' AND json_extract(payload, '$.status') = 'running'")
+    .get(sessionId) as { seq: number | null };
+  if (start.seq === null) return undefined;
+  return getDb()
+    .prepare("SELECT * FROM events WHERE session_id = ? AND seq > ? AND type IN ('message_end', 'portal_status') ORDER BY seq ASC")
+    .all(sessionId, start.seq) as EventRow[];
+}
+
+/**
+ * The events of a chat that may hold a result the guard flagged as a suspected prompt injection: a tool's result (kept
+ * with its call's end: its message is kept without it, see stored-event.ts), or a message an extension wrote in that
+ * form (see flaggedIn in pi/guard.ts). Found by the marker's words; the caller reads each for the marker at its start.
+ */
+export function flaggedEvents(sessionId: string): EventRow[] {
+  return getDb()
+    .prepare(
+      `SELECT * FROM events WHERE session_id = ? AND type IN ('tool_execution_end', 'message_end')
+         AND payload LIKE '%<<<untrusted:%(suspected prompt injection: %' ORDER BY seq ASC`,
+    )
+    .all(sessionId) as EventRow[];
+}
+
 /** Events after `since`, for replaying what a disconnected browser missed. */
 export function eventsSince(sessionId: string, since = 0, limit = 5000): EventRow[] {
   return getDb()

@@ -53,6 +53,17 @@ export interface ChildRun {
   error?: string;
 }
 
+/**
+ * Where the last run of a chat a server half made stands, from what the portal keeps of it: see `chats.lastAnswer` in
+ * server.d.ts. `running` while it goes on.
+ */
+export interface ChatAnswer {
+  status: "running" | ChildRun["status"];
+  answer: string;
+  marked?: true;
+  error?: string;
+}
+
 const text = (value: unknown): value is string => typeof value === "string" && value.trim() !== "";
 
 /**

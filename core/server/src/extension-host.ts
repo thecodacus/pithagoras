@@ -31,7 +31,7 @@ import { holdMemory } from "./memory-holder.js";
 import { provideMode } from "./chat-modes.js";
 import { logFileLine, onLogLine, scrubSecrets, type LogLine } from "./logs.js";
 import type { Chat, ChatLife as Life, Ran, ServerPortal, Upgrade, VoiceProvider } from "@pithagoras/extension-api/server";
-import type { ChildRun } from "./child-chats.js";
+import type { ChatAnswer, ChildRun } from "./child-chats.js";
 
 /**
  * An extension's server half: a module of the package's that the portal loads
@@ -494,6 +494,7 @@ let liveModel: LiveModel = async () => undefined;
 let childChats: {
   create: (options: unknown, creator: string) => SessionRow;
   start: (options: unknown, creator: string) => SessionRow;
+  lastAnswer: (chatId: string) => ChatAnswer | undefined;
   run: (chatId: string, message: string, options: { steer?: boolean }) => Promise<ChildRun>;
   abort: (chatId: string) => Promise<void>;
   remove: (chatId: string) => Promise<void>;
@@ -504,6 +505,7 @@ let childChats: {
   start: () => {
     throw new Error("Chats are not started here");
   },
+  lastAnswer: () => undefined,
   run: async () => ({ status: "error", answer: "", error: "Child chats are not available here" }),
   abort: async () => {},
   remove: async () => {},
@@ -515,7 +517,7 @@ export function setChatBridge(
   toolOffered = bridge.offers;
   reloadChats = bridge.reload;
   liveModel = bridge.model;
-  childChats = { create: bridge.create, start: bridge.start, run: bridge.run, abort: bridge.abort, remove: bridge.remove };
+  childChats = { create: bridge.create, start: bridge.start, lastAnswer: bridge.lastAnswer, run: bridge.run, abort: bridge.abort, remove: bridge.remove };
 }
 /** How a server half chooses voice mode's source, and asks which it is: the voice settings are the voice routes', which import the host. */
 let voiceSource: { choose(name: string, chosen: boolean): void; chosen(): string } = { choose: () => {}, chosen: () => "" };
@@ -790,6 +792,12 @@ function portalFor(ext: Running): ServerPortal {
         ownChat(chatId);
         if (typeof message !== "string" || !message.trim()) throw new TypeError("A child chat is sent a message with words in it");
         return scope.exit(() => childChats.run(chatId, message, { steer: options?.steer === true }));
+      },
+      // From what the portal keeps, so a half that started again (in a process of its own, maybe) finds how a run ended
+      // while it was away.
+      lastAnswer: (chatId) => {
+        ownChat(chatId);
+        return childChats.lastAnswer(chatId);
       },
       abort: async (chatId) => {
         ownChat(chatId);

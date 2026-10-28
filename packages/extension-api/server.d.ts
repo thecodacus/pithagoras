@@ -110,6 +110,20 @@ export interface ChildRun {
 }
 
 /**
+ * Where the last run of a chat a package made stands (`chats.lastAnswer`), from what the portal keeps: `running` while
+ * it goes on, else how it ended as for `ChildRun` (a run the portal's restart cut off is `stopped`, with an `error`
+ * that says so). `answer` is the last thing it said in that run, which may be nothing (and, while it runs, the last
+ * message it finished). `marked` is there while the guard holds the chat as marked: it read something that looked like
+ * a prompt injection that the person has not trusted.
+ */
+export interface ChatAnswer {
+  status: "running" | ChildRun["status"];
+  answer: string;
+  marked?: true;
+  error?: string;
+}
+
+/**
  * What happened to a chat's pi: it was `started` or `stopped` (for a reload, for being left idle, or with the
  * portal); the chat was `deleted`; or it is `finished`: the run it was started for is over, and the portal stopped
  * its pi for good, as for a routine run in a session of its own. A person who goes on with the chat starts its pi
@@ -873,6 +887,14 @@ export interface ServerPortal {
      * did not make, or a message with no words.
      */
     prompt(chatId: string, message: string, options?: { steer?: boolean }): Promise<ChildRun>;
+    /**
+     * Where the last run of a chat this package made (a child, or one it started) stands, from what the portal keeps of
+     * the chat, so it holds across a restart of the server half or of the portal: for a half that lost a `prompt` it
+     * was waiting on, to tell a run that goes on from one that ended while it was away, and to have its answer.
+     * Nothing for a chat that has never run. Throws for a chat this package did not make. `marked` says the answer is
+     * to be held like outside content; for a child, its parent is marked with it, as `prompt` marks it.
+     */
+    lastAnswer(chatId: string): ChatAnswer | undefined;
     /** Stops the run of a chat this package made, as the person's Stop does: its `prompt` resolves as `stopped`. */
     abort(chatId: string): Promise<void>;
     /**

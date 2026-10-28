@@ -83,6 +83,7 @@ const NOW = new Set([
   "chats.hold",
   "chats.create",
   "chats.start",
+  "chats.lastAnswer",
   "chats.children",
   "folders.list",
   "folders.allowed",

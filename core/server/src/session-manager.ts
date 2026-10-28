@@ -22,7 +22,7 @@ import { isDialog, showsDialogs } from "./pi/ui-requests.js";
 import { ASK_QUESTION_TOOL, asksQuestions, describeAnswers, readAnswers, type Answers, type Question } from "./pi/ask-question.js";
 import { CODEMODE_TOOL } from "./pi/codemode.js";
 import { CHAT_QUESTION, CHAT_QUESTION_END, holdAnswers, openChatQuestion, openChatQuestions, takeHeldAnswers, type ChatQuestion, type QuestionOutcome } from "./questions.js";
-import { forgetTaint, sessionTainted, taintSession } from "./pi/guard.js";
+import { flaggedResult, forgetTaint, sessionTainted, taintSession } from "./pi/guard.js";
 import { neutralise } from "./channels/framing.js";
 import { textOf } from "./pi/entries.js";
 import { removeSessionFiles } from "./session-files.js";
@@ -101,8 +101,11 @@ import {
   lazySetLabels,
   childSessions,
   deleteSession,
+  lastRunEvents,
+  flaggedEvents,
+  trustedResults,
 } from "./db.js";
-import { newChildChat, newPackageChat, type ChildRun } from "./child-chats.js";
+import { newChildChat, newPackageChat, type ChatAnswer, type ChildRun } from "./child-chats.js";
 
 /**
  * Thinking markers that escape into the answer.
@@ -3441,6 +3444,71 @@ class SessionManager extends EventEmitter {
     }
   }
 
+  /**
+   * Where the last run of a chat stands, read from its events and its row, so that it holds after the portal or a
+   * server half restarts: how it ended (or that it goes on), the last thing it said in it, as runChild hears them, and
+   * whether the guard has the chat marked. Undefined for a chat that never ran, or is not there.
+   */
+  lastAnswer(chatId: string): ChatAnswer | undefined {
+    const row = getSession(chatId);
+    const events = row && lastRunEvents(chatId);
+    if (!row || !events) return undefined;
+    let answer = "";
+    let failure: string | undefined;
+    let end: { status: ChildRun["status"]; error?: string } | undefined;
+    for (const event of events) {
+      let p: any = {};
+      try {
+        p = JSON.parse(event.payload);
+      } catch {
+        continue;
+      }
+      if (event.type === "message_end" && p.message?.role === "assistant") {
+        if (p.message.stopReason === "error") failure = String(p.message.errorMessage ?? "The model answered with an error");
+        else {
+          failure = undefined;
+          const said = (Array.isArray(p.message.content) ? p.message.content : []).filter((c: any) => c?.type === "text").map((c: any) => c.text).join("");
+          if (said.trim()) answer = said;
+        }
+      } else if (event.type === "portal_status" && p.status === "error") end = { status: "error", error: String(p.error ?? failure ?? "The run failed") };
+      else if (event.type === "portal_status" && p.status === "idle") end = p.aborted ? { status: "stopped" } : failure ? { status: "error", error: failure } : { status: "done" };
+      // The portal stopped while it ran: it was cut off, and its next start said so.
+      else if (event.type === "portal_status" && p.status === "interrupted") end = { status: "stopped", error: "The portal stopped while it ran" };
+    }
+    const now: ChatAnswer["status"] | undefined = row.status === "running" ? "running" : end?.status;
+    const status = now ?? (row.status === "error" ? "error" : "stopped");
+    const error = now === "running" ? undefined : (end?.error ?? (row.status === "error" ? (row.last_error ?? "The run failed") : undefined));
+    const marked = this.marked(chatId);
+    // As for runChild: what a marked child said is what the mark carried, and the chat it works for takes it in marked.
+    if (marked && row.parent_id) taintSession(row.parent_id);
+    return { status, answer, ...(marked ? { marked: true as const } : {}), ...(error ? { error } : {}) };
+  }
+
+  /**
+   * Whether the guard holds a chat as marked: the guard that runs for it says, and with none running, what it would
+   * find as it starts. A result it flagged that the person has not trusted (see flaggedIn in pi/guard.ts).
+   */
+  private marked(chatId: string): boolean {
+    if (sessionTainted(chatId)) return true;
+    const trusted = trustedResults(chatId);
+    for (const event of flaggedEvents(chatId)) {
+      let p: any;
+      try {
+        p = JSON.parse(event.payload);
+      } catch {
+        continue;
+      }
+      // A tool's result, or a message an extension wrote; not what the person or the model said, which only quotes one.
+      const content = event.type === "tool_execution_end" ? p.result?.content : p.message?.role === "custom" ? p.message.content : undefined;
+      const texts: string[] = typeof content === "string" ? [content] : Array.isArray(content) ? content.flatMap((c: any) => (c?.type === "text" && typeof c.text === "string" ? [c.text] : [])) : [];
+      if (texts.some((one) => {
+        const flag = flaggedResult(one);
+        return flag !== undefined && !trusted.has(flag.id);
+      })) return true;
+    }
+    return false;
+  }
+
   /** Drop the running process so the next turn rebuilds it — used when a
    * session's role changes and its context files must be reloaded. */
   async shutdownSession(sessionId: string): Promise<void> {
@@ -3500,6 +3568,7 @@ setChatBridge({
   tell: (chatId, extension, data) => sessions.tellExtension(chatId, extension, data),
   create: (options, creator) => sessions.createChild(options, creator),
   start: (options, creator) => sessions.startChat(options, creator),
+  lastAnswer: (chatId) => sessions.lastAnswer(chatId),
   run: (chatId, message, options) => sessions.runChild(chatId, message, options),
   abort: (chatId) => sessions.abort(chatId),
   remove: (chatId) => sessions.deleteChat(chatId),
