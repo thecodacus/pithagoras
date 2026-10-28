@@ -15,6 +15,10 @@ import { cleanTitle } from "./projects.js";
  * answer on the portal's pages, the guard refuses for the child too, rather than waiting on a page nobody opens. One
  * level only: a child has no children. It is deleted with its parent (db.ts removeSession, and
  * SessionManager.discard for its pi and files).
+ *
+ * A child made `unattended` is one nobody answers in, wherever its parent is: it has no ask_question, every dialog an
+ * extension opens in it is answered at once with its no-answer value, and the guard refuses a held call rather than
+ * asking, as in a routine run. Stored on its row, so a pi started for it after a restart is started the same way.
  */
 
 /** What a server half asks of a child chat: see `chats.create` in server.d.ts. */
@@ -24,6 +28,7 @@ export interface ChildChatOptions {
   mode?: string;
   model?: { provider: string; id: string };
   listed?: boolean;
+  unattended?: true;
 }
 
 /** How a run of a child chat ended, and the last thing it said: see `chats.prompt` in server.d.ts. */
@@ -54,6 +59,7 @@ export function newChildChat(options: unknown, creator: string): SessionRow {
   const title = cleanTitle(asked.title);
   if (!title) throw new TypeError("A child chat needs a title");
   if (asked.listed !== undefined && typeof asked.listed !== "boolean") throw new TypeError("listed is true or false");
+  if (asked.unattended !== undefined && asked.unattended !== true) throw new TypeError("unattended is true, or left out");
   const model = asked.model as ChildChatOptions["model"] | undefined;
   if (model !== undefined && (!model || typeof model !== "object" || !text(model.provider) || !text(model.id))) {
     throw new TypeError("A child chat's model is a provider and an id, as pi names them");
@@ -89,6 +95,7 @@ export function newChildChat(options: unknown, creator: string): SessionRow {
     parent_id: parent.id,
     listed: asked.listed === false ? 0 : 1,
     creator,
+    unattended: asked.unattended === true ? 1 : 0,
     role: parent.role,
     last_person_key: parent.last_person_key,
     mode,

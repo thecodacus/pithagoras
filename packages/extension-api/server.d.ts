@@ -48,6 +48,8 @@ export interface Chat {
   parent?: string;
   /** A child chat's: whether it shows in the chat lists, under its parent. One that does not is found by its id alone. */
   listed?: boolean;
+  /** Made for nobody to attend (`ChildChatOptions.unattended`). */
+  unattended?: true;
 }
 
 /** What a child chat is made with: see `chats.create`. */
@@ -66,6 +68,14 @@ export interface ChildChatOptions {
   model?: ModelRef;
   /** Whether it shows in the chat lists, under its parent (the default), or is found by its id alone. */
   listed?: boolean;
+  /**
+   * A chat nobody attends, wherever its parent is: for work the person does not watch, such as an answer an extension
+   * posts elsewhere. It is not offered `ask_question`; every dialog an extension opens in it is answered at once with
+   * its no-answer value (a confirm with false, a select or an input with nothing), as in a routine run; and a call the
+   * guard holds after a suspected prompt injection is refused rather than put to the person. The agent gets each
+   * refusal as the tool's result and goes on. Kept with the chat, so it holds after the portal restarts.
+   */
+  unattended?: true;
 }
 
 /**
@@ -812,7 +822,8 @@ export interface ServerPortal {
      * that the person opens at `/s/<id>`. It takes its parent's role and last speaker, so it is held to the person who
      * asked, its parent's mode unless it is given one, and the tools the person switched off or on in the parent. A
      * dialog it opens, and a question the guard asks, go where its parent's would: where nobody can answer on the
-     * portal's pages (a channel conversation, a routine run) the guard refuses for the child too. One level only:
+     * portal's pages (a channel conversation, a routine run) the guard refuses for the child too, and so it does in a
+     * child made `unattended`, which asks nobody anything. One level only:
      * refused for a parent that is a child itself, and for a heartbeat, which is held to reading by a role of its own.
      * Deleted with its parent, and each child's `deleted` is heard as the parent's is. Throws for options that cannot
      * be one: no such parent, no title, a model that is not a provider and an id, or a mode the child may not be put in

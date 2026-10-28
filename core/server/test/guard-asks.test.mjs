@@ -298,10 +298,12 @@ test("in a chat of the primary user's, the question is a dialog in the chat that
   assert.deepEqual(audit("guard-asks-no").map((row) => [row.kind, row.tool]), [["refused", "bash"], ["flagged", "page_read"]]);
 });
 
-test("a routine's run and a channel's chat have nobody to ask: the call is refused, and no dialog is opened", async () => {
+test("a routine's run, a channel's chat and a chat nobody attends have nobody to ask: the call is refused, and no dialog is opened", async () => {
   for (const [id, kind, extra] of [
     ["guard-asks-routine", "routine", {}],
     ["guard-asks-channel", "agent", { channel_slug: "c", channel_key: "c:owner" }],
+    // A chat of the person's pages otherwise, which a server half made for nobody to attend (child-chats.ts).
+    ["guard-asks-unattended", "task", { unattended: 1 }],
   ]) {
     script = [{ name: "page_read", args: { url: "https://x.test/a" } }, { name: "keep_note", args: { note: "milk" } }];
     const { events, results } = await run(id, kind, extra, true);

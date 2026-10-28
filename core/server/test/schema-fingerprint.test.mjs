@@ -18,8 +18,10 @@ import { freePort, inProcessHome } from "./server-harness.mjs";
 // src/schema-version.ts (once for the release, not once for each change),
 // pin the new version and fingerprint here, and have an upgrade test for what
 // changed (below) that starts from a database made before it.
-const PINNED = { version: 15, fingerprint: "830934df6dce1dd977d16b086c0bbe883bfc18a3463f84e9f22f31efa43fc0cd" };
-/** The schema of version 14, the one pinned before: no index on the questions a chat asked. */
+const PINNED = { version: 16, fingerprint: "6a23e3bc2078b9f4d62b21ee386f88e51e15decadd9063f4bb329f10290525ac" };
+/** The schema of version 15, the one pinned before: no chat is one nobody attends. */
+const V15_FINGERPRINT = "830934df6dce1dd977d16b086c0bbe883bfc18a3463f84e9f22f31efa43fc0cd";
+/** The schema of version 14: no index on the questions a chat asked. */
 const V14_FINGERPRINT = "7a7fcf8359ff86a38fcb9060888fa9ed7816b18bb9cfb2d9da454a893c015bda";
 /** The schema of version 13, which version 14 kept: it only left what each chat said its subagents run on for the subagent extension. */
 const V13_FINGERPRINT = "7a7fcf8359ff86a38fcb9060888fa9ed7816b18bb9cfb2d9da454a893c015bda";
@@ -37,10 +39,17 @@ const home = inProcessHome("pithagoras-schema-");
 const { SCHEMA_VERSION } = await import("../dist/schema-version.js");
 const { getDb } = await import("../dist/db.js");
 
-/** A database of the schema of version 13 (which 14 kept) at `file`, open: a fresh one, with no index on the questions a chat asked. */
-function freshAt13(file) {
+/** A database of the schema of version 15 at `file`, open: a fresh one, whose chats are all attended. */
+function freshAt15(file) {
   getDb().exec(`VACUUM INTO '${file}'`);
   const d = new Database(file);
+  d.exec("ALTER TABLE sessions DROP COLUMN unattended");
+  return d;
+}
+
+/** A database of the schema of version 13 (which 14 kept) at `file`, open: one of version 15, with no index on the questions a chat asked. */
+function freshAt13(file) {
+  const d = freshAt15(file);
   d.exec("DROP INDEX idx_events_questions");
   return d;
 }
@@ -1589,6 +1598,35 @@ test("a database of version 14, or of 13, is backed up and given the index on th
         { id: "c2", parent_id: "c1", listed: 0 },
       ]);
       assert.deepEqual(now.prepare("SELECT session_id, type FROM events").all(), [{ session_id: "c2", type: "portal_question" }]);
+    } finally {
+      now.close();
+    }
+  }
+});
+
+test("a database of version 15, or of 14, is backed up and given chats nobody attends at schema 16, its chats kept as attended", async () => {
+  for (const [version, fingerprint, make] of [[15, V15_FINGERPRINT, freshAt15], [14, V14_FINGERPRINT, freshAt13]]) {
+    const dir = path.join(home, `unattended-from-${version}`);
+    mkdirSync(dir, { recursive: true });
+    const d = make(path.join(dir, "portal.db"));
+    d.pragma(`user_version = ${version}`);
+    assert.equal(schemaFingerprint(d), fingerprint, `the schema of version ${version}`);
+    d.prepare("INSERT INTO sessions (id, title, workspace, kind) VALUES ('c1', 'Kites', '/w/site', 'task')").run();
+    d.prepare("INSERT INTO sessions (id, title, workspace, kind, parent_id, listed, creator) VALUES ('c2', 'Tails', '/w/site', 'task', 'c1', 0, 'helper')").run();
+    d.close();
+    assert.deepEqual(upgradeCheck(path.join(dir, "portal.db")), { needed: true, from: version });
+    assert.match(await upgraded(dir), new RegExp(`upgrading the database from version ${version} to ${SCHEMA_VERSION}`));
+    const backups = backupsIn(path.join(dir, "backups"));
+    assert.equal(backups.length, 1, `one backup, of version ${version}`);
+    assert.match(path.basename(backups[0]), new RegExp(`^portal-v${version}-\\d{8}-\\d{6}\\.db$`));
+
+    const now = new Database(path.join(dir, "portal.db"), { readonly: true });
+    try {
+      assert.deepEqual([now.pragma("user_version", { simple: true }), schemaFingerprint(now)], [SCHEMA_VERSION, PINNED.fingerprint]);
+      assert.deepEqual(now.prepare("SELECT id, parent_id, unattended FROM sessions ORDER BY id").all(), [
+        { id: "c1", parent_id: null, unattended: 0 },
+        { id: "c2", parent_id: "c1", unattended: 0 },
+      ]);
     } finally {
       now.close();
     }

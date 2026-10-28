@@ -970,7 +970,7 @@ restart the portal.
 | `http.upgrade(handler)` | WebSocket upgrades under the package's routes |
 | `http.endWithLogin(end)` | Ends a long response, such as a stream, when the login it was opened under ends (the password changed, single sign-on was set up anew), so what it showed is not shown to whoever signs in next. Returns what stops the watching, for a response that ended by itself |
 | `http.send(req, res, file, options?)` | [Sends a file](#sending-a-file) opened by `files.open` as the portal sends its own: a version, the part a player asks for, or to be saved |
-| `chats.get(id)`, `chats.list()` | A chat: `{ id, title, workspace, status, mode?, parent?, listed? }`. `list` leaves out the [child chats](#child-chats) made to be found by their id alone |
+| `chats.get(id)`, `chats.list()` | A chat: `{ id, title, workspace, status, mode?, parent?, listed?, unattended? }`. `list` leaves out the [child chats](#child-chats) made to be found by their id alone |
 | `chats.folder(id)` | The folder the chat's pi works in, on this disk |
 | `chats.inFolder(folder)` | The sessions of every kind that work in a folder: tasks, and also routine runs, Agent-page and channel conversations and heartbeats, which `chats.list()` leaves out and which have the package's tools in their pi. One for each agent that has some there (what an agent can reach is the same from each of its sessions; none is removed, and a stored path can be a link an agent made) |
 | `chats.send(chatId, data)`, `chats.onOpen(fn)` | [Telling the pages open on a chat](#telling-the-pages-open-on-a-chat) |
@@ -2320,7 +2320,7 @@ portal.chats.extend((pi, chat) => {
 });
 ```
 
-- **`create({ parent, title, mode?, model?, listed? })`** makes it and returns
+- **`create({ parent, title, mode?, model?, listed?, unattended? })`** makes it and returns
   it as a `Chat`, with `parent` set. Listed, it shows under its parent's row in
   the sidebar and on the Sessions page, as a
   [sub-chat](/guide/sessions#sub-chats), and its parent's row says when it
@@ -2351,6 +2351,17 @@ portal.chats.extend((pi, chat) => {
   agent's page) nobody may be looking, so say where it waits; for a child of a
   conversation on a channel or of a routine run, where nobody can answer, the
   guard refuses for the child too, as it does for its parent.
+- **`unattended: true`** makes a chat nobody attends, wherever its parent is:
+  for work the person does not watch, such as an answer the extension posts
+  elsewhere. It is not offered `ask_question`; every dialog an extension opens
+  in it is answered at once with its no-answer value (a confirm with `false`, a
+  select or an input with nothing), as in a routine run; and a call the guard
+  holds after a suspected prompt injection is refused rather than put to the
+  person. The agent gets each refusal as the tool's result and goes on, where a
+  dialog on a page nobody opens would hold its run for good. It has no routine
+  tools either, as a routine run has none. It is kept with the chat, so a pi
+  started for it after a restart is started the same way, and the `Chat` says
+  `unattended: true`.
 - **`prompt(chatId, message, { steer? })`** resolves once the run that takes
   the message in has ended, with `{ status, answer, marked?, error? }`: `status` is
   `"done"`, `"stopped"` (by `abort`, by the person's Stop, or because the chat

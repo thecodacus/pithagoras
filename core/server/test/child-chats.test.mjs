@@ -16,6 +16,9 @@ const home = inProcessHome("pithagoras-child-chats-");
 let held = [];
 const model = await fakeModel((request) => {
   const last = JSON.stringify(request.messages.at(-1)?.content ?? "");
+  // "Confirm" calls a tool that opens a dialog, and the model says what the dialog was answered.
+  if (last.includes("answered: ")) return `It said ${/answered: (\w+)/.exec(last)[1]}.`;
+  if (last.includes("Confirm")) return { name: "confirm_it", args: {} };
   if (last.includes("kites")) return "Kites noted.";
   if (last.includes("Hold")) return new Promise((resolve) => held.push(() => resolve("Held, and done.")));
   if (last.includes("Answer")) return "The answer is 42.";
@@ -57,7 +60,26 @@ const moded = (() => {
 `);
   return { name: "moded", version: "1.0.0", file, rev: `${statSync(file).size}` };
 })();
-await host.syncServerHalves([half("helper"), half("other"), moded]);
+// A fourth gives every chat a tool that opens a dialog, as an extension's tool may.
+const asker = (() => {
+  const dir = path.join(home, "packages", "asker");
+  mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, "server.js");
+  writeFileSync(file, `export default function (portal) {
+  portal.chats.extend((pi) => {
+    pi.registerTool({
+      name: "confirm_it", label: "Confirm", description: "Asks the person to confirm.", parameters: { type: "object", properties: {} },
+      async execute(_id, _params, _signal, _update, ctx) {
+        const yes = await ctx.ui.confirm("Sure?", "Really");
+        return { content: [{ type: "text", text: "answered: " + String(yes) }], details: {} };
+      },
+    });
+  });
+}
+`);
+  return { name: "asker", version: "1.0.0", file, rev: `${statSync(file).size}` };
+})();
+await host.syncServerHalves([half("helper"), half("other"), moded, asker]);
 const helper = globalThis.portals.helper;
 const other = globalThis.portals.other;
 test.after(async () => {
@@ -451,4 +473,23 @@ test("a child marked by the guard marks its parent when its answer comes back, a
   assert.equal(sessionTainted(parent), false, "the mark is on the child until its answer is passed on");
   assert.deepEqual(await helper.chats.prompt(child.id, "Answer second"), { status: "done", answer: "The answer is 42.", marked: true });
   assert.equal(sessionTainted(parent), true, "and what it relays is held like outside content");
+});
+
+test("an unattended child asks nobody, wherever its parent is: no ask_question, and a dialog an extension opens is answered at once with its no-answer value, also after its pi starts again", async () => {
+  const asks = async (id) => (await sessions.getTools(id)).tools.some((tool) => tool.name === "ask_question");
+  const parent = chat();
+  assert.throws(() => helper.chats.create({ parent, title: "Odd", unattended: false }), /unattended is true, or left out/);
+  const child = helper.chats.create({ parent, title: "Nobody looks", listed: false, unattended: true });
+  assert.equal(child.unattended, true, "the chat says so");
+  assert.equal(getSession(child.id).unattended, 1, "kept with the chat");
+  assert.equal(await asks(child.id), false, "no ask_question, though its parent's people could answer");
+  const attended = helper.chats.create({ parent, title: "Somebody looks" });
+  assert.equal(attended.unattended, undefined);
+  assert.equal(await asks(attended.id), true, "a child of the same chat that is attended has it");
+
+  // Waited for a while only: where the dialog is put to a page instead, nobody answers it.
+  const answered = (run) => Promise.race([run, new Promise((resolve) => setTimeout(() => resolve("still waiting on a dialog"), 15_000))]);
+  assert.deepEqual(await answered(helper.chats.prompt(child.id, "Confirm it")), { status: "done", answer: "It said false." });
+  await sessions.stop(child.id);
+  assert.deepEqual(await answered(helper.chats.prompt(child.id, "Confirm it again")), { status: "done", answer: "It said false." }, "a pi started for it again is started the same way");
 });

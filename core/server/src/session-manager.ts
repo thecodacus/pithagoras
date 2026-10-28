@@ -277,11 +277,17 @@ function plain(text: unknown): string {
 const hasRoutineTools = (session: SessionRow) =>
   session.kind === "agent" || (session.kind === "task" && agentAt(session.workspace) !== undefined);
 
-/** Whether the conversation gets the ask_question tool: see asksQuestions. */
+/** Whether the conversation gets the ask_question tool: see asksQuestions. Never in a chat nobody attends (child-chats.ts). */
 const canAsk = (session: SessionRow) => {
   const host = dialogHost(session);
-  return asksQuestions({ kind: host.kind, role: session.role }, onChannel(host));
+  return !session.unattended && asksQuestions({ kind: host.kind, role: session.role }, onChannel(host));
 };
+
+/**
+ * Whether somebody is there to answer a dialog an extension opens in the conversation, and a question the guard puts
+ * (see showsDialogs). A child chat's go where its parent's would (dialogHost); a chat nobody attends has nobody.
+ */
+const hasDialogs = (session: SessionRow) => !session.unattended && showsDialogs(dialogHost(session), onChannel(dialogHost(session)));
 
 /**
  * The chat's own switches turning the code tool off where its mode switches it on (modeHoldsCodemode): refused. With a
@@ -1212,10 +1218,10 @@ class SessionManager extends EventEmitter {
       model: chosen.model || undefined,
       thinkingLevel: session.thinking_level || settings.thinkingLevel || undefined,
       sessionFile: session.pi_session_file || undefined,
-      routineTools: hasRoutineTools(session),
+      // Not in a chat nobody attends, for the reason a routine run has none: a routine that can make routines, unwatched, can build a chain.
+      routineTools: hasRoutineTools(session) && !session.unattended,
       questions: canAsk(session),
-      // A child chat's go where its parent's would: see dialogHost.
-      dialogs: showsDialogs(dialogHost(session), onChannel(dialogHost(session))),
+      dialogs: hasDialogs(session),
       // A routine run gets the report tool instead: it is the one kind of
       // session with nobody on the other end to read what it found.
       routineSlug: session.kind === "routine" ? session.routine_slug : undefined,

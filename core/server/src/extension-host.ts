@@ -283,6 +283,7 @@ const chatOf = (row: SessionRow): Chat => ({
   ...(row.kind !== "task" ? { kind: row.kind } : {}),
   ...(row.mode ? { mode: row.mode } : {}),
   ...(row.parent_id ? { parent: row.parent_id, listed: row.listed === 1 } : {}),
+  ...(row.unattended ? { unattended: true as const } : {}),
 });
 const say = (name: string, text: string) => console.log(`[extension ${name}] ${text}`);
 /**
