@@ -538,6 +538,24 @@ test("a server half starts a chat of a project's or an agent's folder: a task ch
   assert.ok(!(await sessions.getTools(home.id)).tools.some((tool) => tool.name === "routine_create"), "one nobody attends does not");
 });
 
+test("a child of a chat nobody attends is unattended too, and one of an unlisted chat unlisted, whoever makes it and whatever it asks", async () => {
+  const { defaultAgent } = await import("../dist/agents.js");
+  mkdirSync(defaultAgent().home, { recursive: true });
+  const started = helper.chats.start({ folder: defaultAgent().home, title: "Nobody looks", listed: false, unattended: true });
+  // Another package, as the subagent tool makes a child of the chat it runs in, without saying either.
+  const child = other.chats.create({ parent: started.id, title: "A subagent", listed: true });
+  assert.deepEqual([child.unattended, child.listed], [true, false], "the chat says both");
+  assert.deepEqual([getSession(child.id).unattended, getSession(child.id).listed], [1, 0], "kept with it");
+  const ids = (rows) => rows.map((one) => one.id);
+  assert.ok(!ids(listChatSessions()).includes(child.id) && !ids(listSessions()).includes(child.id), "not in the lists on its own, with no chat it is a part of");
+  // Waited for a while only: where the dialog is put to its parent's page instead, nobody answers it.
+  const answered = (run) => Promise.race([run, new Promise((resolve) => setTimeout(() => resolve("still waiting on a dialog"), 15_000))]);
+  assert.deepEqual(await answered(other.chats.prompt(child.id, "Confirm it")), { status: "done", answer: "It said false." });
+  const tools = (await sessions.getTools(child.id)).tools.map((tool) => tool.name);
+  assert.ok(!tools.includes("ask_question"), "no ask_question");
+  assert.ok(!tools.includes("routine_create"), "and no routine tools, in an agent's home nobody watches");
+});
+
 test("a chat is started only in an agent's or a project's folder, with a title", () => {
   const site = project("site");
   mkdirSync(path.join(site, "docs"), { recursive: true });

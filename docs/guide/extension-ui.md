@@ -2391,7 +2391,11 @@ portal.chats.extend((pi, chat) => {
   tools either, as a routine run has none, and it starts from the folder's
   tools (`tools: "defaults"`) unless told otherwise. It is kept with the chat, so a pi
   started for it after a restart is started the same way, and the `Chat` says
-  `unattended: true`.
+  `unattended: true`. A child of an unattended chat (one
+  [started](#a-chat-of-a-folder) so) is unattended itself, whoever makes it and
+  whether or not it says so, as the subagent tool does not: its dialogs would go
+  to its parent's page, which nobody opens. A child of a chat that is not listed
+  is not listed either, or it would stand in the lists on its own.
 - **`prompt(chatId, message, { steer? })`** resolves once the run that takes
   the message in has ended, with `{ status, answer, marked?, error? }`: `status` is
   `"done"`, `"stopped"` (by `abort`, by the person's Stop, or because the chat

@@ -26,7 +26,8 @@ import { workspaceRoot } from "./workspaces.js";
  *
  * A child made `unattended` is one nobody answers in, wherever its parent is: it has no ask_question, every dialog an
  * extension opens in it is answered at once with its no-answer value, and the guard refuses a held call rather than
- * asking, as in a routine run. Stored on its row, so a pi started for it after a restart is started the same way.
+ * asking, as in a routine run. Stored on its row, so a pi started for it after a restart is started the same way. A child
+ * of an unattended chat is unattended itself, and a child of an unlisted one unlisted, whatever it is asked.
  */
 
 /** What a server half asks of a child chat: see `chats.create` in server.d.ts. */
@@ -89,9 +90,12 @@ export function newChildChat(options: unknown, creator: string): SessionRow {
   if (asked.listed !== undefined && typeof asked.listed !== "boolean") throw new TypeError("listed is true or false");
   if (asked.unattended !== undefined && asked.unattended !== true) throw new TypeError("unattended is true, or left out");
   if (asked.tools !== undefined && asked.tools !== "parent" && asked.tools !== "defaults") throw new TypeError('tools is "parent" or "defaults"');
+  // A child of a chat nobody attends has nobody to ask either: its dialogs would go to its parent's page, which nobody
+  // opens, and wait there for good. So it is unattended too, whoever makes it (the subagent tool does not say).
+  const unattended = asked.unattended === true || parent.unattended === 1;
   // A chat nobody attends does work of the package's, not the conversation its parent is: the tools the person switched
   // for that conversation are not its own unless asked for.
-  const defaults = asked.tools === "defaults" || (asked.tools === undefined && asked.unattended === true);
+  const defaults = asked.tools === "defaults" || (asked.tools === undefined && unattended);
   const model = asked.model as ChildChatOptions["model"] | undefined;
   if (model !== undefined && (!model || typeof model !== "object" || !text(model.provider) || !text(model.id))) {
     throw new TypeError("A child chat's model is a provider and an id, as pi names them");
@@ -126,9 +130,10 @@ export function newChildChat(options: unknown, creator: string): SessionRow {
     executor: parent.executor,
     kind: "task",
     parent_id: parent.id,
-    listed: asked.listed === false ? 0 : 1,
+    // Under a parent kept out of the lists, a listed child would stand in them on its own, with no chat it is a part of.
+    listed: asked.listed === false || parent.listed === 0 ? 0 : 1,
     creator,
-    unattended: asked.unattended === true ? 1 : 0,
+    unattended: unattended ? 1 : 0,
     role: parent.role,
     last_person_key: parent.last_person_key,
     mode,

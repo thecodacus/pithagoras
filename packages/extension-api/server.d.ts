@@ -69,15 +69,20 @@ export interface ChildChatOptions {
   mode?: string;
   /** The model it runs on; the model of a mode that is named, else its parent's, when left out. */
   model?: ModelRef;
-  /** Whether it shows in the chat lists, under its parent (the default), or is found by its id alone. */
+  /**
+   * Whether it shows in the chat lists, under its parent (the default), or is found by its id alone. A child of a chat
+   * that is not listed is not listed either, whatever this says: it would stand in the lists on its own.
+   */
   listed?: boolean;
   /**
    * A chat nobody attends, wherever its parent is: for work the person does not watch, such as an answer an extension
    * posts elsewhere. It is not offered `ask_question`; every dialog an extension opens in it is answered at once with
    * its no-answer value (a confirm with false, a select or an input with nothing), as in a routine run; and a call the
    * guard holds after a suspected prompt injection is refused rather than put to the person. The agent gets each
-   * refusal as the tool's result and goes on. Kept with the chat, so it holds after the portal restarts. Its tools are
-   * the folder's `"defaults"` unless `tools` says otherwise.
+   * refusal as the tool's result and goes on. It has no routine tools either (in an agent's home, where a chat has
+   * them), as a routine run has none. Kept with the chat, so it holds after the portal restarts. Its tools are the
+   * folder's `"defaults"` unless `tools` says otherwise. A child of an unattended chat is unattended itself, whoever
+   * makes it and whether or not it says so: its parent's page, where its dialogs would go, is one nobody opens.
    */
   unattended?: true;
   /**
