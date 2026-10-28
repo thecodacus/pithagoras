@@ -164,6 +164,24 @@ function reusedInode(files: string[], was: BigIntStats) {
   };
 }
 
+/**
+ * What lstat gives where Node cannot use statx (an old kernel, a sandbox that refuses it): the time of the file's last change as the time it was
+ * made, for every look (the store's own as well). Undone by what it returns.
+ */
+function changeAsBirth() {
+  const real = fs.lstatSync;
+  fs.lstatSync = ((at: fs.PathLike, options?: any) => {
+    const stat = real(at, options);
+    if (!stat) return stat;
+    return Object.create(stat, { birthtimeNs: { value: (stat as BigIntStats).ctimeNs }, birthtimeMs: { value: stat.ctimeMs }, birthtime: { value: stat.ctime } });
+  }) as typeof fs.lstatSync;
+  syncBuiltinESMExports();
+  return () => {
+    fs.lstatSync = real;
+    syncBuiltinESMExports();
+  };
+}
+
 /** A folder with a document called `Plan` made through the store, saved once more, and a comment on it. */
 async function withDocument(prefix: string, options: Options = {}) {
   const folder = folderWith(prefix, { 'documents/.keep': '' });
@@ -405,6 +423,36 @@ test('a rename that was cut off between the two halves of the file\'s rename is 
     assert.deepEqual(tree(folder), ['after.md']);
   } finally {
     await again.close();
+  }
+});
+
+test('a rename that was cut off between its halves is finished where a look gives the time of the last change as the time the file was made', async () => {
+  let cutting = true;
+  // The second name changes that time: the clock has moved on by then (a tick is 10 ms at most), as it has after any real stop.
+  const stopping = { ...folderFiles, renameFile: (base: string, rel: string, name: string, options?: any) => {
+    if (!cutting) return folderFiles.renameFile(base, rel, name, options);
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 30);
+    linkSync(path.join(base, rel), path.join(base, name));
+    throw new Error('stopped between the link and the unlink');
+  } } as typeof folderFiles;
+  const undo = changeAsBirth();
+  try {
+    const { folder, docs, id, url, dir } = await withDocument('docs-rename-cut-ctime-', { files: stopping });
+    assert.equal((await docs.call('POST', `${url}/rename`, { name: 'after.md' })).status, 500);
+    await docs.close();
+    cutting = false;
+    assert.equal(statSync(path.join(dir, 'plan.md')).nlink, 2);
+    const again = await portal({ a: folder });
+    try {
+      const listed = (await again.call('GET', '/folders')).body.folders[0].documents;
+      assert.deepEqual(listed.map((d: any) => [d.id, d.name]), [[id, 'after.md']]);
+      assert.deepEqual(readdirSync(dir).filter((n) => !n.startsWith('.')), ['after.md'], 'the old name is taken away');
+      assert.equal(statSync(path.join(dir, 'after.md')).nlink, 1);
+    } finally {
+      await again.close();
+    }
+  } finally {
+    undo();
   }
 });
 
