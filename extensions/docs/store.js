@@ -87,8 +87,15 @@ export const isDocumentId = (id) => typeof id === "string" && /^[0-9a-f]{16}$/.t
 /** Which file or folder a stat is, on this system: its device and inode as text (an inode can be wider than a number), as place.js tells a folder. */
 const idOf = (stat) => ({ dev: String(stat.dev), ino: String(stat.ino) });
 const isId = (id) => /^\d+$/.test(id?.dev) && /^\d+$/.test(id?.ino);
-/** Whether `stat` (from a `bigint` look) is the file or folder `id` names. */
-const sameId = (stat, id) => Boolean(stat) && isId(id) && String(stat.dev) === id.dev && String(stat.ino) === id.ino;
+/**
+ * Which file a stat (from a `bigint` look) is, for a decision that is finished later, perhaps after a stop: its device and inode, and when it
+ * was made where the file system keeps that (0 where it does not). An inode number is given again once its file is gone (ext4 does so at
+ * once), so a file made at the name since has the same device and inode as often as not; it was not made at the same nanosecond. The time
+ * it was made stays with the file through a second name, which a rename cut off between its halves leaves it with.
+ */
+const fileIdOf = (stat) => ({ ...idOf(stat), born: String(stat.birthtimeNs) });
+/** Whether `stat` (from a `bigint` look) is the file or folder `id` names. A decision written before the time a file was made was kept has only its inode. */
+const sameId = (stat, id) => Boolean(stat) && isId(id) && String(stat.dev) === id.dev && String(stat.ino) === id.ino && (id.born === undefined || String(stat.birthtimeNs) === id.born);
 
 /** What is said of a documents folder that is not the one the documents were kept in. */
 const REPLACED = "The documents folder here is not the folder these documents were kept in (it was replaced, or another folder was moved onto its name), so nothing was deleted or renamed. If the folder that is there is the one you want (a restore, say), making a new document here takes it as the documents folder.";
@@ -1011,7 +1018,7 @@ export class Store {
       if (was && there && was.dev === there.dev && was.ino === there.ino && was.nlink === 1n) {
         throw new DocError(409, `This file system does not tell ${to} from ${row.name} (they differ only in capitals or in the form of a letter), so the file cannot be renamed to it directly: rename it to another name first, then to ${to}`, { code: "same_name" });
       }
-      const pending = { op: "rename", id: row.id, from: row.name, to, author, folder, file: was?.isFile() ? idOf(was) : null };
+      const pending = { op: "rename", id: row.id, from: row.name, to, author, folder, file: was?.isFile() ? fileIdOf(was) : null };
       this.setMeta("pending", JSON.stringify(pending));
       await this.#carryRename(pending);
       const now = this.row(row.id);
@@ -1038,7 +1045,7 @@ export class Store {
       const dir = this.documentsDir();
       const folder = dir ? this.holds() : null;
       const there = dir ? this.statOf(dir, row.name) : null;
-      const pending = { op: "delete", id: row.id, name: row.name, author, folder, file: there?.isFile() ? idOf(there) : null, done: false };
+      const pending = { op: "delete", id: row.id, name: row.name, author, folder, file: there?.isFile() ? fileIdOf(there) : null, done: false };
       this.setMeta("pending", JSON.stringify(pending));
       await this.#carryDelete(pending);
       return { comments };
