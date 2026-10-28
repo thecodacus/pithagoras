@@ -102,7 +102,10 @@ What you do:
   ([Extensions in their own repository](/guide/extension-ui#extensions-in-their-own-repository)).
   Nothing of 0.2.0's interface is gone, and `portal.version` stays 1. The panel
   `portal.panels.open("agents")` opens is the subagent extension's now, there
-  while it is on.
+  while it is on. An extension that runs subagents over the subagent protocol
+  has them drawn only while Subagents is on, and `subagent:v1:config` is
+  answered with `{}` now, so the chat's choice of model is that extension's own
+  to keep ([Subagents are an extension](#subagents-are-an-extension)).
 
 What behaves differently:
 
@@ -1544,8 +1547,11 @@ upgrade takes up as [Subagents' section](#going-back-to-a-version-before-subagen
 says; Voice servers' library in `extension-data/pithagoras-voice-servers/`; and
 the pictures Media made with reference pictures, which stay in its gallery. The
 networks Docker for extensions 1.3.0 made, and the forwarders it made for them,
-stay in Docker with the extension's name as their label
-(`docker network ls --filter label=pithagoras.extension`) until you remove them.
+stay in Docker with the extension's name as their label until you remove them
+(`docker network ls --filter label=pithagoras.extension`). A forwarder is a
+container, `<container>-forward`, that restarts with Docker and holds a port on
+127.0.0.1 (`docker ps -a --filter label=pithagoras.extension`). Remove the
+forwarders with `docker rm -f` first, then the networks with `docker network rm`.
 
 ### Going back to 0.1.0
 
