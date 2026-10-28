@@ -2339,6 +2339,9 @@ test('a selection does not follow a change of filter: a chat’s picture that is
 test('a gallery of hundreds can be selected whole and deleted: the portal takes 200 at a time, and one question covers them all', async ({ page }) => {
   const many = Array.from({ length: 240 }, (_, i) => pic({ prompt: `Many ${i + 1}`, age: i }));
   const p = await portal(page, { pictures: many });
+  // Without the observer that reads on as the end comes near, so that the button is the only thing that does. With it, the
+  // click's scroll to the button can bring the next page first, and the click then reads on one page too far or finds no button.
+  await page.addInitScript(() => delete (window as any).IntersectionObserver);
   await page.goto('/x/pithagoras-media/media');
   // A page at a time, by the button, until all of it is loaded.
   for (const shown of [96, 144, 192, 240]) {
