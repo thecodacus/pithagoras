@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { type Page } from '@playwright/test';
 import { merge3 } from '../../web/merge.js';
 import { test, expect, mockPortal, reply, DONE } from '../../../../tests/browser/portal-mock';
+import { clickIntoText } from './caret';
 
 /**
  * A document changed while it is open on the Documents page: the extension's browser half (extensions/docs/web)
@@ -99,7 +100,7 @@ const tell = (page: Page, revision: number, author = 'agent') =>
 
 /** Puts the caret at the end of the paragraph or heading that holds `text`, and types there. */
 async function typeAfter(page: Page, text: string, typed: string) {
-  await editorOf(page).getByText(text).click();
+  await clickIntoText(editorOf(page).getByText(text));
   await page.keyboard.press('End');
   // The editor learns where the caret went a moment after the browser moved it.
   await page.waitForTimeout(100);

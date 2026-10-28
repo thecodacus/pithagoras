@@ -117,6 +117,9 @@ test('a reply ending replaces what was written so far, also when the end comes r
 
 test('a poll that finds the chats as they were does not draw the sidebar again', async ({ page }) => {
   const { asked } = await portal(page);
+  // Home and the projects as the page knew them from before, and as the portal says they are. Not known, they are
+  // asked for once the chats are drawn, and their answer draws the sidebar again: late, that came after the count.
+  await page.addInitScript(() => localStorage.setItem('knownPlaces', JSON.stringify({ home: '/h', agents: [], projects: [] })));
   await page.goto('/s/a');
   await expect(page.getByRole('complementary', { name: 'Sidebar' }).getByText('Chat B')).toBeVisible();
   await page.evaluate(() => (window as any).hide(true));

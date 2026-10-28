@@ -5,6 +5,7 @@ import { type Locator, type Page } from '@playwright/test';
 import { carry, locate, passage } from '../../web/anchor.js';
 import { merge3 } from '../../web/merge.js';
 import { test, expect, mockPortal, reply, DONE } from '../../../../tests/browser/portal-mock';
+import { clickIntoText } from './caret';
 
 /**
  * The comments on the Documents page: the extension's browser half (extensions/docs/web) with the editor
@@ -613,7 +614,7 @@ test('a comment on text that was typed and not saved yet is made on the revision
   const store = new Store();
   await open(page, store);
   // Typed, and the second's wait for the save not yet over: the save is made before the comment is started.
-  await editorOf(page).getByText('Sign-off is on Monday.').click();
+  await clickIntoText(editorOf(page).getByText('Sign-off is on Monday.'));
   await page.keyboard.press('End');
   await page.waitForTimeout(100);
   await page.keyboard.type(' Maybe.');
@@ -634,7 +635,7 @@ test('the passage is refused when it is too long for a comment, and a reason is 
   const long = `# Long\n\n${'word '.repeat(1100).trim()}.\n`;
   store.texts.set(3, long);
   await open(page, store, { ready: 'word word' });
-  await editorOf(page).getByText('word word').first().click();
+  await clickIntoText(editorOf(page).getByText('word word').first());
   await page.keyboard.press('Control+a');
   await expect(commentButton(page)).toBeEnabled();
   await commentButton(page).click();
@@ -773,12 +774,12 @@ test('a passage stays marked on its words while text is typed before it and in i
   await showList(page);
   await expectMarked(page, green.id, 'The build is green.');
   // Typed before it, in the paragraph above, and after the passage's end (not in it).
-  await editorOf(page).getByText('Ship it on').first().click();
+  await clickIntoText(editorOf(page).getByText('Ship it on').first());
   await page.keyboard.press('End');
   await page.waitForTimeout(100);
   await page.keyboard.type(' Early.');
   await expectMarked(page, green.id, 'The build is green.');
-  await editorOf(page).getByText('The build is green.').click();
+  await clickIntoText(editorOf(page).getByText('The build is green.'));
   await page.keyboard.press('End');
   await page.waitForTimeout(100);
   await page.keyboard.type(' More.');
@@ -1414,7 +1415,7 @@ test('where there is no room beside a passage the card is under it, above it whe
   const before = (await popover(page).boundingBox())!.y;
   const spread = await gap(first.id);
   await closeCard(page);
-  await editorOf(page).getByText('Paragraph 1 of').click();
+  await clickIntoText(editorOf(page).getByText('Paragraph 1 of'));
   await page.keyboard.press('End');
   await page.keyboard.press('Enter');
   await page.keyboard.type('A new paragraph.');
@@ -1508,7 +1509,7 @@ test('every thread is reached with the keyboard: Ctrl+Alt+M at a commented passa
   await open(page, store, { ready: 'Notes' });
   await expectMarked(page, line.id, 'An other line.');
   // The caret in the passage, and Ctrl+Alt+M: the card is open and the box has the focus. Typing there is the box's.
-  await editorOf(page).getByText('A line.').click();
+  await clickIntoText(editorOf(page).getByText('A line.'));
   await page.keyboard.press('ArrowDown');
   await expect.poll(() => page.evaluate(() => Boolean(window.getSelection()?.anchorNode?.parentElement?.closest('[data-pd-thread]')))).toBe(true);
   await page.keyboard.press('Control+Alt+m');
@@ -1595,7 +1596,7 @@ test('the page is the whole area under the toolbar: no box, no frame, no band un
   expect(m.overflows).toBe(false);
   expect(m.frame).toEqual(['0px', '0px', 'none', 'rgba(0, 0, 0, 0)', '0px']);
   // A click far under the text, and beside it, goes to the end of the document: what is typed there is its last words.
-  await editorOf(page).getByText('Sign-off is on Monday.').click();
+  await clickIntoText(editorOf(page).getByText('Sign-off is on Monday.'));
   await page.keyboard.press('Home');
   await page.mouse.click(m.scroll.left + 40, m.scroll.bottom - 60);
   await page.keyboard.type(' End.');
@@ -1605,7 +1606,7 @@ test('the page is the whole area under the toolbar: no box, no frame, no band un
   await page.keyboard.type(' Again.');
   await expect(editorOf(page).locator('p').last()).toHaveText('Sign-off is on Monday. End. Again.');
   // The caret is where it was put: a click in the text itself is not taken for it.
-  await editorOf(page).getByText('Ship it on').click();
+  await clickIntoText(editorOf(page).getByText('Ship it on'));
   await page.keyboard.press('End');
   await page.keyboard.type('!');
   await expect(editorOf(page).locator('p').nth(0)).toContainText('now.!');
@@ -1685,7 +1686,7 @@ test('a comment kept with words in it is not thrown away by starting another one
   await compose.getByRole('textbox').press('Escape');
   await barButton(page).click();
   // From the keyboard: the caret in its passage and the shortcut.
-  await editorOf(page).getByText('Ship it on').click();
+  await clickIntoText(editorOf(page).getByText('Ship it on'));
   await page.keyboard.press('ArrowDown');
   await expect.poll(() => page.evaluate(() => Boolean(window.getSelection()?.anchorNode?.parentElement?.closest('[data-pd-thread]')))).toBe(true);
   await page.keyboard.press('Control+Alt+m');
@@ -1888,7 +1889,7 @@ test('a marker in the right margin, level with the line of each commented passag
   await closeCard(page);
   // The marker goes down with its passage when text is typed above it.
   const before = (await greenMarker.boundingBox())!.y;
-  await editorOf(page).getByRole('heading').click();
+  await clickIntoText(editorOf(page).getByRole('heading'));
   await page.keyboard.press('End');
   await page.keyboard.press('Enter');
   await page.keyboard.type('A new paragraph that is above.');
@@ -2023,7 +2024,7 @@ test('the markers are measured once in a frame, and not after every key: typing 
       return query.call(this, selector);
     };
   });
-  await editorOf(page).getByText('The last point.').click();
+  await clickIntoText(editorOf(page).getByText('The last point.'));
   await page.keyboard.press('End');
   await page.waitForTimeout(100);
   await page.keyboard.type('x'.repeat(30), { delay: 5 });

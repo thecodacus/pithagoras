@@ -4,7 +4,8 @@ import { test, expect, mockPortal, reply } from './portal-mock';
 /**
  * A portal with one project, "demo", and three tools seen. `off` is what the
  * project has off (the portal-wide default has web_fetch off, which the
- * project's answer includes); `puts` is what the page sent.
+ * project's answer includes); `puts` is what the page sent. A save that fails
+ * (`saveFails`) is held until the test calls `refuse()`, so it can see the switch first.
  */
 async function portal(page: Page, opts: { off?: string[]; refuse?: string; toolsError?: string; readsFail?: boolean; saveFails?: string } = {}) {
   let off = opts.off ?? ['web_fetch'];
@@ -14,6 +15,8 @@ async function portal(page: Page, opts: { off?: string[]; refuse?: string; tools
   /** What the page asked to have made, and the chats it then started. */
   const made: { body: any }[] = [];
   const chats: string[] = [];
+  let refuse = () => {};
+  const refused = new Promise<void>((done) => (refuse = done));
   await mockPortal(page, async ({ path: p, method, json, route }) => {
     if (p === '/api/sessions' && method === 'POST') {
       chats.push(route.request().postData() ?? '');
@@ -47,6 +50,7 @@ async function portal(page: Page, opts: { off?: string[]; refuse?: string; tools
       return reply(500, { error: 'The portal is starting up' });
     }
     if (p === '/api/projects/demo/tools' && method === 'PUT' && opts.saveFails) {
+      await refused;
       return reply(500, { error: opts.saveFails });
     }
     if (p === '/api/projects/demo/tools' && method === 'PUT') {
@@ -70,7 +74,7 @@ async function portal(page: Page, opts: { off?: string[]; refuse?: string; tools
   }, { settings: true });
   await page.addInitScript(() => localStorage.removeItem('toolGroupsOpen'));
   await page.goto('/projects');
-  return { puts, made, chats, down };
+  return { puts, made, chats, down, refuse };
 }
 
 const dialog = (page: Page) => page.getByRole('dialog');
@@ -134,11 +138,17 @@ test('a read that fails is not taken for a deployment without tool switches: it 
 });
 
 test('a switch the portal did not save snaps back, and says why', async ({ page }) => {
-  await portal(page, { saveFails: 'The settings file is read-only' });
+  const { refuse } = await portal(page, { saveFails: 'The settings file is read-only' });
   await page.getByRole('button', { name: 'Tools for demo' }).click();
   await dialog(page).getByRole('button', { name: /pi-todo/ }).click();
   const todo = dialog(page).getByRole('checkbox', { name: 'todo' });
-  await todo.uncheck();
+  await expect(todo).toBeChecked();
+  // A click, not uncheck(): uncheck() looks at the box once more after its click, and the
+  // refusal can be back and the box checked again by then. The portal holds its answer
+  // instead, so the switch is seen to flip before it snaps back.
+  await todo.click();
+  await expect(todo).not.toBeChecked();
+  refuse();
   await expect(dialog(page).getByRole('alert')).toContainText('That switch was not saved: The settings file is read-only');
   await expect(todo).toBeChecked();
 });
