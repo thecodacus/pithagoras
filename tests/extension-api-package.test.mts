@@ -12,7 +12,9 @@ const dir = path.join(root, 'packages/extension-api');
  * the files its exports name, its readme, its licence and the repository's NOTICE, and nothing else.
  */
 test('the published extension API has the files its exports name, its readme, its licence and its NOTICE, and nothing else', () => {
-  const [packed] = JSON.parse(execFileSync('npm', ['pack', '--dry-run', '--json', '-w', 'packages/extension-api'], { cwd: root, encoding: 'utf8' }));
+  // npm up to 11 prints an array with one entry per package, npm 12 an object keyed by the package's name.
+  const printed = JSON.parse(execFileSync('npm', ['pack', '--dry-run', '--json', '-w', 'packages/extension-api'], { cwd: root, encoding: 'utf8' }));
+  const packed = Array.isArray(printed) ? printed[0] : printed['@pithagoras/extension-api'];
   const files: string[] = packed.files.map((file: { path: string }) => file.path).sort();
   assert.deepEqual(files, ['LICENSE', 'NOTICE', 'README.md', 'build.mjs', 'index.d.ts', 'package.json', 'server.d.ts', 'tailwind.mjs']);
 
