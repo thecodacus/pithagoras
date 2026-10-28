@@ -57,7 +57,7 @@ export interface Chat {
 
 /** What a child chat is made with: see `chats.create`. */
 export interface ChildChatOptions {
-  /** The chat it works for: its folder is the child's, and so are its role, its last speaker and its tool switches. */
+  /** The chat it works for: its folder is the child's, and so are its role, its last speaker and (see `tools`) its tool switches. */
   parent: string;
   title: string;
   /**
@@ -76,9 +76,18 @@ export interface ChildChatOptions {
    * posts elsewhere. It is not offered `ask_question`; every dialog an extension opens in it is answered at once with
    * its no-answer value (a confirm with false, a select or an input with nothing), as in a routine run; and a call the
    * guard holds after a suspected prompt injection is refused rather than put to the person. The agent gets each
-   * refusal as the tool's result and goes on. Kept with the chat, so it holds after the portal restarts.
+   * refusal as the tool's result and goes on. Kept with the chat, so it holds after the portal restarts. Its tools are
+   * the folder's `"defaults"` unless `tools` says otherwise.
    */
   unattended?: true;
+  /**
+   * Which tools it has: `"parent"` (the default, except for an unattended child) the tools the person switched off or
+   * on in its parent, and the ones its parent's mode took away where it is in another mode; it is held to its parent's
+   * switches as they are before each message. `"defaults"` the tools a new chat of the folder has in its mode, as
+   * Settings → Tools, its agent and its project say, with none of its parent's switches: for work of the package's that
+   * is not the conversation the person switched them for.
+   */
+  tools?: "parent" | "defaults";
 }
 
 /** What a chat a package starts in a folder is made with: see `chats.start`. */
@@ -852,7 +861,8 @@ export interface ServerPortal {
      * Makes a child chat of a chat, to give part of its work to: a chat like any other, in its parent's folder, whose
      * pi the portal starts with the guard, the sandbox, the tool layers and its mode, and with a transcript of its own
      * that the person opens at `/s/<id>`. It takes its parent's role and last speaker, so it is held to the person who
-     * asked, its parent's mode unless it is given one, and the tools the person switched off or on in the parent. A
+     * asked, its parent's mode unless it is given one, and the tools the person switched off or on in the parent unless
+     * it is to start from the folder's (`tools: "defaults"`). A
      * dialog it opens, and a question the guard asks, go where its parent's would: where nobody can answer on the
      * portal's pages (a channel conversation, a routine run) the guard refuses for the child too, and so it does in a
      * child made `unattended`, which asks nobody anything. One level only:

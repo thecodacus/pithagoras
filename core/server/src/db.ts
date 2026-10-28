@@ -103,6 +103,11 @@ export interface SessionRow {
    * asking. 0 for every other chat.
    */
   unattended: number;
+  /**
+   * A child chat's tools: null for its parent's switches, which it is held to (child-chats.ts), and "defaults" for
+   * those a new chat of its folder starts with, its parent's switches aside. Null for every other chat.
+   */
+  tools_from: "defaults" | null;
 }
 
 /**
@@ -1155,6 +1160,8 @@ function migrate(d: Database.Database): void {
   if (!names.includes("creator")) d.exec("ALTER TABLE sessions ADD COLUMN creator TEXT");
   // Chats nobody attends (schema 16): every chat before was one a person could answer in.
   if (!names.includes("unattended")) d.exec("ALTER TABLE sessions ADD COLUMN unattended INTEGER NOT NULL DEFAULT 0");
+  // And whose tools a child chat starts from (schema 16): every child before took its parent's switches.
+  if (!names.includes("tools_from")) d.exec("ALTER TABLE sessions ADD COLUMN tools_from TEXT");
   // A chat's children are looked up as it is deleted, and as its pi asks whether one of them still works.
   d.exec("CREATE INDEX IF NOT EXISTS idx_sessions_parent ON sessions(parent_id) WHERE parent_id IS NOT NULL");
   // Versions kept before pi's file was kept as the part after a checked start:
@@ -1364,6 +1371,7 @@ export function createSession(row: {
   listed?: number;
   creator?: string | null;
   unattended?: number;
+  tools_from?: SessionRow["tools_from"];
   role?: SessionRow["role"];
   last_person_key?: string | null;
   mode?: string | null;
@@ -1376,9 +1384,9 @@ export function createSession(row: {
   getDb()
     .prepare(
       `INSERT INTO sessions (id, title, workspace, executor, kind, channel_slug, channel_key, routine_slug, auto_title,
-                             parent_id, listed, creator, unattended, role, last_person_key, mode, provider, model, thinking_level, tools_off, tools_on)
+                             parent_id, listed, creator, unattended, tools_from, role, last_person_key, mode, provider, model, thinking_level, tools_off, tools_on)
        VALUES (@id, @title, @workspace, @executor, @kind, @channel_slug, @channel_key, @routine_slug, @auto_title,
-               @parent_id, @listed, @creator, @unattended, @role, @last_person_key, @mode, @provider, @model, @thinking_level, @tools_off, @tools_on)`
+               @parent_id, @listed, @creator, @unattended, @tools_from, @role, @last_person_key, @mode, @provider, @model, @thinking_level, @tools_off, @tools_on)`
     )
     .run({
       kind: "task",
@@ -1390,6 +1398,7 @@ export function createSession(row: {
       listed: 1,
       creator: null,
       unattended: 0,
+      tools_from: null,
       role: "primary",
       last_person_key: null,
       mode: null,

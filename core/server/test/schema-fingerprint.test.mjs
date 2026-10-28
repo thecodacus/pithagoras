@@ -18,8 +18,8 @@ import { freePort, inProcessHome } from "./server-harness.mjs";
 // src/schema-version.ts (once for the release, not once for each change),
 // pin the new version and fingerprint here, and have an upgrade test for what
 // changed (below) that starts from a database made before it.
-const PINNED = { version: 16, fingerprint: "6a23e3bc2078b9f4d62b21ee386f88e51e15decadd9063f4bb329f10290525ac" };
-/** The schema of version 15, the one pinned before: no chat is one nobody attends. */
+const PINNED = { version: 16, fingerprint: "ba52cad83d268b2700843d8970a6f880eaa924ae3076b3ab66414b2af22eeb1a" };
+/** The schema of version 15, the one pinned before: no chat is one nobody attends, and every child takes its parent's tools. */
 const V15_FINGERPRINT = "830934df6dce1dd977d16b086c0bbe883bfc18a3463f84e9f22f31efa43fc0cd";
 /** The schema of version 14: no index on the questions a chat asked. */
 const V14_FINGERPRINT = "7a7fcf8359ff86a38fcb9060888fa9ed7816b18bb9cfb2d9da454a893c015bda";
@@ -39,11 +39,11 @@ const home = inProcessHome("pithagoras-schema-");
 const { SCHEMA_VERSION } = await import("../dist/schema-version.js");
 const { getDb } = await import("../dist/db.js");
 
-/** A database of the schema of version 15 at `file`, open: a fresh one, whose chats are all attended. */
+/** A database of the schema of version 15 at `file`, open: a fresh one, whose chats are all attended and whose children take their parents' tools. */
 function freshAt15(file) {
   getDb().exec(`VACUUM INTO '${file}'`);
   const d = new Database(file);
-  d.exec("ALTER TABLE sessions DROP COLUMN unattended");
+  d.exec("ALTER TABLE sessions DROP COLUMN unattended; ALTER TABLE sessions DROP COLUMN tools_from;");
   return d;
 }
 
@@ -1604,7 +1604,7 @@ test("a database of version 14, or of 13, is backed up and given the index on th
   }
 });
 
-test("a database of version 15, or of 14, is backed up and given chats nobody attends at schema 16, its chats kept as attended", async () => {
+test("a database of version 15, or of 14, is backed up and given chats nobody attends and children on the defaults at schema 16, its chats kept as they were", async () => {
   for (const [version, fingerprint, make] of [[15, V15_FINGERPRINT, freshAt15], [14, V14_FINGERPRINT, freshAt13]]) {
     const dir = path.join(home, `unattended-from-${version}`);
     mkdirSync(dir, { recursive: true });
@@ -1623,9 +1623,9 @@ test("a database of version 15, or of 14, is backed up and given chats nobody at
     const now = new Database(path.join(dir, "portal.db"), { readonly: true });
     try {
       assert.deepEqual([now.pragma("user_version", { simple: true }), schemaFingerprint(now)], [SCHEMA_VERSION, PINNED.fingerprint]);
-      assert.deepEqual(now.prepare("SELECT id, parent_id, unattended FROM sessions ORDER BY id").all(), [
-        { id: "c1", parent_id: null, unattended: 0 },
-        { id: "c2", parent_id: "c1", unattended: 0 },
+      assert.deepEqual(now.prepare("SELECT id, parent_id, unattended, tools_from FROM sessions ORDER BY id").all(), [
+        { id: "c1", parent_id: null, unattended: 0, tools_from: null },
+        { id: "c2", parent_id: "c1", unattended: 0, tools_from: null },
       ]);
     } finally {
       now.close();

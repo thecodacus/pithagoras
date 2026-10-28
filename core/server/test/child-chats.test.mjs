@@ -637,3 +637,31 @@ test("lastAnswer says a chat is marked while the guard holds it so, also with no
   assert.equal(helper.chats.lastAnswer(child.id).marked, true);
   assert.equal(sessionTainted(parent), true, "what it said is held in its parent too");
 });
+
+test("a child asked to start from the defaults has the folder's tools, none of its parent's switches or its parent's mode's, and is not held to them; an unattended one does unless asked", async () => {
+  const mine = createCustomMode({ label: "No shell", description: "Cannot run commands" });
+  setCustomModeTools(mine.id, { off: ["bash"], on: [] });
+  const parent = chat({ mode: `custom/${mine.id}` });
+  getDb().prepare("UPDATE sessions SET tools_off = 'read', tools_on = 'web_search' WHERE id = ?").run(parent);
+  assert.throws(() => helper.chats.create({ parent, title: "Odd", tools: "mine" }), /tools is "parent" or "defaults"/);
+
+  const fresh = helper.chats.create({ parent, title: "Fresh", mode: "standard", tools: "defaults" });
+  const row = () => getSession(fresh.id);
+  assert.deepEqual([row().tools_off, row().tools_on, row().tools_from], ["", "", "defaults"]);
+  const declaredIn = async (message) => {
+    const asked = model.requests.length;
+    assert.equal((await helper.chats.prompt(fresh.id, message)).status, "done");
+    return declared(model.requests[asked]);
+  };
+  const first = await declaredIn("Answer once");
+  assert.ok(first.includes("bash") && first.includes("read"), "what the parent and its mode had off is on, as in a new chat of the folder");
+  // The person switches write off in the parent: a child on the defaults is not held to it.
+  getDb().prepare("UPDATE sessions SET tools_off = 'read\nwrite' WHERE id = ?").run(parent);
+  assert.ok((await declaredIn("Answer again")).includes("write"));
+  assert.deepEqual([row().tools_off, row().tools_on], ["", ""]);
+
+  const nobody = getSession(helper.chats.create({ parent, title: "Nobody", unattended: true }).id);
+  assert.deepEqual([nobody.tools_off, nobody.tools_on, nobody.tools_from], ["", "", "defaults"], "an unattended child starts from the defaults");
+  const asked = getSession(helper.chats.create({ parent, title: "Theirs", unattended: true, tools: "parent" }).id);
+  assert.deepEqual([asked.tools_off, asked.tools_on, asked.tools_from], ["read\nwrite", "web_search", null], "unless it asks for its parent's");
+});

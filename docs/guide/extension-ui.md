@@ -2320,7 +2320,7 @@ portal.chats.extend((pi, chat) => {
 });
 ```
 
-- **`create({ parent, title, mode?, model?, listed?, unattended? })`** makes it and returns
+- **`create({ parent, title, mode?, model?, listed?, unattended?, tools? })`** makes it and returns
   it as a `Chat`, with `parent` set. Listed, it shows under its parent's row in
   the sidebar and on the Sessions page, as a
   [sub-chat](/guide/sessions#sub-chats), and its parent's row says when it
@@ -2345,7 +2345,12 @@ portal.chats.extend((pi, chat) => {
   who asked, and the tools the person switched off or on in the parent. It is
   held to them as they stand now: a tool switched off in the parent since is off
   in the child before its next message, and one switched on in the parent later
-  is not given to it. A dialog
+  is not given to it. With **`tools: "defaults"`** it has the tools a new chat
+  of its folder has in its mode instead (what Settings → Tools, its agent and
+  its project say), and none of its parent's switches, nor the ones its
+  parent's mode took away: for work of the package's that is not the
+  conversation the person switched them for. An `unattended` child starts from
+  the defaults unless it is given `tools: "parent"`. A dialog
   it opens, and a question the guard asks, are drawn on its own page, where its
   parent's would be: for a child of a chat of the portal's pages (or of the
   agent's page) nobody may be looking, so say where it waits; for a child of a
@@ -2359,7 +2364,8 @@ portal.chats.extend((pi, chat) => {
   holds after a suspected prompt injection is refused rather than put to the
   person. The agent gets each refusal as the tool's result and goes on, where a
   dialog on a page nobody opens would hold its run for good. It has no routine
-  tools either, as a routine run has none. It is kept with the chat, so a pi
+  tools either, as a routine run has none, and it starts from the folder's
+  tools (`tools: "defaults"`) unless told otherwise. It is kept with the chat, so a pi
   started for it after a restart is started the same way, and the `Chat` says
   `unattended: true`.
 - **`prompt(chatId, message, { steer? })`** resolves once the run that takes

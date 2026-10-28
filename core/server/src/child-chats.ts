@@ -21,6 +21,9 @@ import { workspaceRoot } from "./workspaces.js";
  * level only: a child has no children. It is deleted with its parent (db.ts removeSession, and
  * SessionManager.discard for its pi and files).
  *
+ * A child takes its parent's tool switches and is held to them (`tools: "parent"`), or starts from the tools a new chat
+ * of the folder has and is not (`tools: "defaults"`, which an unattended child is unless it asks for its parent's).
+ *
  * A child made `unattended` is one nobody answers in, wherever its parent is: it has no ask_question, every dialog an
  * extension opens in it is answered at once with its no-answer value, and the guard refuses a held call rather than
  * asking, as in a routine run. Stored on its row, so a pi started for it after a restart is started the same way.
@@ -34,6 +37,7 @@ export interface ChildChatOptions {
   model?: { provider: string; id: string };
   listed?: boolean;
   unattended?: true;
+  tools?: "parent" | "defaults";
 }
 
 /** What a server half asks of a chat of its own in a folder: see `chats.start` in server.d.ts. */
@@ -84,6 +88,10 @@ export function newChildChat(options: unknown, creator: string): SessionRow {
   if (!title) throw new TypeError("A child chat needs a title");
   if (asked.listed !== undefined && typeof asked.listed !== "boolean") throw new TypeError("listed is true or false");
   if (asked.unattended !== undefined && asked.unattended !== true) throw new TypeError("unattended is true, or left out");
+  if (asked.tools !== undefined && asked.tools !== "parent" && asked.tools !== "defaults") throw new TypeError('tools is "parent" or "defaults"');
+  // A chat nobody attends does work of the package's, not the conversation its parent is: the tools the person switched
+  // for that conversation are not its own unless asked for.
+  const defaults = asked.tools === "defaults" || (asked.tools === undefined && asked.unattended === true);
   const model = asked.model as ChildChatOptions["model"] | undefined;
   if (model !== undefined && (!model || typeof model !== "object" || !text(model.provider) || !text(model.id))) {
     throw new TypeError("A child chat's model is a provider and an id, as pi names them");
@@ -106,8 +114,9 @@ export function newChildChat(options: unknown, creator: string): SessionRow {
     if (entry.id !== parent.mode) fromMode = entry;
   }
   // A child in another mode than its parent's has not that mode's layer: the tools it took away stay off for the child
-  // too, as its own switches, or naming Standard would be a way out of them.
-  const left = mode === parent.mode ? [] : (modeOf(parent.mode)?.tools?.off ?? []);
+  // too, as its own switches, or naming Standard would be a way out of them. Not for one that starts from the defaults,
+  // which has the tools a chat of the folder started in its mode has: none of its parent's switches, nor of its mode's.
+  const left = mode === parent.mode || defaults ? [] : (modeOf(parent.mode)?.tools?.off ?? []);
 
   const id = nanoid(12);
   createSession({
@@ -130,8 +139,12 @@ export function newChildChat(options: unknown, creator: string): SessionRow {
         ? { provider: fromMode.provider ?? null, model: fromMode.model }
         : { provider: parent.provider, model: parent.model }),
     thinking_level: fromMode.thinkingLevel ?? parent.thinking_level,
-    tools_off: left.length ? [...new Set([...parseToolsOff(parent.tools_off), ...left])].sort().join("\n") : parent.tools_off,
-    tools_on: left.length ? parseToolsOff(parent.tools_on).filter((name) => !left.includes(name)).join("\n") : parent.tools_on,
+    ...(defaults
+      ? { tools_from: "defaults" as const }
+      : {
+          tools_off: left.length ? [...new Set([...parseToolsOff(parent.tools_off), ...left])].sort().join("\n") : parent.tools_off,
+          tools_on: left.length ? parseToolsOff(parent.tools_on).filter((name) => !left.includes(name)).join("\n") : parent.tools_on,
+        }),
   });
   return getSession(id)!;
 }

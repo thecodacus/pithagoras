@@ -3339,7 +3339,8 @@ class SessionManager extends EventEmitter {
   private async holdToParentsTools(childId: string, parentId: string): Promise<void> {
     const child = getSession(childId);
     const parent = getSession(parentId);
-    if (!child || !parent) return;
+    // One that starts from the defaults has switches of its own, as a chat of the folder has.
+    if (!child || !parent || child.tools_from === "defaults") return;
     const own = { off: parseToolsOff(child.tools_off), on: parseToolsOff(child.tools_on) };
     const above = { off: parseToolsOff(parent.tools_off), on: parseToolsOff(parent.tools_on) };
     const off = [...new Set([...own.off, ...above.off])];

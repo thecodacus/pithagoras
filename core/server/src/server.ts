@@ -887,7 +887,7 @@ app.delete("/api/agents/:id", async (req, res) => {
  * parent's row can say so: a child's dialogs are shown on its own page, which nobody may have open. Only a child's,
  * since asking every chat in the list for its questions would cost a query each, on every poll.
  */
-const toApi = ({ parent_id, listed, creator: _creator, unattended: _unattended, ...s }: ReturnType<typeof getSession> & {}) => ({
+const toApi = ({ parent_id, listed, creator: _creator, unattended: _unattended, tools_from: _toolsFrom, ...s }: ReturnType<typeof getSession> & {}) => ({
   ...s,
   ...(parent_id ? { parent: parent_id, listed: listed === 1, ...(sessions.waitsOnPerson(s.id) ? { asking: true } : {}) } : {}),
   pinned: Boolean(s.pinned),
