@@ -50,9 +50,8 @@ jobs:
       - run: npm run build -w core/web
       - run: npm run build:extensions
 
-  # The browser tests, against the web app's dev server and a mocked portal. Two of them are
-  # known to fail now and then on a busy machine (the voice windows phone layout, and a model
-  # picked in a chat on the default), so a test that fails is tried once more before it counts.
+  # The browser tests, against the web app's dev server and a mocked portal. A few still fail
+  # now and then on a busy machine, so a test that fails is tried once more before it counts.
   # They run in two halves at once, each on its own machine: one after the other they no longer
   # finish in the time a job is given.
   browser:

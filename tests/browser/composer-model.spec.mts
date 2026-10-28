@@ -40,6 +40,11 @@ async function portal(page: Page): Promise<Portal> {
 }
 
 const modelPill = (page: Page) => page.locator('.composer-settings button').first();
+/**
+ * A model in the full list, by its name. Not by its title: the list opens under the pointer, and the title of the model it
+ * comes to rest on is lifted into the portal's own tooltip (tooltips.ts), so a title would find nothing.
+ */
+const listed = (page: Page, name: string) => page.getByRole('group', { name: 'Models' }).getByRole('button', { name });
 
 test('a model of another provider is picked with its provider, and a pick that fails says so in the menu', async ({ page }) => {
   const state = await portal(page);
@@ -48,12 +53,12 @@ test('a model of another provider is picked with its provider, and a pick that f
   await modelPill(page).click();
   await page.getByRole('button', { name: 'More models' }).click();
   state.failWith = { error: 'Model not found: prov-a/Beta' };
-  await page.getByTitle('Beta', { exact: true }).click();
+  await listed(page, 'Beta').click();
   await expect(page.getByRole('alert')).toHaveText('Model not found: prov-a/Beta');
   // The menu stays, so the pick can be made again.
   await expect(page.getByRole('button', { name: 'Refresh models' })).toBeVisible();
   state.failWith = null;
-  await page.getByTitle('Beta', { exact: true }).click();
+  await listed(page, 'Beta').click();
   await expect(page.getByRole('button', { name: 'Refresh models' })).toHaveCount(0);
   expect(state.posts).toEqual([{ provider: 'prov-b', modelId: 'Beta' }, { provider: 'prov-b', modelId: 'Beta' }]);
 });
@@ -64,7 +69,7 @@ test('two providers offering a model of one id are told apart, in what is sent a
   await modelPill(page).click();
   await page.getByRole('button', { name: 'More models' }).click();
   // The second of the two: prov-b's.
-  await page.getByTitle('Shared', { exact: true }).nth(1).click();
+  await listed(page, 'Shared').nth(1).click();
   await expect(page.getByRole('button', { name: 'Refresh models' })).toHaveCount(0);
   expect(state.posts).toEqual([{ provider: 'prov-b', modelId: 'Shared' }]);
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem('pithagoras.recentModels')!))).toEqual(['prov-b/Shared']);
@@ -131,7 +136,7 @@ test("a model pick that fails after its chat was left says nothing in the chat o
   await page.goto('/s/a');
   await modelPill(page).click();
   await page.getByRole('button', { name: 'More models' }).click();
-  await page.getByTitle('Beta', { exact: true }).click();
+  await listed(page, 'Beta').click();
   await expect.poll(() => state.posts.length).toBe(1);
   await page.getByText('Second chat').first().click();
   await expect(page).toHaveURL(/\/s\/b$/);
