@@ -2423,7 +2423,10 @@ portal.chats.extend((pi, chat) => {
   portal keeps of the chat: `{ status, answer, marked?, error? }`, with
   `status` `"running"` while it goes on and else as for `prompt` (a run the
   portal's restart cut off is `"stopped"`, with an `error` that says so), and
-  nothing for a chat that never ran. It holds across a restart of the server
+  nothing for a chat that never ran. It throws for a chat the package did
+  not make, and, saying "There is no chat …", for one that is gone (the person
+  deleted it, or it went with its project or agent while the half was away),
+  as `prompt`, `abort` and `remove` do. It holds across a restart of the server
   half or of the portal: a half that lost the `prompt` it waited on tells a
   run that goes on from one that ended while it was away, and has its answer.
   `marked` is there while the guard holds the chat as marked, by a result it

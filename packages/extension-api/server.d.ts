@@ -924,14 +924,15 @@ export interface ServerPortal {
      * the step it is on. A child's is sent as the person its parent last heard from, a started chat's as the primary user. A run that fails resolves as an `error`, and so does a
      * command its speaker may not run; a command it may run is no message of the chat, and resolves as `done` at
      * once when it started no run (with no answer), or when the run it started ends. This throws only for a chat this package
-     * did not make, or a message with no words.
+     * did not make, one that is not there (any more: "There is no chat <id>"), or a message with no words.
      */
     prompt(chatId: string, message: string, options?: { steer?: boolean }): Promise<ChildRun>;
     /**
      * Where the last run of a chat this package made (a child, or one it started) stands, from what the portal keeps of
      * the chat, so it holds across a restart of the server half or of the portal: for a half that lost a `prompt` it
      * was waiting on, to tell a run that goes on from one that ended while it was away, and to have its answer.
-     * Nothing for a chat that has never run. Throws for a chat this package did not make. `marked` says the answer is
+     * Nothing for a chat that has never run. Throws for a chat this package did not make, and for one that is not
+     * there any more, deleted by the person or with its project or agent ("There is no chat <id>"). `marked` says the answer is
      * to be held like outside content; for a child, its parent is marked with it, as `prompt` marks it.
      */
     lastAnswer(chatId: string): ChatAnswer | undefined;

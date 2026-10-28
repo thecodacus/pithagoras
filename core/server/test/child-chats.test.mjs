@@ -585,6 +585,10 @@ test("a started chat is run, stopped and removed by the package that started it 
   await helper.chats.remove(started.id);
   assert.equal(getSession(started.id), undefined);
   assert.ok(globalThis.heard.includes(`helper ${started.id}`) && globalThis.heard.includes(`other ${started.id}`), "every half hears it was deleted");
+  // A half that kept its id, as after a restart, hears that it is gone, not that it is another's.
+  assert.throws(() => helper.chats.lastAnswer(started.id), new RegExp(`There is no chat ${started.id}: it was deleted`));
+  await assert.rejects(helper.chats.prompt(started.id, "Answer"), /There is no chat/);
+  await assert.rejects(helper.chats.remove(started.id), /There is no chat/);
 });
 
 test("chats.list gives the task chats pinned first, then the most recently active first, as the typings promise", () => {

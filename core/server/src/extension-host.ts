@@ -560,7 +560,10 @@ function portalFor(ext: Running): ServerPortal {
   /** A chat this package made (a child, or one it started in a folder), or a refusal that says why it is not one. */
   const ownChat = (id: string) => {
     const row = getSession(id);
-    if (!row?.creator) throw new Error(`${id} is no chat a package made: only a child chat or a chat a package started is prompted, stopped or removed`);
+    // One that is gone (deleted by the person, or with its project or agent while the half was away) is said to be
+    // gone, not to be another's: a half that kept its id tells the two apart.
+    if (!row) throw new Error(`There is no chat ${id}: it was deleted, or never was`);
+    if (!row.creator) throw new Error(`${id} is no chat a package made: only a child chat or a chat a package started is prompted, stopped or removed`);
     if (row.creator !== name) throw new Error(`The chat ${id} was made by another package: only that one may prompt, stop or remove it`);
   };
   const dataDir = () => {
