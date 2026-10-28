@@ -151,7 +151,8 @@ const run = (task: string, answer: string, from = 1) =>
 /**
  * `kid1`'s stream, one answer for each time the page connects (`answers[n](since)` is the body of the n-th; the last
  * serves any later one), and the `since` of each. The page's clock is its own, so a reconnect does not wait for two
- * seconds of the test's.
+ * seconds of the test's. Of an answer only the events after `since` are sent, as the portal sends them: a later
+ * reconnect, which the page's clock can bring at any time, is given nothing it has read already.
  */
 async function serveStream(page: Page, answers: ((since: number) => string)[]) {
   const connects: string[] = [];
@@ -159,7 +160,12 @@ async function serveStream(page: Page, answers: ((since: number) => string)[]) {
   await page.route('**/api/sessions/kid1/events**', async (route) => {
     const since = new URL(route.request().url()).searchParams.get('since') ?? '';
     connects.push(since);
-    await route.fulfill({ headers: { 'content-type': 'text/event-stream' }, body: answers[Math.min(connects.length, answers.length) - 1](Number(since)) });
+    const body = answers[Math.min(connects.length, answers.length) - 1](Number(since));
+    const after = body.split(/(?<=\n\n)/).filter((block) => {
+      const id = /^id: (\d+)\n/.exec(block);
+      return !id || Number(id[1]) > Number(since);
+    });
+    await route.fulfill({ headers: { 'content-type': 'text/event-stream' }, body: after.join('') });
   });
   await page.route('**/api/sessions/kid1', (route) => route.fulfill({ json: { id: 'kid1', title: 'Backup check', parent: 'preview', listed: false, status: 'running' } }));
   /** Lets the page's clock run until it has connected `n` times. */
@@ -189,7 +195,9 @@ test('a reload of the child chat that happened while its stream was down is read
   await connected(3);
   await expect(panel(page).getByText('New answer')).toBeVisible();
   await expect(panel(page).getByText('Old answer')).toHaveCount(0);
-  expect(connects).toEqual(['0', '2', '0']);
+  // The stream read on after that, at whatever moment the page's clock brought it, reads on from where it was.
+  expect(connects.slice(0, 3)).toEqual(['0', '2', '0']);
+  expect(connects.slice(3).every((since) => since === '2')).toBe(true);
 });
 
 test('a child chat whose stream broke in the middle of its replay is read again from the start', async ({ page }) => {
