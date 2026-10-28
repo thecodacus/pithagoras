@@ -1,6 +1,6 @@
 {
   "name": "@pithagoras/extension-api",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "What a Pithagoras extension is given, as types, and the build that bundles one written in TypeScript and JSX",
   "keywords": ["pithagoras", "pi", "extension", "types", "esbuild", "tailwindcss"],
   "homepage": "https://thecodacus.github.io/pithagoras/guide/extension-ui",
