@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
 import { schemaFingerprint } from "./schema-fingerprint.mjs";
@@ -1419,14 +1419,15 @@ test("pi's settings with none of the subagent's, or that cannot be read, leave n
 
 test("pi's settings that cannot be written keep the subagent's for the next start, which takes them out and leaves them once", async () => {
   const dir = databaseAt11("subagent-kept");
-  const agentDir = process.env.PI_CODING_AGENT_DIR;
   const text = JSON.stringify({ subagentModel: "llama-swap/model-b" });
   await withPiSettings(text, async (file) => {
-    chmodSync(agentDir, 0o555);
+    // The copy of the file before a save cannot be put in place over a folder, for root too, which a folder's
+    // permissions do not stop: the save fails before the file is touched, as on a disk that takes nothing more.
+    mkdirSync(`${file}.bak`);
     try {
       assert.match(await upgraded(dir), /could not be left for its extension, and are kept for the next start/);
     } finally {
-      chmodSync(agentDir, 0o755);
+      rmSync(`${file}.bak`, { recursive: true });
     }
     assert.equal(readFileSync(file, "utf8"), text);
     await upgraded(dir);
