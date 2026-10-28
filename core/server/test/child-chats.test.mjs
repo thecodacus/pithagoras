@@ -558,3 +558,17 @@ test("a started chat is run, stopped and removed by the package that started it 
   assert.equal(getSession(started.id), undefined);
   assert.ok(globalThis.heard.includes(`helper ${started.id}`) && globalThis.heard.includes(`other ${started.id}`), "every half hears it was deleted");
 });
+
+test("chats.list gives the task chats pinned first, then the most recently active first, as the typings promise", () => {
+  const [old, pinnedOld, recent] = [chat(), chat(), chat()];
+  const at = (id, when, pinned = 0) => getDb().prepare("UPDATE sessions SET updated_at = ?, pinned = ? WHERE id = ?").run(when, pinned, id);
+  at(old, "2001-01-01 10:00:00");
+  at(pinnedOld, "2000-01-01 10:00:00", 1);
+  at(recent, "2001-01-02 10:00:00");
+  const order = helper.chats.list().map((one) => one.id).filter((id) => [old, pinnedOld, recent].includes(id));
+  assert.deepEqual(order, [pinnedOld, recent, old]);
+  // A run that starts makes a chat the most recently active one.
+  updateSession(old, { status: "running" });
+  assert.deepEqual(helper.chats.list().map((one) => one.id).filter((id) => [old, pinnedOld, recent].includes(id)), [pinnedOld, old, recent]);
+  updateSession(old, { status: "idle" });
+});

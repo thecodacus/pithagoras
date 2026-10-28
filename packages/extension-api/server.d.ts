@@ -760,6 +760,10 @@ export interface ServerPortal {
   };
   chats: {
     get(id: string): Chat | undefined;
+    /**
+     * The task chats, as the sidebar lists them: pinned first, then the most recently active first (a run that starts or
+     * ends, a new title). Not those kept out of the lists (`listed: false`), and no other kind of session (see `inFolder`).
+     */
     list(): Chat[];
     /**
      * The sessions that work in a folder, of every kind: the tasks `list` gives, and also routine runs, conversations on the Agent page
