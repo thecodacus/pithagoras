@@ -523,6 +523,15 @@ one: it can be pinned, and its run ending is told. An agent's page lists its
 conversations the same way, a sub-chat under its conversation and not counted
 with them.
 
+An extension can also start a chat of its own in an agent's or a project's
+folder, for work that belongs to no chat of yours, such as the answer to a
+comment in a document. It is a chat of that folder like the others; one the
+extension keeps out of the lists is found by its link alone, and is deleted
+with the project or the agent. A chat an extension made for nobody to attend
+asks nothing: the agent there has no questions for you, and what it would ask
+or the guard would hold is refused instead
+([unattended](/guide/extension-ui#child-chats)).
+
 ## Using a phone
 
 Tap the navigation icon in the header to open the sidebar, then choose a
