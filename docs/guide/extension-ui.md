@@ -2459,10 +2459,15 @@ agent's or a project's folder (`folder` is its path as `folders.list()` gives
 it), with no parent, as one the person starts there with "+": in the primary
 role, in Standard mode on the default model, with the tools a new chat there
 has. It throws for a folder that is not an agent's or a project's (one inside
-them included) and for no title. `listed` and `unattended` are as for a child.
-It is the package's as a child is: only it sends it messages (`prompt`, as the
-primary user), stops it (`abort`) and deletes it (`remove`). Deleting the
-project or the agent deletes it with the folder's other chats, listed or not.
+them included) and for no title. `listed` and `unattended` are as for a child,
+except that `listed: false` needs `unattended: true`: a child that waits on the
+person says so on its parent's row, and a chat with no parent that is in no
+list has no row to say it on. It is the package's as a child is: only it sends
+it messages (`prompt`, as the primary user), stops it (`abort`) and deletes it
+(`remove`). Deleting the project or the agent deletes it with the folder's
+other chats, listed or not. A listed one that is working keeps the delete from
+going through until the person stops it, as any chat does; an unlisted one,
+which the person cannot find, is stopped with the delete.
 
 ```js
 const [folder] = portal.folders.list().filter((one) => one.kind === "agent");

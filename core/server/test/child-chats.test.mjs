@@ -566,6 +566,7 @@ test("a chat is started only in an agent's or a project's folder, with a title",
   assert.throws(() => helper.chats.start({ title: "No folder" }), /started in a folder/);
   assert.throws(() => helper.chats.start({ folder: site, title: " " }), /needs a title/);
   assert.throws(() => helper.chats.start({ folder: site, title: "Odd", unattended: "yes" }), /unattended is true/);
+  assert.throws(() => helper.chats.start({ folder: site, title: "Hidden", listed: false }), /kept out of the lists is one nobody attends/);
   assert.equal(getDb().prepare("SELECT COUNT(*) AS n FROM sessions").get().n, before, "nothing was made");
 });
 

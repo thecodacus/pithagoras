@@ -198,6 +198,9 @@ export function newPackageChat(options: unknown, creator: string): SessionRow {
   if (!title) throw new TypeError("A chat needs a title");
   if (asked.listed !== undefined && typeof asked.listed !== "boolean") throw new TypeError("listed is true or false");
   if (asked.unattended !== undefined && asked.unattended !== true) throw new TypeError("unattended is true, or left out");
+  // A child that waits on the person says so on its parent's row; a chat with no parent that is in no list has no row
+  // to say it on, and a question in it would wait on a page nobody finds.
+  if (asked.listed === false && asked.unattended !== true) throw new TypeError("A chat kept out of the lists is one nobody attends: say unattended: true too");
   const id = nanoid(12);
   createSession({
     id,

@@ -63,6 +63,7 @@ import {
   setLazyToolSets,
   toolGroupNames,
   updateSession,
+  type SessionRow,
 } from "./db.js";
 import { checkWorkspace, workspaceRoot } from "./workspaces.js";
 import { insideReal, isWithinText, realPath } from "./within.js";
@@ -741,6 +742,13 @@ app.put("/api/routines/:id/tools", async (req, res) => {
 });
 
 /**
+ * Whether the person can find a chat to stop it: every chat but one a server half started in a folder and keeps out
+ * of the lists. That one is the package's, which hears it deleted; a delete stops its run (sessions.discard) rather
+ * than wait for a Stop nobody can give.
+ */
+const findable = (session: SessionRow) => session.listed !== 0;
+
+/**
  * The project, its chats and its folder. Refused while any chat or routine run
  * in it is working, and while its folder holds repositories — itself, submodules,
  * clones in subfolders — with work that only the folder has — uncommitted
@@ -764,7 +772,7 @@ app.delete("/api/projects/:name", async (req, res) => {
     }
     // The chats a server half keeps out of the lists too: they work in the folder as the others do.
     const chats = withoutChildren(workingIn(project.path, listSessions({ unlisted: true })));
-    if (chats.some((s) => sessions.isBusy(s.id) || sessions.backgroundWork(s.id))) {
+    if (chats.some((s) => findable(s) && (sessions.isBusy(s.id) || sessions.backgroundWork(s.id)))) {
       return res.status(409).json({ error: "A chat in this project is still working. Stop it first." });
     }
     const routines = routinesIn(project.path);
@@ -834,7 +842,7 @@ app.delete("/api/agents/:id", async (req, res) => {
     // Its chats and its conversations — those started on the Agent page and
     // through channels — and the one its heartbeat looks around in.
     const chats = withoutChildren(workingIn(agent.home, [...listSessions({ unlisted: true }), ...listAgentSessions(), ...listHeartbeatSessions()]));
-    if (chats.some((s) => sessions.isBusy(s.id) || sessions.backgroundWork(s.id))) {
+    if (chats.some((s) => findable(s) && (sessions.isBusy(s.id) || sessions.backgroundWork(s.id)))) {
       return res.status(409).json({ error: "A chat with this agent is still working. Stop it first." });
     }
     if (heartbeat.isRunning(agent.id)) {

@@ -100,7 +100,10 @@ export interface StartChatOptions {
   /** The folder of an agent or a project, by its path as `folders.list()` gives it (where it really is). */
   folder: string;
   title: string;
-  /** Whether it shows in the chat lists (the default), or is found by its id alone. */
+  /**
+   * Whether it shows in the chat lists (the default), or is found by its id alone. One that does not is refused unless
+   * it is `unattended` too: with no parent, it has no row to say it waits on the person, nor a page anybody finds.
+   */
   listed?: boolean;
   /** A chat nobody attends: see `ChildChatOptions.unattended`. */
   unattended?: true;
@@ -904,9 +907,10 @@ export interface ServerPortal {
      * there has. For work of the package's own that belongs to no chat of the person's, such as the answer to a
      * comment in a document. It is this package's as a child chat is: only it prompts, stops or removes it
      * (`prompt`, `abort`, `remove`), and a message it sends is the primary user's. It goes with the folder's other chats
-     * when the project or the agent is deleted, listed or not, and each delete is heard as `deleted`. Throws for
-     * options that cannot be one: a folder that is not an agent's or a project's (one inside them included), or no
-     * title.
+     * when the project or the agent is deleted, listed or not, and each delete is heard as `deleted`; an unlisted one
+     * that is working is stopped then, where a listed one keeps the delete from going through until the person stops
+     * it. Throws for options that cannot be one: a folder that is not an agent's or a project's (one inside them
+     * included), no title, or `listed: false` without `unattended: true`.
      */
     start(options: StartChatOptions): Chat;
     /**
