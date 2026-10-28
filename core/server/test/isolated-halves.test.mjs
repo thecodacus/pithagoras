@@ -633,7 +633,7 @@ test("a row in Audit, at once with its TypeError, and an install and where an ex
   await host.syncServerHalves([]);
 });
 
-test("a child chat made, run, stopped and removed from its process, as the package that made it, and no other chat", async () => {
+test("a child chat made, a chat started, run, stopped and removed from its process, as the package that made it, and no other chat", async () => {
   // The session manager is not loaded here: what it is asked, and as which package, is written down.
   const asked = [];
   host.setChatBridge({
@@ -645,6 +645,11 @@ test("a child chat made, run, stopped and removed from its process, as the packa
       asked.push(["create", options.parent, creator]);
       createSession({ id: "kid", title: options.title, workspace: work, executor: "host", parent_id: options.parent, listed: 0, creator });
       return getSession("kid");
+    },
+    start: (options, creator) => {
+      asked.push(["start", options.folder, creator]);
+      createSession({ id: "own", title: options.title, workspace: work, executor: "host", listed: 0, creator, unattended: 1 });
+      return getSession("own");
     },
     run: async (id, message, options) => {
       asked.push(["run", id, message, options]);
@@ -662,17 +667,20 @@ test("a child chat made, run, stopped and removed from its process, as the packa
         const found = portal.chats.children("a");
         const theirs = await portal.chats.remove("a").catch((e) => e.message);
         await portal.chats.remove(child.id);
-        res.json({ child, run, theirs, found });
+        const started = portal.chats.start({ folder: "/somewhere", title: "Of a folder", listed: false, unattended: true });
+        await portal.chats.remove(started.id);
+        res.json({ child, run, theirs, found, started });
       });
     `),
   ]);
   assert.deepEqual((await get("/api/x/maker/go", { method: "POST" })).body, {
     child: { id: "kid", title: "Helper", workspace: work, status: "idle", parent: "a", listed: false },
     run: { status: "done", answer: "42" },
-    theirs: "a is no child chat",
+    theirs: "a is no chat a package made: only a child chat or a chat a package started is prompted, stopped or removed",
     found: [{ id: "kid", title: "Helper", workspace: work, status: "idle", parent: "a", listed: false }],
+    started: { id: "own", title: "Of a folder", workspace: work, status: "idle", listed: false, unattended: true },
   });
-  assert.deepEqual(asked, [["create", "a", "maker"], ["run", "kid", "Answer", { steer: true }], ["abort", "kid"], ["remove", "kid"]]);
+  assert.deepEqual(asked, [["create", "a", "maker"], ["run", "kid", "Answer", { steer: true }], ["abort", "kid"], ["remove", "kid"], ["start", "/somewhere", "maker"], ["remove", "own"]]);
   await host.syncServerHalves([]);
 });
 
