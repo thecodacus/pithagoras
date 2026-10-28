@@ -1,19 +1,29 @@
 name: Build and publish container
 
+# The image of main, on every push to it: latest and sha-<commit>. A release's image is built here too, when the
+# release (publish-extension-api.yml) calls this workflow with its tag, v<version>: <version>, latest and sha-<commit>,
+# the tags a v* tag was given when it started this workflow itself. A tag does not start it any more: the release
+# builds its image before it publishes the package and the GitHub release.
 on:
   push:
     branches: [main]
-    tags: ["v*"]
+  workflow_call:
+    inputs:
+      tag:
+        description: "The release's tag, v<version>: the image is tagged <version> and latest"
+        type: string
+        required: true
   workflow_dispatch:
 
 env:
   IMAGE: ghcr.io/${{ github.repository }}
 
-# A push while an image is still being built replaces that build. Left to finish, it could
-# be the last to push and leave `latest` on the older commit.
+# A push while main's image is still being built replaces that build. Left to finish, it could
+# be the last to push and leave `latest` on the older commit. A release's build is never replaced:
+# it has a group of its own, and not main's, which the release's push to main is in as well.
 concurrency:
-  group: docker-${{ github.ref }}
-  cancel-in-progress: true
+  group: docker-${{ inputs.tag || github.ref }}
+  cancel-in-progress: ${{ !inputs.tag }}
 
 jobs:
   # Nothing is published that the tests have not passed: the jobs of test.yml, as a pull request runs them.
@@ -42,13 +52,19 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      # A build of main is tagged latest and sha-<commit>; a release, <version>, latest and sha-<commit>, from the tag
+      # it is called with, whether the release was started by a push to main or by the tag. latest comes from the two
+      # raw lines alone (latest=false): the semver line would add it as well, and a release from a push to main would
+      # be given it twice.
       - uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
         id: meta
         with:
           images: ${{ env.IMAGE }}
+          flavor: latest=false
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
-            type=semver,pattern={{version}}
+            type=raw,value=latest,enable=${{ inputs.tag != '' }}
+            type=semver,pattern={{version}},value=${{ inputs.tag }}
             type=sha
       - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
