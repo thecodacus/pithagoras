@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { type Page } from '@playwright/test';
 import { test, expect, mockPortal, reply, DONE } from '../../../../tests/browser/portal-mock';
+import { clickIntoText } from './caret';
 
 /**
  * A document renamed and deleted from the Documents page: from a row of the list (on the page and in the panel beside a chat) and from the
@@ -425,7 +426,7 @@ test('the bar has a menu next to Download with Rename and Delete: it opens with 
 test('a document is renamed from its bar: what was typed is saved first, the name in the bar is the new one, and the page is not told of its own rename', async ({ page }) => {
   const shelf = new Shelf();
   await openDocument(page, shelf);
-  await editorOf(page).getByText('The build is green.').click();
+  await clickIntoText(editorOf(page).getByText('The build is green.'));
   await page.keyboard.press('End');
   await page.keyboard.type(' Really.');
   await actions(page).click();
@@ -451,7 +452,7 @@ test('a document is renamed from its bar: what was typed is saved first, the nam
   await expect(page.getByRole('menuitem', { name: 'Markdown (.md)' })).toHaveAttribute('download', 'roadmap.md');
   await page.keyboard.press('Escape');
   // And the page still saves, on the new revision.
-  await editorOf(page).getByText('Really.').click();
+  await clickIntoText(editorOf(page).getByText('Really.'));
   await page.keyboard.press('End');
   await page.keyboard.type(' More.');
   await expect.poll(() => shelf.requests.filter((r) => r.startsWith('PUT')).length).toBe(2);
@@ -477,7 +478,7 @@ test('a rename from the bar that is refused is said under the field and leaves t
 test('a document is deleted from its bar after the portal\'s question, and the page goes back to the list without saving what was typed', async ({ page }) => {
   const shelf = new Shelf();
   await openDocument(page, shelf);
-  await editorOf(page).getByText('The build is green.').click();
+  await clickIntoText(editorOf(page).getByText('The build is green.'));
   await page.keyboard.press('End');
   await page.keyboard.type(' Typed.');
   await actions(page).click();
@@ -512,7 +513,7 @@ test('with the question switched off a document is deleted from the bar at once'
 test('a document that is renamed from elsewhere has its new name on the page that has it open, and what is typed there is kept and saved on the new revision', async ({ page }) => {
   const shelf = new Shelf();
   await openDocument(page, shelf);
-  await editorOf(page).getByText('The build is green.').click();
+  await clickIntoText(editorOf(page).getByText('The build is green.'));
   await page.keyboard.press('End');
   await page.keyboard.type(' Typed.');
   const revision = shelf.renameElsewhere(PLAN.id, 'elsewhere.md');
@@ -530,7 +531,7 @@ test('a document that is renamed from elsewhere has its new name on the page tha
 test('a document that is deleted from elsewhere says so on the page that has it open, which keeps the text and sends nothing more', async ({ page }) => {
   const shelf = new Shelf();
   await openDocument(page, shelf);
-  await editorOf(page).getByText('The build is green.').click();
+  await clickIntoText(editorOf(page).getByText('The build is green.'));
   await page.keyboard.press('End');
   await page.keyboard.type(' Typed.');
   shelf.deleteElsewhere(PLAN.id);
@@ -554,7 +555,7 @@ test('the text of a document deleted from elsewhere is saved as a new document w
   const { made } = await portal(page, shelf);
   await page.goto(`/x/${NAME}/documents?folder=${FOLDER}&doc=${PLAN.id}`);
   await expect(page.locator('.pd-state')).toContainText('Saved');
-  await editorOf(page).getByText('The build is green.').click();
+  await clickIntoText(editorOf(page).getByText('The build is green.'));
   await page.keyboard.press('End');
   await page.keyboard.type(' Typed.');
   shelf.deleteElsewhere(PLAN.id);
@@ -573,7 +574,7 @@ test('a save that finds the document gone says so as a deletion does, and Close 
   await openDocument(page, shelf);
   // The stream was down: the page was not told. Its next save finds out.
   shelf.deleteElsewhere(PLAN.id);
-  await editorOf(page).getByText('The build is green.').click();
+  await clickIntoText(editorOf(page).getByText('The build is green.'));
   await page.keyboard.press('End');
   await page.keyboard.type(' Typed.');
   await expect(page.getByRole('alert')).toContainText('This document was deleted. Your text is kept here and is not saved.');
@@ -597,7 +598,7 @@ test('a 404 that is not the server half\'s own, as the portal answers while the 
   const shelf = new Shelf();
   await openDocument(page, shelf);
   shelf.away = true;
-  await editorOf(page).getByText('The build is green.').click();
+  await clickIntoText(editorOf(page).getByText('The build is green.'));
   await page.keyboard.press('End');
   await page.keyboard.type(' Typed while it was away.');
   // The save fails as any failed save does: said, the text kept, tried again at the next change. Not the words for a deleted document.
@@ -624,7 +625,7 @@ test('a 404 on a deletion that is not the server half\'s own is a failure, said 
   await asksNot(page);
   const shelf = new Shelf();
   await openDocument(page, shelf);
-  await editorOf(page).getByText('The build is green.').click();
+  await clickIntoText(editorOf(page).getByText('The build is green.'));
   await page.keyboard.press('End');
   await page.keyboard.type(' Typed.');
   shelf.away = true;

@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { type Locator, type Page } from '@playwright/test';
 import { test, expect, mockPortal, reply, DONE } from '../../../../tests/browser/portal-mock';
+import { clickIntoText } from './caret';
 
 /**
  * A document edited on the Documents page: the extension's browser half
@@ -134,7 +135,7 @@ const restoreThis = async (page: Page, history: Locator) => {
 };
 /** Types at the end of the document's last line. */
 async function typeAtEnd(page: Page, text: string) {
-  await editorOf(page).click();
+  await clickIntoText(editorOf(page));
   await page.keyboard.press('Control+End');
   // The editor learns where the caret went a moment after the browser moved it; keys that act on its own idea of it (Enter) must not come first.
   await page.waitForTimeout(100);
