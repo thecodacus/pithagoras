@@ -138,7 +138,10 @@ test('a switch the portal did not save snaps back, and says why', async ({ page 
   await page.getByRole('button', { name: 'Tools for demo' }).click();
   await dialog(page).getByRole('button', { name: /pi-todo/ }).click();
   const todo = dialog(page).getByRole('checkbox', { name: 'todo' });
-  await todo.uncheck();
+  await expect(todo).toBeChecked();
+  // A click, not uncheck(): uncheck() looks at the box once more after its click, and the
+  // refusal can be back and the box checked again by then, which is what this test wants.
+  await todo.click();
   await expect(dialog(page).getByRole('alert')).toContainText('That switch was not saved: The settings file is read-only');
   await expect(todo).toBeChecked();
 });
