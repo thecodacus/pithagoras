@@ -632,6 +632,27 @@ test("lastAnswer says where the last run of a chat the package made stands, from
   assert.deepEqual(helper.chats.lastAnswer(child.id), { status: "done", answer: "The answer is 42." });
 });
 
+test("lastAnswer says a run that failed is an error, with what went wrong: a model that answered with one, or a run the portal saw fail; a good message after an error clears it", async () => {
+  const { appendEvent } = await import("../dist/db.js");
+  const started = helper.chats.start({ folder: project("site"), title: "Fails", listed: false, unattended: true });
+  // A run as the portal stores it, written here: the stub model has no way to answer with an error.
+  const run = (...events) => {
+    appendEvent(started.id, "portal_status", { status: "running" });
+    for (const [type, payload] of events) appendEvent(started.id, type, payload);
+  };
+  const said = (text) => ["message_end", { message: { role: "assistant", content: [{ type: "text", text }], stopReason: "stop" } }];
+  const failed = (errorMessage) => ["message_end", { message: { role: "assistant", content: [], stopReason: "error", errorMessage } }];
+
+  run(said("Half way."), failed("The model is gone"), ["portal_status", { status: "idle" }]);
+  assert.deepEqual(helper.chats.lastAnswer(started.id), { status: "error", answer: "Half way.", error: "The model is gone" });
+  run(failed("Overloaded"), said("Done after all."), ["portal_status", { status: "idle" }]);
+  assert.deepEqual(helper.chats.lastAnswer(started.id), { status: "done", answer: "Done after all." }, "a later good message clears the error");
+  run(failed("Overloaded"), ["portal_status", { status: "error", error: "pi exited" }]);
+  assert.deepEqual(helper.chats.lastAnswer(started.id), { status: "error", answer: "", error: "pi exited" });
+  run(failed("Overloaded"), ["portal_status", { status: "error" }]);
+  assert.deepEqual(helper.chats.lastAnswer(started.id), { status: "error", answer: "", error: "Overloaded" }, "with no words of its own, what the model said");
+});
+
 test("lastAnswer says a chat is marked while the guard holds it so, also with no pi running for it, until the person trusts what was flagged; a child's marks its parent", async () => {
   const { flaggedResult } = await import("../dist/pi/guard.js");
   const { trustResult } = await import("../dist/db.js");
