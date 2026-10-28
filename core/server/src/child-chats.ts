@@ -1,7 +1,12 @@
 import { nanoid } from "nanoid";
+import { agentHome } from "./agent-home.js";
+import { listAgents } from "./agents.js";
 import { STANDARD } from "./chat-modes.js";
 import { createSession, getSession, modeOf, modesFor, parseToolsOff, type SessionRow } from "./db.js";
-import { cleanTitle } from "./projects.js";
+import { EXECUTOR_KIND } from "./executor-kind.js";
+import { cleanTitle, listProjects } from "./projects.js";
+import { baseDir } from "./workspace-files.js";
+import { workspaceRoot } from "./workspaces.js";
 
 /**
  * Child chats: a chat a server half makes for a chat (`chats.create`, server.d.ts), to give part of that chat's work
@@ -27,6 +32,14 @@ export interface ChildChatOptions {
   title: string;
   mode?: string;
   model?: { provider: string; id: string };
+  listed?: boolean;
+  unattended?: true;
+}
+
+/** What a server half asks of a chat of its own in a folder: see `chats.start` in server.d.ts. */
+export interface PackageChatOptions {
+  folder: string;
+  title: string;
   listed?: boolean;
   unattended?: true;
 }
@@ -108,6 +121,64 @@ export function newChildChat(options: unknown, creator: string): SessionRow {
     thinking_level: fromMode.thinkingLevel ?? parent.thinking_level,
     tools_off: left.length ? [...new Set([...parseToolsOff(parent.tools_off), ...left])].sort().join("\n") : parent.tools_off,
     tools_on: left.length ? parseToolsOff(parent.tools_on).filter((name) => !left.includes(name)).join("\n") : parent.tools_on,
+  });
+  return getSession(id)!;
+}
+
+/**
+ * The folder of an agent or a project that `folder` is, by where it really leads, as the chats there store it: an
+ * agent's home as its agent names it, a project as the folder directly under the workspace root. Undefined for any
+ * other folder, one inside them included: a task chat of the person's own works in one of these.
+ */
+function agentOrProjectFolder(folder: string): string | undefined {
+  let real: string;
+  try {
+    real = baseDir(folder);
+  } catch {
+    return undefined;
+  }
+  const leads = (dir: string) => {
+    try {
+      return baseDir(dir) === real;
+    } catch {
+      return false;
+    }
+  };
+  const agent = listAgents().find((one) => leads(one.home));
+  if (agent) return agentHome(agent.home);
+  try {
+    return listProjects(workspaceRoot()).find((project) => leads(project.path))?.path;
+  } catch {
+    // No workspace root yet: no projects.
+    return undefined;
+  }
+}
+
+/**
+ * Makes a chat of an agent's or a project's folder for the package `creator`, and returns its row: a task chat with no
+ * parent, in the primary role, in Standard mode on the default model, with the tools a chat started there has. It is
+ * the package's as a child is (it alone prompts, stops or removes it), and goes with the folder's chats when the
+ * project or the agent is deleted. Throws a TypeError for a request that cannot be one, and says why.
+ */
+export function newPackageChat(options: unknown, creator: string): SessionRow {
+  const asked = (options ?? {}) as Partial<Record<keyof PackageChatOptions, unknown>>;
+  if (!text(asked.folder)) throw new TypeError("A chat is started in a folder: an agent's or a project's, as folders.list() gives it");
+  const workspace = agentOrProjectFolder(asked.folder);
+  if (!workspace) throw new TypeError(`${asked.folder} is not the folder of an agent or a project`);
+  const title = cleanTitle(asked.title);
+  if (!title) throw new TypeError("A chat needs a title");
+  if (asked.listed !== undefined && typeof asked.listed !== "boolean") throw new TypeError("listed is true or false");
+  if (asked.unattended !== undefined && asked.unattended !== true) throw new TypeError("unattended is true, or left out");
+  const id = nanoid(12);
+  createSession({
+    id,
+    title,
+    workspace,
+    executor: EXECUTOR_KIND,
+    kind: "task",
+    listed: asked.listed === false ? 0 : 1,
+    creator,
+    unattended: asked.unattended === true ? 1 : 0,
   });
   return getSession(id)!;
 }

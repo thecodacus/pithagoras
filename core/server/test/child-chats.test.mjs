@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fakeModel } from "./fake-model.mjs";
 import { inProcessHome } from "./server-harness.mjs";
@@ -236,8 +236,8 @@ test("only the package that made a child prompts, stops or removes it, and none 
   await assert.rejects(other.chats.remove(child.id), /made by another package/);
   await assert.rejects(other.chats.prompt(child.id, "Answer"), /made by another package/);
   await assert.rejects(other.chats.abort(child.id), /made by another package/);
-  await assert.rejects(helper.chats.prompt(parent, "Answer"), /is no child chat/);
-  await assert.rejects(helper.chats.remove(parent), /is no child chat/);
+  await assert.rejects(helper.chats.prompt(parent, "Answer"), /is no chat a package made/);
+  await assert.rejects(helper.chats.remove(parent), /is no chat a package made/);
   assert.ok(getSession(child.id), "still there");
   globalThis.heard.length = 0;
   await helper.chats.remove(child.id);
@@ -492,4 +492,69 @@ test("an unattended child asks nobody, wherever its parent is: no ask_question, 
   assert.deepEqual(await answered(helper.chats.prompt(child.id, "Confirm it")), { status: "done", answer: "It said false." });
   await sessions.stop(child.id);
   assert.deepEqual(await answered(helper.chats.prompt(child.id, "Confirm it again")), { status: "done", answer: "It said false." }, "a pi started for it again is started the same way");
+});
+
+/** A project's folder, made where projects are, by its real path as folders.list() gives it. */
+function project(name) {
+  const dir = path.join(process.env.WORKSPACE_ROOT, name);
+  mkdirSync(dir, { recursive: true });
+  return realpathSync(dir);
+}
+
+test("a server half starts a chat of a project's or an agent's folder: a task chat of its own, in the primary role, on the defaults, listed or not", async () => {
+  const { defaultAgent } = await import("../dist/agents.js");
+  const site = project("site");
+  const started = helper.chats.start({ folder: site, title: "  Answer the\ncomment  " });
+  assert.deepEqual(started, { id: started.id, title: "Answer the comment", workspace: path.join(process.env.WORKSPACE_ROOT, "site"), status: "idle", listed: true });
+  const row = getSession(started.id);
+  assert.deepEqual(
+    [row.kind, row.parent_id, row.role, row.last_person_key, row.creator, row.mode, row.provider, row.tools_off, row.tools_on, row.unattended],
+    ["task", null, "primary", null, "helper", null, null, "", "", 0],
+  );
+  const ids = (rows) => rows.map((one) => one.id);
+  assert.ok(ids(helper.chats.list()).includes(started.id), "listed, as a chat of its own");
+
+  mkdirSync(defaultAgent().home, { recursive: true });
+  const home = helper.chats.start({ folder: realpathSync(defaultAgent().home), title: "Nobody looks", listed: false, unattended: true });
+  assert.deepEqual([home.workspace, home.listed, home.unattended], [defaultAgent().home, false, true]);
+  assert.ok(!ids(listChatSessions()).includes(home.id) && !ids(listSessions()).includes(home.id) && !ids(helper.chats.list()).includes(home.id), "an unlisted one is in no list");
+  assert.deepEqual(helper.chats.get(home.id), home, "and found by its id");
+  const tools = (await sessions.getTools(home.id)).tools.map((tool) => tool.name);
+  assert.ok(!tools.includes("ask_question"), "nobody attends it");
+  // A chat of an agent's home has the routine tools (see hasRoutineTools); one nobody attends has none, as a routine run.
+  const attended = helper.chats.start({ folder: defaultAgent().home, title: "Somebody looks" });
+  assert.deepEqual((await helper.chats.prompt(attended.id, "Answer please")).status, "done");
+  assert.ok((await sessions.getTools(attended.id)).tools.some((tool) => tool.name === "routine_create"), "an attended chat of the agent's home has them");
+  assert.deepEqual((await helper.chats.prompt(home.id, "Answer please")).status, "done");
+  assert.ok(!(await sessions.getTools(home.id)).tools.some((tool) => tool.name === "routine_create"), "one nobody attends does not");
+});
+
+test("a chat is started only in an agent's or a project's folder, with a title", () => {
+  const site = project("site");
+  mkdirSync(path.join(site, "docs"), { recursive: true });
+  const before = getDb().prepare("SELECT COUNT(*) AS n FROM sessions").get().n;
+  assert.throws(() => helper.chats.start({ folder: path.join(site, "docs"), title: "Inside" }), /not the folder of an agent or a project/);
+  assert.throws(() => helper.chats.start({ folder: process.env.WORKSPACE_ROOT, title: "The root" }), /not the folder of an agent or a project/);
+  assert.throws(() => helper.chats.start({ folder: path.join(process.env.WORKSPACE_ROOT, "nowhere"), title: "Lost" }), /not the folder of an agent or a project/);
+  assert.throws(() => helper.chats.start({ title: "No folder" }), /started in a folder/);
+  assert.throws(() => helper.chats.start({ folder: site, title: " " }), /needs a title/);
+  assert.throws(() => helper.chats.start({ folder: site, title: "Odd", unattended: "yes" }), /unattended is true/);
+  assert.equal(getDb().prepare("SELECT COUNT(*) AS n FROM sessions").get().n, before, "nothing was made");
+});
+
+test("a started chat is run, stopped and removed by the package that started it alone, as the primary user", async () => {
+  const started = helper.chats.start({ folder: project("site"), title: "Runs" });
+  assert.deepEqual(await helper.chats.prompt(started.id, "Answer the question"), { status: "done", answer: "The answer is 42." });
+  assert.equal(sessions.speakerRole(started.id), "primary");
+  await assert.rejects(other.chats.prompt(started.id, "Answer"), /made by another package/);
+  await assert.rejects(other.chats.remove(started.id), /made by another package/);
+  const run = helper.chats.prompt(started.id, "Hold this");
+  await until(() => held.length === 1, "its run to be held at the model");
+  await helper.chats.abort(started.id);
+  assert.equal((await run).status, "stopped");
+  letGo();
+  globalThis.heard.length = 0;
+  await helper.chats.remove(started.id);
+  assert.equal(getSession(started.id), undefined);
+  assert.ok(globalThis.heard.includes(`helper ${started.id}`) && globalThis.heard.includes(`other ${started.id}`), "every half hears it was deleted");
 });

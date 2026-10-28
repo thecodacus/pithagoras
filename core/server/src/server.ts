@@ -762,7 +762,8 @@ app.delete("/api/projects/:name", async (req, res) => {
       const unsaved = await unsavedWork(project.path);
       if (unsaved && holdsWork(unsaved)) return res.status(409).json(unsavedRefusal(unsaved));
     }
-    const chats = withoutChildren(workingIn(project.path, listSessions()));
+    // The chats a server half keeps out of the lists too: they work in the folder as the others do.
+    const chats = withoutChildren(workingIn(project.path, listSessions({ unlisted: true })));
     if (chats.some((s) => sessions.isBusy(s.id) || sessions.backgroundWork(s.id))) {
       return res.status(409).json({ error: "A chat in this project is still working. Stop it first." });
     }
@@ -832,7 +833,7 @@ app.delete("/api/agents/:id", async (req, res) => {
     const agent = deletable(req.params.id);
     // Its chats and its conversations — those started on the Agent page and
     // through channels — and the one its heartbeat looks around in.
-    const chats = withoutChildren(workingIn(agent.home, [...listSessions(), ...listAgentSessions(), ...listHeartbeatSessions()]));
+    const chats = withoutChildren(workingIn(agent.home, [...listSessions({ unlisted: true }), ...listAgentSessions(), ...listHeartbeatSessions()]));
     if (chats.some((s) => sessions.isBusy(s.id) || sessions.backgroundWork(s.id))) {
       return res.status(409).json({ error: "A chat with this agent is still working. Stop it first." });
     }

@@ -982,7 +982,7 @@ restart the portal.
 | `tools.exceptions(names)` | [Who has its tools](#who-has-its-tools): the chats and routines where those tools are not what the default says |
 | `chats.offers(chatId, tool)` | How the chat's model is offered a tool now: `"direct"`, `"lazy"` (through the `tools` tool) or nothing (switched off, out of reach, or the chat's pi not running here). In a chat whose mode works through the code tool ([Code mode](/guide/sessions#modes)), `"direct"` means that a script calls the tool by its name, with no streamed arguments of its own |
 | `chats.hold(chatId)` | Keeps the chat's pi from being let go for being idle, or reloaded, while work goes on; returns what lets it go |
-| `chats.create(options)`, `chats.children(parent)`, `chats.prompt(chatId, message, options?)`, `chats.abort(chatId)`, `chats.remove(chatId)` | [Child chats](#child-chats): a chat of a chat, to give part of its work to, run until it answers, stopped and deleted |
+| `chats.create(options)`, `chats.children(parent)`, `chats.start(options)`, `chats.prompt(chatId, message, options?)`, `chats.abort(chatId)`, `chats.remove(chatId)` | [Child chats](#child-chats): a chat of a chat, to give part of its work to, or a chat of an agent's or a project's folder; run until it answers, stopped and deleted |
 | `sandbox.run(chatId, argv, options?)`, `sandbox.spawnAs(chatId)`, `sandbox.on()` | [Running things as the chat's agent](#running-things-as-the-chat-s-agent) |
 | `sandbox.personEnv()` | The portal's environment for a process the person starts, such as a shell of their own: without the mark the agent's processes carry, so it is not listed as a job the agent left running |
 | `files.inside(base, rel)` | A path checked to be inside a folder |
@@ -2379,8 +2379,9 @@ portal.chats.extend((pi, chat) => {
   works, a message waits for the run to end, as the person's does; with
   `steer`, it is taken after the step the run is on, and both prompts resolve
   as that run ends. A run that fails resolves as an error, and so does a
-  command the child's speaker may not run; `prompt` throws only for a chat that
-  is not a child the package made, or a message with no words. A command the
+  command the child's speaker may not run; `prompt` throws only for a chat the
+  package did not make (a child, or one it [started](#a-chat-of-a-folder)), or a
+  message with no words. A command the
   speaker may run (`/compact`) is no message of the chat: `prompt` resolves as
   `done` at once, with no answer, when it started no run, or when the run it
   started ends.
@@ -2402,7 +2403,27 @@ portal.chats.extend((pi, chat) => {
   names the child on its [protocol](/guide/extensions#the-subagent-protocol)
   start (`chat`).
 - **In a process of its own** (`"isolated": true`), `create` is answered at
-  once (`children` too) and the others later, as the other calls are.
+  once (`children` and `start` too) and the others later, as the other calls are.
+
+#### A chat of a folder
+
+Work of the package's own that belongs to no chat of the person's, such as
+the answer to a comment in a document, gets a chat of its own:
+**`start({ folder, title, listed?, unattended? })`** makes a task chat of an
+agent's or a project's folder (`folder` is its path as `folders.list()` gives
+it), with no parent, as one the person starts there with "+": in the primary
+role, in Standard mode on the default model, with the tools a new chat there
+has. It throws for a folder that is not an agent's or a project's (one inside
+them included) and for no title. `listed` and `unattended` are as for a child.
+It is the package's as a child is: only it sends it messages (`prompt`, as the
+primary user), stops it (`abort`) and deletes it (`remove`). Deleting the
+project or the agent deletes it with the folder's other chats, listed or not.
+
+```js
+const [folder] = portal.folders.list().filter((one) => one.kind === "agent");
+const chat = portal.chats.start({ folder: folder.path, title: "A comment on report.docx", listed: false, unattended: true });
+const run = await portal.chats.prompt(chat.id, "Answer this comment: …");
+```
 
 ## Panels and commands
 

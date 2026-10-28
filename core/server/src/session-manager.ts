@@ -102,7 +102,7 @@ import {
   childSessions,
   deleteSession,
 } from "./db.js";
-import { newChildChat, type ChildRun } from "./child-chats.js";
+import { newChildChat, newPackageChat, type ChildRun } from "./child-chats.js";
 
 /**
  * Thinking markers that escape into the answer.
@@ -3321,6 +3321,11 @@ class SessionManager extends EventEmitter {
     return newChildChat(options, creator);
   }
 
+  /** Makes a chat of an agent's or a project's folder for the server half of `creator`: see newPackageChat. */
+  startChat(options: unknown, creator: string): SessionRow {
+    return newPackageChat(options, creator);
+  }
+
   /**
    * A child keeps no switch its parent has taken away since it was made: a tool the person switched off in the parent
    * is off in the child before its next message (and in its pi, if that is up), and one the parent no longer has
@@ -3347,26 +3352,29 @@ class SessionManager extends EventEmitter {
   }
 
   /**
-   * Sends a child chat a message and waits for the run that takes it in to end: how it ended, and the last thing it
-   * said. Mid-run, `steer` takes it in after the step the run is on; without, it waits for the run to end, as a
-   * person's message does. It is sent as the person its parent last heard from: a child is held to the role and the
-   * person of the chat it works for. A run that fails, or a message refused, resolves as an error: it never throws
-   * for the run's sake.
+   * Sends a chat a server half made (a child, or one it started in a folder) a message and waits for the run that
+   * takes it in to end: how it ended, and the last thing it said. Mid-run, `steer` takes it in after the step the run
+   * is on; without, it waits for the run to end, as a person's message does. A child's is sent as the person its
+   * parent last heard from: a child is held to the role and the person of the chat it works for. A chat with no parent
+   * is sent as its own role, which is the primary user's. A run that fails, or a message refused, resolves as an
+   * error: it never throws for the run's sake.
    */
   async runChild(childId: string, message: string, options: { steer?: boolean } = {}): Promise<ChildRun> {
     const child = getSession(childId);
     const parent = child?.parent_id ? getSession(child.parent_id) : undefined;
-    if (!child || !parent) throw new Error(`There is no child chat ${childId}`);
-    const person = this.speaker.get(parent.id);
-    if (person) this.setSpeaker(childId, person);
-    const role = lower(child.role, this.speakerRole(parent.id));
-    if (role !== child.role || parent.last_person_key !== child.last_person_key) {
-      updateSession(childId, { role, last_person_key: parent.last_person_key });
-      // Its context files are picked by its role as its pi starts: one that was up has to start again. Not mid-run,
-      // where the role of the speaker set above holds every call.
-      if (role !== child.role && !this.isBusy(childId)) await this.stop(childId);
+    if (!child || (child.parent_id && !parent)) throw new Error(`There is no chat ${childId}`);
+    if (parent) {
+      const person = this.speaker.get(parent.id);
+      if (person) this.setSpeaker(childId, person);
+      const role = lower(child.role, this.speakerRole(parent.id));
+      if (role !== child.role || parent.last_person_key !== child.last_person_key) {
+        updateSession(childId, { role, last_person_key: parent.last_person_key });
+        // Its context files are picked by its role as its pi starts: one that was up has to start again. Not mid-run,
+        // where the role of the speaker set above holds every call.
+        if (role !== child.role && !this.isBusy(childId)) await this.stop(childId);
+      }
+      await this.holdToParentsTools(childId, parent.id);
     }
-    await this.holdToParentsTools(childId, parent.id);
 
     let end!: (run: ChildRun) => void;
     const ended = new Promise<ChildRun>((resolve) => (end = resolve));
@@ -3379,7 +3387,7 @@ class SessionManager extends EventEmitter {
       // What a child that was marked said is what a mark on it carried: the chat it worked for takes it in marked too, as a
       // routine's report does, or its own words would be a way round the rules that hold a chat after outside content.
       const marked = sessionTainted(childId);
-      if (marked) taintSession(parent.id);
+      if (marked && parent) taintSession(parent.id);
       end({ status, answer, ...(marked ? { marked: true as const } : {}), ...(error ? { error } : {}) });
     };
     const key = `session:${childId}`;
@@ -3491,6 +3499,7 @@ export const sessions = new SessionManager();
 setChatBridge({
   tell: (chatId, extension, data) => sessions.tellExtension(chatId, extension, data),
   create: (options, creator) => sessions.createChild(options, creator),
+  start: (options, creator) => sessions.startChat(options, creator),
   run: (chatId, message, options) => sessions.runChild(chatId, message, options),
   abort: (chatId) => sessions.abort(chatId),
   remove: (chatId) => sessions.deleteChat(chatId),

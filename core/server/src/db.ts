@@ -90,9 +90,12 @@ export interface SessionRow {
    * One level only: a child has no children.
    */
   parent_id: string | null;
-  /** 0 for a child kept out of the chat lists, found only by its id; 1 for every other chat. */
+  /** 0 for a chat a server half kept out of the chat lists, found only by its id; 1 for every other chat. */
   listed: number;
-  /** The package whose server half made this child, which alone may prompt, stop or remove it; null for any other chat. */
+  /**
+   * The package whose server half made this chat (a child, `chats.create`, or one of a folder, `chats.start`), which
+   * alone may prompt, stop or remove it; null for any other chat.
+   */
   creator: string | null;
   /**
    * 1 for a chat a server half made for nobody to attend (`unattended` in server.d.ts): no ask_question, every dialog
@@ -1399,14 +1402,17 @@ export function createSession(row: {
     });
 }
 
-/** A child chat that is kept out of the lists: it is found by its id alone. */
-const UNLISTED = "parent_id IS NOT NULL AND listed = 0";
+/** A chat a server half keeps out of the lists (a child, or one it started in a folder): it is found by its id alone. */
+const UNLISTED = "listed = 0";
 
-/** The sessions you create yourself, and the children of chats that are listed. Agent sessions have their own tab. */
-export function listSessions(): SessionRow[] {
+/**
+ * The sessions you create yourself, and the chats server halves made that are listed. Agent sessions have their own
+ * tab. `unlisted` adds those kept out of the lists, for what is done to every chat of a folder (deleting its project).
+ */
+export function listSessions(options: { unlisted?: boolean } = {}): SessionRow[] {
   // Pinned first, then most recently touched — the order the sidebar shows.
   return getDb()
-    .prepare(`SELECT * FROM sessions WHERE kind = 'task' AND NOT (${UNLISTED}) ORDER BY pinned DESC, updated_at DESC`)
+    .prepare(`SELECT * FROM sessions WHERE kind = 'task'${options.unlisted ? "" : ` AND NOT (${UNLISTED})`} ORDER BY pinned DESC, updated_at DESC`)
     .all() as SessionRow[];
 }
 

@@ -23,6 +23,11 @@ mkdirSync(site, { recursive: true });
 createSession({ id: "site-chat", title: "Build the site", workspace: site, executor: "host" });
 createSession({ id: "site-child", title: "Check the links", workspace: site, executor: "host", parent_id: "site-chat", listed: 1, creator: "helper" });
 createSession({ id: "site-other", title: "Fix the logo", workspace: site, executor: "host" });
+// A project with a chat of its own and one a server half started there unlisted (chats.start), with no parent.
+const blog = path.join(workspace, "blog");
+mkdirSync(blog, { recursive: true });
+createSession({ id: "blog-chat", title: "Write a post", workspace: blog, executor: "host" });
+createSession({ id: "blog-started", title: "Answer a comment", workspace: blog, executor: "host", listed: 0, creator: "helper", unattended: 1 });
 
 let base;
 before(async () => {
@@ -91,4 +96,16 @@ test("a project counts its chats without their children, and deleting it deletes
   const deleted = await call("DELETE", "/api/projects/site?discard=1");
   assert.deepEqual([deleted.status, deleted.body.sessionsDeleted], [200, 2]);
   for (const id of ["site-chat", "site-child", "site-other"]) assert.equal((await call("GET", `/api/sessions/${id}`)).status, 404, id);
+});
+
+test("a chat a server half started unlisted is in no list, is found by its id, and is deleted with its project", async () => {
+  const listed = (await call("GET", "/api/sessions")).body.sessions.map((s) => s.id);
+  assert.ok(listed.includes("blog-chat") && !listed.includes("blog-started"));
+  const started = await call("GET", "/api/sessions/blog-started");
+  assert.equal(started.status, 200);
+  assert.deepEqual([started.body.parent, started.body.creator, started.body.unattended], [undefined, undefined, undefined], "what is stored for it is the portal's");
+  assert.equal((await call("GET", "/api/projects/blog")).body.sessions, 1, "the project counts the chats it lists");
+  const deleted = await call("DELETE", "/api/projects/blog?discard=1");
+  assert.equal(deleted.status, 200);
+  for (const id of ["blog-chat", "blog-started"]) assert.equal((await call("GET", `/api/sessions/${id}`)).status, 404, id);
 });

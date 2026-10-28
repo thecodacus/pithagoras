@@ -46,7 +46,10 @@ export interface Chat {
    * of its own.
    */
   parent?: string;
-  /** A child chat's: whether it shows in the chat lists, under its parent. One that does not is found by its id alone. */
+  /**
+   * A chat a server half made's (`chats.create`, `chats.start`): whether it shows in the chat lists, a child under its
+   * parent. One that does not is found by its id alone.
+   */
   listed?: boolean;
   /** Made for nobody to attend (`ChildChatOptions.unattended`). */
   unattended?: true;
@@ -75,6 +78,17 @@ export interface ChildChatOptions {
    * guard holds after a suspected prompt injection is refused rather than put to the person. The agent gets each
    * refusal as the tool's result and goes on. Kept with the chat, so it holds after the portal restarts.
    */
+  unattended?: true;
+}
+
+/** What a chat a package starts in a folder is made with: see `chats.start`. */
+export interface StartChatOptions {
+  /** The folder of an agent or a project, by its path as `folders.list()` gives it (where it really is). */
+  folder: string;
+  title: string;
+  /** Whether it shows in the chat lists (the default), or is found by its id alone. */
+  listed?: boolean;
+  /** A chat nobody attends: see `ChildChatOptions.unattended`. */
   unattended?: true;
 }
 
@@ -831,24 +845,35 @@ export interface ServerPortal {
      */
     create(options: ChildChatOptions): Chat;
     /**
+     * Starts a chat of an agent's or a project's folder for this package: a task chat with no parent, as one the person
+     * starts there with "+", in the primary role, in Standard mode on the default model, with the tools a new chat
+     * there has. For work of the package's own that belongs to no chat of the person's, such as the answer to a
+     * comment in a document. It is this package's as a child chat is: only it prompts, stops or removes it
+     * (`prompt`, `abort`, `remove`), and a message it sends is the primary user's. It goes with the folder's other chats
+     * when the project or the agent is deleted, listed or not, and each delete is heard as `deleted`. Throws for
+     * options that cannot be one: a folder that is not an agent's or a project's (one inside them included), or no
+     * title.
+     */
+    start(options: StartChatOptions): Chat;
+    /**
      * The child chats of a chat that this package made, listed or not, oldest first: `chats.list` leaves the unlisted
      * out, so this is how a half finds the ones it made once it has lost its own record of them, to stop or remove them.
      */
     children(parent: string): Chat[];
     /**
-     * Sends a child chat this package made a message, and resolves once the run that takes it in has ended. A child
-     * that is working takes it after the run it is on, as a person's message does; with `steer`, after the step it is
-     * on. It is sent as the person its parent last heard from. A run that fails resolves as an `error`, and so does a
+     * Sends a chat this package made (a child, or one it started) a message, and resolves once the run that takes it in
+     * has ended. A chat that is working takes it after the run it is on, as a person's message does; with `steer`, after
+     * the step it is on. A child's is sent as the person its parent last heard from, a started chat's as the primary user. A run that fails resolves as an `error`, and so does a
      * command its speaker may not run; a command it may run is no message of the chat, and resolves as `done` at
-     * once when it started no run (with no answer), or when the run it started ends. This throws only for a chat that is not a child
-     * this package made, or a message with no words.
+     * once when it started no run (with no answer), or when the run it started ends. This throws only for a chat this package
+     * did not make, or a message with no words.
      */
     prompt(chatId: string, message: string, options?: { steer?: boolean }): Promise<ChildRun>;
-    /** Stops the run of a child chat this package made, as the person's Stop does: its `prompt` resolves as `stopped`. */
+    /** Stops the run of a chat this package made, as the person's Stop does: its `prompt` resolves as `stopped`. */
     abort(chatId: string): Promise<void>;
     /**
-     * Deletes a child chat this package made, stopping its run first: its transcript and files go, and `deleted` is
-     * heard once. Throws while the child's parent is being deleted, which takes the child with it.
+     * Deletes a chat this package made (a child, or one it started), stopping its run first: its transcript and files
+     * go, and `deleted` is heard once. Throws while a child's parent is being deleted, which takes the child with it.
      */
     remove(chatId: string): Promise<void>;
   };
