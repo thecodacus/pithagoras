@@ -600,8 +600,8 @@ function portalFor(ext: Running): ServerPortal {
         ext.removed.push(handler);
       },
       label: (folder) => {
-        const { name, home } = folderLabel(folder);
-        return { name, ...(home ? { home: true as const } : {}) };
+        const { name, home, newChats } = folderLabel(folder);
+        return { name, ...(home ? { home: true as const } : {}), ...(newChats ? { newChats: true as const } : {}) };
       },
     },
     handoffs: {

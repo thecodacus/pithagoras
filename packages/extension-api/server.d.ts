@@ -207,8 +207,18 @@ export interface AgentFolder {
   /** Its agent's name for an agent's home, else its place under the workspace root. */
   name: string;
   kind: "agent" | "project" | "chat";
-  /** The first agent's home, which the sidebar calls Home. */
+  /**
+   * The first agent's home: the default agent, the one a chat, a channel or a routine goes to when none is named, and
+   * whose user the sandbox runs a chat as that is in no agent's home. It cannot be deleted, so one folder of `list` has
+   * it as long as its home is there.
+   */
   home?: true;
+  /**
+   * The home of the agent the New button starts the person's chats with: the first agent's (`home`) unless the person
+   * picked another on its Agent page ("New chats start here"). Where something new of the person's goes that belongs to
+   * no chat, such as a document made from a tab; the sidebar's house icon marks it.
+   */
+  newChats?: true;
 }
 
 /**
@@ -598,7 +608,11 @@ export interface ServerPortal {
    * through, and hears of when one goes.
    */
   folders: {
-    /** Every agent's home, every project, and every folder a chat of any kind works in, each once, with what the person calls it. One that is gone is not listed. */
+    /**
+     * Every agent's home, every project, and every folder a chat of any kind works in, each once, with what the person
+     * calls it. One that is gone is not listed. The default agent's home is the one with `home`, the home of the agent
+     * New starts chats with the one with `newChats` (see AgentFolder).
+     */
     list(): AgentFolder[];
     /** Whether a folder, by its real path, is one the agents may work in: an agent's home, or one inside the workspace root. Only from one of these is what the agents made there to be served. */
     allowed(folder: string): boolean;
@@ -611,10 +625,11 @@ export interface ServerPortal {
     on(event: "removed", handler: (folder: string) => void): void;
     /**
      * What the person calls a folder, by its real path, whether or not `list` has it now: its agent's name for an
-     * agent's home (`home` for the first), its place under the workspace root for a folder inside it, its last part
-     * otherwise. For a folder something was kept for after the last chat in it went.
+     * agent's home (`home` for the first, `newChats` for the one New starts chats with, as in `AgentFolder`), its place
+     * under the workspace root for a folder inside it, its last part otherwise. For a folder something was kept for
+     * after the last chat in it went.
      */
-    label(folder: string): { name: string; home?: true };
+    label(folder: string): { name: string; home?: true; newChats?: true };
   };
   /**
    * What an earlier version of the portal kept for something it did itself and an extension now does: when a

@@ -1497,18 +1497,37 @@ portal.router.get("/chats/:id/picture", (req, res) => {
 ### The folders the agents work in
 
 `folders.list()` is every folder the agents work in, each once by its real
-path: every agent's home (`kind: "agent"`, named after its agent, `home` for
-the first, which the sidebar calls Home), every project (`kind: "project"`,
-named by its place under the workspace root), and every other folder a chat
-of any kind works in (`kind: "chat"`). A gallery of what the agents made looks
-through these. `folders.allowed(path)` says whether a folder, by its real
-path, is one of the kind they work in, the only kind to serve what they made
-from.
+path: every agent's home (`kind: "agent"`, named after its agent), every
+project (`kind: "project"`, named by its place under the workspace root), and
+every other folder a chat of any kind works in (`kind: "chat"`). A gallery of
+what the agents made looks through these. `folders.allowed(path)` says whether
+a folder, by its real path, is one of the kind they work in, the only kind to
+serve what they made from.
+
+Two agents' homes are marked:
+
+- `home: true` is the default agent's home: the first agent, which cannot be
+  deleted, and the one a chat, a channel or a routine goes to when none is
+  named (a chat that is in no agent's home runs as its user when the
+  [sandbox](/guide/sandbox) is on).
+- `newChats: true` is the home of the agent the **New** button starts the
+  person's chats with: the first one, unless the person turned on **New chats
+  start here** on another agent's page. The sidebar's house icon marks it.
+  Something new of the person's that belongs to no chat, such as a document
+  made from a tab of the extension's, goes here, as a new chat would.
+
+```js
+const folders = portal.folders.list();
+const where = folders.find((one) => one.newChats) ?? folders.find((one) => one.home);
+```
+
+The second find is for the moment the home is out of reach (a home that is not
+there is not listed).
 
 `folders.label(folder)` is what the person calls a folder, by its real path,
-whether or not `list` has it now: `{ name, home? }`, its agent's name for an
-agent's home (`home` for the first), its place under the workspace root for a
-folder inside it, and its last part otherwise. It is for a folder something
+whether or not `list` has it now: `{ name, home?, newChats? }`, its agent's
+name for an agent's home (with the marks above), its place under the workspace
+root for a folder inside it, and its last part otherwise. It is for a folder something
 was kept for after the last chat in it went: Media's gallery names the folder
 of a deleted chat's pictures so.
 

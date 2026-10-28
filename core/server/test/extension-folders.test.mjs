@@ -98,3 +98,33 @@ test("a server half is told what the person calls a folder, whether a list has i
   assert.equal((await call("DELETE", `/api/projects/${project.body.name}?discard=1`)).status, 200);
   assert.deepEqual(await label(projectFolder), { name: path.basename(project.body.path) });
 });
+
+test("the default agent's home is marked home, and the home of the agent New starts chats with newChats, as the agents say", async () => {
+  const agent = await call("POST", "/api/agents", { name: "Usher" });
+  assert.equal(agent.status, 200, JSON.stringify(agent.body));
+  const label = async (folder) => (await call("GET", `/api/x/folder-watcher/label?folder=${encodeURIComponent(folder)}`)).body;
+  const real = (p) => realpathSync(p);
+  const marked = async (mark) => {
+    const { list } = await folders();
+    return list.filter((one) => one[mark]).map((one) => one.path);
+  };
+  // The agents as the page has them: which one is first, which one New starts chats with.
+  const agents = async () => (await call("GET", "/api/agents")).body.agents;
+  const first = (await agents()).find((one) => one.first);
+  const homeFolder = real(first.home);
+
+  assert.deepEqual(await marked("home"), [homeFolder], "the first agent's home, and only it");
+  assert.deepEqual(await marked("newChats"), [homeFolder], "New starts chats with the first agent unless another is picked");
+  assert.deepEqual(await label(homeFolder), { name: first.name, home: true, newChats: true });
+
+  assert.equal((await call("PUT", `/api/agents/${agent.body.id}/new-chats`, { on: true })).status, 200);
+  assert.equal((await agents()).find((one) => one.newChats).id, agent.body.id);
+  assert.deepEqual(await marked("home"), [homeFolder], "the default agent stays the first");
+  assert.deepEqual(await marked("newChats"), [real(agent.body.home)], "the picked agent's home");
+  assert.deepEqual(await label(real(agent.body.home)), { name: "Usher", newChats: true });
+  assert.deepEqual(await label(homeFolder), { name: first.name, home: true });
+
+  // Its agent deleted, New starts chats with the first agent again, and so says the list.
+  assert.equal((await call("DELETE", `/api/agents/${agent.body.id}`)).status, 200);
+  assert.deepEqual(await marked("newChats"), [homeFolder]);
+});

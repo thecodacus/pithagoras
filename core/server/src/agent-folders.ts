@@ -1,5 +1,5 @@
 import path from "node:path";
-import { agentsRoot, listAgents } from "./agents.js";
+import { agentsRoot, firstAgent, listAgents, newChatAgent } from "./agents.js";
 import { getDb } from "./db.js";
 import { listProjects } from "./projects.js";
 import { isWithinText, pathBelow, realPath } from "./within.js";
@@ -17,18 +17,30 @@ export interface AgentFolder {
   /** What the person calls it: its agent for an agent's home, else its place under the workspace root. */
   name: string;
   kind: "agent" | "project" | "chat";
-  /** The first agent's home, which the sidebar calls Home. */
+  /** The first agent's home: defaultAgent's, the agent a chat, a channel or a routine goes to when none is named. */
   home?: true;
+  /** The home of the agent the New button starts chats with: newChatAgent's, the first agent unless the person picked another. */
+  newChats?: true;
 }
 
-/** What a folder is called to the person: its agent for an agent's home, else its place under the workspace root (a project's name, or the way to a folder in one). `home` marks the first agent's home. */
-export function folderLabel(folder: string): { name: string; home: boolean } {
+/**
+ * What a folder is called to the person: its agent for an agent's home, else its place under the workspace root (a
+ * project's name, or the way to a folder in one). `home` marks the first agent's home and `newChats` the home of the
+ * agent New starts chats with, each found by the function the rest of the portal asks (firstAgent, newChatAgent).
+ */
+export function folderLabel(folder: string): { name: string; home: boolean; newChats: boolean } {
   const agents = listAgents();
   const agent = agents.find((a) => realPath(a.home) === folder);
-  // Named after its agent, as the sidebar names it. The first agent's home stays the one that is Home.
-  if (agent) return { name: agent.name, home: agent === agents[0] };
+  // Named after its agent, as the sidebar names it.
+  if (agent) return { name: agent.name, home: agent.id === firstAgent(agents).id, newChats: agent.id === newChatAgent(agents).id };
   const inRoot = pathBelow(realPath(workspaceRoot()) ?? workspaceRoot(), folder);
-  return { name: inRoot || path.basename(folder), home: false };
+  return { name: inRoot || path.basename(folder), home: false, newChats: false };
+}
+
+/** A folder as list names it, by its real path, with the marks that are true of it only. */
+function entryOf(real: string, kind: AgentFolder["kind"]): AgentFolder {
+  const { name, home, newChats } = folderLabel(real);
+  return { path: real, name, kind, ...(home ? { home: true as const } : {}), ...(newChats ? { newChats: true as const } : {}) };
 }
 
 /**
@@ -62,8 +74,7 @@ export function listFolders(): AgentFolder[] {
       return;
     }
     if (!allowed(real) || found.has(real)) return;
-    const { name, home } = folderLabel(real);
-    found.set(real, { path: real, name, kind, ...(home ? { home: true as const } : {}) });
+    found.set(real, entryOf(real, kind));
   };
   for (const agent of listAgents()) add(agent.home, "agent");
   try {
