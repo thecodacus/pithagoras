@@ -3017,50 +3017,84 @@ when something an extension relies on changes.
 ### Releasing @pithagoras/extension-api
 
 For the maintainers of this repository. The package is released with the
-portal, from the portal's tag:
+portal, in the portal's release, and merging the pull request that raises the
+version is all it takes:
 
 1. In a pull request, raise `version` to the release's in `package.json` and
    `packages/extension-api/package.json`, and in `package-lock.json` its
-   `version` and the entries `""` and `packages/extension-api`, and merge it.
-2. Tag the merged commit `v<version>` and push the tag:
+   `version` and the entries `""` and `packages/extension-api`.
+2. For notes of your own, add them to the same pull request as
+   `.github/release-notes/v<version>.md` (for 0.3.0,
+   `.github/release-notes/v0.3.0.md`). The file is the GitHub release's text as
+   it is, in GitHub's Markdown, so `#123` and `@name` link as they do in a pull
+   request. Without it, GitHub writes the notes from the pull requests merged
+   since the previous `v*` tag.
+3. Merge it.
 
-   ```sh
-   git fetch origin
-   git tag v0.3.0 origin/main
-   git push origin v0.3.0
-   ```
+The merge starts `.github/workflows/publish-extension-api.yml`, **Release** in
+the Actions tab, which:
 
-The tag builds the image (`.github/workflows/docker.yml`) and publishes the
-package (`.github/workflows/publish-extension-api.yml`) with npm's trusted
-publishing: no token, and with provenance. The workflow stops before
-publishing when the tag is not the version in both `package.json` files, and
-`tests/extension-api-package.test.mts` fails while they, or the lock, differ.
-Run by hand, the workflow is run on the tag.
+- tags the merge commit `v<version>`. Where that tag is there already, the run
+  ends and releases nothing, as it does for a merge that edits either
+  `package.json` and leaves the version as it was. It stops before the tag when
+  the two versions differ, and `tests/extension-api-package.test.mts` fails
+  while they, or the lock, differ;
+- builds the image (`.github/workflows/docker.yml`) once the tests a pull
+  request runs have passed, and pushes `ghcr.io/thecodacus/pithagoras:<version>`,
+  `latest` and `sha-<commit>`;
+- publishes the package with npm's trusted publishing: no token, and with
+  provenance. Where npm has the version already, it publishes nothing;
+- makes the GitHub release `v<version>`, marked latest. Where the tag has a
+  release already, published or a draft, it is left as it is.
 
-npm links a trusted publisher only to a package that exists, so the first
-version, 0.2.0, is published by hand, from a clean checkout of the tag `v0.2.0`
-once that release is cut:
+A tag pushed by hand is released the same way, and has to be the version in
+both `package.json` files:
 
 ```sh
-git clone --branch v0.2.0 https://github.com/thecodacus/pithagoras.git
-cd pithagoras
-npm publish --provenance=false -w packages/extension-api
+git fetch origin
+git tag v0.3.0 origin/main
+git push origin v0.3.0
 ```
 
-Provenance is made only in CI. The workflow's own run on `v0.2.0` fails at
-`npm publish`, as npm has no trusted publisher for the package yet; the image
-is built all the same.
+When a step fails, **Re-run failed jobs** runs it and the ones after it again,
+for the same tag, and each skips what is done already. **Re-run all jobs** of a
+run a merge started runs the gate again, which finds the tag and releases
+nothing. A run too old to be re-run is started again with **Run workflow** on
+the tag `v<version>`.
 
-The trusted publisher is added when the next release after it is cut, between
-steps 1 and 2: on npmjs.com, the package's **Settings → Trusted Publisher**
-takes GitHub Actions, with the organization or user `thecodacus`, the
-repository `pithagoras`, the workflow filename `publish-extension-api.yml`, no
-environment name, and `npm publish` selected under **Allowed actions**
-(`npm dist-tag` stays off). Without it, a new trusted publisher allows only
-`npm stage publish`, and npm refuses the workflow's `npm publish`. A new
-trusted publisher expires when no publish goes through it within 2 days: push
-the tag within 2 days of adding it, and if it expires, delete it and add it
-again.
+The tag is pushed before the tests run. When it is the tagged commit itself
+that fails, and not a test that fails now and then, a later merge with the same
+version releases nothing, as the tag is there: raise the version again in the
+fix's pull request, or once the fix is merged, delete the tag
+(`git push origin :refs/tags/v<version>`) and push it again on the fixed
+commit, which releases that one.
+
+npm's trusted publisher for the package is set on npmjs.com, in the package's
+**Settings → Trusted Publisher**: GitHub Actions, with the organization or user
+`thecodacus`, the repository `pithagoras`, the workflow filename
+`publish-extension-api.yml`, no environment name, and `npm publish` selected
+under **Allowed actions** (`npm dist-tag` stays off). npm checks the workflow a
+run was started from, the calling one where `npm publish` is in a workflow it
+calls, so `npm publish` is in the file that starts the release, which keeps the
+name it had when it published the package alone. A trusted publisher that is
+there cannot be changed: to name another file, it is deleted and added again. A
+new one expires when no publish goes through it within 2 days: release within 2
+days of adding it, and if it expires, delete it and add it again.
+
+Without `npm publish` among its allowed actions, a trusted publisher allows only
+`npm stage publish`, and npm refuses the release's `npm publish`. With the
+variable `NPM_STAGE` set to `true`, the repository's (Settings → Secrets and
+variables → Actions → Variables) or the organization's, the release stages the
+version instead, and it is published once a maintainer approves it with 2FA on
+npmjs.com.
+
+npm links a trusted publisher only to a package that exists, so the first
+version, 0.2.0, was published by hand, from a clean checkout of the tag
+`v0.2.0`, with `npm publish --provenance=false -w packages/extension-api`.
+
+If a tag ruleset limits who may create `v*` tags, the GitHub Actions app
+(github-actions[bot]) has to be on its bypass list, or the release cannot push
+the tag.
 
 ## Troubleshooting
 

@@ -28,7 +28,7 @@ test('the published extension API has the files its exports name, its readme, it
 
 /**
  * The package is released with the portal, from the portal's tag v<version>, and has the portal's version: a release
- * raises both, and the lock's entries with them, or the workflow that publishes it stops at the tag.
+ * raises both, and the lock's entries with them, or the release stops at its gate.
  */
 test("the extension API's version is the portal's, in package.json and in the lock", () => {
   const version = (file: string) => JSON.parse(readFileSync(path.join(root, file), 'utf8')).version;

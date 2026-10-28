@@ -178,12 +178,16 @@ test('the test jobs have a time limit, run what a change can break, and can be c
   assert.equal([...text.matchAll(/actions\/checkout@v\d+\n\s+with:\n\s+persist-credentials: false/g)].length, 3);
 });
 
-test('an image is built only after the tests passed, from the Dockerfile alone, and a newer push replaces an older build', () => {
+test('an image is built only after the tests passed, from the Dockerfile alone, and a newer push replaces an older build of main, not a release\'s', () => {
   const text = read('.github/workflows/docker.yml');
   const jobs = jobsOf('.github/workflows/docker.yml');
   assert.match(jobs.test, /uses: \.\/\.github\/workflows\/test\.yml/);
   assert.match(jobs.build, /needs: test/);
-  assert.match(text, /concurrency:\n\s+group: docker-\$\{\{ github\.ref \}\}\n\s+cancel-in-progress: true/);
+  // A release calls it with its tag; a tag does not start it.
+  const triggers = text.slice(text.indexOf('\non:\n'), text.indexOf('\nenv:\n'));
+  assert.match(triggers, /^ {2}workflow_call:\n {4}inputs:\n {6}tag:/m);
+  assert.doesNotMatch(triggers, /tags:/);
+  assert.match(text, /concurrency:\n\s+group: docker-\$\{\{ inputs\.tag \|\| github\.ref \}\}\n\s+cancel-in-progress: \$\{\{ !inputs\.tag \}\}/);
   // The runner has the token that publishes the image: no dependency's install script runs on it, and the checkout does not keep it.
   assert.doesNotMatch(jobs.build, /setup-node|npm /);
   assert.match(jobs.build, /actions\/checkout@v\d+\n\s+with:\n\s+persist-credentials: false/);
@@ -191,6 +195,123 @@ test('an image is built only after the tests passed, from the Dockerfile alone, 
   const outside = [...jobs.build.matchAll(/uses: ([^\s@]+)@(\S+)/g)].filter((m) => !m[1].startsWith('actions/'));
   assert.ok(outside.length >= 4);
   for (const [, action, ref] of outside) assert.match(ref, /^[0-9a-f]{40}$/, `${action} is pinned`);
+});
+
+const RELEASE = '.github/workflows/publish-extension-api.yml';
+
+/** The permissions a job asks for: each `name: level` under its `permissions:`. */
+const permissionsOf = (job: string): Record<string, string> => {
+  const lines = job.split('\n');
+  const held: Record<string, string> = {};
+  for (const line of lines.slice(lines.findIndex((l) => /^ {4}permissions:\s*$/.test(l)) + 1)) {
+    const entry = /^ {6}([\w-]+): (\w+)\s*$/.exec(line);
+    if (!entry) break;
+    held[entry[1]] = entry[2];
+  }
+  return held;
+};
+
+/** The script of the step with `id: <id>`, written as `run: |` on the line after the id. */
+const scriptOf = (file: string, id: string): string => {
+  const lines = read(file).split('\n');
+  const at = lines.findIndex((l) => l.trim() === `id: ${id}`);
+  assert.ok(at >= 0 && lines[at + 1].trim() === 'run: |', `${file} has the step ${id}`);
+  const indent = lines[at + 1].length - lines[at + 1].trimStart().length + 2;
+  const script: string[] = [];
+  for (const line of lines.slice(at + 2)) {
+    if (line.trim() && line.length - line.trimStart().length < indent) break;
+    script.push(line.slice(indent));
+  }
+  return script.join('\n');
+};
+
+test('a release is one workflow, the one npm\'s trusted publisher names, and each of its jobs holds only what it needs', () => {
+  const text = read(RELEASE);
+  const jobs = jobsOf(RELEASE);
+  assert.deepEqual(Object.keys(jobs), ['gate', 'image', 'npm', 'github-release']);
+  assert.deepEqual(permissionsOf(jobs.gate), { contents: 'write' });
+  assert.deepEqual(permissionsOf(jobs.image), { contents: 'read', packages: 'write' });
+  assert.deepEqual(permissionsOf(jobs.npm), { contents: 'read', 'id-token': 'write' });
+  assert.deepEqual(permissionsOf(jobs['github-release']), { contents: 'write' });
+  for (const name of ['image', 'npm', 'github-release']) assert.match(jobs[name], /if: needs\.gate\.outputs\.release == 'true'/, `${name} waits for the gate`);
+  // The image is docker.yml's, which runs the tests first, and the package and the GitHub release come after it.
+  assert.match(jobs.image, /uses: \.\/\.github\/workflows\/docker\.yml\n\s+with:\n\s+tag: \$\{\{ needs\.gate\.outputs\.tag \}\}/);
+  assert.match(jobs.npm, /needs: \[gate, image\]/);
+  assert.match(jobs['github-release'], /needs: \[gate, npm\]/);
+  // npm matches a trusted publisher against the workflow a run started from: the publish is in this file, and in no other.
+  assert.match(text, /^ {2}NPM_PUBLISH: \$\{\{ vars\.NPM_STAGE == 'true' && 'npm stage publish' \|\| 'npm publish' \}\} -w packages\/extension-api$/m);
+  assert.match(jobs.npm, /\n\s+\$NPM_PUBLISH\n/);
+  assert.doesNotMatch(jobs.npm, /npm ci/, 'no dependency is installed where the identity that can publish is');
+  for (const file of ['test', 'docker', 'docs'].map((name) => `.github/workflows/${name}.yml`)) assert.doesNotMatch(read(file), /npm (stage )?publish/, file);
+  // One release at a time, and none is cancelled half way.
+  assert.match(text, /\nconcurrency:\n\s+group: release\n\s+cancel-in-progress: false\n/);
+});
+
+test('the release gate tags and releases a version that has no tag, releases nothing for one that has, and stops when the versions differ', () => {
+  const script = scriptOf(RELEASE, 'tag');
+  const temp = mkdtempSync(path.join(tmpdir(), 'release-gate-'));
+  // Git as the runner has it: none of this machine's own settings (signing, hooks) apply.
+  const isolated = { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' };
+  const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: 'pipe', env: { ...process.env, ...isolated } }).trim();
+  try {
+    const origin = path.join(temp, 'origin.git');
+    const work = path.join(temp, 'work');
+    git(temp, 'init', '-q', '--bare', origin);
+    git(temp, 'clone', '-q', origin, work);
+    mkdirSync(path.join(work, 'packages/extension-api'), { recursive: true });
+    const merge = (portal: string, api: string) => {
+      writeFileSync(path.join(work, 'package.json'), JSON.stringify({ version: portal }));
+      writeFileSync(path.join(work, 'packages/extension-api/package.json'), JSON.stringify({ version: api }));
+      git(work, 'add', '-A');
+      git(work, '-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-q', '-m', `${portal}`);
+      git(work, 'push', '-q', 'origin', 'HEAD:refs/heads/main');
+      return git(work, 'rev-parse', 'HEAD');
+    };
+    const tagged = (tag: string) => git(work, 'ls-remote', '--tags', 'origin', `refs/tags/${tag}`).split('\t')[0];
+    const gate = (env: Record<string, string>) => {
+      const output = path.join(temp, 'output');
+      writeFileSync(output, '');
+      const run = spawnSync('bash', ['-eo', 'pipefail', '-c', script], { cwd: work, encoding: 'utf8', env: { PATH: process.env.PATH, HOME: temp, ...isolated, GITHUB_OUTPUT: output, ...env } });
+      const outputs = Object.fromEntries(readFileSync(output, 'utf8').split('\n').filter(Boolean).map((line) => line.split('=')));
+      return { status: run.status, said: run.stdout + run.stderr, outputs };
+    };
+    const pushed = (sha: string) => ({ GITHUB_EVENT_NAME: 'push', GITHUB_REF_TYPE: 'branch', GITHUB_REF_NAME: 'main', GITHUB_SHA: sha });
+    const tagPushed = (tag: string, sha: string) => ({ GITHUB_EVENT_NAME: 'push', GITHUB_REF_TYPE: 'tag', GITHUB_REF_NAME: tag, GITHUB_SHA: sha });
+
+    // A merge that leaves the version as it was, already tagged, releases nothing.
+    const before = merge('0.2.0', '0.2.0');
+    git(work, 'push', '-q', 'origin', `${before}:refs/tags/v0.2.0`);
+    let run = gate(pushed(before));
+    assert.equal(run.status, 0, run.said);
+    assert.match(run.said, /v0\.2\.0 exists: nothing to release/);
+    assert.deepEqual(run.outputs, { release: 'false' });
+
+    // The merge that raises both versions is tagged, and released.
+    const raised = merge('0.3.0', '0.3.0');
+    run = gate(pushed(raised));
+    assert.equal(run.status, 0, run.said);
+    assert.deepEqual(run.outputs, { tag: 'v0.3.0', version: '0.3.0', release: 'true' });
+    assert.equal(tagged('v0.3.0'), raised);
+    // Run again from the gate, it finds its tag and releases nothing.
+    assert.deepEqual(gate(pushed(raised)).outputs, { release: 'false' });
+
+    // A tag pushed by hand is released when it is the version, and stops the run when it is not.
+    assert.deepEqual(gate(tagPushed('v0.3.0', raised)).outputs, { tag: 'v0.3.0', version: '0.3.0', release: 'true' });
+    run = gate(tagPushed('v0.3.1', raised));
+    assert.equal(run.status, 1);
+    assert.match(run.said, /the tag v0\.3\.1 is not v0\.3\.0/);
+    // Run by hand on a branch, there is no tag to release.
+    assert.equal(gate({ GITHUB_EVENT_NAME: 'workflow_dispatch', GITHUB_REF_TYPE: 'branch', GITHUB_REF_NAME: 'main', GITHUB_SHA: raised }).status, 1);
+
+    // Versions that differ stop the run before anything is tagged.
+    const apart = merge('0.4.0', '0.3.0');
+    run = gate(pushed(apart));
+    assert.equal(run.status, 1);
+    assert.match(run.said, /packages\/extension-api\/package\.json says 0\.3\.0 and package\.json 0\.4\.0/);
+    assert.equal(tagged('v0.4.0'), '');
+  } finally {
+    rmSync(temp, { recursive: true, force: true });
+  }
 });
 
 test('the docs are built with the whole history, and only the job that deploys holds the deployment token', () => {
