@@ -1526,11 +1526,11 @@ The second find is for the moment the home is out of reach (a home that is not
 there is not listed).
 
 `folders.label(folder)` is what the person calls a folder, by its real path,
-whether or not `list` has it now: `{ name, home?, newChats? }`, its agent's
-name for an agent's home (with the marks above), its place under the workspace
-root for a folder inside it, and its last part otherwise. It is for a folder something
-was kept for after the last chat in it went: Media's gallery names the folder
-of a deleted chat's pictures so.
+whether or not `list` has it now: `{ name, home?, newChats? }`, its agent's name
+for an agent's home (with the marks above), its place under the workspace root
+for a folder inside it, and its last part otherwise. It is for a folder
+something was kept for after the last chat in it went: Media's gallery names the
+folder of a deleted chat's pictures so.
 
 `folders.on("removed", (folder) => …)` is told when the portal deletes one: a
 project with its folder, or an agent with its home. `folder` is where it really
@@ -1550,10 +1550,11 @@ gives it: `{ path, name, kind, home?, newChats? }`. An agent's chat is told by
 the same rule the [sandbox](/guide/sandbox) picks the user a chat runs as by:
 the folder stored for the chat, not where a link in it leads. Its project is
 found as the project's settings are, by where its folder really leads. A chat
-in a project is the project's, whichever agent the project is linked to. There is
-nothing for a chat that is in neither (the workspace root itself, or the folder
-kept from a deleted agent, which the sandbox runs as the first agent), for one
-whose agent's home or project folder is gone, and for an id no chat has.
+in a project is the project's, whichever agent the project is linked to. There
+is nothing for a chat that is in neither (the workspace root itself, or the
+folder kept from a deleted agent, which the sandbox runs as the first agent),
+for one whose agent's home or project folder is gone, and for an id no chat
+has.
 
 ```js
 // A document a chat asked for goes where the chat's agent or project keeps its things.
