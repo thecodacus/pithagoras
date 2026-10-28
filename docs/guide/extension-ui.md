@@ -203,7 +203,7 @@ await buildExtension({ dir: import.meta.dirname });
   "pi": {},
   "pithagoras": { "client": "./web/client.js", "style": "./web/client.css" },
   "scripts": { "build": "node build.mjs" },
-  "devDependencies": { "@pithagoras/extension-api": "^0.2.0", "esbuild": "*" }
+  "devDependencies": { "@pithagoras/extension-api": "^0.3.0", "esbuild": "*" }
 }
 ```
 
@@ -3006,10 +3006,10 @@ It is installed by name in Settings → Extensions → Discover:
 | git | `git:github.com/<owner>/<repo>@<tag>`, or its `https://` URL | Committed built: pi clones it and installs its `dependencies`, not its `devDependencies`, and does not build it |
 | A folder on the server | Its path | Built there |
 
-The package is released with the portal and has its version: 0.2.0 is what
-Pithagoras 0.2.0 gives an extension. The portal stays on 0.x while this
+The package is released with the portal and has its version: 0.3.0 is what
+Pithagoras 0.3.0 gives an extension. The portal stays on 0.x while this
 interface still changes, and a 0.x minor version may break an extension, so an
-extension depends on `"^0.2.0"`, which takes 0.2.1 and not 0.3.0. `version` on
+extension depends on `"^0.3.0"`, which takes 0.3.1 and not 0.4.0. `version` on
 the `portal` an extension is given, `1`, is not the package's version: it is
 the version of the interface the portal loads an extension with, raised only
 when something an extension relies on changes.
