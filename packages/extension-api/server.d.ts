@@ -910,7 +910,13 @@ export interface ServerPortal {
      * when the project or the agent is deleted, listed or not, and each delete is heard as `deleted`; an unlisted one
      * that is working is stopped then, where a listed one keeps the delete from going through until the person stops
      * it. Throws for options that cannot be one: a folder that is not an agent's or a project's (one inside them
-     * included), no title, or `listed: false` without `unattended: true`.
+     * included), no title, or `listed: false` without `unattended: true`. Keep its id: an unlisted one is in no list,
+     * and `children` finds children only, so the id is how the half reaches it again after a restart (`lastAnswer`).
+     *
+     * A message it is sent is the primary user's own words, and the chat is not marked by them: words from a document or
+     * from another person are outside content, which the agent reads through a tool with `guard: { outside: true }`
+     * rather than in the message. A pi tool that starts or prompts a chat declares `guard: { acts: ["delegate"] }`, as
+     * the subagent tool does, so that a marked chat cannot hand its work to a fresh one the guard holds nothing in.
      */
     start(options: StartChatOptions): Chat;
     /**
@@ -933,7 +939,9 @@ export interface ServerPortal {
      * was waiting on, to tell a run that goes on from one that ended while it was away, and to have its answer.
      * Nothing for a chat that has never run. Throws for a chat this package did not make, and for one that is not
      * there any more, deleted by the person or with its project or agent ("There is no chat <id>"). `marked` says the answer is
-     * to be held like outside content; for a child, its parent is marked with it, as `prompt` marks it.
+     * to be held like outside content. For a child, its parent is marked with it as `prompt` marks it, in the guard that
+     * runs for the parent now: none does after a restart, until the parent's pi starts again, and that mark is not kept.
+     * Hand a marked answer on in the flagged form (see `ChildRun.marked`), which the parent's guard finds again.
      */
     lastAnswer(chatId: string): ChatAnswer | undefined;
     /** Stops the run of a chat this package made, as the person's Stop does: its `prompt` resolves as `stopped`. */

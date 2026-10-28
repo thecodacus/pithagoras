@@ -2371,9 +2371,12 @@ portal.chats.extend((pi, chat) => {
   in the child before its next message, and one switched on in the parent later
   is not given to it. With **`tools: "defaults"`** it has the tools a new chat
   of its folder has in its mode instead (what Settings → Tools, its agent and
-  its project say), and none of its parent's switches, nor the ones its
-  parent's mode took away: for work of the package's that is not the
-  conversation the person switched them for. An `unattended` child starts from
+  its project say), and none of its parent's switches: for work of the
+  package's that is not the conversation the person switched them for. Its mode
+  is its parent's unless `mode` names another, and that mode's layer holds as
+  in any chat: left in a parent's mode that switches the shell off, it has no
+  shell either; put in another mode, the tools its parent's mode took away are
+  not taken from it. An `unattended` child starts from
   the defaults unless it is given `tools: "parent"`. A dialog
   it opens, and a question the guard asks, are drawn on its own page, where its
   parent's would be: for a child of a chat of the portal's pages (or of the
@@ -2432,7 +2435,10 @@ portal.chats.extend((pi, chat) => {
   `marked` is there while the guard holds the chat as marked, by a result it
   flagged that the person has not trusted, also when no pi runs for it now:
   hold such an answer back as outside content. For a child, its parent is
-  marked with it, as `prompt` marks it.
+  marked with it, as `prompt` marks it, in the guard that runs for the parent
+  now. After a restart none does until the parent's pi starts again, and that
+  mark is not kept: hand a marked answer on in the flagged form described under
+  `prompt`, which the parent's guard finds again in its history.
 - **`abort(chatId)`** stops its run, as the person's Stop does.
   **`remove(chatId)`** deletes it, its run stopped first; its transcript and
   files go, and `chats.on("deleted")` hears it once. While its parent is being
@@ -2475,8 +2481,21 @@ which the person cannot find, is stopped with the delete.
 ```js
 const [folder] = portal.folders.list().filter((one) => one.kind === "agent");
 const chat = portal.chats.start({ folder: folder.path, title: "A comment on report.docx", listed: false, unattended: true });
-const run = await portal.chats.prompt(chat.id, "Answer this comment: …");
+const run = await portal.chats.prompt(chat.id, "Answer the comment comment-7 in report.docx: read it with read_comment.");
 ```
+
+Keep the chat's id where the half keeps its own data: an unlisted chat is in
+no list, and `children` finds children only, so the id is how the half reaches
+it again after a restart, for `lastAnswer` or to `remove` it.
+
+What the chat is sent is the primary user's own words, and nothing marks the
+chat for them. So words from a document or from another person, such as the
+comment itself, do not go into the message: they are outside content, which
+the agent reads through a tool of the package's with `guard: { outside: true }`
+(as in the example), and the guard wraps and flags it as it does a web page. A
+pi tool that starts or prompts a chat declares `guard: { acts: ["delegate"] }`,
+as the subagent tool does, so that a chat that read something suspicious
+cannot hand its work to a fresh chat the guard holds nothing in.
 
 ## Panels and commands
 

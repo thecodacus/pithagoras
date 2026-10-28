@@ -661,7 +661,7 @@ test("lastAnswer says a chat is marked while the guard holds it so, also with no
   assert.equal(sessionTainted(parent), true, "what it said is held in its parent too");
 });
 
-test("a child asked to start from the defaults has the folder's tools, none of its parent's switches or its parent's mode's, and is not held to them; an unattended one does unless asked", async () => {
+test("a child asked to start from the defaults has the folder's tools in its mode, none of its parent's switches, and is not held to them; an unattended one does unless asked", async () => {
   const mine = createCustomMode({ label: "No shell", description: "Cannot run commands" });
   setCustomModeTools(mine.id, { off: ["bash"], on: [] });
   const parent = chat({ mode: `custom/${mine.id}` });
@@ -682,6 +682,14 @@ test("a child asked to start from the defaults has the folder's tools, none of i
   getDb().prepare("UPDATE sessions SET tools_off = 'read\nwrite' WHERE id = ?").run(parent);
   assert.ok((await declaredIn("Answer again")).includes("write"));
   assert.deepEqual([row().tools_off, row().tools_on], ["", ""]);
+
+  // Asked into no mode, it is in its parent's, and that mode's layer is the defaults' own: the shell stays off.
+  const inMode = helper.chats.create({ parent, title: "In its mode", tools: "defaults" });
+  assert.equal(getSession(inMode.id).mode, `custom/${mine.id}`);
+  const asked0 = model.requests.length;
+  assert.equal((await helper.chats.prompt(inMode.id, "Answer in the mode")).status, "done");
+  const inModeTools = declared(model.requests[asked0]);
+  assert.ok(!inModeTools.includes("bash") && inModeTools.includes("read"), "the parent's mode's layer holds, its switches do not");
 
   const nobody = getSession(helper.chats.create({ parent, title: "Nobody", unattended: true }).id);
   assert.deepEqual([nobody.tools_off, nobody.tools_on, nobody.tools_from], ["", "", "defaults"], "an unattended child starts from the defaults");

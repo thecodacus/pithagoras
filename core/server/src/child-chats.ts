@@ -119,7 +119,8 @@ export function newChildChat(options: unknown, creator: string): SessionRow {
   }
   // A child in another mode than its parent's has not that mode's layer: the tools it took away stay off for the child
   // too, as its own switches, or naming Standard would be a way out of them. Not for one that starts from the defaults,
-  // which has the tools a chat of the folder started in its mode has: none of its parent's switches, nor of its mode's.
+  // which has the tools a chat of the folder started in its mode has: none of its parent's switches, nor of its parent's
+  // mode's where it is in another (in its parent's, that mode's layer holds for it as for any chat, db.ts withMode).
   const left = mode === parent.mode || defaults ? [] : (modeOf(parent.mode)?.tools?.off ?? []);
 
   const id = nanoid(12);
