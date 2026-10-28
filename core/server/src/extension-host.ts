@@ -21,6 +21,7 @@ import { folderFiles } from "./folder-files.js";
 import { baseDir, setAgentAccess, type AgentAccess } from "./workspace-files.js";
 import { sendFile } from "./send-file.js";
 import { watchStream } from "./login-streams.js";
+import { requestPerson } from "./auth.js";
 import { personsEnv } from "./background.js";
 import { gitAt } from "./git.js";
 import { folderAllowed, folderLabel, listFolders } from "./agent-folders.js";
@@ -739,6 +740,8 @@ function portalFor(ext: Running): ServerPortal {
         ext.upgrade = handler;
       },
       endWithLogin: watchStream,
+      // Read from the request's login as it came: the route's request, or an upgrade's, which no Express has seen.
+      person: (req) => requestPerson(req),
       // A file of no type said is sent as bytes, to be saved: it is drawn by nothing.
       send: (req, res, file, options = {}) =>
         sendFile(req, res, { ...file, mimeType: file.mimeType ?? "application/octet-stream" }, options.cache ?? "private, no-cache", options.download ?? (file.mimeType ? undefined : file.name)),

@@ -690,6 +690,51 @@ test("a child chat made, a chat started, run, stopped and removed from its proce
   await host.syncServerHalves([]);
 });
 
+test("its routes and upgrades are told who is behind a request, in the portal's process and in one of its own; a header the request came with does not say it", async () => {
+  const { putSetting } = await import("../dist/db.js");
+  const { issueCookie, setUpPassword } = await import("../dist/auth.js");
+  const { seen, setRole, forgetPerson } = await import("../dist/people.js");
+  const body = `
+    portal.router.get("/who", (req, res) => res.json({ person: portal.http.person(req) ?? null, header: req.headers["x-pithagoras-person"] ?? null }));
+    portal.http.upgrade((req, socket) => {
+      socket.end("HTTP/1.1 101 Switching Protocols\\r\\nUpgrade: who\\r\\nConnection: Upgrade\\r\\n\\r\\n" + JSON.stringify(portal.http.person(req) ?? null));
+    });
+  `;
+  await host.syncServerHalves([half("own", body), half("inside", body, { isolated: false })]);
+  // A login, as signing in on the portal's page makes one.
+  assert.equal(await setUpPassword("a password long enough"), null);
+  let login = "";
+  issueCookie({ req: { secure: false }, cookie: (name, value) => (login = `${name}=${encodeURIComponent(value)}`) });
+  const forged = encodeURIComponent(JSON.stringify({ id: "someone", name: "Mallory", role: "primary" }));
+  const who = async (name, cookie) => (await get(`/api/x/${name}/who`, { headers: { "x-pithagoras-person": forged, ...(cookie ? { cookie } : {}) } })).body;
+  const upgraded = async (name, cookie) => {
+    const socket = connect(server.address().port, "127.0.0.1");
+    let heard = "";
+    socket.on("data", (data) => (heard += data));
+    socket.write(`GET /api/x/${name}/stream HTTP/1.1\r\nHost: here\r\nUpgrade: who\r\nConnection: Upgrade\r\n${cookie ? `Cookie: ${cookie}\r\n` : ""}x-pithagoras-person: ${forged}\r\n\r\n`);
+    await new Promise((resolve) => socket.on("close", resolve));
+    return JSON.parse(heard.slice(heard.indexOf("\r\n\r\n") + 4));
+  };
+  try {
+    const owner = { id: "owner", name: "Owner", role: "primary" };
+    for (const name of ["own", "inside"]) {
+      assert.deepEqual((await who(name, login)).person, owner, name);
+      assert.deepEqual(await upgraded(name, login), owner, `${name}, an upgrade`);
+      // With no login (which the portal's own login refuses before it gets here), nobody's, whatever the request says.
+      assert.equal((await who(name)).person, null, `${name}, with no login`);
+      assert.equal(await upgraded(name), null, `${name}, an upgrade with no login`);
+    }
+    assert.equal((await who("own")).header, null, "the header a request came with is not handed on");
+    seen("telegram:42", "Sam");
+    setRole("telegram:42", "primary");
+    assert.deepEqual((await who("own", login)).person, { id: "owner", name: "Sam", role: "primary" }, "called what People calls the primary user");
+    forgetPerson("telegram:42");
+  } finally {
+    putSetting("portal_password", "");
+  }
+  await host.syncServerHalves([]);
+});
+
 test("a command run as a chat's agent, from its process: its input and output as bytes, and an abort", async () => {
   await host.syncServerHalves([
     half("runner", `

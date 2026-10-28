@@ -124,6 +124,22 @@ export function hasPrimary(): boolean {
   );
 }
 
+/** Who is behind a request to the portal's own pages, as an extension's routes are told (`http.person` in server.d.ts). */
+export interface RequestPerson {
+  id: string;
+  name: string;
+  role: Role;
+}
+
+/**
+ * The person behind a login to the portal's pages. There is one login, the owner's, so it is the primary user: called
+ * what People calls the person marked primary, and "Owner" while nobody is. Its id is the login's, not a channel's.
+ */
+export function ownerPerson(): RequestPerson {
+  const row = getDb().prepare("SELECT name FROM people WHERE role = 'primary' ORDER BY first_seen ASC LIMIT 1").get() as { name: string } | undefined;
+  return { id: "owner", name: row?.name?.trim() || "Owner", role: "primary" };
+}
+
 /**
  * What to call the person the agent works for.
  *

@@ -155,6 +155,21 @@ export interface FileEntry {
   mtime: number;
 }
 
+/** The role of a person the agents work with, as People sets it: see "People" in the guide. */
+export type PersonRole = "primary" | "colleague" | "guest" | "unknown";
+
+/**
+ * Who is behind a request to the package's routes (`http.person`). Every login to the portal is its owner's for now:
+ * `{ id: "owner", name, role: "primary" }`, with the name People gives the person marked primary ("Owner" while nobody
+ * is). Check `role` where what a request asks the agents to do depends on who asks: logins with fewer rights would say
+ * theirs here.
+ */
+export interface RequestPerson {
+  id: string;
+  name: string;
+  role: PersonRole;
+}
+
 /** A file's text, or the fact that it is not text or is over 1 MB. */
 export type FileContent = { binary: true; size: number; mtime: number } | { binary: false; size: number; mtime: number; content: string };
 
@@ -770,6 +785,12 @@ export interface ServerPortal {
      * stops the watching, for a response that ended by itself.
      */
     endWithLogin(end: () => void): () => void;
+    /**
+     * Who is behind a request to the package's routes, or an upgrade under them, from the login it came with: nothing
+     * for one that is not signed in. The same in a server half in a process of its own, where the portal says it on
+     * the request it hands on (a header of that name the request came with is dropped).
+     */
+    person(req: IncomingMessage): RequestPerson | undefined;
     /**
      * Sends a file opened by `files.open` as the portal sends its own: with
      * its type, a policy that keeps it from running anything, a version a

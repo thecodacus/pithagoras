@@ -968,6 +968,7 @@ restart the portal.
 | `router` | An Express router: the package's routes, at `/api/x/<package>/…`, behind the portal's login |
 | `http.json()`, `http.raw()`, `http.text()` | Body parsers, for the routes that want one |
 | `http.upgrade(handler)` | WebSocket upgrades under the package's routes |
+| `http.person(req)` | [Who is behind a request](#who-is-behind-a-request) to its routes, or an upgrade: `{ id, name, role }`, from the login it came with |
 | `http.endWithLogin(end)` | Ends a long response, such as a stream, when the login it was opened under ends (the password changed, single sign-on was set up anew), so what it showed is not shown to whoever signs in next. Returns what stops the watching, for a response that ended by itself |
 | `http.send(req, res, file, options?)` | [Sends a file](#sending-a-file) opened by `files.open` as the portal sends its own: a version, the part a player asks for, or to be saved |
 | `chats.get(id)`, `chats.list()` | A chat: `{ id, title, workspace, status, mode?, parent?, listed?, unattended? }`. `list` gives the task chats as the sidebar lists them, pinned first and then the most recently active (a run that started or ended, a new title) first, and leaves out the chats a server half [made](#child-chats) to be found by their id alone |
@@ -1131,6 +1132,29 @@ A route can stream as well: write `text/event-stream`, or take an upgrade with
 `portal.http.upgrade((req, socket, head) => …)`, which the portal has already
 checked for the login and for the page it comes from. An answer held open is
 ended when the portal's password changes, as the portal's own streams are.
+
+#### Who is behind a request
+
+`portal.http.person(req)` says who is behind a request to the package's
+routes, or an upgrade under them, from the login it came with:
+`{ id, name, role }`, and nothing for one that is not signed in (the portal's
+login refuses such a request before it gets there). Every login to the portal
+is its owner's for now: `{ id: "owner", name, role: "primary" }`, called what
+People (see [People are a separate layer](/guide/security#people-are-a-separate-layer)) calls the person marked primary, and "Owner" while
+nobody is. Check `role` where a route makes the agents do something on a
+person's behalf, such as starting a chat: once there are logins with fewer
+rights, they say theirs here.
+
+```js
+portal.router.post("/comments/:id/answer", (req, res) => {
+  if (portal.http.person(req)?.role !== "primary") return res.status(403).json({ error: "Only the owner can ask the agent here" });
+  /* … */
+});
+```
+
+In a server half in a process of its own it is the same call: the portal says
+who it is on each request it hands on, in a header of its own, and drops a
+header of that name the request came with.
 
 ### Where it keeps things
 
