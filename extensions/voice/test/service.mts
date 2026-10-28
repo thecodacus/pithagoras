@@ -38,6 +38,8 @@ export async function voiceDocker() {
   const smiOutput = path.join(dir, "smi-output");
   writeFileSync(smi, `#!/bin/sh\ncat "${smiOutput}"\n`);
   chmodSync(smi, 0o755);
+  // A host with no nvidia-smi until a test says what it prints (hostGpus): the GPUs of the machine the tests run on are not the test's.
+  process.env.NVIDIA_SMI = path.join(dir, "no-such-nvidia-smi");
 
   /** What nvidia-smi in the GPU check's container prints, as it starts, or null for a Docker with no runtime for a GPU. */
   let inDocker: string | null | (() => string) = "";
