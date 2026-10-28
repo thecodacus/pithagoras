@@ -3062,6 +3062,13 @@ run a merge started runs the gate again, which finds the tag and releases
 nothing. A run too old to be re-run is started again with **Run workflow** on
 the tag `v<version>`.
 
+The tag is pushed before the tests run. When it is the tagged commit itself
+that fails, and not a test that fails now and then, a later merge with the same
+version releases nothing, as the tag is there: raise the version again in the
+fix's pull request, or once the fix is merged, delete the tag
+(`git push origin :refs/tags/v<version>`) and push it again on the fixed
+commit, which releases that one.
+
 npm's trusted publisher for the package is set on npmjs.com, in the package's
 **Settings → Trusted Publisher**: GitHub Actions, with the organization or user
 `thecodacus`, the repository `pithagoras`, the workflow filename
