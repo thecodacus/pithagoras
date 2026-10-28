@@ -24,7 +24,7 @@ import { watchStream } from "./login-streams.js";
 import { requestPerson } from "./auth.js";
 import { personsEnv } from "./background.js";
 import { gitAt } from "./git.js";
-import { folderAllowed, folderLabel, listFolders } from "./agent-folders.js";
+import { chatOwner, folderAllowed, folderLabel, listFolders } from "./agent-folders.js";
 import { handoffDone, takeHandoff } from "./handoff.js";
 import { modelEndpoint, modelOf, modelProviders, type LiveModel } from "./models.js";
 import { mcpServer } from "./api/mcp.js";
@@ -775,6 +775,10 @@ function portalFor(ext: Running): ServerPortal {
         return [...found.values()];
       },
       folder,
+      owner: (id) => {
+        const row = getSession(id);
+        return row ? chatOwner(row.workspace) : undefined;
+      },
       send: (chatId, data) => {
         const text = wire(name, data);
         if (text) pagePushes.emit(chatId, text);

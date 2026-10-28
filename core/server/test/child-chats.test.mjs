@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fakeModel } from "./fake-model.mjs";
 import { inProcessHome } from "./server-harness.mjs";
@@ -554,6 +554,42 @@ test("a child of a chat nobody attends is unattended too, and one of an unlisted
   const tools = (await sessions.getTools(child.id)).tools.map((tool) => tool.name);
   assert.ok(!tools.includes("ask_question"), "no ask_question");
   assert.ok(!tools.includes("routine_create"), "and no routine tools, in an agent's home nobody watches");
+});
+
+test("a chat is its agent's when it works in the agent's home, as the sandbox runs it, else its project's, and no chat is neither's", async () => {
+  const { createAgent, defaultAgent, setNewChatAgent } = await import("../dist/agents.js");
+  const site = project("site");
+  mkdirSync(path.join(site, "docs"), { recursive: true });
+  const first = defaultAgent();
+  mkdirSync(first.home, { recursive: true });
+  const scout = createAgent({ name: "Owner Scout" });
+  mkdirSync(scout.home, { recursive: true });
+
+  const projects = { path: site, name: "site", kind: "project" };
+  assert.deepEqual(helper.chats.owner(chat({ workspace: site })), projects, "a chat of the project");
+  assert.deepEqual(helper.chats.owner(chat({ workspace: path.join(site, "docs") })), projects, "one in a folder of it too");
+  const started = helper.chats.start({ folder: site, title: "Of the project" });
+  assert.deepEqual(helper.chats.owner(helper.chats.create({ parent: started.id, title: "Its child" }).id), projects, "and a child of one");
+  assert.deepEqual(helper.chats.owner(chat({ workspace: first.home })), { path: realpathSync(first.home), name: first.name, kind: "agent", home: true, newChats: true });
+  const scouts = chat({ workspace: scout.home });
+  assert.deepEqual(helper.chats.owner(scouts), { path: realpathSync(scout.home), name: "Owner Scout", kind: "agent" });
+  // Of any kind: a routine run of the agent's is the agent's too.
+  assert.deepEqual(helper.chats.owner(chat({ workspace: scout.home, kind: "routine" })), helper.chats.owner(scouts));
+  // The sandbox runs a chat as the agent whose home its stored workspace is in, wherever a link there leads (agentOf):
+  // so it is said to be that agent's, not the project's the link leads into.
+  symlinkSync(site, path.join(scout.home, "to-site"));
+  assert.deepEqual(helper.chats.owner(chat({ workspace: path.join(scout.home, "to-site") })), helper.chats.owner(scouts));
+
+  setNewChatAgent(scout.id);
+  assert.deepEqual(helper.chats.owner(scouts), { path: realpathSync(scout.home), name: "Owner Scout", kind: "agent", newChats: true });
+  setNewChatAgent(first.id);
+
+  assert.equal(helper.chats.owner(chat({ workspace: process.env.WORKSPACE_ROOT })), undefined, "the workspace root is no project");
+  assert.equal(helper.chats.owner("nowhere"), undefined, "nor is a chat that is not there");
+  const gone = project("gone");
+  const left = chat({ workspace: gone });
+  rmSync(gone, { recursive: true });
+  assert.equal(helper.chats.owner(left), undefined, "nor one whose folder went");
 });
 
 test("a chat is started only in an agent's or a project's folder, with a title", () => {

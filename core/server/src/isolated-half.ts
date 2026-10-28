@@ -75,6 +75,7 @@ const NOW = new Set([
   "chats.list",
   "chats.inFolder",
   "chats.folder",
+  "chats.owner",
   "chats.offers",
   "chats.extend",
   "chats.onOpen",

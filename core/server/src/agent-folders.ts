@@ -1,9 +1,9 @@
 import path from "node:path";
-import { agentsRoot, firstAgent, listAgents, newChatAgent } from "./agents.js";
+import { agentOf, agentsRoot, firstAgent, listAgents, newChatAgent } from "./agents.js";
 import { getDb } from "./db.js";
 import { listProjects } from "./projects.js";
 import { isWithinText, pathBelow, realPath } from "./within.js";
-import { workspaceRoot } from "./workspaces.js";
+import { projectOf, workspaceRoot } from "./workspaces.js";
 import { baseDir } from "./workspace-files.js";
 
 /**
@@ -84,4 +84,29 @@ export function listFolders(): AgentFolder[] {
   }
   for (const row of getDb().prepare("SELECT DISTINCT workspace AS dir FROM sessions").all() as { dir: string | null }[]) add(row.dir, "chat");
   return [...found.values()];
+}
+
+/** Whose a chat is: its agent's home or its project's folder, as list gives it. */
+export type ChatOwner = AgentFolder & { kind: "agent" | "project" };
+
+/**
+ * Whose a chat working in `workspace` (as stored for it) is: the agent whose home it works in, by the rule the sandbox
+ * picks the user a chat runs as by (agentOf on the stored workspace: a link in it that leads elsewhere changes
+ * nothing), else the project it works in, by the rule a project's settings and its link to an agent are found by
+ * (projectOf). Undefined for a chat in neither (the workspace root itself, the kept folder of a deleted agent), which
+ * the sandbox runs as the first agent all the same, and for one whose agent's home or project folder cannot be reached
+ * now, as list leaves that out.
+ */
+export function chatOwner(workspace: string): ChatOwner | undefined {
+  const agent = agentOf(workspace);
+  const project = agent ? undefined : projectOf(workspace);
+  const dir = agent ? agent.home : project ? path.join(workspaceRoot(), project) : undefined;
+  if (!dir) return undefined;
+  let real: string;
+  try {
+    real = baseDir(dir);
+  } catch {
+    return undefined;
+  }
+  return entryOf(real, agent ? "agent" : "project") as ChatOwner;
 }

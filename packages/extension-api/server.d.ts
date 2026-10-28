@@ -221,6 +221,9 @@ export interface AgentFolder {
   newChats?: true;
 }
 
+/** Whose a chat is: see `chats.owner`. An agent's home or a project's folder, as `folders.list()` gives it. */
+export type ChatOwner = AgentFolder & { kind: "agent" | "project" };
+
 /**
  * A file opened by `files.open`, to read from `fd` and send. `mimeType` is what
  * its first bytes say it is where it is a picture (PNG, JPEG, GIF, WebP) or a
@@ -848,6 +851,17 @@ export interface ServerPortal {
      * folder is.
      */
     folder(id: string): string;
+    /**
+     * Whose a chat is, for any chat (a person's, a child, a routine run, a channel conversation): the agent whose home
+     * it works in (`kind: "agent"`), by the same rule the sandbox picks the user a chat runs as by (the workspace
+     * stored for the chat; a link in it that leads elsewhere changes nothing), else the project it works in, a folder
+     * of it included, by where its folder really leads, as the project's settings are found (`kind: "project"`). The folder is given as `folders.list()` gives it: its real path, its name,
+     * and `home` or `newChats` on an agent's. A chat in a project is the project's, whichever agent the project is
+     * linked to. Nothing for a chat that is in neither (the workspace root itself, the folder kept from a deleted
+     * agent: the sandbox runs it as the first agent), for one whose agent's home or project folder is gone, and for no
+     * such chat.
+     */
+    owner(id: string): ChatOwner | undefined;
     /** To what the package drew on the pages open on a chat. Nothing is stored. */
     send(chatId: string, data: unknown): void;
     /** What a page that opens a chat is told first: where things stand. Nothing, to tell it nothing. */

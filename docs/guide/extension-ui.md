@@ -973,6 +973,7 @@ restart the portal.
 | `http.send(req, res, file, options?)` | [Sends a file](#sending-a-file) opened by `files.open` as the portal sends its own: a version, the part a player asks for, or to be saved |
 | `chats.get(id)`, `chats.list()` | A chat: `{ id, title, workspace, status, mode?, parent?, listed?, unattended? }`. `list` gives the task chats as the sidebar lists them, pinned first and then the most recently active (a run that started or ended, a new title) first, and leaves out the chats a server half [made](#child-chats) to be found by their id alone |
 | `chats.folder(id)` | The folder the chat's pi works in, on this disk |
+| `chats.owner(id)` | [Whose a chat is](#whose-a-chat-is): its agent's home or its project's folder, as `folders.list()` gives it |
 | `chats.inFolder(folder)` | The sessions of every kind that work in a folder: tasks, and also routine runs, Agent-page and channel conversations and heartbeats, which `chats.list()` leaves out and which have the package's tools in their pi. One for each agent that has some there (what an agent can reach is the same from each of its sessions; none is removed, and a stored path can be a link an agent made) |
 | `chats.send(chatId, data)`, `chats.onOpen(fn)` | [Telling the pages open on a chat](#telling-the-pages-open-on-a-chat) |
 | `chats.on("started" \| "stopped" \| "deleted" \| "finished", fn)` | A chat's pi started or stopped; the chat was deleted; or it is finished: the run it was started for is over, and the portal stopped its pi for good, as for a routine run in a session of its own. A person who goes on with the chat starts its pi again (`started`). A pi stopped for being idle is not finished: it starts again with the next message |
@@ -1538,6 +1539,27 @@ was not running then, because it was switched off, removed and installed again,
 or failed to start, is told when it next starts, once for each folder, as soon
 as its default export is done. One that starts for the first time is told of
 none deleted before: it kept nothing of them.
+
+#### Whose a chat is
+
+`chats.owner(id)` says whose a chat is, for any chat (a person's, a child, a
+routine run, a channel conversation): the agent whose home it works in
+(`kind: "agent"`), else the project it works in, a folder inside the project
+included (`kind: "project"`). The answer is that folder as `folders.list()`
+gives it: `{ path, name, kind, home?, newChats? }`. An agent's chat is told by
+the same rule the [sandbox](/guide/sandbox) picks the user a chat runs as by:
+the folder stored for the chat, not where a link in it leads. Its project is
+found as the project's settings are, by where its folder really leads. A chat
+in a project is the project's, whichever agent the project is linked to. There is
+nothing for a chat that is in neither (the workspace root itself, or the folder
+kept from a deleted agent, which the sandbox runs as the first agent), for one
+whose agent's home or project folder is gone, and for an id no chat has.
+
+```js
+// A document a chat asked for goes where the chat's agent or project keeps its things.
+const owner = portal.chats.owner(chatId);
+const folder = owner?.path ?? portal.folders.list().find((one) => one.home)?.path;
+```
 
 ### Telling the pages open on a chat
 

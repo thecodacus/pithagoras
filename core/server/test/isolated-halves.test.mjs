@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { once } from "node:events";
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { connect } from "node:net";
 import path from "node:path";
 import { PassThrough } from "node:stream";
@@ -674,7 +674,9 @@ test("a child chat made, a chat started, run, stopped and removed from its proce
         await portal.chats.remove(child.id);
         const started = portal.chats.start({ folder: "/somewhere", title: "Of a folder", listed: false, unattended: true });
         await portal.chats.remove(started.id);
-        res.json({ child, run, last, theirs, found, started });
+        const owner = portal.chats.owner("kid");
+        const nobody = portal.chats.owner("nowhere") ?? null;
+        res.json({ child, run, last, theirs, found, started, owner, nobody });
       });
     `),
   ]);
@@ -685,6 +687,8 @@ test("a child chat made, a chat started, run, stopped and removed from its proce
     theirs: "a is no chat a package made: only a child chat or a chat a package started is prompted, stopped or removed",
     found: [{ id: "kid", title: "Helper", workspace: work, status: "idle", parent: "a", listed: false }],
     started: { id: "own", title: "Of a folder", workspace: work, status: "idle", listed: false, unattended: true },
+    owner: { path: realpathSync(work), name: "site", kind: "project" },
+    nobody: null,
   });
   assert.deepEqual(asked, [["create", "a", "maker"], ["run", "kid", "Answer", { steer: true }], ["abort", "kid"], ["lastAnswer", "kid"], ["remove", "kid"], ["start", "/somewhere", "maker"], ["remove", "own"]]);
   await host.syncServerHalves([]);

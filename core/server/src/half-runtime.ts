@@ -223,6 +223,7 @@ function portalOf(init: { name: string; executor: string }): ServerPortal {
       list: () => callNow("chats.list"),
       inFolder: (folder) => callNow("chats.inFolder", folder),
       folder: (id) => callNow("chats.folder", id),
+      owner: (id) => callNow("chats.owner", id),
       send(chatId, data) {
         try {
           post({ t: "send", chatId, data });
