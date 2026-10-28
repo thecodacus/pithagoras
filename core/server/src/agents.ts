@@ -57,7 +57,8 @@ export function getAgent(id: string): Agent | undefined {
 
 /** The first agent: the one a chat, channel or routine goes to when none is named. */
 export function defaultAgent(): Agent {
-  return firstAgent(listAgents());
+  // Its row alone where it is there, as it always is: the agents are read whole only where it is not.
+  return getAgent(DEFAULT_AGENT) ?? firstAgent(listAgents());
 }
 
 /**

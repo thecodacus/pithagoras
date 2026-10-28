@@ -69,7 +69,7 @@ export function agentsRouter(): Router {
       const a = agentOf(s.workspace, agents);
       if (a) counts.set(a.id, (counts.get(a.id) ?? 0) + 1);
     }
-    const picked = newChatAgent().id;
+    const picked = newChatAgent(agents).id;
     res.json({ agents: agents.map((a) => agentToApi(a, counts.get(a.id) ?? 0, a.id === picked)) });
   });
 
