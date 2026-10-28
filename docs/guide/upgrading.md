@@ -63,6 +63,106 @@ mv portal.db portal-damaged.db && rm -f portal.db-wal portal.db-shm && mv portal
 
 The portal checks the recovered database before upgrading it. Rows on damaged pages can't be recovered, which usually means part of the event history of some conversations. Once you're happy with the result, delete `portal-damaged.db`.
 
+## From 0.2.0 to 0.3.0
+
+A portal at 0.2.0 takes every step of this release in its first start. The
+database goes from schema 11 to 16 in one transaction, after one check and one
+backup, `backups/portal-v11-<date>-<time>.db`. The steps run in this order, and
+each has a section below:
+
+| Schema | What changes | Section |
+| --- | --- | --- |
+| 12 | The subagent's settings in pi's `settings.json` are left for the subagent extension | [Subagents are an extension](#subagents-are-an-extension) |
+| 13 | A chat can have a parent: every chat there is stays one of its own, and listed | [Chats can have child chats](#chats-can-have-child-chats) |
+| 14 | What each chat said its subagents run on is left for the subagent extension | [Subagents are an extension](#subagents-are-an-extension) |
+| 15 | An index on the questions a chat asked, for its sub-chats in the chat list | [Sub-chats in the chat list](#sub-chats-in-the-chat-list) |
+| 16 | A chat can be one nobody attends, and a child chat can start from a new chat's tools: every chat there is stays as it was | [Chats an extension makes for nobody to attend](#chats-an-extension-makes-for-nobody-to-attend) |
+
+A portal at 0.1.0 takes 0.2.0's steps and these in one start, from schema 3 to
+16, with one backup, `portal-v3-….db`: read
+[From 0.1.0 to 0.2.0](#from-0-1-0-to-0-2-0) as well.
+
+What you do:
+
+- **Reload the portal's open tabs.** A tab that was open before the upgrade
+  still runs the old page, whose Subagents panel was the portal's own.
+- **If you installed the subagent tool by hand** from an old clone of the
+  repository, replace it with the one that comes with the portal: until then it
+  keeps its settings in pi's `settings.json`, and the log says so
+  ([Subagents are an extension](#subagents-are-an-extension)).
+- **Change scripts** that switch the subagent tool with
+  `PUT /api/features/subagent` and `enabled`, or read `subagent` from
+  `GET /api/features/flags`: it is switched in Settings → Extensions now. Its
+  other routes answer with a 307 to their new place (the table in
+  [Subagents are an extension](#subagents-are-an-extension)).
+- **Take `PI_SUBAGENT_BIN` and `PI_SUBAGENT_GRACE_MS` out** of your
+  environment if you set them: nothing reads them any more. No variable is new.
+- **An extension of your own** that depends on `@pithagoras/extension-api`
+  `^0.2.0` keeps working. To use what 0.3.0 adds, depend on `^0.3.0`
+  ([Extensions in their own repository](/guide/extension-ui#extensions-in-their-own-repository)).
+  Nothing of 0.2.0's interface is gone, and `portal.version` stays 1. The panel
+  `portal.panels.open("agents")` opens is the subagent extension's now, there
+  while it is on.
+
+What behaves differently:
+
+- **Subagents** are the `pithagoras-subagent` extension, on where the tool was
+  on and off where it was off, with its settings under Extension settings →
+  Subagents. Each one works in a
+  [child chat](#subagents-work-in-chats-of-their-own) of the chat that asked,
+  under the guard (and the sandbox, where it is on), in the chat's mode (**Subagents work in the
+  chat's mode**, on by default) and held to its tool switches, so something a
+  subagent could do before may now be refused or wait for you. The agent also
+  has a `subagents` tool to list and stop them, in background mode or with
+  **Keep subagent chats** on (off by default). A heartbeat has no `subagent`
+  tool any more. The Subagents panel lists subagents only: code mode, web
+  search, fetch, deep research and MCP calls are no longer listed there, and
+  their cards in the chat show what they did, as before.
+- **Sub-chats** are listed under their chat in the sidebar, on the Sessions page
+  and on the Agents page, shut until you open them, and a chat says when one of
+  them waits for you
+  ([Sub-chats in the chat list](#sub-chats-in-the-chat-list)). Deleting a chat
+  deletes its sub-chats.
+- **Docker for extensions 1.3.0** ships with this release. It adds networks of
+  an extension's own that have no way out
+  ([A container on a network of its own](/guide/docker#a-container-on-a-network-of-its-own)),
+  which need Docker Engine 28.0 or later; nothing else in it does. It now
+  refuses a container on another extension's network or on one nobody made,
+  and one that shares the network of a container that is neither the
+  extension's nor the portal's. Browser, Voice and Understory make theirs as
+  before.
+- **Voice servers** has [custom voices](/guide/voice-servers#custom-voices) for
+  Breeze and Chatterbox, off until you switch them on. While they are off, it
+  sends what it sent in 0.2.0.
+- **Voice mode** can show an extension's avatar in place of the orb, chosen per
+  agent under **Shown as** in its Avatar dialog. The row is there only while an
+  extension offers one, so without such an extension nothing changes. Voice mode
+  reads `GET /api/agent/avatar`; `GET /api/agent/orb` stays for scripts.
+- **Media** makes a new picture
+  [with reference pictures](/guide/media#reference-pictures), on its page and
+  through `generate_image`. It asks the editing endpoint, so it is there only
+  while editing is on, and a picture made without references is asked as before.
+- **Extensions** can make and run chats: child chats of a chat, chats of their
+  own in an agent's home or a project, chats nobody attends, a chat's last
+  answer and owner, and the person a request is from
+  ([Child chats](/guide/extension-ui#child-chats)). They can draw in the
+  running tray and the model menu, and the subagent protocol's types are in
+  `@pithagoras/extension-api/server`.
+- **Documents**: the markers in a document's margin are placed again when the
+  window's width changes, and a deletion that was cut off no longer takes a new
+  file of the same name for the old one.
+
+What does not carry over:
+
+- **A dock side or width** given to the Subagents panel; it starts at the
+  default place once.
+- **A subagent from before the upgrade** still shows in the panel, from what
+  its chat kept of it, but has no chat of its own to open.
+
+Going back to 0.2.0 is putting `portal-v11-….db` back and the subagent's
+settings back into pi's `settings.json`: see
+[Going back to 0.2.0](#going-back-to-0-2-0).
+
 ## From 0.1.0 to 0.2.0
 
 A portal at 0.1.0 takes every step of this release in its first start. The
@@ -1133,8 +1233,8 @@ done'
 
 ## Subagents are an extension
 
-This comes after 0.2.0, which still has the subagent tool in Settings → Tools →
-Subagents, and is not one of the steps from 0.1.0. In the release after 0.2.0 the
+This is 0.3.0's. 0.2.0 has the subagent tool in Settings → Tools → Subagents
+(0.1.0 in Settings → Add-ons). In 0.3.0 the
 tool is the `pithagoras-subagent` extension, which comes with the portal
 ([Subagents](/guide/features#subagents)). **A portal that had it on keeps it on**:
 its folder was in pi's packages already, and is loaded as an extension. It is
@@ -1404,12 +1504,52 @@ Going back to a version from before Browser was an extension needs Browser remov
 Going back to a version from before Voice's service was an extension needs Voice and Voice servers removed first, and what is left of their hand-offs and their folders moved aside, before step 3: see [Voice's service is an extension](#going-back-to-a-version-before-voice-was-an-extension).
 Going back to a version from before Understory was an extension needs Understory removed first, and what is left of its hand-off and its folder out of the way, before step 3, and its container made again from the older version afterwards: see [Understory is an extension](#going-back-to-a-version-before-understory-was-an-extension).
 Going back from 0.2.0 to 0.1.0 needs all of these at once, in one order: see [Going back to 0.1.0](#going-back-to-0-1-0).
+Going back from 0.3.0 to 0.2.0 needs the subagent's settings put back in pi's `settings.json`, and what 0.2.0 cannot run removed first: see [Going back to 0.2.0](#going-back-to-0-2-0).
 
 From this version on, an older version does not start on a newer database: it stops at the page described above, because a newer version may have renamed or dropped columns, not only added them. Versions before this one open it anyway and run against it, so put the backup back before you start one of them. The backup from `backups/` is the database as it was before the newer version changed it, which is why going back means putting it back.
 
+### Going back to 0.2.0
+
+0.2.0 does not open a database that 0.3.0 has upgraded: it shows the page that
+says the database is at a newer version. Going back is putting back
+`backups/portal-v11-….db`, the copy the upgrade made, and the subagent's
+settings back where 0.2.0 reads them. Everything written to the database since
+the upgrade is lost, as with any restore: the chats made since, with the
+sub-chats, the subagents' chats and the chats extensions made.
+
+1. **Remove what 0.2.0 cannot run**, while 0.3.0 still runs, under Settings →
+   Extensions: an extension that requires Docker for extensions `^1.3.0` (0.2.0
+   comes with 1.2.0, and does not start an extension that requires more), or
+   one that uses what `@pithagoras/extension-api` 0.3.0 added. Leave Subagents
+   installed: 0.2.0 loads the same folder as its subagent tool.
+2. **Switch Custom voices off** on Voice servers' page, where you switched them
+   on. 0.2.0's Voice servers sends OpenAI's request with the page's Voice, and a
+   voice of your library is not one the server has; switching them off sets the
+   page's Voice back to the server's own where it was one of them.
+3. **Stop the portal.**
+4. **Put the backup back:** `backups/portal-v11-….db` as `portal.db`, with
+   `portal.db-wal` and `portal.db-shm` beside it removed.
+5. **Put the subagent's settings back**, where you used the tool:
+   `subagentMode`, `subagentMaxParallel` and `subagentModel` in pi's
+   `settings.json`, from `extension-data/pithagoras-subagent/settings.json`
+   (`mode`, `maxParallel` and `model`), as
+   [Subagents' section](#going-back-to-a-version-before-subagents-were-an-extension)
+   says. Each chat's choice of model is in the backup as it was at the upgrade.
+6. **Start 0.2.0:** `PITHAGORAS_VERSION=0.2.0` in the Portainer stack, or the
+   image you kept (see [Going back](#going-back)).
+
+What the backup cannot hold stays where it is, and 0.2.0 does not read it:
+`extension-data/pithagoras-subagent/` and what `handoff/` holds, which the next
+upgrade takes up as [Subagents' section](#going-back-to-a-version-before-subagents-were-an-extension)
+says; Voice servers' library in `extension-data/pithagoras-voice-servers/`; and
+the pictures Media made with reference pictures, which stay in its gallery. The
+networks Docker for extensions 1.3.0 made, and the forwarders it made for them,
+stay in Docker with the extension's name as their label
+(`docker network ls --filter label=pithagoras.extension`) until you remove them.
+
 ### Going back to 0.1.0
 
-0.1.0 does not open a database that 0.2.0 has upgraded: it shows the page that
+0.1.0 does not open a database that 0.2.0 or 0.3.0 has upgraded: it shows the page that
 says the database is at a newer version. Going back is putting back
 `backups/portal-v3-….db`, the copy the upgrade made, and moving what the upgrade
 took out of the database back to where 0.1.0 looks for it. Everything written to
@@ -1493,6 +1633,12 @@ the database since the upgrade is lost, as with any restore.
    press **Save and restart Understory**. Understory made the container to reach
    the chat's model at a server 0.1.0 does not run. The memory in its volume is
    kept.
+
+From 0.3.0 the steps are the same, with one more: leave Subagents installed in
+step 1, and before step 4 sets `extension-data/` aside, put the subagent's
+settings back into pi's `settings.json` as in step 5 of
+[Going back to 0.2.0](#going-back-to-0-2-0). 0.1.0 reads them there too, and
+loads the same folder as its subagent tool.
 
 What the backup cannot hold stays with 0.2.0's folders in
 `backups/0.2.0-<date>-<time>`: settings changed on an extension's page after the
