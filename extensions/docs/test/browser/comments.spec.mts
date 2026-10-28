@@ -1990,6 +1990,10 @@ test('the markers in the margin are drawn only where the margin is wide enough t
       expect(marker.left).toBeGreaterThanOrEqual(0);
       expect(marker.right).toBeGreaterThanOrEqual(0);
     }
+    // Settled before the next width: a measure the page still has queued from this one would be taken at the next, and
+    // the next would be passed by it whether or not the page notices that width itself. From 1440 to 1700 pixels only
+    // the sheet's padding grows, and the text inside it stays as wide as it was.
+    await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
   }
   // The sheets of about 760 and 880 pixels were among them: no marker, no overlap.
   await page.setViewportSize({ width: 1320, height: 900 });
