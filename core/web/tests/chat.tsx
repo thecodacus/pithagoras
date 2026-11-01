@@ -96,6 +96,12 @@ if (phase === 'stats') events.push(
     timings: { promptTokens: 1203, cachedTokens: 11264, promptMs: 2210, promptPerSecond: 544.3, outputTokens: 41, outputMs: 1142, outputPerSecond: 35.9, draftTokens: 30, draftAccepted: 22 }, thinkingSince: now - 5000, thinkingUntil: now - 4000 }, 3),
   ev('agent_end', {}, 2),
 );
+// A finished reply with code blocks, which carry their own copy and download buttons: `?phase=code`.
+if (phase === 'code') events.push(
+  ev('portal_prompt', { message: 'Run the tests' }, 6),
+  ev('message_end', { streamId: 'st', message: { role: 'assistant', content: [{ type: 'text', text: 'Here is what ran.\n\n```test\nRunning 3 tests\n  ok 1 - parses\n  ok 2 - writes\n  ok 3 - reads\n```\n\nAnd the code:\n\n```js\nconst a = 1;\n```\n\nDone.' }] } }, 3),
+  ev('agent_end', {}, 2),
+);
 // Tools called with more than a path: a search with several queries, an edit with a list of changes, an MCP tool that answers in JSON; then the answer, finished.
 if (phase === 'args') events.push(
   ev('turn_start', {}, 20),
@@ -286,7 +292,7 @@ if (phase === 'codemode') {
   });
 }
 
-const session: Session = { id: 'preview', title: 'Fix the build', workspace: '/workspaces/pithagoras', executor: 'host', status: phase === 'interrupted' ? 'interrupted' : phase === 'args' || phase === 'pictures' || phase === 'outputs' || phase === 'stats' || phase === 'flagged' || phase === 'flagged-lazy' ? 'idle' : 'running', created_at: '', updated_at: '', last_error: null, pinned: false, provider: 'llama-server', model: 'Model A', thinking_level: 'medium' } as Session;
+const session: Session = { id: 'preview', title: 'Fix the build', workspace: '/workspaces/pithagoras', executor: 'host', status: phase === 'interrupted' ? 'interrupted' : phase === 'args' || phase === 'code' || phase === 'pictures' || phase === 'outputs' || phase === 'stats' || phase === 'flagged' || phase === 'flagged-lazy' ? 'idle' : 'running', created_at: '', updated_at: '', last_error: null, pinned: false, provider: 'llama-server', model: 'Model A', thinking_level: 'medium' } as Session;
 const noop = async () => {};
 // An extension moves its status twenty times a second: how often the chat asks for /background is counted.
 if (phase === 'nudge') {
