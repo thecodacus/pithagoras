@@ -142,6 +142,16 @@ resumes the conversation.
   `container` mode or separate workspaces to run those in parallel.
 - One portal per data directory: a second one on the same data refuses to start.
 
+## More extensions
+
+Extensions that are not part of the portal live in repositories of their own. Each is a package you install by its
+npm name in **Settings → Extensions → Discover**:
+
+- [prometheion/pithagoras-extensions](https://github.com/prometheion/pithagoras-extensions) — extensions that give
+  the agent more to work with.
+- [prometheion/pithagoras-flair](https://github.com/prometheion/pithagoras-flair) — cosmetic and opinionated
+  extensions that change how the portal looks and feels.
+
 ## Documentation
 
 Full docs live in `docs/` and are a VitePress site.
