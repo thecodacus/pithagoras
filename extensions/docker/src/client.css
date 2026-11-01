@@ -8,3 +8,7 @@
 .dk-docker-logs { max-height: 18rem; margin: 6px 0 0; padding: 10px 12px; overflow: auto; border: 1px solid rgb(var(--line)); border-radius: 10px; background: rgb(var(--canvas)); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .dk-docker-hint { margin: 8px 0 0; font-size: 13px; color: rgb(var(--fg-muted)); }
 .dk-docker-hint code { font-size: 12px; }
+.dk-docker-note { margin-top: 6px; }
+.dk-docker-outdated { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.dk-docker-outdated > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.dk-docker-outdated > button { flex: none; }

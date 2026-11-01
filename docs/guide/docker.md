@@ -54,12 +54,70 @@ list) shows:
   **Start** it, read the end of what it wrote (**Logs**), or **Remove** it,
   which asks first. What an extension keeps in a volume stays, and the
   extension may make its container again;
+- a warning under a container that runs another image than its extension wants
+  now, with an **Update** button ([below](#an-image-that-is-not-the-one-wanted));
 - the volumes they keep, which **Delete** takes away with all they hold, once
   you say so.
 
 A container that no extension made, such as one you started by hand, is not
 shown, and not acted on from here. What the agent runs is listed under Docker
 itself.
+
+### Outdated images and Update
+
+Where an extension runs a service in a container, and a newer version of the
+extension asks for a newer image, the container you already have keeps
+running the old one: Docker never changes the image of a container that
+exists. Docker's page then shows a warning under it:
+
+- **Outdated image: it runs X, and the extension now wants Y**: the container
+  was made on another image than the extension wants now. An example is the
+  voice service after an update that moves its image to a newer CUDA version.
+- **Outdated image: X has been downloaded again since it was made**: the image
+  it was made on has the same name, but the name points to a newer image now.
+
+**Update** asks first, and then does the following in the background (a large
+image can take minutes to download; the row says how it goes):
+
+1. Downloads the image the extension wants, if it is not downloaded yet. Where
+   that fails, nothing else has happened: the container is still there and
+   still runs, and the page says why.
+2. Makes the container again on it, under its name, **with the same settings,
+   mounts, networks and volumes**: environment, command, ports, restart policy,
+   the volumes and folders it mounts, its networks with the names it has on
+   them. The volumes made for folders an image declares (`VOLUME`) are mounted
+   again by name, so nothing they hold is lost. What the container only had
+   from its old image (its environment, command, labels and so on) is not
+   carried over: the new image brings its own. A container that was stopped is
+   made again and stays stopped.
+3. Stops the old container and starts the new one, and removes the old one.
+   Where the new one cannot be made or does not start, it is taken away
+   again, the old container has its name back, and runs again if it ran: the
+   page says so, and the warning stays.
+
+The old container is stopped only after the new one has been made, so a new
+body that Docker refuses costs no downtime. While the update runs, the
+container is out of use, and the extension cannot use it. The page refuses an
+update (and says why) where the container is already being updated, where
+nothing is outdated, where its extension says it is in use (Voice does while its
+setup runs), or where another container shares its network (`container:<name>`):
+that one would lose it, so remove it first. An update that the portal's restart
+interrupts between its steps leaves the old container under the name
+`<name>-before-update`, shown on Docker's page beside the new one (or alone,
+where the new one was not made yet, which its extension then makes again). Remove
+it once the container you want is running: another update is refused while it
+is there.
+
+What an update does not do: it does not change anything else the extension keeps
+(Voice keeps the setup script it made its container with, so a newer installer
+still means **Uninstall** and **Install voice** again, as
+[Recreate Voice after a portal update](/guide/voice-service#recreate-voice-after-a-portal-update)
+says), and it does not look in a registry for a newer image under the same name
+(`:latest` images are only warned of once a newer one has been downloaded).
+
+Whoever is logged in to the portal may update, as they may stop and remove: it
+is the same page. What the agent runs from a chat's folder, and containers an
+extension has said nothing about, are not checked.
 
 ## The agent's tools
 
@@ -172,6 +230,7 @@ What it gives (`extensions/docker/src/api.ts`, with its types):
 | `containers.create(name, spec)` | Makes one, not started, from Docker's own create body (`Image`, `Env`, `Cmd`, `HostConfig`, …). One of yours by that name is removed first. One on a network that is not yours, or sharing the network of a container that is neither yours nor the portal's, is refused |
 | `containers.inspect(name)` | How your container was made and how it stands: Docker's own inspect body (`Config`, `HostConfig`, `State`, …), as `create` takes Docker's own create body. Nothing where there is none |
 | `containers.update(name, changes)` | Changes your container as it is, running or not, from Docker's own update body (`RestartPolicy`, and the resources: `Memory`, `NanoCpus`, …): it is neither made again nor restarted, and what the change does not name stays ([below](#when-the-machine-restarts)) |
+| `containers.wantImage(wanted)`, `containers.outdated(name)` | Says which image each of your containers should run now, so that Docker's page warns where one runs another and offers to update it; asks whether one of your containers is outdated ([below](#an-image-that-is-not-the-one-wanted)) |
 | `containers.exec(name, cmd, options?)` | Runs a command in your running container, and gives what it wrote and how it ended ([below](#running-a-command-in-a-container)) |
 | `containers.start`, `stop`, `remove`, `logs(name, { tail })` | Your container's life, and the end of what it wrote |
 | `containers.adopt(name)` | Takes over a container that carries no extension's name: one made before your app was an extension, so that what it kept is kept. Browser takes over the `pithagoras-browser` container and its profile volume this way each time it starts, Voice the `pithagoras-voice` container (where it is labelled as the voice service) and its models volume, and Understory the `pithagoras-understory` container (where it is labelled as the portal's Understory) and its memory volume |
@@ -183,7 +242,8 @@ What it gives (`extensions/docker/src/api.ts`, with its types):
 `sharedNetwork`, `containers.inspect` and `containers.exec` came with Docker
 1.1.0: an extension that uses them requires `^1.1.0`. `containers.update` came
 with 1.2.0, and requires `^1.2.0`. `networks` came with 1.3.0, and requires
-`^1.3.0` and Docker Engine 28.0 or later.
+`^1.3.0` and Docker Engine 28.0 or later. `containers.wantImage` and
+`containers.outdated` came with 1.4.0, and require `^1.4.0`.
 
 Each extension has its own. The containers, volumes and networks it makes carry
 its name (the label `pithagoras.extension`), and it may start, stop, change,
@@ -351,6 +411,40 @@ by default; a forwarder's own network takes one more.
 networks, takes the portal's container off it, and removes it. While one of
 your containers is still on it, Docker refuses, with 403: remove that container
 first.
+
+### An image that is not the one wanted
+
+`containers.create` makes a container on the image you name, and Docker keeps
+it there: the extension's next version may want another image, and the
+containers made before it do not follow. Say which image each container should
+run, as your server half starts, and Docker's page
+([above](#outdated-images-and-update)) warns where one does not and offers
+**Update**:
+
+```js
+docker.containers.wantImage((container) =>
+  container.name === "my-redis" ? { image: "redis:8", busy: working ? "it is rebuilding its index" : undefined } : undefined,
+);
+```
+
+The function is asked of each of your containers whenever it is looked at
+(`container` is as `containers.get` has it, with the labels it was made with),
+and answers with the image now, or with nothing for a container it has no wish
+for: only containers with a wish are checked, and offered an update. `busy` is
+a reason, in English, why the container is not to be made again now: the page
+refuses **Update** while it is there. The wish is kept in memory, not on
+disk: the server half says it each time it starts, and Docker's does so
+before yours.
+
+A container is outdated where it runs another image than the one wanted (the
+reference it was made with is another, and the wanted one is not the same
+image), or the same reference that has been downloaded again since and now is
+another image. `containers.outdated(name)` gives that as
+`{ kind: "other" | "pulled", running, wanted, busy? }`, or nothing where the
+container is as wanted. It needs nothing recorded when a container is made: a
+container made before there was `wantImage` is judged by the reference it was
+made with, which Docker has kept. The update itself is the person's, on
+Docker's page.
 
 ### When the machine restarts
 

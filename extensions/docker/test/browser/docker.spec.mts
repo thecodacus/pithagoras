@@ -114,3 +114,73 @@ test("in Settings' list it is Docker, with its own icon, not the package's name 
   const mark = await dialog.locator('.rail-item').filter({ hasText: /^plain$/ }).locator('svg').innerHTML();
   expect(await entry.locator('svg').innerHTML()).not.toBe(mark);
 });
+
+const OUTDATED = { kind: 'other', running: 'nvidia/cuda:12.4.1-devel-ubuntu22.04', wanted: 'nvidia/cuda:12.9.1-devel-ubuntu22.04' };
+const voiceRow = (extra: Record<string, unknown>) => container({ name: 'pithagoras-voice', owner: 'pithagoras-voice', image: OUTDATED.running, ...extra });
+/** Docker's page with the voice container outdated; `overview` is what the page is told next, as it asks again. */
+const outdated = (page: Page, row: Record<string, unknown> = {}) => open(page, { ...REACHED, containers: [voiceRow({ imageWarning: OUTDATED, ...row }), ...REACHED.containers] });
+
+test('a container that runs another image than its extension wants is warned of, with an Update that asks first, and the update goes on in the background', async ({ page }) => {
+  const { dialog, asked, state } = await outdated(page);
+  const voice = dialog.getByRole('listitem').filter({ hasText: 'pithagoras-voice' });
+  const warning = voice.getByText(/^Outdated image: it runs nvidia\/cuda:12\.4\.1/);
+  await expect(warning).toContainText('and pithagoras-voice now wants nvidia/cuda:12.9.1-devel-ubuntu22.04.');
+  // Only that one: a container that is as its extension wants it has none.
+  await expect(dialog.getByText(/Outdated image/)).toHaveCount(1);
+
+  await voice.getByRole('button', { name: 'Update' }).click();
+  const confirm = page.getByRole('alertdialog');
+  await expect(confirm).toContainText('Update pithagoras-voice?');
+  await expect(confirm).toContainText('nvidia/cuda:12.9.1-devel-ubuntu22.04 is downloaded if it is not there yet, then pithagoras-voice is stopped and made again on it, with the same settings, mounts, networks and volumes.');
+  await confirm.getByRole('button', { name: 'Cancel' }).click();
+  expect(asked).toEqual([]);
+
+  state.overview = { ...REACHED, containers: [voiceRow({ imageWarning: OUTDATED, update: { active: true, line: 'Downloading [=====>   ] 5MB/10MB' } })] };
+  await voice.getByRole('button', { name: 'Update' }).click();
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Update' }).click();
+  await expect.poll(() => asked).toEqual(['POST /containers/pithagoras-voice/update']);
+  // Under way: what Docker says of the download, and nothing else to press on the row until it ends.
+  await expect(voice).toContainText('Updating: Downloading [=====>   ] 5MB/10MB');
+  await expect(voice.getByRole('button', { name: 'Update' })).toHaveCount(0);
+  for (const name of ['Stop', 'Logs', 'Remove']) await expect(voice.getByRole('button', { name })).toBeDisabled();
+});
+
+test('what an update came to is said under the container: that it runs the wanted image now, or why it failed and that it is as it was', async ({ page }) => {
+  const { dialog, state } = await open(page, { ...REACHED, containers: [voiceRow({ image: OUTDATED.wanted, update: { active: false, line: '', done: { from: OUTDATED.running, to: OUTDATED.wanted } } })] });
+  const voice = dialog.getByRole('listitem').filter({ hasText: 'pithagoras-voice' });
+  await expect(voice).toContainText(`Updated: pithagoras-voice runs ${OUTDATED.wanted} now, and ran ${OUTDATED.running}.`);
+  await expect(dialog.getByText(/Outdated image/)).toHaveCount(0);
+
+  state.overview = { ...REACHED, containers: [voiceRow({ imageWarning: OUTDATED, update: { active: false, line: '', error: 'pull access denied for nvidia/cuda' } })] };
+  await expect(voice).toContainText('The update failed, and pithagoras-voice is as it was: pull access denied for nvidia/cuda', { timeout: 10_000 });
+  // And it can be tried again.
+  await expect(voice.getByRole('button', { name: 'Update' })).toBeEnabled();
+});
+
+test('a container that is in use cannot be updated from here, and says why; an image downloaded again is said so', async ({ page }) => {
+  const { dialog, state } = await outdated(page, { imageWarning: { ...OUTDATED, busy: 'its setup is running' } });
+  const voice = dialog.getByRole('listitem').filter({ hasText: 'pithagoras-voice' });
+  await expect(voice).toContainText('It is in use: its setup is running.');
+  await expect(voice.getByRole('button', { name: 'Update' })).toBeDisabled();
+  // Same image, downloaded again: said so.
+  state.overview = { ...REACHED, containers: [voiceRow({ image: 'img:1', imageWarning: { kind: 'pulled', running: 'img:1', wanted: 'img:1' } })] };
+  await expect(voice).toContainText('Outdated image: img:1 has been downloaded again since it was made, and it still runs the older one.', { timeout: 10_000 });
+  await expect(voice.getByRole('button', { name: 'Update' })).toBeEnabled();
+});
+
+test.describe('in a browser set to German', () => {
+  test.use({ locale: 'de-DE' });
+
+  test('the warning and its Update are in German', async ({ page }) => {
+    await mockPortal(page, ({ path }) => {
+      if (path === '/api/extensions') return { settingsPath: '/a/settings.json', extensions: [DOCKER] };
+      if (path === `${BASE}/overview`) return { ...REACHED, containers: [voiceRow({ imageWarning: OUTDATED })] };
+      return undefined;
+    }, { settings: true });
+    await page.goto('/settings/x/pithagoras-docker');
+    const voice = page.getByRole('dialog', { name: 'Einstellungen' }).getByRole('listitem').filter({ hasText: 'pithagoras-voice' });
+    await expect(voice).toContainText('Veraltetes Image: Er läuft mit nvidia/cuda:12.4.1-devel-ubuntu22.04, und pithagoras-voice will jetzt nvidia/cuda:12.9.1-devel-ubuntu22.04.');
+    await voice.getByRole('button', { name: 'Aktualisieren' }).click();
+    await expect(page.getByRole('alertdialog')).toContainText('pithagoras-voice aktualisieren?');
+  });
+});

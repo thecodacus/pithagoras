@@ -1,18 +1,19 @@
 import { useCallback, useEffect, useState } from "react";
 import { LuContainer } from "react-icons/lu";
 import type { Portal } from "@pithagoras/extension-api";
-import type { ContainerInfo, VolumeInfo } from "./api";
+import type { OverviewContainer, VolumeInfo } from "./api";
 import { de } from "./de";
 import { msg, portal, setPortal, t } from "./portal";
 import "./client.css";
 
 /**
  * Docker's page in Settings: whether the portal reaches Docker, and the containers and volumes each extension runs,
- * which the person may start, stop and remove, and whose output they may read. What the extensions are given to run
+ * which the person may start, stop and remove, and whose output they may read. A container that runs another image than
+ * its extension wants is warned of, and made again on the wanted one by Update. What the extensions are given to run
  * them with is the server half's (api.ts).
  */
 
-type Overview = { available: false; socket: boolean } | { available: true; version: string; containers: ContainerInfo[]; volumes: VolumeInfo[] };
+type Overview = { available: false; socket: boolean } | { available: true; version: string; containers: OverviewContainer[]; volumes: VolumeInfo[] };
 
 /** How often the page asks how things stand, while it is open. */
 const EVERY_MS = 5_000;
@@ -57,7 +58,7 @@ function DockerPage() {
       setBusy(null);
     }
   };
-  const remove = async (container: ContainerInfo) => {
+  const remove = async (container: OverviewContainer) => {
     const ok = await ui.confirm({
       title: t("Remove {name}?", { name: container.name }),
       message: t("The container is stopped and removed. What {owner} keeps in a volume stays; it may make the container again.", { owner: container.owner }),
@@ -65,6 +66,20 @@ function DockerPage() {
       danger: true,
     });
     if (ok) await act(`remove ${container.name}`, at(`/containers/${name(container.name)}`), "DELETE");
+  };
+  /** The image of a container made again on the one its extension wants: it goes on in the background, and the overview tells how. */
+  const update = async (container: OverviewContainer) => {
+    if (!container.imageWarning) return;
+    const ok = await ui.confirm({
+      title: t("Update {name}?", { name: container.name }),
+      message: t("{image} is downloaded if it is not there yet, then {name} is stopped and made again on it, with the same settings, mounts, networks and volumes. What {owner} keeps in a volume stays. {name} is out of use meanwhile.", {
+        image: container.imageWarning.wanted,
+        name: container.name,
+        owner: container.owner,
+      }),
+      confirmLabel: t("Update"),
+    });
+    if (ok) await act(`update ${container.name}`, at(`/containers/${name(container.name)}/update`), "POST");
   };
   const removeVolume = async (volume: VolumeInfo) => {
     const ok = await ui.confirm({
@@ -75,7 +90,7 @@ function DockerPage() {
     });
     if (ok) await act(`volume ${volume.name}`, at(`/volumes/${name(volume.name)}`), "DELETE");
   };
-  const readLogs = async (container: ContainerInfo) => {
+  const readLogs = async (container: OverviewContainer) => {
     if (logs?.name === container.name) return setLogs(null);
     setBusy(`logs ${container.name}`);
     setProblem(null);
@@ -118,34 +133,58 @@ function DockerPage() {
           <ul className="dk-docker-list">
             {overview.containers
               .filter((c) => c.owner === owner)
-              .map((container) => (
-                <li key={container.id}>
-                  <div className="dk-docker-row">
-                    <ui.StatusDot status={dotOf(container.state)} />
-                    <div className="dk-docker-what">
-                      <span className="dk-docker-name">{container.name}</span>
-                      <span className="dk-docker-meta">{`${container.image} · ${container.status}`}</span>
+              .map((container) => {
+                const updating = container.update?.active === true;
+                const locked = busy !== null || updating;
+                const outdated = container.imageWarning;
+                return (
+                  <li key={container.id}>
+                    <div className="dk-docker-row">
+                      <ui.StatusDot status={dotOf(container.state)} />
+                      <div className="dk-docker-what">
+                        <span className="dk-docker-name">{container.name}</span>
+                        <span className="dk-docker-meta">{updating ? `${container.image} · ${t("Updating: {line}", { line: container.update?.line ?? "" })}` : `${container.image} · ${container.status}`}</span>
+                      </div>
+                      {/* One Docker waits to start again is running to it, and a stop ends the wait; a start would do nothing. */}
+                      {container.state === "running" || container.state === "restarting" ? (
+                        <button type="button" className={ui.classes.ghost} disabled={locked} onClick={() => void act(`stop ${container.name}`, at(`/containers/${name(container.name)}/stop`), "POST")}>
+                          {t("Stop")}
+                        </button>
+                      ) : (
+                        <button type="button" className={ui.classes.ghost} disabled={locked} onClick={() => void act(`start ${container.name}`, at(`/containers/${name(container.name)}/start`), "POST")}>
+                          {t("Start")}
+                        </button>
+                      )}
+                      <button type="button" className={ui.classes.ghost} disabled={locked} aria-expanded={logs?.name === container.name} onClick={() => void readLogs(container)}>
+                        {t("Logs")}
+                      </button>
+                      <button type="button" className={ui.classes.ghost} disabled={locked} onClick={() => void remove(container)}>
+                        {t("Remove")}
+                      </button>
                     </div>
-                    {/* One Docker waits to start again is running to it, and a stop ends the wait; a start would do nothing. */}
-                    {container.state === "running" || container.state === "restarting" ? (
-                      <button type="button" className={ui.classes.ghost} disabled={busy !== null} onClick={() => void act(`stop ${container.name}`, at(`/containers/${name(container.name)}/stop`), "POST")}>
-                        {t("Stop")}
-                      </button>
-                    ) : (
-                      <button type="button" className={ui.classes.ghost} disabled={busy !== null} onClick={() => void act(`start ${container.name}`, at(`/containers/${name(container.name)}/start`), "POST")}>
-                        {t("Start")}
-                      </button>
+                    {outdated && !updating && (
+                      <ui.WarnBanner className="dk-docker-note">
+                        <div className="dk-docker-outdated">
+                          <span>
+                            {outdated.kind === "other"
+                              ? t("Outdated image: it runs {running}, and {owner} now wants {wanted}.", { running: outdated.running, owner: container.owner, wanted: outdated.wanted })
+                              : t("Outdated image: {image} has been downloaded again since it was made, and it still runs the older one.", { image: outdated.running })}
+                            {outdated.busy ? ` ${t("It is in use: {reason}.", { reason: outdated.busy })}` : ""}
+                          </span>
+                          <button type="button" className={ui.classes.primarySmall} disabled={locked || Boolean(outdated.busy)} onClick={() => void update(container)}>
+                            {t("Update")}
+                          </button>
+                        </div>
+                      </ui.WarnBanner>
                     )}
-                    <button type="button" className={ui.classes.ghost} disabled={busy !== null} aria-expanded={logs?.name === container.name} onClick={() => void readLogs(container)}>
-                      {t("Logs")}
-                    </button>
-                    <button type="button" className={ui.classes.ghost} disabled={busy !== null} onClick={() => void remove(container)}>
-                      {t("Remove")}
-                    </button>
-                  </div>
-                  {logs?.name === container.name && <pre className="dk-docker-logs" aria-label={t("What {name} wrote", { name: container.name })}>{logs.text || t("It has written nothing.")}</pre>}
-                </li>
-              ))}
+                    {container.update?.error && !updating && (
+                      <ui.ErrorBanner className="dk-docker-note">{t("The update failed, and {name} is as it was: {error}", { name: container.name, error: container.update.error })}</ui.ErrorBanner>
+                    )}
+                    {container.update?.done && !updating && <p className="dk-docker-hint">{t("Updated: {name} runs {to} now, and ran {from}.", { name: container.name, to: container.update.done.to, from: container.update.done.from })}</p>}
+                    {logs?.name === container.name && <pre className="dk-docker-logs" aria-label={t("What {name} wrote", { name: container.name })}>{logs.text || t("It has written nothing.")}</pre>}
+                  </li>
+                );
+              })}
           </ul>
         </ui.Section>
       ))}
