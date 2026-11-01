@@ -34,6 +34,7 @@ import { bridgeExtensionUi, UI_RECEIVE } from "../extension-ui.js";
 import { hostExtensions } from "../extension-host.js";
 import { adapterTool, contextWindowFor, getSkipThinkingProviders, getVoiceInstructions, getVoiceModel, questionWaitMs, voiceSpeaks } from "../db.js";
 import { configStamp, isLlamaProvider } from "../providers.js";
+import { configuredCompaction, fitCompaction } from "../pi-settings.js";
 import { rereadConfig } from "./model-runtime.js";
 import { browserServers } from "../api/mcp.js";
 import { PI_BUILT_IN_TOOLS } from "../tool-policy.js";
@@ -1838,10 +1839,22 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     if (current !== this.appliedModel) this.definitionWindows.set(key, current.contextWindow);
     const declared = this.modelRuntime.getModel(current.provider, current.id)?.contextWindow ?? this.definitionWindows.get(key);
     const wanted = contextWindowFor(current.provider, current.id, declared);
+    this.fitCompaction(key, wanted ?? current.contextWindow);
     if (wanted === current.contextWindow) return;
     const next = { ...current, contextWindow: wanted };
     this.appliedModel = next;
     this.session.agent.state.model = next;
+  }
+
+  /**
+   * Give pi's compaction numbers the window can bear, for this model in this session: see fitCompaction. Put over
+   * the session's settings as an override for the model, so nothing is written to the file, and said again
+   * wherever the window is, since reading the file again (a reload, a change of "keep recent") takes it away.
+   */
+  private fitCompaction(modelKey: string, contextWindow: number | undefined): void {
+    const settings = this.session.settingsManager;
+    if (!contextWindow || typeof settings?.applyOverrides !== "function") return;
+    settings.applyOverrides({ compaction: { modelOverrides: { [modelKey]: fitCompaction(contextWindow, configuredCompaction(modelKey)) } } });
   }
 
   async setThinkingLevel(level: string): Promise<void> {
@@ -1859,6 +1872,8 @@ export class SdkPiClient extends EventEmitter implements PiClient {
    */
   async refreshSettings(): Promise<void> {
     await this.session.settingsManager?.reload?.();
+    // The file read again has taken the window's share of compaction away.
+    this.applyLimitQuietly();
   }
 
   async setAutoCompaction(enabled: boolean): Promise<void> {

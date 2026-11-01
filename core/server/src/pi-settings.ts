@@ -60,6 +60,55 @@ export const COMPACTION_DEFAULTS: CompactionSettings = {
   keepRecentTokens: 20_000,
 };
 
+/** What pi holds back for the next answer and the summary, when it is not told otherwise. */
+const RESERVE_DEFAULT = 16_384;
+
+/** The two numbers pi's compaction runs on. */
+export interface CompactionTokens {
+  reserveTokens: number;
+  keepRecentTokens: number;
+}
+
+/**
+ * The compaction numbers as the settings file has them for a model: its own entry, else the ordinary setting, else
+ * pi's default. `modelKey` is `provider/id`, as pi keys its `modelOverrides`.
+ */
+export function configuredCompaction(modelKey: string): CompactionTokens {
+  const stored = readPiSettings().compaction;
+  const c = stored && typeof stored === "object" ? (stored as Record<string, unknown>) : {};
+  const overrides = c.modelOverrides && typeof c.modelOverrides === "object" ? (c.modelOverrides as Record<string, unknown>) : {};
+  const own = overrides[modelKey] && typeof overrides[modelKey] === "object" ? (overrides[modelKey] as Record<string, unknown>) : {};
+  const pick = (field: keyof CompactionTokens, fallback: number): number => {
+    for (const value of [own[field], c[field]]) if (typeof value === "number" && Number.isSafeInteger(value) && value > 0) return value;
+    return fallback;
+  };
+  return { reserveTokens: pick("reserveTokens", RESERVE_DEFAULT), keepRecentTokens: pick("keepRecentTokens", COMPACTION_DEFAULTS.keepRecentTokens) };
+}
+
+/**
+ * The compaction numbers a context window can bear.
+ *
+ * pi's defaults, 16384 held back and 20000 kept verbatim, are made for windows of 128k and more. On a small one they
+ * leave compaction nothing to do: with 20000 kept and a chat that has not got that far, it is "nothing to compact" —
+ * and when pi tries by itself it does not say so, the chat just goes on to fill the window until the model has no
+ * room to answer. So what is kept is held to a sixth of the window, which 128k does not reach.
+ *
+ * What is held back is held to a quarter of it, but never below 6144: pi asks the model for no more than what is
+ * left of the window less 4096 tokens, and for one token when nothing is, so a compaction that starts later than
+ * that starts after the model has been left no room to answer. The 2048 above that are room for an answer.
+ */
+export function fitCompaction(contextWindow: number, wanted: CompactionTokens): CompactionTokens {
+  if (!Number.isFinite(contextWindow) || contextWindow <= 0) return wanted;
+  const room = Math.min(Math.max(RESERVE_FLOOR, Math.floor(contextWindow / 4)), Math.floor(contextWindow / 2));
+  return {
+    reserveTokens: Math.max(256, Math.min(wanted.reserveTokens, room)),
+    keepRecentTokens: Math.max(256, Math.min(wanted.keepRecentTokens, Math.floor(contextWindow / 6))),
+  };
+}
+
+/** The least that can be held back where the window allows it: pi's 4096 tokens of safety, and room for an answer. */
+const RESERVE_FLOOR = 6_144;
+
 export function readCompactionSettings(): CompactionSettings {
   const stored = readPiSettings().compaction;
   const c = stored && typeof stored === "object" ? (stored as Record<string, unknown>) : {};

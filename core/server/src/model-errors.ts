@@ -12,6 +12,9 @@
  * retry loop, and an overflow is decided afterwards by compaction_end. The
  * notice is therefore held until the next run starts or the session settles,
  * by which point both have had their say.
+ *
+ * A turn that ends on the token limit without saying a word is held to the
+ * same account, though pi calls it no error: see EMPTY_LENGTH.
  */
 export class ModelErrors {
   /** A failure pi has not recovered from, waiting to be reported: what it says, and the notice made of it. */
@@ -38,6 +41,10 @@ export class ModelErrors {
 
       case "agent_end": {
         const last = lastAssistant(msg.messages);
+        if (msg.willRetry !== true && last?.stopReason === "length" && saidNothing(last)) {
+          this.pending.set(sessionId, { why: EMPTY_LENGTH, text: EMPTY_LENGTH });
+          return undefined;
+        }
         if (last?.stopReason !== "error" || msg.willRetry === true) return undefined;
         const why = last.errorMessage || "the model failed to answer.";
         const n = this.retries.get(sessionId) ?? 0;
@@ -90,6 +97,20 @@ export class ModelErrors {
     this.pending.delete(sessionId);
     return failed;
   }
+}
+
+/**
+ * What a turn that ends on the model's token limit without a word says. pi clamps a request's output to what is left
+ * of the context window, so a window that is full leaves the model one token and it stops on "length": no error,
+ * and nothing in the chat. pi compacts and asks again when it can; a notice is made of this when it could not.
+ */
+const EMPTY_LENGTH =
+  "The model stopped before it answered: the context window is full, or its output limit was reached. Compact the conversation with /compact, or start a new chat.";
+
+/** Whether an assistant message has neither words nor a call in it. */
+function saidNothing(message: any): boolean {
+  const content = Array.isArray(message?.content) ? message.content : [];
+  return !content.some((c: any) => c?.type === "toolCall" || (c?.type === "text" && typeof c.text === "string" && c.text.trim()));
 }
 
 /**

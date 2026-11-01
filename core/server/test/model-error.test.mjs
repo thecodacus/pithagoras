@@ -152,6 +152,43 @@ test("an abort that nobody asked for, and a real failure after a stop, are still
   assert.deepEqual(notesFor([...attempt(busy), { type: "agent_settled", aborted: true }]), ["Model error: model is busy"]);
 });
 
+const cutOff = (content = []) => ({ role: "assistant", content, stopReason: "length", usage: { input: 60, cacheRead: 31000, output: 1 } });
+
+test("a turn that stops on the token limit without a word is reported, once pi has had its say", () => {
+  const notice = /^The model stopped before it answered: the context window is full.*\/compact/;
+  // pi could not compact (nothing to cut): no compaction event at all.
+  const silent = notesFor([...attempt(cutOff()), { type: "agent_settled" }]);
+  assert.equal(silent.length, 1);
+  assert.match(silent[0], notice);
+  // A turn that only thought is no answer either.
+  assert.equal(notesFor([...attempt(cutOff([{ type: "thinking", thinking: "hm" }])), { type: "agent_settled" }]).length, 1);
+  // Compacted and asked again: nothing to report.
+  assert.deepEqual(
+    notesFor([
+      ...attempt(cutOff()),
+      { type: "compaction_start", reason: "overflow" },
+      { type: "compaction_end", reason: "overflow", aborted: false, willRetry: true },
+      { type: "agent_start" },
+      { type: "message_end", message: answered },
+      { type: "agent_end", messages: [user, answered], willRetry: false },
+      { type: "agent_settled" },
+    ]),
+    []
+  );
+  // The one compact-and-retry pi allows did not help: says why.
+  const failedAgain = notesFor([
+    ...attempt(cutOff()),
+    { type: "compaction_end", reason: "overflow", aborted: false, willRetry: false, errorMessage: "Truncated response recovery failed after one compact-and-retry attempt." },
+    { type: "agent_settled" },
+  ]);
+  assert.match(failedAgain[0], /^The model stopped before it answered.* — Truncated response recovery failed/);
+});
+
+test("a long answer cut off by the token limit, or a call it was making, is no notice", () => {
+  assert.deepEqual(notesFor([...attempt(cutOff([{ type: "text", text: "The history of the bicycle begins" }])), { type: "agent_settled" }]), []);
+  assert.deepEqual(notesFor([...attempt(cutOff([{ type: "toolCall", name: "read", arguments: {} }])), { type: "agent_settled" }]), []);
+});
+
 // Through the session manager, with a stand-in for pi: what reaches the
 // transcript, and what reaches a channel waiting on ask().
 

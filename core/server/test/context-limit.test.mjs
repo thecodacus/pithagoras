@@ -4,7 +4,7 @@ import test from 'node:test';
 import { inProcessHome } from './server-harness.mjs';
 
 const dataDir = inProcessHome('pithagoras-ctx-');
-const { getContextLimit, setContextLimit, getDefaultContextLimit, setDefaultContextLimit, contextWindowFor, contextLimitProblem, getDb } =
+const { getContextLimit, setContextLimit, getDefaultContextLimit, setDefaultContextLimit, contextWindowFor, contextLimitProblem, noteServerWindow, getDb } =
   await import('../dist/db.js');
 const { SdkPiClient } = await import('../dist/pi/sdk-client.js');
 test.after(() => getDb().close());
@@ -160,4 +160,62 @@ test('a window that cannot be applied costs the run and the config nothing', () 
     console.error = log;
   }
   assert.match(errors.join(), /could not apply the context window: agent is gone/);
+});
+
+test('what the server says it holds caps the window, whatever was set, until a window is set by hand', () => {
+  const { client, session } = clientFor({ provider: 'p', id: 'served', contextWindow: 131072 }, 131072);
+  setContextLimit('p', 'served', 200000);
+  client.applyContextLimit();
+  assert.equal(session.model.contextWindow, 200000);
+  assert.equal(noteServerWindow('p', 'served', 32768), true);
+  client.applyContextLimit();
+  assert.equal(session.model.contextWindow, 32768, 'a window set for the model that the server cannot hold was a mistake');
+  assert.equal(contextWindowFor('p', 'served', 131072), 32768);
+  // Said again, or said to be bigger: nothing new. Another model's is its own.
+  assert.equal(noteServerWindow('p', 'served', 32768), false);
+  assert.equal(noteServerWindow('p', 'served', 65536), false);
+  assert.equal(contextWindowFor('p', 'other', 131072), 131072);
+  assert.equal(noteServerWindow('p', 'served', 16384), true, 'a smaller one goes on');
+  assert.equal(contextWindowFor('p', 'served', 131072), 16384);
+  // A person's window for the model is the last word.
+  setContextLimit('p', 'served', 65536);
+  assert.equal(contextWindowFor('p', 'served', 131072), 65536);
+  setContextLimit('p', 'served', null);
+});
+
+test('the server\'s window never raises a smaller one, and a number that is no window is ignored', () => {
+  assert.equal(noteServerWindow('p', 'roomy', 262144), true);
+  assert.equal(contextWindowFor('p', 'roomy', 32768), 32768, 'the model declares less');
+  assert.equal(contextWindowFor('p', 'roomy', undefined), 262144, 'and one that says nothing has the server\'s');
+  for (const bad of [0, 100, -5, 1.5, NaN]) assert.equal(noteServerWindow('p', 'junk', bad), false, String(bad));
+  assert.equal(contextWindowFor('p', 'junk', 4096), 4096);
+});
+
+test('a chat learns the window of its server from the refusal, is told, and compacts to fit it', async () => {
+  const { sessions } = await import('../dist/session-manager.js');
+  const { createSession, eventsSince } = await import('../dist/db.js');
+  const model = { provider: 'p', id: 'refused', contextWindow: 131072 };
+  const { client, session } = clientFor(model, 131072);
+  session.settingsManager = (await import('@earendil-works/pi-coding-agent')).SettingsManager.inMemory({});
+  client.getState = async () => ({ model: { ...session.model, name: 'refused' } });
+  client.applyContextLimit();
+  createSession({ id: 'refused-chat', title: 'refused', workspace: dataDir, executor: 'host' });
+  sessions.live.set('refused-chat', { client });
+  try {
+    await sessions.reportServerWindow('refused-chat', 'refused', 14000);
+    assert.equal(session.model.contextWindow, 14000);
+    const compaction = session.settingsManager.getCompactionSettings(session.model);
+    assert.ok(compaction.keepRecentTokens < 14000 / 2, 'what is kept leaves room in the window the server has');
+    const notices = eventsSince('refused-chat').filter((r) => r.type === 'portal_notice').map((r) => JSON.parse(r.payload));
+    assert.equal(notices.length, 1);
+    assert.match(notices[0].text, /holds 14,000 tokens of context for a chat, not the 131,072 this chat counted on/);
+    // Said again by the next refusal: not told again.
+    await sessions.reportServerWindow('refused-chat', 'refused', 14000);
+    assert.equal(eventsSince('refused-chat').filter((r) => r.type === 'portal_notice').length, 1);
+    // Another model of the chat is none of its business.
+    await sessions.reportServerWindow('refused-chat', 'someone-else', 5000);
+    assert.equal(session.model.contextWindow, 14000);
+  } finally {
+    sessions.live.delete('refused-chat');
+  }
 });
