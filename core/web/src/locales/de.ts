@@ -59,7 +59,7 @@ const de: Locale = {
     "Its {n} sub-chats are deleted with it: {names}.": { one: "Sein Unterchat {names} wird mit gelöscht.", other: "Seine {n} Unterchats werden mit gelöscht: {names}." },
     "Delete {n} chats?": { one: "{n} Chat löschen?", other: "{n} Chats löschen?" },
     "They are stopped if they are running, and their transcripts are removed.": "Laufende werden gestoppt, und ihre Verläufe werden entfernt.",
-    "Their {n} sub-chats are deleted with them.": { one: "Sein Unterchat wird mit gelöscht.", other: "Ihre {n} Unterchats werden mit gelöscht." },
+    "Their {n} sub-chats are deleted with them.": { one: "Ein Unterchat wird mit gelöscht.", other: "Ihre {n} Unterchats werden mit gelöscht." },
     "{n} of them are running or waiting for you.": { one: "{n} davon läuft oder wartet auf dich.", other: "{n} davon laufen oder warten auf dich." },
     // SubChats.tsx
     "{n} sub-chats": { one: "{n} Unterchat", other: "{n} Unterchats" },
@@ -1321,7 +1321,7 @@ const de: Locale = {
     "Select none": "Keine auswählen",
     "Select all shown": "Alle angezeigten auswählen",
     "Select the chats older than": "Chats auswählen, die älter sind als",
-    "Select older than…": "Ältere auswählen als…",
+    "Select older than…": "Älter als … auswählen",
     "{n} days": { one: "{n} Tag", other: "{n} Tage" },
     "Delete {n} chats": { one: "{n} Chat löschen", other: "{n} Chats löschen" },
     "Delete selected": "Ausgewählte löschen",

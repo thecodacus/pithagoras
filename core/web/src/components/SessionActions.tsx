@@ -44,7 +44,7 @@ export function confirmDeleteSessions(chats: readonly { title: string; busy: boo
     message: [
       names,
       t("They are stopped if they are running, and their transcripts are removed."),
-      subChats ? tp(subChats, "Its sub-chat is deleted with them.", "Their {n} sub-chats are deleted with them.") : "",
+      subChats ? tp(subChats, "One sub-chat is deleted with them.", "Their {n} sub-chats are deleted with them.") : "",
       busy ? tp(busy, "{n} of them is running or waiting for you.", "{n} of them are running or waiting for you.") : "",
     ].filter(Boolean).join("\n\n"),
     confirmLabel: t("Delete"),

@@ -98,3 +98,42 @@ test('a chat the server refuses stays, chosen, with the reason; the others are g
   await expect(row(page, 'Stale chat').getByRole('checkbox')).toBeChecked();
   expect(deleted).toEqual(['ancient']);
 });
+
+test('Select all shown leaves out the chats of a folder that is shut, and the question counts a lone sub-chat right', async ({ page }) => {
+  const deleted: string[] = [];
+  const all = [
+    chat('a1', 'Alpha one', 1, { workspace: '/w/alpha' }),
+    chat('a2', 'Alpha two', 2, { workspace: '/w/alpha' }),
+    chat('a2s', 'Alpha helper', 2, { workspace: '/w/alpha', parent: 'a2', listed: true }),
+    chat('b1', 'Beta one', 3, { workspace: '/w/beta' }),
+    chat('b2', 'Beta two', 4, { workspace: '/w/beta' }),
+  ];
+  await mockPortal(page, ({ path, method }) => {
+    if (path === '/api/sessions' && method === 'GET') return { sessions: all.filter((s) => !deleted.includes(s.id)), executor: 'host' };
+    if (path === '/api/projects') {
+      return { root: '/w', home: '/h', projects: ['alpha', 'beta'].map((name) => ({ name, path: `/w/${name}`, isGit: false, hasInstructions: false, hasTools: false, sessions: 0, lastActive: null })) };
+    }
+    const del = /^\/api\/sessions\/([^/]+)$/.exec(path);
+    if (del && method === 'DELETE') {
+      deleted.push(del[1]);
+      return { ok: true };
+    }
+  });
+  await page.goto('/sessions');
+  const main = page.getByRole('main');
+  await expect(main.getByRole('button', { name: 'beta', exact: true })).toHaveAttribute('aria-expanded', 'true');
+  await main.getByRole('button', { name: 'beta', exact: true }).click();
+  await expect(main.getByRole('button', { name: 'beta', exact: true })).toHaveAttribute('aria-expanded', 'false');
+  await expect(row(page, 'Beta one')).toHaveCount(0);
+  await list(page).getByRole('button', { name: 'Select', exact: true }).click();
+  await list(page).getByRole('button', { name: 'Select all shown' }).click();
+  // Alpha's two chats are on screen; Beta's are not, so they are neither counted nor named nor deleted.
+  await expect(list(page).getByRole('status')).toHaveText('2 selected');
+  await list(page).getByRole('button', { name: 'Delete 2 chats' }).click();
+  await expect(dialog(page)).toContainText('"Alpha one", "Alpha two"');
+  await expect(dialog(page)).not.toContainText('Beta');
+  await expect(dialog(page)).toContainText('One sub-chat is deleted with them.');
+  await dialog(page).getByRole('button', { name: 'Delete', exact: true }).click();
+  await expect(row(page, 'Alpha one')).toHaveCount(0);
+  expect(deleted.sort()).toEqual(['a1', 'a2']);
+});

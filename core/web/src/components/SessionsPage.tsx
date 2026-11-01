@@ -162,7 +162,8 @@ export const SessionsPage = memo(function SessionsPage({
   const [choosing, setChoosing] = useState(false);
   const [picked, setPicked] = useState<ReadonlySet<string>>(new Set());
   const [deleting, setDeleting] = useState(false);
-  const visible = byFolder ? folders.flatMap((f) => f.sessions) : shown;
+  // A shut folder's chats are not drawn, so they are not on screen either.
+  const visible = byFolder ? folders.filter((f) => openFolders.isOpen(f.key)).flatMap((f) => f.sessions) : shown;
   const chosen = visible.filter((s) => picked.has(s.id));
   /** At work: running, or waiting for an answer, itself or in a sub-chat. */
   const busy = (s: Session) => [s, ...(all.under.get(s.id) ?? [])].some((c) => c.status === "running" || c.asking);
