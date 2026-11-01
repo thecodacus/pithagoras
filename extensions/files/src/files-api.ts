@@ -41,6 +41,9 @@ const own = (sessionId: string, route: string, path: string, more = "") =>
 export const api = {
   listFiles: (sessionId: string, dir: string) => portal.api.json<{ path: string; entries: FileEntry[]; truncated: boolean }>(own(sessionId, "files", dir)),
   readFile: (sessionId: string, file: string) => portal.api.json<FileContent>(own(sessionId, "file", file)),
+  /** The file if it is not as `known` says (its time and size when it was read), otherwise only that it is: its text is not sent again. */
+  readFileIfChanged: (sessionId: string, file: string, known: { mtime: number; size: number }) =>
+    portal.api.json<FileContent | { unchanged: true }>(own(sessionId, "file", file, `&since=${known.mtime}&size=${known.size}`)),
   /** `mtime` is the time the text on screen was read at; the save is refused if the file has changed since. */
   saveFile: (sessionId: string, file: string, content: string, mtime?: number) =>
     portal.api.json<{ ok: true; size: number; mtime: number }>(own(sessionId, "file", file), { method: "PUT", body: JSON.stringify({ content, mtime }) }),

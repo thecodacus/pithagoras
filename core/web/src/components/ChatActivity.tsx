@@ -191,14 +191,16 @@ function tidyText(text: string): string {
   return text.replace(/\n{2,}/g, "\n").trim();
 }
 
-/** The last few lines of a command's output that say something, oldest first. */
-function lastLines(text: string, n = 3): string[] {
+/** The lines of a command's output that say something, oldest first. */
+function sayingLines(text: string): string[] {
   return text
     .split("\n")
     .map((l) => l.trimEnd())
-    .filter((l) => l.trim())
-    .slice(-n);
+    .filter((l) => l.trim());
 }
+
+/** How many of them a running command shows under its header. */
+const STREAM_LINES = 3;
 
 /**
  * What a tool is, as a picture. Guessed from the words in its name — pi's tools
@@ -325,7 +327,8 @@ export function ToolCall({
   // Counted on the whole output: what is kept of it is only the end.
   const lines = shell ? (item.outputLines ?? lineCount(output)) : 0;
   // Any tool that streams what it is doing shows its newest lines while it runs.
-  const recent = running && !open ? lastLines(output) : [];
+  const said = running && !open ? sayingLines(output) : [];
+  const recent = said.slice(-STREAM_LINES);
 
   return (
     <div className={`chat-tool is-${item.status} ${item.interrupted ? "is-interrupted" : ""} ${open ? "is-open" : ""}`}>
@@ -364,7 +367,7 @@ export function ToolCall({
       {recent.length > 0 && (
         // Keyed by place, not by text: a new line moves the others up
         // without anything being drawn afresh.
-        <div className="chat-tool-stream" aria-hidden>
+        <div className={`chat-tool-stream ${said.length > STREAM_LINES ? "is-clipped" : ""}`} aria-hidden>
           {recent.map((line, i) => (
             <span key={i}>{line}</span>
           ))}

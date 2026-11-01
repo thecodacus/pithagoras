@@ -18,17 +18,28 @@ type Entry = { name: string; type: 'file' | 'dir'; size: number; mtime: number }
  * with that; otherwise what was saved is on disk. A markdown file opens as a
  * page unless the source was chosen before, so the tests start with that
  * choice made; `shown: 'page'` leaves it out. Returned: what was saved, and
- * how often the file was read and the folder listed.
+ * how often the file was read and the folder listed. A look at the open file
+ * that asks only whether it changed (`since`) is answered as the server does,
+ * and counted apart as `looks`; the panel does that every few seconds, which
+ * these tests leave out (the page counts as hidden) unless `watch` is set: then
+ * a fake clock is theirs to move, and the page is visible.
  */
 async function files(
   page: Page,
-  { content = 'one\n', shown = 'source', open = true, put = () => null }: { content?: string; shown?: 'source' | 'page'; open?: boolean; put?: (n: number) => Parameters<Route['fulfill']>[0] | null } = {},
+  {
+    content = 'one\n',
+    shown = 'source',
+    open = true,
+    put = () => null,
+    watch = false,
+  }: { content?: string; shown?: 'source' | 'page'; open?: boolean; put?: (n: number) => Parameters<Route['fulfill']>[0] | null; watch?: boolean } = {},
 ) {
   const saves: Put[] = [];
   const disk = { content, mtime: 1, gone: false };
   const listed: Entry[] = [{ name: 'notes.md', type: 'file', size: 4, mtime: 1 }];
   let reads = 0;
   let lists = 0;
+  let looks = 0;
   let held: Promise<void> | null = null;
   await page.route('**/api/x/pithagoras-files/chats/*/file*', async (route) => {
     const url = new URL(route.request().url());
@@ -44,12 +55,17 @@ async function files(
       disk.mtime++;
       return route.fulfill({ json: { ok: true, size: disk.content.length, mtime: disk.mtime } });
     }
-    reads++;
+    const since = url.searchParams.get('since');
+    if (since === null) reads++;
+    else looks++;
     const found = { ...disk };
     if (held) await held;
+    if (since !== null && !found.gone && Number(since) === found.mtime && Number(url.searchParams.get('size')) === found.content.length) return route.fulfill({ json: { unchanged: true } });
     if (found.gone) return route.fulfill({ status: 404, json: { error: 'There is no such file' } });
     return route.fulfill({ json: { content: found.content, binary: false, size: found.content.length, mtime: found.mtime } });
   });
+  if (watch) await page.clock.install();
+  else await page.addInitScript(() => Object.defineProperty(document, 'visibilityState', { get: () => 'hidden' }));
   if (shown === 'source') await page.addInitScript(() => localStorage.setItem('filesMarkdownRendered', '0'));
   await page.setViewportSize({ width: 1300, height: 800 });
   await page.goto('/tests/chat.html?phase=switch');
@@ -64,7 +80,7 @@ async function files(
       release();
     };
   };
-  return { saves, disk, listed, hold, reads: () => reads, lists: () => lists };
+  return { saves, disk, listed, hold, reads: () => reads, lists: () => lists, looks: () => looks };
 }
 
 let calls = 0;
@@ -317,4 +333,90 @@ test('Refresh with a file open lists the folder again as well, so that the folde
   await answered(page);
   await page.getByRole('button', { name: 'Back to the folder' }).click();
   await expect(page.getByRole('button', { name: /^later\.md/ })).toBeVisible();
+});
+
+/** The few seconds after which the panel looks at the open file. */
+const later = (page: Page) => page.clock.fastForward(3500);
+
+test('a file that changes on disk shows its new text by itself, with no "Loading…" between', async ({ page }) => {
+  const { disk, looks } = await files(page, { watch: true });
+  await expect(box(page)).toHaveValue('one\n');
+  // Nothing changed: it is looked at, and the screen stays as it is.
+  await later(page);
+  await expect.poll(looks).toBe(1);
+  await expect(box(page)).toHaveValue('one\n');
+  disk.content = 'from outside\n';
+  disk.mtime = 2;
+  await later(page);
+  await expect(box(page)).toHaveValue('from outside\n');
+  await expect(page.getByText('Loading…')).toHaveCount(0);
+  await expect(save(page)).toBeDisabled();
+  // It is the file as it is now: a save is checked against the new time.
+  await box(page).fill('mine\n');
+  await save(page).click();
+  await expect(save(page)).toBeDisabled();
+});
+
+test('a file that changes on disk while it has changes not saved asks instead of replacing them, and only once it changed', async ({ page }) => {
+  const { disk, looks } = await files(page, { watch: true });
+  await box(page).fill('mine\n');
+  await later(page);
+  await expect.poll(looks).toBe(1);
+  await expect(bar(page)).toHaveCount(0);
+  disk.content = 'theirs\n';
+  disk.mtime = 2;
+  await later(page);
+  await expect(bar(page)).toBeVisible();
+  await expect(box(page)).toHaveValue('mine\n');
+  await bar(page).getByRole('button', { name: 'Load the new version' }).click();
+  await expect(box(page)).toHaveValue('theirs\n');
+});
+
+test('a file that is gone, or a look that fails, leaves what is on screen alone', async ({ page }) => {
+  const { disk, looks } = await files(page, { watch: true });
+  disk.gone = true;
+  await later(page);
+  await expect.poll(looks).toBe(1);
+  await expect(box(page)).toHaveValue('one\n');
+  await expect(page.getByRole('alert')).toHaveCount(0);
+});
+
+test('the open file is not looked at while the page is hidden, nor when no file is open', async ({ page }) => {
+  const { looks } = await files(page, { watch: true });
+  await page.evaluate(() => Object.defineProperty(document, 'visibilityState', { get: () => 'hidden', configurable: true }));
+  await later(page);
+  await later(page);
+  expect(looks()).toBe(0);
+  await page.evaluate(() => Object.defineProperty(document, 'visibilityState', { get: () => 'visible', configurable: true }));
+  await later(page);
+  await expect.poll(looks).toBe(1);
+  await page.getByRole('button', { name: 'Back to the folder' }).click();
+  await later(page);
+  await later(page);
+  expect(looks()).toBe(1);
+});
+
+test('a look that comes while Refresh is under way does not take its answer: a file that is gone is still reported', async ({ page }) => {
+  const { disk, hold, looks } = await files(page, { watch: true });
+  await expect(box(page)).toHaveValue('one\n');
+  disk.gone = true;
+  const release = hold();
+  await refresh(page).click();
+  await later(page);
+  await expect.poll(looks).toBe(1);
+  release();
+  await expect(page.getByText('There is no such file')).toBeVisible();
+});
+
+test('once the bar about a changed file is up over changes not saved, the file is not looked at again', async ({ page }) => {
+  const { disk, looks } = await files(page, { watch: true });
+  await box(page).fill('mine\n');
+  disk.content = 'theirs\n';
+  disk.mtime = 2;
+  await later(page);
+  await expect(bar(page)).toBeVisible();
+  expect(looks()).toBe(1);
+  await later(page);
+  await later(page);
+  expect(looks()).toBe(1);
 });

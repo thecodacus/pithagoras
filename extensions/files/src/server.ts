@@ -72,7 +72,17 @@ export function routes(router: Router, json: RequestHandler, files: Files, folde
     const at = base(req, res);
     if (!at) return;
     try {
-      if (req.query.download !== "1") return void res.json(files.read(at, pathOf(req)));
+      if (req.query.download !== "1") {
+        // A page that only wants to know whether the file is still as it read it (`since` is its time, `size` its size) is told from a look at the
+        // file, without reading it, and not sent the text again.
+        if (req.query.since !== undefined) {
+          const seen = files.open(at, pathOf(req));
+          closeSync(seen.fd);
+          if (Number(req.query.since) === seen.mtime && Number(req.query.size) === seen.size) return void res.json({ unchanged: true });
+        }
+        const read = files.read(at, pathOf(req));
+        return void res.json(read);
+      }
       // Sent from the descriptor that was checked, not from the path again.
       const { fd, size, name } = files.open(at, pathOf(req));
       res.attachment(name);

@@ -268,3 +268,71 @@ test('a finished reply says how fast it was written and read, and the tokens in 
   expect(details).toContain('Draft: 22 of 30 tokens kept');
   await line.scrollIntoViewIfNeeded();
 });
+
+test('the copy and download buttons of a code block can be clicked, and give the code', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await page.goto('/tests/chat.html?phase=code');
+  const block = page.locator('[data-streamdown="code-block"][data-language="test"]');
+  await expect(block).toContainText('ok 3 - reads');
+  // They float over the block's header, which Streamdown's classes do (sticky, a negative margin); with the stylesheet
+  // missing those they sat in the flow under it, or out of the block when the chat was scrolled.
+  const floating = await block.locator('[data-streamdown="code-block-actions"]').evaluate((el) => {
+    const s = getComputedStyle(el.parentElement!);
+    return { position: s.position, marginTop: s.marginTop };
+  });
+  expect(floating).toEqual({ position: 'sticky', marginTop: '-40px' });
+  // Nothing is on top of them: what is at the middle of each is the button.
+  for (const name of ['Copy Code', 'Download file']) {
+    const button = block.getByTitle(name);
+    await button.scrollIntoViewIfNeeded();
+    const covered = await button.evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      const top = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+      return !top || !el.contains(top);
+    });
+    expect(covered, name).toBe(false);
+  }
+  // Streamdown ends the code with the line break the fence had.
+  const code = 'Running 3 tests\n  ok 1 - parses\n  ok 2 - writes\n  ok 3 - reads\n';
+  await block.getByTitle('Copy Code').click();
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(code);
+  const download = page.waitForEvent('download');
+  await block.getByTitle('Download file').click();
+  const file = await (await download).createReadStream();
+  const chunks: Buffer[] = [];
+  for await (const c of file) chunks.push(c as Buffer);
+  expect(Buffer.concat(chunks).toString()).toBe(code);
+});
+
+test("a running command's output preview fills from the top, in a window that keeps its height", async ({ page }) => {
+  await page.goto('/tests/chat.html?phase=livetool');
+  const stream = page.locator('.chat-tool-stream');
+  const lines = stream.locator('span');
+  await expect(lines).toHaveText(['building…']);
+  const gap = () =>
+    page.evaluate(() => {
+      const box = document.querySelector('.chat-tool-stream')!.getBoundingClientRect();
+      const first = document.querySelector('.chat-tool-stream > span')!.getBoundingClientRect();
+      const head = document.querySelector('.chat-tool-stream')!.parentElement!.querySelector('.chat-tool-head')!.getBoundingClientRect();
+      return { height: box.height, first: first.top - box.top, below: first.bottom - head.bottom };
+    });
+  // One line: right at the top of the window, under the header, not at the bottom of three lines' room.
+  const one = await gap();
+  expect(one.first).toBeLessThan(1);
+  expect(one.below).toBeLessThan(one.height / 2);
+  await expect(stream).not.toHaveClass(/is-clipped/);
+
+  // More arrives: the window keeps its height; nothing fades while all of it fits.
+  await page.evaluate(() => (window as any).bashOut('building…\ncompiling a\ncompiling b'));
+  await expect(lines).toHaveText(['building…', 'compiling a', 'compiling b']);
+  expect((await gap()).height).toBe(one.height);
+  await expect(stream).not.toHaveClass(/is-clipped/);
+
+  // Past three lines it shows the newest three, still from the top, and the oldest fades out.
+  await page.evaluate(() => (window as any).bashOut('building…\ncompiling a\ncompiling b\ncompiling c\ncompiling d'));
+  await expect(lines).toHaveText(['compiling b', 'compiling c', 'compiling d']);
+  const full = await gap();
+  expect(full.height).toBe(one.height);
+  expect(full.first).toBeLessThan(1);
+  await expect(stream).toHaveClass(/is-clipped/);
+});

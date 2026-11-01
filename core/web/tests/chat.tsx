@@ -47,6 +47,8 @@ const events: PortalEvent[] = [
   ev('compaction_end', { result: { summary: 'The user asked to fix the build. The build passes; one test fails.', tokensBefore: 84210 } }, 60),
 ];
 if (phase === 'tools') events.push(ev('turn_start', {}, 20), ...bash('b3', 'for i in $(seq 1 40); do echo "step $i"; sleep 1; done', Array.from({ length: 12 }, (_, i) => `step ${i + 1}`).join('\n'), undefined, 12));
+// A command that has just started and put out one line: `window.bashOut(text)` gives it more. `?phase=livetool`.
+if (phase === 'livetool') events.push(ev('turn_start', {}, 20), ...bash('b3', 'npm run build', 'building…', undefined, 12));
 if (phase === 'model') events.push(ev('turn_start', {}, 8), ev('portal_model', { model: 'model-b-q4', state: 'loading' }, 7));
 if (phase === 'prefill') events.push(ev('turn_start', {}, 8), ev('message_start', { message: { role: 'assistant' } }, 7), ev('portal_prefill', { total: 48000, processed: 20160, cache: 12000 }, 1));
 if (phase === 'thinking') events.push(ev('turn_start', {}, 8), ev('message_update', { streamId: 's', assistantMessageEvent: { type: 'thinking_delta', delta: 'The test fails because the regex expects the status at the very end.\nI should check how pi appends it' } }, 5), ev('message_update', { streamId: 's', assistantMessageEvent: { type: 'thinking_delta', delta: ' — it adds two newlines before "Command exited".' } }, 1));
@@ -92,6 +94,12 @@ if (phase === 'stats') events.push(
   ev('portal_prompt', { message: 'hi' }, 6),
   ev('message_end', { streamId: 'st', message: { role: 'assistant', content: [{ type: 'thinking', thinking: 'A greeting.' }, { type: 'text', text: 'Hi — what do you need?' }], usage: { input: 1203, output: 41, cacheRead: 11264, cacheWrite: 0 } },
     timings: { promptTokens: 1203, cachedTokens: 11264, promptMs: 2210, promptPerSecond: 544.3, outputTokens: 41, outputMs: 1142, outputPerSecond: 35.9, draftTokens: 30, draftAccepted: 22 }, thinkingSince: now - 5000, thinkingUntil: now - 4000 }, 3),
+  ev('agent_end', {}, 2),
+);
+// A finished reply with code blocks, which carry their own copy and download buttons: `?phase=code`.
+if (phase === 'code') events.push(
+  ev('portal_prompt', { message: 'Run the tests' }, 6),
+  ev('message_end', { streamId: 'st', message: { role: 'assistant', content: [{ type: 'text', text: 'Here is what ran.\n\n```test\nRunning 3 tests\n  ok 1 - parses\n  ok 2 - writes\n  ok 3 - reads\n```\n\nAnd the code:\n\n```js\nconst a = 1;\n```\n\nDone.' }] } }, 3),
   ev('agent_end', {}, 2),
 );
 // Tools called with more than a path: a search with several queries, an edit with a list of changes, an MCP tool that answers in JSON; then the answer, finished.
@@ -284,7 +292,7 @@ if (phase === 'codemode') {
   });
 }
 
-const session: Session = { id: 'preview', title: 'Fix the build', workspace: '/workspaces/pithagoras', executor: 'host', status: phase === 'interrupted' ? 'interrupted' : phase === 'args' || phase === 'pictures' || phase === 'outputs' || phase === 'stats' || phase === 'flagged' || phase === 'flagged-lazy' ? 'idle' : 'running', created_at: '', updated_at: '', last_error: null, pinned: false, provider: 'llama-server', model: 'Model A', thinking_level: 'medium' } as Session;
+const session: Session = { id: 'preview', title: 'Fix the build', workspace: '/workspaces/pithagoras', executor: 'host', status: phase === 'interrupted' ? 'interrupted' : phase === 'args' || phase === 'code' || phase === 'pictures' || phase === 'outputs' || phase === 'stats' || phase === 'flagged' || phase === 'flagged-lazy' ? 'idle' : 'running', created_at: '', updated_at: '', last_error: null, pinned: false, provider: 'llama-server', model: 'Model A', thinking_level: 'medium' } as Session;
 const noop = async () => {};
 // An extension moves its status twenty times a second: how often the chat asks for /background is counted.
 if (phase === 'nudge') {
