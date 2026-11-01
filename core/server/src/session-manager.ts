@@ -972,6 +972,10 @@ class SessionManager extends EventEmitter {
    */
   private inRun = new Set<string>();
 
+  /** Stops under way per session, and who waits for the run they stop to settle: see abort. */
+  private abortsUnderWay = new Map<string, number>();
+  private settleWaiters = new Map<string, Array<() => void>>();
+
   /** The extensions whose failure has been said since the last run began, per session. */
   private failuresSaid = new Map<string, Set<string>>();
 
@@ -1434,7 +1438,11 @@ class SessionManager extends EventEmitter {
       if (msg.type === "agent_settled") {
         this.inRun.delete(sessionId);
         this.settleWaiting(sessionId);
-        if (!this.failed.delete(sessionId)) this.mark(sessionId, "idle");
+        // A stop that waits for this settle records the chat idle itself, as stopped: see abort.
+        const stoppedHere = (this.abortsUnderWay.get(sessionId) ?? 0) > 0;
+        if (!this.failed.delete(sessionId) && !stoppedHere) this.mark(sessionId, "idle");
+        for (const woken of this.settleWaiters.get(sessionId) ?? []) woken();
+        this.settleWaiters.delete(sessionId);
         if (client.reloadDue) void this.reloadSettled(sessionId, client);
       }
     });
@@ -3035,6 +3043,23 @@ class SessionManager extends EventEmitter {
     }
   }
 
+  /**
+   * Resolves when the run that is going settles, at once when none is, and after `timeoutMs` at the latest: pi
+   * settles a run a moment after its abort() has returned (the extensions' handlers are awaited first), so a Stop that
+   * did not wait would record the chat idle ahead of the run's own settling.
+   */
+  private whenSettled(sessionId: string, timeoutMs = 10_000): Promise<void> {
+    if (!this.inRun.has(sessionId)) return Promise.resolve();
+    return new Promise((resolve) => {
+      const timer = setTimeout(done, timeoutMs);
+      function done() {
+        clearTimeout(timer);
+        resolve();
+      }
+      this.settleWaiters.set(sessionId, [...(this.settleWaiters.get(sessionId) ?? []), done]);
+    });
+  }
+
   async abort(sessionId: string): Promise<void> {
     this.aborts.set(sessionId, (this.aborts.get(sessionId) ?? 0) + 1);
     const live = this.live.get(sessionId);
@@ -3060,6 +3085,7 @@ class SessionManager extends EventEmitter {
     const before = this.sending.get(sessionId);
     const tail = before ? before.then(() => gate) : gate;
     this.sending.set(sessionId, tail);
+    this.abortsUnderWay.set(sessionId, (this.abortsUnderWay.get(sessionId) ?? 0) + 1);
     try {
       const sentBefore = new Set(this.waiting.get(sessionId) ?? []);
       // Before the abort, which waits for the run to settle and would find them
@@ -3068,6 +3094,9 @@ class SessionManager extends EventEmitter {
       await this.whenHanded(sessionId);
       this.dropWaiting(sessionId, live.client, sentBefore);
       await live.client.abort().catch(() => {});
+      // The stopped run's settling comes after this: it is waited for, or it would be recorded behind the message
+      // that is sent next, and be taken for the end of the run that message starts.
+      await this.whenSettled(sessionId);
       // Cancelling a compaction does not end it. pi detaches the session from
       // agent events for the whole of compact() and reattaches in its own
       // finally, so between abortCompaction() returning and that finally running
@@ -3078,6 +3107,9 @@ class SessionManager extends EventEmitter {
       updateSession(sessionId, { status: "idle" });
       this.record(sessionId, "portal_status", { status: "idle", aborted: true });
     } finally {
+      const left = (this.abortsUnderWay.get(sessionId) ?? 1) - 1;
+      if (left > 0) this.abortsUnderWay.set(sessionId, left);
+      else this.abortsUnderWay.delete(sessionId);
       stopped();
       if (this.sending.get(sessionId) === tail) this.sending.delete(sessionId);
     }
@@ -3205,6 +3237,9 @@ class SessionManager extends EventEmitter {
     this.extensionUi.delete(sessionId);
     this.failuresSaid.delete(sessionId);
     this.inRun.delete(sessionId);
+    // A run that went with its pi settles no more: a Stop that waits for it is let go.
+    for (const woken of this.settleWaiters.get(sessionId) ?? []) woken();
+    this.settleWaiters.delete(sessionId);
     this.calls.delete(sessionId);
     toolCallsCutOff(sessionId);
     this.callWindows.delete(sessionId);
