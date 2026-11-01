@@ -74,13 +74,28 @@ export function switchedOffServer(input: Record<string, unknown>, off: ReadonlyS
   return allOff(statsOf(off, view).get(asked)) ? asked : undefined;
 }
 
-/** Less the suggestions ("Did you mean: …") that name a tool that is off. */
+/**
+ * Less the tools that are off from the lists a failed call ends with: what the server has ("Server "x" has: a, b"), what
+ * is available on it, and the suggestions ("Did you mean: a, b").
+ */
 function withoutSuggestions(value: string, isOff: (name: string) => boolean): string {
-  return value.replace(/ Did you mean: ([^\n]*)/g, (whole, list: string) => {
+  const kept = (list: string) => {
     const all = list.split(", ");
-    const kept = all.filter((name) => !isOff(name));
-    return kept.length === all.length ? whole : kept.length ? ` Did you mean: ${kept.join(", ")}` : "";
-  });
+    return { all, kept: all.filter((name) => !isOff(name)) };
+  };
+  return value
+    .replace(/ Server ("[^"]*") has: (.*?)(?= Did you mean: |$)/gm, (whole, server: string, list: string) => {
+      const { all, kept: left } = kept(list);
+      return left.length === all.length ? whole : left.length ? ` Server ${server} has: ${left.join(", ")}` : ' Use mcp({ search: "..." }) to search.';
+    })
+    .replace(/Available tools on ("[^"]*"): (.*?)(?= Did you mean: |$)/gm, (whole, server: string, list: string) => {
+      const { all, kept: left } = kept(list);
+      return left.length === all.length ? whole : left.length ? `Available tools on ${server}: ${left.join(", ")}` : `Server ${server} has no tools.`;
+    })
+    .replace(/ Did you mean: ([^\n]*)/g, (whole, list: string) => {
+      const { all, kept: left } = kept(list);
+      return left.length === all.length ? whole : left.length ? ` Did you mean: ${left.join(", ")}` : "";
+    });
 }
 
 const plural = (n: number) => (n === 1 ? "" : "s");

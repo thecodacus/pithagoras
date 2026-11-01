@@ -117,6 +117,16 @@ test("a suggestion does not name a tool that is off", () => {
   assert.doesNotMatch(text(withoutSwitchedOff(miss, new Set(["jira_search", "jira_create_issue"]), view())), /Did you mean/);
 });
 
+test("a call that finds no such tool does not name the server's tools that are off", () => {
+  const miss = (hint) => ({ content: [{ type: "text", text: `Tool "jira_serch" not found.${hint}` }], details: { mode: "call", error: "tool_not_found" } });
+  const has = ' Server "jira" has: jira_search, jira_create_issue, jira_admin_delete Did you mean: jira_search, jira_create_issue';
+  const off = new Set(["jira_create_issue", "jira_admin_delete"]);
+  assert.equal(text(withoutSwitchedOff(miss(has), off, view())), 'Tool "jira_serch" not found. Server "jira" has: jira_search Did you mean: jira_search');
+  assert.equal(text(withoutSwitchedOff(miss(has), new Set(["jira_search", "jira_create_issue", "jira_admin_delete"]), view())), 'Tool "jira_serch" not found. Use mcp({ search: "..." }) to search.');
+  const after = { content: [{ type: "text", text: 'Tool "x" not found on "jira" after reconnect. Available tools on "jira": jira_search, jira_create_issue' }], details: { mode: "call" } };
+  assert.equal(text(withoutSwitchedOff(after, new Set(["jira_create_issue"]), view())), 'Tool "x" not found on "jira" after reconnect. Available tools on "jira": jira_search');
+});
+
 test("a server whose tools are all off is not listed, searched, connected or read the instructions of", () => {
   const off = new Set(["notes_read", "notes_write"]);
   assert.equal(switchedOffServer({ connect: "notes" }, off, view()), "notes");
