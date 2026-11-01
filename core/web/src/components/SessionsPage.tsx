@@ -1,21 +1,22 @@
 import { Fragment, memo, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { LuFilter, LuMessagesSquare, LuPin, LuSearch, LuX } from "react-icons/lu";
+import { LuFilter, LuListChecks, LuMessagesSquare, LuPin, LuSearch, LuX } from "react-icons/lu";
 import { PageHeader, Stat } from "./PageHeader";
 import type { Session } from "../api";
 import { when } from "../time";
-import { filterSessions } from "../session-filter";
-import { SessionActions, sessionError } from "./SessionActions";
-import { ErrorBanner } from "./SettingsUi";
+import { filterSessions, olderThan } from "../session-filter";
+import { SessionActions, confirmDeleteSessions, sessionError } from "./SessionActions";
+import { ErrorBanner, ghostCls } from "./SettingsUi";
+import { Select } from "./Select";
 import { StatusDot, workingText } from "./StatusDot";
 import { TitleInput } from "./TitleInput";
 import { ChatsHeading, FolderTree } from "./FolderTree";
 import { RowsSkeleton } from "./Skeleton";
 import { folderFrom, folderKeys, hasMoreThanHome, folderName, folderNameOf, groupByFolder, sortFolders, type Places } from "../session-folders";
 import { useFolderPrefs, useOpenFolders } from "../use-session-folders";
-import { useFlip } from "../motion";
+import { keep, useFlip } from "../motion";
 import { useNow } from "../use-now";
-import { t, useLanguage } from "../i18n";
+import { t, tp, useLanguage } from "../i18n";
 import { SubChats } from "./SubChats";
 import { familiesFound, familyRunning, shownStatus, splitSubChats, type ShownStatus } from "../sub-chats";
 
@@ -38,6 +39,7 @@ export const SessionsPage = memo(function SessionsPage({
   onSelect,
   onNewChat,
   onDelete,
+  onDeleteMany,
   onPin,
   onRename,
 }: {
@@ -48,6 +50,8 @@ export const SessionsPage = memo(function SessionsPage({
   /** A chat in `workspace`, or where New starts without one, opened. */
   onNewChat?: (workspace?: string) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
+  /** Deletes the chats one after the other, and tells which ones the server refused. */
+  onDeleteMany: (ids: string[]) => Promise<{ id: string; error: string }[]>;
   onPin: (id: string, pinned: boolean) => Promise<void>;
   onRename: (id: string, title: string) => Promise<void>;
 }) {
@@ -151,6 +155,62 @@ export const SessionsPage = memo(function SessionsPage({
       });
   };
 
+  /**
+   * Choosing chats to delete together. Only chats listed on their own are chosen: their sub-chats go with them. What
+   * is chosen but not shown (a search narrowed the list since) is not deleted, so the count is of what is on screen.
+   */
+  const [choosing, setChoosing] = useState(false);
+  const [picked, setPicked] = useState<ReadonlySet<string>>(new Set());
+  const [deleting, setDeleting] = useState(false);
+  const visible = byFolder ? folders.flatMap((f) => f.sessions) : shown;
+  const chosen = visible.filter((s) => picked.has(s.id));
+  /** At work: running, or waiting for an answer, itself or in a sub-chat. */
+  const busy = (s: Session) => [s, ...(all.under.get(s.id) ?? [])].some((c) => c.status === "running" || c.asking);
+  const stopChoosing = () => {
+    setChoosing(false);
+    setPicked(new Set());
+  };
+  const toggle = (id: string) =>
+    setPicked((p) => {
+      const next = new Set(p);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
+  const everyChosen = visible.length > 0 && chosen.length === visible.length;
+  const deleteChosen = async () => {
+    const ids = chosen.map((s) => s.id);
+    const subs = chosen.reduce((n, s) => n + (all.under.get(s.id)?.length ?? 0), 0);
+    if (!ids.length || deleting || !(await confirmDeleteSessions(chosen.map((s) => ({ title: s.title, busy: busy(s) })), subs))) return;
+    setError(null);
+    setDeleting(true);
+    // Pictures of the rows, to break apart where they were once they are gone (see motion.ts).
+    const gone = new Map(
+      ids.map((id) => {
+        const el = list.current?.querySelector<HTMLElement>(`[data-flip="${CSS.escape(id)}"]`) ?? null;
+        return [id, keep(el, list.current)] as const;
+      }),
+    );
+    try {
+      const failed = await onDeleteMany(ids);
+      const refused = new Set(failed.map((f) => f.id));
+      for (const [id, leave] of gone) if (!refused.has(id)) leave("row");
+      // What the server kept stays chosen, to try again.
+      setPicked(new Set(refused));
+      if (failed.length) {
+        const first = chosen.find((s) => s.id === failed[0].id);
+        setError(
+          failed.length === 1
+            ? sessionError("delete", first?.title ?? "", new Error(failed[0].error))
+            : t("Could not delete {n} of {all} chats, the first being \"{name}\": {error}", { n: failed.length, all: ids.length, name: first?.title ?? "", error: failed[0].error }),
+        );
+      } else {
+        stopChoosing();
+      }
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   /** A chat's row, and its sub-chats under it. */
   const family = (s: Session) => {
     const subs = all.under.get(s.id);
@@ -173,6 +233,7 @@ export const SessionsPage = memo(function SessionsPage({
           endingRename.current = renaming === s.id;
         }}
         onClick={() => {
+          if (choosing) return nested ? undefined : toggle(s.id);
           // A click on a name that is waiting for a second one is overtaken by this one.
           window.clearTimeout(opening.current);
           if (endingRename.current || renaming === s.id) {
@@ -187,11 +248,22 @@ export const SessionsPage = memo(function SessionsPage({
           if (e.target !== e.currentTarget) return;
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
-            onSelect(s.id);
+            if (!choosing) onSelect(s.id);
+            else if (!nested) toggle(s.id);
           }
         }}
-        className="group flex cursor-pointer items-center gap-3 rounded-xl border border-line bg-raised/40 px-3 py-2.5 transition hover:bg-fg/5"
+        className={`group flex cursor-pointer items-center gap-3 rounded-xl border bg-raised/40 px-3 py-2.5 transition hover:bg-fg/5 ${choosing && picked.has(s.id) ? "border-accent/50" : "border-line"}`}
       >
+        {choosing && !nested && (
+          <input
+            type="checkbox"
+            checked={picked.has(s.id)}
+            onChange={() => toggle(s.id)}
+            onClick={(e) => e.stopPropagation()}
+            aria-label={t("Select {name}", { name: s.title })}
+            className="h-4 w-4 shrink-0 accent-accent"
+          />
+        )}
         <StatusDot status={status} />
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-2">
@@ -207,12 +279,15 @@ export const SessionsPage = memo(function SessionsPage({
               <p
                 className={`truncate text-sm text-fg ${workingText(status)}`}
                 onClick={(e) => {
+                  // Choosing: the click is the row's, which chooses the chat.
+                  if (choosing) return;
                   e.stopPropagation();
                   window.clearTimeout(opening.current);
                   if (e.detail > 1) return;
                   opening.current = window.setTimeout(() => onSelect(s.id), DOUBLE_CLICK_MS);
                 }}
                 onDoubleClick={(e) => {
+                  if (choosing) return;
                   e.stopPropagation();
                   window.clearTimeout(opening.current);
                   setRenaming(s.id);
@@ -229,9 +304,11 @@ export const SessionsPage = memo(function SessionsPage({
           {!byFolder && !only && !nested && <p className="truncate text-[11px] text-fg-faint">{folderOf(s)}</p>}
         </div>
         <span className="shrink-0 text-[11px] text-fg-faint">{when(s.updated_at)}</span>
-        <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100">
-          <SessionActions session={s} subChats={subChats} nested={nested} onPin={onPin} onStartRename={() => setRenaming(s.id)} onDelete={onDelete} onError={setError} />
-        </div>
+        {!choosing && (
+          <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100">
+            <SessionActions session={s} subChats={subChats} nested={nested} onPin={onPin} onStartRename={() => setRenaming(s.id)} onDelete={onDelete} onError={setError} />
+          </div>
+        )}
       </li>
   );
 
@@ -255,7 +332,8 @@ export const SessionsPage = memo(function SessionsPage({
             </div>
           </PageHeader>
 
-          <div className="relative mt-4">
+          <div className="mt-4 flex items-center gap-2">
+          <div className="relative min-w-0 flex-1">
             <LuSearch className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-fg-faint" />
             <input
               value={query}
@@ -270,6 +348,41 @@ export const SessionsPage = memo(function SessionsPage({
               </span>
             )}
           </div>
+          <button
+            type="button"
+            onClick={() => (choosing ? stopChoosing() : setChoosing(true))}
+            aria-pressed={choosing}
+            className={`${ghostCls} inline-flex shrink-0 items-center gap-1.5 !py-2 ${choosing ? "!bg-accent/12 !text-accent" : ""}`}
+          >
+            <LuListChecks aria-hidden className="h-4 w-4" />
+            {t("Select")}
+          </button>
+          </div>
+
+          {choosing && (
+            <div role="group" aria-label={t("Delete several chats")} className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-line bg-raised/40 px-3 py-2">
+              <span role="status" className="text-sm text-fg-muted">{t("{n} selected", { n: chosen.length })}</span>
+              <button type="button" onClick={() => setPicked(everyChosen ? new Set() : new Set(visible.map((s) => s.id)))} className={ghostCls} disabled={!visible.length}>
+                {everyChosen ? t("Select none") : t("Select all shown")}
+              </button>
+              <Select
+                size="sm"
+                value=""
+                aria-label={t("Select the chats older than")}
+                placeholder={t("Select older than…")}
+                onChange={(days) => setPicked(new Set(olderThan(visible, Number(days), busy).map((s) => s.id)))}
+                options={[7, 30, 90].map((d) => ({ value: String(d), label: tp(d, "{n} day", "{n} days") }))}
+              />
+              <button
+                type="button"
+                onClick={() => void deleteChosen()}
+                disabled={!chosen.length || deleting}
+                className={`${ghostCls} ml-auto !bg-danger/15 !text-danger ring-1 ring-inset ring-danger/30 hover:!bg-danger/25 disabled:opacity-50`}
+              >
+                {chosen.length ? tp(chosen.length, "Delete {n} chat", "Delete {n} chats") : t("Delete selected")}
+              </button>
+            </div>
+          )}
 
           {error && <ErrorBanner className="mt-3" onClose={() => setError(null)}>{error}</ErrorBanner>}
           {startError && <ErrorBanner className="mt-3" onClose={() => setStartError(null)}>{startError}</ErrorBanner>}

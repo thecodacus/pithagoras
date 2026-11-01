@@ -489,6 +489,20 @@ routines, projects, voices and channels alike. It is kept per browser.
 Discarding unsaved changes is still asked about. The Agents page's conversations
 can be renamed and deleted the same way, from the row.
 
+### Deleting several chats at once
+
+**Sessions → Select** turns the page into a list to choose from: each chat gets
+a checkbox, and a click on a row chooses it instead of opening it. The bar under
+the search counts what is chosen and offers **Select all shown**, **Select
+none**, and **Select older than…** (7, 30 or 90 days), which chooses the chats
+not touched for that long, never a pinned one nor one that is running or waiting
+for you. **Delete** asks once, naming the first few chats, how many sub-chats go
+with them and how many of the chats are at work, and then deletes them one after
+the other. Only what the page shows counts: a search narrows what is chosen as
+well as what is listed. A chat the server refuses stays chosen, with the reason
+in an alert, and the rest are gone. The question can be turned off like any
+other delete's, in **Settings → This browser → Confirmations**.
+
 ### Sub-chats
 
 An extension can give part of a chat's work to a chat of its own, a
