@@ -32,7 +32,8 @@ import { proxyBaseUrl } from "../llama-progress.js";
 import { bridgeSubagents, SUBAGENT_INPUT, SUBAGENT_STOP, type Bridge } from "../subagent-protocol.js";
 import { bridgeExtensionUi, UI_RECEIVE } from "../extension-ui.js";
 import { hostExtensions } from "../extension-host.js";
-import { adapterTool, contextWindowFor, getSkipThinkingProviders, getVoiceInstructions, getVoiceModel, questionWaitMs, voiceSpeaks } from "../db.js";
+import { adapterTool, contextWindowFor, getSkipThinkingProviders, getVoiceInstructions, getVoiceModel, mcpView, questionWaitMs, voiceSpeaks } from "../db.js";
+import { describedWithoutSwitchedOff } from "./mcp-hide.js";
 import { configStamp, isLlamaProvider } from "../providers.js";
 import { rereadConfig } from "./model-runtime.js";
 import { browserServers } from "../api/mcp.js";
@@ -1573,6 +1574,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       this.wanted = new Set();
     }
     this.keepSwitchedOffFromScripts(session);
+    this.keepSwitchedOffFromMcpTool(session);
     session._setActiveTools = (names: string[]) => {
       this.takenLate();
       const held = this.heldBack(session, names, this.fromExtension);
@@ -1609,6 +1611,36 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     if (typeof session?._getCallableTools !== "function") return;
     const original = session._getCallableTools.bind(session) as (...args: unknown[]) => any[];
     session._getCallableTools = (...args: unknown[]) => original(...args).filter((tool) => !this.switchedOff.has(String(tool?.name)));
+  }
+
+  /**
+   * Take what is switched off out of what the `mcp` tool is declared with.
+   *
+   * The adapter writes the tool's description from its cache: the servers it names, how many tools they have, the
+   * ones it registers one by one, the instructions of each. It knows no switch, so a server whose tools are all off
+   * was still named, with its tool count. pi declares the tools to the model in `_applyToolLoadout`, which every
+   * activation ends in (see guardActiveTools), so the description is written again there, less what is off here
+   * (see mcp-hide.ts). The tool's own definition is left as the adapter made it: the next loadout starts from that.
+   */
+  private keepSwitchedOffFromMcpTool(session: any): void {
+    if (typeof session?._applyToolLoadout !== "function") return;
+    const original = session._applyToolLoadout.bind(session) as (...args: unknown[]) => any[];
+    session._applyToolLoadout = (...args: unknown[]) => {
+      const declared = original(...args);
+      const at = Array.isArray(declared) ? declared.findIndex((tool) => tool?.name === "mcp" && typeof tool.description === "string") : -1;
+      if (at < 0 || !this.switchedOff.size) return declared;
+      let description: string;
+      try {
+        description = describedWithoutSwitchedOff(declared[at].description, this.switchedOff, mcpView());
+      } catch (e) {
+        console.error(`[portal] could not leave the switched-off tools out of the mcp tool: ${(e as Error).message}`);
+        return declared;
+      }
+      if (description === declared[at].description) return declared;
+      const shown = declared.map((tool, i) => (i === at ? { ...tool, description } : tool));
+      if (session.agent?.state) session.agent.state.tools = shown;
+      return shown;
+    };
   }
 
   /** True while an extension's `setActiveTools` is being carried out. */

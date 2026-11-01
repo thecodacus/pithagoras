@@ -10,6 +10,7 @@ import { listToolRules, mcpView, recordAudit, trustResult, trustedMcpServers, tr
 import { SIGNALS, injectionSignals, type Signal } from "./injection.js";
 import { GUARD_RULE_NAMES, type GuardRuleName } from "./guard-rule-names.js";
 import { mcpClaims, mcpServerOf } from "../tool-policy.js";
+import { switchedOffServer, withoutSwitchedOff } from "./mcp-hide.js";
 import { DATA_DIR } from "../data-dir.js";
 import { piAgentDir } from "../pi-settings.js";
 import { isWithinText, pathBelow, realPath, realPathAhead } from "../within.js";
@@ -2113,6 +2114,15 @@ export function guardExtension(
       if (portalSessionId) trusted = trustedResults(portalSessionId);
     });
 
+    // First of the hooks on a result, so that what the others read, wrap and weigh is what the model is given: the
+    // adapter's lists, searches and status are written from its cache, which knows no switch (see mcp-hide.ts).
+    pi.on("tool_result", (event: any) => {
+      if (event.toolName !== "mcp" || event.isError) return undefined;
+      const off = offNow();
+      if (!off.size) return undefined;
+      return withoutSwitchedOff({ content: event.content, details: event.details }, off, mcpView());
+    });
+
     pi.on("tool_result", (event: any) => {
       if (typeof event.toolCallId === "string") running.delete(event.toolCallId);
       const compact = !event.isError && isBrowserSnapshot(event.toolName, event.input ?? {});
@@ -2214,6 +2224,18 @@ export function guardExtension(
                   "Call the MCP tools you need one at a time instead."
                 : `Refused: "${offTool}" is switched off in this conversation, and the mcp tool does not reach it ` +
                   "either. Say that it is switched off rather than looking for another way to it.",
+        };
+      }
+
+      // A server with every tool off is gone from the conversation, not listed with its tools refused one by one.
+      const offServer = event.toolName === "mcp" ? switchedOffServer(event.input ?? {}, offNow(), mcpView()) : undefined;
+      if (offServer) {
+        note("refused", `Switched off in this conversation: the tools of ${offServer}`);
+        return {
+          block: true,
+          reason:
+            `Refused: every tool of the MCP server "${offServer}" is switched off in this conversation, so there is nothing to list, ` +
+            "search or connect. Say that it is switched off rather than looking for another way to it.",
         };
       }
 
