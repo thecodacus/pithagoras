@@ -9,7 +9,7 @@ import { bareRef } from "../browser/ref.js";
 import { listToolRules, mcpView, recordAudit, trustResult, trustedMcpServers, trustedResults, untrustResult, useGrant, type McpView, type ToolRule } from "../db.js";
 import { SIGNALS, injectionSignals, type Signal } from "./injection.js";
 import { GUARD_RULE_NAMES, type GuardRuleName } from "./guard-rule-names.js";
-import { mcpClaims, mcpServerOf } from "../tool-policy.js";
+import { mcpClaims, mcpPrefixAs, mcpServerAs, mcpServerOf } from "../tool-policy.js";
 import { switchedOffServer, withoutSwitchedOff } from "./mcp-hide.js";
 import { DATA_DIR } from "../data-dir.js";
 import { piAgentDir } from "../pi-settings.js";
@@ -147,7 +147,9 @@ export function switchedOffVia(
   toolName: string,
   input: Record<string, unknown>,
   off: ReadonlySet<string>,
-  given?: Pick<McpView, "servers" | "serverTool">,
+  given?: Pick<McpView, "servers" | "serverTool"> & Partial<Pick<McpView, "naming">>,
+  /** Whether the adapter registered a tool of this name in the session: a server's whatever it is called (see untrustedResult). */
+  fromAdapter: (name: string) => boolean = () => false,
 ): string | undefined {
   if (!off.size || (toolName !== GATEWAY_TOOL && toolName !== "mcp" && toolName !== "mcp_script" && toolName !== "mcpScript")) {
     return undefined;
@@ -164,20 +166,30 @@ export function switchedOffVia(
     return [...off].find((name) => same(name) === asked);
   }
   const mcp = given ?? mcpView();
+  // A server's tool in whatever naming the adapter gives the server's tools (`toolPrefix`), and one the adapter
+  // registered from a configuration the portal does not read (a project's): not only the default `<server>_<tool>`.
+  const naming = (server: string) => mcp.naming?.(server) ?? "server";
+  const serversTool = (name: string) => mcpServerAs(name, mcp.servers, naming) !== undefined || fromAdapter(name);
   if (toolName === "mcp") {
     const server = typeof input.server === "string" && input.server ? same(input.server) : undefined;
+    const configured = typeof input.server === "string" ? mcp.servers.find((one) => one === input.server) : undefined;
+    const prefix = configured === undefined ? undefined : mcpPrefixAs(configured, naming(configured));
     for (const key of ["tool", "describe"]) {
       const asked = input[key];
       if (typeof asked !== "string" || !asked) continue;
-      const wanted = [same(asked), ...(server ? [`${server}_${same(asked)}`] : [])];
-      const hit = [...off].find((name) => wanted.includes(same(name)) && mcpServerOf(name, mcp.servers) !== undefined);
+      const wanted = [
+        same(asked),
+        ...(server ? [`${server}_${same(asked)}`] : []),
+        ...(prefix ? [same(`${prefix}_${asked}`)] : []),
+      ];
+      const hit = [...off].find((name) => wanted.includes(same(name)) && serversTool(name));
       if (hit) return hit;
     }
     return undefined;
   }
   // `mcpScript` too: the name the portal's own lists have for it, should an adapter register it so.
   if (toolName === "mcp_script" || toolName === "mcpScript") {
-    return [...off].find((name) => mcp.serverTool(name));
+    return [...off].find((name) => mcp.serverTool(name) || fromAdapter(name));
   }
   return undefined;
 }
@@ -2114,13 +2126,20 @@ export function guardExtension(
       if (portalSessionId) trusted = trustedResults(portalSessionId);
     });
 
-    // First of the hooks on a result, so that what the others read, wrap and weigh is what the model is given: the
-    // adapter's lists, searches and status are written from its cache, which knows no switch (see mcp-hide.ts).
+    // First of the guard's hooks on a result, so that what its others read, wrap and weigh is what the model is given:
+    // the adapter's lists, searches and status are written from its cache, which knows no switch (see mcp-hide.ts).
+    // pi runs a package's hooks before the guard's, so one of those may have reworded the text already: what cannot
+    // be read is answered with what the details say (withoutSwitchedOff), and a failure here with nothing of it.
     pi.on("tool_result", (event: any) => {
       if (event.toolName !== "mcp" || event.isError) return undefined;
       const off = offNow();
       if (!off.size) return undefined;
-      return withoutSwitchedOff({ content: event.content, details: event.details }, off, mcpView());
+      try {
+        return withoutSwitchedOff({ content: event.content, details: event.details }, off, { ...mcpView(), registered: fromAdapter }, event.input ?? {});
+      } catch (e) {
+        console.error(`[portal] could not leave the switched-off tools out of an mcp result: ${(e as Error).message}`);
+        return { content: [{ type: "text", text: "The MCP adapter's answer is left out: it could not be read without the tools switched off in this conversation." }] };
+      }
     });
 
     pi.on("tool_result", (event: any) => {
@@ -2210,7 +2229,7 @@ export function guardExtension(
             "Say that it is switched off rather than looking for another way to it.",
         };
       }
-      const offTool = event.toolName === GATEWAY_TOOL && !gateway ? undefined : switchedOffVia(event.toolName, event.input ?? {}, offNow());
+      const offTool = event.toolName === GATEWAY_TOOL && !gateway ? undefined : switchedOffVia(event.toolName, event.input ?? {}, offNow(), undefined, fromAdapter);
       if (offTool) {
         note("refused", `Switched off in this conversation: ${offTool}`);
         return {
@@ -2228,14 +2247,14 @@ export function guardExtension(
       }
 
       // A server with every tool off is gone from the conversation, not listed with its tools refused one by one.
-      const offServer = event.toolName === "mcp" ? switchedOffServer(event.input ?? {}, offNow(), mcpView()) : undefined;
+      const offServer = event.toolName === "mcp" ? switchedOffServer(event.input ?? {}, offNow(), { ...mcpView(), registered: fromAdapter }) : undefined;
       if (offServer) {
         note("refused", `Switched off in this conversation: the tools of ${offServer}`);
         return {
           block: true,
           reason:
             `Refused: every tool of the MCP server "${offServer}" is switched off in this conversation, so there is nothing to list, ` +
-            "search or connect. Say that it is switched off rather than looking for another way to it.",
+            "search, connect or call. Say that it is switched off rather than looking for another way to it.",
         };
       }
 

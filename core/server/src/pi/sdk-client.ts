@@ -33,7 +33,7 @@ import { bridgeSubagents, SUBAGENT_INPUT, SUBAGENT_STOP, type Bridge } from "../
 import { bridgeExtensionUi, UI_RECEIVE } from "../extension-ui.js";
 import { hostExtensions } from "../extension-host.js";
 import { adapterTool, contextWindowFor, getSkipThinkingProviders, getVoiceInstructions, getVoiceModel, mcpView, questionWaitMs, voiceSpeaks } from "../db.js";
-import { describedWithoutSwitchedOff } from "./mcp-hide.js";
+import { describedBare, describedWithoutSwitchedOff } from "./mcp-hide.js";
 import { configStamp, isLlamaProvider } from "../providers.js";
 import { rereadConfig } from "./model-runtime.js";
 import { browserServers } from "../api/mcp.js";
@@ -365,6 +365,12 @@ function packageOf(info: any): string | undefined {
   return info?.origin === "package" && info?.scope === "user" && typeof info.source === "string" ? info.source : undefined;
 }
 
+/** Whether the MCP adapter registered a tool of this name in the session: a server's tool, whatever it is named. */
+function registeredByAdapter(session: any, name: string): boolean {
+  const tool = (session?.getAllTools?.() ?? []).find((one: any) => one?.name === name);
+  return tool !== undefined && adapterTool({ source: sourceLabel(tool.sourceInfo), package: packageOf(tool.sourceInfo) });
+}
+
 /** Whether the portal's own inline extension registered it: pi names those <inline:name>, which no file's path is. */
 function isInline(info: any): boolean {
   return typeof info?.path === "string" && /^<inline:[^>]+>$/.test(info.path);
@@ -690,10 +696,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     });
     filesOf = (name) => declaredFiles(session.getToolDefinition(name));
     guardOf = (name) => declaredGuard(session.getToolDefinition(name));
-    fromAdapter = (name) => {
-      const tool = (session.getAllTools?.() ?? []).find((one: any) => one?.name === name);
-      return tool !== undefined && adapterTool({ source: sourceLabel(tool.sourceInfo), package: packageOf(tool.sourceInfo) });
-    };
+    fromAdapter = (name) => registeredByAdapter(session, name);
 
     const client = new SdkPiClient(session, modelRuntime, () => {});
     switchedOff = () => client.switchedOff;
@@ -1610,7 +1613,12 @@ export class SdkPiClient extends EventEmitter implements PiClient {
   private keepSwitchedOffFromScripts(session: any): void {
     if (typeof session?._getCallableTools !== "function") return;
     const original = session._getCallableTools.bind(session) as (...args: unknown[]) => any[];
-    session._getCallableTools = (...args: unknown[]) => original(...args).filter((tool) => !this.switchedOff.has(String(tool?.name)));
+    // The `mcp` tool too as the model is to be told of it: pi writes the code tool's description from these, and in the
+    // code tool's `only` presentation that is where the model reads the `mcp` tool's own (see keepSwitchedOffFromMcpTool).
+    session._getCallableTools = (...args: unknown[]) =>
+      original(...args)
+        .filter((tool) => !this.switchedOff.has(String(tool?.name)))
+        .map((tool) => this.mcpToolShown(session, tool));
   }
 
   /**
@@ -1627,20 +1635,26 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     const original = session._applyToolLoadout.bind(session) as (...args: unknown[]) => any[];
     session._applyToolLoadout = (...args: unknown[]) => {
       const declared = original(...args);
-      const at = Array.isArray(declared) ? declared.findIndex((tool) => tool?.name === "mcp" && typeof tool.description === "string") : -1;
-      if (at < 0 || !this.switchedOff.size) return declared;
-      let description: string;
-      try {
-        description = describedWithoutSwitchedOff(declared[at].description, this.switchedOff, mcpView());
-      } catch (e) {
-        console.error(`[portal] could not leave the switched-off tools out of the mcp tool: ${(e as Error).message}`);
-        return declared;
-      }
-      if (description === declared[at].description) return declared;
-      const shown = declared.map((tool, i) => (i === at ? { ...tool, description } : tool));
+      if (!Array.isArray(declared)) return declared;
+      const shown = declared.map((tool) => this.mcpToolShown(session, tool));
+      if (shown.every((tool, i) => tool === declared[i])) return declared;
       if (session.agent?.state) session.agent.state.tools = shown;
       return shown;
     };
+  }
+
+  /** The `mcp` tool less what is switched off in its description, and any other tool as it is: see keepSwitchedOffFromMcpTool. */
+  private mcpToolShown(session: any, tool: any): any {
+    if (tool?.name !== "mcp" || typeof tool.description !== "string" || !this.switchedOff.size) return tool;
+    let description: string;
+    try {
+      description = describedWithoutSwitchedOff(tool.description, this.switchedOff, { ...mcpView(), registered: (name) => registeredByAdapter(session, name) });
+    } catch (e) {
+      // Nothing of a server rather than all of them.
+      console.error(`[portal] could not leave the switched-off tools out of the mcp tool: ${(e as Error).message}`);
+      description = describedBare(tool.description);
+    }
+    return description === tool.description ? tool : { ...tool, description };
   }
 
   /** True while an extension's `setActiveTools` is being carried out. */

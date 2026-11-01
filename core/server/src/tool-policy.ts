@@ -88,6 +88,28 @@ export function mcpServerOf(name: string, servers: Iterable<string>): string | u
   return best;
 }
 
+/**
+ * Which MCP server a tool came through, each server taken in the naming the adapter
+ * gives its tools (`toolPrefix`, see mcpPrefixAs) as well as in the default one,
+ * which the adapter's own match by a name's start may go by. The longest start
+ * wins, as in mcpServerOf; a server named `none` could have a tool of any name, so
+ * it has one only where no other server claims it.
+ */
+export function mcpServerAs(name: string, servers: Iterable<string>, naming: (server: string) => string): string | undefined {
+  let best: string | undefined;
+  let bestLength = -1;
+  for (const server of servers) {
+    for (const as of new Set([naming(server), "server"])) {
+      if (!mcpClaims(server, name, as)) continue;
+      const length = mcpPrefixAs(server, as).length;
+      if (length > bestLength) {
+        best = server;
+        bestLength = length;
+      }
+    }
+  }
+  return best;
+}
 
 /** What to file a tool under: its MCP server where it has one, its package otherwise. */
 export function toolSource(name: string, source: string, servers: Iterable<string>): string {
