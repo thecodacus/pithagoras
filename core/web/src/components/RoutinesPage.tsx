@@ -193,7 +193,7 @@ export function RoutinesPage({ onOpenSession }: { onOpenSession: (id: string) =>
 
   if (open) {
     return (
-      <div className="h-full overflow-y-auto px-4 py-6">
+      <div className="scroll-steady h-full overflow-y-auto px-4 py-6">
         <div className="mx-auto w-full max-w-3xl">
           {errorBox}
           <RoutineDetail
@@ -213,7 +213,7 @@ export function RoutinesPage({ onOpenSession }: { onOpenSession: (id: string) =>
   }
 
   return (
-    <div className="h-full overflow-y-auto px-4 py-6">
+    <div className="scroll-steady h-full overflow-y-auto px-4 py-6">
       <div className="mx-auto w-full max-w-3xl">
         <PageHeader
           icon={<LuClock />}

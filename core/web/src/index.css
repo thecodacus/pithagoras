@@ -186,6 +186,14 @@
   audio { color-scheme: inherit; border-radius: 10px; }
 }
 
+/*
+ * A box a page or a conversation scrolls in. Scrolled by a fraction of a pixel (a trackpad, smooth scrolling, a screen
+ * at 125 %), Chromium draws its text again at that offset, and every line is rounded to the screen on its own: lines
+ * of one paragraph step a pixel apart from each other, and the text wobbles as it moves. Told that it scrolls, the
+ * browser moves what it has drawn as one piece instead.
+ */
+.scroll-steady { will-change: scroll-position; }
+
 /* Markdown in the transcript. */
 .md p { @apply my-1.5 leading-relaxed; }
 .md ul, .md ol { @apply my-1.5 ml-5 list-disc space-y-1; }

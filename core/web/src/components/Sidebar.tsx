@@ -328,7 +328,7 @@ export const Sidebar = memo(function Sidebar({
         </div>
       )}
 
-      <div ref={list} className="sidebar-list flex-1 overflow-y-auto px-2 pb-2">
+      <div ref={list} className="sidebar-list scroll-steady flex-1 overflow-y-auto px-2 pb-2">
         {/* By folder, each says so itself, and a chat can be started in it. */}
         {sessions.length === 0 && !byFolder && (
           <p className="px-2 py-4 text-xs text-fg-subtle">{t("No sessions yet.")}</p>
