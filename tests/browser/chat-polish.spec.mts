@@ -268,3 +268,36 @@ test('a finished reply says how fast it was written and read, and the tokens in 
   expect(details).toContain('Draft: 22 of 30 tokens kept');
   await line.scrollIntoViewIfNeeded();
 });
+
+test("a running command's output preview fills from the top, in a window that keeps its height", async ({ page }) => {
+  await page.goto('/tests/chat.html?phase=livetool');
+  const stream = page.locator('.chat-tool-stream');
+  const lines = stream.locator('span');
+  await expect(lines).toHaveText(['building…']);
+  const gap = () =>
+    page.evaluate(() => {
+      const box = document.querySelector('.chat-tool-stream')!.getBoundingClientRect();
+      const first = document.querySelector('.chat-tool-stream > span')!.getBoundingClientRect();
+      const head = document.querySelector('.chat-tool-stream')!.parentElement!.querySelector('.chat-tool-head')!.getBoundingClientRect();
+      return { height: box.height, first: first.top - box.top, below: first.bottom - head.bottom };
+    });
+  // One line: right at the top of the window, under the header, not at the bottom of three lines' room.
+  const one = await gap();
+  expect(one.first).toBeLessThan(1);
+  expect(one.below).toBeLessThan(one.height / 2);
+  await expect(stream).not.toHaveClass(/is-clipped/);
+
+  // More arrives: the window keeps its height; nothing fades while all of it fits.
+  await page.evaluate(() => (window as any).bashOut('building…\ncompiling a\ncompiling b'));
+  await expect(lines).toHaveText(['building…', 'compiling a', 'compiling b']);
+  expect((await gap()).height).toBe(one.height);
+  await expect(stream).not.toHaveClass(/is-clipped/);
+
+  // Past three lines it shows the newest three, still from the top, and the oldest fades out.
+  await page.evaluate(() => (window as any).bashOut('building…\ncompiling a\ncompiling b\ncompiling c\ncompiling d'));
+  await expect(lines).toHaveText(['compiling b', 'compiling c', 'compiling d']);
+  const full = await gap();
+  expect(full.height).toBe(one.height);
+  expect(full.first).toBeLessThan(1);
+  await expect(stream).toHaveClass(/is-clipped/);
+});
