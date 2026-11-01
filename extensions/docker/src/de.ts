@@ -15,8 +15,6 @@ export const de: Record<string, string> = {
   "Logs": "Protokoll",
   "No extension runs a container.": "Keine Erweiterung betreibt einen Container.",
   "Outdated image: it runs {running}, and {owner} now wants {wanted}.": "Veraltetes Image: Er läuft mit {running}, und {owner} will jetzt {wanted}.",
-  "Outdated image: {image} has been downloaded again since it was made, and it still runs the older one.":
-    "Veraltetes Image: {image} wurde seit dem Anlegen neu heruntergeladen, und er läuft noch mit dem älteren.",
   "Remove": "Entfernen",
   "Remove {name}?": "{name} entfernen?",
   "Start": "Starten",

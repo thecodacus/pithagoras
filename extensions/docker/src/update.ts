@@ -133,16 +133,27 @@ export function recreation(old: ContainerBody, oldImage: ImageConfig | undefined
 }
 
 /**
- * Whether an image is the one its extension wants. `running` is the reference the container was made with, `ran` the
- * id of the image it runs, and `local` the id the wanted reference has here now, none where it is not downloaded. The
- * same reference is outdated only when it has come to point to another image since (it was downloaded again); another
- * reference is outdated, unless it is the same image under another name.
+ * Whether a reference names one version: a digest, or a tag that is not `latest`. No tag is `latest`, which moves on by
+ * itself and is not a version anyone asked for; a registry's port (`localhost:5000/app`) is no tag.
+ */
+export function pinned(image: string): boolean {
+  if (image.includes("@")) return true;
+  const name = image.slice(image.lastIndexOf("/") + 1);
+  const tag = name.includes(":") ? name.slice(name.indexOf(":") + 1) : "";
+  return tag !== "" && tag !== "latest";
+}
+
+/**
+ * Whether a container runs another image than the one its extension wants, said only for a pinned one (`pinned`): a
+ * floating `latest` is never a warning, and neither is a pinned tag that was moved in its registry and downloaded again
+ * (the extension asked for the same version still, which the registry rebuilt). `running` is the reference the container
+ * was made with, `ran` the id of the image it runs, and `local` the id the wanted reference has here now, none where it
+ * is not downloaded: another reference is outdated, unless it is the same image under another name.
  */
 export function warning(running: string, ran: string | undefined, wanted: WantedImage, local: string | undefined): ImageWarning | undefined {
-  const base = { running, wanted: wanted.image, ...(wanted.busy ? { busy: wanted.busy } : {}) };
-  if (running === wanted.image) return local && ran && local !== ran ? { ...base, kind: "pulled" } : undefined;
+  if (!pinned(wanted.image) || running === wanted.image) return undefined;
   if (local && ran && local === ran) return undefined;
-  return { ...base, kind: "other" };
+  return { running, wanted: wanted.image, ...(wanted.busy ? { busy: wanted.busy } : {}) };
 }
 
 /** The names of the containers that share the network of the one with this id and name, from Docker's list of all of them. */

@@ -66,15 +66,22 @@ itself.
 ### Outdated images and Update
 
 Where an extension runs a service in a container, and a newer version of the
-extension asks for a newer image, the container you already have keeps
+extension asks for another image, the container you already have keeps
 running the old one: Docker never changes the image of a container that
 exists. Docker's page then shows a warning under it:
 
 - **Outdated image: it runs X, and the extension now wants Y**: the container
   was made on another image than the extension wants now. An example is the
   voice service after an update that moves its image to a newer CUDA version.
-- **Outdated image: X has been downloaded again since it was made**: the image
-  it was made on has the same name, but the name points to a newer image now.
+
+Only a pinned image is warned about: a reference with a version tag (`:12.4.1`,
+`:22.04`) or a digest (`@sha256:…`). An image without a tag, or with `:latest`,
+moves on by itself and is never a warning. A pinned tag that its registry has
+rebuilt and that you downloaded again is the same version, and not a warning
+either. Voice (a CUDA or Ubuntu version), the forwarders Docker makes for a
+network without a way out, and Browser and Understory (which run `latest`
+today, so they say nothing yet) all state the image they want, so that an
+update of any of them that changes a pinned version shows the warning.
 
 **Update** asks first, and then does the following in the background (a large
 image can take minutes to download; the row says how it goes):
@@ -99,8 +106,7 @@ image can take minutes to download; the row says how it goes):
    left stopped for you to remove.
 
 Only a download of the image counts as the image: an image that a chat's agent
-built under the same name is replaced by the download when you update, and gets
-no "downloaded again" warning.
+built under the same name is replaced by the download when you update.
 
 The old container is stopped only after the new one has been made, so a new
 body that Docker refuses costs no downtime. While the update runs, the
@@ -448,12 +454,14 @@ refuses **Update** while it is there. The wish is kept in memory, not on
 disk: the server half says it each time it starts, and Docker's does so
 before yours.
 
-A container is outdated where it runs another image than the one wanted (the
-reference it was made with is another, and the wanted one is not the same
-image), or the same reference that has been downloaded again since and now is
-another image. `containers.outdated(name)` gives that as
-`{ kind: "other" | "pulled", running, wanted, busy? }`, or nothing where the
-container is as wanted. It needs nothing recorded when a container is made: a
+A container is outdated where the image wanted is pinned (a tag other than
+`latest`, or a digest) and the container was made with another reference, which
+is not the same image under another name. An image with no tag or with `latest`
+is never outdated, whatever the container runs, and neither is one whose pinned
+tag was only downloaded again. `containers.outdated(name)` gives that as
+`{ running, wanted, busy? }`, or nothing where the container is as wanted.
+State the pinned image your container runs, so that the people who use your
+extension are told when an update of it changes that version. It needs nothing recorded when a container is made: a
 container made before there was `wantImage` is judged by the reference it was
 made with, which Docker has kept. The update itself is the person's, on
 Docker's page.

@@ -115,7 +115,7 @@ test("in Settings' list it is Docker, with its own icon, not the package's name 
   expect(await entry.locator('svg').innerHTML()).not.toBe(mark);
 });
 
-const OUTDATED = { kind: 'other', running: 'nvidia/cuda:12.4.1-devel-ubuntu22.04', wanted: 'nvidia/cuda:12.9.1-devel-ubuntu22.04' };
+const OUTDATED = { running: 'nvidia/cuda:12.4.1-devel-ubuntu22.04', wanted: 'nvidia/cuda:12.9.1-devel-ubuntu22.04' };
 const voiceRow = (extra: Record<string, unknown>) => container({ name: 'pithagoras-voice', owner: 'pithagoras-voice', image: OUTDATED.running, ...extra });
 /** Docker's page with the voice container outdated; `overview` is what the page is told next, as it asks again. */
 const outdated = (page: Page, row: Record<string, unknown> = {}) => open(page, { ...REACHED, containers: [voiceRow({ imageWarning: OUTDATED, ...row }), ...REACHED.containers] });
@@ -169,15 +169,15 @@ test('an update that left the old container behind says so, and one that could n
   await expect(dialog.getByText('is as it was')).toHaveCount(0);
 });
 
-test('a container that is in use cannot be updated from here, and says why; an image downloaded again is said so', async ({ page }) => {
+test('a container that is in use cannot be updated from here, and says why; it can once it is not in use', async ({ page }) => {
   const { dialog, state } = await outdated(page, { imageWarning: { ...OUTDATED, busy: 'its setup is running' } });
   const voice = dialog.getByRole('listitem').filter({ hasText: 'pithagoras-voice' });
   await expect(voice).toContainText('It is in use: its setup is running.');
   await expect(voice.getByRole('button', { name: 'Update' })).toBeDisabled();
-  // Same image, downloaded again: said so.
-  state.overview = { ...REACHED, containers: [voiceRow({ image: 'img:1', imageWarning: { kind: 'pulled', running: 'img:1', wanted: 'img:1' } })] };
-  await expect(voice).toContainText('Outdated image: img:1 has been downloaded again since it was made, and it still runs the older one.', { timeout: 10_000 });
-  await expect(voice.getByRole('button', { name: 'Update' })).toBeEnabled();
+  // No longer in use: the same warning, and the button works.
+  state.overview = { ...REACHED, containers: [voiceRow({ imageWarning: OUTDATED })] };
+  await expect(voice.getByRole('button', { name: 'Update' })).toBeEnabled({ timeout: 10_000 });
+  await expect(voice).not.toContainText('It is in use');
 });
 
 test.describe('in a browser set to German', () => {

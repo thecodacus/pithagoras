@@ -137,7 +137,7 @@ test("as it starts, Voice tells Docker which image its container should run: Doc
   const at = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/x/pithagoras-docker`;
   const row = async () => ((await (await fetch(`${at}/overview`)).json()) as any).containers.find((c: any) => c.name === CONTAINER);
   try {
-    assert.deepEqual((await row()).imageWarning, { kind: "other", running: old, wanted: IMAGE });
+    assert.deepEqual((await row()).imageWarning, { running: old, wanted: IMAGE });
     assert.equal((await fetch(`${at}/containers/${CONTAINER}/update`, { method: "POST" })).status, 202);
     await until(() => machine.voice()?.Image === IMAGE && machine.voice()?.State === "running", "made again on the wanted image");
     const made = machine.voice()!.made as any;

@@ -15,7 +15,8 @@ import type { Docker, WantedImage } from "../src/api.ts";
 const docker = await fakeDocker();
 process.env.DOCKER_SOCKET = docker.socket;
 const { dockerFor, OWNER_LABEL } = await import("../src/docker.ts");
-const { recreation } = await import("../src/update.ts");
+const { pinned, recreation } = await import("../src/update.ts");
+const { FORWARDER_IMAGE, FORWARDS_LABEL } = await import("../src/forward.ts");
 const { default: serverHalf } = await import("../src/server.ts");
 test.after(() => docker.close());
 
@@ -61,13 +62,13 @@ async function ended(person: ReturnType<typeof dockerFor>["person"], name: strin
   assert.fail(`the update of ${name} did not end`);
 }
 
-test("a container is outdated where its extension wants another image, or the one it runs has been downloaded again; the extension's wish is all that says so", async () => {
+test("a container is outdated where its extension wants another pinned image; the extension's wish is all that says so", async () => {
   images();
   const { d, forExtension } = wanting(VOICE, "img:2");
   await d.containers.create("up-a", { Image: "img:1", Labels: { "pithagoras.voice-recipe": "x" } });
   const seen: Record<string, string>[] = [];
   d.containers.wantImage((c) => (seen.push(c.labels), c.name === "up-a" ? { image: "img:2", busy: "its setup is running" } : undefined));
-  assert.deepEqual(await d.containers.outdated("up-a"), { kind: "other", running: "img:1", wanted: "img:2", busy: "its setup is running" });
+  assert.deepEqual(await d.containers.outdated("up-a"), { running: "img:1", wanted: "img:2", busy: "its setup is running" });
   assert.equal(seen.at(-1)!["pithagoras.voice-recipe"], "x", "the wish is asked with the labels the container was made with");
 
   // The same image under another name is the same image.
@@ -75,14 +76,15 @@ test("a container is outdated where its extension wants another image, or the on
   docker.imageInfo.set("img:1b", OLD);
   d.containers.wantImage(() => ({ image: "img:1b" }));
   assert.equal(await d.containers.outdated("up-a"), undefined);
-  // Wanting the reference it runs, it is current until that reference points to another image.
+  // Wanting the reference it runs, it is current: also when a registry has moved that tag and it was downloaded again (the same version still).
   d.containers.wantImage(() => ({ image: "img:1" }));
   assert.equal(await d.containers.outdated("up-a"), undefined);
   docker.imageInfo.set("img:1", NEW);
-  assert.deepEqual(await d.containers.outdated("up-a"), { kind: "pulled", running: "img:1", wanted: "img:1" });
+  assert.equal(await d.containers.outdated("up-a"), undefined, "a pinned tag that was moved is not another version");
+  docker.imageInfo.set("img:1", OLD);
   // A wanted image that is not downloaded yet is not the one it runs.
   d.containers.wantImage(() => ({ image: "img:3" }));
-  assert.equal((await d.containers.outdated("up-a"))?.kind, "other");
+  assert.deepEqual(await d.containers.outdated("up-a"), { running: "img:1", wanted: "img:3" });
 
   // No wish for it, a wish that throws, and a container that is not there: nothing to say.
   d.containers.wantImage(() => undefined);
@@ -94,6 +96,43 @@ test("a container is outdated where its extension wants another image, or the on
   assert.equal(await d.containers.outdated("up-none"), undefined);
   // Another extension's is not its to ask about.
   await assert.rejects(forExtension("pithagoras-browser").containers.outdated("up-a"), /up-a is pithagoras-voice's container, not pithagoras-browser's/);
+});
+
+test("which references are pinned: a tag other than latest, or a digest", () => {
+  for (const image of ["redis:8", "ubuntu:22.04", "nvidia/cuda:12.4.1-devel-ubuntu22.04", "localhost:5000/app:2", "ghcr.io/a/b:v1", "app@sha256:" + "a".repeat(64), "app:latest@sha256:" + "a".repeat(64)]) assert.equal(pinned(image), true, image);
+  for (const image of ["redis", "redis:latest", "ghcr.io/a/b", "ghcr.io/a/b:latest", "localhost:5000/app", "localhost:5000/app:latest"]) assert.equal(pinned(image), false, image);
+});
+
+test("only a pinned image is a warning: a container on another image than a floating one the extension wants is told of nothing, and one on another than a pinned tag or a digest is", async () => {
+  images();
+  const { d } = wanting(VOICE, "img:2");
+  await d.containers.create("up-a", { Image: "img:1" });
+  docker.imageInfo.set("img:latest", NEW);
+  const warns = async (image: string) => {
+    d.containers.wantImage(() => ({ image }));
+    return d.containers.outdated("up-a");
+  };
+  assert.equal(await warns("img"), undefined, "no tag");
+  assert.equal(await warns("img:latest"), undefined, "latest, also where it is another image than the one the container runs");
+  assert.deepEqual(await warns("img:2"), { running: "img:1", wanted: "img:2" });
+  const digest = `img@sha256:${"b".repeat(64)}`;
+  assert.deepEqual(await warns(digest), { running: "img:1", wanted: digest });
+  // A container made on a pinned image that is now to run a floating one: nothing is pinned any more.
+  assert.equal(await warns("img:latest"), undefined);
+});
+
+test("a forwarder on another image than the one forwarders are made on is a warning, though no extension said a wish for it", async () => {
+  images();
+  const { d, person } = wanting(VOICE, "img:2");
+  d.containers.wantImage(() => undefined);
+  await d.containers.create("up-a-forward", { Image: "node:old", Labels: { [FORWARDS_LABEL]: "up-net" } });
+  await d.containers.create("up-b-forward", { Image: "node:old" });
+  const rows = ((await person.overview()) as { containers: any[] }).containers;
+  assert.deepEqual(rows.find((c) => c.name === "up-a-forward").imageWarning, { running: "node:old", wanted: FORWARDER_IMAGE });
+  assert.equal(rows.find((c) => c.name === "up-b-forward").imageWarning, undefined, "a container by that name that is no forwarder is not one");
+  docker.images.add(FORWARDER_IMAGE);
+  await d.containers.create("up-c-forward", { Image: FORWARDER_IMAGE, Labels: { [FORWARDS_LABEL]: "up-net" } });
+  assert.equal(await d.containers.outdated("up-c-forward"), undefined, "and one on that image is as wanted");
 });
 
 test("an update downloads the wanted image and makes the container again on it with its settings, mounts, networks and volumes, the new image's own settings in place of the old one's", async () => {
@@ -190,7 +229,7 @@ test("where the download fails, or the new container cannot be made or started, 
     { from: "up-a", to: "up-a-before-update" },
     { from: "up-a-before-update", to: "up-a" },
   ]);
-  assert.equal(row.imageWarning.kind, "other", "and it still says it is outdated");
+  assert.equal(row.imageWarning.wanted, "img:2", "and it still says it is outdated");
 
   // One the daemon refuses to make (on a network that is not the extension's) is refused before the old one is stopped.
   docker.runs.refuseStart = undefined;
@@ -273,7 +312,7 @@ test("the page's route starts an update and answers at once; Docker's overview t
   };
   try {
     const first = (await call("GET", "/overview")).body.containers.find((c: any) => c.name === "up-a");
-    assert.deepEqual(first.imageWarning, { kind: "other", running: "img:1", wanted: "img:2" });
+    assert.deepEqual(first.imageWarning, { running: "img:1", wanted: "img:2" });
     assert.equal(first.update, undefined);
 
     let release!: () => void;
@@ -443,7 +482,7 @@ test("a container made again that does not stay up is taken away and the old one
   assert.match(row.update.error, /up-a did not stay up on img:2: it exited, exit code 0/);
   assert.deepEqual(docker.containers.map((c) => [c.Name, c.Image, c.State]), [["up-a", "img:1", "running"]]);
   assert.equal(docker.containers[0], old);
-  assert.equal(row.imageWarning.kind, "other");
+  assert.equal(row.imageWarning.wanted, "img:2");
 
   docker.runs.onStart = STAYS;
   await person.updateImage("up-a");
@@ -474,21 +513,21 @@ test("a container with an entrypoint of its own keeps its command, even where it
   assert.equal(mounted.HostConfig.Binds, undefined, "and not mounted a second time by a bind");
 });
 
-test("an image a chat's build holds a reference with is not the downloaded one: no 'downloaded again' warning from it, and an update downloads the image, and makes the container on that", async () => {
+test("an image a chat's build holds a reference with is not the downloaded one: no warning from it for the reference the container runs, and an update downloads the image, and makes the container on that", async () => {
   images();
   const { d, person } = wanting(VOICE, "img:1");
   await d.containers.create("up-a", { Image: "img:1" });
   await d.containers.start("up-a");
   // The agent's build took the reference over.
   docker.imageInfo.set("img:1", BUILT);
-  assert.equal(await d.containers.outdated("up-a"), undefined, "not 'downloaded again'");
+  assert.equal(await d.containers.outdated("up-a"), undefined);
 
   // The wanted reference is held by a build; the registry's image is what a download brings.
   d.containers.wantImage(() => ({ image: "img:2" }));
   docker.images.add("img:2");
   docker.imageInfo.set("img:2", BUILT);
   docker.registry.set("img:2", NEW);
-  assert.deepEqual(await d.containers.outdated("up-a"), { kind: "other", running: "img:1", wanted: "img:2" }, "not downloaded, as far as the extension is concerned");
+  assert.deepEqual(await d.containers.outdated("up-a"), { running: "img:1", wanted: "img:2" }, "not downloaded, as far as the extension is concerned");
   docker.runs.onStart = STAYS;
   await person.updateImage("up-a");
   const row = await ended(person, "up-a");

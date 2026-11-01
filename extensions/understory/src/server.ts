@@ -1,11 +1,11 @@
 import type { ServerPortal } from "@pithagoras/extension-api/server";
 import { UNDERSTORY, UNDERSTORY_RULE } from "./server/entry";
 import { takeHandoff } from "./server/handoff";
-import { setPortal } from "./server/host";
+import { docker, setPortal } from "./server/host";
 import { forgetAsking, forgetChat, noteEvent, serveModels } from "./server/llm";
 import { memoryRoutes } from "./server/memory";
 import { understoryRoutes } from "./server/routes";
-import { lookAfter, scheduleDreams, settleKept, stopDreams } from "./server/service";
+import { lookAfter, scheduleDreams, settleKept, stopDreams, wantedImage } from "./server/service";
 import { openStore } from "./server/store";
 
 /**
@@ -25,6 +25,12 @@ export default async function understory(portal: ServerPortal) {
   setPortal(portal);
   openStore(portal.dataDir());
   takeHandoff();
+  // Docker's page tells when the container runs another pinned image than the one wanted now, and updates it.
+  try {
+    docker().containers.wantImage(wantedImage);
+  } catch (e) {
+    portal.log(`could not tell Docker which image Understory's container should run: ${(e as Error).message}`);
+  }
   // While its server is the chats' (switched on, and pi-mcp-adapter on): MEMORY.md is left aside for it.
   portal.memory.hold({ label: "Understory", rule: UNDERSTORY_RULE, on: () => portal.mcp.get(UNDERSTORY)?.on === true });
   understoryRoutes(portal.router);

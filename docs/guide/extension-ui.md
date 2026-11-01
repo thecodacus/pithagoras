@@ -2042,6 +2042,12 @@ container an extension runs through it uses Docker's `unless-stopped` restart
 policy, as Browser's, Voice's and Understory's do, so that it comes back after
 the host restarts and stays stopped when the person stops it
 ([When the machine restarts](/guide/docker#when-the-machine-restarts)).
+If your container runs a pinned image (a version tag or a digest), state it with
+`containers.wantImage` as your server half starts (it needs `pithagoras-docker`
+`^1.4.0`): when an update of your extension changes the version, Docker's page
+then warns that the container still runs the old one and offers to update it
+([An image that is not the one wanted](/guide/docker#an-image-that-is-not-the-one-wanted)).
+An image with no tag or with `latest` never warns.
 
 - **`requires`**: the extensions it cannot work without, each with the versions
   it takes (a semver range). Without one of them, or with one in a version it

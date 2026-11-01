@@ -4,8 +4,8 @@ import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import type { ContainerInfo, ContainerSpec, Docker, ImageUpdate, ImageWarning, NetworkInfo, OverviewContainer, PullState, Reach, VolumeInfo, WantedImage } from "./api";
 import { checked, DockerError, exec, logs, ping, pull, request, socketThere } from "./engine";
-import { FORWARD_SPEC_LABEL, FORWARDER_IMAGE, FORWARDS_LABEL, forwarderName, forwarderSpec } from "./forward";
-import { type ContainerBody, type ImageConfig, recreation, sharing, warning } from "./update";
+import { FORWARD_SPEC_LABEL, FORWARDER_IMAGE, FORWARDS_LABEL, forwarderName, forwarderSpec, forwarderWish } from "./forward";
+import { type ContainerBody, type ImageConfig, pinned, recreation, sharing, warning } from "./update";
 
 /**
  * Docker as each extension is given it (api.ts), and as the person sees it all (`overview`). What is whose is the label
@@ -221,13 +221,14 @@ export function dockerFor(dataDir: string, inContainer = existsSync("/.dockerenv
   }
 
   /**
-   * How `container`'s image is not the one its extension wants (api.ts, `wantImage`): nothing where it has no wish, or
-   * where the wish cannot be told, which a failing extension is not to take Docker's page down with.
+   * How `container`'s image is not the one its extension wants (api.ts, `wantImage`): nothing where it has no wish, where
+   * the wish is not a pinned image (`pinned`), or where the wish cannot be told, which a failing extension is not to
+   * take Docker's page down with. A forwarder is Docker's own, and its wish is the image it makes forwarders on.
    */
   async function outdated(container: ContainerInfo): Promise<ImageWarning | undefined> {
     let asked: unknown;
     try {
-      asked = wants.get(container.owner)?.(container);
+      asked = forwarderWish(container) ?? wants.get(container.owner)?.(container);
     } catch {
       return undefined;
     }
@@ -238,6 +239,8 @@ export function dockerFor(dataDir: string, inContainer = existsSync("/.dockerenv
     }
     const wanted = asked as WantedImage | undefined;
     if (!wanted || typeof wanted.image !== "string" || !wanted.image || (wanted.busy !== undefined && typeof wanted.busy !== "string")) return undefined;
+    // Before Docker is asked anything: a floating image is never a warning.
+    if (!pinned(wanted.image)) return undefined;
     const found = await inspect(container.id);
     if (!found) return undefined;
     // A reference a chat's build took over is not the image that was downloaded under it.

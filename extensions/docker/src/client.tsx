@@ -166,9 +166,7 @@ function DockerPage() {
                       <ui.WarnBanner className="dk-docker-note">
                         <div className="dk-docker-outdated">
                           <span>
-                            {outdated.kind === "other"
-                              ? t("Outdated image: it runs {running}, and {owner} now wants {wanted}.", { running: outdated.running, owner: container.owner, wanted: outdated.wanted })
-                              : t("Outdated image: {image} has been downloaded again since it was made, and it still runs the older one.", { image: outdated.running })}
+                            {t("Outdated image: it runs {running}, and {owner} now wants {wanted}.", { running: outdated.running, owner: container.owner, wanted: outdated.wanted })}
                             {outdated.busy ? ` ${t("It is in use: {reason}.", { reason: outdated.busy })}` : ""}
                           </span>
                           <button type="button" className={ui.classes.primarySmall} disabled={locked || Boolean(outdated.busy)} onClick={() => void update(container)}>

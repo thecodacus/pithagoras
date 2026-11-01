@@ -41,7 +41,8 @@ export interface ContainerInfo {
 
 /**
  * The image an extension wants one of its containers to run now (`containers.wantImage`): the reference, as a container
- * is made with it (`Image`), and, while the container should not be made again, why not.
+ * is made with it (`Image`), and, while the container should not be made again, why not. Only a pinned reference (a tag
+ * other than `latest`, or a digest) is checked: `latest` and no tag move on by themselves and never warn.
  */
 export interface WantedImage {
   image: string;
@@ -49,13 +50,8 @@ export interface WantedImage {
   busy?: string;
 }
 
-/** How a container's image is not the one its extension wants (`containers.outdated`). */
+/** How a container runs another image than the pinned one its extension wants (`containers.outdated`). */
 export interface ImageWarning {
-  /**
-   * `other`: it runs another image than the extension wants now. `pulled`: it runs the reference the extension wants,
-   * but that has been downloaded again since, and now points to a newer image.
-   */
-  kind: "other" | "pulled";
   /** The reference the container was made with, and the one the extension wants. */
   running: string;
   wanted: string;
