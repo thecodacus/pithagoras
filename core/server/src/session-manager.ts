@@ -2316,7 +2316,8 @@ class SessionManager extends EventEmitter {
         } else if (row.type === "portal_status" && p.status === "error") done(String(p.error ?? error ?? "The run failed"));
         // Stopped by the person: the edit is what they stopped, not undid.
         else if (row.type === "portal_status" && p.status === "idle" && p.aborted) done();
-        else if (row.type === "agent_settled") done(error ?? "The run ended without an answer");
+        // A Stop records the stopped run's settle before its own idle (see abort), so the settle says it too.
+        else if (row.type === "agent_settled") p.aborted ? done() : done(error ?? "The run ended without an answer");
         // Idle with no run begun: an extension took it, and that is all.
         else if (row.type === "portal_status" && p.status === "idle") done(started ? (error ?? "The run ended without an answer") : undefined);
       };
@@ -3051,11 +3052,17 @@ class SessionManager extends EventEmitter {
   private whenSettled(sessionId: string, timeoutMs = 10_000): Promise<void> {
     if (!this.inRun.has(sessionId)) return Promise.resolve();
     return new Promise((resolve) => {
-      const timer = setTimeout(done, timeoutMs);
-      function done() {
+      const timer = setTimeout(() => {
+        // Not left behind for the next settle to call.
+        const rest = (this.settleWaiters.get(sessionId) ?? []).filter((w) => w !== done);
+        if (rest.length) this.settleWaiters.set(sessionId, rest);
+        else this.settleWaiters.delete(sessionId);
+        done();
+      }, timeoutMs);
+      const done = () => {
         clearTimeout(timer);
         resolve();
-      }
+      };
       this.settleWaiters.set(sessionId, [...(this.settleWaiters.get(sessionId) ?? []), done]);
     });
   }
