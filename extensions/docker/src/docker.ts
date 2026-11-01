@@ -1,8 +1,9 @@
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import type { ContainerInfo, ContainerSpec, Docker, NetworkInfo, PullState, Reach, VolumeInfo } from "./api";
+import type { ContainerInfo, ContainerSpec, Docker, ImageUpdate, ImageWarning, NetworkInfo, OverviewContainer, PullState, Reach, VolumeInfo, WantedImage } from "./api";
 import { checked, DockerError, exec, logs, ping, pull, request, socketThere } from "./engine";
 import { FORWARD_SPEC_LABEL, FORWARDER_IMAGE, FORWARDS_LABEL, forwarderName, forwarderSpec } from "./forward";
+import { type ContainerBody, type ImageConfig, recreation, sharing, warning } from "./update";
 
 /**
  * Docker as each extension is given it (api.ts), and as the person sees it all (`overview`). What is whose is the label
@@ -16,14 +17,7 @@ import { FORWARD_SPEC_LABEL, FORWARDER_IMAGE, FORWARDS_LABEL, forwarderName, for
 export const OWNER_LABEL = "pithagoras.extension";
 
 type Raw = { Id: string; Names?: string[]; Image: string; State: string; Status: string; Labels?: Record<string, string> | null };
-type Inspected = {
-  Id: string;
-  Name: string;
-  Config?: { Image?: string; Tty?: boolean; Labels?: Record<string, string> | null };
-  HostConfig?: { NetworkMode?: string };
-  State?: { Status?: string; Running?: boolean };
-  NetworkSettings?: { Networks?: Record<string, { NetworkID?: string }> | null };
-};
+type Inspected = ContainerBody;
 type Adopted = { containers: Record<string, string>; volumes: Record<string, string> };
 /** The portal's own container, as much of Docker's inspect as is read of it. */
 type PortalContainer = { Id: string; HostConfig?: { NetworkMode?: string }; NetworkSettings?: Inspected["NetworkSettings"] };
@@ -56,6 +50,11 @@ const wayOut = (name: string) => new DockerError(`${name} has a way out to the m
 
 /** Docker's own networks, which no extension makes and every container may be on: the default bridge, the machine's, and none. */
 const DOCKERS_OWN = new Set(["bridge", "host", "none"]);
+
+/** How long what an update came to, or why it failed, is told on Docker's page. */
+const UPDATE_SHOWN_MS = 10 * 60_000;
+/** An update of a container's image, as the page is told of it. */
+type Tracked = ImageUpdate & { ended?: number };
 
 /** How much of what a container wrote `logs` gives, unless asked for another amount, and the most it gives. */
 const TAIL = 200;
@@ -108,6 +107,10 @@ export function dockerFor(dataDir: string, inContainer = existsSync("/.dockerenv
     writeFileSync(`${file}.tmp`, JSON.stringify(next, null, 2), { mode: 0o600 });
     renameSync(`${file}.tmp`, file);
   };
+
+  /** What each extension says its containers should run (api.ts, `wantImage`), and the updates under way or lately done, by the container's name. */
+  const wants = new Map<string, (container: ContainerInfo) => WantedImage | undefined>();
+  const updates = new Map<string, Tracked>();
 
   const containerOwner = (id: string, labels: Record<string, string> | null | undefined) => labels?.[OWNER_LABEL] ?? adopted().containers[id] ?? "";
   const info = (raw: Raw): ContainerInfo => ({ name: nameOf(raw), id: raw.Id, image: raw.Image, state: raw.State, status: raw.Status, owner: containerOwner(raw.Id, raw.Labels), labels: raw.Labels ?? {} });
@@ -185,6 +188,31 @@ export function dockerFor(dataDir: string, inContainer = existsSync("/.dockerenv
     const { status, body } = await request<{ message?: string }>("POST", `/containers/${encodeURIComponent(id)}/${verb}${verb === "stop" ? "?t=10" : ""}`);
     // 304: it is as asked already.
     if (status >= 400) throw new DockerError(body?.message || `Docker answered ${status}`, status);
+  }
+
+  /** An image by its reference or id, as Docker has it: nothing where it is not downloaded. */
+  async function imageInfo(image: string): Promise<{ Id: string; Config?: ImageConfig } | undefined> {
+    const { status, body } = await request<{ Id: string; Config?: ImageConfig; message?: string }>("GET", `/images/${encodeURIComponent(image)}/json`);
+    if (status === 404) return undefined;
+    if (status >= 400) throw new DockerError(body?.message || `Docker answered ${status}`, status);
+    return body;
+  }
+
+  /**
+   * How `container`'s image is not the one its extension wants (api.ts, `wantImage`): nothing where it has no wish, or
+   * where the wish cannot be told, which a failing extension is not to take Docker's page down with.
+   */
+  async function outdated(container: ContainerInfo): Promise<ImageWarning | undefined> {
+    let wanted: WantedImage | undefined;
+    try {
+      wanted = wants.get(container.owner)?.(container);
+    } catch {
+      return undefined;
+    }
+    if (!wanted) return undefined;
+    const found = await inspect(container.id);
+    if (!found) return undefined;
+    return warning(found.Config?.Image ?? container.image, found.Image, wanted, (await imageInfo(wanted.image))?.Id);
   }
 
   /** One download for an image at a time, whoever asks: the others are told how it goes too. */
@@ -416,6 +444,14 @@ export function dockerFor(dataDir: string, inContainer = existsSync("/.dockerenv
           });
           return exec(made.Id, tty, options.timeoutMs ?? 0);
         },
+        wantImage(wanted) {
+          wants.set(who, wanted);
+        },
+        async outdated(name) {
+          if (!(await own(who, name))) return undefined;
+          const info = await get(name);
+          return info && outdated(info);
+        },
         async adopt(name) {
           const found = await inspect(name);
           if (!found) throw new DockerError(`There is no container ${name}`, 404);
@@ -493,13 +529,69 @@ export function dockerFor(dataDir: string, inContainer = existsSync("/.dockerenv
     };
   }
 
+  async function rename(id: string, name: string): Promise<void> {
+    await checked("POST", `/containers/${encodeURIComponent(id)}/rename?name=${encodeURIComponent(name)}`);
+  }
+
+  /**
+   * `old` made again on `image`, as `recreation` has it made, and started if it was running: made under its name once
+   * the old one is out of the way under another, and the old one removed once the new one runs. Where anything fails
+   * before that, the new one is removed again and the old one has its name back, and runs again if it ran: it is
+   * stopped only after the new one is made, so a refusal of the new one's body leaves it running all along.
+   */
+  async function swap(who: string, old: Inspected, image: string): Promise<void> {
+    const name = old.Name.replace(/^\//, "");
+    const before = `${name}-before-update`;
+    if (await inspect(before)) throw new DockerError(`${before} is there already, left by an update that did not finish: remove it first`, 409);
+    const spec = recreation(old, (await imageInfo(old.Image ?? ""))?.Config, image);
+    await rename(old.Id, before);
+    let made: ContainerInfo;
+    try {
+      made = await forExtension(who).containers.create(name, spec);
+    } catch (e) {
+      await rename(old.Id, name).catch(() => {});
+      throw e;
+    }
+    const ran = old.State?.Running === true;
+    try {
+      if (ran) {
+        await act(old.Id, "stop");
+        await act(made.id, "start");
+      }
+    } catch (e) {
+      await act(made.id, "remove").catch(() => {});
+      const back = await rename(old.Id, name).then(
+        () => "",
+        () => ` It is still named ${before}.`,
+      );
+      if (ran) await act(old.Id, "start").catch(() => {});
+      throw new DockerError(`${(e as Error).message}${back}`, e instanceof DockerError ? e.status : 0);
+    }
+    try {
+      await act(old.Id, "remove");
+    } catch (e) {
+      throw new DockerError(`${name} runs on ${image} now, but ${before}, which it replaced, could not be removed: ${(e as Error).message}`, e instanceof DockerError ? e.status : 0);
+    }
+  }
+
   /** What the person is shown and may do: every extension's containers and volumes. */
   const person = {
     async overview() {
       if (!socketThere()) return { available: false as const, socket: false };
       if (!(await ping())) return { available: false as const, socket: true };
       const version = await checked<{ Version?: string }>("GET", "/version").catch(() => ({ Version: undefined }));
-      return { available: true as const, version: version.Version ?? "", containers: await containers(), volumes: await volumes() };
+      const now = Date.now();
+      const all: OverviewContainer[] = await Promise.all(
+        (await containers()).map(async (c) => {
+          const tracked = updates.get(c.name);
+          if (tracked?.ended && now - tracked.ended > UPDATE_SHOWN_MS) updates.delete(c.name);
+          const { ended: _ended, ...update } = updates.get(c.name) ?? {};
+          // A Docker that hiccups on one container's image does not take the page down.
+          const imageWarning = await outdated(c).catch(() => undefined);
+          return { ...c, ...(imageWarning ? { imageWarning } : {}), ...(updates.has(c.name) ? { update: update as ImageUpdate } : {}) };
+        }),
+      );
+      return { available: true as const, version: version.Version ?? "", containers: all, volumes: await volumes() };
     },
     /** A container of an extension's, for the person to act on: one that is no extension's is not shown, and not theirs to act on here. */
     async container(name: string): Promise<Inspected> {
@@ -510,6 +602,46 @@ export function dockerFor(dataDir: string, inContainer = existsSync("/.dockerenv
     start: async (name: string) => act((await person.container(name)).Id, "start"),
     stop: async (name: string) => act((await person.container(name)).Id, "stop"),
     remove: async (name: string) => act((await person.container(name)).Id, "remove"),
+    /**
+     * The image of a container made again as its extension wants it, in the background: refused here, in Docker's words,
+     * where there is nothing to update, where the extension says the container is in use, where another container
+     * shares its network (it would lose it), or while it is being updated. Otherwise the wanted image is downloaded if
+     * it is not, and the container made again with the same settings, mounts, networks and volumes; what it comes to is
+     * in the overview (`update`). Where it fails, the container is as it was.
+     */
+    async updateImage(name: string): Promise<void> {
+      const found = await person.container(name);
+      const mine = found.Name.replace(/^\//, "");
+      if (updates.get(mine)?.active) throw new DockerError(`${mine} is being updated already`, 409);
+      // Claimed before anything is awaited again: two requests at once would each swap it.
+      updates.set(mine, { active: true, line: "starting" });
+      const refuse = (message: string) => new DockerError(message, 409);
+      let started = false;
+      try {
+        const info = await get(mine);
+        const asked = info && (await outdated(info));
+        if (!info || !asked) throw refuse(`${mine} runs the image its extension wants`);
+        if (asked.busy) throw refuse(`${mine} is in use: ${asked.busy}`);
+        const sharers = sharing(await checked<Parameters<typeof sharing>[0]>("GET", "/containers/json?all=1"), found.Id, mine);
+        if (sharers.length) throw refuse(`${sharers.join(", ")} share${sharers.length === 1 ? "s" : ""} the network of ${mine}, which ${sharers.length === 1 ? "it" : "they"} would lose: remove ${sharers.length === 1 ? "it" : "them"} first`);
+        started = true;
+        void (async () => {
+          try {
+            await ensure(asked.wanted, (state) => {
+              if (state.active && state.line !== "starting") updates.set(mine, { active: true, line: state.line });
+            });
+            updates.set(mine, { active: true, line: "replacing the container" });
+            await swap(info.owner, (await inspect(mine))!, asked.wanted);
+            updates.set(mine, { active: false, line: "", done: { from: asked.running, to: asked.wanted }, ended: Date.now() });
+          } catch (e) {
+            updates.set(mine, { active: false, line: "", error: (e as Error).message, ended: Date.now() });
+          }
+        })();
+      } catch (e) {
+        if (!started) updates.delete(mine);
+        throw e;
+      }
+    },
     async logs(name: string, tail = TAIL) {
       const found = await person.container(name);
       return logs(found.Id, Math.min(Math.max(1, Math.floor(tail)), MOST_TAIL), Boolean(found.Config?.Tty));

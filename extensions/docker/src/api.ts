@@ -39,6 +39,47 @@ export interface ContainerInfo {
   labels: Record<string, string>;
 }
 
+/**
+ * The image an extension wants one of its containers to run now (`containers.wantImage`): the reference, as a container
+ * is made with it (`Image`), and, while the container should not be made again, why not.
+ */
+export interface WantedImage {
+  image: string;
+  /** In English, as a clause that follows "in use:": what the container is doing, or being set up for, that making it again would cut short. */
+  busy?: string;
+}
+
+/** How a container's image is not the one its extension wants (`containers.outdated`). */
+export interface ImageWarning {
+  /**
+   * `other`: it runs another image than the extension wants now. `pulled`: it runs the reference the extension wants,
+   * but that has been downloaded again since, and now points to a newer image.
+   */
+  kind: "other" | "pulled";
+  /** The reference the container was made with, and the one the extension wants. */
+  running: string;
+  wanted: string;
+  /** Why the container is not to be made again now, where its extension said so (`WantedImage.busy`). */
+  busy?: string;
+}
+
+/** What an update of a container's image (Settings → Docker) is doing, or did last. */
+export interface ImageUpdate {
+  active: boolean;
+  /** What it is doing, in Docker's words while it downloads the image. */
+  line: string;
+  /** Why it failed: the container was left as it was. */
+  error?: string;
+  /** The images it ran before and runs now, once it is done. */
+  done?: { from: string; to: string };
+}
+
+/** A container as Docker's page lists it: how its image stands, and the update of it, where there is one. */
+export interface OverviewContainer extends ContainerInfo {
+  imageWarning?: ImageWarning;
+  update?: ImageUpdate;
+}
+
 /** A volume, and the extension it belongs to. */
 export interface VolumeInfo {
   name: string;
@@ -159,6 +200,20 @@ export interface Docker {
      * on, it is not a failure: `timedOut` says so.
      */
     exec(name: string, cmd: string[], options?: ExecOptions): Promise<ExecResult>;
+    /**
+     * Says which image each of this extension's containers should run now: `wanted` is asked of a container (as `get` has
+     * it, with the labels it was made with) whenever it is looked at, and answers with the image, or with nothing where it
+     * has no wish. Only a container that has one is checked and offered an update on Docker's page (Settings → Docker).
+     * The wish is kept in memory: say it as the server half starts, which Docker's does every time it starts. Said again,
+     * it replaces the one before.
+     */
+    wantImage(wanted: (container: ContainerInfo) => WantedImage | undefined): void;
+    /**
+     * How the image of one of this extension's containers is not the one `wantImage` says: nothing where it is the one,
+     * or where no wish was said for it. Refused as `start` is for one that is another's, or nobody's; nothing for one there
+     * is none of.
+     */
+    outdated(name: string): Promise<ImageWarning | undefined>;
     /**
      * A container made before there was this extension, which carries no extension's name (one of the portal's own,
      * from before its app was an extension), made this extension's from now on. Another extension's is refused.
