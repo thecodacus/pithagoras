@@ -32,7 +32,7 @@ const text = (result) => result.content.map((part) => part.text).join("\n");
 
 // What pi-mcp-adapter 2.18.0 answers (proxy-modes.ts), word for word.
 const list = {
-  content: [{ type: "text", text: "jira (3 tools, not connected, cached):\n\n- jira_search - Search issues\n- jira_create_issue - Create an issue\n- jira_admin_delete" }],
+  content: [{ type: "text", text: "jira (3 tools (not connected, cached)):\n\n- jira_search - Search issues\n- jira_create_issue - Create an issue\n- jira_admin_delete" }],
   details: { mode: "list", server: "jira", tools: ["jira_search", "jira_create_issue", "jira_admin_delete"], count: 3, hasInstructions: false },
 };
 const search = {
@@ -59,7 +59,7 @@ const status = {
 
 test("a list says nothing of a tool that is off, and counts the rest", () => {
   const shown = withoutSwitchedOff(list, new Set(["jira_create_issue"]), view());
-  assert.equal(text(shown), "jira (2 tools, not connected, cached):\n\n- jira_search - Search issues\n- jira_admin_delete");
+  assert.equal(text(shown), "jira (2 tools (not connected, cached)):\n\n- jira_search - Search issues\n- jira_admin_delete");
   assert.deepEqual(shown.details.tools, ["jira_search", "jira_admin_delete"]);
   assert.equal(shown.details.count, 2);
   assert.equal(withoutSwitchedOff(list, new Set(["bash"]), view()), undefined, "nothing of this server is off");
@@ -71,7 +71,7 @@ test("a tool's description that runs over lines goes with it, and the server's i
     content: [{ type: "text", text: "jira (2 tools):\n\n- jira_search - Search\nissues by text\n\nand more\n- jira_create_issue - Create\n\nServer instructions:\nUse with care." }],
     details: { mode: "list", server: "jira", tools: ["jira_search", "jira_create_issue"], count: 2 },
   };
-  assert.equal(text(withoutSwitchedOff(long, new Set(["jira_search"]), view())), "jira (1 tool):\n\n- jira_create_issue - Create\n\nServer instructions:\nUse with care.");
+  assert.equal(text(withoutSwitchedOff(long, new Set(["jira_search"]), view())), "jira (1 tools):\n\n- jira_create_issue - Create\n\nServer instructions:\nUse with care.");
 });
 
 test("a list of a server with every tool off is a server that is off", () => {

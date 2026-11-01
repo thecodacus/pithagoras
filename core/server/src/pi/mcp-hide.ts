@@ -106,11 +106,12 @@ function listWithout(value: string, details: Record<string, any>, isOff: (name: 
       // The server's own instructions follow the tools, after a blank line the skipped tool's description may have had too.
       if (line !== "Server instructions:") continue;
       skipping = false;
-      if (out.at(-1) !== "") out.push("");
+      // As the adapter writes it: the tools end in a line break, and the instructions follow after a blank line.
+      if (out.at(-1) !== "") out.push("", "");
     }
     out.push(line);
   }
-  const body = out.join("\n").replace(/^(.*?) \(\d+ tools?/, `$1 (${left.length} tool${plural(left.length)}`);
+  const body = out.join("\n").replace(/^(.*?) \(\d+ tools?/, `$1 (${left.length} tools`);
   return { text: body, details: shown };
 }
 
@@ -164,7 +165,7 @@ function statusWithout(value: string, details: Record<string, any>, off: Readonl
     }
     const line = new RegExp(`^(\\S+) ${escaped(one.name)} \\((\\d+) tools?(, cached)?\\)$`, "m");
     body = body.replace(line, (_, mark: string, _n: string, cached?: string) =>
-      whole ? `⊘ ${one.name} (switched off)` : `${mark} ${one.name} (${one.toolCount - gone} tool${plural(one.toolCount - gone)}${cached ?? ""})`,
+      whole ? `⊘ ${one.name} (switched off)` : `${mark} ${one.name} (${one.toolCount - gone} tools${cached ?? ""})`,
     );
     return { ...one, toolCount: one.toolCount - gone, ...(whole ? { switchedOff: true } : {}) };
   });
