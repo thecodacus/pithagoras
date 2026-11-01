@@ -123,7 +123,7 @@ sudo systemctl restart docker
 Run the same CUDA image used by the installer:
 
 ```sh
-docker run --rm --gpus all nvidia/cuda:12.4.1-devel-ubuntu22.04 nvidia-smi
+docker run --rm --gpus all nvidia/cuda:12.9.1-devel-ubuntu22.04 nvidia-smi
 ```
 
 Continue only when this lists your GPU.
