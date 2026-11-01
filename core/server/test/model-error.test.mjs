@@ -124,6 +124,34 @@ test("an aborted turn is not presented as a model error", () => {
   assert.deepEqual(notesFor([...attempt(aborted), { type: "agent_settled" }]), []);
 });
 
+test("a stop that pi closes as an error, with the abort's own words, is not presented as a model error", () => {
+  // The Stop landed while pi was setting the request up, and pi closes a request that fails there as an error
+  // whatever the cause. Its settle says the run was aborted.
+  for (const why of ["This operation was aborted", "The operation was aborted", "Request was aborted", "Request aborted"]) {
+    assert.deepEqual(notesFor([...attempt(failed(why)), { type: "agent_settled", aborted: true }]), [], why);
+  }
+  // Also when retries had been made before it.
+  assert.deepEqual(
+    notesFor([
+      ...attempt(busy, true),
+      { type: "auto_retry_start", attempt: 1, maxAttempts: 3, delayMs: 1, errorMessage: "model is busy" },
+      ...attempt(failed("This operation was aborted")),
+      { type: "agent_settled", aborted: true },
+    ]),
+    []
+  );
+});
+
+test("an abort that nobody asked for, and a real failure after a stop, are still reported", () => {
+  // No Stop: a timeout inside the request is a failure.
+  assert.deepEqual(notesFor([...attempt(failed("This operation was aborted")), { type: "agent_settled", aborted: false }]), [
+    "Model error: This operation was aborted",
+  ]);
+  assert.deepEqual(notesFor([...attempt(failed("This operation was aborted")), { type: "agent_settled" }]), ["Model error: This operation was aborted"]);
+  // A Stop does not hide what the model really said.
+  assert.deepEqual(notesFor([...attempt(busy), { type: "agent_settled", aborted: true }]), ["Model error: model is busy"]);
+});
+
 // Through the session manager, with a stand-in for pi: what reaches the
 // transcript, and what reaches a channel waiting on ask().
 
@@ -159,6 +187,15 @@ test("a failed model call is not answered by silence", async () => {
     transcript("busy").filter((r) => r.type === "portal_notice").map((r) => r.payload),
     [{ text: "Model error: model is busy", error: true }]
   );
+});
+
+test("a stop that comes out of pi as an error is no notice in the chat and no answer for a channel", async () => {
+  createSession({ id: "stopped", title: "stopped", workspace: home, executor: "host" });
+  answerWith([...attempt(failed("This operation was aborted")), { type: "agent_settled", aborted: true }]);
+  const reply = await sessions.ask("stopped", "hi", { streamText: false });
+
+  assert.equal(reply, "");
+  assert.deepEqual(transcript("stopped").filter((r) => r.type === "portal_notice"), []);
 });
 
 test("a recovered retry reaches neither the transcript nor the channel as an error", async () => {

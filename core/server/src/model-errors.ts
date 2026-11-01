@@ -14,8 +14,8 @@
  * by which point both have had their say.
  */
 export class ModelErrors {
-  /** A failure pi has not recovered from, waiting to be reported. */
-  private pending = new Map<string, string>();
+  /** A failure pi has not recovered from, waiting to be reported: what it says, and the notice made of it. */
+  private pending = new Map<string, { why: string; text: string }>();
   /** Retries pi has made for the turn in progress. */
   private retries = new Map<string, number>();
 
@@ -41,10 +41,10 @@ export class ModelErrors {
         if (last?.stopReason !== "error" || msg.willRetry === true) return undefined;
         const why = last.errorMessage || "the model failed to answer.";
         const n = this.retries.get(sessionId) ?? 0;
-        this.pending.set(
-          sessionId,
-          n > 0 ? `Still failing after ${n} ${n === 1 ? "retry" : "retries"}: ${why}` : `Model error: ${why}`
-        );
+        this.pending.set(sessionId, {
+          why,
+          text: n > 0 ? `Still failing after ${n} ${n === 1 ? "retry" : "retries"}: ${why}` : `Model error: ${why}`,
+        });
         return undefined;
       }
 
@@ -54,7 +54,7 @@ export class ModelErrors {
         const failed = this.pending.get(sessionId);
         if (msg.reason !== "overflow" || !failed) return undefined;
         if (msg.willRetry === true) this.pending.delete(sessionId);
-        else if (msg.errorMessage) this.pending.set(sessionId, `${failed} — ${msg.errorMessage}`);
+        else if (msg.errorMessage) this.pending.set(sessionId, { ...failed, text: `${failed.text} — ${msg.errorMessage}` });
         return undefined;
       }
 
@@ -64,11 +64,12 @@ export class ModelErrors {
       case "agent_start":
         return this.flush(sessionId);
 
-      // The end of the work, retries and all.
+      // The end of the work, retries and all. A run the person stopped says so
+      // (`aborted`): see stopped().
       case "agent_settled": {
-        const text = this.flush(sessionId);
+        const failed = this.takeFailure(sessionId);
         this.retries.delete(sessionId);
-        return text;
+        return failed && !(msg.aborted === true && stopped(failed.why)) ? failed.text : undefined;
       }
     }
     return undefined;
@@ -81,10 +82,28 @@ export class ModelErrors {
   }
 
   private flush(sessionId: string): string | undefined {
-    const text = this.pending.get(sessionId);
-    this.pending.delete(sessionId);
-    return text;
+    return this.takeFailure(sessionId)?.text;
   }
+
+  private takeFailure(sessionId: string): { why: string; text: string } | undefined {
+    const failed = this.pending.get(sessionId);
+    this.pending.delete(sessionId);
+    return failed;
+  }
+}
+
+/**
+ * Whether a failure is only the Stop the person pressed, coming out as an error.
+ *
+ * A stop closes the turn as "aborted", unless it lands while pi is still setting
+ * the request up (looking for the key, queued behind another credential read):
+ * pi closes a request that fails there as an error whatever the cause, with the
+ * abort signal's own words, "This operation was aborted". The settle of such a
+ * run says it was aborted, and a failure that says the same is the stop. Any
+ * other failure stays one, whether or not a Stop came after it.
+ */
+function stopped(why: string): boolean {
+  return /\b(?:operation|request)(?: was)? aborted\b/i.test(why);
 }
 
 function lastAssistant(messages: unknown): any {
