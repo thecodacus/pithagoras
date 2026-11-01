@@ -147,10 +147,10 @@ resumes the conversation.
 Extensions that are not part of the portal live in repositories of their own. Each is a package you install by its
 npm name in **Settings → Extensions → Discover**:
 
-- [prometheion/pithagoras-extensions](https://github.com/prometheion/pithagoras-extensions) — a collection of
-  extensions for the agent: Blender, Godot, Inline UI, Office (Word and Excel documents in OnlyOffice) and Nextcloud.
+- [prometheion/pithagoras-extensions](https://github.com/prometheion/pithagoras-extensions) — extensions that give
+  the agent more to work with.
 - [prometheion/pithagoras-flair](https://github.com/prometheion/pithagoras-flair) — cosmetic and opinionated
-  extensions that change how the portal looks and feels, such as a 3D avatar for voice mode.
+  extensions that change how the portal looks and feels.
 
 ## Documentation
 
