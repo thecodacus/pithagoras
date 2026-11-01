@@ -29,6 +29,8 @@ test('a window of 128k or more keeps pi\'s numbers, a smaller one gets what it c
 
 test('numbers chosen lower than the window allows are left as they are, and a window that is not known changes nothing', () => {
   assert.deepEqual(fitCompaction(32768, { reserveTokens: 5000, keepRecentTokens: 3000 }), { reserveTokens: 5000, keepRecentTokens: 3000 });
+  // As low as a person likes: a chat whose "keep recent" is a single token still compacts everything.
+  assert.deepEqual(fitCompaction(32768, { reserveTokens: 1000, keepRecentTokens: 1 }), { reserveTokens: 1000, keepRecentTokens: 1 });
   for (const window of [0, NaN, -1]) assert.deepEqual(fitCompaction(window, piDefaults), piDefaults);
 });
 

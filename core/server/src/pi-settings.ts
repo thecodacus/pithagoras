@@ -93,16 +93,17 @@ export function configuredCompaction(modelKey: string): CompactionTokens {
  * and when pi tries by itself it does not say so, the chat just goes on to fill the window until the model has no
  * room to answer. So what is kept is held to a sixth of the window, which 128k does not reach.
  *
- * What is held back is held to a quarter of it, but never below 6144: pi asks the model for no more than what is
- * left of the window less 4096 tokens, and for one token when nothing is, so a compaction that starts later than
- * that starts after the model has been left no room to answer. The 2048 above that are room for an answer.
+ * What is held back is held to a quarter of it, but not to less than 6144 where the window allows: pi asks the model
+ * for no more than what is left of the window less 4096 tokens, and for one token when nothing is, so a compaction
+ * that starts later than that starts after the model has been left no room to answer. The 2048 above that are room
+ * for an answer. Numbers chosen lower than that are theirs to choose, and are kept.
  */
 export function fitCompaction(contextWindow: number, wanted: CompactionTokens): CompactionTokens {
   if (!Number.isFinite(contextWindow) || contextWindow <= 0) return wanted;
   const room = Math.min(Math.max(RESERVE_FLOOR, Math.floor(contextWindow / 4)), Math.floor(contextWindow / 2));
   return {
-    reserveTokens: Math.max(256, Math.min(wanted.reserveTokens, room)),
-    keepRecentTokens: Math.max(256, Math.min(wanted.keepRecentTokens, Math.floor(contextWindow / 6))),
+    reserveTokens: Math.min(wanted.reserveTokens, room),
+    keepRecentTokens: Math.min(wanted.keepRecentTokens, Math.max(256, Math.floor(contextWindow / 6))),
   };
 }
 
