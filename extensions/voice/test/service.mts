@@ -18,7 +18,7 @@ import { openStore, putSettings } from "../src/server/store.ts";
 
 /** Docker's words for a container that asks for a GPU it has no runtime for. */
 export const NO_RUNTIME = 'could not select device driver "nvidia" with capabilities: [[gpu]]';
-export const CUDA = "nvidia/cuda:12.4.1-devel-ubuntu22.04";
+export const CUDA = "nvidia/cuda:12.9.1-devel-ubuntu22.04";
 export const BASE = "ubuntu:22.04";
 export const CONTAINER = "pithagoras-voice";
 export const PROBE = "pithagoras-voice-probe";
