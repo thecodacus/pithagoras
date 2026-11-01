@@ -3,6 +3,9 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import http from "node:http";
 import path from "node:path";
+import { once } from "node:events";
+import type { AddressInfo } from "node:net";
+import express from "express";
 import { inProcessHome } from "../../../tests/helpers.mts";
 import { startVoice } from "./portal.mts";
 import { CONTAINER } from "./service.mts";
@@ -59,7 +62,7 @@ const VOLUME = "pithagoras_voice-models";
 test("Voice's server half does not start without Docker, which it requires, and starts after it", async () => {
   await host.syncServerHalves([halves.voice]);
   assert.equal(host.isServing("pithagoras-voice"), false);
-  assert.match(host.serverFailure("pithagoras-voice") ?? "", /It needs pithagoras-docker \(\^1\.2\.0\), which is not installed, or is switched off/);
+  assert.match(host.serverFailure("pithagoras-voice") ?? "", /It needs pithagoras-docker \(\^1\.4\.0\), which is not installed, or is switched off/);
 
   await host.syncServerHalves(both);
   assert.equal(host.serverFailure("pithagoras-voice"), undefined);
@@ -120,6 +123,33 @@ test("a running container on the portal's old container is made again on its new
   await until(() => !(was in adopted().containers), "let go of");
   assert.deepEqual(docker.volumes.map((volume) => volume.Name), [VOLUME]);
   assert.deepEqual(docker.pulls, [], "no image is downloaded: the one it runs is there");
+});
+
+test("as it starts, Voice tells Docker which image its container should run: Docker's page offers to make it again on that where it runs another, and does", async () => {
+  const { IMAGE } = await import("../src/server/service.ts");
+  machine.reset();
+  const old = "nvidia/cuda:11.8.0-devel-ubuntu22.04";
+  machine.putVoice({ ...OLD, Image: old, Labels: { ...OLD.Labels, "pithagoras.extension": "pithagoras-voice" } });
+  await restart();
+  const app = express().use("/api/x", host.extensionRoutes);
+  const server = app.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const at = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/x/pithagoras-docker`;
+  const row = async () => ((await (await fetch(`${at}/overview`)).json()) as any).containers.find((c: any) => c.name === CONTAINER);
+  try {
+    assert.deepEqual((await row()).imageWarning, { kind: "other", running: old, wanted: IMAGE });
+    assert.equal((await fetch(`${at}/containers/${CONTAINER}/update`, { method: "POST" })).status, 202);
+    await until(() => machine.voice()?.Image === IMAGE && machine.voice()?.State === "running", "made again on the wanted image");
+    const made = machine.voice()!.made as any;
+    assert.equal(made.Labels["pithagoras.voice-recipe"], "breeze+whisper:base", "with its engines");
+    assert.deepEqual(made.HostConfig.DeviceRequests, OLD.HostConfig.DeviceRequests, "and its card");
+    assert.equal(made.HostConfig.NetworkMode, "container:portal-one");
+    assert.deepEqual(made.HostConfig.Binds ?? [], OLD.HostConfig.Binds ?? []);
+    await until(() => !docker.containers.some((c) => c.Name === `${CONTAINER}-before-update`), "the old one removed");
+    assert.equal((await row()).imageWarning, undefined);
+  } finally {
+    server.close();
+  }
 });
 
 test("the half stops without stopping the voice container, and leaves it to the next start", async () => {

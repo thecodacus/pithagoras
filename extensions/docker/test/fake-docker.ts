@@ -15,6 +15,8 @@ export interface FakeContainer {
   State: string;
   Labels: Record<string, string>;
   Tty: boolean;
+  /** The id of the image it was made on, as inspect's `Image` has it: the id its reference had in `imageInfo` then, else the reference. */
+  ImageId?: string;
   /** What it wrote: its output, and its errors. */
   out: string;
   err: string;
@@ -46,6 +48,21 @@ export interface FakeContainer {
    * start sets anew. Docker's zero time where it was never started, or a test put it there without saying.
    */
   started?: string;
+}
+
+/** An image as Docker's inspect has it: its id, and the settings its containers get from it. */
+export interface FakeImage {
+  Id: string;
+  Config?: {
+    Env?: string[];
+    Cmd?: string[];
+    Entrypoint?: string[];
+    WorkingDir?: string;
+    User?: string;
+    Labels?: Record<string, string>;
+    ExposedPorts?: Record<string, object>;
+    Volumes?: Record<string, object>;
+  };
 }
 
 /** A command run in a container (`exec`), as it was asked for, and how it stands. */
@@ -87,6 +104,8 @@ export async function fakeDocker() {
   const dir = mkdtempSync(path.join(os.tmpdir(), "dk-"));
   const socket = path.join(dir, "docker.sock");
   const images = new Set<string>();
+  /** What the images in `images` are, by reference: their ids, and what a container made on one is given by it. A reference with none has its own name for an id. */
+  const imageInfo = new Map<string, FakeImage>();
   const containers: FakeContainer[] = [];
   const volumes: { Name: string; Labels: Record<string, string> | null; Driver?: string; Options?: Record<string, string> | null }[] = [];
   const networks: FakeNetwork[] = [];
@@ -116,6 +135,8 @@ export async function fakeDocker() {
   const starts: string[] = [];
   const updates: { name: string; changes: Record<string, unknown> }[] = [];
   const pulls: string[] = [];
+  /** Each container renamed, from and to. */
+  const renames: { from: string; to: string }[] = [];
   /** Each connect asked for, refused or not: the network's name and the container's. */
   const connects: { network: string; container: string }[] = [];
   /** A download that fails, by image, with Docker's own words. */
@@ -134,7 +155,7 @@ export async function fakeDocker() {
   const findNetwork = (key: string) => networks.find((n) => n.Id === key || n.Name === key);
   /** The containers on a network as Docker counts them for its inspect and its remove: the running ones. */
   const onNetwork = (n: FakeNetwork) => containers.filter((c) => c.State === "running" && c.Networks?.[n.Name]);
-  const raw = (c: FakeContainer) => ({ Id: c.Id, Names: [`/${c.Name}`], Image: c.Image, State: c.State, Status: c.State === "running" ? "Up 2 minutes" : "Exited (0) 1 minute ago", Labels: c.Labels, Ports: c.Ports ?? [] });
+  const raw = (c: FakeContainer) => ({ Id: c.Id, Names: [`/${c.Name}`], Image: c.Image, State: c.State, Status: c.State === "running" ? "Up 2 minutes" : "Exited (0) 1 minute ago", Labels: c.Labels, Ports: c.Ports ?? [], HostConfig: { NetworkMode: String(((c.HostConfig ?? c.made?.HostConfig) as Record<string, unknown> | undefined)?.NetworkMode ?? "default") } });
   const filtersOf = (url: URL) => JSON.parse(url.searchParams.get("filters") ?? "{}") as Record<string, string[]>;
   /** Docker's frames for a container with no terminal: a header of eight bytes, which stream and how long, then the bytes. */
   const frame = (stream: number, text: string) => {
@@ -159,7 +180,11 @@ export async function fakeDocker() {
       let m: RegExpExecArray | null;
       if (p === "/_ping") return res.end("OK");
       if (p === "/version") return send(200, { Version: "27.3.1" });
-      if ((m = /^\/images\/(.+)\/json$/.exec(p))) return images.has(m[1]) ? send(200, { Id: m[1] }) : send(404, { message: `No such image: ${m[1]}` });
+      if ((m = /^\/images\/(.+)\/json$/.exec(p))) {
+        // By its reference, or by the id a container was made on.
+        const known = images.has(m[1]) ? (imageInfo.get(m[1]) ?? { Id: m[1] }) : [...imageInfo.values()].find((i) => i.Id === m![1]);
+        return known ? send(200, known) : send(404, { message: `No such image: ${m[1]}` });
+      }
       if (p === "/images/create" && req.method === "POST") {
         const image = `${url.searchParams.get("fromImage")}:${url.searchParams.get("tag")}`;
         pulls.push(image);
@@ -192,7 +217,23 @@ export async function fakeDocker() {
         // On the network its network mode names, and on those its endpoints do, of the ones there are here: by its id from its first start.
         const named = [body.HostConfig?.NetworkMode, ...Object.keys(body.NetworkingConfig?.EndpointsConfig ?? {})];
         const on = networks.filter((n) => named.includes(n.Name) || named.includes(n.Id));
-        if (on.length) made.Networks = Object.fromEntries(on.map((n) => [n.Name, { NetworkID: "" }]));
+        if (on.length) {
+          // With what the body gave it on each (the names it has there, and the start of its id besides, which Docker adds to those).
+          made.Networks = Object.fromEntries(
+            on.map((n) => {
+              const asked = body.NetworkingConfig?.EndpointsConfig?.[n.Name];
+              return [n.Name, { NetworkID: "", ...(asked?.Aliases ? { Aliases: [...asked.Aliases, made.Id.slice(0, 12)] } : {}), ...(asked?.IPAMConfig ? { IPAMConfig: asked.IPAMConfig } : {}) }];
+            }),
+          );
+        }
+        // The image it is made on, and a volume of no name for each folder the image declares as one that the body mounts nothing in.
+        const image = imageInfo.get(body.Image);
+        if (image) {
+          made.ImageId = image.Id;
+          const bound = new Set<string>((body.HostConfig?.Binds ?? []).map((b: string) => b.split(":")[1]));
+          const unnamed = Object.keys(image.Config?.Volumes ?? {}).filter((dest) => !bound.has(dest));
+          if (unnamed.length) made.Mounts = unnamed.map((Destination) => ({ Type: "volume", Name: `anon${++ids}`.padEnd(64, "0"), Destination, RW: true }));
+        }
         containers.push(made);
         created.push(made);
         return send(201, { Id: made.Id });
@@ -202,10 +243,27 @@ export async function fakeDocker() {
         if (!c) return send(404, { message: `No such container: ${m[1]}` });
         // Docker's create body is the container's Config, with its HostConfig and NetworkingConfig apart.
         const { HostConfig: madeHost, NetworkingConfig: _networking, ...config } = c.made ?? {};
+        // What its image gives it, which the body did not say: as Docker's inspect holds it, merged in. An environment entry by a name the body gave replaces the image's.
+        const given = [...imageInfo.values()].find((i) => i.Id === c.ImageId)?.Config;
+        const made = (config.Env ?? []) as string[];
+        const env = [...(given?.Env ?? []).map((e) => made.find((m) => m.split("=")[0] === e.split("=")[0]) ?? e), ...made.filter((m) => !(given?.Env ?? []).some((e) => e.split("=")[0] === m.split("=")[0]))];
         return send(200, {
           Id: c.Id,
           Name: `/${c.Name}`,
-          Config: { ...config, Image: c.Image, Tty: c.Tty, Labels: c.Labels, ...(c.User !== undefined ? { User: c.User } : {}) },
+          Image: c.ImageId ?? c.Image,
+          Config: {
+            ...config,
+            ...(given?.Cmd && !config.Cmd ? { Cmd: given.Cmd } : {}),
+            ...(given?.Entrypoint && !config.Entrypoint ? { Entrypoint: given.Entrypoint } : {}),
+            ...(given?.WorkingDir && !config.WorkingDir ? { WorkingDir: given.WorkingDir } : {}),
+            ...(env.length ? { Env: env } : {}),
+            ...(given?.ExposedPorts ? { ExposedPorts: { ...given.ExposedPorts, ...(config.ExposedPorts as object | undefined) } } : {}),
+            ...(given?.Volumes ? { Volumes: { ...given.Volumes, ...(config.Volumes as object | undefined) } } : {}),
+            Image: c.Image,
+            Tty: c.Tty,
+            Labels: { ...given?.Labels, ...c.Labels },
+            ...(c.User !== undefined ? { User: c.User } : given?.User ? { User: given.User } : {}),
+          },
           // Docker counts one it is waiting to start again as running, for its stop and its remove.
           State: { Status: c.State, Running: c.State === "running" || c.State === "restarting", Restarting: c.State === "restarting", ExitCode: c.code ?? 0, Error: c.error ?? "", StartedAt: c.started ?? "0001-01-01T00:00:00Z" },
           RestartCount: c.restarts ?? 0,
@@ -244,6 +302,15 @@ export async function fakeDocker() {
       if ((m = /^\/exec\/([^/]+)\/json$/.exec(p))) {
         const e = execs.find((x) => x.Id === m![1]);
         return e ? send(200, { Running: e.Running, ExitCode: e.ExitCode }) : send(404, { message: `No such exec instance: ${m[1]}` });
+      }
+      if ((m = /^\/containers\/([^/]+)\/rename$/.exec(p)) && req.method === "POST") {
+        const c = find(m[1]);
+        if (!c) return send(404, { message: `No such container: ${m[1]}` });
+        const to = url.searchParams.get("name")!;
+        if (find(to)) return send(409, { message: `Conflict. The container name "/${to}" is already in use` });
+        renames.push({ from: c.Name, to });
+        c.Name = to;
+        return send(204);
       }
       if ((m = /^\/containers\/([^/]+)\/(start|stop)$/.exec(p))) {
         const c = find(m[1]);
@@ -371,5 +438,5 @@ export async function fakeDocker() {
     });
   });
   await new Promise<void>((resolve) => server.listen(socket, resolve));
-  return { socket, dir, images, containers, volumes, networks, built, runs, execs, created, starts, updates, pulls, connects, failing, hold, close: () => new Promise<void>((resolve) => server.close(() => resolve())) };
+  return { socket, dir, images, containers, volumes, networks, built, runs, execs, created, starts, updates, pulls, renames, imageInfo, connects, failing, hold, close: () => new Promise<void>((resolve) => server.close(() => resolve())) };
 }

@@ -3,6 +3,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { asrDevice, ttsDevice, choiceFromKey, choiceKey, cpuServerConfig, cpuThreads, DEFAULT_CHOICE, healthUrls, parseChoice, pickGpu, sameChoice, serverConfig, SPEECH_PORT, suggestChoice, suggestCpuChoice, ttsModel, usesGpu, type Gpu, type Host, type TtsEngine, type VoiceChoice } from '../engines';
 import { CHATTERBOX_LANGUAGES } from '../languages';
 import { NoGpu, askedCard, cardOf, decide, detectGpus, deviceId, explain, holds, hostProbe, isNoGpu, readHost, SMI_ARGS, type Card, type Detected, type Probe } from './gpu';
+import type { ContainerInfo, WantedImage } from '../../../docker/src/api';
 import { docker, portal } from './host';
 import { putSettings, setting, speech } from './store';
 
@@ -19,6 +20,15 @@ export const IMAGE = 'nvidia/cuda:12.4.1-devel-ubuntu22.04';
 export const BASE_IMAGE = 'ubuntu:22.04';
 /** The image a choice runs in: the CUDA one wherever the GPU is used, else the small base. */
 export const imageFor = (choice: VoiceChoice) => usesGpu(choice) ? IMAGE : BASE_IMAGE;
+/**
+ * The image Docker's page (Settings → Docker) should find the voice container running, which it offers to make the container
+ * again on where it does not (`containers.wantImage`): the one its engines run in now (`imageFor`), by the recipe it was made
+ * with. Not while the service is being set up, which makes the container again itself.
+ */
+export function wantedImage(container: ContainerInfo): WantedImage | undefined {
+  if (container.name !== CONTAINER) return undefined;
+  return { image: imageFor(choiceFromKey(container.labels['pithagoras.voice-recipe'])), ...(pending ? { busy: 'its setup is running' } : {}) };
+}
 const VOLUME = 'pithagoras_voice-models';
 /** The short-lived container the GPU check runs nvidia-smi in: shown in Settings → Docker while it runs. */
 const PROBE = 'pithagoras-voice-probe';
