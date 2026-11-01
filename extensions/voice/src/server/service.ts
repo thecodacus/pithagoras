@@ -14,7 +14,7 @@ import { putSettings, setting, speech } from './store';
  */
 
 export const CONTAINER = 'pithagoras-voice';
-export const IMAGE = 'nvidia/cuda:12.4.1-devel-ubuntu22.04';
+export const IMAGE = 'nvidia/cuda:12.9.1-devel-ubuntu22.04';
 /** What a choice with nothing on the GPU runs in, and what the GPU check asks nvidia-smi with: no CUDA toolchain, so no multi-GB download. */
 export const BASE_IMAGE = 'ubuntu:22.04';
 /** The image a choice runs in: the CUDA one wherever the GPU is used, else the small base. */
