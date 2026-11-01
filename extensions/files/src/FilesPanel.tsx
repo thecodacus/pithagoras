@@ -63,6 +63,9 @@ function FilePicture({ src, name }: { src: string; name: string }) {
   );
 }
 
+/** How often the file that is open is looked at, to notice a change made outside this panel. */
+const WATCH_MS = 3000;
+
 const parentOf = (p: string) => p.split("/").slice(0, -1).join("/");
 const join = (dir: string, name: string) => (dir ? `${dir}/${name}` : name);
 
@@ -151,11 +154,15 @@ export const FilesPanel = memo(function FilesPanel({
   const dirty = !!file && !file.binary && !file.loading && draft !== file.saved;
   const dirtyRef = useRef(dirty);
   dirtyRef.current = dirty;
+  const changedRef = useRef(changed);
+  changedRef.current = changed;
   // For what finishes later than it started, such as a delete that asked first.
   const dirRef = useRef(dir);
   dirRef.current = dir;
   const fileRef = useRef(file);
   fileRef.current = file;
+  const savingRef = useRef(false);
+  savingRef.current = saving;
   /** Deletes on their way, by path: asking git first can take a moment, and a second click is not a second delete. */
   const [removing, setRemoving] = useState<ReadonlySet<string>>(() => new Set());
   // Answers that arrive after a newer question was asked are not the answer.
@@ -268,8 +275,14 @@ export const FilesPanel = memo(function FilesPanel({
    * where the text was, as opening the file would.
    */
   const rereadFile = useCallback(
-    (path: string) => {
-      const ask = ++fileAsk.current;
+    (path: string, watching = false) => {
+      const known = fileRef.current;
+      // Asked on its own, the server leaves out the text when the file is as it was: the server reads nothing and nothing is shown for most looks.
+      // With the bar about a changed file up while there are changes not saved, there is nothing more a look could tell.
+      if (watching && (savingRef.current || known?.path !== path || known.loading || (dirtyRef.current && changedRef.current))) return Promise.resolve();
+      // A look does not count as a new question: a read that is under way (Refresh, the agent's change) must not become stale because of it,
+      // or its error would be lost. A read started later still overtakes the look.
+      const ask = watching ? fileAsk.current : ++fileAsk.current;
       // What is shown is then the file as it is now, so neither the bar nor an earlier save's error is about it any more.
       const show = (open: Open, text: string) => {
         setFile(open);
@@ -277,11 +290,13 @@ export const FilesPanel = memo(function FilesPanel({
         setChanged(false);
         setSaveError(null);
       };
-      setRereading(true);
-      return api
-        .readFile(sessionId, path)
+      if (!watching) setRereading(true);
+      return (watching ? api.readFileIfChanged(sessionId, path, known!) : api.readFile(sessionId, path))
         .then((r) => {
           if (ask !== fileAsk.current) return;
+          if ("unchanged" in r) return;
+          // A save under way: the file may already be the one it writes, which is not a change by somebody else.
+          if (watching && savingRef.current) return;
           if (dirtyRef.current) {
             if (r.mtime !== fileRef.current?.mtime) setChanged(true);
             return;
@@ -292,14 +307,28 @@ export const FilesPanel = memo(function FilesPanel({
           if (!r.binary && !text) setWriting(true);
         })
         .catch((e) => {
-          if (ask !== fileAsk.current) return;
+          // A look that fails says nothing: the next one tries again, and Refresh shows why.
+          if (watching || ask !== fileAsk.current) return;
           if (dirtyRef.current) return setChanged(true);
           show({ path, loading: false, error: (e as Error).message, binary: false, size: 0, mtime: 0, saved: "" }, "");
         })
-        .finally(() => setRereading(false));
+        .finally(() => {
+          if (!watching) setRereading(false);
+        });
     },
     [sessionId],
   );
+
+  // The open file is looked at now and then: a change made outside this panel (another device, a cron job, the agent's shell) shows by itself.
+  // Not while the page is hidden, and a look that finds nothing new changes nothing on screen.
+  const watched = file && !file.loading && !file.error ? file.path : null;
+  useEffect(() => {
+    if (!watched) return;
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible") void rereadFile(watched, true);
+    }, WATCH_MS);
+    return () => clearInterval(timer);
+  }, [watched, rereadFile]);
 
   /** True to go on: nothing is lost, or the person said it may be. */
   const mayLeave = async () =>
