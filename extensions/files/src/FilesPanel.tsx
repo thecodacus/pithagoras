@@ -154,6 +154,8 @@ export const FilesPanel = memo(function FilesPanel({
   const dirty = !!file && !file.binary && !file.loading && draft !== file.saved;
   const dirtyRef = useRef(dirty);
   dirtyRef.current = dirty;
+  const changedRef = useRef(changed);
+  changedRef.current = changed;
   // For what finishes later than it started, such as a delete that asked first.
   const dirRef = useRef(dir);
   dirRef.current = dir;
@@ -275,9 +277,12 @@ export const FilesPanel = memo(function FilesPanel({
   const rereadFile = useCallback(
     (path: string, watching = false) => {
       const known = fileRef.current;
-      // Asked on its own, the server leaves out the text when the file is as it was: nothing is read or shown for most looks.
-      if (watching && (savingRef.current || known?.path !== path || known.loading)) return Promise.resolve();
-      const ask = ++fileAsk.current;
+      // Asked on its own, the server leaves out the text when the file is as it was: the server reads nothing and nothing is shown for most looks.
+      // With the bar about a changed file up while there are changes not saved, there is nothing more a look could tell.
+      if (watching && (savingRef.current || known?.path !== path || known.loading || (dirtyRef.current && changedRef.current))) return Promise.resolve();
+      // A look does not count as a new question: a read that is under way (Refresh, the agent's change) must not become stale because of it,
+      // or its error would be lost. A read started later still overtakes the look.
+      const ask = watching ? fileAsk.current : ++fileAsk.current;
       // What is shown is then the file as it is now, so neither the bar nor an earlier save's error is about it any more.
       const show = (open: Open, text: string) => {
         setFile(open);

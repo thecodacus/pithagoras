@@ -49,10 +49,10 @@ function commitHere(dir: string) {
 }
 
 /** The routes as the portal mounts a server half's: at /api/x/<package>, no body read unless a route asks. */
-async function withApi(fn: (base: string) => Promise<void>) {
+async function withApi(fn: (base: string) => Promise<void>, files: typeof folderFiles = folderFiles) {
   const app = express();
   const router = express.Router();
-  routes(router, express.json(), folderFiles, (id) => {
+  routes(router, express.json(), files, (id) => {
     if (id !== "del") throw new Error("No such chat");
     return baseDir(work);
   });
@@ -108,6 +108,20 @@ test("a read that says what it saw of the file is told that it is unchanged, wit
     // A file that is not there is still said to be not there.
     assert.equal((await fetch(`${base}/file?path=nope.md&since=1&size=1`).then(answer)).status, 404);
   });
+});
+
+test("a look at whether the file changed does not read it, and one that finds it changed does", async () => {
+  let reads = 0;
+  const counting = { ...folderFiles, read: (...args: Parameters<typeof folderFiles.read>) => (reads++, folderFiles.read(...args)) } as typeof folderFiles;
+  await withApi(async (base) => {
+    writeFileSync(path.join(work, "light.md"), "one\n");
+    const read = (await fetch(`${base}/file?path=light.md`).then(answer)) as { mtime: number; size: number };
+    reads = 0;
+    assert.deepEqual(await fetch(`${base}/file?path=light.md&since=${read.mtime}&size=${read.size}`).then(answer), { status: 200, unchanged: true });
+    assert.equal(reads, 0);
+    assert.equal(((await fetch(`${base}/file?path=light.md&since=${read.mtime}&size=${read.size + 1}`).then(answer)) as { content?: string }).content, "one\n");
+    assert.equal(reads, 1);
+  }, counting);
 });
 
 test("nothing outside the chat's folder is reached, through a path or a link the agent left", async () => {

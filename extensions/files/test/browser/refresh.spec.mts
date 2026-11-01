@@ -395,3 +395,28 @@ test('the open file is not looked at while the page is hidden, nor when no file 
   await later(page);
   expect(looks()).toBe(1);
 });
+
+test('a look that comes while Refresh is under way does not take its answer: a file that is gone is still reported', async ({ page }) => {
+  const { disk, hold, looks } = await files(page, { watch: true });
+  await expect(box(page)).toHaveValue('one\n');
+  disk.gone = true;
+  const release = hold();
+  await refresh(page).click();
+  await later(page);
+  await expect.poll(looks).toBe(1);
+  release();
+  await expect(page.getByText('There is no such file')).toBeVisible();
+});
+
+test('once the bar about a changed file is up over changes not saved, the file is not looked at again', async ({ page }) => {
+  const { disk, looks } = await files(page, { watch: true });
+  await box(page).fill('mine\n');
+  disk.content = 'theirs\n';
+  disk.mtime = 2;
+  await later(page);
+  await expect(bar(page)).toBeVisible();
+  expect(looks()).toBe(1);
+  await later(page);
+  await later(page);
+  expect(looks()).toBe(1);
+});
