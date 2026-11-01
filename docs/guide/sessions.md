@@ -610,7 +610,8 @@ tokens word for word and holds 16,384 back for the answer. On a smaller window
 that leaves a chat that has not got that far nothing to compact, so the portal
 scales both to the window of the model: a sixth of the window is kept at most,
 and a quarter of it is held back (never less than 6,144 tokens, which pi needs
-below the window to ask the model for an answer at all). A window of about 120k
+below the window to ask the model for an answer at all; a window under 12,288
+tokens holds back half of it instead). A window of about 120k
 and more is left as pi has it. The tools, instructions and skills that every
 chat starts with count against the window as well: a window that is not much
 bigger than they are leaves no room for a conversation, whatever is compacted.

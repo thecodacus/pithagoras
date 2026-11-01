@@ -982,6 +982,9 @@ export class SdkPiClient extends EventEmitter implements PiClient {
   ): Promise<PromptTaken> {
     // See `reloading`. Failed or not, the chat is what it left.
     if (this.reloading) await this.reloading.catch(() => {});
+    // pi's settings saves (its own model changes, a toggle in its menus) rebuild the settings and drop the fitted
+    // compaction numbers, and the check before a run reads them before any agent_start could say them again.
+    this.applyLimitQuietly();
     if (options?.voice) {
       this.useVoiceModel();
       this.voiceFirst?.arm(this.isIdle());
@@ -1854,11 +1857,17 @@ export class SdkPiClient extends EventEmitter implements PiClient {
   private fitCompaction(modelKey: string, contextWindow: number | undefined): void {
     const settings = this.session.settingsManager;
     if (!contextWindow || typeof settings?.applyOverrides !== "function") return;
-    settings.applyOverrides({ compaction: { modelOverrides: { [modelKey]: fitCompaction(contextWindow, configuredCompaction(modelKey)) } } });
+    // The numbers the session itself has, the project's settings over the global ones as pi merges them, and not the
+    // global file alone: the override ranks above both, so numbers worked out from less would replace a project's own.
+    // Written when they are not lowered too, as the very numbers pi resolves anyway: an override cannot be taken away,
+    // and one left by an earlier, smaller window would otherwise stay.
+    const layers = [settings.getGlobalSettings?.() ?? {}, settings.getProjectSettings?.() ?? {}];
+    settings.applyOverrides({ compaction: { modelOverrides: { [modelKey]: fitCompaction(contextWindow, configuredCompaction(modelKey, layers)) } } });
   }
 
   async setThinkingLevel(level: string): Promise<void> {
     this.session.setThinkingLevel(level);
+    this.applyLimitQuietly();
   }
 
   /**
@@ -1878,10 +1887,12 @@ export class SdkPiClient extends EventEmitter implements PiClient {
 
   async setAutoCompaction(enabled: boolean): Promise<void> {
     this.session.setAutoCompactionEnabled(enabled);
+    this.applyLimitQuietly();
   }
 
   async setAutoRetry(enabled: boolean): Promise<void> {
     this.session.setAutoRetryEnabled(enabled);
+    this.applyLimitQuietly();
   }
 
   async compact(): Promise<void> {

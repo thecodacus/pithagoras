@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
 import { inProcessHome } from './server-harness.mjs';
@@ -46,10 +46,29 @@ test('the numbers in pi\'s file are read the way pi reads them, a model\'s own b
   assert.deepEqual(configuredCompaction('p/m'), piDefaults);
 });
 
-/** A client around a stand-in session with a real settings manager: what applyContextLimit touches. */
-function clientFor(model) {
-  const settingsManager = SettingsManager.inMemory({});
-  const session = { settingsManager, agent: { state: { model } }, get model() { return this.agent.state.model; } };
+/** A project folder with its own pi settings, as a chat in it has them; `compaction` undefined for a project without. */
+function projectWith(compaction) {
+  const folder = mkdtempSync(join(home, 'project-'));
+  if (compaction) {
+    mkdirSync(join(folder, '.pi'));
+    writeFileSync(join(folder, '.pi', 'settings.json'), JSON.stringify({ compaction }));
+  }
+  return folder;
+}
+
+/**
+ * A client around a stand-in session with a real settings manager, global file and project's together as pi
+ * reads them: what applyContextLimit touches.
+ */
+function clientFor(model, project = projectWith()) {
+  const settingsManager = SettingsManager.create(project, process.env.PI_CODING_AGENT_DIR);
+  const session = {
+    settingsManager,
+    agent: { state: { model } },
+    get model() { return this.agent.state.model; },
+    setAutoCompactionEnabled: (enabled) => settingsManager.setCompactionEnabled(enabled),
+    setThinkingLevel: (level) => settingsManager.setDefaultThinkingLevel(level),
+  };
   const client = Object.create(SdkPiClient.prototype);
   client.session = session;
   client.definitionWindows = new Map();
@@ -112,4 +131,62 @@ test('a chat that has not outgrown pi\'s "keep recent" has nothing to compact th
   const kept = (keepRecentTokens) => findCutPoint(entries, 0, entries.length, keepRecentTokens).firstKeptEntryIndex;
   assert.equal(kept(piDefaults.keepRecentTokens), 0, 'pi keeps everything: nothing is left to summarise');
   assert.ok(kept(fitCompaction(16384, piDefaults).keepRecentTokens) > 0);
+});
+
+test('a project\'s own compaction numbers are not replaced, on a big window nor on a small one', () => {
+  settingsFile(undefined);
+  const big = { provider: 'p', id: 'big', contextWindow: 262144 };
+  const { client, session } = clientFor(big, projectWith({ keepRecentTokens: 40000, reserveTokens: 30000 }));
+  assert.deepEqual(session.settingsManager.getCompactionSettings(big), { enabled: true, reserveTokens: 30000, keepRecentTokens: 40000 });
+  client.applyContextLimit();
+  assert.deepEqual(session.settingsManager.getCompactionSettings(big), { enabled: true, reserveTokens: 30000, keepRecentTokens: 40000 });
+  // On a small window the project's numbers are what is lowered, not pi's defaults.
+  const small = { provider: 'p', id: 'small', contextWindow: 32768 };
+  const other = clientFor(small, projectWith({ keepRecentTokens: 4000, reserveTokens: 30000, modelOverrides: { 'p/small': { reserveTokens: 7000 } } }));
+  other.client.applyContextLimit();
+  assert.deepEqual(other.session.settingsManager.getCompactionSettings(small), { enabled: true, reserveTokens: 7000, keepRecentTokens: 4000 });
+});
+
+test('the numbers are resolved as pi merges them: the project over the global file, a model\'s entry before the ordinary setting', () => {
+  const global = { compaction: { keepRecentTokens: 12000, reserveTokens: 9000, modelOverrides: { 'p/m': { keepRecentTokens: 7000 } } } };
+  const project = { compaction: { keepRecentTokens: 5000, modelOverrides: { 'p/m': { reserveTokens: 3000 } } } };
+  assert.deepEqual(configuredCompaction('p/m', [global, project]), { reserveTokens: 3000, keepRecentTokens: 7000 });
+  assert.deepEqual(configuredCompaction('p/x', [global, project]), { reserveTokens: 9000, keepRecentTokens: 5000 });
+  assert.deepEqual(configuredCompaction('p/x', [global, {}]), { reserveTokens: 9000, keepRecentTokens: 12000 });
+});
+
+test('a settings save in pi does not leave the session without the fitted numbers for the prompt after it', async () => {
+  settingsFile(undefined);
+  const model = { provider: 'p', id: 'saved', contextWindow: 16384 };
+  const { client, session } = clientFor(model);
+  const fitted = { enabled: true, reserveTokens: 6144, keepRecentTokens: 2730 };
+  client.applyContextLimit();
+  assert.deepEqual(session.settingsManager.getCompactionSettings(model), fitted);
+  // pi saving its settings rebuilds them from the files, and the fit is gone.
+  session.settingsManager.setDefaultThinkingLevel('low');
+  assert.deepEqual(session.settingsManager.getCompactionSettings(model), { enabled: true, ...piDefaults });
+  await client.setThinkingLevel('low');
+  assert.deepEqual(session.settingsManager.getCompactionSettings(model), fitted);
+  await client.setAutoCompaction(true);
+  assert.deepEqual(session.settingsManager.getCompactionSettings(model), fitted);
+});
+
+test('a prompt says the fitted numbers again before pi checks the chat that comes with it', async () => {
+  settingsFile(undefined);
+  const model = { provider: 'p', id: 'saved', contextWindow: 16384 };
+  const { client, session } = clientFor(model);
+  const fitted = { enabled: true, reserveTokens: 6144, keepRecentTokens: 2730 };
+  client.applyContextLimit();
+  // pi's own model change saves its settings too.
+  session.settingsManager.setDefaultModelAndProvider('p', 'saved');
+  assert.deepEqual(session.settingsManager.getCompactionSettings(model), { enabled: true, ...piDefaults });
+  client.handoffs = [];
+  client.voiceFirst = undefined;
+  client.restoreChatModel = () => {};
+  client.sayAudioRule = () => false;
+  let seen;
+  session.prompt = async () => { seen = session.settingsManager.getCompactionSettings(model); };
+  session.isIdle = true;
+  await client.prompt('hello').catch(() => {});
+  assert.deepEqual(seen, fitted);
 });

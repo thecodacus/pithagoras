@@ -70,16 +70,22 @@ export interface CompactionTokens {
 }
 
 /**
- * The compaction numbers as the settings file has them for a model: its own entry, else the ordinary setting, else
- * pi's default. `modelKey` is `provider/id`, as pi keys its `modelOverrides`.
+ * The compaction numbers as pi resolves them for a model: its own entry, else the ordinary setting, else pi's
+ * default. `modelKey` is `provider/id`, as pi keys its `modelOverrides`. `layers` are the settings the numbers
+ * come from, the later ones over the earlier (pi merges the project's file over the global one field by field);
+ * by default pi's global file alone.
  */
-export function configuredCompaction(modelKey: string): CompactionTokens {
-  const stored = readPiSettings().compaction;
-  const c = stored && typeof stored === "object" ? (stored as Record<string, unknown>) : {};
-  const overrides = c.modelOverrides && typeof c.modelOverrides === "object" ? (c.modelOverrides as Record<string, unknown>) : {};
-  const own = overrides[modelKey] && typeof overrides[modelKey] === "object" ? (overrides[modelKey] as Record<string, unknown>) : {};
+export function configuredCompaction(modelKey: string, layers: Record<string, unknown>[] = [readPiSettings()]): CompactionTokens {
+  const object = (value: unknown): Record<string, unknown> => (value && typeof value === "object" ? (value as Record<string, unknown>) : {});
+  const compactions = layers.map(layer => object(layer.compaction));
+  const entries = compactions.map(c => object(object(c.modelOverrides)[modelKey]));
   const pick = (field: keyof CompactionTokens, fallback: number): number => {
-    for (const value of [own[field], c[field]]) if (typeof value === "number" && Number.isSafeInteger(value) && value > 0) return value;
+    for (const from of [entries, compactions]) {
+      for (const layer of [...from].reverse()) {
+        const value = layer[field];
+        if (typeof value === "number" && Number.isSafeInteger(value) && value > 0) return value;
+      }
+    }
     return fallback;
   };
   return { reserveTokens: pick("reserveTokens", RESERVE_DEFAULT), keepRecentTokens: pick("keepRecentTokens", COMPACTION_DEFAULTS.keepRecentTokens) };
@@ -93,10 +99,11 @@ export function configuredCompaction(modelKey: string): CompactionTokens {
  * and when pi tries by itself it does not say so, the chat just goes on to fill the window until the model has no
  * room to answer. So what is kept is held to a sixth of the window, which 128k does not reach.
  *
- * What is held back is held to a quarter of it, but not to less than 6144 where the window allows: pi asks the model
- * for no more than what is left of the window less 4096 tokens, and for one token when nothing is, so a compaction
- * that starts later than that starts after the model has been left no room to answer. The 2048 above that are room
- * for an answer. Numbers chosen lower than that are theirs to choose, and are kept.
+ * What is held back is held to a quarter of it, but not to less than 6144 where the window allows (and never to
+ * more than half of it): pi asks the model for no more than what is left of the window less 4096 tokens, and for
+ * one token when nothing is, so a compaction that starts later than that starts after the model has been left no
+ * room to answer. The 2048 above that are room for an answer. Numbers chosen lower than that are theirs to choose,
+ * and are kept.
  */
 export function fitCompaction(contextWindow: number, wanted: CompactionTokens): CompactionTokens {
   if (!Number.isFinite(contextWindow) || contextWindow <= 0) return wanted;
