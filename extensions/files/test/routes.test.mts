@@ -91,6 +91,25 @@ test("a folder is listed, a file read, saved over what it was read as, and refus
   });
 });
 
+test("a read that says what it saw of the file is told that it is unchanged, without the text, and otherwise gets the file", async () => {
+  await withApi(async (base) => {
+    writeFileSync(path.join(work, "seen.md"), "one\n");
+    const read = (await fetch(`${base}/file?path=seen.md`).then(answer)) as { content: string; mtime: number; size: number };
+    const again = (query: string) => fetch(`${base}/file?path=seen.md${query}`).then(answer);
+    assert.deepEqual(await again(`&since=${read.mtime}&size=${read.size}`), { status: 200, unchanged: true });
+    // Another time, or another size, is another file: the text comes.
+    assert.equal(((await again(`&since=${read.mtime - 1}&size=${read.size}`)) as { content?: string }).content, "one\n");
+    assert.equal(((await again(`&since=${read.mtime}&size=${read.size + 1}`)) as { content?: string }).content, "one\n");
+    assert.equal(((await again(`&since=${read.mtime}`)) as { content?: string }).content, "one\n", "no size");
+    writeFileSync(path.join(work, "seen.md"), "two!\n");
+    const changed = (await again(`&since=${read.mtime}&size=${read.size}`)) as { content?: string; unchanged?: boolean };
+    assert.equal(changed.content, "two!\n");
+    assert.equal(changed.unchanged, undefined);
+    // A file that is not there is still said to be not there.
+    assert.equal((await fetch(`${base}/file?path=nope.md&since=1&size=1`).then(answer)).status, 404);
+  });
+});
+
 test("nothing outside the chat's folder is reached, through a path or a link the agent left", async () => {
   await withApi(async (base) => {
     writeFileSync(path.join(outside, "secret.txt"), "not yours");
