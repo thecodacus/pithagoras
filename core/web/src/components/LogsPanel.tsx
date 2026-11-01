@@ -162,7 +162,7 @@ export function LogsPanel({ onError }: { onError: (message: string | null) => vo
         tabIndex={0}
         role="log"
         aria-label={t("Server logs")}
-        className="h-[60vh] min-h-64 overflow-auto rounded-xl border border-line bg-raised/40 p-2 font-mono text-[11px] leading-relaxed"
+        className="scroll-steady [--ground:color-mix(in_srgb,rgb(var(--raised))_40%,rgb(var(--surface)))] h-[60vh] min-h-64 overflow-auto rounded-xl border border-line p-2 font-mono text-[11px] leading-relaxed"
       >
         {loading ? (
           <p className="px-1 text-fg-subtle">{t("Loading…")}</p>

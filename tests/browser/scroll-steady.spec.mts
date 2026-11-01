@@ -124,3 +124,60 @@ test('Settings scrolls as one piece, the extensions to discover included', async
   await page.waitForTimeout(300);
   expectOnePiece(await moves(page, box));
 });
+
+/**
+ * A scroller that has no ground of its own is not kept as a layer of its own at 125 %, and its text wobbles; one with an
+ * opaque ground is, and keeps the sub-pixel smoothing of the page's text. `will-change` would stop the wobble too, but
+ * not keep that smoothing for the sidebar, the pages, Settings and the conversation, which are all drawn over a ground.
+ * So each of them has the ground it was drawn over before, as a colour of its own, and the same look.
+ */
+const colour = (el: Element, name: string) => {
+  const probe = document.createElement('canvas').getContext('2d', { willReadFrequently: true })!;
+  const read = (value: string) => {
+    probe.clearRect(0, 0, 1, 1);
+    probe.fillStyle = '#000';
+    probe.fillStyle = value;
+    probe.fillRect(0, 0, 1, 1);
+    return [...probe.getImageData(0, 0, 1, 1).data];
+  };
+  return name === 'ground' ? read(getComputedStyle(el).backgroundColor) : read(`rgb(${getComputedStyle(document.documentElement).getPropertyValue(name)})`);
+};
+
+/** The ground of a box as drawn (all four channels), what the portal's variable `name` is, and whether the box asks for a layer by `will-change`. */
+async function ground(box: Locator, over: [string, string, number][]) {
+  return box.evaluate((el, { over, src }) => {
+    const colour = new Function('el', 'name', `return (${src})(el, name)`) as (el: Element, name: string) => number[];
+    const mine = colour(el, 'ground');
+    // [variable, other variable or '', share of the first]: the colour the box used to be, laid over what was behind it.
+    const [first, second, share] = over[0];
+    const a = colour(el, first), b = second ? colour(el, second) : a;
+    const expected = a.slice(0, 3).map((v, i) => Math.round(v * share + b[i] * (1 - share)));
+    return { mine, expected, willChange: getComputedStyle(el).willChange };
+  }, { over, src: colour.toString() });
+}
+
+function expectGround(found: { mine: number[]; expected: number[]; willChange: string }) {
+  expect(found.mine[3], `ground ${JSON.stringify(found.mine)}`).toBe(255);
+  for (let i = 0; i < 3; i++) expect(Math.abs(found.mine[i] - found.expected[i]), `ground ${JSON.stringify(found)}`).toBeLessThanOrEqual(1);
+  expect(found.willChange).toBe('auto');
+}
+
+test('the conversation is scrolled over an opaque ground of the colour they were drawn over', async ({ page }) => {
+  await page.goto('/tests/chat.html?phase=reasoning&turns=40');
+  await expect(page.getByText('The last step writes the bundle.')).toBeVisible();
+  expectGround(await ground(page.locator('.chat-list').locator('..'), [['--canvas', '', 1]]));
+});
+
+test('The sidebar, Settings, its navigation and the server log are scrolled over an opaque ground of the colour they were drawn over', async ({ page }) => {
+  await mockPortal(page, ({ path }) => {
+    if (path === '/api/logs') return { boot: 'a', gap: false, last: 1, lines: [{ id: 1, level: 'info', text: 'listening', at: '2026-10-01T09:00:00Z' }] };
+    return undefined;
+  }, { settings: true });
+  await page.goto('/settings/logs');
+  await expect(page.getByRole('log', { name: 'Server logs' })).toContainText('listening');
+  await expect(page.locator('.sidebar-list')).toBeVisible();
+  expectGround(await ground(page.locator('.sidebar-list'), [['--surface', '', 1]]));
+  expectGround(await ground(page.getByRole('dialog').locator('div.scroll-steady').first(), [['--surface', '', 1]]));
+  expectGround(await ground(page.getByRole('dialog').locator('nav.scroll-steady'), [['--canvas', '--surface', 0.4]]));
+  expectGround(await ground(page.getByRole('log', { name: 'Server logs' }), [['--raised', '--surface', 0.4]]));
+});

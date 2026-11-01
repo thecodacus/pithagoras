@@ -268,6 +268,21 @@ ground and text. A stylesheet written with them follows the theme, the
 portal's own or [one an extension brought](#themes). Give your class names a
 prefix of your own: the stylesheet is the page's.
 
+A box of your own that scrolls (an editor, a board's column) should have an
+opaque ground, or the class `scroll-steady`, which gives it one: on a screen at
+125 % Chromium draws the text of a scrolling box without a ground again at every
+fraction of a pixel it is moved by, and the lines of a paragraph step apart
+from each other as it moves. The ground is `--canvas`; where the box is on
+`--surface`, say so with `--ground` on the box, a whole colour:
+
+```css
+.my-editor { overflow-y: auto; background-color: rgb(var(--surface)); }
+```
+
+```jsx
+<div className="scroll-steady overflow-y-auto" style={{ "--ground": "rgb(var(--surface))" }}>…</div>
+```
+
 While the portal's [animations](/guide/interface#animations) play (the switch in
 Settings → This browser is on, and the system does not ask for less motion),
 `<html>` has `data-motion="fancy"`, and it has none while they do not. Put a
