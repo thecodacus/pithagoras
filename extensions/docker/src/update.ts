@@ -19,8 +19,8 @@ export type ContainerBody = {
     Tty?: boolean;
     Labels?: Record<string, string> | null;
   } & Record<string, unknown>;
-  HostConfig?: { NetworkMode?: string; Binds?: string[] | null; Mounts?: { Target?: string }[] | null; PortBindings?: Record<string, unknown> | null } & Record<string, unknown>;
-  State?: { Status?: string; Running?: boolean };
+  HostConfig?: { NetworkMode?: string; Binds?: string[] | null; Mounts?: { Type?: string; Source?: string; Target?: string }[] | null; PortBindings?: Record<string, unknown> | null } & Record<string, unknown>;
+  State?: { Status?: string; Running?: boolean; Restarting?: boolean; ExitCode?: number; Error?: string };
   Mounts?: { Type?: string; Name?: string; Destination?: string; RW?: boolean }[] | null;
   NetworkSettings?: { Networks?: Record<string, EndpointBody> | null };
 };
@@ -76,14 +76,16 @@ export function recreation(old: ContainerBody, oldImage: ImageConfig | undefined
 
   const { Image: _image, MacAddress: _mac, Hostname: hostname, Domainname: domainname, Env: env, Cmd: cmd, Entrypoint: entrypoint, WorkingDir: workingDir, User: user, ExposedPorts: ports, Volumes: volumes, Labels: labels, Healthcheck: healthcheck, StopSignal: stopSignal, Shell: shell, OnBuild: onBuild, ...rest } = config as Record<string, unknown> & ImageConfig & { Hostname?: string; Domainname?: string };
   const envLeft = ((env as string[] | null | undefined) ?? []).filter((entry) => !(inherited.Env ?? []).includes(entry));
+  const ownEntrypoint = ownOf(entrypoint, inherited.Entrypoint);
   const body: Record<string, unknown> = {
     ...rest,
     Image: image,
     ...(hostname && hostname !== old.Id.slice(0, 12) && !shared ? { Hostname: hostname } : {}),
     ...(domainname && !shared ? { Domainname: domainname } : {}),
     ...(envLeft.length ? { Env: envLeft } : {}),
-    Cmd: ownOf(cmd, inherited.Cmd),
-    Entrypoint: ownOf(entrypoint, inherited.Entrypoint),
+    // Docker takes the image's command only where the body names no entrypoint: with one of its own, the command stays as it is.
+    Cmd: ownEntrypoint !== undefined ? cmd : ownOf(cmd, inherited.Cmd),
+    Entrypoint: ownEntrypoint,
     WorkingDir: ownOf(workingDir, inherited.WorkingDir) || undefined,
     User: ownOf(user, inherited.User) || undefined,
     ExposedPorts: shared ? undefined : beyond(ports, inherited.ExposedPorts, (port) => portBound.has(port)),
@@ -102,7 +104,10 @@ export function recreation(old: ContainerBody, oldImage: ImageConfig | undefined
     if (mount.Type !== "volume" || !mount.Name || !mount.Destination || there.has(mount.Destination)) continue;
     binds.push(`${mount.Name}:${mount.Destination}${mount.RW === false ? ":ro" : ""}`);
   }
-  body.HostConfig = { ...host, ...(binds.length ? { Binds: binds } : {}) };
+  // A volume the mount API made with no source is only known by its name now as well.
+  const named = new Map((old.Mounts ?? []).filter((mount) => mount.Type === "volume" && mount.Name && mount.Destination).map((mount) => [mount.Destination, mount.Name] as const));
+  const mounts = host.Mounts?.map((mount) => (mount.Type === "volume" && !mount.Source && named.has(mount.Target) ? { ...mount, Source: named.get(mount.Target) } : mount));
+  body.HostConfig = { ...host, ...(mounts ? { Mounts: mounts } : {}), ...(binds.length ? { Binds: binds } : {}) };
 
   const endpoints = shared
     ? {}

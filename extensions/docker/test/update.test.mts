@@ -21,6 +21,7 @@ test.after(() => docker.close());
 
 const dataDir = () => mkdtempSync(path.join(os.tmpdir(), "dk-data-"));
 const VOICE = "pithagoras-voice";
+const SETTLE = 30;
 
 /** What the old image gives its containers, and the new one. */
 const OLD: FakeImage = { Id: "sha256:old", Config: { Env: ["PATH=/bin", "CUDA_VERSION=12.4.1", "KEEP=same"], Cmd: ["bash"], WorkingDir: "/w-old", Labels: { "com.image": "old" }, ExposedPorts: { "8080/tcp": {} }, Volumes: { "/imgdata": {} } } };
@@ -37,13 +38,15 @@ afterEach(() => {
   docker.images.clear();
   docker.imageInfo.clear();
   docker.failing.clear();
-  delete docker.runs.refuseStart;
+  for (const key of Object.keys(docker.runs)) delete (docker.runs as Record<string, unknown>)[key];
+  docker.registry.clear();
   delete docker.hold.pull;
 });
 
 /** Wants `image` of `name` for the extension, and gives the Docker it is asked through. */
 function wanting(who: string, image: string, wanted: (name: string) => Partial<WantedImage> = () => ({})) {
-  const { forExtension, person } = dockerFor(dataDir());
+  // The container made again has to stay up for a moment (SETTLE): a short one here.
+  const { forExtension, person } = dockerFor(dataDir(), undefined, SETTLE);
   const d = forExtension(who);
   d.containers.wantImage((c) => (c.name.startsWith("up-") ? { image, ...wanted(c.name) } : undefined));
   return { d, person, forExtension };
@@ -287,7 +290,7 @@ test("the page's route starts an update and answers at once; Docker's overview t
     assert.deepEqual([again.status, again.body.error], [409, "up-a is being updated already"]);
     release();
     let done: any;
-    for (let i = 0; i < 400 && (!done?.update || done.update.active); i++) {
+    for (let i = 0; i < 1200 && (!done?.update || done.update.active); i++) {
       await delay(5);
       done = (await call("GET", "/overview")).body.containers.find((c: any) => c.name === "up-a");
     }
@@ -299,4 +302,254 @@ test("the page's route starts an update and answers at once; Docker's overview t
   } finally {
     server.close();
   }
+});
+
+/** An image a chat's agent built under a reference: it carries the label the agent's builds get. */
+const BUILT: FakeImage = { Id: "sha256:built", Config: { Entrypoint: ["/evil"], Labels: { [OWNER_LABEL]: "pithagoras-docker" } } };
+const STAYS = () => new Promise<void>(() => {});
+
+test("what was checked before the download is checked again before the swap: a container replaced meanwhile, a wish that changed, or one that is in use now ends the update, and the other container is untouched", async () => {
+  images();
+  let wish = "img:2";
+  let busy: string | undefined;
+  const { d, person, forExtension } = wanting(VOICE, "img:2");
+  d.containers.wantImage((c) => (c.name.startsWith("up-") ? { image: wish, busy } : undefined));
+  const hold = () => {
+    docker.images.delete("img:2");
+    let release!: () => void;
+    docker.hold.pull = new Promise<void>((resolve) => (release = resolve));
+    return release;
+  };
+  const going = async (name: string) => {
+    for (let i = 0; i < 400 && !docker.pulls.length; i++) await delay(5);
+    assert.ok(docker.pulls.length, `the download for ${name} began`);
+  };
+
+  // Another extension's container takes the name while the image is downloaded.
+  await d.containers.create("up-a", { Image: "img:1" });
+  await d.containers.start("up-a");
+  let release = hold();
+  await person.updateImage("up-a");
+  await going("up-a");
+  await d.containers.remove("up-a");
+  const other = forExtension("pithagoras-browser");
+  await other.containers.create("up-a", { Image: "img:1", Env: ["SECRET=of-other"] });
+  release();
+  let row = await ended(person, "up-a");
+  assert.match(row.update.error, /up-a was replaced while the image was downloaded/);
+  const theirs = docker.containers.find((c) => c.Name === "up-a")!;
+  assert.equal(theirs.Labels[OWNER_LABEL], "pithagoras-browser", "still the other extension's, not made again as Voice's");
+  assert.deepEqual((theirs.made as any).Env, ["SECRET=of-other"]);
+  assert.deepEqual(docker.renames, []);
+
+  // The extension wants another image when the download ends.
+  docker.containers.length = 0;
+  docker.pulls.length = 0;
+  await d.containers.create("up-b", { Image: "img:1" });
+  release = hold();
+  await person.updateImage("up-b");
+  await going("up-b");
+  wish = "img:3";
+  release();
+  row = await ended(person, "up-b");
+  assert.match(row.update.error, /up-b's extension wants img:3 now, not img:2/);
+  assert.deepEqual(docker.renames, []);
+
+  // It is in use when the download ends (a setup began).
+  wish = "img:2";
+  docker.pulls.length = 0;
+  docker.images.delete("img:2");
+  release = hold();
+  await person.updateImage("up-b");
+  await going("up-b");
+  busy = "its setup is running";
+  release();
+  row = await ended(person, "up-b");
+  assert.match(row.update.error, /up-b is in use now: its setup is running/);
+  assert.deepEqual(docker.renames, []);
+});
+
+test("while the containers are swapped, the extension and the page cannot make, start, stop or remove them", async () => {
+  images();
+  const { forExtension, person } = dockerFor(dataDir(), undefined, 300);
+  const d = forExtension(VOICE);
+  d.containers.wantImage((c) => (c.name.startsWith("up-") ? { image: "img:2" } : undefined));
+  docker.images.add("img:2");
+  await d.containers.create("up-a", { Image: "img:1" });
+  await d.containers.start("up-a");
+  docker.runs.onStart = STAYS;
+  await person.updateImage("up-a");
+  for (let i = 0; i < 400 && docker.starts.length < 2; i++) await delay(2);
+  assert.equal(docker.starts.length, 2, "the new container is started and settling");
+  const refused = /is being updated: wait until that is done/;
+  await assert.rejects(d.containers.create("up-a", { Image: "img:1" }), refused);
+  await assert.rejects(d.containers.remove("up-a"), refused);
+  await assert.rejects(d.containers.stop("up-a"), refused);
+  await assert.rejects(d.containers.start("up-a"), refused);
+  await assert.rejects(person.remove("up-a"), refused);
+  await assert.rejects(person.stop("up-a"), refused);
+  await assert.rejects(d.containers.remove("up-a-before-update"), refused);
+  await ended(person, "up-a");
+  // And the name is free again.
+  await d.containers.stop("up-a");
+});
+
+test("the update is told as failed only where the container is as it was; where only the old container could not be removed it is done, and where it could not be named back the row it is on says so", async () => {
+  images();
+  const { d, person } = wanting(VOICE, "img:2");
+  docker.images.add("img:2");
+  await d.containers.create("up-a", { Image: "img:1" });
+  await d.containers.start("up-a");
+  docker.runs.onStart = STAYS;
+  const old = docker.containers.find((c) => c.Name === "up-a")!;
+  docker.runs.refuseRemove = (c) => (c === old ? "removal of the container is already in progress" : undefined);
+  await person.updateImage("up-a");
+  let row = await ended(person, "up-a");
+  assert.deepEqual(row.update, { active: false, line: "", done: { from: "img:1", to: "img:2" }, leftover: "up-a-before-update" });
+  assert.equal(row.imageWarning, undefined);
+  assert.deepEqual(docker.containers.map((c) => [c.Name, c.Image, c.State]).sort(), [["up-a", "img:2", "running"], ["up-a-before-update", "img:1", "exited"]]);
+
+  // The new one does not stay up, and the old one cannot be named back: it is told on the old one's row.
+  docker.runs.refuseRemove = undefined;
+  docker.containers.length = 0;
+  await d.containers.create("up-b", { Image: "img:1" });
+  await d.containers.start("up-b");
+  docker.runs.onStart = async (c) => {
+    if (c.Image === "img:2") await delay(5);
+    else await STAYS();
+  };
+  docker.runs.refuseRename = (_c, to) => (to === "up-b" ? "rename failed" : undefined);
+  await person.updateImage("up-b");
+  row = await ended(person, "up-b-before-update");
+  assert.equal(row.update.stranded, true);
+  assert.match(row.update.error, /did not stay up on img:2.* It is still named up-b-before-update\./);
+  assert.equal(((await person.overview()) as any).containers.find((c: any) => c.name === "up-b"), undefined, "no row of the name it lost");
+});
+
+test("a container made again that does not stay up is taken away and the old one runs again; one that stays up is done", async () => {
+  images();
+  const { d, person } = wanting(VOICE, "img:2");
+  docker.images.add("img:2");
+  await d.containers.create("up-a", { Image: "img:1" });
+  await d.containers.start("up-a");
+  const old = docker.containers.find((c) => c.Name === "up-a")!;
+  // It starts, and its command fails a moment later.
+  docker.runs.onStart = async (c) => {
+    if (c.Image === "img:2") await delay(5);
+    else await STAYS();
+  };
+  await person.updateImage("up-a");
+  const row = await ended(person, "up-a");
+  assert.match(row.update.error, /up-a did not stay up on img:2: it exited, exit code 0/);
+  assert.deepEqual(docker.containers.map((c) => [c.Name, c.Image, c.State]), [["up-a", "img:1", "running"]]);
+  assert.equal(docker.containers[0], old);
+  assert.equal(row.imageWarning.kind, "other");
+
+  docker.runs.onStart = STAYS;
+  await person.updateImage("up-a");
+  assert.deepEqual((await ended(person, "up-a")).update, { active: false, line: "", done: { from: "img:1", to: "img:2" } });
+});
+
+test("a container with an entrypoint of its own keeps its command, even where it is the old image's; a volume of the mount API with no source stays mounted", () => {
+  const old = (config: Record<string, unknown>, host: Record<string, unknown> = {}, mounts: Record<string, unknown>[] = []) => ({ Id: "abcdef0123456789", Name: "/up-b", Config: { Image: "img:1", ...config }, HostConfig: host, Mounts: mounts }) as never;
+  const image = { Cmd: ["serve"], Entrypoint: ["/image-entry"] };
+  const own = recreation(old({ Entrypoint: ["/run.sh"], Cmd: ["serve"] }), image, "img:2") as any;
+  assert.deepEqual([own.Entrypoint, own.Cmd], [["/run.sh"], ["serve"]]);
+  // Both from the old image: the new image's.
+  const both = recreation(old({ Entrypoint: ["/image-entry"], Cmd: ["serve"] }), image, "img:2") as any;
+  assert.deepEqual([both.Entrypoint, both.Cmd], [undefined, undefined]);
+  // Only the command of its own over the image's entrypoint.
+  const cmd = recreation(old({ Entrypoint: ["/image-entry"], Cmd: ["other"] }), image, "img:2") as any;
+  assert.deepEqual([cmd.Entrypoint, cmd.Cmd], [undefined, ["other"]]);
+
+  const mounted = recreation(
+    old({}, { Mounts: [{ Type: "volume", Target: "/data" }, { Type: "volume", Source: "named", Target: "/named" }, { Type: "tmpfs", Target: "/tmp" }] }, [
+      { Type: "volume", Name: "anon123", Destination: "/data", RW: true },
+      { Type: "volume", Name: "named", Destination: "/named", RW: true },
+    ]),
+    undefined,
+    "img:2",
+  ) as any;
+  assert.deepEqual(mounted.HostConfig.Mounts, [{ Type: "volume", Source: "anon123", Target: "/data" }, { Type: "volume", Source: "named", Target: "/named" }, { Type: "tmpfs", Target: "/tmp" }]);
+  assert.equal(mounted.HostConfig.Binds, undefined, "and not mounted a second time by a bind");
+});
+
+test("an image a chat's build holds a reference with is not the downloaded one: no 'downloaded again' warning from it, and an update downloads the image, and makes the container on that", async () => {
+  images();
+  const { d, person } = wanting(VOICE, "img:1");
+  await d.containers.create("up-a", { Image: "img:1" });
+  await d.containers.start("up-a");
+  // The agent's build took the reference over.
+  docker.imageInfo.set("img:1", BUILT);
+  assert.equal(await d.containers.outdated("up-a"), undefined, "not 'downloaded again'");
+
+  // The wanted reference is held by a build; the registry's image is what a download brings.
+  d.containers.wantImage(() => ({ image: "img:2" }));
+  docker.images.add("img:2");
+  docker.imageInfo.set("img:2", BUILT);
+  docker.registry.set("img:2", NEW);
+  assert.deepEqual(await d.containers.outdated("up-a"), { kind: "other", running: "img:1", wanted: "img:2" }, "not downloaded, as far as the extension is concerned");
+  docker.runs.onStart = STAYS;
+  await person.updateImage("up-a");
+  const row = await ended(person, "up-a");
+  assert.deepEqual(row.update.done, { from: "img:1", to: "img:2" });
+  assert.deepEqual(docker.pulls, ["img:2"], "it was downloaded although a reference of that name was there");
+  assert.equal(docker.containers.find((c) => c.Name === "up-a")!.ImageId, NEW.Id);
+  assert.equal((docker.containers.find((c) => c.Name === "up-a")!.made as any).Entrypoint, undefined);
+});
+
+test("a container is made on the image that was checked: where the reference points to another one at the moment it is made, the update fails and the old container runs", async () => {
+  images();
+  const { d, person } = wanting(VOICE, "img:2");
+  docker.images.add("img:2");
+  await d.containers.create("up-a", { Image: "img:1" });
+  await d.containers.start("up-a");
+  docker.runs.onStart = STAYS;
+  docker.runs.beforeCreate = (body) => {
+    if (body.Image === "img:2") docker.imageInfo.set("img:2", { ...BUILT, Id: "sha256:tagged-meanwhile", Config: {} });
+  };
+  await person.updateImage("up-a");
+  const row = await ended(person, "up-a");
+  assert.match(row.update.error, /img:2 is another image now than the one that was downloaded/);
+  assert.deepEqual(docker.containers.map((c) => [c.Name, c.Image, c.State]), [["up-a", "img:1", "running"]]);
+});
+
+test("a wish is an object with an image: a promise (from an isolated half), no image, or a busy that is no text is no wish, and a rejecting promise is not left unheard", async () => {
+  images();
+  const { d } = wanting(VOICE, "img:2");
+  await d.containers.create("up-a", { Image: "img:1" });
+  const unheard: unknown[] = [];
+  const onUnhandled = (reason: unknown) => unheard.push(reason);
+  process.on("unhandledRejection", onUnhandled);
+  try {
+    d.containers.wantImage((() => Promise.reject(new Error("released"))) as never);
+    assert.equal(await d.containers.outdated("up-a"), undefined);
+    d.containers.wantImage((() => Promise.resolve({ image: "img:2" })) as never);
+    assert.equal(await d.containers.outdated("up-a"), undefined);
+    for (const bad of [{ image: "" }, { image: 5 }, {}, { image: "img:2", busy: 1 }, "img:2"]) {
+      d.containers.wantImage((() => bad) as never);
+      assert.equal(await d.containers.outdated("up-a"), undefined, JSON.stringify(bad));
+    }
+    await delay(20);
+  } finally {
+    process.off("unhandledRejection", onUnhandled);
+  }
+  assert.deepEqual(unheard, []);
+});
+
+test("another extension's container by the name an update waits under does not stop the update: the old one waits under another name", async () => {
+  images();
+  const { d, person, forExtension } = wanting(VOICE, "img:2");
+  docker.images.add("img:2");
+  docker.runs.onStart = STAYS;
+  await d.containers.create("up-c", { Image: "img:1" });
+  await d.containers.start("up-c");
+  await forExtension("pithagoras-browser").containers.create("up-c-before-update", { Image: "img:1" });
+  docker.containers.push({ Id: "hand000000000", Name: "up-c-before-update-by-hand", Image: "img:1", State: "exited", Labels: {}, Tty: false, out: "", err: "" });
+  await person.updateImage("up-c");
+  const row = await ended(person, "up-c");
+  assert.deepEqual(row.update.done, { from: "img:1", to: "img:2" });
+  assert.match(docker.renames[0].to, /^up-c-before-update-[0-9a-f]{6}$/);
+  assert.equal(docker.containers.find((c) => c.Name === "up-c-before-update")?.Labels[OWNER_LABEL], "pithagoras-browser", "theirs is untouched");
+  assert.equal(docker.containers.find((c) => c.Name === "up-c")!.Image, "img:2");
 });

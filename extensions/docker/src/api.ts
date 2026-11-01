@@ -68,10 +68,14 @@ export interface ImageUpdate {
   active: boolean;
   /** What it is doing, in Docker's words while it downloads the image. */
   line: string;
-  /** Why it failed: the container was left as it was. */
+  /** Why it failed: the container was left as it was, unless `stranded` says it was not. */
   error?: string;
+  /** Set on a failure that left the old container under another name (this entry is on that container): it could not be named back. */
+  stranded?: boolean;
   /** The images it ran before and runs now, once it is done. */
   done?: { from: string; to: string };
+  /** Once done: the name of the old container, which could not be removed and is left stopped. */
+  leftover?: string;
 }
 
 /** A container as Docker's page lists it: how its image stands, and the update of it, where there is one. */
@@ -205,7 +209,8 @@ export interface Docker {
      * it, with the labels it was made with) whenever it is looked at, and answers with the image, or with nothing where it
      * has no wish. Only a container that has one is checked and offered an update on Docker's page (Settings → Docker).
      * The wish is kept in memory: say it as the server half starts, which Docker's does every time it starts. Said again,
-     * it replaces the one before.
+     * it replaces the one before. It answers at once, with a plain object: an answer that is a promise is no wish, so a
+     * server half that runs isolated cannot say one.
      */
     wantImage(wanted: (container: ContainerInfo) => WantedImage | undefined): void;
     /**

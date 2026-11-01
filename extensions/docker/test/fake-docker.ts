@@ -106,6 +106,8 @@ export async function fakeDocker() {
   const images = new Set<string>();
   /** What the images in `images` are, by reference: their ids, and what a container made on one is given by it. A reference with none has its own name for an id. */
   const imageInfo = new Map<string, FakeImage>();
+  /** What a reference is once a download of it has ended: the registry's image, which replaces what a tag by that name was here. */
+  const registry = new Map<string, FakeImage>();
   const containers: FakeContainer[] = [];
   const volumes: { Name: string; Labels: Record<string, string> | null; Driver?: string; Options?: Record<string, string> | null }[] = [];
   const networks: FakeNetwork[] = [];
@@ -123,6 +125,10 @@ export async function fakeDocker() {
   const runs: {
     onStart?: (c: FakeContainer) => void | Promise<void>;
     refuseStart?: (c: FakeContainer) => string | undefined;
+    /** Docker's words for a remove or a rename it refuses, and a look at a create body before the container is made (an image may be given another meaning meanwhile). */
+    refuseRemove?: (c: FakeContainer) => string | undefined;
+    refuseRename?: (c: FakeContainer, to: string) => string | undefined;
+    beforeCreate?: (body: Record<string, any>) => void;
     onStop?: (c: FakeContainer) => void;
     onExecCreate?: (c: FakeContainer) => void;
     onExec?: (e: FakeExec) => { out?: string; err?: string; code?: number };
@@ -200,6 +206,7 @@ export async function fakeDocker() {
             if (failure) res.end(`${JSON.stringify({ error: failure })}\n`);
             else {
               images.add(image);
+              if (registry.has(image)) imageInfo.set(image, registry.get(image)!);
               res.end(`${JSON.stringify({ status: "Downloaded newer image" })}\n`);
             }
           });
@@ -212,6 +219,7 @@ export async function fakeDocker() {
       }
       if (p === "/containers/create" && req.method === "POST") {
         const name = url.searchParams.get("name")!;
+        runs.beforeCreate?.(body);
         if (find(name)) return send(409, { message: `Conflict. The container name "/${name}" is already in use` });
         const made: FakeContainer = { Id: `id${++ids}`.padEnd(12, "0"), Name: name, Image: body.Image, State: "created", Labels: body.Labels ?? {}, Tty: Boolean(body.Tty), out: "", err: "", made: body };
         // On the network its network mode names, and on those its endpoints do, of the ones there are here: by its id from its first start.
@@ -307,6 +315,8 @@ export async function fakeDocker() {
         const c = find(m[1]);
         if (!c) return send(404, { message: `No such container: ${m[1]}` });
         const to = url.searchParams.get("name")!;
+        const refusedRename = runs.refuseRename?.(c, to);
+        if (refusedRename) return send(500, { message: refusedRename });
         if (find(to)) return send(409, { message: `Conflict. The container name "/${to}" is already in use` });
         renames.push({ from: c.Name, to });
         c.Name = to;
@@ -357,6 +367,8 @@ export async function fakeDocker() {
       if ((m = /^\/containers\/([^/]+)$/.exec(p)) && req.method === "DELETE") {
         const c = find(m[1]);
         if (!c) return send(404, { message: `No such container: ${m[1]}` });
+        const refusedRemove = runs.refuseRemove?.(c);
+        if (refusedRemove) return send(500, { message: refusedRemove });
         containers.splice(containers.indexOf(c), 1);
         return send(204);
       }
@@ -438,5 +450,5 @@ export async function fakeDocker() {
     });
   });
   await new Promise<void>((resolve) => server.listen(socket, resolve));
-  return { socket, dir, images, containers, volumes, networks, built, runs, execs, created, starts, updates, pulls, renames, imageInfo, connects, failing, hold, close: () => new Promise<void>((resolve) => server.close(() => resolve())) };
+  return { socket, dir, images, containers, volumes, networks, built, runs, execs, created, starts, updates, pulls, renames, imageInfo, registry, connects, failing, hold, close: () => new Promise<void>((resolve) => server.close(() => resolve())) };
 }

@@ -178,9 +178,16 @@ function DockerPage() {
                       </ui.WarnBanner>
                     )}
                     {container.update?.error && !updating && (
-                      <ui.ErrorBanner className="dk-docker-note">{t("The update failed, and {name} is as it was: {error}", { name: container.name, error: container.update.error })}</ui.ErrorBanner>
+                      <ui.ErrorBanner className="dk-docker-note">
+                        {container.update.stranded
+                          ? t("The update failed, and {name} has not got its name back: {error}", { name: container.name, error: container.update.error })
+                          : t("The update failed, and {name} is as it was: {error}", { name: container.name, error: container.update.error })}
+                      </ui.ErrorBanner>
                     )}
                     {container.update?.done && !updating && <p className="dk-docker-hint">{t("Updated: {name} runs {to} now, and ran {from}.", { name: container.name, to: container.update.done.to, from: container.update.done.from })}</p>}
+                    {container.update?.done && container.update.leftover && !updating && (
+                      <ui.WarnBanner className="dk-docker-note">{t("{old}, which {name} replaced, could not be removed and is left stopped: remove it.", { old: container.update.leftover, name: container.name })}</ui.WarnBanner>
+                    )}
                     {logs?.name === container.name && <pre className="dk-docker-logs" aria-label={t("What {name} wrote", { name: container.name })}>{logs.text || t("It has written nothing.")}</pre>}
                   </li>
                 );

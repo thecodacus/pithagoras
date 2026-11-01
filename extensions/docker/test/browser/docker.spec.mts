@@ -157,6 +157,18 @@ test('what an update came to is said under the container: that it runs the wante
   await expect(voice.getByRole('button', { name: 'Update' })).toBeEnabled();
 });
 
+test('an update that left the old container behind says so, and one that could not name it back says so on the old container', async ({ page }) => {
+  const { dialog, state } = await open(page, { ...REACHED, containers: [voiceRow({ image: OUTDATED.wanted, update: { active: false, line: '', done: { from: OUTDATED.running, to: OUTDATED.wanted }, leftover: 'pithagoras-voice-before-update' } })] });
+  const voice = dialog.getByRole('listitem').filter({ hasText: 'pithagoras-voice' });
+  await expect(voice).toContainText('Updated: pithagoras-voice runs');
+  await expect(voice).toContainText('pithagoras-voice-before-update, which pithagoras-voice replaced, could not be removed and is left stopped: remove it.');
+  await expect(voice).not.toContainText('is as it was');
+
+  state.overview = { ...REACHED, containers: [voiceRow({ name: 'pithagoras-voice-before-update', update: { active: false, line: '', stranded: true, error: 'pithagoras-voice did not stay up. It is still named pithagoras-voice-before-update.' } })] };
+  await expect(dialog.getByRole('listitem').filter({ hasText: 'pithagoras-voice-before-update' })).toContainText('The update failed, and pithagoras-voice-before-update has not got its name back: pithagoras-voice did not stay up.', { timeout: 10_000 });
+  await expect(dialog.getByText('is as it was')).toHaveCount(0);
+});
+
 test('a container that is in use cannot be updated from here, and says why; an image downloaded again is said so', async ({ page }) => {
   const { dialog, state } = await outdated(page, { imageWarning: { ...OUTDATED, busy: 'its setup is running' } });
   const voice = dialog.getByRole('listitem').filter({ hasText: 'pithagoras-voice' });

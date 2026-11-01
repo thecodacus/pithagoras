@@ -90,14 +90,24 @@ image can take minutes to download; the row says how it goes):
    from its old image (its environment, command, labels and so on) is not
    carried over: the new image brings its own. A container that was stopped is
    made again and stays stopped.
-3. Stops the old container and starts the new one, and removes the old one.
-   Where the new one cannot be made or does not start, it is taken away
-   again, the old container has its name back, and runs again if it ran: the
-   page says so, and the warning stays.
+3. Stops the old container and starts the new one, which has to stay up for a
+   few seconds, and then removes the old one. Where the new one cannot be made,
+   does not start or stops again at once, it is taken away again, the old
+   container has its name back, and runs again if it ran: the page says so,
+   and the warning stays. Where the new one runs but the old one cannot be
+   removed, the page says it is updated and names the old container, which is
+   left stopped for you to remove.
+
+Only a download of the image counts as the image: an image that a chat's agent
+built under the same name is replaced by the download when you update, and gets
+no "downloaded again" warning.
 
 The old container is stopped only after the new one has been made, so a new
 body that Docker refuses costs no downtime. While the update runs, the
-container is out of use, and the extension cannot use it. The page refuses an
+container is out of use, and the extension cannot use it: while the containers
+are swapped, the extension cannot make, start, stop or remove it either, and
+an update that finds the container replaced, no longer outdated, in use or
+wanted on another image after the download does nothing. The page refuses an
 update (and says why) where the container is already being updated, where
 nothing is outdated, where its extension says it is in use (Voice does while its
 setup runs), or where another container shares its network (`container:<name>`):
@@ -105,8 +115,10 @@ that one would lose it, so remove it first. An update that the portal's restart
 interrupts between its steps leaves the old container under the name
 `<name>-before-update`, shown on Docker's page beside the new one (or alone,
 where the new one was not made yet, which its extension then makes again). Remove
-it once the container you want is running: another update is refused while it
-is there.
+it once the container you want is running: another update of the extension's
+container is refused while it is there. (A container of another extension by
+that name does not stop the update: the old one then waits under a name with a
+random ending.)
 
 What an update does not do: it does not change anything else the extension keeps
 (Voice keeps the setup script it made its container with, so a newer installer
