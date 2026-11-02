@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { filterSessions } from "../core/web/src/session-filter.ts";
+import { filterSessions, olderThan } from "../core/web/src/session-filter.ts";
 
 const list = [
   { title: "Fix login", workspace: "/home/me/webapp" },
@@ -41,4 +41,27 @@ test("a word is not glued to the next field", () => {
 
 test("nothing matching is nothing", () => {
   assert.deepEqual(filterSessions(list, "zzz"), []);
+});
+
+const DAY = 86_400_000;
+const now = Date.parse("2026-03-01T12:00:00Z");
+const ago = (days: number) => new Date(now - days * DAY).toISOString();
+
+test("older than: only chats untouched for that many days, never a pinned or busy one", () => {
+  const chats = [
+    { id: "new", pinned: false, updated_at: ago(2) },
+    { id: "old", pinned: false, updated_at: ago(40) },
+    { id: "old-pinned", pinned: true, updated_at: ago(40) },
+    { id: "old-busy", pinned: false, updated_at: ago(40) },
+    { id: "edge", pinned: false, updated_at: ago(30) },
+    { id: "older", pinned: false, updated_at: ago(31) },
+  ];
+  const picked = olderThan(chats, 30, (s) => s.id === "old-busy", now).map((s) => s.id);
+  assert.deepEqual(picked, ["old", "older"]);
+});
+
+test("older than: reads the server's timestamps, which carry no zone", () => {
+  const chats = [{ id: "a", pinned: false, updated_at: "2026-01-01 00:00:00" }];
+  assert.equal(olderThan(chats, 30, () => false, now).length, 1);
+  assert.equal(olderThan(chats, 90, () => false, now).length, 0);
 });

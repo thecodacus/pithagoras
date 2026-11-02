@@ -31,6 +31,28 @@ export function confirmDeleteSession(title: string, channel = false, subChats: r
   });
 }
 
+/**
+ * What a person is asked before several chats are deleted at once: the first few by name, how many sub-chats go
+ * with them, and that those at work are stopped. One question for all, never one each.
+ */
+export function confirmDeleteSessions(chats: readonly { title: string; busy: boolean }[], subChats: number): Promise<boolean> {
+  const named = chats.slice(0, NAMED_SUB_CHATS).map((c) => `"${c.title}"`);
+  const names = chats.length > named.length ? [...named, "…"].join(", ") : named.join(", ");
+  const busy = chats.filter((c) => c.busy).length;
+  return confirmDialog({
+    title: tp(chats.length, "Delete {n} chat?", "Delete {n} chats?"),
+    message: [
+      names,
+      t("They are stopped if they are running, and their transcripts are removed."),
+      subChats ? tp(subChats, "One sub-chat is deleted with them.", "Their {n} sub-chats are deleted with them.") : "",
+      busy ? tp(busy, "{n} of them is running or waiting for you.", "{n} of them are running or waiting for you.") : "",
+    ].filter(Boolean).join("\n\n"),
+    confirmLabel: t("Delete"),
+    danger: true,
+    deletes: true,
+  });
+}
+
 /** What was said when pinning, renaming or deleting a chat failed, by the sidebar and the Sessions page alike. */
 export function sessionError(what: "pin" | "unpin" | "rename" | "delete", name: string, e: unknown): string {
   const error = (e as Error).message;
