@@ -380,6 +380,8 @@ function TimeoutDefaultField({ value, onChanged, onError }: { value: TimeoutDefa
     try {
       const { timeoutDefault } = await api.setTimeoutDefault(minutes);
       onChanged(timeoutDefault);
+      // Shown as it was kept: a 0 typed clears it, and the field is empty for that, not "0".
+      setDraft(minutesText(timeoutDefault.stored));
     } catch (e) {
       setDraft(minutesText(value.stored));
       onError((e as Error).message);

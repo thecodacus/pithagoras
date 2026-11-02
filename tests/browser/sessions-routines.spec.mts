@@ -26,7 +26,8 @@ async function portal(page: Page, opts: { routine?: Record<string, unknown>; ren
       return { routines: [routine], timeoutDefault };
     }
     if (p === '/api/routines/timeout-default' && method === 'PUT') {
-      Object.assign(timeoutDefault, { stored: body.minutes, minutes: body.minutes ?? timeoutDefault.fallback });
+      // As the server answers: null or 0 clears it, and what the portal started with stands.
+      Object.assign(timeoutDefault, { stored: body.minutes || null, minutes: body.minutes || timeoutDefault.fallback });
       return { timeoutDefault };
     }
     if (p === '/api/routines/r1' && method === 'PATCH' && opts.refuses) return reply(400, { error: opts.refuses });
@@ -243,6 +244,14 @@ test("the portal's default run time limit is set above the list, names what the 
   await field.press('Enter');
   await expect.poll(() => sent.filter((s) => s.method === 'PUT' && s.path === '/api/routines/timeout-default').at(-1)?.body).toEqual({ minutes: null });
   await expect(field).toHaveAttribute('placeholder', '60');
+  // A 0 typed clears it too, and the field shows the cleared default, not the 0.
+  await field.fill('45');
+  await field.press('Enter');
+  await expect(field).toHaveValue('45');
+  await field.fill('0');
+  await field.press('Enter');
+  await expect.poll(() => sent.filter((s) => s.method === 'PUT' && s.path === '/api/routines/timeout-default').at(-1)?.body).toEqual({ minutes: 0 });
+  await expect(field).toHaveValue('');
 });
 
 test('a second save soon after the first keeps its "Saved" for as long as the first had', async ({ page }) => {
