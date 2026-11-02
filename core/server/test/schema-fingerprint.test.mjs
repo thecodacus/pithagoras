@@ -1634,6 +1634,66 @@ test("a database of version 15, or of 14, is backed up and given chats nobody at
   }
 });
 
+// A portal at v0.2.0 (schema 11) that used the subagent tool, as v0.2.0 kept it: its settings in pi's settings.json, and
+// what each chat said its subagents run on in the database, beside chats of each kind, one in Code mode. One start takes
+// it through every step of 0.3.0 (12 to 16) with one backup, portal-v11-….db, and leaves both for the extension at their
+// schemas; what the extension does with them is in extensions/subagent/test/upgrade.test.mts.
+test("a portal at v0.2.0 that used the subagent tool is brought to this version in one start, with one backup, both of the subagent's hand-offs, and its chats kept as they were", async () => {
+  const dir = path.join(home, "everything-from-v11");
+  mkdirSync(dir, { recursive: true });
+  const d = freshAt12(path.join(dir, "portal.db"));
+  d.pragma("user_version = 11");
+  assert.equal(schemaFingerprint(d), V11_FINGERPRINT, "the schema of v0.2.0");
+  const chat = d.prepare("INSERT INTO sessions (id, title, workspace, kind, channel_slug, mode, pinned) VALUES (?, ?, ?, ?, ?, ?, ?)");
+  chat.run("c1", "Kites", "/w/site", "task", null, "code", 1);
+  chat.run("c2", "On the Agent page", "/w/home", "agent", "browser", null, 0);
+  chat.run("c3", "Notes", "/w/notes", "task", null, null, 0);
+  const said = d.prepare("INSERT INTO settings (key, value) VALUES (?, ?)");
+  said.run("subagent_model:c1", "provider-a/model-b");
+  said.run("subagent_model:c2", "auto");
+  said.run("subagent_model:c3", "");
+  d.close();
+  assert.deepEqual(upgradeCheck(path.join(dir, "portal.db")), { needed: true, from: 11 });
+
+  const others = { packages: ["../../extensions/subagent"], defaultProvider: "provider-a" };
+  const subagent = { subagentMode: "background", subagentMaxParallel: 3, subagentModel: "provider-a/model-c" };
+  await withPiSettings(JSON.stringify({ ...others, ...subagent }), async (file) => {
+    assert.match(await upgraded(dir), new RegExp(`upgrading the database from version 11 to ${SCHEMA_VERSION}`));
+    assert.deepEqual(JSON.parse(readFileSync(file, "utf8")), others, "the subagent's settings are out of pi's file, the rest kept");
+    assert.deepEqual(JSON.parse(readFileSync(`${file}.bak`, "utf8")), { ...others, ...subagent }, "and pi's file as it was is beside it");
+  });
+
+  const backups = backupsIn(path.join(dir, "backups"));
+  assert.equal(backups.length, 1, "one backup");
+  assert.match(path.basename(backups[0]), /^portal-v11-\d{8}-\d{6}\.db$/);
+  const now = new Database(path.join(dir, "portal.db"), { readonly: true });
+  try {
+    assert.deepEqual([now.pragma("user_version", { simple: true }), schemaFingerprint(now)], [SCHEMA_VERSION, PINNED.fingerprint]);
+    assert.deepEqual(now.prepare("SELECT id, kind, mode, pinned, parent_id, listed, creator, unattended, tools_from FROM sessions ORDER BY id").all(), [
+      { id: "c1", kind: "task", mode: "code", pinned: 1, parent_id: null, listed: 1, creator: null, unattended: 0, tools_from: null },
+      { id: "c2", kind: "agent", mode: null, pinned: 0, parent_id: null, listed: 1, creator: null, unattended: 0, tools_from: null },
+      { id: "c3", kind: "task", mode: null, pinned: 0, parent_id: null, listed: 1, creator: null, unattended: 0, tools_from: null },
+    ]);
+    assert.deepEqual(now.prepare("SELECT key FROM settings WHERE key LIKE 'subagent%'").all(), [], "what the chats said is out of the database");
+    const indexes = now.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name IN ('idx_sessions_parent', 'idx_events_questions') ORDER BY name").all();
+    assert.deepEqual(indexes.map((row) => row.name), ["idx_events_questions", "idx_sessions_parent"]);
+  } finally {
+    now.close();
+  }
+
+  assert.deepEqual(leftAt(dir), ["subagent", "subagent-chats"], "both hand-offs, and nothing half done beside them");
+  const left = (handoff, name) => path.join(dir, "handoff", handoff, name);
+  const about = (handoff) => {
+    const { made: _made, ...rest } = JSON.parse(readFileSync(left(handoff, "handoff.json"), "utf8"));
+    return rest;
+  };
+  assert.deepEqual(about("subagent"), { format: 1, name: "subagent", schema: 12 });
+  assert.deepEqual(JSON.parse(readFileSync(left("subagent", "settings.json"), "utf8")), subagent);
+  assert.deepEqual(about("subagent-chats"), { format: 1, name: "subagent-chats", schema: 14 });
+  // The chat that went back to the default ("") said nothing.
+  assert.deepEqual(JSON.parse(readFileSync(left("subagent-chats", "models.json"), "utf8")), { c1: "provider-a/model-b", c2: "auto" });
+});
+
 // A data folder of v0.1.0 that used every part an extension holds now, each kept as v0.1.0 kept it, on fixtures/portal-v3.db:
 // a chat with a canvas, a picture of the Media page with its file, the image endpoint, voice mode on at the voice service's
 // addresses with the person's own remembered as connecting it kept them, a designed voice and a clone, the GPU chosen,
