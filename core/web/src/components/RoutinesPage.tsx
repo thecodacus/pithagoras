@@ -367,6 +367,8 @@ const minutesText = (minutes: number | null) => (minutes ? String(minutes) : "")
 function TimeoutDefaultField({ value, onChanged, onError }: { value: TimeoutDefault; onChanged: (next: TimeoutDefault) => void; onError: (e: string) => void }) {
   const [draft, setDraft] = useState(minutesText(value.stored));
   const [busy, setBusy] = useState(false);
+  // A save under way: Enter and the blur that follows it would otherwise save twice.
+  const saving = useRef(false);
   // What the page read anew (a save elsewhere, a poll) is what the field shows, unless something is being typed.
   const shown = useRef(value.stored);
   if (shown.current !== value.stored) {
@@ -375,7 +377,8 @@ function TimeoutDefaultField({ value, onChanged, onError }: { value: TimeoutDefa
   }
   const save = async () => {
     const minutes = draft.trim() ? Number(draft) : null;
-    if (minutes === value.stored) return;
+    if (minutes === value.stored || saving.current) return;
+    saving.current = true;
     setBusy(true);
     try {
       const { timeoutDefault } = await api.setTimeoutDefault(minutes);
@@ -386,6 +389,7 @@ function TimeoutDefaultField({ value, onChanged, onError }: { value: TimeoutDefa
       setDraft(minutesText(value.stored));
       onError((e as Error).message);
     } finally {
+      saving.current = false;
       setBusy(false);
     }
   };
@@ -403,7 +407,7 @@ function TimeoutDefaultField({ value, onChanged, onError }: { value: TimeoutDefa
         step={1}
         inputMode="numeric"
         value={draft}
-        disabled={busy}
+        readOnly={busy}
         onChange={(e) => setDraft(e.target.value)}
         onBlur={() => void save()}
         onKeyDown={(e) => e.key === "Enter" && void save()}

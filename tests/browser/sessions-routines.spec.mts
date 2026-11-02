@@ -253,10 +253,14 @@ test("the portal's default run time limit is set above the list, names what the 
   await expect.poll(() => sent.filter((s) => s.method === 'PUT' && s.path === '/api/routines/timeout-default').at(-1)?.body).toEqual({ minutes: 0 });
   await expect(field).toHaveValue('');
   // And a 0 with nothing stored already: the answer changes nothing, so only the save itself can empty the field.
+  const puts = () => sent.filter((s) => s.method === 'PUT' && s.path === '/api/routines/timeout-default');
+  const before = puts().length;
   await field.fill('0');
   await field.press('Enter');
-  await expect.poll(() => sent.filter((s) => s.method === 'PUT' && s.path === '/api/routines/timeout-default').length).toBe(5);
+  await expect.poll(() => puts().length > before && puts().at(-1)?.body.minutes).toBe(0);
   await expect(field).toHaveValue('');
+  // Each save went once: Enter and the blur after it are one save, not two.
+  expect(puts().length).toBe(5);
 });
 
 test('a second save soon after the first keeps its "Saved" for as long as the first had', async ({ page }) => {
