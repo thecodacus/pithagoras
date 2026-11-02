@@ -255,6 +255,9 @@ function schema(db: Database.Database): void {
       instructions TEXT NOT NULL DEFAULT '',
       -- Start each run in a clean session instead of the routine's own.
       fresh_session INTEGER NOT NULL DEFAULT 0,
+      -- How many minutes a run may take, for this routine alone. NULL takes the
+      -- portal's default: an hour, or what ROUTINE_RUN_TIMEOUT_MIN says.
+      timeout_min INTEGER,
       -- Whether the injection guard's blocking rules apply to this routine's
       -- runs. On by default. Work that reads logs and then fixes what it found
       -- trips them honestly: fetching the logs taints the session, and a fix
@@ -1280,6 +1283,8 @@ function migrate(d: Database.Database): void {
   for (const col of ["tools_off", "tools_on"]) {
     if (routineCols.length && !routineCols.includes(col)) d.exec(`ALTER TABLE routines ADD COLUMN ${col} TEXT NOT NULL DEFAULT ''`);
   }
+  // A routine's own limit on how long a run may take (schema 17): NULL takes the portal's default, as every run had.
+  if (routineCols.length && !routineCols.includes("timeout_min")) d.exec("ALTER TABLE routines ADD COLUMN timeout_min INTEGER");
   d.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_routines_slug ON routines(slug)");
   d.exec("CREATE INDEX IF NOT EXISTS idx_notes_pending ON notes(session_id, consumed_at)");
   d.exec("CREATE INDEX IF NOT EXISTS idx_grants_open ON grants(session_id, tool, used_at)");
@@ -2457,6 +2462,20 @@ export function getDefaultReportTo(): ReportTo | null {
 export function setDefaultReportTo(to: ReportTo | null): void {
   putSetting("report_channel", to?.channel ?? "");
   putSetting("report_target", to?.target ?? "");
+}
+
+/**
+ * The minutes a routine's run may take unless the routine says, as set on the
+ * Routines page: null when nothing is stored, and what the portal started with
+ * stands (ROUTINE_RUN_TIMEOUT_MIN, or an hour).
+ */
+export function getDefaultTimeoutMin(): number | null {
+  const n = Number(getSetting("routine_timeout_min"));
+  return Number.isInteger(n) && n >= 1 ? n : null;
+}
+
+export function setDefaultTimeoutMin(minutes: number | null): void {
+  putSetting("routine_timeout_min", minutes ? String(minutes) : "");
 }
 
 /**

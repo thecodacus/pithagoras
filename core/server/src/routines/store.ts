@@ -61,6 +61,8 @@ export interface NewRoutine {
   timing: Timing;
   instructions: string;
   freshSession: boolean;
+  /** How many minutes a run may take; null takes the portal's default. */
+  timeoutMin: number | null;
   /** Where its reports go: null inherits the portal default, "" never reports. */
   reportChannel: string | null;
   reportTarget: string | null;
@@ -88,9 +90,9 @@ export function insertRoutine(r: NewRoutine): { id: string; slug: string } {
   getDb()
     .prepare(
       `INSERT INTO routines
-         (id, slug, name, schedule, run_at, instructions, fresh_session, next_run,
+         (id, slug, name, schedule, run_at, instructions, fresh_session, timeout_min, next_run,
           report_channel, report_target, workspace)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       id,
@@ -100,6 +102,7 @@ export function insertRoutine(r: NewRoutine): { id: string; slug: string } {
       r.timing.runAt,
       r.instructions.trim(),
       r.freshSession ? 1 : 0,
+      r.timeoutMin,
       r.timing.schedule ? (nextRun(parseCron(r.timing.schedule))?.toISOString() ?? null) : r.timing.runAt,
       r.reportChannel,
       r.reportTarget,

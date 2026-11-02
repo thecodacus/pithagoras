@@ -1299,6 +1299,19 @@ mode where you switch it off. Gone:
 database is not changed, so going back needs nothing but the older version; the
 subagents' chats it made stay, as chats of their own.
 
+## A routine's own run time limit
+
+A routine's page sets how many minutes its runs may take
+([Routines](/guide/routines#scheduling)), where every run had the portal's hour.
+The upgrade (schema 17) adds the column that holds it, empty for every routine
+there is, so each keeps the portal's default. It changes no data; nothing is
+left for an extension, and nothing needs doing.
+
+**Going back.** From `portal-v16-….db` it is only putting the backup in as
+under [Going back](#going-back); an older backup also needs what
+[Chats an extension makes for nobody to attend](#chats-an-extension-makes-for-nobody-to-attend)
+says for it.
+
 ## The guard
 
 What the guard holds a chat to changed in this release

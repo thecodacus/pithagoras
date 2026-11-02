@@ -18,8 +18,10 @@ import { freePort, inProcessHome } from "./server-harness.mjs";
 // src/schema-version.ts (once for the release, not once for each change),
 // pin the new version and fingerprint here, and have an upgrade test for what
 // changed (below) that starts from a database made before it.
-const PINNED = { version: 16, fingerprint: "ba52cad83d268b2700843d8970a6f880eaa924ae3076b3ab66414b2af22eeb1a" };
-/** The schema of version 15, the one pinned before: no chat is one nobody attends, and every child takes its parent's tools. */
+const PINNED = { version: 17, fingerprint: "702ec50b6348a1afc6bdd5a2bb7cb8d0d8ec8df6aa3d32c1be4743e91f4e212e" };
+/** The schema of version 16, the one pinned before: no limit of a routine's own on how long a run may take. */
+const V16_FINGERPRINT = "ba52cad83d268b2700843d8970a6f880eaa924ae3076b3ab66414b2af22eeb1a";
+/** The schema of version 15: no chat is one nobody attends, and every child takes its parent's tools. */
 const V15_FINGERPRINT = "830934df6dce1dd977d16b086c0bbe883bfc18a3463f84e9f22f31efa43fc0cd";
 /** The schema of version 14: no index on the questions a chat asked. */
 const V14_FINGERPRINT = "7a7fcf8359ff86a38fcb9060888fa9ed7816b18bb9cfb2d9da454a893c015bda";
@@ -39,10 +41,17 @@ const home = inProcessHome("pithagoras-schema-");
 const { SCHEMA_VERSION } = await import("../dist/schema-version.js");
 const { getDb } = await import("../dist/db.js");
 
-/** A database of the schema of version 15 at `file`, open: a fresh one, whose chats are all attended and whose children take their parents' tools. */
-function freshAt15(file) {
+/** A database of the schema of version 16 at `file`, open: a fresh one, whose routines have no limit of their own on a run. */
+function freshAt16(file) {
   getDb().exec(`VACUUM INTO '${file}'`);
   const d = new Database(file);
+  d.exec("ALTER TABLE routines DROP COLUMN timeout_min");
+  return d;
+}
+
+/** A database of the schema of version 15 at `file`, open: one of version 16, whose chats are all attended and whose children take their parents' tools. */
+function freshAt15(file) {
+  const d = freshAt16(file);
   d.exec("ALTER TABLE sessions DROP COLUMN unattended; ALTER TABLE sessions DROP COLUMN tools_from;");
   return d;
 }
@@ -1742,4 +1751,25 @@ test("a data folder of v0.1.0 that used every part is brought to this version in
     whisperUrl: OWN.whisper, sttModel: "", breezeUrl: OWN.speech, runtime: "kokoro", dictationUrl: null, dictationModel: null, language: "en", kokoroVoice: "af_heart",
   });
   assert.deepEqual(understoryLeft(dir, "settings.json"), UNDERSTORY_KEPT);
+});
+
+test("a database of version 16 is backed up and given each routine a limit of its own at schema 17, empty: each keeps the portal's default", async () => {
+  const dir = path.join(home, "from-v16");
+  mkdirSync(dir, { recursive: true });
+  const d = freshAt16(path.join(dir, "portal.db"));
+  assert.equal(schemaFingerprint(d), V16_FINGERPRINT, "the schema of version 16");
+  d.pragma("user_version = 16");
+  d.prepare("INSERT INTO routines (id, slug, name, schedule, instructions) VALUES ('r1', 'nightly', 'Nightly build', '@daily', 'build it')").run();
+  d.close();
+  assert.deepEqual(upgradeCheck(path.join(dir, "portal.db")), { needed: true, from: 16 });
+
+  const run = startUpgrade(dir, await freePort());
+  const exited = await new Promise((resolve) => run.child.on("exit", resolve));
+  assert.equal(exited, 0, run.output());
+  assert.equal(backupsIn(path.join(dir, "backups")).length, 1);
+  const after = new Database(path.join(dir, "portal.db"), { readonly: true });
+  assert.equal(after.pragma("user_version", { simple: true }), SCHEMA_VERSION);
+  assert.equal(schemaFingerprint(after), PINNED.fingerprint);
+  assert.deepEqual(after.prepare("SELECT slug, timeout_min FROM routines").all(), [{ slug: "nightly", timeout_min: null }]);
+  after.close();
 });

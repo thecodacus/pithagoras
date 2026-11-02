@@ -1,10 +1,11 @@
 import { nanoid } from "nanoid";
-import { createSession, findRoutineSession, getDb, getSession, type SessionRow } from "../db.js";
+import { createSession, findRoutineSession, getDb, getDefaultTimeoutMin, getSession, type SessionRow } from "../db.js";
 import { agentHome } from "../agent-home.js";
 import { checkWorkspace } from "../workspaces.js";
 import { EXECUTOR_KIND } from "../executor-kind.js";
 import { sessions } from "../session-manager.js";
 import { isDue, nextRun, parseCron } from "./cron.js";
+import { envTimeoutMin, MAX_TIMEOUT_MIN } from "./timeout.js";
 import { reportFraming, reportToFor } from "../pi/report-tool.js";
 
 /**
@@ -26,6 +27,8 @@ export interface RoutineRow {
   run_at: string | null;
   instructions: string;
   fresh_session: number;
+  /** How many minutes a run may take, for this routine alone; null takes the portal's default. */
+  timeout_min: number | null;
   /** 0 turns off the injection guard's blocking rules for this routine's runs. */
   guard: number;
   /** Where its runs happen: null for Home, else a project's directory. */
@@ -46,8 +49,27 @@ export interface RoutineRow {
   updated_at: string;
 }
 
-/** How long a single run may take before it is abandoned. */
-const RUN_TIMEOUT_MS = 60 * 60_000;
+/**
+ * How long a run may take before it is abandoned, where neither the routine
+ * nor the Routines page says: an hour, or the minutes ROUTINE_RUN_TIMEOUT_MIN
+ * says where the portal starts, read by the rule a routine's own limit is read
+ * by (timeout.ts); what that rule refuses is named in the log and leaves the
+ * hour. A build, a download or a benchmark on local hardware can take longer
+ * than an hour, and the limit is not what keeps runs from stacking: the next
+ * slot of a routine still running is skipped.
+ */
+export const ENV_TIMEOUT_MIN = envTimeoutMin(process.env.ROUTINE_RUN_TIMEOUT_MIN, (problem) => console.warn(`[routines] ${problem}`));
+
+/**
+ * The portal's default, in minutes: what the Routines page stored, else what
+ * the portal started with. Read as a run starts, so a change on the page
+ * reaches the next run without a restart.
+ */
+export const defaultTimeoutMin = (): number => getDefaultTimeoutMin() ?? ENV_TIMEOUT_MIN;
+
+/** The limit a run of this routine gets: its own minutes, or the portal's default, as one deadline for the whole run. */
+export const runLimitMs = (row: Pick<RoutineRow, "timeout_min">): number =>
+  Math.min(row.timeout_min && row.timeout_min > 0 ? row.timeout_min : defaultTimeoutMin(), MAX_TIMEOUT_MIN) * 60_000;
 
 /** Enough of the outcome to see what happened without storing a transcript. */
 const MAX_OUTPUT = 4000;
@@ -204,7 +226,7 @@ class RoutineSupervisor {
       // so this would be recorded as ok, with half an answer.
       let stopped = false;
       const output = await sessions.ask(session.id, prompt(row, trigger), {
-        timeoutMs: RUN_TIMEOUT_MS,
+        timeoutMs: runLimitMs(row),
         onStopped: () => (stopped = true),
       });
       if (stopped) this.finish(row.id, "stopped", output ? `${STOPPED}\n\n${output}` : STOPPED, Date.now() - started);

@@ -16,7 +16,7 @@ import {
 } from "react-icons/lu";
 import { PageHeader, Stat } from "./PageHeader";
 import { RowsSkeleton } from "./Skeleton";
-import { api, type Agent, type ReportTarget, type ReportTo, type Routine, type Workspace } from "../api";
+import { api, type Agent, type ReportTarget, type ReportTo, type Routine, type TimeoutDefault, type Workspace } from "../api";
 import { ErrorBanner, Segments, Switch, SwitchTrack, btnCls, inputCls, primaryCls } from "./SettingsUi";
 import { confirmDialog } from "./ConfirmDialog";
 import { below } from "../paths";
@@ -160,6 +160,8 @@ const labelFor = (targets: ReportTarget[], to: ReportTo) =>
  */
 export function RoutinesPage({ onOpenSession }: { onOpenSession: (id: string) => void }) {
   const [routines, setRoutines] = useState<Routine[]>([]);
+  // The minutes a run may take unless the routine says: set here, said beside the routine's own field.
+  const [timeoutDefault, setTimeoutDefault] = useState<TimeoutDefault>({ minutes: 60, stored: null, fallback: 60 });
   const [openId, setOpenId] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -174,6 +176,7 @@ export function RoutinesPage({ onOpenSession }: { onOpenSession: (id: string) =>
       .routines()
       .then((r) => {
         setRoutines(r.routines);
+        setTimeoutDefault(r.timeoutDefault);
         setLoadError(null);
       })
       .catch((e) => setLoadError((e as Error).message))
@@ -206,6 +209,7 @@ export function RoutinesPage({ onOpenSession }: { onOpenSession: (id: string) =>
             onError={setError}
             onOpenSession={onOpenSession}
             places={places}
+            timeoutDefaultMin={timeoutDefault.minutes}
           />
         </div>
       </div>
@@ -236,6 +240,8 @@ export function RoutinesPage({ onOpenSession }: { onOpenSession: (id: string) =>
         </PageHeader>
 
         {errorBox}
+
+        <TimeoutDefaultField value={timeoutDefault} onChanged={setTimeoutDefault} onError={setError} />
 
         <div className="mt-4 flex items-center justify-between">
           <h3 className="text-xs font-semibold uppercase tracking-wider text-fg-subtle">
@@ -349,6 +355,68 @@ function usePlaces(): Places {
       .catch(() => {});
   }, []);
   return places;
+}
+
+/** A routine's own minutes as the field shows them: none is empty, the portal's default. */
+const minutesText = (minutes: number | null) => (minutes ? String(minutes) : "");
+
+/**
+ * The minutes a run may take unless its routine says, for every routine at once. Saved as the field is left or
+ * Enter pressed; empty clears it, and what the portal started with stands again, which the field then names.
+ */
+function TimeoutDefaultField({ value, onChanged, onError }: { value: TimeoutDefault; onChanged: (next: TimeoutDefault) => void; onError: (e: string) => void }) {
+  const [draft, setDraft] = useState(minutesText(value.stored));
+  const [busy, setBusy] = useState(false);
+  // A save under way: Enter and the blur that follows it would otherwise save twice.
+  const saving = useRef(false);
+  // What the page read anew (a save elsewhere, a poll) is what the field shows, unless something is being typed.
+  const shown = useRef(value.stored);
+  if (shown.current !== value.stored) {
+    shown.current = value.stored;
+    setDraft(minutesText(value.stored));
+  }
+  const save = async () => {
+    const minutes = draft.trim() ? Number(draft) : null;
+    if (minutes === value.stored || saving.current) return;
+    saving.current = true;
+    setBusy(true);
+    try {
+      const { timeoutDefault } = await api.setTimeoutDefault(minutes);
+      onChanged(timeoutDefault);
+      // Shown as it was kept: a 0 typed clears it, and the field is empty for that, not "0".
+      setDraft(minutesText(timeoutDefault.stored));
+    } catch (e) {
+      setDraft(minutesText(value.stored));
+      onError((e as Error).message);
+    } finally {
+      saving.current = false;
+      setBusy(false);
+    }
+  };
+  return (
+    <label className="mt-4 flex items-center gap-3 rounded-lg border border-line bg-raised/40 px-3 py-2">
+      <span className="min-w-0 flex-1 text-sm text-fg">
+        {t("Run time limit by default (minutes)")}
+        <span className="mt-0.5 block text-[11px] text-fg-faint">
+          {t("For every routine without a limit of its own, from its next run on. Empty takes what the portal started with: ROUTINE_RUN_TIMEOUT_MIN, or an hour.")}
+        </span>
+      </span>
+      <input
+        type="number"
+        min={1}
+        step={1}
+        inputMode="numeric"
+        value={draft}
+        readOnly={busy}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => void save()}
+        onKeyDown={(e) => e.key === "Enter" && void save()}
+        placeholder={String(value.fallback)}
+        aria-label={t("Run time limit by default (minutes)")}
+        className={`${inputCls} !w-24 shrink-0`}
+      />
+    </label>
+  );
 }
 
 /** Home, an agent, or where under the projects' root it runs: "site", or "site/docs" for a folder in one. */
@@ -581,6 +649,7 @@ function RoutineDetail({
   onError,
   onOpenSession,
   places,
+  timeoutDefaultMin,
 }: {
   routine: Routine;
   onBack: () => void;
@@ -588,6 +657,8 @@ function RoutineDetail({
   onError: (e: string) => void;
   onOpenSession: (id: string) => void;
   places: Places;
+  /** The minutes a run may take unless the routine says. */
+  timeoutDefaultMin: number;
 }) {
   const [name, setName] = useState(r.name);
   const [mode, setMode] = useState<"repeats" | "once">(r.mode);
@@ -595,6 +666,8 @@ function RoutineDetail({
   const [runAt, setRunAt] = useState(toLocalInput(r.runAt));
   const [instructions, setInstructions] = useState(r.instructions);
   const [fresh, setFresh] = useState(r.freshSession);
+  // Minutes, as typed; "" takes the portal's default.
+  const [limit, setLimit] = useState(minutesText(r.timeoutMin));
   const [workspace, setWorkspace] = useState(r.workspace ?? "");
   // "" = inherit the portal default, "off" = stay quiet, else "channel\u0000target".
   const [report, setReport] = useState(reportValue(r));
@@ -611,6 +684,7 @@ function RoutineDetail({
     (mode === "repeats" ? schedule !== from.schedule : toLocalInput(from.runAt) !== runAt) ||
     instructions !== from.instructions ||
     fresh !== from.freshSession ||
+    limit !== minutesText(from.timeoutMin) ||
     workspace !== (from.workspace ?? "") ||
     report !== reportValue(from);
   const dirty = differs(r);
@@ -623,12 +697,13 @@ function RoutineDetail({
     setRunAt(toLocalInput(from.runAt));
     setInstructions(from.instructions);
     setFresh(from.freshSession);
+    setLimit(minutesText(from.timeoutMin));
     setWorkspace(from.workspace ?? "");
     setReport(reportValue(from));
   };
   // The fields as they are now, for a save that finishes after more was typed.
-  const live = useRef({ name, mode, schedule, runAt, instructions, fresh, workspace, report });
-  live.current = { name, mode, schedule, runAt, instructions, fresh, workspace, report };
+  const live = useRef({ name, mode, schedule, runAt, instructions, fresh, limit, workspace, report });
+  live.current = { name, mode, schedule, runAt, instructions, fresh, limit, workspace, report };
 
   // What the form was last filled from: the fields are filled again from the routine
   // for another routine, after this form's own save (see the Save button), or when
@@ -759,6 +834,23 @@ function RoutineDetail({
           <SwitchTrack on={fresh} />
         </button>
 
+        <label className="block">
+          <span className="text-xs text-fg-muted">{t("Run time limit (minutes)")}</span>
+          <input
+            type="number"
+            min={1}
+            step={1}
+            inputMode="numeric"
+            value={limit}
+            onChange={(e) => setLimit(e.target.value)}
+            placeholder={t("{n} (portal default)", { n: timeoutDefaultMin })}
+            className={`${inputCls} mt-1`}
+          />
+          <p className="mt-1 text-[11px] text-fg-faint">
+            {t("A run still going after this is listed as an error, and stopped in a fresh session. Empty takes the portal's default, set above the list of routines.")}
+          </p>
+        </label>
+
         {/* The rules one at a time are Settings → Guard's: what it says here is what holds for this routine. */}
         <div className="flex w-full items-center gap-3 px-1 py-1.5">
           <div className="min-w-0 flex-1">
@@ -887,6 +979,7 @@ function RoutineDetail({
                   : { schedule: "", runAt: new Date(runAt).toISOString() }),
                 instructions,
                 freshSession: fresh,
+                timeoutMin: limit.trim() ? Number(limit) : null,
                 // Only when it changed: a place that has gone would refuse the save.
                 ...(workspace !== (r.workspace ?? "") ? { workspace: workspace || null } : {}),
                 ...reportPatch(report),

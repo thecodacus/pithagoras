@@ -2384,15 +2384,20 @@ class SessionManager extends EventEmitter {
     } = {}
   ): Promise<string> {
     const previous = this.asking.get(sessionId) ?? Promise.resolve("");
+    // One deadline for the whole of it: waiting behind an earlier ask, waiting
+    // for a turn still running, and the run itself share it, so a routine's
+    // limit is the most its run can take, not the most each wait can.
+    const deadline = Date.now() + (opts.timeoutMs ?? 15 * 60_000);
+    const left = () => Math.max(0, deadline - Date.now());
     const next = previous
       .catch(() => "")
       .then(async () => {
-        await this.waitForIdle(sessionId, opts.timeoutMs ?? 15 * 60_000);
+        await this.waitForIdle(sessionId, left());
         await opts.beforeTurn?.();
         return this.askNow(
           sessionId,
           message,
-          opts.timeoutMs ?? 15 * 60_000,
+          left(),
           opts.onReply,
           opts.streamText,
           opts.onUi,

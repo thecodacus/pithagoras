@@ -45,9 +45,22 @@ let go when the run ends, unless a build or a server it started in the backgroun
 is still running: the agent is kept until that is over, as for an idle chat (see
 [Extensions](/guide/extensions)).
 
-A run that is still going after an hour is listed as an error. In a fresh session
-it is stopped then, as pressing Stop in its chat would; in the session a routine
-keeps, it carries on there.
+A run that is still going after its run time limit — an hour, unless set
+otherwise — is listed as an error. In a fresh session it is stopped then, as
+pressing Stop in its chat would; in the session a routine keeps, it carries on
+there. The limit is one deadline for the whole run: in a kept session, waiting
+for a turn that is still going counts against it.
+
+Two places set it. **Run time limit by default**, above the list of routines,
+is the portal's: every routine without a limit of its own takes it, from its
+next run on, and no restart is needed. Empty, it is what the portal started
+with: `ROUTINE_RUN_TIMEOUT_MIN`, where the portal starts, or an hour (see
+[Configuration](/reference/configuration#environment)). **Run time limit** on a
+routine's page gives that routine another number of minutes, for work that
+takes longer — a build, a download, a benchmark on local hardware — without a
+stuck run elsewhere being allowed the same. Both are whole minutes, up to
+35791. The limit is not what keeps runs from stacking: a routine whose run is
+still going skips its next slot whatever it is set to.
 
 ## Reporting back
 

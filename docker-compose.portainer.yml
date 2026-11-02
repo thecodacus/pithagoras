@@ -47,6 +47,9 @@ services:
       # this says otherwise, and the quiet hours of an agent's heartbeat and a
       # repeating routine's schedule are read on that clock.
       TZ: ${TZ:-UTC}
+      # How many minutes a routine's run may take before it is listed as an error
+      # and, in a fresh session, stopped: 60 unless this says otherwise.
+      ROUTINE_RUN_TIMEOUT_MIN: ${ROUTINE_RUN_TIMEOUT_MIN:-}
       # "skip" upgrades the database without the backup it is otherwise made first,
       # for a volume with no room for the copy. See docs/guide/upgrading.md.
       PORTAL_UPGRADE_BACKUP: ${PORTAL_UPGRADE_BACKUP:-}

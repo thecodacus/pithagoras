@@ -91,6 +91,16 @@ export interface SkillDiagnostic {
   path?: string;
 }
 
+/**
+ * The minutes a routine's run may take unless the routine says: `minutes` is what a run gets now, `stored` what the
+ * Routines page set (null for what the portal started with: `fallback`, ROUTINE_RUN_TIMEOUT_MIN or an hour).
+ */
+export interface TimeoutDefault {
+  minutes: number;
+  stored: number | null;
+  fallback: number;
+}
+
 /** Work the agent does on a schedule. */
 export interface Routine {
   id: string;
@@ -106,6 +116,8 @@ export interface Routine {
   done: boolean;
   instructions: string;
   freshSession: boolean;
+  /** How many minutes a run may take; null takes the portal's default, `timeoutDefault` on the list. */
+  timeoutMin: number | null;
   /** False lets this routine act on what it read against at least one of the guard's rules — see `exempt`. */
   guard: boolean;
   /** The guard's rules its runs are exempt from, by name: set in Settings → Guard. */
@@ -902,7 +914,10 @@ export const api = {
   forgetPerson: (key: string, force = false) =>
     json<{ ok: true }>(`/api/people/${encodeURIComponent(key)}${force ? "?force=1" : ""}`, { method: "DELETE" }),
 
-  routines: () => json<{ routines: Routine[] }>("/api/routines"),
+  routines: () => json<{ routines: Routine[]; timeoutDefault: TimeoutDefault }>("/api/routines"),
+  /** The minutes a run may take unless its routine says: a number stores it, null clears it to what the portal started with. */
+  setTimeoutDefault: (minutes: number | null) =>
+    json<{ timeoutDefault: TimeoutDefault }>("/api/routines/timeout-default", { method: "PUT", body: JSON.stringify({ minutes }) }),
   reportTargets: () =>
     json<{ targets: ReportTarget[]; default: ReportTo | null }>("/api/routines/report-targets"),
   setReportDefault: (to: ReportTo | null) =>
@@ -930,6 +945,7 @@ export const api = {
       instructions?: string;
       enabled?: boolean;
       freshSession?: boolean;
+      timeoutMin?: number | null;
       guard?: boolean;
       reportChannel?: string | null;
       reportTarget?: string | null;

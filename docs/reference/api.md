@@ -697,14 +697,15 @@ Each agent has a home folder of its own, with its own `SOUL.md`,
 
 | Route | Purpose |
 | --- | --- |
-| `GET /api/routines` | List routines and defaults. |
-| `POST /api/routines` | Create a recurring or one-off routine. Its slug is its name's, or the next free one: not one whose runs are still kept after a routine was deleted, so that it does not continue that conversation. An explicit `slug` is taken as it is, and reconnects the routine to the runs that slug had. |
-| `PATCH /api/routines/:id` | Update a routine. |
+| `GET /api/routines` | List routines and defaults: `timeoutDefault` is `{ minutes, stored, fallback }`, how many minutes a run may take unless the routine says (`timeoutMin`, `null` for the default): what a run gets now, what the Routines page stored (`null` for none), and what the portal started with (`ROUTINE_RUN_TIMEOUT_MIN`, or 60). |
+| `POST /api/routines` | Create a recurring or one-off routine. `timeoutMin`: a whole number of minutes a run may take, or `null` or `0` for the portal's default. Its slug is its name's, or the next free one: not one whose runs are still kept after a routine was deleted, so that it does not continue that conversation. An explicit `slug` is taken as it is, and reconnects the routine to the runs that slug had. |
+| `PATCH /api/routines/:id` | Update a routine; `timeoutMin` as on creation. |
 | `DELETE /api/routines/:id` | Delete a routine. |
 | `POST /api/routines/:id/run` | Start a run now; it answers when the run ends. A routine deleted while it ran is answered 404. |
 | `POST /api/routines/preview` | The next three runs of a schedule, without saving it: `{ expression, runs }`. |
 | `GET /api/routines/:id/sessions` | List the routine's runs. |
 | `GET /api/routines/report-targets` | List available report destinations. |
 | `PUT /api/routines/report-default` | Set the default report destination. |
+| `PUT /api/routines/timeout-default` | `{ minutes }`: how many minutes a run may take unless its routine says, read as a run starts; a whole number of minutes, or `null` or `0` to clear it, so that what the portal started with stands again. Answers `{ timeoutDefault }` as the list says it. |
 
 Recurring routines resume at their next future slot after a restart. Overdue one-off routines catch up.
