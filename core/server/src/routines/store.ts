@@ -54,20 +54,6 @@ export function timingSets(
   return { sets, values: [timing.schedule, timing.runAt] };
 }
 
-/** The most minutes a routine may be given for a run: what a timer may hold. */
-export const MAX_TIMEOUT_MIN = 35_791;
-
-/**
- * A routine's own limit on how long a run may take, as sent: a whole number of
- * minutes from 1 to MAX_TIMEOUT_MIN sets it; null, "" or 0 clears it, back to
- * the portal's default; anything else is refused, said as such.
- */
-export function readTimeout(raw: unknown): { timeoutMin: number | null } | { error: string } {
-  if (raw === null || raw === "" || raw === 0) return { timeoutMin: null };
-  if (typeof raw === "number" && Number.isInteger(raw) && raw >= 1 && raw <= MAX_TIMEOUT_MIN) return { timeoutMin: raw };
-  return { error: `timeoutMin must be a whole number of minutes from 1 to ${MAX_TIMEOUT_MIN}, or 0 for the portal's default` };
-}
-
 export interface NewRoutine {
   name: string;
   /** A slug that reconnects the routine to the sessions that slug had; without one it is made from the name. */

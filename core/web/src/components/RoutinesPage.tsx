@@ -16,7 +16,7 @@ import {
 } from "react-icons/lu";
 import { PageHeader, Stat } from "./PageHeader";
 import { RowsSkeleton } from "./Skeleton";
-import { api, type Agent, type ReportTarget, type ReportTo, type Routine, type Workspace } from "../api";
+import { api, type Agent, type ReportTarget, type ReportTo, type Routine, type TimeoutDefault, type Workspace } from "../api";
 import { ErrorBanner, Segments, Switch, SwitchTrack, btnCls, inputCls, primaryCls } from "./SettingsUi";
 import { confirmDialog } from "./ConfirmDialog";
 import { below } from "../paths";
@@ -160,8 +160,8 @@ const labelFor = (targets: ReportTarget[], to: ReportTo) =>
  */
 export function RoutinesPage({ onOpenSession }: { onOpenSession: (id: string) => void }) {
   const [routines, setRoutines] = useState<Routine[]>([]);
-  // The minutes a run may take unless the routine says, said beside the routine's own field.
-  const [timeoutDefault, setTimeoutDefault] = useState(60);
+  // The minutes a run may take unless the routine says: set here, said beside the routine's own field.
+  const [timeoutDefault, setTimeoutDefault] = useState<TimeoutDefault>({ minutes: 60, stored: null, fallback: 60 });
   const [openId, setOpenId] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -176,7 +176,7 @@ export function RoutinesPage({ onOpenSession }: { onOpenSession: (id: string) =>
       .routines()
       .then((r) => {
         setRoutines(r.routines);
-        setTimeoutDefault(r.timeoutDefaultMin ?? 60);
+        setTimeoutDefault(r.timeoutDefault);
         setLoadError(null);
       })
       .catch((e) => setLoadError((e as Error).message))
@@ -209,7 +209,7 @@ export function RoutinesPage({ onOpenSession }: { onOpenSession: (id: string) =>
             onError={setError}
             onOpenSession={onOpenSession}
             places={places}
-            timeoutDefaultMin={timeoutDefault}
+            timeoutDefaultMin={timeoutDefault.minutes}
           />
         </div>
       </div>
@@ -240,6 +240,8 @@ export function RoutinesPage({ onOpenSession }: { onOpenSession: (id: string) =>
         </PageHeader>
 
         {errorBox}
+
+        <TimeoutDefaultField value={timeoutDefault} onChanged={setTimeoutDefault} onError={setError} />
 
         <div className="mt-4 flex items-center justify-between">
           <h3 className="text-xs font-semibold uppercase tracking-wider text-fg-subtle">
@@ -355,10 +357,63 @@ function usePlaces(): Places {
   return places;
 }
 
-/** Home, an agent, or where under the projects' root it runs: "site", or "site/docs" for a folder in one. */
 /** A routine's own minutes as the field shows them: none is empty, the portal's default. */
 const minutesText = (minutes: number | null) => (minutes ? String(minutes) : "");
 
+/**
+ * The minutes a run may take unless its routine says, for every routine at once. Saved as the field is left or
+ * Enter pressed; empty clears it, and what the portal started with stands again, which the field then names.
+ */
+function TimeoutDefaultField({ value, onChanged, onError }: { value: TimeoutDefault; onChanged: (next: TimeoutDefault) => void; onError: (e: string) => void }) {
+  const [draft, setDraft] = useState(minutesText(value.stored));
+  const [busy, setBusy] = useState(false);
+  // What the page read anew (a save elsewhere, a poll) is what the field shows, unless something is being typed.
+  const shown = useRef(value.stored);
+  if (shown.current !== value.stored) {
+    shown.current = value.stored;
+    setDraft(minutesText(value.stored));
+  }
+  const save = async () => {
+    const minutes = draft.trim() ? Number(draft) : null;
+    if (minutes === value.stored) return;
+    setBusy(true);
+    try {
+      const { timeoutDefault } = await api.setTimeoutDefault(minutes);
+      onChanged(timeoutDefault);
+    } catch (e) {
+      setDraft(minutesText(value.stored));
+      onError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <label className="mt-4 flex items-center gap-3 rounded-lg border border-line bg-raised/40 px-3 py-2">
+      <span className="min-w-0 flex-1 text-sm text-fg">
+        {t("Run time limit by default (minutes)")}
+        <span className="mt-0.5 block text-[11px] text-fg-faint">
+          {t("For every routine without a limit of its own, from its next run on. Empty takes what the portal started with: ROUTINE_RUN_TIMEOUT_MIN, or an hour.")}
+        </span>
+      </span>
+      <input
+        type="number"
+        min={1}
+        step={1}
+        inputMode="numeric"
+        value={draft}
+        disabled={busy}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => void save()}
+        onKeyDown={(e) => e.key === "Enter" && void save()}
+        placeholder={String(value.fallback)}
+        aria-label={t("Run time limit by default (minutes)")}
+        className={`${inputCls} !w-24 shrink-0`}
+      />
+    </label>
+  );
+}
+
+/** Home, an agent, or where under the projects' root it runs: "site", or "site/docs" for a folder in one. */
 const placeName = (workspace: string | null, root: string | null, agents: readonly Agent[] = []) => {
   if (!workspace) return agents.find((a) => a.first)?.name ?? t("Home");
   const agent = agents.find((a) => a.home === workspace);
@@ -786,7 +841,7 @@ function RoutineDetail({
             className={`${inputCls} mt-1`}
           />
           <p className="mt-1 text-[11px] text-fg-faint">
-            {t("A run still going after this is listed as an error, and stopped in a fresh session. Empty takes the portal's default, which ROUTINE_RUN_TIMEOUT_MIN sets.")}
+            {t("A run still going after this is listed as an error, and stopped in a fresh session. Empty takes the portal's default, set above the list of routines.")}
           </p>
         </label>
 

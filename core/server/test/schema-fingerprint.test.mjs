@@ -18,7 +18,7 @@ import { freePort, inProcessHome } from "./server-harness.mjs";
 // src/schema-version.ts (once for the release, not once for each change),
 // pin the new version and fingerprint here, and have an upgrade test for what
 // changed (below) that starts from a database made before it.
-const PINNED = { version: 17, fingerprint: "NEW_FINGERPRINT" };
+const PINNED = { version: 17, fingerprint: "702ec50b6348a1afc6bdd5a2bb7cb8d0d8ec8df6aa3d32c1be4743e91f4e212e" };
 /** The schema of version 16, the one pinned before: no limit of a routine's own on how long a run may take. */
 const V16_FINGERPRINT = "ba52cad83d268b2700843d8970a6f880eaa924ae3076b3ab66414b2af22eeb1a";
 /** The schema of version 15: no chat is one nobody attends, and every child takes its parent's tools. */

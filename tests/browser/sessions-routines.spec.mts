@@ -11,6 +11,8 @@ async function portal(page: Page, opts: { routine?: Record<string, unknown>; ren
     lastReportAt: null, lastRun: null, lastStatus: null, lastOutput: null, lastMs: null, nextRun: null, createdAt: '', updatedAt: '1',
     workspaceProblem: null, ...opts.routine,
   };
+  // The minutes a run may take unless its routine says: nothing stored, the hour the portal started with.
+  const timeoutDefault = { minutes: 60, stored: null as number | null, fallback: 60 };
   await mockPortal(page, async ({ path: p, method, json }) => {
     const body = json();
     if (method !== 'GET') sent.push({ method, path: p, body });
@@ -21,7 +23,11 @@ async function portal(page: Page, opts: { routine?: Record<string, unknown>; ren
     if (p === '/api/routines' && method === 'GET') {
       if (opts.server?.next) Object.assign(routine, opts.server.next);
       if (opts.server) opts.server.next = undefined;
-      return { routines: [routine], timeoutDefaultMin: 60 };
+      return { routines: [routine], timeoutDefault };
+    }
+    if (p === '/api/routines/timeout-default' && method === 'PUT') {
+      Object.assign(timeoutDefault, { stored: body.minutes, minutes: body.minutes ?? timeoutDefault.fallback });
+      return { timeoutDefault };
     }
     if (p === '/api/routines/r1' && method === 'PATCH' && opts.refuses) return reply(400, { error: opts.refuses });
     if (p === '/api/routines/r1' && method === 'PATCH') { Object.assign(routine, body, { updatedAt: opts.stamps?.shift() ?? String(Date.now()) }); return routine; }
@@ -216,6 +222,27 @@ test("a routine's run time limit is empty for the portal's default, which the fi
   await limit.fill('');
   await page.getByRole('button', { name: /^Save/ }).click();
   await expect.poll(() => sent.filter((s) => s.method === 'PATCH' && s.path === '/api/routines/r1').at(-1)?.body.timeoutMin).toBe(null);
+});
+
+test("the portal's default run time limit is set above the list, names what the portal started with while empty, and reaches a routine's field", async ({ page }) => {
+  const sent = await portal(page);
+  await page.goto('/routines');
+  const field = page.getByLabel('Run time limit by default (minutes)');
+  await expect(field).toHaveValue('');
+  await expect(field).toHaveAttribute('placeholder', '60');
+  await field.fill('120');
+  await field.press('Enter');
+  await expect.poll(() => sent.find((s) => s.method === 'PUT' && s.path === '/api/routines/timeout-default')?.body).toEqual({ minutes: 120 });
+  await expect(field).toHaveValue('120');
+  // A routine without a limit of its own now says so.
+  await page.getByRole('button', { name: /Nightly build/ }).click();
+  await expect(page.getByLabel('Run time limit (minutes)')).toHaveAttribute('placeholder', '120 (portal default)');
+  await page.getByRole('main').getByRole('button', { name: 'Routines', exact: true }).click();
+  // Emptied, nothing is stored, and the hour stands again.
+  await field.fill('');
+  await field.press('Enter');
+  await expect.poll(() => sent.filter((s) => s.method === 'PUT' && s.path === '/api/routines/timeout-default').at(-1)?.body).toEqual({ minutes: null });
+  await expect(field).toHaveAttribute('placeholder', '60');
 });
 
 test('a second save soon after the first keeps its "Saved" for as long as the first had', async ({ page }) => {

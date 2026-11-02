@@ -2465,6 +2465,20 @@ export function setDefaultReportTo(to: ReportTo | null): void {
 }
 
 /**
+ * The minutes a routine's run may take unless the routine says, as set on the
+ * Routines page: null when nothing is stored, and what the portal started with
+ * stands (ROUTINE_RUN_TIMEOUT_MIN, or an hour).
+ */
+export function getDefaultTimeoutMin(): number | null {
+  const n = Number(getSetting("routine_timeout_min"));
+  return Number.isInteger(n) && n >= 1 ? n : null;
+}
+
+export function setDefaultTimeoutMin(minutes: number | null): void {
+  putSetting("routine_timeout_min", minutes ? String(minutes) : "");
+}
+
+/**
  * Something the portal said into a conversation, waiting to join its context.
  *
  * With `forAgent` off it is only kept for delivery, as consumed already: the agent

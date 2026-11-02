@@ -1,12 +1,13 @@
 import express, { type Router } from "express";
-import { forgetRoutineExemptions, getDb, getDefaultReportTo, listRoutineSessions, routineExemptions, setDefaultReportTo, setRoutineExemptions } from "../db.js";
+import { forgetRoutineExemptions, getDb, getDefaultReportTo, getDefaultTimeoutMin, listRoutineSessions, routineExemptions, setDefaultReportTo, setDefaultTimeoutMin, setRoutineExemptions } from "../db.js";
 import { GUARD_RULE_NAMES } from "../pi/guard-rule-names.js";
 import { channelSupervisor } from "../channels/supervisor.js";
 import { unscopeKey } from "../agent.js";
 import { isValidSlug, slugify } from "../slug.js";
 import { isValidCron, nextRun, parseCron } from "../routines/cron.js";
-import { DEFAULT_TIMEOUT_MIN, isOneOff, oneOffDone, routineSupervisor, type RoutineRow } from "../routines/supervisor.js";
-import { insertRoutine, readTimeout, readTiming, timingSets } from "../routines/store.js";
+import { defaultTimeoutMin, ENV_TIMEOUT_MIN, isOneOff, oneOffDone, routineSupervisor, type RoutineRow } from "../routines/supervisor.js";
+import { insertRoutine, readTiming, timingSets } from "../routines/store.js";
+import { readTimeout } from "../routines/timeout.js";
 import { placeProblem, routinePlace } from "../workspaces.js";
 import { insideReal } from "../within.js";
 
@@ -28,7 +29,7 @@ const toApi = (row: RoutineRow) => ({
   done: oneOffDone(row) && row.last_status !== "interrupted" && row.last_status !== "stopped",
   instructions: row.instructions,
   freshSession: Boolean(row.fresh_session),
-  /** How many minutes a run may take; null takes the portal's default, `timeoutDefaultMin` on the list. */
+  /** How many minutes a run may take; null takes the portal's default, `timeoutDefault` on the list. */
   timeoutMin: row.timeout_min,
   guard: row.guard === 1,
   /** The guard's rules its runs are exempt from, by name: set on the Guard page. */
@@ -152,12 +153,32 @@ function reportTargets() {
   return out;
 }
 
+/**
+ * The minutes a run may take unless its routine says, for the page to say
+ * beside a routine's own: `minutes` is what a run gets now, `stored` what the
+ * page set (null for what the portal started with: `fallback`, the environment's
+ * or the hour).
+ */
+const timeoutDefault = () => ({ minutes: defaultTimeoutMin(), stored: getDefaultTimeoutMin(), fallback: ENV_TIMEOUT_MIN });
+
 export function routinesRouter(): Router {
   const router = express.Router();
 
   /** Destinations a routine can report to, and the portal-wide default. */
   router.get("/routines/report-targets", (_req, res) => {
     res.json({ targets: reportTargets(), default: getDefaultReportTo() });
+  });
+
+  /**
+   * The minutes a run may take unless its routine says: `minutes` stores one,
+   * read as a run starts; null, "" or 0 clears it, and what the portal started
+   * with stands again. Answers as the list says it.
+   */
+  router.put("/routines/timeout-default", (req, res) => {
+    const limit = readTimeout(req.body?.minutes);
+    if ("error" in limit) return res.status(400).json({ error: limit.error.replace("timeoutMin", "minutes") });
+    setDefaultTimeoutMin(limit.timeoutMin);
+    res.json({ timeoutDefault: timeoutDefault() });
   });
 
   router.put("/routines/report-default", (req, res) => {
@@ -180,8 +201,7 @@ export function routinesRouter(): Router {
     const rows = getDb()
       .prepare("SELECT * FROM routines ORDER BY created_at ASC")
       .all() as RoutineRow[];
-    // The minutes a run may take unless the routine says: for the page to say beside a routine's own.
-    res.json({ routines: rows.map(toApi), timeoutDefaultMin: DEFAULT_TIMEOUT_MIN });
+    res.json({ routines: rows.map(toApi), timeoutDefault: timeoutDefault() });
   });
 
   router.post("/routines", (req, res) => {
