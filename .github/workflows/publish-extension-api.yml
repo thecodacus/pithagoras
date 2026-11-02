@@ -1,50 +1,186 @@
-name: Publish extension API
+# A release of Pithagoras: v<version>, the version in package.json, which packages/extension-api/package.json has too,
+# as @pithagoras/extension-api is released with the portal and has its version. Merging a pull request that changes
+# that version releases it, and a tag pushed by hand still does. Releasing is described in docs/guide/extension-ui.md
+# (Releasing @pithagoras/extension-api).
+#
+# The file keeps the name it had when it only published the package: npm's trusted publisher for
+# @pithagoras/extension-api names it, and npm checks the workflow a run was started from, the calling one where
+# `npm publish` is in a workflow it calls (https://docs.npmjs.com/trusted-publishers, Troubleshooting). So
+# `npm publish` is in this file itself, and a trusted publisher that names another file cannot be had by editing it:
+# npm does not change one that exists, it is deleted and added again.
+#
+# 0. The gate, a job that is cheap and runs first, works out the tag and the version, and stops the run when the two
+#    package.json files have different versions. On a tag, the tag has to be v<the version>. On a push to main that
+#    changes either package.json, the tag is v<the version>: where that tag is there already (the edit left the
+#    version as it was, or the version was tagged by hand), the run ends there and releases nothing; otherwise the
+#    gate puts the tag on the pushed commit and pushes it with the job's GITHUB_TOKEN. GitHub starts no workflow run
+#    for what GITHUB_TOKEN pushes (only workflow_dispatch, repository_dispatch and some pull_request events are
+#    exceptions:
+#    https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow#triggering-a-workflow-from-a-workflow),
+#    so that tag starts neither this workflow a second time nor any other. One release runs at a time (the
+#    concurrency group), so a merge and a hand-pushed tag of one version cannot both release it: the merge's run finds
+#    the tag and stops, and a tag pushed by hand after the gate pushed it is refused, or has nothing to push. If a tag
+#    ruleset limits who may create v* tags, github-actions[bot] (the GitHub Actions app) has to be on its bypass list,
+#    or the gate's push is refused.
+# 1. The image: docker.yml, called with the tag, runs test.yml's jobs and then builds and pushes
+#    ghcr.io/thecodacus/pithagoras:<version>, latest and sha-<commit>. Pushed again, the same tags are only moved.
+# 2. The package goes to npm. npm's trusted publishing signs in with this workflow's identity (`id-token: write`), with
+#    no token, and adds provenance. Where npm has the version already (a re-run, or a version published by hand), the
+#    step says so and publishes nothing. With the variable NPM_STAGE "true" (the repository's or the organization's),
+#    the version is staged (`npm stage publish`) and published once a maintainer approves it with 2FA on npmjs.com.
+# 3. The GitHub release, marked latest. Its notes are .github/release-notes/v<version>.md where the release's pull
+#    request adds that file, and otherwise the notes GitHub writes from the pull requests since the previous v* tag.
+#    Where the tag has a release already, published or a draft, it is left as it is.
+#
+# Each step can be run again: if a job fails, "Re-run failed jobs" runs it and the ones after it again, for the same
+# tag. Re-running all jobs of a run started by a push to main runs the gate again, which finds the tag and stops. Once
+# a run is too old to be re-run, Run workflow on the tag v<version> (Actions → Release) runs the release again.
+name: Release
 
-# Publishes @pithagoras/extension-api (packages/extension-api) to npm from the portal's release tag v<version>, the tag
-# docker.yml builds the image from. The package's version is the portal's: the tag has to be v<version> of the root
-# package.json and of packages/extension-api/package.json both, or the job stops before publishing. Run by hand, it is
-# run on such a tag. npm's trusted publishing signs in with this workflow's identity, so there is no token, and npm adds
-# provenance, as it does for a public package published from a public repository. Releasing, and the first version,
-# which is published by hand, are described in docs/guide/extension-ui.md.
 on:
   push:
     tags: ["v*"]
+    branches: [main]
+    # For the push to main only: GitHub does not look at paths for a tag.
+    paths: [package.json, packages/extension-api/package.json]
+  # On a tag: run by hand, it is run on the tag v<version>.
   workflow_dispatch:
 
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  # How the package goes to npm: see 2. above.
+  NPM_PUBLISH: ${{ vars.NPM_STAGE == 'true' && 'npm stage publish' || 'npm publish' }} -w packages/extension-api
+
 jobs:
-  # Nothing is published that the tests have not passed, as for the image in docker.yml.
-  test:
+  # 0. above.
+  gate:
+    runs-on: ubuntu-latest
+    permissions:
+      # To push the tag.
+      contents: write
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      version: ${{ steps.tag.outputs.version }}
+      release: ${{ steps.tag.outputs.release }}
+    steps:
+      # The checkout's token stays in .git/config, for the push of the tag: nothing is installed or run here but git
+      # and node reading two package.json files.
+      - uses: actions/checkout@v4
+      - name: The tag, and whether there is anything to release
+        id: tag
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          PACKAGE=$(node -p "require('./packages/extension-api/package.json').version")
+          if [ "$PACKAGE" != "$VERSION" ]; then
+            echo "::error::packages/extension-api/package.json says $PACKAGE and package.json $VERSION: the package is released with the portal's version"
+            exit 1
+          fi
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            TAG=$GITHUB_REF_NAME
+            if [ "$TAG" != "v$VERSION" ]; then
+              echo "::error::the tag $TAG is not v$VERSION: package.json and packages/extension-api/package.json say $VERSION"
+              exit 1
+            fi
+          elif [ "$GITHUB_EVENT_NAME" = push ]; then
+            TAG=v$VERSION
+            # An assignment, so that a failed ls-remote fails the step rather than reading as no tag.
+            REMOTE=$(git ls-remote --tags origin "refs/tags/$TAG")
+            if [ -n "$REMOTE" ]; then
+              echo "$TAG exists: nothing to release"
+              echo "release=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            git tag "$TAG" "$GITHUB_SHA"
+            git push origin "refs/tags/$TAG"
+          else
+            echo "::error::run by hand, the release is run on its tag v<version>, not on $GITHUB_REF_NAME"
+            exit 1
+          fi
+          { echo "tag=$TAG"; echo "version=$VERSION"; echo "release=true"; } >> "$GITHUB_OUTPUT"
+
+  # 1. above. Nothing is published that the tests have not passed: docker.yml runs test.yml's jobs first.
+  image:
+    needs: gate
+    if: needs.gate.outputs.release == 'true'
     permissions:
       contents: read
-    uses: ./.github/workflows/test.yml
+      # The image, to GHCR.
+      packages: write
+    uses: ./.github/workflows/docker.yml
+    with:
+      tag: ${{ needs.gate.outputs.tag }}
 
-  publish:
-    needs: test
+  # 2. above.
+  npm:
+    needs: [gate, image]
+    if: needs.gate.outputs.release == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      # npm's trusted publishing.
       id-token: write
+    env:
+      VERSION: ${{ needs.gate.outputs.version }}
     steps:
-      # Nothing is installed: the package is published as its files are, and no dependency's script runs where the
-      # identity that can publish it is.
+      # Nothing is installed but npm itself: the package is published as its files are, and no dependency's script
+      # runs where the identity that can publish it is.
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      # Trusted publishing needs npm 11.5.1 or later, which Node 24 comes with and Node 22 does not.
       - uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 22
           registry-url: https://registry.npmjs.org
-      - name: The tag is the portal's version and the package's
+      # Node 22 comes with npm 10: trusted publishing takes 11.5.1 or later, and `npm stage` 11.15. One version, put in
+      # before anything is published.
+      - name: npm 11
+        run: npm install -g npm@11.21.0 && npm --version
+      - name: Publish to npm
         run: |
-          portal=$(node -p 'require("./package.json").version')
-          package=$(node -p 'require("./packages/extension-api/package.json").version')
-          if [ "$GITHUB_REF" != "refs/tags/v$portal" ]; then
-            echo "::error::$GITHUB_REF is not refs/tags/v$portal: package.json says $portal"
-            exit 1
+          NAME=$(node -p "require('./packages/extension-api/package.json').name")
+          if [ "$(npm view "$NAME@$VERSION" version 2>/dev/null)" = "$VERSION" ]; then
+            echo "$NAME@$VERSION is on npm already: nothing to publish"
+            exit 0
           fi
-          if [ "$GITHUB_REF" != "refs/tags/v$package" ]; then
-            echo "::error::$GITHUB_REF is not refs/tags/v$package: packages/extension-api/package.json says $package"
-            exit 1
+          $NPM_PUBLISH
+
+  # 3. above.
+  github-release:
+    needs: [gate, npm]
+    if: needs.gate.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      # The GitHub release.
+      contents: write
+    env:
+      TAG: ${{ needs.gate.outputs.tag }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      # The tagged commit, for its notes, and the v* tags, for the previous one.
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: GitHub release
+        run: |
+          if DRAFT=$(gh release view "$TAG" --json isDraft --jq .isDraft 2>/dev/null); then
+            if [ "$DRAFT" = true ]; then
+              echo "::warning::$TAG has a draft release: it is left as it is, to be published by hand"
+            else
+              echo "The release $TAG is there already: left as it is"
+            fi
+            exit 0
           fi
-      - run: npm publish -w packages/extension-api
+          NOTES=.github/release-notes/$TAG.md
+          if [ -f "$NOTES" ]; then
+            echo "The notes are $NOTES"
+            gh release create "$TAG" --verify-tag --title "$TAG" --latest --notes-file "$NOTES"
+            exit 0
+          fi
+          # The v* tag just below this one, by version.
+          PREVIOUS=$(git tag --list 'v*' --sort=-v:refname | grep -Fx -A1 "$TAG" | sed -n 2p)
+          echo "No $NOTES: GitHub writes the notes, from $PREVIOUS"
+          gh release create "$TAG" --verify-tag --title "$TAG" --latest --generate-notes --notes-start-tag "$PREVIOUS"

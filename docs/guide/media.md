@@ -59,8 +59,8 @@ next visit (the description is not kept), **Generate** and **Edit** each with th
 
 | Field | Sent as | Meaning |
 | --- | --- | --- |
-| **Model** | `model` | Instead of the model saved for the add-on (for **Edit**, the model saved for editing). Empty uses that one. |
-| **Width** and **Height** | `size`, as `1024x768` | Both, or neither: a size needs both sides, each a whole number from 64 to 8192. Empty uses the size saved for the add-on; an edit has none of its own, and an empty size sends none, since what an edit comes out as is the endpoint's to say. |
+| **Model** | `model` | Instead of the model saved for the add-on (for **Edit**, the model saved for editing). Empty uses that one. With [reference pictures](#reference-pictures) it is always the model saved for editing: the field shows it and is off. |
+| **Width** and **Height** | `size`, as `1024x768` | Both, or neither: a size needs both sides, each a whole number from 64 to 8192. Empty uses the size saved for the add-on, with reference pictures too; an edit has none of its own, and an empty size sends none, since what an edit comes out as is the endpoint's to say. |
 | **How many** | `n` (1 for each) | One to four. Each is a request of its own for one picture, so an endpoint that makes one at a time is not asked for a number it may refuse. |
 
 **Advanced** adds two more, which the OpenAI image format also has:
@@ -93,7 +93,8 @@ take the block as part of the description, so leave it off for those.
 **Off,** the form shows only the OpenAI fields above and **nothing of this kind is ever sent**: no
 block, not even for a value that was typed or kept earlier. Those values stay in the form's memory,
 and are not shown or sent. Under **Advanced** a quiet line tells where to switch the settings on, with
-a link to Media's page in Settings. The agent's tools never send these settings, on or off.
+a link to Media's page in Settings. The agent's tools never send these settings, on or off, but for one: a picture
+`generate_image` makes with references starts from noise while the switch is on (see [Reference pictures](#reference-pictures)).
 
 **On,** the fields are plain fields of the form, right under the others in **Advanced**, in the same
 style and with no box or heading of their own, and the line about switching them on is gone. A short
@@ -105,12 +106,59 @@ note says that they are for stable-diffusion.cpp servers only:
 | **Seed** | `seed` | A whole number, 0 or more, or -1 for a random one. With several pictures each takes the next seed, so that they are not the same picture. A seed is not kept for the next visit. |
 | **Steps** | `sample_params.sample_steps` | The sampler's steps, 1 to 100. |
 | **Strength** | `strength` | Edit only: 0 to 1. See below. |
-| **Start from** | `init_image: null` | Edit only: **Noise only**. See below. |
+| **Start from** | `init_image: null` | Edit only: **Noise only**. See below. A picture made with [reference pictures](#reference-pictures) always has it while the switch is on. |
 
 A field left empty is left out of the block, and with none set there is no block: the description
 goes as you typed it. The block is made as JSON, so quotes, line breaks and `<` in a negative prompt
 are text and cannot end it early. A description that has an `<sd_cpp_extra_args>` block of its own
 cannot also have settings: it is refused, since only one of the two would be read.
+
+#### Reference pictures
+
+A new picture can be made **with reference pictures** as well as the description: a character sheet, a
+product, a style, carried into a completely new picture, in another scene or pose. **Use reference pictures**,
+under the description in **Generate**, opens a row for them; **Leave out the reference pictures** closes it and
+empties it. While it is open the gallery's boxes choose references, in the order you tick them ("Use A fox sheet as a
+reference"), and the viewer has **Use as a reference** for the picture it shows; files can be added from this
+computer, dropped on the form or pasted, as in **Edit** (a drop in **Generate** adds references only while the row
+is open; otherwise it starts an edit, as it always did). The row is the one **Edit** has, with the same places,
+arrows, drag and **×**: the description names them by their place ("the first picture"), and the endpoint gets them
+in this order.
+
+The OpenAI image format has no route that takes pictures to make a new one, only `images/edits`, so a picture with
+references is asked of the **editing endpoint**: it needs [editing](/guide/features#editing-a-picture) switched on
+(the row says so, with a link to the setting, where it is not), and more than one reference needs **Several pictures
+per edit**, like an edit (with it off, a reference you add takes the place of the one there is). It is still a **new
+picture**: in the gallery it is *Made from a description*, kept under a name of its own, never tied to a reference as
+an edit is to its original, and **Details** lists how many reference pictures it was made with. The request is the
+edit's — the references as `image` or `image[]`, checked, limited and scaled like an edit's pictures — with:
+
+- **Always the editing model.** A model typed for making pictures need not be one the editing endpoint has, so while
+  there are references the **Model** field shows the editing model and is off, with a note under it ("Reference
+  pictures use the editing model: …", or the endpoint's own where none is saved). What you typed is kept, and comes
+  back and is sent again once the references are left out. The portal ignores a `model` sent with references, so the
+  agent's tool, the form and **Run again** all use the editing model.
+- **A size, always where there is one**: the field's, else the size saved for the add-on. Without one, a
+  stable-diffusion.cpp server makes the picture in the size and shape of the first reference, and the form says
+  so while no size is set anywhere.
+- **Starting from noise**, as `"init_image": null` in the `<sd_cpp_extra_args>` block, so that a stable-diffusion.cpp
+  server uses the references as references and does not rework the first one into the result. That block goes only
+  while **Stable Diffusion extra settings** is on, since any other server would read it as words of the description:
+  the portal cannot tell which server it is. **With the switch off**, nothing is added: an OpenAI-style server takes
+  the pictures of an edit as references either way, but a stable-diffusion.cpp server then starts from the first
+  reference, and the picture may come out as a reworked copy of it. The form says so in a warning under the row, with
+  a link to the switch; with it on it says the picture starts from noise, and **Details** lists **Start from: Noise only**.
+  With it on, a description that has an `<sd_cpp_extra_args>` block of its own is refused with references, since the
+  server would read that block and not the one that starts from noise.
+
+The other settings (format, compression, and the Stable Diffusion ones while that switch is on) go as for any
+picture; there is no strength and no mask. A reference over the [maximum picture size](/guide/features#editing-a-picture)
+or the weight an edit takes is scaled down as an edit's picture is, and the warning above the form then says **A
+reference picture was scaled down to fit what the editing endpoint takes.**, with which one and how ("The reference was
+scaled down from … to fit what the editing endpoint takes."): it is not a picture that was changed, so the words for an
+edit are not used. **Run again** on such a picture makes it again with the same references,
+when they are all still in the gallery, and says so when they are not. Without references the request is the
+`images/generations` one it always was.
 
 At most **four** pictures are being made at once — a guard against a click that costs
 more than meant, not a measure of what an endpoint can do. **Stop** on a picture that
@@ -160,11 +208,13 @@ noise (below).
   chosen until they are in the gallery.
 - **Several pictures.** Where the editing endpoint is [said to take several](/guide/features#several-pictures)
   (**Several pictures per edit**, off until you switch it on), the form takes up to eight
-  pictures, in the order the request sends them. This also makes a new
-  picture from references; the endpoint cannot tell the two apart, the description does.
+  pictures, in the order the request sends them. This also combines pictures into a new one, starting
+  from the first; for a new picture of the same character, object or style, use
+  [reference pictures](#reference-pictures) in **Generate**, which start from noise.
   - **Adding.** Tick pictures in the gallery, in the order you want them. The **Add** button
     after the last picture takes several files at once (`Ctrl`/`Shift` in the file dialog). Files
-    can also be **dropped anywhere on the form** — a drop in **Generate** switches to **Edit** — and a
+    can also be **dropped anywhere on the form** — a drop in **Generate** switches to **Edit**, unless its
+    reference pictures are open, which it adds to — and a
     picture on the clipboard (a screenshot, or "Copy image") is **pasted** with `Ctrl`/`Cmd` + `V` into
     the description or anywhere in the form. Each file is checked by its bytes as a PNG, JPEG, GIF or
     WebP; one that is not a picture is named in the message and the others are still added. While files are
@@ -444,9 +494,9 @@ Beside its own buttons, the viewer of a picture has these:
 
 | Button | Does |
 | --- | --- |
-| **Details** | The full description, when and how it was made, the model, the size, the file format and compression, the Stable Diffusion settings it was made with, including **Start from: Noise only** for a change that started from noise (they are listed whether or not the switch is on now), the free fields an older version sent, how many pictures an edit was made from and whether it had a mask, the file's name and size, and for the agent's pictures the chat, with a link that opens it. For one that was found in a folder it says which folder, and that nothing is kept of what it was asked for. |
+| **Details** | The full description, when and how it was made, the model, the size, the file format and compression, the Stable Diffusion settings it was made with, including **Start from: Noise only** for a change, or a picture with reference pictures, that started from noise (they are listed whether or not the switch is on now), the free fields an older version sent, how many pictures an edit was made from and whether it had a mask, how many reference pictures a new picture was made with, the file's name and size, and for the agent's pictures the chat, with a link that opens it. For one that was found in a folder it says which folder, and that nothing is kept of what it was asked for. |
 | **Edit it** | Puts the picture in the form, in **Edit**, to be changed, in place of any that were there. Always offered: where editing is not set up it leads to the form, which says so. While the form is already in **Edit** this button is **Use in the edit** instead, which adds the picture to the ones there, or takes it out again, and leaves the viewer open. To work from several pictures, tick them in the gallery instead. |
-| **Run again** | A picture made from a description is made once more, with the model, size, file format and compression it was made with, and its Stable Diffusion settings while that switch is on: one click, one more picture. With a seed that is the same picture again, as the endpoint makes it. A change is shown in the form instead, with its pictures and its description, since its mask is not kept; that is what to check before it is made again. Not for a picture you put in yourself, or one that was found in a folder, which have no description. |
+| **Run again** | A picture made from a description is made once more, with the model, size, file format and compression it was made with, and its Stable Diffusion settings while that switch is on: one click, one more picture. One made with reference pictures is made with the same ones, which must all still be in the gallery (it says so when they are not), and needs editing set up. With a seed that is the same picture again, as the endpoint makes it. A change is shown in the form instead, with its pictures and its description, since its mask is not kept; that is what to check before it is made again. Not for a picture you put in yourself, or one that was found in a folder, which have no description. |
 | **Make a video from it** | Only while [video generation](/guide/features#video-generation) is on: opens the form for videos with this picture as the first frame of the video to be made (see [First and last frame](#first-and-last-frame)). |
 | **Delete** | See below. |
 | **Open in a new tab**, **Download** | The file itself. |

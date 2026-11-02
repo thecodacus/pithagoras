@@ -730,13 +730,14 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
       return () => watch.disconnect();
     }, []);
     // The sheet changes its height as the text is typed, and its width as the window or a panel at the side changes: the card of a comment
-    // is placed again at its passage, and the markers in the margin are measured again.
+    // is placed again at its passage, and the markers in the margin are measured again. The sheet by its border box: its padding is what
+    // grows with the window, and the text inside it stays 46rem wide, so a wider window leaves its content box as it was.
     const [relayout, setRelayout] = useState(0);
     useEffect(() => {
       if (typeof ResizeObserver === "undefined") return;
       const watch = new ResizeObserver(() => setRelayout((n) => n + 1));
       if (host.current) watch.observe(host.current);
-      if (sheet.current) watch.observe(sheet.current);
+      if (sheet.current) watch.observe(sheet.current, { box: "border-box" });
       return () => watch.disconnect();
     }, []);
     const [markers, setMarkers] = useState([]);

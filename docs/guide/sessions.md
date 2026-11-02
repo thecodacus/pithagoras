@@ -130,7 +130,10 @@ command sent to pi. Leaving a mode means starting a new chat; `/new` and
 said nothing again, and its mode can be chosen again. Changing it before then
 lets the chat's pi go if one was started (opening the model menu starts it), so
 that the first message starts it again in the mode chosen; nothing is lost, as
-the chat has said nothing. A subagent the chat starts does not take its mode.
+the chat has said nothing. A [subagent](/guide/features#subagents) the chat
+starts works in a chat of its own in the same mode, unless you switch off
+[**Subagents work in the chat's mode**](/guide/features#the-mode-a-subagent-works-in),
+and then in Standard mode.
 
 Modes are offered in the chats you start on the portal's pages, and in the
 conversations started on an agent's page, where pi runs in the portal's own
@@ -489,8 +492,10 @@ can be renamed and deleted the same way, from the row.
 ### Sub-chats
 
 An extension can give part of a chat's work to a chat of its own, a
-[child chat](/guide/extension-ui#child-chats). One it keeps listed is a
-sub-chat: it is not a chat among the others, but sits under its chat's row, in
+[child chat](/guide/extension-ui#child-chats): the subagent extension does, for
+each subagent, and lists them with
+[Keep subagent chats](/guide/features#kept-subagent-chats) on. One it keeps
+listed is a sub-chat: it is not a chat among the others, but sits under its chat's row, in
 the sidebar and on the Sessions page, behind a line that says how many there
 are (*2 sub-chats*). That line opens and shuts them; they are indented, with a
 line beside them. They are shut until you open them, and open on their own
@@ -517,6 +522,15 @@ came through a channel, say — is listed as a chat of its own, and is treated a
 one: it can be pinned, and its run ending is told. An agent's page lists its
 conversations the same way, a sub-chat under its conversation and not counted
 with them.
+
+An extension can also start a chat of its own in an agent's or a project's
+folder, for work that belongs to no chat of yours, such as the answer to a
+comment in a document. It is a chat of that folder like the others; one the
+extension keeps out of the lists is found by its link alone, and is deleted
+with the project or the agent. A chat an extension made for nobody to attend
+asks nothing: the agent there has no questions for you, and what it would ask
+or the guard would hold is refused instead
+([unattended](/guide/extension-ui#child-chats)).
 
 ## Using a phone
 
@@ -630,7 +644,10 @@ before it was a feature:
 If the server restarts mid-run, that session is marked `interrupted` rather than
 left spinning. The run is stopped first, as Stop would, so what the agent had
 written so far is kept in the transcript and in its own record of the
-conversation, not lost with the process. Send a message to carry on.
+conversation, not lost with the process. Send a message to carry on. A
+subagent's chat that was working is marked the same way, and its subagent ends
+as stopped; a [kept one](/guide/features#kept-subagent-chats) can be given more
+later.
 
 A chat's pi is let go after twenty minutes without use: nothing running, no
 command or question waiting, no subagent working in the background, and nothing

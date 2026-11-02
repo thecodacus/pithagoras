@@ -4,6 +4,7 @@ import { getDb, getSetting, isSignedOut, putSetting, recordSignOut } from "./db.
 import { allowNoPassword, tlsFiles } from "./http-security.js";
 import { bindLogin, sweep } from "./login-streams.js";
 import { fingerprint } from "./oidc.js";
+import { ownerPerson, type RequestPerson } from "./people.js";
 import { ssoConfig } from "./sso-settings.js";
 import {
   EXAMPLE_PASSWORD,
@@ -318,5 +319,14 @@ bindLogin({ hash: loginIdentity });
 
 export function isAuthedUpgrade(req: { headers: { cookie?: string } }): boolean {
   return authMode() === "open" || verify(upgradeCookie(req));
+}
+
+/**
+ * The person behind a request's login, from its cookie as it came (a request to an extension's routes, or an upgrade):
+ * nobody for one that is not signed in. Every login is the owner's for now (ownerPerson); once there are logins with
+ * fewer rights, this is where each says who it is.
+ */
+export function requestPerson(req: { headers: { cookie?: string } }): RequestPerson | undefined {
+  return isAuthedUpgrade(req) ? ownerPerson() : undefined;
 }
 

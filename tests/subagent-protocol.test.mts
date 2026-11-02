@@ -18,6 +18,16 @@ test('a subagent an extension announces reaches the portal as session events',()
  assert.equal(out[3].status,'done');
  off();b.emit('subagent:v1:start',{id:'r2'});assert.equal(out.length,4);
 });
+test('a subagent that works in a child chat names that chat on its start, and the portal keeps it',()=>{
+ const b=bus();const out:any[]=[];const bridge=bridgeSubagents(b,e=>out.push(e));
+ b.emit('subagent:v1:start',{id:'c1',label:'Research',toolCallId:'t1',input:true,stop:true,chat:'c1'});
+ b.emit('subagent:v1:start',{id:'c2',label:'Other',chat:''});
+ assert.equal(out[0].chat,'c1');
+ assert.equal('chat' in out[1],false,'an empty one is none');
+ assert.equal(bridge.takes('c1','stop'),true);
+ b.emit('subagent:v1:end',{id:'c1',status:'done'});
+ assert.deepEqual(out[2],{type:'portal_subagent',op:'end',id:'c1',toolCallId:'t1',status:'done'});
+});
 test('a subagent\'s finished message says how long it thought',()=>{
  const b=bus();const out:any[]=[];bridgeSubagents(b,e=>out.push(e));
  b.emit('subagent:v1:start',{id:'r',label:'R'});
@@ -94,7 +104,8 @@ test('the protocol is the same in the portal, in the typed API and in the subage
   assert.deepEqual(said![1].split(',').map(f=>f.trim().replace(/:.*$/,'').replace(/\(.*$/,'')),want,channel);
  }
  // The extension's: the channels it speaks on, by their names. All but the config, which it does not ask: it keeps
- // each chat's model itself, and the portal answers nothing there.
+ // each chat's model itself, and the portal answers nothing there; and but the events, which its subagents' chats
+ // have in their own transcripts.
  const ext=fs.readFileSync('extensions/subagent/src/pi.ts','utf8');
- assert.deepEqual([...ext.matchAll(/"(subagent:v1:\w+)" satisfies keyof SubagentProtocol/g)].map(m=>m[1]).sort(),Object.keys(typed).filter(c=>c!=='subagent:v1:config').sort(),'the extension\'s channels');
+ assert.deepEqual([...ext.matchAll(/"(subagent:v1:\w+)" satisfies keyof SubagentProtocol/g)].map(m=>m[1]).sort(),Object.keys(typed).filter(c=>c!=='subagent:v1:config'&&c!=='subagent:v1:event').sort(),'the extension\'s channels');
 });

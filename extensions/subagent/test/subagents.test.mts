@@ -84,3 +84,28 @@ test('a chat\'s subagents are worked out once for each state of the chat, and on
   assert.equal(next[0], one[0], 'the first has not changed');
   assert.notEqual(next[1], one[1], 'the second has');
 });
+
+test('a subagent that works in a chat names it, and one whose kept chat is given more is the same subagent at work again, from then', () => {
+  const start = (seq: number, callId: string, more: any = {}) => ev(seq, 'portal_subagent', { op: 'start', id: 'k', label: 'Kept', toolCallId: callId, input: true, stop: true, chat: 'k', ...more });
+  const events = [
+    call(1, 'c1', 'subagent'), start(2, 'c1'),
+    ev(3, 'portal_subagent', { op: 'end', id: 'k', status: 'error', error: 'It failed' }),
+    ev(4, 'tool_execution_end', { toolCallId: 'c1', toolName: 'subagent', result: { content: [] } }),
+    call(5, 'c2', 'subagent'), start(6, 'c2', { detail: 'Continuing' }),
+  ];
+  const [again] = list(events);
+  assert.deepEqual(
+    [again.chat, again.status, again.since, again.until, again.error, again.detail, again.calls, again.toolCallId],
+    ['k', 'running', 6000, undefined, undefined, 'Continuing', ['c1', 'c2'], 'c2'],
+  );
+  // Waiting for a slot, then starting, is one start: where it began stays.
+  const waited = list([call(1, 'c3', 'subagent'), start(2, 'c3', { detail: 'Waiting for a free slot' }), start(3, 'c3', { detail: 'Starting' })]);
+  assert.deepEqual(waited.map((s) => [s.since, s.detail, s.calls]), [[2000, 'Starting', ['c3']]]);
+});
+
+test('a subagent with the same calls is the same entry, however its list of them was made', () => {
+  const events = [call(1, 'c1', 'subagent'), ev(2, 'portal_subagent', { op: 'start', id: 'a', label: 'One', toolCallId: 'c1', chat: 'a' })];
+  const feed = (evs: any[]) => ({ events: evs, items: buildTranscript(evs), status: 'running' }) as any;
+  const one = agentsOf('chat-calls', feed(events));
+  assert.equal(agentsOf('chat-calls', feed([...events, ev(3, 'message_update', {})]))[0], one[0]);
+});

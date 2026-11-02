@@ -56,7 +56,11 @@ const UNTRUSTED_COMMAND = /\b(himalaya|mutt|neomutt|notmuch|offlineimap|mbsync|c
  * Does what this call returned carry somebody else's words? Mail and the web
  * read through a command, an MCP server the portal does not control, and the
  * browser, which reads pages anyone can write. The agent's own tools, a
- * subagent's answer and a routine's included, do not mark the conversation.
+ * subagent's answer and a routine's included, do not mark the conversation by
+ * themselves: a subagent's chat is marked by what it reads itself, and when it
+ * is, the portal marks the chat it worked for as its answer comes back
+ * (SessionManager.runChild), and the subagent extension writes that answer to the
+ * chat as a flagged result, which flaggedIn finds again when the guard is made again.
  *
  * A server's tools are its words however they are called: through the adapter's
  * `mcp` tool, or under their own names (`jira_get_issue`), which the adapter
@@ -1104,7 +1108,7 @@ const RULES: Rule[] = [
   },
   {
     name: "delegate",
-    why: "a subagent or a routine works without this conversation's rules, so what it does is not held to them",
+    why: "a subagent or a routine works in a conversation of its own, which has not read what this one read, so it is not held back as this one is",
     hit: (tool) => tool === "subagent" || tool === "routine_run",
   },
 ];
@@ -1850,16 +1854,24 @@ const textsOf = (content: unknown): string[] =>
 
 /**
  * What a session's entries say it has read: each result flagged as a suspected
- * prompt injection, by its id, with what it was (see flaggedAs). A note of the
+ * prompt injection, by its id, with what it was (see flaggedAs). A message an
+ * extension wrote into the conversation counts when it is in that form, as the
+ * subagent extension writes the words of one that read outside content, so that
+ * the mark taintSession gave the conversation is found again. A note of the
  * portal's own, such as a routine's report, is wrapped as data (see
  * wrapUntrusted) but does not mark the conversation.
  */
 function flaggedIn(entries: unknown, filesOf: (toolName: string) => readonly string[] | undefined): Map<string, string> {
   const found = new Map<string, string>();
   if (!Array.isArray(entries)) return found;
+  const labelsOf = (signals: string[]) => signals.map((name) => SIGNALS.find((signal) => signal.name === name)?.label ?? name);
   // What each call was given, for the result that answers it.
   const calls = new Map<string, Record<string, unknown>>();
   for (const entry of entries) {
+    if (entry?.type === "custom_message") {
+      for (const flag of textsOf(entry.content).flatMap((text) => flaggedResult(text) ?? [])) found.set(flag.id, `what a ${String(entry.customType)} message said (it ${labelsOf(flag.signals).join("; ")})`);
+      continue;
+    }
     const message = entry?.type === "message" ? entry.message : undefined;
     if (message?.role === "assistant" && Array.isArray(message.content)) {
       for (const part of message.content) if (part?.type === "toolCall") calls.set(part.id, part.arguments ?? {});
@@ -1867,8 +1879,7 @@ function flaggedIn(entries: unknown, filesOf: (toolName: string) => readonly str
     if (message?.role !== "toolResult") continue;
     const tool = String(message.toolName ?? "");
     for (const flag of textsOf(message.content).flatMap((text) => flaggedResult(text) ?? [])) {
-      const labels = flag.signals.map((name) => SIGNALS.find((signal) => signal.name === name)?.label ?? name);
-      found.set(flag.id, flaggedAs(tool, callSubject(tool, calls.get(message.toolCallId) ?? {}, filesOf(tool)), labels));
+      found.set(flag.id, flaggedAs(tool, callSubject(tool, calls.get(message.toolCallId) ?? {}, filesOf(tool)), labelsOf(flag.signals)));
     }
   }
   return found;
@@ -1943,6 +1954,7 @@ const taints = new Map<
   string,
   {
     mark: () => void;
+    tainted: () => boolean;
     refuses: (toolName: string, input: Record<string, unknown>, context: RuleContext) => Rule | undefined;
     trusted: (id: string) => void;
     untrusted: (id: string) => void;
@@ -1958,6 +1970,11 @@ export function taintSession(portalSessionId: string): boolean {
   const taint = taints.get(portalSessionId);
   taint?.mark();
   return Boolean(taint);
+}
+
+/** Whether the rules for a tainted conversation hold it now. False when no guard is running for it. */
+export function sessionTainted(portalSessionId: string): boolean {
+  return taints.get(portalSessionId)?.tainted() ?? false;
 }
 
 /**
@@ -2066,6 +2083,7 @@ export function guardExtension(
     if (portalSessionId) {
       const taint = {
         mark: () => { marked = true; },
+        tainted: isTainted,
         refuses: (toolName: string, input: Record<string, unknown>, context: RuleContext) => {
           if (!isTainted()) return undefined;
           const exempt = exemptNow();

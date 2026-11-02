@@ -1788,7 +1788,7 @@ test("the API saves the maximum size of an edit and refuses one that is no size,
   }
 });
 
-test("the agent's tools send nothing that only stable-diffusion.cpp reads, with the Stable Diffusion switch on or off", async () => {
+test("the agent's tools send nothing that only stable-diffusion.cpp reads, with the Stable Diffusion switch on or off, but for a picture made from references", async () => {
   const { origin, seen, server } = await fake((_req, res) => json(res, { data: [{ b64_json: b64(PNG) }] }));
   try {
     for (const sdExtras of [false, true]) {
@@ -1797,9 +1797,9 @@ test("the agent's tools send nothing that only stable-diffusion.cpp reads, with 
       const folder = chatWith();
       const make = load(folder);
       const change = loadEdit(folder);
-      // They have no such settings to give, and the switch does not give them any.
-      assert.deepEqual(Object.keys(make.tool.parameters.properties).sort(), ["prompt", "size", "title"]);
-      assert.ok(!Object.keys(change.tool.parameters.properties).some((name) => /seed|steps|negative|strength|noise|init/i.test(name)));
+      // They have no such settings to give, and the switch does not give them any: references are pictures, not a setting (see the tests of references below).
+      assert.deepEqual(Object.keys(make.tool.parameters.properties).sort(), ["prompt", "references", "size", "title"]);
+      for (const tool of [make.tool, change.tool]) assert.ok(!Object.keys(tool.parameters.properties).some((name) => /seed|steps|negative|strength|noise|init/i.test(name)));
       const before = seen.length;
       await make.call({ prompt: "a lighthouse at dusk" });
       await change.call({ prompt: "make it night", path: "photo.png" });
@@ -1829,4 +1829,177 @@ test("the Stable Diffusion switch is off in a setup saved without it, is a plain
   putSetting("image_generation", JSON.stringify({ sdExtras: "true" }));
   assert.equal(gen.imageGenerationConfig().sdExtras, false, "only a true is on");
   reset();
+});
+
+// --- a new picture made from references ---
+
+/** The parts of an edit's form by name, in the order sent, with their text where they are not pictures. */
+const fields = (seen: Seen) => partList(seen).map((part) => (part.name === "image" || part.name === "image[]" ? [part.name, part.filename] : [part.name, part.bytes.toString()]));
+
+test("without references generate_image is what it was: its shape while editing is off, and its request, byte for byte, while editing is on", async () => {
+  const { origin, seen, server } = await fake((_req, res) => json(res, { data: [{ b64_json: b64(PNG) }] }));
+  try {
+    reset();
+    gen.saveImageGeneration({ baseUrl: origin, enabled: true, model: "image-model", size: "1024x1024", apiKey: KEY, sdExtras: true });
+    const folder = chatWith();
+    const plain = load(folder);
+    assert.deepEqual(Object.keys(plain.tool.parameters.properties).sort(), ["prompt", "size", "title"], "no references while editing is off");
+    assert.doesNotMatch(plain.tool.description, /reference|edit_image/);
+    await plain.call({ prompt: "a lighthouse at dusk", title: "Lighthouse" });
+
+    // Editing on, with several pictures and the Stable Diffusion switch on: the tool can take references, and a call without them is the request it always was.
+    gen.saveImageGeneration({ editEnabled: true, editMultiple: true, editModel: "edit-model" });
+    const withRefs = load(folder);
+    assert.deepEqual(Object.keys(withRefs.tool.parameters.properties).sort(), ["prompt", "references", "size", "title"]);
+    assert.deepEqual(withRefs.tool.parameters.required, ["prompt"], "references are optional");
+    assert.equal(withRefs.tool.description.startsWith(plain.tool.description), true, "the description is the one it was, and more");
+    await withRefs.call({ prompt: "a lighthouse at dusk", title: "Lighthouse" });
+    await withRefs.call({ prompt: "a lighthouse at dusk", references: [] });
+
+    assert.equal(seen.length, 3);
+    for (const one of seen) {
+      assert.equal(one.url, "/images/generations");
+      assert.equal(one.type, "application/json");
+      assert.equal(one.raw!.toString(), JSON.stringify({ model: "image-model", prompt: "a lighthouse at dusk", n: 1, size: "1024x1024" }));
+    }
+    assert.deepEqual(seen[1].raw, seen[0].raw, "byte for byte");
+  } finally {
+    server.close();
+    reset();
+  }
+});
+
+test("with references the picture is a new one, asked of the editing endpoint, from noise, with the references in order", async () => {
+  const folder = chatWith({ "sheet.png": PNG, "style.jpg": JPEG });
+  const { origin, seen, server } = await fake((_req, res) => json(res, { data: [{ b64_json: b64(WEBP) }] }));
+  try {
+    reset();
+    gen.saveImageGeneration({ baseUrl: origin, enabled: true, model: "image-model", size: "1024x1024", apiKey: KEY, editEnabled: true, editMultiple: true, editModel: "edit-model", sdExtras: true });
+    const { call, tool } = load(folder);
+    const refs = tool.parameters.properties.references;
+    assert.deepEqual([refs.type, refs.items.type, refs.minItems, refs.maxItems], ["array", "string", 1, editing.MAX_EDIT_PICTURES]);
+    assert.match(tool.description, /same character, object or style in a new picture/);
+    assert.match(tool.description, /To change a picture use edit_image/);
+    assert.match(refs.description, /stable-diffusion\.cpp starts from the first unless Stable Diffusion extra settings are on/);
+    assert.match(loadEdit(folder).tool.description, /For the same subject or style in a new picture, use generate_image with references/, "edit_image sends the agent there for a new picture");
+
+    const result = await call({ prompt: "  the character from the first picture, riding a bike in the rain  ", title: "Bike", references: ["sheet.png", "style.jpg"] });
+    // A new picture, named as a generated one, never after a reference, and tied to none of them.
+    const made = result.details.files[0].path;
+    assert.match(made, new RegExp(`^${GENERATED_DIR}/image-\\d{8}-\\d{6}-[0-9a-f]{6}\\.webp$`));
+    assert.deepEqual(result.details, { files: [{ path: made, title: "Bike" }] });
+    assert.equal(result.content[0].text, `Generated from sheet.png, style.jpg as references (in this order), and shown to the user: ${made}.`);
+    assert.deepEqual(readFileSync(path.join(folder, made)), WEBP);
+    assert.deepEqual(readFileSync(path.join(folder, "sheet.png")), PNG, "the references stay as they are");
+    assert.deepEqual(readdirSync(folder).sort(), [GENERATED_DIR, "sheet.png", "style.jpg"]);
+
+    // What was sent: the editing route, with its key and model, the references as image[] in order under neutral names, the prompt with the block that starts from noise, and the size.
+    assert.equal(seen.length, 1);
+    assert.equal(seen[0].url, "/images/edits");
+    assert.equal(seen[0].auth, `Bearer ${KEY}`);
+    assert.deepEqual(fields(seen[0]), [
+      ["image[]", "image-1.png"],
+      ["image[]", "image-2.jpg"],
+      ["prompt", 'the character from the first picture, riding a bike in the rain <sd_cpp_extra_args>{"init_image":null}</sd_cpp_extra_args>'],
+      ["model", "edit-model"],
+      ["n", "1"],
+      ["size", "1024x1024"],
+    ]);
+    assert.deepEqual(partList(seen[0]).slice(0, 2).map((part) => part.bytes), [PNG, JPEG]);
+
+    // The size the agent asks for instead of the add-on's; one reference is sent as one picture is.
+    await call({ prompt: "the same character, sitting", size: "768x1344", references: ["sheet.png"] });
+    assert.deepEqual(fields(seen[1]), [
+      ["image", "image.png"],
+      ["prompt", 'the same character, sitting <sd_cpp_extra_args>{"init_image":null}</sd_cpp_extra_args>'],
+      ["model", "edit-model"],
+      ["n", "1"],
+      ["size", "768x1344"],
+    ]);
+    // With no size anywhere, none is sent: the endpoint's own is what it makes.
+    gen.saveImageGeneration({ size: "", editModel: "" });
+    await call({ prompt: "p", references: ["sheet.png"] });
+    assert.deepEqual(fields(seen[2]).map(([name]) => name), ["image", "prompt", "n"]);
+  } finally {
+    server.close();
+    reset();
+  }
+});
+
+test("with Stable Diffusion extra settings off, references go without a block, and the result says the first may have been the start", async () => {
+  const folder = chatWith({ "sheet.png": PNG });
+  const { origin, seen, server } = await fake((_req, res) => json(res, { data: [{ b64_json: b64(PNG) }] }));
+  try {
+    reset();
+    gen.saveImageGeneration({ baseUrl: origin, enabled: true, editEnabled: true, sdExtras: false });
+    const result = await load(folder).call({ prompt: "the character, waving", references: ["sheet.png"] });
+    assert.equal(parts(seen[0]).prompt.bytes.toString(), "the character, waving", "nothing another server would read as words");
+    assert.ok(!seen[0].raw!.includes("sd_cpp_extra_args"));
+    assert.match(result.content[0].text, /shown to the user: generated-images\/image-[^ ]+\.png\. Stable Diffusion extra settings are off, so a stable-diffusion\.cpp endpoint started from the first reference: if the picture looks like a reworked copy of it, tell the person to switch them on under Media in Settings\.$/);
+    assert.deepEqual(result.details.files.map((f: any) => Object.keys(f)), [["path", "title"]], "no picture it was changed from");
+  } finally {
+    server.close();
+    reset();
+  }
+});
+
+test("references are refused before anything is sent: editing off, several where the endpoint takes one, too many, a picture that is not one of the folder's, too large", async () => {
+  const folder = chatWith({ "a.png": PNG, "b.jpg": JPEG, "notes.txt": Buffer.from("not a picture"), "huge.png": Buffer.concat([PNG, Buffer.alloc(26 * 1024 * 1024)]) });
+  const outside = chatWith({ "secret.png": PNG });
+  const { origin, seen, server } = await fake((_req, res) => json(res, { data: [{ b64_json: b64(PNG) }] }));
+  try {
+    reset();
+    gen.saveImageGeneration({ baseUrl: origin, enabled: true, editEnabled: true, editMultiple: false });
+    const { call } = load(folder);
+    const refused = (references: unknown, message: RegExp) => assert.rejects(call({ prompt: "p", references }), (e: Error) => (assert.match(e.message, message), true));
+    // One reference where the endpoint takes one picture; two are refused with the count and the switch.
+    await refused(["a.png", "b.jpg"], /^The editing endpoint is not set up to take several pictures, so none was sent \(2 were given\)\. Use one, or tell the person that "Several pictures per edit" can be switched on under Media in Settings/);
+    gen.saveImageGeneration({ editMultiple: true });
+    await refused(Array(editing.MAX_EDIT_PICTURES + 1).fill("a.png"), /at most 8 pictures, and 9 were given/);
+    await refused(["a.png", path.join(outside, "secret.png")], /^Reference 2 \(.*secret\.png\): Only a picture in the chat's folder can be used as a reference/);
+    await refused(["../secret.png"], /^Only a picture in the chat's folder can be used as a reference/);
+    await refused(["a.png", "notes.txt"], /^Reference 2 \(notes\.txt\): .*not a PNG, JPEG, GIF or WebP/);
+    await refused(["huge.png"], /^The picture is over 25 MB, which is more than can be read to be scaled down for an edit/);
+    await refused(["a.png", 5], /^Reference 2 \(5\): Name the picture by its path/);
+    // With the Stable Diffusion switch on, a block of the prompt's own would hide the one that starts from noise.
+    gen.saveImageGeneration({ sdExtras: true });
+    await assert.rejects(call({ prompt: 'the fox <sd_cpp_extra_args>{"seed":1}</sd_cpp_extra_args>', references: ["a.png"] }), (e: Error) => (assert.match(e.message, /^The prompt has an sd_cpp_extra_args block of its own, which would hide the one that makes a picture with references start from noise/), true));
+    gen.saveImageGeneration({ sdExtras: false });
+
+    // Editing switched off since the tool was loaded: it says what to switch on, and makes nothing without them.
+    gen.saveImageGeneration({ editEnabled: false });
+    const off = /^References are sent to the person's image editing endpoint, and image editing is switched off or has no address now\. Make the picture without them, or tell the person that Image editing can be switched on under Media in Settings\.$/;
+    await refused(["a.png"], off);
+    // A tool loaded with editing off has no references to give; a model that gives some anyway is told the same.
+    const plain = load(folder);
+    assert.equal(plain.tool.parameters.properties.references, undefined);
+    await assert.rejects(plain.call({ prompt: "p", references: ["a.png"] }), (e: Error) => (assert.match(e.message, off), true));
+    assert.equal(seen.length, 0, "nothing was sent for any of it");
+    assert.equal(existsSync(path.join(folder, GENERATED_DIR)), false, "and nothing kept");
+    // What is in bounds goes, and the picture without references is made as ever.
+    assert.ok((await plain.call({ prompt: "p" })).details.files[0].path);
+    assert.equal(seen[0].url, "/images/generations");
+  } finally {
+    server.close();
+    reset();
+  }
+});
+
+test("a reference beyond the maximum size of an edit is scaled down to fit, and the result says so", async () => {
+  const folder = chatWith({ "sheet.png": await real(256, 128) });
+  const { origin, seen, server } = await fake((_req, res) => json(res, { data: [{ b64_json: b64(PNG) }] }));
+  try {
+    reset();
+    gen.saveImageGeneration({ baseUrl: origin, enabled: true, editEnabled: true, editMaxSize: "128x128", sdExtras: true });
+    const result = await load(folder).call({ prompt: "the character, on a beach", references: ["sheet.png"] });
+    assert.equal(await dimensions(sentImages(seen[0])[0].bytes), "128x64");
+    // Said of a reference, which is not what the result is made of: nothing of a result scaled back up.
+    assert.match(result.content[0].text, /The reference was scaled down from 256x128 pixels \([^)]+\) to 128x64 pixels \([^)]+\) to fit what the editing endpoint takes\./);
+    assert.doesNotMatch(result.content[0].text, /The image was|edit takes|scaled back up/);
+    assert.match(result.content[0].text, /as references \(in this order\), and shown to the user/);
+    assert.deepEqual(readFileSync(path.join(folder, "sheet.png")), await real(256, 128), "the reference stays as it was");
+  } finally {
+    server.close();
+    reset();
+  }
 });

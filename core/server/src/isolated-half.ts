@@ -9,7 +9,7 @@ import type { Duplex, Readable, Writable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import type { Request, Response } from "express";
 import type { Chat, ServerPortal } from "@pithagoras/extension-api/server";
-import { API_FN, CHILD_FN, PARENT_FN, errorIn, errorOut, swapped, type CrossedError, type FnUse } from "./half-wire.js";
+import { API_FN, CHILD_FN, PARENT_FN, PERSON_HEADER, errorIn, errorOut, swapped, type CrossedError, type FnUse } from "./half-wire.js";
 import { LOG_LINE_MAX } from "./logs.js";
 
 /**
@@ -75,6 +75,7 @@ const NOW = new Set([
   "chats.list",
   "chats.inFolder",
   "chats.folder",
+  "chats.owner",
   "chats.offers",
   "chats.extend",
   "chats.onOpen",
@@ -82,6 +83,8 @@ const NOW = new Set([
   "chats.onEvent",
   "chats.hold",
   "chats.create",
+  "chats.start",
+  "chats.lastAnswer",
   "chats.children",
   "folders.list",
   "folders.allowed",
@@ -552,7 +555,7 @@ export class IsolatedChild {
    * cannot be reached, the answer is its crash should it have crashed, else 502.
    */
   proxy(req: Request, res: Response): void {
-    const up = request({ socketPath: this.socket, method: req.method, path: req.url, headers: req.headers, agent: this.agent });
+    const up = request({ socketPath: this.socket, method: req.method, path: req.url, headers: this.withPerson(req), agent: this.agent });
     up.on("response", (answer) => {
       res.writeHead(answer.statusCode ?? 502, answer.statusMessage, answer.rawHeaders);
       answer.on("error", () => res.destroy());
@@ -572,11 +575,25 @@ export class IsolatedChild {
     res.status(crash ? 503 : 502).json({ error: crash ? `Its server half crashed: ${crash}` : "Its server half could not be reached" });
   }
 
+  /**
+   * A request's headers as the half is handed them: who is behind it said in PERSON_HEADER, which the portal alone
+   * sets. One the request came with is dropped, said by the portal or not: a page could put anything there.
+   */
+  private withPerson(req: IncomingMessage): IncomingMessage["headers"] {
+    const { [PERSON_HEADER]: _forged, ...headers } = req.headers;
+    const person = this.host.portal.http.person(req);
+    return person ? { ...headers, [PERSON_HEADER]: encodeURIComponent(JSON.stringify(person)) } : headers;
+  }
+
   /** A WebSocket upgrade under the half's routes, handed on to its process as the request came, and joined both ways. */
   upgrade(req: IncomingMessage, socket: Duplex, head: Buffer): void {
     const up = connect(this.socket);
     const said = [`${req.method} ${req.url} HTTP/1.1`];
-    for (let i = 0; i < req.rawHeaders.length; i += 2) said.push(`${req.rawHeaders[i]}: ${req.rawHeaders[i + 1]}`);
+    for (let i = 0; i < req.rawHeaders.length; i += 2) {
+      if (req.rawHeaders[i].toLowerCase() !== PERSON_HEADER) said.push(`${req.rawHeaders[i]}: ${req.rawHeaders[i + 1]}`);
+    }
+    const person = this.host.portal.http.person(req);
+    if (person) said.push(`${PERSON_HEADER}: ${encodeURIComponent(JSON.stringify(person))}`);
     up.write(`${said.join("\r\n")}\r\n\r\n`);
     up.write(head);
     up.pipe(socket);

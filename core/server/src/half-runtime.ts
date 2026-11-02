@@ -5,7 +5,7 @@ import express, { type NextFunction, type Request, type Response } from "express
 import type { Chat, ServerPortal, Upgrade } from "@pithagoras/extension-api/server";
 import { folderFiles } from "./folder-files.js";
 import { gitAt } from "./git.js";
-import { API_FN, CHILD_FN, PARENT_FN, errorIn, errorOut, swapped, type FnUse } from "./half-wire.js";
+import { API_FN, CHILD_FN, PARENT_FN, PERSON_HEADER, errorIn, errorOut, swapped, type FnUse } from "./half-wire.js";
 import { sendFile } from "./send-file.js";
 import { PI_BUILT_IN_TOOLS } from "./tool-policy.js";
 import { setAgentAccess } from "./workspace-files.js";
@@ -204,6 +204,16 @@ function portalOf(init: { name: string; executor: string }): ServerPortal {
         upgrade = handler;
       },
       endWithLogin: (end) => callNow("http.endWithLogin", given(end, "run")),
+      // Said by the portal on each request it hands on (isolated-half.ts), over anything the request came with.
+      person(req) {
+        const said = req.headers[PERSON_HEADER];
+        if (typeof said !== "string") return undefined;
+        try {
+          return JSON.parse(decodeURIComponent(said));
+        } catch {
+          return undefined;
+        }
+      },
       // As the portal sends it (extension-host.ts): a file of no type said is sent as bytes, to be saved.
       send: (req, res, file, options = {}) =>
         sendFile(req, res, { ...file, mimeType: file.mimeType ?? "application/octet-stream" }, options.cache ?? "private, no-cache", options.download ?? (file.mimeType ? undefined : file.name)),
@@ -213,6 +223,7 @@ function portalOf(init: { name: string; executor: string }): ServerPortal {
       list: () => callNow("chats.list"),
       inFolder: (folder) => callNow("chats.inFolder", folder),
       folder: (id) => callNow("chats.folder", id),
+      owner: (id) => callNow("chats.owner", id),
       send(chatId, data) {
         try {
           post({ t: "send", chatId, data });
@@ -233,6 +244,8 @@ function portalOf(init: { name: string; executor: string }): ServerPortal {
       },
       hold: (chatId) => callNow("chats.hold", chatId),
       create: (options) => callNow("chats.create", options),
+      start: (options) => callNow("chats.start", options),
+      lastAnswer: (chatId) => callNow("chats.lastAnswer", chatId),
       children: (parent) => callNow("chats.children", parent),
       prompt: (chatId, message, options) => callLater("chats.prompt", [chatId, message, options]),
       abort: (chatId) => callLater("chats.abort", [chatId]),

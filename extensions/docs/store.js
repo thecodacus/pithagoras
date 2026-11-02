@@ -50,7 +50,7 @@
  */
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomBytes } from "node:crypto";
-import { accessSync, closeSync, constants, lstatSync, openSync, rmSync } from "node:fs";
+import { accessSync, chmodSync, closeSync, constants, lstatSync, openSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { DocError, explained } from "./errors.js";
 import { blobId, GitError, messageFor, parseTrailers, Repo } from "./git.js";
@@ -87,8 +87,18 @@ export const isDocumentId = (id) => typeof id === "string" && /^[0-9a-f]{16}$/.t
 /** Which file or folder a stat is, on this system: its device and inode as text (an inode can be wider than a number), as place.js tells a folder. */
 const idOf = (stat) => ({ dev: String(stat.dev), ino: String(stat.ino) });
 const isId = (id) => /^\d+$/.test(id?.dev) && /^\d+$/.test(id?.ino);
-/** Whether `stat` (from a `bigint` look) is the file or folder `id` names. */
-const sameId = (stat, id) => Boolean(stat) && isId(id) && String(stat.dev) === id.dev && String(stat.ino) === id.ino;
+/**
+ * Which file a stat (from a `bigint` look) is, for a decision that is finished later, perhaps after a stop: its device and inode, and when it
+ * was made where a look tells that (`births`, see `birthTimes`; 0 on a file system that does not keep it). An inode number is given again once
+ * its file is gone (ext4 does so at once), so a file made at the name since has the same device and inode as often as not; it was not made at
+ * the same nanosecond. The time it was made stays with the file through a second name, which a rename cut off between its halves leaves it with.
+ */
+const fileIdOf = (stat, births) => (births ? { ...idOf(stat), born: String(stat.birthtimeNs) } : idOf(stat));
+/**
+ * Whether `stat` (from a `bigint` look) is the file or folder `id` names. A decision written before the time a file was made was kept, or where a
+ * look did not tell it, has only its inode; so is one that is looked at where a look does not tell it (now): its time would be another time.
+ */
+const sameId = (stat, id, births) => Boolean(stat) && isId(id) && String(stat.dev) === id.dev && String(stat.ino) === id.ino && (id.born === undefined || !births || String(stat.birthtimeNs) === id.born);
 
 /** What is said of a documents folder that is not the one the documents were kept in. */
 const REPLACED = "The documents folder here is not the folder these documents were kept in (it was replaced, or another folder was moved onto its name), so nothing was deleted or renamed. If the folder that is there is the one you want (a restore, say), making a new document here takes it as the documents folder.";
@@ -486,6 +496,36 @@ export class Store {
 
   rows() {
     return this.db.prepare("SELECT * FROM documents ORDER BY name").all();
+  }
+
+  /**
+   * Whether a look here tells when a file was made: seen once, on a file of the store's own. Where Node cannot use statx (a kernel before 4.11, a
+   * sandbox that refuses it) it gives the time of the file's last change as that time, and a second name changes it: a decision that kept it would
+   * not know its own file after a rename cut off between its halves. A real one stays where it was when the time of the last change moves on.
+   */
+  birthTimes() {
+    this.births ??= (async () => {
+      const probe = this.guard.at(`birth.${randomBytes(6).toString("hex")}.tmp`);
+      try {
+        writeFileSync(probe, "", { flag: "wx", mode: 0o600 });
+        const first = lstatSync(probe, { bigint: true });
+        if (first.birthtimeNs === 0n) return false;
+        // Made and changed in the same tick of the clock as often as not: changed again until the clock has moved on (a tick is 10 ms at most).
+        for (let i = 0; i < 50; i++) {
+          const now = lstatSync(probe, { bigint: true });
+          if (now.birthtimeNs !== now.ctimeNs) return true;
+          if (now.ctimeNs !== first.ctimeNs) return false;
+          await new Promise((resolve) => setTimeout(resolve, 2));
+          chmodSync(probe, i % 2 ? 0o600 : 0o400);
+        }
+        return false;
+      } catch {
+        return false;
+      } finally {
+        rmSync(probe, { force: true });
+      }
+    })();
+    return this.births;
   }
 
   /** Steps of a write a test breaks: nothing in normal use. */
@@ -1004,6 +1044,7 @@ export class Store {
       if (!dir) throw this.unreadable(row);
       // In the folder the store holds to, and that one only; it is kept with the decision, with the file it is for.
       const folder = this.holds();
+      const births = await this.birthTimes();
       const was = this.statOf(dir, row.name);
       const there = this.statOf(dir, to);
       // A name the file system does not tell from the file's own (it differs in capitals, or in the form of a letter) is the file's own name there:
@@ -1011,7 +1052,7 @@ export class Store {
       if (was && there && was.dev === there.dev && was.ino === there.ino && was.nlink === 1n) {
         throw new DocError(409, `This file system does not tell ${to} from ${row.name} (they differ only in capitals or in the form of a letter), so the file cannot be renamed to it directly: rename it to another name first, then to ${to}`, { code: "same_name" });
       }
-      const pending = { op: "rename", id: row.id, from: row.name, to, author, folder, file: was?.isFile() ? idOf(was) : null };
+      const pending = { op: "rename", id: row.id, from: row.name, to, author, folder, file: was?.isFile() ? fileIdOf(was, births) : null };
       this.setMeta("pending", JSON.stringify(pending));
       await this.#carryRename(pending);
       const now = this.row(row.id);
@@ -1037,8 +1078,9 @@ export class Store {
       // In the folder the store holds to, and that one only; it is kept with the decision, with the file it is for. No folder is no file to take away.
       const dir = this.documentsDir();
       const folder = dir ? this.holds() : null;
+      const births = await this.birthTimes();
       const there = dir ? this.statOf(dir, row.name) : null;
-      const pending = { op: "delete", id: row.id, name: row.name, author, folder, file: there?.isFile() ? idOf(there) : null, done: false };
+      const pending = { op: "delete", id: row.id, name: row.name, author, folder, file: there?.isFile() ? fileIdOf(there, births) : null, done: false };
       this.setMeta("pending", JSON.stringify(pending));
       await this.#carryDelete(pending);
       return { comments };
@@ -1099,13 +1141,14 @@ export class Store {
       this.clearPending();
       throw e;
     }
+    const births = await this.birthTimes();
     const [old, now] = [this.statOf(dir, from), this.statOf(dir, to)];
     // The step the disk is still waiting for, if there is one.
     let step = null;
     if (old?.isFile() && !now) step = () => renameDocument(this.files, dir, from, to, { expect: folder });
     // Cut off between the two halves: the old name is taken away. Not when it is the same file under two spellings of one name (a file system that does
     // not tell them apart: there is one name, and it is the only one), and not on a first try, where a second name is something that is in the way.
-    else if (recovering && old?.isFile() && now?.isFile() && old.dev === now.dev && old.ino === now.ino && old.nlink > 1n && sameId(old, file)) {
+    else if (recovering && old?.isFile() && now?.isFile() && old.dev === now.dev && old.ino === now.ino && old.nlink > 1n && sameId(old, file, births)) {
       step = () => removeDocument(this.files, dir, from, { shared: true, expect: folder });
     }
     // Else the file has the new name already, or there is nothing to rename: neither name is a file, or the new one is another file's.
@@ -1160,8 +1203,9 @@ export class Store {
           this.clearPending();
           throw e;
         }
+        const births = await this.birthTimes();
         const there = this.statOf(dir, row.name);
-        if (there?.isFile() && !sameId(there, file)) {
+        if (there?.isFile() && !sameId(there, file, births)) {
           // Not the file that was decided on: another one is at the name. Recovery leaves it (the other was taken away before the stop); a first try
           // that finds it was beaten to the name by someone, and says so.
           if (!recovering) {

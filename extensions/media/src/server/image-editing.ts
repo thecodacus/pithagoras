@@ -58,6 +58,11 @@ export interface EditRequest {
   outputCompression?: number;
   /** Not in the OpenAI format: put in the prompt as stable-diffusion.cpp's server reads them, and only where one is set. */
   native?: NativeSettings;
+  /**
+   * The pictures are a new picture's references, not pictures to change: what is said of them names them so
+   * ("Reference 2", "The reference"), and a note of one that was scaled down says nothing of a result scaled back.
+   */
+  references?: boolean;
 }
 
 export interface EditOptions extends GenerateOptions {
@@ -91,13 +96,13 @@ function boxOf(maxSize: string): { width: number; height: number } | undefined {
   return width && height ? { width, height } : undefined;
 }
 
-/** The sentence that says a picture was made smaller. */
-function scaledNote(item: Item): string {
+/** The sentence that says a picture was made smaller: one of an edit's, or a new picture's reference (`reference`), whose result was never its size. */
+function scaledNote(item: Item, reference: boolean): string {
   const now = { size: item.size, bytes: item.bytes.length };
   const px = (size?: { width: number; height: number }) => (size ? `${size.width}x${size.height} pixels` : "unknown size");
   const resized = item.was.size && now.size && (item.was.size.width !== now.size.width || item.was.size.height !== now.size.height);
   const how = resized ? `scaled down from ${px(item.was.size)} (${weight(item.was.bytes)}) to ${px(now.size)} (${weight(now.bytes)})` : `compressed from ${weight(item.was.bytes)} to ${weight(now.bytes)}`;
-  return `${item.who} was ${how} to fit what an edit takes. The result is not scaled back up.`;
+  return reference ? `${item.who} was ${how} to fit what the editing endpoint takes.` : `${item.who} was ${how} to fit what an edit takes. The result is not scaled back up.`;
 }
 
 /** What each of the pictures may weigh: all of `total` shared out evenly, where a light one leaves its room to the heavier ones, and none more than `max`. */
@@ -136,7 +141,7 @@ async function apply(item: Item, step: () => Promise<Scaled>, changed: Set<Item>
  * A picture whose size cannot be read cannot be shown to be within the maximum, and is refused. So is one that cannot
  * be made to fit at all; the person is told, and nothing is sent.
  */
-async function fit(pictures: Item[], mask: Item | undefined, maxSize: string, max: number, total: number): Promise<string[]> {
+async function fit(pictures: Item[], mask: Item | undefined, maxSize: string, max: number, total: number, references: boolean): Promise<string[]> {
   const box = boxOf(maxSize);
   const changed = new Set<Item>();
   if (box) {
@@ -172,7 +177,7 @@ async function fit(pictures: Item[], mask: Item | undefined, maxSize: string, ma
       await apply(mask, () => fitBytes(mask.bytes, max, true), changed);
     }
   }
-  return [...changed].map(scaledNote);
+  return [...changed].map((item) => scaledNote(item, references));
 }
 
 /** A picture as it is given: what its first bytes say it is, and nothing more asked of it yet. `who` starts the sentence that says what is wrong with it. */
@@ -223,9 +228,10 @@ export async function editImage(
   const list = Array.isArray(request.image) ? request.image : [request.image];
   checkCount(list.length, target.multiple);
   // What they are first, all of them, so that a picture that is no picture is refused before any is scaled.
-  const pictures = list.map((bytes, i) => (list.length > 1 ? given(bytes, `Picture ${i + 1}`, `image-${i + 1}`) : given(bytes, "The image", "image")));
+  const [one, each] = request.references ? ["The reference", "Reference"] : ["The image", "Picture"];
+  const pictures = list.map((bytes, i) => (list.length > 1 ? given(bytes, `${each} ${i + 1}`, `image-${i + 1}`) : given(bytes, one, "image")));
   const maskItem = request.mask ? given(request.mask, "The mask", "mask") : undefined;
-  const notes = await fit(pictures, maskItem, target.maxSize, max, options.maxTotalBytes ?? MAX_EDIT_TOTAL_BYTES);
+  const notes = await fit(pictures, maskItem, target.maxSize, max, options.maxTotalBytes ?? MAX_EDIT_TOTAL_BYTES, request.references === true);
   const images = pictures.map(toSend);
   const mask = maskItem ? toSend(maskItem) : undefined;
   const form = new FormData();

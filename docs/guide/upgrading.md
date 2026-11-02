@@ -1258,17 +1258,59 @@ straight from schema 13 has, also needs what
 says for it, and an older backup what
 [Chats can have child chats](#chats-can-have-child-chats) says.
 
+## Chats an extension makes for nobody to attend
+
+An extension's server half can make a chat that nobody attends: for work the
+person does not watch, such as the answer to a document's comment (see
+[Child chats](/guide/extension-ui#child-chats)). Such a chat asks nobody
+anything: it has no `ask_question`, a dialog an extension opens in it is
+answered at once, and the guard refuses a call it holds rather than asking. A
+child chat can also start from the tools a new chat of its folder has, rather
+than from its parent's switches. The upgrade (schema 16) keeps both with the
+chat. Every chat there was is one a person attends, and every child chat keeps
+its parent's switches, as before; nothing is left for an extension, and nothing
+needs doing.
+
+**Going back.** From `portal-v15-….db` it is only putting the backup in as
+under [Going back](#going-back), and an older backup needs what
+[Sub-chats in the chat list](#sub-chats-in-the-chat-list) says for it.
+
+## Subagents work in chats of their own
+
+A subagent no longer runs as a separate `pi` process: it works in a
+[child chat](/guide/features#subagents) of the chat that asked, under the guard
+and the sandbox as the person the chat works for, in the chat's mode and with
+its tools. Something a subagent could do before may now be refused, or wait for
+you in its chat (the panel and the tray say so). Its run is in its chat's own
+transcript, not in the parent's: a subagent from before the upgrade still shows
+in the panel from what the parent kept.
+
+A heartbeat has no `subagent` tool any more: its subagent would be a chat the
+heartbeat's rules do not cover, and the guard already refused it. A chat's
+subagent is also held to the chat's tool switches as they are when it is given
+a task, and marks the chat it works for when the guard marked it.
+
+New: **Keep subagent chats** on the extension's page (off by default), which
+lists them as sub-chats and lets the agent continue one by its id, and
+**Subagents work in the chat's mode** (on): a subagent's chat is in the mode of
+the chat it works for, code mode and your own modes included, and in Standard
+mode where you switch it off. Gone:
+`PI_SUBAGENT_BIN` and `PI_SUBAGENT_GRACE_MS`, which nothing reads any more. The
+database is not changed, so going back needs nothing but the older version; the
+subagents' chats it made stay, as chats of their own.
+
 ## A routine's own run time limit
 
 A routine's page sets how many minutes its runs may take
 ([Routines](/guide/routines#scheduling)), where every run had the portal's hour.
-The upgrade (schema 16) adds the column that holds it, empty for every routine
+The upgrade (schema 17) adds the column that holds it, empty for every routine
 there is, so each keeps the portal's default. It changes no data; nothing is
 left for an extension, and nothing needs doing.
 
-**Going back.** From `portal-v15-….db` it is only putting the backup in as
+**Going back.** From `portal-v16-….db` it is only putting the backup in as
 under [Going back](#going-back); an older backup also needs what
-[Sub-chats in the chat list](#sub-chats-in-the-chat-list) says for it.
+[Chats an extension makes for nobody to attend](#chats-an-extension-makes-for-nobody-to-attend)
+says for it.
 
 ## The guard
 

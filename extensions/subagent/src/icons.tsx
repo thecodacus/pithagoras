@@ -45,3 +45,12 @@ export function SendIcon(props: Props) {
     </svg>
   );
 }
+
+/** Open elsewhere: an arrow out of a box. */
+export function OpenIcon(props: Props) {
+  return (
+    <svg {...svg} aria-hidden="true" className={props.className}>
+      <path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" />
+    </svg>
+  );
+}

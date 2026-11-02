@@ -768,6 +768,164 @@ test("the agent's pictures are in the gallery with the chat they came from, and 
   }
 });
 
+test("a picture the agent made from references is a generated one in the gallery, with its references in order and tied to none of them", async () => {
+  const { origin, seen, server } = await answering(png("made"));
+  try {
+    settings({ baseUrl: origin, size: "1024x1024", editEnabled: true, editMultiple: true, editModel: "edit-model", sdExtras: true });
+    const folder = chat("chat-refs", "Characters");
+    const tools = media.tools("chat-refs");
+    // A character sheet the agent made, which the gallery knows, and a style picture of the folder, which it does not.
+    const sheet = await tools.generate_image.execute("id", { prompt: "a character sheet of a fox" });
+    const sheetPicture = (await listed("?origin=chat")).pictures[0];
+    writeFileSync(path.join(folder, "style.png"), png("style"));
+    const made = await tools.generate_image.execute("id", { prompt: "the fox from the first picture, skiing", references: [sheet.details.files[0].path, "style.png"] });
+    assert.match(seen.at(-1)!.url!, /\/images\/edits$/);
+    const picture = (await listed("?origin=chat")).pictures[0];
+    assert.equal(picture.fileName, path.basename(made.details.files[0].path));
+    assert.equal(picture.kind, "generated", "a new picture, not a change");
+    assert.equal(picture.from, null, "no picture it was changed from: the viewer links it to none");
+    assert.equal(picture.prompt, "the fox from the first picture, skiing");
+    assert.deepEqual(picture.params, { model: "edit-model", size: "1024x1024", fromNoise: true, references: [sheetPicture.id] }, "the references the gallery knows; the other is no link");
+    assert.deepEqual((await listed("?origin=chat&kind=edited")).pictures.filter((p: any) => p.chat?.id === "chat-refs"), [], "none of this chat's is a change");
+
+    // With the Stable Diffusion switch off it did not start from noise, and does not say it did.
+    settings({ baseUrl: origin, editEnabled: true, editMultiple: true, sdExtras: false });
+    await tools.generate_image.execute("id", { prompt: "the fox, sleeping", references: [sheet.details.files[0].path] });
+    const plain = (await listed("?origin=chat")).pictures[0];
+    assert.deepEqual(plain.params, { references: [sheetPicture.id] });
+  } finally {
+    server.close();
+    gone();
+  }
+});
+
+test("a picture made on the page from references: the editing endpoint, the references in order, from noise, and the gallery keeps which they were", async () => {
+  const { origin, seen, server } = await answering(png("made"));
+  await clearJobs();
+  try {
+    const sheet = (await call("POST", "/images/upload?name=sheet.png", undefined, { raw: png("sheet") })).body.picture;
+    const style = (await call("POST", "/images/upload?name=style.png", undefined, { raw: png("style") })).body.picture;
+    settings({ baseUrl: origin, size: "1024x1024", editEnabled: true, editMultiple: true, editModel: "edit-model", sdExtras: true });
+    const started = await call("POST", "/images/generate", { prompt: "  the character from the first picture, in a new pose  ", references: [sheet.id, style.id], seed: 7, count: 2 });
+    assert.equal(started.status, 202, JSON.stringify(started.body));
+    assert.deepEqual(started.body.jobs.map((j: any) => [j.kind, j.size, j.from]), [["generate", "1024x1024", undefined], ["generate", "1024x1024", undefined]], "a new picture, in the frame of its size, with no picture under the wait");
+    const jobs = await settled();
+    assert.ok(jobs.every((j: any) => j.state === "done"), JSON.stringify(jobs));
+    assert.equal(seen.length, 2, "one request for each picture");
+    for (const [i, one] of seen.entries()) {
+      assert.match(one.url!, /\/images\/edits$/);
+      assert.equal(one.auth, `Bearer ${KEY}`);
+      const parts = partList(one);
+      assert.deepEqual(parts.map((p) => p.name), ["image[]", "image[]", "prompt", "model", "n", "size"]);
+      assert.deepEqual(parts.slice(0, 2).map((p) => p.bytes), [png("sheet"), png("style")], "in the order given");
+      assert.ok(parts.every((p) => OPENAI_EDIT.includes(p.name)));
+      assert.deepEqual(cutOut(parts[2].bytes.toString()), { prompt: "the character from the first picture, in a new pose", args: { init_image: null, seed: 7 + i } });
+      assert.equal(parts[3].bytes.toString(), "edit-model", "the editing model where the request names none");
+      assert.equal(parts[5].bytes.toString(), "1024x1024", "the add-on's size where the request names none");
+    }
+    const made = (await listed()).pictures.filter((p: any) => jobs.some((j: any) => j.pictureId === p.id));
+    assert.equal(made.length, 2);
+    for (const picture of made) {
+      assert.equal(picture.kind, "generated");
+      assert.equal(picture.from, null);
+      assert.deepEqual(picture.params.references, [sheet.id, style.id]);
+      assert.equal(picture.params.fromNoise, true);
+      assert.equal(picture.params.model, "edit-model");
+      assert.equal(picture.params.size, "1024x1024");
+    }
+
+    // A size of the request's own goes as asked, a model of its own does not: it is always the editing endpoint's. With the switch off, no block, and nothing said of noise.
+    settings({ baseUrl: origin, size: "", editEnabled: true, editMultiple: true, editModel: "edit-model", sdExtras: false });
+    await call("POST", "/images/generate", { prompt: "plain", references: [style.id], size: "768x1344", model: "generation-only-model" });
+    const [one] = await settled();
+    assert.equal(one.state, "done", one.error);
+    assert.deepEqual(partList(seen[2]).map((p) => [p.name, p.name === "image" ? p.bytes : p.bytes.toString()]), [["image", png("style")], ["prompt", "plain"], ["model", "edit-model"], ["n", "1"], ["size", "768x1344"]]);
+    const plain = (await listed()).pictures.find((p: any) => p.id === one.pictureId);
+    assert.deepEqual(plain.params, { model: "edit-model", size: "768x1344", references: [style.id] });
+
+    // Without references the request is the one it always was.
+    await clearJobs();
+    await call("POST", "/images/generate", { prompt: "no references" });
+    await settled();
+    assert.match(seen[3].url!, /\/images\/generations$/);
+    assert.deepEqual(seen[3].body, { model: "image-model", prompt: "no references", n: 1 });
+  } finally {
+    server.close();
+    gone();
+  }
+});
+
+test("a reference that was scaled down to fit is said to be a reference, not a picture that was changed", async () => {
+  const { origin, server } = await answering(png("made"));
+  await clearJobs();
+  try {
+    const wide = await sharp({ create: { width: 128, height: 64, channels: 3, background: "#c33" } }).png().toBuffer();
+    const sheet = (await call("POST", "/images/upload?name=sheet.png", undefined, { raw: wide })).body.picture;
+    const style = (await call("POST", "/images/upload?name=style.png", undefined, { raw: wide })).body.picture;
+    settings({ baseUrl: origin, editEnabled: true, editMultiple: true, editMaxSize: "64x64" });
+    await call("POST", "/images/generate", { prompt: "the fox", references: [sheet.id] });
+    const [one] = await settled();
+    assert.equal(one.state, "done", one.error);
+    assert.equal(one.kind, "generate");
+    assert.equal(one.notes.length, 1);
+    assert.match(one.notes[0], /^The reference was scaled down from 128x64 pixels \([^)]+\) to 64x32 pixels \([^)]+\) to fit what the editing endpoint takes\.$/);
+    await clearJobs();
+    await call("POST", "/images/generate", { prompt: "the fox", references: [sheet.id, style.id] });
+    const [two] = await settled();
+    assert.deepEqual(two.notes.map((note: string) => note.split(" was ")[0]), ["Reference 1", "Reference 2"]);
+    // An edit's notes are as they were.
+    await clearJobs();
+    await call("POST", "/images/edit", { prompt: "brighter", sources: [sheet.id] });
+    const [edit] = await settled();
+    assert.match(edit.notes[0], /^The image was scaled down .* to fit what an edit takes\. The result is not scaled back up\.$/);
+  } finally {
+    server.close();
+    gen.saveImageGeneration({ editMaxSize: "" });
+    gone();
+  }
+});
+
+test("references on the page are refused before anything is sent: editing off, several where the endpoint takes one, too many, one that is not in the gallery", async () => {
+  const { origin, seen, server } = await answering(png("made"));
+  await clearJobs();
+  try {
+    const sheet = (await call("POST", "/images/upload?name=sheet.png", undefined, { raw: png("sheet") })).body.picture;
+    const style = (await call("POST", "/images/upload?name=style.png", undefined, { raw: png("style") })).body.picture;
+    settings({ baseUrl: origin, editEnabled: false });
+    const off = await call("POST", "/images/generate", { prompt: "x", references: [sheet.id] });
+    assert.equal(off.status, 409);
+    assert.match(off.body.error, /^Reference pictures are sent to the image editing endpoint, and image editing is switched off or has no address: set it up under Media in Settings, or leave the references out$/);
+    settings({ baseUrl: origin, editEnabled: true, editMultiple: false });
+    const two = await call("POST", "/images/generate", { prompt: "x", references: [sheet.id, style.id] });
+    assert.equal(two.status, 400);
+    assert.match(two.body.error, /not set up to take several pictures, so none was sent \(2 were given\).*"Several pictures per edit"/);
+    settings({ baseUrl: origin, editEnabled: true, editMultiple: true });
+    settings({ baseUrl: origin, editEnabled: true, editMultiple: true, sdExtras: true });
+    const block = await call("POST", "/images/generate", { prompt: 'x <sd_cpp_extra_args>{"seed":1}</sd_cpp_extra_args>', references: [sheet.id] });
+    assert.equal(block.status, 400);
+    assert.match(block.body.error, /^The description has an sd_cpp_extra_args block of its own, which would hide the one that makes a picture with references start from noise/);
+    settings({ baseUrl: origin, editEnabled: true, editMultiple: true });
+    const missing = await call("POST", "/images/generate", { prompt: "x", references: [sheet.id, "ffffffffffff"] });
+    assert.equal(missing.status, 400);
+    assert.match(missing.body.error, /^Reference 2: There is no such picture/);
+    for (const [references, message] of [
+      [[], /leave them out to make a picture from the description alone/],
+      ["abc", /leave them out/],
+      [Array(9).fill(sheet.id), /at most 8 references, and 9 were given/],
+      [["../x"], /named by their ids in the gallery/],
+    ] as const) {
+      const bad = await call("POST", "/images/generate", { prompt: "x", references });
+      assert.equal(bad.status, 400, JSON.stringify(references));
+      assert.match(bad.body.error, message);
+    }
+    assert.equal(seen.length, 0, "nothing was sent");
+    assert.deepEqual((await call("GET", "/images/jobs")).body.jobs, [], "and no job was started");
+  } finally {
+    server.close();
+    gone();
+  }
+});
+
 test("a picture in a chat's folder is deleted from the folder on purpose; what was made of it loses its link, and the rest stays", async () => {
   const { origin, server } = await answering();
   try {

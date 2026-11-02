@@ -1,5 +1,5 @@
 // Development-only fixture: the chat's activity, thinking, tools and compaction, without a server.
-// Open /tests/chat.html?phase=model|prefill|thinking|reasoning|compacting|tools|agents|interrupted|turns to see each state,
+// Open /tests/chat.html?phase=model|prefill|thinking|reasoning|compacting|tools|agents|child-agent|interrupted|turns to see each state,
 // and add &loading=1 for the conversation still arriving.
 import React from 'react';
 import { createRoot } from 'react-dom/client';
@@ -14,7 +14,7 @@ import { installTooltips } from '../src/tooltips';
 import { installMotion } from '../src/motion';
 import { mockFetch } from './mock-fetch';
 import { setLanguage } from '../src/i18n';
-import { startExtensions } from '../src/extensions/loader';
+import { setNavigate, startExtensions } from '../src/extensions/loader';
 // Offers the languages, as the app does: `setLang('de')` fetches German.
 import '../src/locales';
 installTooltips();
@@ -23,6 +23,9 @@ installMotion();
 // The installed extensions, loaded as the app loads them: those the browser test says are installed (`installed` in
 // tests/browser/portal-mock.ts).
 startExtensions();
+// Where an extension takes the page (`portal.navigate`): kept for a test to read, as this page has no others.
+(window as any).navigated = [];
+setNavigate((path) => (window as any).navigated.push(path));
 
 const phase = new URLSearchParams(location.search).get('phase') ?? 'tools';
 const now = Date.now();
@@ -44,6 +47,8 @@ const events: PortalEvent[] = [
   ev('compaction_end', { result: { summary: 'The user asked to fix the build. The build passes; one test fails.', tokensBefore: 84210 } }, 60),
 ];
 if (phase === 'tools') events.push(ev('turn_start', {}, 20), ...bash('b3', 'for i in $(seq 1 40); do echo "step $i"; sleep 1; done', Array.from({ length: 12 }, (_, i) => `step ${i + 1}`).join('\n'), undefined, 12));
+// A command that has just started and put out one line: `window.bashOut(text)` gives it more. `?phase=livetool`.
+if (phase === 'livetool') events.push(ev('turn_start', {}, 20), ...bash('b3', 'npm run build', 'building…', undefined, 12));
 if (phase === 'model') events.push(ev('turn_start', {}, 8), ev('portal_model', { model: 'model-b-q4', state: 'loading' }, 7));
 if (phase === 'prefill') events.push(ev('turn_start', {}, 8), ev('message_start', { message: { role: 'assistant' } }, 7), ev('portal_prefill', { total: 48000, processed: 20160, cache: 12000 }, 1));
 if (phase === 'thinking') events.push(ev('turn_start', {}, 8), ev('message_update', { streamId: 's', assistantMessageEvent: { type: 'thinking_delta', delta: 'The test fails because the regex expects the status at the very end.\nI should check how pi appends it' } }, 5), ev('message_update', { streamId: 's', assistantMessageEvent: { type: 'thinking_delta', delta: ' — it adds two newlines before "Command exited".' } }, 1));
@@ -89,6 +94,12 @@ if (phase === 'stats') events.push(
   ev('portal_prompt', { message: 'hi' }, 6),
   ev('message_end', { streamId: 'st', message: { role: 'assistant', content: [{ type: 'thinking', thinking: 'A greeting.' }, { type: 'text', text: 'Hi — what do you need?' }], usage: { input: 1203, output: 41, cacheRead: 11264, cacheWrite: 0 } },
     timings: { promptTokens: 1203, cachedTokens: 11264, promptMs: 2210, promptPerSecond: 544.3, outputTokens: 41, outputMs: 1142, outputPerSecond: 35.9, draftTokens: 30, draftAccepted: 22 }, thinkingSince: now - 5000, thinkingUntil: now - 4000 }, 3),
+  ev('agent_end', {}, 2),
+);
+// A finished reply with code blocks, which carry their own copy and download buttons: `?phase=code`.
+if (phase === 'code') events.push(
+  ev('portal_prompt', { message: 'Run the tests' }, 6),
+  ev('message_end', { streamId: 'st', message: { role: 'assistant', content: [{ type: 'text', text: 'Here is what ran.\n\n```test\nRunning 3 tests\n  ok 1 - parses\n  ok 2 - writes\n  ok 3 - reads\n```\n\nAnd the code:\n\n```js\nconst a = 1;\n```\n\nDone.' }] } }, 3),
   ev('agent_end', {}, 2),
 );
 // Tools called with more than a path: a search with several queries, an edit with a list of changes, an MCP tool that answers in JSON; then the answer, finished.
@@ -191,6 +202,14 @@ if (phase === 'agents') {
     if (u.includes('/background/') && u.includes('/output')) return { text: u.includes('from=') ? '' : '> vite\n\n  VITE v5.4  ready in 312 ms\n\n  ➜  Local:   http://localhost:5173/\n  ➜  Network: use --host to expose\n', from: 0, size: 120 };
   });
 }
+// A subagent that works in a child chat, as the subagent extension's do: its run is that chat's own transcript, which
+// the test serves at /api/sessions/kid1/events, and not on the protocol.
+if (phase === 'child-agent') {
+  events.push(
+    ev('tool_execution_start', { toolCallId: 'sc', toolName: 'subagent', args: { task: 'Check the backups', label: 'Backup check' } }, 30),
+    ev('portal_subagent', { op: 'start', id: 'kid1', label: 'Backup check', toolCallId: 'sc', input: true, stop: true, detail: 'Starting on local/model-a', chat: 'kid1' }, 30),
+  );
+}
 
 // An extension fills the chat box twice at once, the way pi's RPC mode names it and then as a paste: delivered as the page does, on arrival.
 const fills: PortalEvent[] = phase === 'editor' ? [
@@ -273,7 +292,7 @@ if (phase === 'codemode') {
   });
 }
 
-const session: Session = { id: 'preview', title: 'Fix the build', workspace: '/workspaces/pithagoras', executor: 'host', status: phase === 'interrupted' ? 'interrupted' : phase === 'args' || phase === 'pictures' || phase === 'outputs' || phase === 'stats' || phase === 'flagged' || phase === 'flagged-lazy' ? 'idle' : 'running', created_at: '', updated_at: '', last_error: null, pinned: false, provider: 'llama-server', model: 'Model A', thinking_level: 'medium' } as Session;
+const session: Session = { id: 'preview', title: 'Fix the build', workspace: '/workspaces/pithagoras', executor: 'host', status: phase === 'interrupted' ? 'interrupted' : phase === 'args' || phase === 'code' || phase === 'pictures' || phase === 'outputs' || phase === 'stats' || phase === 'flagged' || phase === 'flagged-lazy' ? 'idle' : 'running', created_at: '', updated_at: '', last_error: null, pinned: false, provider: 'llama-server', model: 'Model A', thinking_level: 'medium' } as Session;
 const noop = async () => {};
 // An extension moves its status twenty times a second: how often the chat asks for /background is counted.
 if (phase === 'nudge') {

@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
 import { schemaFingerprint } from "./schema-fingerprint.mjs";
@@ -18,8 +18,10 @@ import { freePort, inProcessHome } from "./server-harness.mjs";
 // src/schema-version.ts (once for the release, not once for each change),
 // pin the new version and fingerprint here, and have an upgrade test for what
 // changed (below) that starts from a database made before it.
-const PINNED = { version: 16, fingerprint: "2b0252e9872ed75693c0bb267ef0378704ceb43ec324dabbb7219f6eedeb4bae" };
-/** The schema of version 15, the one pinned before: no limit of a routine's own on how long a run may take. */
+const PINNED = { version: 17, fingerprint: "NEW_FINGERPRINT" };
+/** The schema of version 16, the one pinned before: no limit of a routine's own on how long a run may take. */
+const V16_FINGERPRINT = "ba52cad83d268b2700843d8970a6f880eaa924ae3076b3ab66414b2af22eeb1a";
+/** The schema of version 15: no chat is one nobody attends, and every child takes its parent's tools. */
 const V15_FINGERPRINT = "830934df6dce1dd977d16b086c0bbe883bfc18a3463f84e9f22f31efa43fc0cd";
 /** The schema of version 14: no index on the questions a chat asked. */
 const V14_FINGERPRINT = "7a7fcf8359ff86a38fcb9060888fa9ed7816b18bb9cfb2d9da454a893c015bda";
@@ -39,11 +41,18 @@ const home = inProcessHome("pithagoras-schema-");
 const { SCHEMA_VERSION } = await import("../dist/schema-version.js");
 const { getDb } = await import("../dist/db.js");
 
-/** A database of the schema of version 15 at `file`, open: a fresh one, whose routines have no limit of their own on a run. */
-function freshAt15(file) {
+/** A database of the schema of version 16 at `file`, open: a fresh one, whose routines have no limit of their own on a run. */
+function freshAt16(file) {
   getDb().exec(`VACUUM INTO '${file}'`);
   const d = new Database(file);
   d.exec("ALTER TABLE routines DROP COLUMN timeout_min");
+  return d;
+}
+
+/** A database of the schema of version 15 at `file`, open: one of version 16, whose chats are all attended and whose children take their parents' tools. */
+function freshAt15(file) {
+  const d = freshAt16(file);
+  d.exec("ALTER TABLE sessions DROP COLUMN unattended; ALTER TABLE sessions DROP COLUMN tools_from;");
   return d;
 }
 
@@ -1419,14 +1428,15 @@ test("pi's settings with none of the subagent's, or that cannot be read, leave n
 
 test("pi's settings that cannot be written keep the subagent's for the next start, which takes them out and leaves them once", async () => {
   const dir = databaseAt11("subagent-kept");
-  const agentDir = process.env.PI_CODING_AGENT_DIR;
   const text = JSON.stringify({ subagentModel: "llama-swap/model-b" });
   await withPiSettings(text, async (file) => {
-    chmodSync(agentDir, 0o555);
+    // The copy of the file before a save cannot be put in place over a folder, for root too, which a folder's
+    // permissions do not stop: the save fails before the file is touched, as on a disk that takes nothing more.
+    mkdirSync(`${file}.bak`);
     try {
       assert.match(await upgraded(dir), /could not be left for its extension, and are kept for the next start/);
     } finally {
-      chmodSync(agentDir, 0o755);
+      rmSync(`${file}.bak`, { recursive: true });
     }
     assert.equal(readFileSync(file, "utf8"), text);
     await upgraded(dir);
@@ -1604,6 +1614,35 @@ test("a database of version 14, or of 13, is backed up and given the index on th
   }
 });
 
+test("a database of version 15, or of 14, is backed up and given chats nobody attends and children on the defaults at schema 16, its chats kept as they were", async () => {
+  for (const [version, fingerprint, make] of [[15, V15_FINGERPRINT, freshAt15], [14, V14_FINGERPRINT, freshAt13]]) {
+    const dir = path.join(home, `unattended-from-${version}`);
+    mkdirSync(dir, { recursive: true });
+    const d = make(path.join(dir, "portal.db"));
+    d.pragma(`user_version = ${version}`);
+    assert.equal(schemaFingerprint(d), fingerprint, `the schema of version ${version}`);
+    d.prepare("INSERT INTO sessions (id, title, workspace, kind) VALUES ('c1', 'Kites', '/w/site', 'task')").run();
+    d.prepare("INSERT INTO sessions (id, title, workspace, kind, parent_id, listed, creator) VALUES ('c2', 'Tails', '/w/site', 'task', 'c1', 0, 'helper')").run();
+    d.close();
+    assert.deepEqual(upgradeCheck(path.join(dir, "portal.db")), { needed: true, from: version });
+    assert.match(await upgraded(dir), new RegExp(`upgrading the database from version ${version} to ${SCHEMA_VERSION}`));
+    const backups = backupsIn(path.join(dir, "backups"));
+    assert.equal(backups.length, 1, `one backup, of version ${version}`);
+    assert.match(path.basename(backups[0]), new RegExp(`^portal-v${version}-\\d{8}-\\d{6}\\.db$`));
+
+    const now = new Database(path.join(dir, "portal.db"), { readonly: true });
+    try {
+      assert.deepEqual([now.pragma("user_version", { simple: true }), schemaFingerprint(now)], [SCHEMA_VERSION, PINNED.fingerprint]);
+      assert.deepEqual(now.prepare("SELECT id, parent_id, unattended, tools_from FROM sessions ORDER BY id").all(), [
+        { id: "c1", parent_id: null, unattended: 0, tools_from: null },
+        { id: "c2", parent_id: "c1", unattended: 0, tools_from: null },
+      ]);
+    } finally {
+      now.close();
+    }
+  }
+});
+
 // A data folder of v0.1.0 that used every part an extension holds now, each kept as v0.1.0 kept it, on fixtures/portal-v3.db:
 // a chat with a canvas, a picture of the Media page with its file, the image endpoint, voice mode on at the voice service's
 // addresses with the person's own remembered as connecting it kept them, a designed voice and a clone, the GPU chosen,
@@ -1714,15 +1753,15 @@ test("a data folder of v0.1.0 that used every part is brought to this version in
   assert.deepEqual(understoryLeft(dir, "settings.json"), UNDERSTORY_KEPT);
 });
 
-test("a database of version 15 is backed up and given each routine a limit of its own at schema 16, empty: each keeps the portal's default", async () => {
-  const dir = path.join(home, "from-v15");
+test("a database of version 16 is backed up and given each routine a limit of its own at schema 17, empty: each keeps the portal's default", async () => {
+  const dir = path.join(home, "from-v16");
   mkdirSync(dir, { recursive: true });
-  const d = freshAt15(path.join(dir, "portal.db"));
-  assert.equal(schemaFingerprint(d), V15_FINGERPRINT, "the schema of version 15");
-  d.pragma("user_version = 15");
+  const d = freshAt16(path.join(dir, "portal.db"));
+  assert.equal(schemaFingerprint(d), V16_FINGERPRINT, "the schema of version 16");
+  d.pragma("user_version = 16");
   d.prepare("INSERT INTO routines (id, slug, name, schedule, instructions) VALUES ('r1', 'nightly', 'Nightly build', '@daily', 'build it')").run();
   d.close();
-  assert.deepEqual(upgradeCheck(path.join(dir, "portal.db")), { needed: true, from: 15 });
+  assert.deepEqual(upgradeCheck(path.join(dir, "portal.db")), { needed: true, from: 16 });
 
   const run = startUpgrade(dir, await freePort());
   const exited = await new Promise((resolve) => run.child.on("exit", resolve));

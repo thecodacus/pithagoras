@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { type Page } from '@playwright/test';
 import { test, expect } from '../../../../tests/browser/portal-mock';
+import { clickIntoText } from './caret';
 
 /**
  * The Documents extension's editor, as `npm run build` builds it
@@ -98,7 +99,7 @@ test('another document put in its place cannot be undone back into the first', a
   await page.evaluate(async () => {
     (window as any).held = await (window as any).editor.createEditor({ root: document.getElementById('root'), markdown: '# First\n\nOne.\n' });
   });
-  await page.locator('#root p').click();
+  await clickIntoText(page.locator('#root p'));
   await page.keyboard.press('End');
   await page.keyboard.type(' More.');
   await page.waitForTimeout(100);
@@ -115,7 +116,7 @@ test('the editor says what was typed into it as Markdown, and brings no React of
     (window as any).changes = [];
     (window as any).typed = await (window as any).editor.createEditor({ root: document.getElementById('root'), markdown: '# Plan\n\nShip it.\n', onChange: (md: string) => (window as any).changes.push(md) });
   });
-  await page.locator('#root p').click();
+  await clickIntoText(page.locator('#root p'));
   await page.keyboard.press('End');
   await page.keyboard.type(' On Friday.');
   await expect.poll(() => page.evaluate(() => (window as any).changes.at(-1))).toBe('# Plan\n\nShip it. On Friday.\n');
@@ -218,7 +219,7 @@ test('a selection is the passage as the Markdown holds it: the marks at its edge
     expect(markdown.slice(got.end, got.end + got.suffix.length)).toBe(got.suffix);
   }
   // Nothing selected is no passage; neither is a selection of white space.
-  await page.locator('#root p').first().click();
+  await clickIntoText(page.locator('#root p').first());
   await page.keyboard.press('End');
   await page.waitForFunction(() => (window as any).ed.selection() === null);
 });
@@ -242,7 +243,7 @@ test('a mark moves with the text as it is typed, a click on it is told with the 
   const caret = () => page.evaluate(() => { const s = window.getSelection()!; return [s.anchorNode?.textContent, s.anchorOffset]; });
   await expect(mark('green')).toHaveText('The build is green.');
   // Text typed before it, in the paragraph above.
-  await page.locator('#root p').first().click();
+  await clickIntoText(page.locator('#root p').first());
   await page.keyboard.press('Home');
   await page.keyboard.type('Early. ');
   await expect(mark('green')).toHaveText('The build is green.');

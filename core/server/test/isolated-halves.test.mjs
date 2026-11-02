@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { once } from "node:events";
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { connect } from "node:net";
 import path from "node:path";
 import { PassThrough } from "node:stream";
@@ -633,7 +633,7 @@ test("a row in Audit, at once with its TypeError, and an install and where an ex
   await host.syncServerHalves([]);
 });
 
-test("a child chat made, run, stopped and removed from its process, as the package that made it, and no other chat", async () => {
+test("a child chat made, a chat started, run, stopped and removed from its process, as the package that made it, and no other chat", async () => {
   // The session manager is not loaded here: what it is asked, and as which package, is written down.
   const asked = [];
   host.setChatBridge({
@@ -645,6 +645,15 @@ test("a child chat made, run, stopped and removed from its process, as the packa
       asked.push(["create", options.parent, creator]);
       createSession({ id: "kid", title: options.title, workspace: work, executor: "host", parent_id: options.parent, listed: 0, creator });
       return getSession("kid");
+    },
+    start: (options, creator) => {
+      asked.push(["start", options.folder, creator]);
+      createSession({ id: "own", title: options.title, workspace: work, executor: "host", listed: 0, creator, unattended: 1 });
+      return getSession("own");
+    },
+    lastAnswer: (id) => {
+      asked.push(["lastAnswer", id]);
+      return { status: "done", answer: "42", marked: true };
     },
     run: async (id, message, options) => {
       asked.push(["run", id, message, options]);
@@ -659,20 +668,74 @@ test("a child chat made, run, stopped and removed from its process, as the packa
         const child = portal.chats.create({ parent: "a", title: "Helper", listed: false });
         const run = await portal.chats.prompt(child.id, "Answer", { steer: true });
         await portal.chats.abort(child.id);
+        const last = portal.chats.lastAnswer(child.id);
         const found = portal.chats.children("a");
         const theirs = await portal.chats.remove("a").catch((e) => e.message);
         await portal.chats.remove(child.id);
-        res.json({ child, run, theirs, found });
+        const started = portal.chats.start({ folder: "/somewhere", title: "Of a folder", listed: false, unattended: true });
+        await portal.chats.remove(started.id);
+        const owner = portal.chats.owner("kid");
+        const nobody = portal.chats.owner("nowhere") ?? null;
+        res.json({ child, run, last, theirs, found, started, owner, nobody });
       });
     `),
   ]);
   assert.deepEqual((await get("/api/x/maker/go", { method: "POST" })).body, {
     child: { id: "kid", title: "Helper", workspace: work, status: "idle", parent: "a", listed: false },
     run: { status: "done", answer: "42" },
-    theirs: "a is no child chat",
+    last: { status: "done", answer: "42", marked: true },
+    theirs: "a is no chat a package made: only a child chat or a chat a package started is prompted, stopped or removed",
     found: [{ id: "kid", title: "Helper", workspace: work, status: "idle", parent: "a", listed: false }],
+    started: { id: "own", title: "Of a folder", workspace: work, status: "idle", listed: false, unattended: true },
+    owner: { path: realpathSync(work), name: "site", kind: "project" },
+    nobody: null,
   });
-  assert.deepEqual(asked, [["create", "a", "maker"], ["run", "kid", "Answer", { steer: true }], ["abort", "kid"], ["remove", "kid"]]);
+  assert.deepEqual(asked, [["create", "a", "maker"], ["run", "kid", "Answer", { steer: true }], ["abort", "kid"], ["lastAnswer", "kid"], ["remove", "kid"], ["start", "/somewhere", "maker"], ["remove", "own"]]);
+  await host.syncServerHalves([]);
+});
+
+test("its routes and upgrades are told who is behind a request, in the portal's process and in one of its own; a header the request came with does not say it", async () => {
+  const { putSetting } = await import("../dist/db.js");
+  const { issueCookie, setUpPassword } = await import("../dist/auth.js");
+  const { seen, setRole, forgetPerson } = await import("../dist/people.js");
+  const body = `
+    portal.router.get("/who", (req, res) => res.json({ person: portal.http.person(req) ?? null, header: req.headers["x-pithagoras-person"] ?? null }));
+    portal.http.upgrade((req, socket) => {
+      socket.end("HTTP/1.1 101 Switching Protocols\\r\\nUpgrade: who\\r\\nConnection: Upgrade\\r\\n\\r\\n" + JSON.stringify(portal.http.person(req) ?? null));
+    });
+  `;
+  await host.syncServerHalves([half("own", body), half("inside", body, { isolated: false })]);
+  // A login, as signing in on the portal's page makes one.
+  assert.equal(await setUpPassword("a password long enough"), null);
+  let login = "";
+  issueCookie({ req: { secure: false }, cookie: (name, value) => (login = `${name}=${encodeURIComponent(value)}`) });
+  const forged = encodeURIComponent(JSON.stringify({ id: "someone", name: "Mallory", role: "primary" }));
+  const who = async (name, cookie) => (await get(`/api/x/${name}/who`, { headers: { "x-pithagoras-person": forged, ...(cookie ? { cookie } : {}) } })).body;
+  const upgraded = async (name, cookie) => {
+    const socket = connect(server.address().port, "127.0.0.1");
+    let heard = "";
+    socket.on("data", (data) => (heard += data));
+    socket.write(`GET /api/x/${name}/stream HTTP/1.1\r\nHost: here\r\nUpgrade: who\r\nConnection: Upgrade\r\n${cookie ? `Cookie: ${cookie}\r\n` : ""}x-pithagoras-person: ${forged}\r\n\r\n`);
+    await new Promise((resolve) => socket.on("close", resolve));
+    return JSON.parse(heard.slice(heard.indexOf("\r\n\r\n") + 4));
+  };
+  try {
+    const owner = { id: "owner", name: "Owner", role: "primary" };
+    for (const name of ["own", "inside"]) {
+      assert.deepEqual((await who(name, login)).person, owner, name);
+      assert.deepEqual(await upgraded(name, login), owner, `${name}, an upgrade`);
+      // With no login (which the portal's own login refuses before it gets here), nobody's, whatever the request says.
+      assert.equal((await who(name)).person, null, `${name}, with no login`);
+      assert.equal(await upgraded(name), null, `${name}, an upgrade with no login`);
+    }
+    assert.equal((await who("own")).header, null, "the header a request came with is not handed on");
+    seen("telegram:42", "Sam");
+    setRole("telegram:42", "primary");
+    assert.deepEqual((await who("own", login)).person, { id: "owner", name: "Sam", role: "primary" }, "called what People calls the primary user");
+    forgetPerson("telegram:42");
+  } finally {
+    putSetting("portal_password", "");
+  }
   await host.syncServerHalves([]);
 });
 

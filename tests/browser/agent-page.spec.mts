@@ -101,7 +101,9 @@ test('the sidebar moves its house to the agent picked, without waiting for its n
 
 /** The wizard's two steps, answered: a character and a name. */
 async function answerWizard(main: Locator) {
-  await main.getByLabel('Name').fill('Ada');
+  // The field, not whatever else is labelled with the word: the agent's page can be drawn before the wizard, and its
+  // "Rename Ada" button is too.
+  await main.getByRole('textbox', { name: 'Name', exact: true }).fill('Ada');
   await main.getByLabel('Character').fill('Brisk, answers in two lines.');
   await main.getByRole('button', { name: 'Next' }).click();
   await main.getByLabel('Your name').fill('Sam');

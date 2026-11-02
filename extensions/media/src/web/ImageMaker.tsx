@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
-import { LuChevronLeft, LuChevronRight, LuLoader, LuPlus, LuSlidersHorizontal, LuSparkles, LuUpload, LuWandSparkles, LuX } from "react-icons/lu";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import { LuChevronLeft, LuChevronRight, LuImagePlus, LuLoader, LuPlus, LuSlidersHorizontal, LuSparkles, LuUpload, LuWandSparkles, LuX } from "react-icons/lu";
 import { Link, Select, local, portal, settingsPage, t, tp, tx } from "../portal";
 import { api, type GalleryPicture, type ImagesFeature, type PictureJob } from "./api";
 import { IMAGE_TYPES, isEnter, sortFiles } from "./helpers";
@@ -10,11 +10,18 @@ import { MaskPainter, type MaskHandle } from "./MaskPainter";
 /** What an edit takes in: what the editing endpoints are known to read, the same as the portal checks by the bytes. */
 const ACCEPT = IMAGE_TYPES.join(",");
 
-/** What is said of pictures that were put in and not taken: there was no room, or the editing endpoint takes one. */
-const leftOutText = (left: number, multiple: boolean): string =>
-  multiple
-    ? tp(left, "One picture was left out: an edit takes at most {max}.", "{n} pictures were left out: an edit takes at most {max}.", { max: MAX_SOURCES })
-    : tp(left, "One more picture was left out: this editing endpoint takes one picture per edit.", "{n} more pictures were left out: this editing endpoint takes one picture per edit.");
+/** What is said of pictures that were put in and not taken: there was no room, or the editing endpoint takes one. `references` is whether they were to be references. */
+const leftOutText = (left: number, multiple: boolean, references: boolean): string =>
+  references
+    ? multiple
+      ? tp(left, "One picture was left out: a picture takes at most {max} references.", "{n} pictures were left out: a picture takes at most {max} references.", { max: MAX_SOURCES })
+      : tp(left, "One more picture was left out: this editing endpoint takes one reference picture.", "{n} more pictures were left out: this editing endpoint takes one reference picture.")
+    : multiple
+      ? tp(left, "One picture was left out: an edit takes at most {max}.", "{n} pictures were left out: an edit takes at most {max}.", { max: MAX_SOURCES })
+      : tp(left, "One more picture was left out: this editing endpoint takes one picture per edit.", "{n} more pictures were left out: this editing endpoint takes one picture per edit.");
+
+/** Which list of pictures the form is putting pictures into: the ones a change works from, or a new picture's references. */
+type Into = "sources" | "references";
 
 /** What the form is for: a new picture from a description, or a change to pictures there are. */
 export type Mode = "make" | "edit";
@@ -48,7 +55,13 @@ const problemText = (problem: Problem): string => {
  * rather than leave the person without it.
  *
  * Generate is a description and a button, with the settings of the picture
- * under it. Edit is the pictures to change and a description of the change,
+ * under it, and reference pictures where the person opens them: pictures of a
+ * character, an object or a style that the new picture is made with. They go to
+ * the editing endpoint, the one that takes pictures, so they need editing set up,
+ * and the picture starts from noise where the add-on says the endpoint is
+ * stable-diffusion.cpp; the form says what happens where it does not. While they
+ * are open the gallery's boxes choose them, and a drop or a paste adds to them.
+ * Edit is the pictures to change and a description of the change,
  * with the same settings and a strength. The pictures are chosen in the gallery under the form (the page
  * takes the clicks there), or put in from this computer, several at once where
  * the editing endpoint takes them: picked, dropped on the form or pasted. The
@@ -78,6 +91,10 @@ export function ImageMaker({
   onMode,
   sources,
   onSources,
+  references,
+  onReferences,
+  referencesOpen,
+  onReferencesOpen,
   onFind,
   onStarted,
   onUploaded,
@@ -94,6 +111,11 @@ export function ImageMaker({
   /** The pictures to change, in the order the prompt refers to them. They stay while the form is making a new picture, for the way back. */
   sources: GalleryPicture[];
   onSources: (sources: GalleryPicture[]) => void;
+  /** A new picture's references, in the order the prompt refers to them, and whether the form has them open: the page picks them in the gallery while it does. Closed, there are none. */
+  references: GalleryPicture[];
+  onReferences: (references: GalleryPicture[]) => void;
+  referencesOpen: boolean;
+  onReferencesOpen: (open: boolean) => void;
   /** The pictures of the gallery with these ids, those there are: what a picture of the page that is dragged or pasted into the form is taken as. */
   onFind: (ids: string[]) => Promise<GalleryPicture[]>;
   onStarted: (jobs: PictureJob[]) => void;
@@ -134,18 +156,29 @@ export function ImageMaker({
   };
   const invalid = (field: FieldName) => problem?.field === field;
   const multiple = features.editMultiple;
-  // The pictures as the last of the ones put in meanwhile left them: a drop while another is being uploaded adds to that.
-  const sourcesNow = useRef(sources);
-  sourcesNow.current = sources;
+  // The pictures as the last of the ones put in meanwhile left them: a drop while another is being uploaded adds to that. Brought up to date with what was committed, not with a render that may be dropped.
+  const listsNow = useRef({ sources, references });
+  useLayoutEffect(() => {
+    listsNow.current = { sources, references };
+  }, [sources, references]);
+  const setters: Record<Into, (list: GalleryPicture[]) => void> = { sources: onSources, references: onReferences };
   // Making and changing have a switch and an address each: either can be on without the other.
   const generating = features.ready;
   const changing = features.editReady;
+  // The references are open in Generate: the row of pictures is theirs then, as it is the change's in Edit.
+  const referring = !editing && generating && referencesOpen;
+  const list = editing ? sources : references;
+  const setList = editing ? onSources : onReferences;
+  // A new picture with references is made by the editing endpoint, always with its model: the one typed for making pictures is kept, and neither shown nor sent.
+  const referenceModel = referring && references.length > 0;
   const full = running >= limit;
   const count = Math.min(form.count, Math.max(1, limit - running));
-  const refused = editing ? refusal(sources, multiple) : undefined;
+  const refused = editing || referring ? refusal(list, multiple) : undefined;
   const why =
     refused === "one"
-      ? t("This editing endpoint takes one picture per edit, and {n} are chosen. Take out all but one, or switch on “Several pictures per edit”.", { n: sources.length })
+      ? editing
+        ? t("This editing endpoint takes one picture per edit, and {n} are chosen. Take out all but one, or switch on “Several pictures per edit”.", { n: sources.length })
+        : t("This editing endpoint takes one reference picture, and {n} are chosen. Take out all but one, or switch on “Several pictures per edit”.", { n: references.length })
       : undefined;
 
   // Another picture to change is another picture to paint on.
@@ -173,19 +206,20 @@ export function ImageMaker({
     // At the end of the row the button that was pressed is off: the one that is left moves it back.
     const same = button(todo.moved.by);
     (same && !same.disabled ? same : button(todo.moved.by === 1 ? -1 : 1))?.focus();
-  }, [sources]);
+  }, [list]);
 
   /** Puts a picture at a place in the row, by a drag or an arrow, and says where it went. */
-  const reorder = (list: GalleryPicture[], id: string) => {
-    const at = list.findIndex((p) => p.id === id);
-    const picture = list[at];
-    onSources(list);
-    if (picture) setMoveNote(t("{name} is picture {n} of {total} now", { name: sourceName(picture), n: at + 1, total: list.length }));
+  const reorder = (next: GalleryPicture[], id: string) => {
+    const at = next.findIndex((p) => p.id === id);
+    const picture = next[at];
+    setList(next);
+    if (picture) setMoveNote(t("{name} is picture {n} of {total} now", { name: sourceName(picture), n: at + 1, total: next.length }));
   };
 
   const submit = async () => {
     const said = prompt.trim();
-    if (!said || busy || full || refused || (editing && (!sources.length || adding > 0))) return;
+    // Pictures still being put in, as a change's or as references, are waited for: a request sent now would leave them out.
+    if (!said || busy || full || refused || adding > 0 || (editing && !sources.length)) return;
     setError(null);
     setNotice(null);
     setProblem(null);
@@ -204,7 +238,8 @@ export function ImageMaker({
         const { jobs } = await api.changePicture({ prompt: said, sources: sources.map((p) => p.id), ...settings.body, ...(painted ? { mask: painted } : {}), count });
         onStarted(jobs);
       } else {
-        const { jobs } = await api.makePictures({ prompt: said, ...settings.body, count });
+        const { model: _typed, ...withoutModel } = settings.body;
+        const { jobs } = await api.makePictures({ prompt: said, ...(references.length ? { ...withoutModel, references: references.map((p) => p.id) } : settings.body), count });
         onStarted(jobs);
       }
     } catch (e) {
@@ -214,22 +249,22 @@ export function ImageMaker({
     }
   };
 
-  /** Pictures of the gallery that were dragged or pasted in as themselves: added to the pictures of the edit, with nothing uploaded. */
-  const putKnown = (found: GalleryPicture[]) => {
-    const added = addSources(sourcesNow.current, found, multiple);
-    sourcesNow.current = added.list;
-    onSources(added.list);
-    if (added.left > 0) setNotice(leftOutText(added.left, multiple));
+  /** Pictures of the gallery that were dragged or pasted in as themselves: added to the pictures of the edit, or the references, with nothing uploaded. */
+  const putKnown = (found: GalleryPicture[], into: Into) => {
+    const added = addSources(listsNow.current[into], found, multiple);
+    listsNow.current = { ...listsNow.current, [into]: added.list };
+    setters[into](added.list);
+    if (added.left > 0) setNotice(leftOutText(added.left, multiple, into === "references"));
   };
-  /** Puts files in the gallery, one after another so that they keep the order they were given in, and adds them to the pictures of the edit. */
-  const put = async (files: File[], own: string[]) => {
+  /** Puts files in the gallery, one after another so that they keep the order they were given in, and adds them to the pictures of the edit, or the references. */
+  const put = async (files: File[], own: string[], into: Into) => {
     // What came from a picture of the gallery is that picture: it is in the gallery, and a copy of it would be there twice.
     const known = own.length ? await onFind(own) : [];
-    if (known.length) return putKnown(known);
+    if (known.length) return putKnown(known, into);
     const { images, others } = sortFiles(files);
     const problems = others.map((f) => t("{name} is not a PNG, JPEG, GIF or WebP picture", { name: f.name || t("Pasted picture") }));
     // Only as many as there is room for are put in the gallery: the rest would be pictures nobody asked to keep.
-    const taking = images.slice(0, roomFor(sourcesNow.current.length, multiple));
+    const taking = images.slice(0, roomFor(listsNow.current[into].length, multiple));
     const left = images.length - taking.length;
     const got: GalleryPicture[] = [];
     for (const picked of taking) {
@@ -243,25 +278,26 @@ export function ImageMaker({
     let late = 0;
     if (got.length) {
       onUploaded(got[0]);
-      const added = addSources(sourcesNow.current, got, multiple);
+      const added = addSources(listsNow.current[into], got, multiple);
       late = added.left;
-      sourcesNow.current = added.list;
-      onSources(added.list);
+      listsNow.current = { ...listsNow.current, [into]: added.list };
+      setters[into](added.list);
     }
-    if (left + late > 0) setNotice(leftOutText(left + late, multiple));
+    if (left + late > 0) setNotice(leftOutText(left + late, multiple, into === "references"));
     if (problems.length) setError(problems.join(" "));
   };
   const queue = useRef<Promise<void>>(Promise.resolve());
   /** Picked, dropped or pasted: each set of files waits for the one before it, so that two quick pastes do not take the same places. */
   const addFiles = (files: File[], own: string[] = []) => {
     if ((!files.length && !own.length) || !changing) return;
-    // Pictures put on the form are for a change, wherever it was left.
-    onMode("edit");
+    // Pictures put on the form are references while those are open in Generate, and otherwise for a change, wherever it was left.
+    const into: Into = referring ? "references" : "sources";
+    if (into === "sources") onMode("edit");
     setError(null);
     setNotice(null);
     setAdding((n) => n + 1);
     queue.current = queue.current
-      .then(() => put(files, own))
+      .then(() => put(files, own, into))
       .catch((e: Error) => setError(e.message))
       .finally(() => setAdding((n) => n - 1));
   };
@@ -298,13 +334,15 @@ export function ImageMaker({
           {t("Model")}
           <input
             id="image-model"
-            value={fields.model}
+            value={referenceModel ? features.editModel : fields.model}
             onChange={(e) => setField({ model: e.target.value })}
-            placeholder={(editing ? features.editModel : features.model) || empty}
+            placeholder={(editing || referenceModel ? features.editModel : features.model) || empty}
+            disabled={referenceModel}
+            aria-describedby={referenceModel ? "image-model-hint" : undefined}
             maxLength={200}
             spellCheck={false}
             autoComplete="off"
-            className={numberCls}
+            className={`${numberCls} disabled:opacity-50`}
           />
         </label>
         {numberField("width", t("Width"), shownSize.width || empty)}
@@ -321,6 +359,11 @@ export function ImageMaker({
           />
         </div>
       </div>
+      {referenceModel && (
+        <p id="image-model-hint" className="mt-1 text-[11px] text-fg-faint">
+          {features.editModel ? t("Reference pictures use the editing model: {name}", { name: features.editModel }) : t("Reference pictures use the editing endpoint's own model.")}
+        </p>
+      )}
 
       <button type="button" onClick={() => change({ open: !form.open })} aria-expanded={form.open} className={`${ghostCls} mt-2`}>
         <LuSlidersHorizontal aria-hidden className="h-3.5 w-3.5" />
@@ -426,9 +469,139 @@ export function ImageMaker({
     { id: "edit", label: t("Edit"), icon: <LuWandSparkles aria-hidden className="h-4 w-4" />, ready: changing },
   ];
   const noPicture = editing && !sources.length;
-  // Pictures still being put in are not in the row yet: an edit sent now would leave them out, while the row goes on to show them as if they were used.
-  const waiting = editing && adding > 0;
-  const showRow = sources.length > 0 || adding > 0;
+  // Pictures still being put in are not in the row yet: a request sent now would leave them out, while the row goes on to show them as if they were used.
+  const waiting = adding > 0;
+  const showRow = list.length > 0 || adding > 0;
+
+  /**
+   * The row of pictures the form works with, in the order the request sends them: the change's in Edit, the references
+   * in Generate. Each opens larger, moves by a drag or its arrows, and is taken out by its ×; `labelledBy` is its heading.
+   */
+  const pictureRow = (labelledBy: string) => (
+    <ol ref={row} aria-labelledby={labelledBy} className="mt-1.5 flex flex-wrap gap-x-3 gap-y-2">
+      {list.map((p, i) => (
+        <li
+          key={p.id}
+          // Dragged by mouse or pen to another place, where the browser lets a thumbnail be; the arrows below are the way for a keyboard and a touch screen.
+          draggable={list.length > 1}
+          onDragStart={(e) => {
+            e.dataTransfer.effectAllowed = "move";
+            e.dataTransfer.setData(SOURCE_TYPE, p.id);
+            setDragged(p.id);
+          }}
+          onDragOver={(e) => {
+            if (!e.dataTransfer.types.includes(SOURCE_TYPE)) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "move";
+            setOver(i);
+          }}
+          onDragLeave={(e) => {
+            if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setOver((now) => (now === i ? null : now));
+          }}
+          onDrop={(e) => {
+            const id = e.dataTransfer.getData(SOURCE_TYPE);
+            setDragged(null);
+            setOver(null);
+            if (!id) return;
+            e.preventDefault();
+            // Not the form's: it takes dropped files, and this is no file.
+            e.stopPropagation();
+            reorder(moveTo(list, id, i), id);
+          }}
+          onDragEnd={() => {
+            setDragged(null);
+            setOver(null);
+          }}
+          className={`flex w-16 flex-col items-center gap-1 rounded-lg ${list.length > 1 ? "cursor-grab" : ""} ${dragged === p.id ? "opacity-40" : ""} ${over === i && dragged && dragged !== p.id ? "outline-2 outline-offset-2 outline-accent" : ""}`}
+        >
+          <div className="relative">
+            {/* A button, so that it can be looked at larger and a keyboard reaches it. */}
+            <button type="button" data-source-id={p.id} onClick={() => setLooking(p.id)} aria-label={t("Look at {name}", { name: sourceName(p) })} title={t("Look at {name}", { name: sourceName(p) })} className="block rounded-lg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
+              <img
+                src={p.thumb ? api.galleryThumbUrl(p.id) : api.galleryFileUrl(p.id)}
+                alt={sourceName(p)}
+                loading="lazy"
+                draggable={false}
+                className={`h-16 w-16 rounded-lg border object-cover ${masking && i === 0 ? "border-accent ring-2 ring-accent" : "border-line"}`}
+              />
+            </button>
+            {list.length > 1 && <span className="pointer-events-none absolute bottom-0.5 left-0.5 rounded bg-surface/85 px-1 text-[10px] tabular-nums text-fg">{i + 1}</span>}
+            {masking && i === 0 && <span className="pointer-events-none absolute left-0.5 top-0.5 rounded bg-accent px-1 text-[10px] text-accent-fg">{t("Mask")}</span>}
+            <button
+              type="button"
+              onClick={() => {
+                refocus.current = { gone: i };
+                setList(list.filter((s) => s.id !== p.id));
+              }}
+              aria-label={t("Remove {name}", { name: sourceName(p) })}
+              title={t("Remove")}
+              className="absolute -right-2 -top-2 grid h-6 w-6 place-items-center rounded-full border border-line bg-surface text-fg-muted hover:text-danger sm:-right-1.5 sm:-top-1.5 sm:h-5 sm:w-5"
+            >
+              <LuX aria-hidden className="h-3 w-3" />
+            </button>
+          </div>
+          {list.length > 1 && (
+            <div className="flex gap-1">
+              <button
+                type="button"
+                data-move="-1"
+                data-move-id={p.id}
+                onClick={() => {
+                  refocus.current = { moved: { id: p.id, by: -1 } };
+                  reorder(moved(list, i, -1), p.id);
+                }}
+                disabled={i === 0}
+                aria-label={t("Move {name} earlier", { name: sourceName(p) })}
+                title={t("Earlier")}
+                className="grid h-6 w-7 place-items-center rounded-md bg-fg/5 text-fg-muted hover:bg-fg/10 hover:text-fg disabled:pointer-events-none disabled:opacity-35"
+              >
+                <LuChevronLeft aria-hidden className="h-3.5 w-3.5" />
+              </button>
+              <button
+                type="button"
+                data-move="1"
+                data-move-id={p.id}
+                onClick={() => {
+                  refocus.current = { moved: { id: p.id, by: 1 } };
+                  reorder(moved(list, i, 1), p.id);
+                }}
+                disabled={i === list.length - 1}
+                aria-label={t("Move {name} later", { name: sourceName(p) })}
+                title={t("Later")}
+                className="grid h-6 w-7 place-items-center rounded-md bg-fg/5 text-fg-muted hover:bg-fg/10 hover:text-fg disabled:pointer-events-none disabled:opacity-35"
+              >
+                <LuChevronRight aria-hidden className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          )}
+        </li>
+      ))}
+      {adding > 0 && (
+        <li className="grid h-16 w-16 place-items-center rounded-lg border border-dashed border-line text-fg-subtle">
+          <LuLoader aria-hidden className="h-4 w-4 animate-spin" />
+          <span role="status" className="sr-only">
+            {t("Adding…")}
+          </span>
+        </li>
+      )}
+      {multiple && list.length < MAX_SOURCES && (
+        <li>
+          <button
+            type="button"
+            onClick={() => file.current?.click()}
+            aria-label={t("Add pictures from this computer")}
+            title={t("Add pictures from this computer")}
+            className="grid h-16 w-16 place-items-center rounded-lg border border-dashed border-line text-fg-muted transition hover:border-accent/60 hover:bg-accent/5 hover:text-accent"
+          >
+            <span className="grid place-items-center gap-0.5 text-[11px]">
+              <LuPlus aria-hidden className="h-4 w-4" />
+              {t("Add")}
+            </span>
+          </button>
+        </li>
+      )}
+    </ol>
+  );
 
   return (
     <section
@@ -464,7 +637,13 @@ export function ImageMaker({
     >
       {dragging && (
         <div className="pointer-events-none absolute inset-0 z-10 grid place-items-center rounded-2xl border-2 border-dashed border-accent/60 bg-accent/10 px-4 text-center text-xs text-accent">
-          {multiple ? t("Drop pictures here to change them, or to use them as references") : t("Drop a picture here to change it")}
+          {referring
+            ? multiple
+              ? t("Drop pictures here to use them as references")
+              : t("Drop a picture here to use it as a reference")
+            : multiple
+              ? t("Drop pictures here to change them, or to use them as references")
+              : t("Drop a picture here to change it")}
         </div>
       )}
 
@@ -506,129 +685,7 @@ export function ImageMaker({
             {multiple && <span className="ml-auto shrink-0 text-[11px] tabular-nums text-fg-subtle">{t("{n} of {max} pictures", { n: sources.length, max: MAX_SOURCES })}</span>}
           </div>
           {showRow ? (
-            <ol ref={row} aria-labelledby="edit-sources-heading" className="mt-1.5 flex flex-wrap gap-x-3 gap-y-2">
-              {sources.map((p, i) => (
-                <li
-                  key={p.id}
-                  // Dragged by mouse or pen to another place, where the browser lets a thumbnail be; the arrows below are the way for a keyboard and a touch screen.
-                  draggable={sources.length > 1}
-                  onDragStart={(e) => {
-                    e.dataTransfer.effectAllowed = "move";
-                    e.dataTransfer.setData(SOURCE_TYPE, p.id);
-                    setDragged(p.id);
-                  }}
-                  onDragOver={(e) => {
-                    if (!e.dataTransfer.types.includes(SOURCE_TYPE)) return;
-                    e.preventDefault();
-                    e.dataTransfer.dropEffect = "move";
-                    setOver(i);
-                  }}
-                  onDragLeave={(e) => {
-                    if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setOver((now) => (now === i ? null : now));
-                  }}
-                  onDrop={(e) => {
-                    const id = e.dataTransfer.getData(SOURCE_TYPE);
-                    setDragged(null);
-                    setOver(null);
-                    if (!id) return;
-                    e.preventDefault();
-                    // Not the form's: it takes dropped files, and this is no file.
-                    e.stopPropagation();
-                    reorder(moveTo(sources, id, i), id);
-                  }}
-                  onDragEnd={() => {
-                    setDragged(null);
-                    setOver(null);
-                  }}
-                  className={`flex w-16 flex-col items-center gap-1 rounded-lg ${sources.length > 1 ? "cursor-grab" : ""} ${dragged === p.id ? "opacity-40" : ""} ${over === i && dragged && dragged !== p.id ? "outline-2 outline-offset-2 outline-accent" : ""}`}
-                >
-                  <div className="relative">
-                    {/* A button, so that it can be looked at larger and a keyboard reaches it. */}
-                    <button type="button" data-source-id={p.id} onClick={() => setLooking(p.id)} aria-label={t("Look at {name}", { name: sourceName(p) })} title={t("Look at {name}", { name: sourceName(p) })} className="block rounded-lg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
-                      <img
-                        src={p.thumb ? api.galleryThumbUrl(p.id) : api.galleryFileUrl(p.id)}
-                        alt={sourceName(p)}
-                        loading="lazy"
-                        draggable={false}
-                        className={`h-16 w-16 rounded-lg border object-cover ${masking && i === 0 ? "border-accent ring-2 ring-accent" : "border-line"}`}
-                      />
-                    </button>
-                    {sources.length > 1 && <span className="pointer-events-none absolute bottom-0.5 left-0.5 rounded bg-surface/85 px-1 text-[10px] tabular-nums text-fg">{i + 1}</span>}
-                    {masking && i === 0 && <span className="pointer-events-none absolute left-0.5 top-0.5 rounded bg-accent px-1 text-[10px] text-accent-fg">{t("Mask")}</span>}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        refocus.current = { gone: i };
-                        onSources(sources.filter((s) => s.id !== p.id));
-                      }}
-                      aria-label={t("Remove {name}", { name: sourceName(p) })}
-                      title={t("Remove")}
-                      className="absolute -right-2 -top-2 grid h-6 w-6 place-items-center rounded-full border border-line bg-surface text-fg-muted hover:text-danger sm:-right-1.5 sm:-top-1.5 sm:h-5 sm:w-5"
-                    >
-                      <LuX aria-hidden className="h-3 w-3" />
-                    </button>
-                  </div>
-                  {sources.length > 1 && (
-                    <div className="flex gap-1">
-                      <button
-                        type="button"
-                        data-move="-1"
-                        data-move-id={p.id}
-                        onClick={() => {
-                          refocus.current = { moved: { id: p.id, by: -1 } };
-                          reorder(moved(sources, i, -1), p.id);
-                        }}
-                        disabled={i === 0}
-                        aria-label={t("Move {name} earlier", { name: sourceName(p) })}
-                        title={t("Earlier")}
-                        className="grid h-6 w-7 place-items-center rounded-md bg-fg/5 text-fg-muted hover:bg-fg/10 hover:text-fg disabled:pointer-events-none disabled:opacity-35"
-                      >
-                        <LuChevronLeft aria-hidden className="h-3.5 w-3.5" />
-                      </button>
-                      <button
-                        type="button"
-                        data-move="1"
-                        data-move-id={p.id}
-                        onClick={() => {
-                          refocus.current = { moved: { id: p.id, by: 1 } };
-                          reorder(moved(sources, i, 1), p.id);
-                        }}
-                        disabled={i === sources.length - 1}
-                        aria-label={t("Move {name} later", { name: sourceName(p) })}
-                        title={t("Later")}
-                        className="grid h-6 w-7 place-items-center rounded-md bg-fg/5 text-fg-muted hover:bg-fg/10 hover:text-fg disabled:pointer-events-none disabled:opacity-35"
-                      >
-                        <LuChevronRight aria-hidden className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                  )}
-                </li>
-              ))}
-              {adding > 0 && (
-                <li className="grid h-16 w-16 place-items-center rounded-lg border border-dashed border-line text-fg-subtle">
-                  <LuLoader aria-hidden className="h-4 w-4 animate-spin" />
-                  <span role="status" className="sr-only">
-                    {t("Adding…")}
-                  </span>
-                </li>
-              )}
-              {multiple && sources.length < MAX_SOURCES && (
-                <li>
-                  <button
-                    type="button"
-                    onClick={() => file.current?.click()}
-                    aria-label={t("Add pictures from this computer")}
-                    title={t("Add pictures from this computer")}
-                    className="grid h-16 w-16 place-items-center rounded-lg border border-dashed border-line text-fg-muted transition hover:border-accent/60 hover:bg-accent/5 hover:text-accent"
-                  >
-                    <span className="grid place-items-center gap-0.5 text-[11px]">
-                      <LuPlus aria-hidden className="h-4 w-4" />
-                      {t("Add")}
-                    </span>
-                  </button>
-                </li>
-              )}
-            </ol>
+            pictureRow("edit-sources-heading")
           ) : (
             <p className="mt-1.5 rounded-xl border border-dashed border-line px-3 py-4 text-center text-xs text-fg-subtle">
               {multiple
@@ -695,6 +752,94 @@ export function ImageMaker({
         </label>
       )}
 
+      {/* Reference pictures, for Generate: closed until the person opens them, and empty again when they close them. */}
+      {!editing && generating && (
+        <div className="mt-2">
+          <button
+            type="button"
+            onClick={() => {
+              if (referencesOpen) onReferences([]);
+              onReferencesOpen(!referencesOpen);
+            }}
+            aria-expanded={referencesOpen}
+            className={ghostCls}
+          >
+            <LuImagePlus aria-hidden className="h-3.5 w-3.5" />
+            {referencesOpen ? t("Leave out the reference pictures") : t("Use reference pictures")}
+          </button>
+          {referring &&
+            (changing ? (
+              <div className="mt-2">
+                <div className="flex items-baseline gap-2">
+                  <p id="reference-heading" className="text-xs text-fg-muted">
+                    {multiple && references.length > 1
+                      ? tp(references.length, "The {n} reference picture, in the order the description can refer to them", "The {n} reference pictures, in the order the description can refer to them")
+                      : t("Reference pictures: a character, an object or a style to carry into the new picture")}
+                  </p>
+                  {multiple && <span className="ml-auto shrink-0 text-[11px] tabular-nums text-fg-subtle">{t("{n} of {max} pictures", { n: references.length, max: MAX_SOURCES })}</span>}
+                </div>
+                {showRow ? (
+                  pictureRow("reference-heading")
+                ) : (
+                  <p className="mt-1.5 rounded-xl border border-dashed border-line px-3 py-4 text-center text-xs text-fg-subtle">
+                    {multiple
+                      ? t("No reference picture yet. Tick pictures in the gallery below, drop or paste them here, or add them from this computer.")
+                      : t("No reference picture yet. Tick one in the gallery below, drop or paste it here, or add it from this computer.")}
+                  </p>
+                )}
+                <p aria-live="polite" className="sr-only">
+                  {moveNote}
+                </p>
+                {multiple && references.length > 1 && (
+                  <p className="mt-2 text-[11px] text-fg-muted">
+                    {t("The description can name them by their place: “the first picture”, “the second picture”. Drag a picture to another place, or use the arrows under it, to change the order; the endpoint gets them in this order.")}
+                  </p>
+                )}
+                {references.length > 0 &&
+                  (sd ? (
+                    <p className="mt-2 text-[11px] text-fg-faint">{t("The new picture starts from noise: the references guide it, and none of them is changed.")}</p>
+                  ) : (
+                    // Not known of the endpoint: what happens on a stable-diffusion.cpp server is said, and what to switch on for it.
+                    <p className="mt-2 rounded-lg bg-warn/10 px-2 py-1.5 text-[11px] text-warn">
+                      {tx("Stable Diffusion extra settings are off, so a stable-diffusion.cpp server starts from the first reference, and the picture may come out as a reworked copy of it. Switch them on under {settings} to start from noise. Other endpoints use the pictures as references either way.", {
+                        settings: (
+                          <Link to={settingsPage()} className="text-accent hover:underline">
+                            {t("Media in Settings")}
+                          </Link>
+                        ),
+                      })}
+                    </p>
+                  ))}
+                {references.length > 0 && !fields.width.trim() && !fields.height.trim() && !features.size && (
+                  <p className="mt-2 text-[11px] text-fg-faint">{t("No size is set, so the endpoint may make the picture in the size and shape of the first reference. Set a width and height to choose them.")}</p>
+                )}
+                {(refused || !multiple) && (
+                  <p className={`mt-2 text-[11px] ${refused ? "rounded-lg bg-warn/10 px-2 py-1.5 text-warn" : "text-fg-faint"}`} role={refused ? "alert" : undefined}>
+                    {why ?? t("This editing endpoint takes one reference picture, and a picture you add takes the place of the one there is. To use several, switch on “Several pictures per edit”.")}{" "}
+                    <Link to={settingsPage()} className="text-accent hover:underline">
+                      {t("Set it up under Media in Settings")}
+                    </Link>
+                  </p>
+                )}
+                {/* With references and room for more, the add button is in their row. */}
+                {!(multiple && references.length > 0) && (
+                  <button type="button" onClick={() => file.current?.click()} disabled={adding > 0} className={`${ghostCls} mt-2`}>
+                    {adding > 0 ? <LuLoader aria-hidden className="h-3.5 w-3.5 animate-spin" /> : <LuUpload aria-hidden className="h-3.5 w-3.5" />}
+                    {multiple ? t("Add pictures from this computer") : t("Add a picture from this computer")}
+                  </button>
+                )}
+              </div>
+            ) : (
+              <p className="mt-2 text-xs text-fg-muted">
+                {t("Reference pictures are sent to the image editing endpoint, and image editing is switched off or has no address.")}{" "}
+                <Link to={settingsPage()} className="text-accent hover:underline">
+                  {t("Set it up under Media in Settings")}
+                </Link>
+              </p>
+            ))}
+        </div>
+      )}
+
       {editing && changing && sources.length > 0 && !fromNoise && (
         <div className="mt-2">
           <button type="button" onClick={() => setMasking((v) => !v)} aria-expanded={masking} className={ghostCls}>
@@ -729,30 +874,28 @@ export function ImageMaker({
             {busy ? <LuLoader aria-hidden className="h-4 w-4 animate-spin" /> : editing ? <LuWandSparkles aria-hidden className="h-4 w-4" /> : <LuSparkles aria-hidden className="h-4 w-4" />}
             {editing ? tp(count, "Change the picture", "Make {n} changes") : tp(count, "Make the picture", "Make {n} pictures")}
           </button>
-          {editing && (
-            <>
-              <input
-                ref={file}
-                type="file"
-                accept={ACCEPT}
-                multiple={multiple}
-                className="sr-only"
-                tabIndex={-1}
-                aria-label={t("Upload a picture")}
-                onChange={(e) => {
-                  const picked = [...(e.target.files ?? [])];
-                  e.target.value = "";
-                  addFiles(picked);
-                }}
-              />
-              {/* With pictures to work from and room for more, the add button is in their row. */}
-              {!(multiple && sources.length > 0) && (
-                <button type="button" onClick={() => file.current?.click()} disabled={adding > 0} className={ghostCls}>
-                  {adding > 0 ? <LuLoader aria-hidden className="h-3.5 w-3.5 animate-spin" /> : <LuUpload aria-hidden className="h-3.5 w-3.5" />}
-                  {multiple ? t("Add pictures from this computer") : t("Change a picture from this computer")}
-                </button>
-              )}
-            </>
+          {(editing || (referring && changing)) && (
+            <input
+              ref={file}
+              type="file"
+              accept={ACCEPT}
+              multiple={multiple}
+              className="sr-only"
+              tabIndex={-1}
+              aria-label={t("Upload a picture")}
+              onChange={(e) => {
+                const picked = [...(e.target.files ?? [])];
+                e.target.value = "";
+                addFiles(picked);
+              }}
+            />
+          )}
+          {/* With pictures to work from and room for more, the add button is in their row. */}
+          {editing && !(multiple && sources.length > 0) && (
+            <button type="button" onClick={() => file.current?.click()} disabled={adding > 0} className={ghostCls}>
+              {adding > 0 ? <LuLoader aria-hidden className="h-3.5 w-3.5 animate-spin" /> : <LuUpload aria-hidden className="h-3.5 w-3.5" />}
+              {multiple ? t("Add pictures from this computer") : t("Change a picture from this computer")}
+            </button>
           )}
           <span className="ml-auto text-xs tabular-nums text-fg-subtle">{running > 0 ? t("{n} of {max} being made", { n: running, max: limit }) : ""}</span>
         </div>
@@ -770,7 +913,7 @@ export function ImageMaker({
       )}
       {looking && (
         <ui.ImageViewer
-          pictures={sources.map((p) => viewerPicture(p, api.galleryFileUrl))}
+          pictures={list.map((p) => viewerPicture(p, api.galleryFileUrl))}
           startId={looking}
           onClose={() => setLooking(null)}
           anchor={(id) => document.querySelector<HTMLElement>(`[data-source-id="${CSS.escape(id)}"]`)}

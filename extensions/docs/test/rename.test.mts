@@ -2,7 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import fs, { type BigIntStats, existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { once } from 'node:events';
 import type { AddressInfo } from 'node:net';
 import path from 'node:path';
@@ -143,6 +144,43 @@ const git = (folder: string, ...args: string[]) =>
 const tree = (folder: string, rev = 'HEAD') => git(folder, 'ls-tree', '--name-only', rev).split('\n').filter(Boolean);
 const trailers = (folder: string, rev = 'HEAD') => git(folder, 'show', '-s', '--format=%(trailers:only,unfold)', rev);
 const commits = (folder: string) => Number(git(folder, 'rev-list', '--count', 'HEAD'));
+
+/**
+ * What ext4 does with a file made just after another was removed, made certain: a look at the names in `files` (the store's, not followed)
+ * finds the device and inode of the file `was` had, and everything else of the file that is there now. Undone by what it returns.
+ */
+function reusedInode(files: string[], was: BigIntStats) {
+  const real = fs.lstatSync;
+  fs.lstatSync = ((at: fs.PathLike, options?: any) => {
+    const stat = real(at, options);
+    if (!stat || !files.includes(path.resolve(String(at)))) return stat;
+    const as = (n: bigint) => (options?.bigint ? n : Number(n));
+    return Object.create(stat, { dev: { value: as(was.dev) }, ino: { value: as(was.ino) } });
+  }) as typeof fs.lstatSync;
+  syncBuiltinESMExports();
+  return () => {
+    fs.lstatSync = real;
+    syncBuiltinESMExports();
+  };
+}
+
+/**
+ * What lstat gives where Node cannot use statx (an old kernel, a sandbox that refuses it): the time of the file's last change as the time it was
+ * made, for every look (the store's own as well). Undone by what it returns.
+ */
+function changeAsBirth() {
+  const real = fs.lstatSync;
+  fs.lstatSync = ((at: fs.PathLike, options?: any) => {
+    const stat = real(at, options);
+    if (!stat) return stat;
+    return Object.create(stat, { birthtimeNs: { value: (stat as BigIntStats).ctimeNs }, birthtimeMs: { value: stat.ctimeMs }, birthtime: { value: stat.ctime } });
+  }) as typeof fs.lstatSync;
+  syncBuiltinESMExports();
+  return () => {
+    fs.lstatSync = real;
+    syncBuiltinESMExports();
+  };
+}
 
 /** A folder with a document called `Plan` made through the store, saved once more, and a comment on it. */
 async function withDocument(prefix: string, options: Options = {}) {
@@ -385,6 +423,36 @@ test('a rename that was cut off between the two halves of the file\'s rename is 
     assert.deepEqual(tree(folder), ['after.md']);
   } finally {
     await again.close();
+  }
+});
+
+test('a rename that was cut off between its halves is finished where a look gives the time of the last change as the time the file was made', async () => {
+  let cutting = true;
+  // The second name changes that time: the clock has moved on by then (a tick is 10 ms at most), as it has after any real stop.
+  const stopping = { ...folderFiles, renameFile: (base: string, rel: string, name: string, options?: any) => {
+    if (!cutting) return folderFiles.renameFile(base, rel, name, options);
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 30);
+    linkSync(path.join(base, rel), path.join(base, name));
+    throw new Error('stopped between the link and the unlink');
+  } } as typeof folderFiles;
+  const undo = changeAsBirth();
+  try {
+    const { folder, docs, id, url, dir } = await withDocument('docs-rename-cut-ctime-', { files: stopping });
+    assert.equal((await docs.call('POST', `${url}/rename`, { name: 'after.md' })).status, 500);
+    await docs.close();
+    cutting = false;
+    assert.equal(statSync(path.join(dir, 'plan.md')).nlink, 2);
+    const again = await portal({ a: folder });
+    try {
+      const listed = (await again.call('GET', '/folders')).body.folders[0].documents;
+      assert.deepEqual(listed.map((d: any) => [d.id, d.name]), [[id, 'after.md']]);
+      assert.deepEqual(readdirSync(dir).filter((n) => !n.startsWith('.')), ['after.md'], 'the old name is taken away');
+      assert.equal(statSync(path.join(dir, 'after.md')).nlink, 1);
+    } finally {
+      await again.close();
+    }
+  } finally {
+    undo();
   }
 });
 
@@ -745,14 +813,16 @@ test('a rename that was cut off between its halves is finished only for the file
     throw new Error('stopped between the link and the unlink');
   } } as typeof folderFiles;
   const { folder, docs, url, dir } = await withDocument('docs-rename-other-file-', { files: stopping });
+  const was = lstatSync(path.join(dir, 'plan.md'), { bigint: true });
   assert.equal((await docs.call('POST', `${url}/rename`, { name: 'after.md' })).status, 500);
   await docs.close();
   cutting = false;
-  // The agent has made another file of it by the time of the next look: it has the two names as well.
+  // The agent has made another file of it by the time of the next look: it has the two names as well, and the inode the other had.
   unlinkSync(path.join(dir, 'plan.md'));
   unlinkSync(path.join(dir, 'after.md'));
   writeFileSync(path.join(dir, 'plan.md'), 'The agent\'s own file.\n');
   linkSync(path.join(dir, 'plan.md'), path.join(dir, 'after.md'));
+  const undo = reusedInode([path.join(dir, 'plan.md'), path.join(dir, 'after.md')], was);
   const again = await portal({ a: folder });
   try {
     await again.call('GET', '/folders');
@@ -767,6 +837,7 @@ test('a rename that was cut off between its halves is finished only for the file
       store.close();
     }
   } finally {
+    undo();
     await again.close();
   }
 });
@@ -888,6 +959,7 @@ test('a deletion whose file was removed and whose commit was cut off is finished
 
 test('a deletion that is not known to have removed the file does not remove another file that is at the name, whatever it is called by then', async () => {
   const made = await withDocument('docs-delete-unknown-');
+  const was = lstatSync(path.join(made.dir, 'plan.md'), { bigint: true });
   made.docs.fault('delete');
   assert.equal((await made.docs.call('DELETE', made.url)).status, 500);
   await made.docs.close();
@@ -899,14 +971,16 @@ test('a deletion that is not known to have removed the file does not remove anot
   } finally {
     db.close();
   }
-  // And another file has the name by then (not the one that was decided on).
+  // And another file has the name by then (not the one that was decided on), with the inode the removed one had.
   writeFileSync(path.join(made.dir, 'plan.md'), 'made after.\n');
+  const undo = reusedInode([path.join(made.dir, 'plan.md')], was);
   const again = await portal({ a: made.folder });
   try {
     await again.call('GET', '/folders');
     assert.equal(readFileSync(path.join(made.dir, 'plan.md'), 'utf8'), 'made after.\n');
     assert.equal((await again.call('GET', made.url)).status, 404);
   } finally {
+    undo();
     await again.close();
   }
 });

@@ -15,6 +15,13 @@ import { inspect } from "node:util";
 export const CHILD_FN = "pithagoras.fn";
 export type FnUse = "run" | "call" | "open" | "mirror";
 
+/**
+ * The header the portal sends a request to the half's routes with, saying who is behind it (`http.person`): JSON, as
+ * URI text. The portal sets it on every request it hands on, over whatever the request came with, and only the portal
+ * reaches the half's socket.
+ */
+export const PERSON_HEADER = "x-pithagoras-person";
+
 /** A function of the portal's, in what it answers a call with (a hold's release, an unwatch): `{ [PARENT_FN]: id }`. */
 export const PARENT_FN = "pithagoras.portalFn";
 

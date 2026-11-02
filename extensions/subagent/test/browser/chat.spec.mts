@@ -84,6 +84,188 @@ test('a running subagent is timed from its start in the panel, and its run is no
   expect((await page.evaluate(() => (window as any).drawn)).ChildItem).toBe(before.ChildItem);
 });
 
+/** The child chat `kid1` (`?phase=child-agent`) as the portal serves it: its stream, and the chat itself, `asking` or not. */
+async function serveChild(page: Page, { asking = false } = {}) {
+  const streams: string[] = [];
+  const said = (seq: number, type: string, payload: unknown) => `id: ${seq}\ndata: ${JSON.stringify({ seq, type, at: Date.now() - 20_000, payload })}\n\n`;
+  await page.route('**/api/sessions/kid1/events**', async (route) => {
+    streams.push(new URL(route.request().url()).search);
+    await route.fulfill({
+      headers: { 'content-type': 'text/event-stream' },
+      body:
+        'event: live-reset\ndata: {}\n\n' +
+        said(1, 'portal_prompt', { message: 'Check that last night\'s backup can be restored.' }) +
+        said(2, 'tool_execution_start', { toolCallId: 'k1', toolName: 'bash', args: { command: 'restic snapshots' } }) +
+        said(3, 'tool_execution_end', { toolCallId: 'k1', toolName: 'bash', result: { content: [{ type: 'text', text: 'snapshot 4f2a' }] } }) +
+        said(4, 'message_end', { message: { role: 'assistant', content: [{ type: 'text', text: 'The latest snapshot is from 02:00.' }] } }) +
+        'event: caught-up\ndata: {"seq":4}\n\n',
+    });
+  });
+  await page.route('**/api/sessions/kid1', (route) => route.fulfill({ json: { id: 'kid1', title: 'Backup check', parent: 'preview', listed: false, status: 'running', ...(asking ? { asking: true } : {}) } }));
+  return streams;
+}
+
+test('a subagent that works in a child chat is drawn from that chat\'s own transcript, and opens as that chat', async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const streams = await serveChild(page);
+  await page.goto('/tests/chat.html?phase=child-agent');
+  await card(page, 'subagent').getByRole('button', { name: 'Watch' }).click();
+  await expect(panel(page).locator('.sub-head')).toContainText('Backup check');
+  await expect(panel(page).locator('.side-transcript-prompt')).toHaveText("Check that last night's backup can be restored.");
+  await expect(panel(page).locator('.chat-tool')).toContainText('restic snapshots');
+  await expect(panel(page).getByText('The latest snapshot is from 02:00.')).toBeVisible();
+  // Read from the start, as a page that opens a chat reads it.
+  expect(streams[0]).toBe('?since=0');
+  await expect(panel(page).locator('.sub-head')).not.toContainText('Waiting for you');
+  await panel(page).getByRole('button', { name: 'Open as chat' }).click();
+  await expect.poll(() => page.evaluate(() => (window as any).navigated)).toEqual(['/s/kid1']);
+});
+
+test('a subagent whose chat waits for the person says so in the panel and the tray, with the way to its chat', async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  await serveChild(page, { asking: true });
+  await page.goto('/tests/chat.html?phase=child-agent');
+  await expect(tray(page).getByRole('button', { name: /Backup check/ })).toContainText('waiting for you');
+  await tray(page).getByRole('button', { name: /Backup check/ }).click();
+  await expect(panel(page).locator('.sub-head')).toContainText('Waiting for you');
+  await expect(panel(page).getByRole('status')).toContainText('It waits for you in its chat.');
+  await panel(page).getByRole('button', { name: 'Open it to answer' }).click();
+  await expect.poll(() => page.evaluate(() => (window as any).navigated)).toEqual(['/s/kid1']);
+});
+
+test('a subagent whose chat is gone says so, and offers no way to it', async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  await page.route('**/api/sessions/kid1/events**', (route) => route.fulfill({ status: 404, json: { error: 'Not found' } }));
+  await page.route('**/api/sessions/kid1', (route) => route.fulfill({ status: 404, json: { error: 'Not found' } }));
+  await page.goto('/tests/chat.html?phase=child-agent');
+  await card(page, 'subagent').getByRole('button', { name: 'Watch' }).click();
+  await expect(panel(page).getByText('Its chat is gone: it was deleted, or the subagent was stopped before it started.')).toBeVisible();
+  await expect(panel(page).getByRole('button', { name: 'Open as chat' })).toHaveCount(0);
+});
+
+/** What the portal sends of an event of `kid1`'s stream. */
+const told = (seq: number, type: string, payload: unknown) => `id: ${seq}\ndata: ${JSON.stringify({ seq, type, at: Date.now() - 20_000, payload })}\n\n`;
+const run = (task: string, answer: string, from = 1) =>
+  told(from, 'portal_prompt', { message: task }) + told(from + 1, 'message_end', { message: { role: 'assistant', content: [{ type: 'text', text: answer }] } });
+
+/**
+ * `kid1`'s stream, one answer for each time the page connects (`answers[n](since)` is the body of the n-th; the last
+ * serves any later one), and the `since` of each. The page's clock is its own, so a reconnect does not wait for two
+ * seconds of the test's. Of an answer only the events after `since` are sent, as the portal sends them: a later
+ * reconnect, which the page's clock can bring at any time, is given nothing it has read already.
+ */
+async function serveStream(page: Page, answers: ((since: number) => string)[]) {
+  const connects: string[] = [];
+  await page.clock.install();
+  await page.route('**/api/sessions/kid1/events**', async (route) => {
+    const since = new URL(route.request().url()).searchParams.get('since') ?? '';
+    connects.push(since);
+    const body = answers[Math.min(connects.length, answers.length) - 1](Number(since));
+    const after = body.split(/(?<=\n\n)/).filter((block) => {
+      const id = /^id: (\d+)\n/.exec(block);
+      return !id || Number(id[1]) > Number(since);
+    });
+    await route.fulfill({ headers: { 'content-type': 'text/event-stream' }, body: after.join('') });
+  });
+  await page.route('**/api/sessions/kid1', (route) => route.fulfill({ json: { id: 'kid1', title: 'Backup check', parent: 'preview', listed: false, status: 'running' } }));
+  /** Lets the page's clock run until it has connected `n` times. */
+  const connected = (n: number) =>
+    expect
+      .poll(async () => {
+        await page.clock.runFor(2500);
+        return connects.length;
+      })
+      .toBeGreaterThanOrEqual(n);
+  return { connects, connected };
+}
+const head = (reloads: number) => `event: reloads\ndata: ${JSON.stringify({ reloads })}\n\nevent: live-reset\ndata: {}\n\n`;
+const caughtUp = (seq: number) => `event: caught-up\ndata: {"seq":${seq}}\n\n`;
+
+test('a reload of the child chat that happened while its stream was down is read again from the start', async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const { connects, connected } = await serveStream(page, [
+    () => head(0) + run('Old task', 'Old answer') + caughtUp(2),
+    // The portal has put events back under seqs the page read past: nothing is newer than seq 2.
+    () => head(1) + caughtUp(0),
+    () => head(1) + run('New task', 'New answer') + caughtUp(2),
+  ]);
+  await page.goto('/tests/chat.html?phase=child-agent');
+  await card(page, 'subagent').getByRole('button', { name: 'Watch' }).click();
+  await expect(panel(page).getByText('Old answer')).toBeVisible();
+  await connected(3);
+  await expect(panel(page).getByText('New answer')).toBeVisible();
+  await expect(panel(page).getByText('Old answer')).toHaveCount(0);
+  // The stream read on after that, at whatever moment the page's clock brought it, reads on from where it was.
+  expect(connects.slice(0, 3)).toEqual(['0', '2', '0']);
+  expect(connects.slice(3).every((since) => since === '2')).toBe(true);
+});
+
+test('a child chat whose stream broke in the middle of its replay is read again from the start', async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const { connects, connected } = await serveStream(page, [
+    // Cut off before it caught up: the first message has been read, the second has not.
+    () => head(0) + told(1, 'portal_prompt', { message: 'The whole task' }),
+    (since) => head(0) + (since === 0 ? run('The whole task', 'The whole answer') : told(2, 'message_end', { message: { role: 'assistant', content: [{ type: 'text', text: 'Only the end' }] } })) + caughtUp(2),
+  ]);
+  await page.goto('/tests/chat.html?phase=child-agent');
+  await card(page, 'subagent').getByRole('button', { name: 'Watch' }).click();
+  await connected(2);
+  await expect(panel(page).getByText('The whole answer')).toBeVisible();
+  await expect(panel(page).locator('.side-transcript-prompt')).toHaveText('The whole task');
+  expect(connects).toEqual(['0', '0']);
+});
+
+test('a message taken out of the child chat leaves its stream, and the count it brings is not a missed reload', async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const { connects, connected } = await serveStream(page, [
+    () => head(0) + run('First task', 'First answer') + caughtUp(2) + told(3, 'portal_prompt', { message: 'Second task' }) + told(4, 'message_end', { message: { role: 'assistant', content: [{ type: 'text', text: 'Second answer' }] } }) + told(5, 'portal_removed', { from: 3, to: null, reloads: 1 }),
+    () => head(1) + caughtUp(5),
+  ]);
+  await page.goto('/tests/chat.html?phase=child-agent');
+  await card(page, 'subagent').getByRole('button', { name: 'Watch' }).click();
+  await expect(panel(page).getByText('First answer')).toBeVisible();
+  await expect(panel(page).getByText('Second answer')).toHaveCount(0);
+  await connected(2);
+   // Read on from where it was, not from the start: it had heard the reload that the count says.
+  expect(connects).toEqual(['0', '4']);
+  await expect(panel(page).getByText('First answer')).toBeVisible();
+  await expect(panel(page).getByText('Second answer')).toHaveCount(0);
+});
+
+test('the stream of a child chat is closed with the panel that draws it, and opened again with the next', async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const { connects, connected } = await serveStream(page, [() => head(0) + run('Task', 'Answered') + caughtUp(2)]);
+  await page.goto('/tests/chat.html?phase=child-agent');
+  await card(page, 'subagent').getByRole('button', { name: 'Watch' }).click();
+  await expect(panel(page).getByText('Answered')).toBeVisible();
+  // The body of a stream here ends at once, so an open one reconnects every few seconds.
+  await connected(2);
+  await page.locator('.chat-header').getByRole('button', { name: 'Subagents', exact: true }).click();
+  await expect(panel(page)).toHaveCount(0);
+  const before = connects.length;
+  for (let i = 0; i < 4; i++) await page.clock.runFor(5000);
+  expect(connects.length).toBe(before);
+  await card(page, 'subagent').getByRole('button', { name: 'Watch' }).click();
+  await expect(panel(page).getByText('Answered')).toBeVisible();
+  expect(connects.length).toBe(before + 1);
+});
+
+test('a subagent whose chat asks, and is answered, stops saying it waits for the person', async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  let asking = false;
+  await page.clock.install();
+  await page.route('**/api/sessions/kid1/events**', (route) => route.fulfill({ headers: { 'content-type': 'text/event-stream' }, body: head(0) + run('Check', 'Checked') + caughtUp(2) }));
+  await page.route('**/api/sessions/kid1', (route) => route.fulfill({ json: { id: 'kid1', title: 'Backup check', parent: 'preview', listed: false, status: 'running', ...(asking ? { asking: true } : {}) } }));
+  await page.goto('/tests/chat.html?phase=child-agent');
+  const chip = tray(page).getByRole('button', { name: /Backup check/ });
+  await expect(chip).toBeVisible();
+  await expect(chip).not.toContainText('waiting for you');
+  asking = true;
+  await expect.poll(async () => { await page.clock.runFor(4500); return chip.textContent(); }).toContain('waiting for you');
+  asking = false;
+  await expect.poll(async () => { await page.clock.runFor(4500); return chip.textContent(); }).not.toContain('waiting for you');
+});
+
 test.describe('without the extension', () => {
   test.use({ installed: [] });
 

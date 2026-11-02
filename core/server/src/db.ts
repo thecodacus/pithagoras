@@ -90,10 +90,24 @@ export interface SessionRow {
    * One level only: a child has no children.
    */
   parent_id: string | null;
-  /** 0 for a child kept out of the chat lists, found only by its id; 1 for every other chat. */
+  /** 0 for a chat a server half kept out of the chat lists, found only by its id; 1 for every other chat. */
   listed: number;
-  /** The package whose server half made this child, which alone may prompt, stop or remove it; null for any other chat. */
+  /**
+   * The package whose server half made this chat (a child, `chats.create`, or one of a folder, `chats.start`), which
+   * alone may prompt, stop or remove it; null for any other chat.
+   */
   creator: string | null;
+  /**
+   * 1 for a chat a server half made for nobody to attend (`unattended` in server.d.ts): no ask_question, every dialog
+   * an extension opens answered at once with its no-answer value, and the guard refusing a held call rather than
+   * asking. 0 for every other chat.
+   */
+  unattended: number;
+  /**
+   * A child chat's tools: null for its parent's switches, which it is held to (child-chats.ts), and "defaults" for
+   * those a new chat of its folder starts with, its parent's switches aside. Null for every other chat.
+   */
+  tools_from: "defaults" | null;
 }
 
 /**
@@ -1147,6 +1161,10 @@ function migrate(d: Database.Database): void {
   if (!names.includes("parent_id")) d.exec("ALTER TABLE sessions ADD COLUMN parent_id TEXT");
   if (!names.includes("listed")) d.exec("ALTER TABLE sessions ADD COLUMN listed INTEGER NOT NULL DEFAULT 1");
   if (!names.includes("creator")) d.exec("ALTER TABLE sessions ADD COLUMN creator TEXT");
+  // Chats nobody attends (schema 16): every chat before was one a person could answer in.
+  if (!names.includes("unattended")) d.exec("ALTER TABLE sessions ADD COLUMN unattended INTEGER NOT NULL DEFAULT 0");
+  // And whose tools a child chat starts from (schema 16): every child before took its parent's switches.
+  if (!names.includes("tools_from")) d.exec("ALTER TABLE sessions ADD COLUMN tools_from TEXT");
   // A chat's children are looked up as it is deleted, and as its pi asks whether one of them still works.
   d.exec("CREATE INDEX IF NOT EXISTS idx_sessions_parent ON sessions(parent_id) WHERE parent_id IS NOT NULL");
   // Versions kept before pi's file was kept as the part after a checked start:
@@ -1265,7 +1283,7 @@ function migrate(d: Database.Database): void {
   for (const col of ["tools_off", "tools_on"]) {
     if (routineCols.length && !routineCols.includes(col)) d.exec(`ALTER TABLE routines ADD COLUMN ${col} TEXT NOT NULL DEFAULT ''`);
   }
-  // A routine's own limit on how long a run may take (schema 16): NULL takes the portal's default, as every run had.
+  // A routine's own limit on how long a run may take (schema 17): NULL takes the portal's default, as every run had.
   if (routineCols.length && !routineCols.includes("timeout_min")) d.exec("ALTER TABLE routines ADD COLUMN timeout_min INTEGER");
   d.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_routines_slug ON routines(slug)");
   d.exec("CREATE INDEX IF NOT EXISTS idx_notes_pending ON notes(session_id, consumed_at)");
@@ -1357,6 +1375,8 @@ export function createSession(row: {
   parent_id?: string | null;
   listed?: number;
   creator?: string | null;
+  unattended?: number;
+  tools_from?: SessionRow["tools_from"];
   role?: SessionRow["role"];
   last_person_key?: string | null;
   mode?: string | null;
@@ -1369,9 +1389,9 @@ export function createSession(row: {
   getDb()
     .prepare(
       `INSERT INTO sessions (id, title, workspace, executor, kind, channel_slug, channel_key, routine_slug, auto_title,
-                             parent_id, listed, creator, role, last_person_key, mode, provider, model, thinking_level, tools_off, tools_on)
+                             parent_id, listed, creator, unattended, tools_from, role, last_person_key, mode, provider, model, thinking_level, tools_off, tools_on)
        VALUES (@id, @title, @workspace, @executor, @kind, @channel_slug, @channel_key, @routine_slug, @auto_title,
-               @parent_id, @listed, @creator, @role, @last_person_key, @mode, @provider, @model, @thinking_level, @tools_off, @tools_on)`
+               @parent_id, @listed, @creator, @unattended, @tools_from, @role, @last_person_key, @mode, @provider, @model, @thinking_level, @tools_off, @tools_on)`
     )
     .run({
       kind: "task",
@@ -1382,6 +1402,8 @@ export function createSession(row: {
       parent_id: null,
       listed: 1,
       creator: null,
+      unattended: 0,
+      tools_from: null,
       role: "primary",
       last_person_key: null,
       mode: null,
@@ -1394,14 +1416,17 @@ export function createSession(row: {
     });
 }
 
-/** A child chat that is kept out of the lists: it is found by its id alone. */
-const UNLISTED = "parent_id IS NOT NULL AND listed = 0";
+/** A chat a server half keeps out of the lists (a child, or one it started in a folder): it is found by its id alone. */
+const UNLISTED = "listed = 0";
 
-/** The sessions you create yourself, and the children of chats that are listed. Agent sessions have their own tab. */
-export function listSessions(): SessionRow[] {
+/**
+ * The sessions you create yourself, and the chats server halves made that are listed. Agent sessions have their own
+ * tab. `unlisted` adds those kept out of the lists, for what is done to every chat of a folder (deleting its project).
+ */
+export function listSessions(options: { unlisted?: boolean } = {}): SessionRow[] {
   // Pinned first, then most recently touched — the order the sidebar shows.
   return getDb()
-    .prepare(`SELECT * FROM sessions WHERE kind = 'task' AND NOT (${UNLISTED}) ORDER BY pinned DESC, updated_at DESC`)
+    .prepare(`SELECT * FROM sessions WHERE kind = 'task'${options.unlisted ? "" : ` AND NOT (${UNLISTED})`} ORDER BY pinned DESC, updated_at DESC`)
     .all() as SessionRow[];
 }
 
@@ -2106,6 +2131,35 @@ export function eventsBefore(sessionId: string, before: number, limit = 1500): E
        ) ORDER BY seq ASC`
     )
     .all(sessionId, before, limit) as EventRow[];
+}
+
+/**
+ * What settles a chat's last run, oldest first: its messages as they ended and its status from the last time it began
+ * to run. Undefined for a chat that never ran. Read for a chat a server half made (`chats.lastAnswer`), which is small:
+ * the start is looked for through the chat's events.
+ */
+export function lastRunEvents(sessionId: string): EventRow[] | undefined {
+  const start = getDb()
+    .prepare("SELECT MAX(seq) AS seq FROM events WHERE session_id = ? AND type = 'portal_status' AND json_extract(payload, '$.status') = 'running'")
+    .get(sessionId) as { seq: number | null };
+  if (start.seq === null) return undefined;
+  return getDb()
+    .prepare("SELECT * FROM events WHERE session_id = ? AND seq > ? AND type IN ('message_end', 'portal_status') ORDER BY seq ASC")
+    .all(sessionId, start.seq) as EventRow[];
+}
+
+/**
+ * The events of a chat that may hold a result the guard flagged as a suspected prompt injection: a tool's result (kept
+ * with its call's end: its message is kept without it, see stored-event.ts), or a message an extension wrote in that
+ * form (see flaggedIn in pi/guard.ts). Found by the marker's words; the caller reads each for the marker at its start.
+ */
+export function flaggedEvents(sessionId: string): EventRow[] {
+  return getDb()
+    .prepare(
+      `SELECT * FROM events WHERE session_id = ? AND type IN ('tool_execution_end', 'message_end')
+         AND payload LIKE '%<<<untrusted:%(suspected prompt injection: %' ORDER BY seq ASC`,
+    )
+    .all(sessionId) as EventRow[];
 }
 
 /** Events after `since`, for replaying what a disconnected browser missed. */

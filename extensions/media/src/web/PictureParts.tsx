@@ -49,6 +49,7 @@ function PictureDetails({ picture }: { picture: GalleryPicture }) {
     ...(params.fromNoise ? [[t("Start from"), t("Noise only")] as [string, string]] : []),
     ...(extra ? [[t("Other fields of the request"), extra] as [string, string]] : []),
     ...(params.sources?.length ? [[t("Changed from"), tp(params.sources.length, "{n} picture", "{n} pictures")] as [string, string]] : []),
+    ...(params.references?.length ? [[t("Reference pictures"), tp(params.references.length, "{n} picture", "{n} pictures")] as [string, string]] : []),
     ...(params.masked ? [[t("Mask"), t("Only a painted part was changed")] as [string, string]] : []),
     [t("File"), `${picture.fileName} · ${bytesLabel(picture.bytes)}`],
   ];
@@ -104,16 +105,16 @@ export function PictureViewerActions({
   onVideo?: (picture: GalleryPicture) => void;
   onShown: (picture: GalleryPicture) => void;
   onEdit: (picture: GalleryPicture) => void;
-  /** Where the form is in Edit: whether this picture is one of the edit's, whether the edit has all it takes, and a way to take it in or out. */
-  use?: { on: boolean; full: boolean; toggle: () => void };
+  /** Where the form is in Edit, or has a new picture's references open (`as`): whether this picture is one of them, whether there are all there may be, and a way to take it in or out. */
+  use?: { on: boolean; full: boolean; toggle: () => void; as: "edit" | "reference" };
   onAgain: (picture: GalleryPicture) => void;
   onDelete: (picture: GalleryPicture) => void;
 }) {
   const { viewerButton } = portal.ui.classes;
   const [details, setDetails] = useState(false);
   useEffect(() => onShown(picture), [picture.id, onShown]);
-  // A picture put in by the person has no description to make again.
-  const again = picture.kind !== "uploaded" && picture.prompt !== "" && (picture.kind === "generated" ? makes : canEdit);
+  // A picture put in by the person has no description to make again. One made with references is made again with them, by the editing endpoint.
+  const again = picture.kind !== "uploaded" && picture.prompt !== "" && (picture.kind === "generated" ? makes && (!picture.params.references?.length || canEdit) : canEdit);
   return (
     <>
       {/* Under the button on a wide screen; on a phone, above the zoom buttons, over the picture, so that the buttons that close it are not under it. */}
@@ -138,8 +139,20 @@ export function PictureViewerActions({
           onClick={use.toggle}
           disabled={use.full && !use.on}
           aria-pressed={use.on}
-          aria-label={t("Use in the edit")}
-          title={use.on ? t("Take out of the edit") : use.full ? t("An edit takes at most {n} pictures", { n: MAX_SOURCES }) : t("Use in the edit")}
+          aria-label={use.as === "reference" ? t("Use as a reference") : t("Use in the edit")}
+          title={
+            use.as === "reference"
+              ? use.on
+                ? t("Take out of the references")
+                : use.full
+                  ? t("A picture takes at most {n} references", { n: MAX_SOURCES })
+                  : t("Use as a reference")
+              : use.on
+                ? t("Take out of the edit")
+                : use.full
+                  ? t("An edit takes at most {n} pictures", { n: MAX_SOURCES })
+                  : t("Use in the edit")
+          }
           className={viewerButton}
         >
           {use.on ? <LuCheck aria-hidden className="h-[18px] w-[18px]" /> : <LuWandSparkles aria-hidden className="h-[18px] w-[18px]" />}
@@ -173,10 +186,10 @@ const previewState = (job: PictureJob | undefined) => (!job ? "done" : job.state
 
 /**
  * A click on a tile's picture, or Enter on it, opens it in the viewer, always. What the box in its corner does is the
- * mode: it selects the picture, for a download, a delete or a change (select), or takes it into the edit that the
- * form is in (pick).
+ * mode: it selects the picture, for a download, a delete or a change (select), takes it into the edit that the
+ * form is in (pick), or into the references of the new picture it is making (reference).
  */
-type TileMode = "select" | "pick";
+type TileMode = "select" | "pick" | "reference";
 
 export const PictureTile = memo(function PictureTile({
   tile,
@@ -191,9 +204,9 @@ export const PictureTile = memo(function PictureTile({
   tile: Tile;
   mode: TileMode;
   selected: boolean;
-  /** Its place among the pictures of the edit, for one that is in it and where several can be; none is 0. */
+  /** Its place among the pictures of the edit, or the references, for one that is in them and where several can be; none is 0. */
   place: number;
-  /** Picking, and the edit has all it takes: this one is not in it, and cannot be added. */
+  /** Picking, and the edit, or the references, have all there may be: this one is not in them, and cannot be added. */
   full: boolean;
   onOpen: (id: string) => void;
   onToggle: (id: string) => void;
@@ -230,18 +243,18 @@ export const PictureTile = memo(function PictureTile({
       />
       {here && (
         // The box has a place of its own that a thumb can find, and a name that says which picture it is for.
-        <label className="gallery-check-hit" title={full ? t("An edit takes at most {n} pictures", { n: MAX_SOURCES }) : undefined}>
+        <label className="gallery-check-hit" title={full ? (mode === "reference" ? t("A picture takes at most {n} references", { n: MAX_SOURCES }) : t("An edit takes at most {n} pictures", { n: MAX_SOURCES })) : undefined}>
           <input
             type="checkbox"
             className="gallery-check"
             checked={selected}
             disabled={full}
             onChange={() => onToggle(id)}
-            aria-label={mode === "pick" ? t("Use {name} in the edit", { name }) : t("Select {name}", { name })}
+            aria-label={mode === "pick" ? t("Use {name} in the edit", { name }) : mode === "reference" ? t("Use {name} as a reference", { name }) : t("Select {name}", { name })}
           />
         </label>
       )}
-      {mode === "pick" && selected && place > 0 && (
+      {mode !== "select" && selected && place > 0 && (
         <span className="gallery-order" aria-hidden>
           {place}
         </span>

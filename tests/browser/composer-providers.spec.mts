@@ -59,6 +59,7 @@ test("a model picked in the menu is asked for with its own provider, not the one
   await page.goto('/tests/chat.html?phase=model');
   await page.getByTitle('Model A', { exact: true }).click();
   await page.getByRole('button', { name: 'More models' }).click();
-  await page.getByTitle('strata-1gpu', { exact: true }).click();
+  // By its name, not its title, which is lifted into the tooltip of the model the list opens under the pointer.
+  await page.getByRole('group', { name: 'Models' }).getByRole('button', { name: 'strata-1gpu' }).click();
   await expect.poll(() => asked).toEqual([{ provider: 'llama-swap', modelId: 'strata-1gpu' }]);
 });

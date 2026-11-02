@@ -2339,6 +2339,9 @@ test('a selection does not follow a change of filter: a chat’s picture that is
 test('a gallery of hundreds can be selected whole and deleted: the portal takes 200 at a time, and one question covers them all', async ({ page }) => {
   const many = Array.from({ length: 240 }, (_, i) => pic({ prompt: `Many ${i + 1}`, age: i }));
   const p = await portal(page, { pictures: many });
+  // Without the observer that reads on as the end comes near, so that the button is the only thing that does. With it, the
+  // click's scroll to the button can bring the next page first, and the click then reads on one page too far or finds no button.
+  await page.addInitScript(() => delete (window as any).IntersectionObserver);
   await page.goto('/x/pithagoras-media/media');
   // A page at a time, by the button, until all of it is loaded.
   for (const shown of [96, 144, 192, 240]) {
@@ -2423,4 +2426,186 @@ test('the pictures of an edit show their small copies in the form', async ({ pag
   await loaded(thumbs(page).last());
   expect(await thumbs(page).evaluateAll((els) => els.map((e) => e.getAttribute('src')))).toEqual([`/api/x/pithagoras-media/images/${a.id}/thumb`, `/api/x/pithagoras-media/images/${b.id}/file`]);
   expect(p.state.thumbFiles).toContain(a.id);
+});
+
+/** A new picture's references, as the form lists them in Generate. */
+const references = (page: Page) => maker(page).getByRole('list', { name: /reference picture/i });
+const referenceNames = (page: Page) => references(page).getByRole('img').evaluateAll((els) => els.map((e) => e.getAttribute('alt')));
+
+test('reference pictures in Generate: opened, ticked in the gallery in order, reordered, and sent with the description; closed, the boxes select again', async ({ page }) => {
+  const sheet = pic({ prompt: 'A fox sheet', age: 2 });
+  const style = pic({ prompt: 'Watercolour', age: 1 });
+  const p = await portal(page, { pictures: [sheet, style], images: feature({ editMultiple: true, editModel: 'edit-model', sdExtras: true }) });
+  await page.goto('/x/pithagoras-media/media');
+  await expect(maker(page)).toHaveAccessibleName('Make a picture');
+  // Closed until opened: Generate's boxes are for a download, a delete and a change.
+  const open = maker(page).getByRole('button', { name: 'Use reference pictures' });
+  await expect(open).toHaveAttribute('aria-expanded', 'false');
+  await expect(box(page, 'A fox sheet')).toHaveAccessibleName('Select A fox sheet');
+  await open.click();
+  await expect(maker(page).getByText('No reference picture yet. Tick pictures in the gallery below, drop or paste them here, or add them from this computer.')).toBeVisible();
+  await expect(box(page, 'A fox sheet')).toHaveAccessibleName('Use A fox sheet as a reference');
+  await expect(page.getByText('Tick pictures to use them as references, in the order you tick them. A click on a picture opens it.')).toBeVisible();
+  // Ticked in an order, and moved: the order is the request's.
+  await tick(page, 'Watercolour');
+  await tick(page, 'A fox sheet');
+  await expect.poll(() => referenceNames(page)).toEqual(['Watercolour', 'A fox sheet']);
+  await expect(cell(page, 'Watercolour').locator('.gallery-order')).toHaveText('1');
+  await references(page).getByRole('button', { name: 'Move A fox sheet earlier' }).click();
+  await expect.poll(() => referenceNames(page)).toEqual(['A fox sheet', 'Watercolour']);
+  // From noise, as the add-on says the endpoint is stable-diffusion.cpp; the editing model is what is used without one typed.
+  await expect(maker(page).getByText('The new picture starts from noise: the references guide it, and none of them is changed.')).toBeVisible();
+  await expect(page.locator('#image-model')).toHaveAttribute('placeholder', 'edit-model');
+  await page.getByPlaceholder('Describe the picture').fill('The fox from the first picture, skiing');
+  await page.getByRole('button', { name: 'Make the picture' }).click();
+  await expect.poll(() => p.state.generated.length).toBe(1);
+  expect(p.state.generated[0]).toEqual({ prompt: 'The fox from the first picture, skiing', count: 1, references: [sheet.id, style.id] });
+  expect(p.state.edited).toEqual([]);
+
+  // Closed again: none are sent, and the boxes select.
+  await maker(page).getByRole('button', { name: 'Leave out the reference pictures' }).click();
+  await expect(references(page)).toHaveCount(0);
+  await expect(box(page, 'A fox sheet')).toHaveAccessibleName('Select A fox sheet');
+  await page.getByRole('button', { name: 'Make the picture' }).click();
+  await expect.poll(() => p.state.generated.length).toBe(2);
+  expect(p.state.generated[1]).toEqual({ prompt: 'The fox from the first picture, skiing', count: 1 });
+});
+
+test('the form says what happens to references: the first may be the start while Stable Diffusion extra settings are off, a size may be the first’s, and one where the endpoint takes one', async ({ page }) => {
+  const sheet = pic({ prompt: 'A fox sheet', age: 2 });
+  const style = pic({ prompt: 'Watercolour', age: 1 });
+  await portal(page, { pictures: [sheet, style], images: feature({ size: '', sdExtras: false }) });
+  await page.goto('/x/pithagoras-media/media');
+  await maker(page).getByRole('button', { name: 'Use reference pictures' }).click();
+  await expect(maker(page).getByText(/^This editing endpoint takes one reference picture, and a picture you add takes the place of the one there is/)).toBeVisible();
+  await tick(page, 'A fox sheet');
+  await expect(maker(page).getByText(/Stable Diffusion extra settings are off, so a stable-diffusion\.cpp server starts from the first reference, and the picture may come out as a reworked copy of it/)).toBeVisible();
+  await expect(maker(page).getByRole('link', { name: 'Media in Settings', exact: true })).toBeVisible();
+  const noSize = maker(page).getByText('No size is set, so the endpoint may make the picture in the size and shape of the first reference. Set a width and height to choose them.');
+  await expect(noSize).toBeVisible();
+  await page.locator('#image-width').fill('768');
+  await page.locator('#image-height').fill('1344');
+  await expect(noSize).toHaveCount(0);
+  // One where the endpoint takes one: another takes its place.
+  await tick(page, 'Watercolour');
+  await expect.poll(() => referenceNames(page)).toEqual(['Watercolour']);
+  await expect(box(page, 'A fox sheet')).not.toBeChecked();
+});
+
+test('without editing, references say what to switch on, and the gallery’s boxes stay for selecting', async ({ page }) => {
+  await portal(page, { pictures: [pic({ prompt: 'A fox sheet' })], images: feature({ editEnabled: false, editReady: false }) });
+  await page.goto('/x/pithagoras-media/media');
+  await maker(page).getByRole('button', { name: 'Use reference pictures' }).click();
+  await expect(maker(page).getByText('Reference pictures are sent to the image editing endpoint, and image editing is switched off or has no address.')).toBeVisible();
+  await expect(maker(page).getByRole('link', { name: 'Set it up under Media in Settings' })).toBeVisible();
+  await expect(box(page, 'A fox sheet')).toHaveAccessibleName('Select A fox sheet');
+});
+
+test('pictures dropped on Generate while references are open are references, uploaded once; closed, a drop still starts an edit', async ({ page }) => {
+  const p = await portal(page, { images: feature({ editMultiple: true }) });
+  await page.goto('/x/pithagoras-media/media');
+  await maker(page).getByRole('button', { name: 'Use reference pictures' }).click();
+  await maker(page).evaluate((el) => {
+    const data = new DataTransfer();
+    data.items.add(new File(['x'], 'x.png', { type: 'image/png' }));
+    el.dispatchEvent(new DragEvent('dragover', { dataTransfer: data, bubbles: true, cancelable: true }));
+  });
+  await expect(maker(page).getByText('Drop pictures here to use them as references')).toBeVisible();
+  await drop(maker(page), ['sheet.png', 'style.png']);
+  await expect.poll(() => referenceNames(page)).toEqual(['sheet.png', 'style.png']);
+  await expect(maker(page)).toHaveAccessibleName('Make a picture');
+  expect(p.state.uploads.map((u) => u.name)).toEqual(['sheet.png', 'style.png']);
+  await maker(page).getByRole('button', { name: 'Leave out the reference pictures' }).click();
+  await drop(maker(page), ['photo.png']);
+  await expect(maker(page)).toHaveAccessibleName('Change a picture');
+  await expect.poll(() => names(page)).toEqual(['photo.png']);
+});
+
+test('a picture made from references says so under Details, and Run again makes it with the same ones, or says they are gone', async ({ page }) => {
+  const sheet = pic({ prompt: 'A fox sheet', age: 3 });
+  const style = pic({ prompt: 'Watercolour', age: 2 });
+  const made = pic({ prompt: 'The fox, skiing', params: { model: 'edit-model', size: '1024x1024', fromNoise: true, references: [sheet.id, style.id] }, age: 1 });
+  const lost = pic({ prompt: 'The fox, sailing', params: { references: [sheet.id, 'ffffffffffff'] }, age: 0 });
+  const p = await portal(page, { pictures: [sheet, style, made, lost], images: feature({ editMultiple: true }) });
+  await page.goto('/x/pithagoras-media/media');
+  await tile(page, 'The fox, skiing').click();
+  await viewer(page).getByRole('button', { name: 'Details' }).click();
+  const details = viewer(page).getByRole('region', { name: 'Details' });
+  for (const [name, value] of [['How', 'Made from a description'], ['Reference pictures', '2 pictures'], ['Start from', 'Noise only'], ['Model', 'edit-model']]) {
+    await expect(details.locator('dt', { hasText: name }).locator('xpath=following-sibling::dd[1]')).toHaveText(value);
+  }
+  await viewer(page).getByRole('button', { name: 'Run again' }).click();
+  await expect.poll(() => p.state.generated.length).toBe(1);
+  // The model is the editing endpoint's, always: it is not sent.
+  expect(p.state.generated[0]).toEqual({ prompt: 'The fox, skiing', size: '1024x1024', references: [sheet.id, style.id] });
+
+  await tile(page, 'The fox, sailing').click();
+  await viewer(page).getByRole('button', { name: 'Run again' }).click();
+  await expect(page.getByText('The reference pictures this was made with are not all in the gallery any more.')).toBeVisible();
+  expect(p.state.generated).toHaveLength(1);
+});
+
+test('with references the Model field shows the editing model and is off: a model typed for making pictures is kept, and not sent', async ({ page }) => {
+  const sheet = pic({ prompt: 'A fox sheet' });
+  const p = await portal(page, { pictures: [sheet], images: feature({ model: 'image-model', editModel: 'edit-model', editMultiple: true }) });
+  await page.goto('/x/pithagoras-media/media');
+  const model = page.locator('#image-model');
+  await model.fill('generation-only-model');
+  await maker(page).getByRole('button', { name: 'Use reference pictures' }).click();
+  // Open and empty, the picture is made as ever, with the model typed.
+  await expect(model).toBeEnabled();
+  await tick(page, 'A fox sheet');
+  await expect(model).toBeDisabled();
+  await expect(model).toHaveValue('edit-model');
+  await expect(model).toHaveAccessibleDescription('Reference pictures use the editing model: edit-model');
+  await page.getByPlaceholder('Describe the picture').fill('The fox, sailing');
+  await page.getByRole('button', { name: 'Make the picture' }).click();
+  await expect.poll(() => p.state.generated.length).toBe(1);
+  expect(p.state.generated[0]).toEqual({ prompt: 'The fox, sailing', count: 1, references: [sheet.id] });
+  // Without references the typed one is back, and sent.
+  await maker(page).getByRole('button', { name: 'Leave out the reference pictures' }).click();
+  await expect(model).toBeEnabled();
+  await expect(model).toHaveValue('generation-only-model');
+  await expect(maker(page).getByText(/Reference pictures use the editing/)).toHaveCount(0);
+  await page.getByRole('button', { name: 'Make the picture' }).click();
+  await expect.poll(() => p.state.generated.length).toBe(2);
+  expect(p.state.generated[1]).toEqual({ prompt: 'The fox, sailing', model: 'generation-only-model', count: 1 });
+});
+
+test('with no editing model set, the Model field says references use the editing endpoint’s own', async ({ page }) => {
+  await portal(page, { pictures: [pic({ prompt: 'A fox sheet' })], images: feature({ editModel: '' }) });
+  await page.goto('/x/pithagoras-media/media');
+  await maker(page).getByRole('button', { name: 'Use reference pictures' }).click();
+  await tick(page, 'A fox sheet');
+  await expect(page.locator('#image-model')).toBeDisabled();
+  await expect(page.locator('#image-model')).toHaveValue('');
+  await expect(maker(page).getByText("Reference pictures use the editing endpoint's own model.")).toBeVisible();
+});
+
+test('a reference that was scaled down is said to be one in the warning, not a picture changed for an edit', async ({ page }) => {
+  const sheet = pic({ prompt: 'A fox sheet' });
+  const p = await portal(page, { pictures: [sheet] });
+  await page.goto('/x/pithagoras-media/media');
+  await maker(page).getByRole('button', { name: 'Use reference pictures' }).click();
+  await tick(page, 'A fox sheet');
+  await page.getByPlaceholder('Describe the picture').fill('The fox, skiing');
+  await page.getByRole('button', { name: 'Make the picture' }).click();
+  await expect.poll(() => p.state.jobs.length).toBe(1);
+  const note = 'The reference was scaled down from 4000x500 pixels (1.2 MB) to 2048x256 pixels (0.3 MB) to fit what the editing endpoint takes.';
+  p.finish(p.state.jobs[0].id, {}, [note]);
+  const warning = page.getByRole('status').filter({ hasText: 'A reference picture was scaled down to fit what the editing endpoint takes.' });
+  await expect(warning).toBeVisible();
+  await expect(warning).toContainText(note);
+  await expect(page.getByText('A picture was changed to fit what an edit takes.')).toHaveCount(0);
+});
+
+test('Run again of a picture made with the same reference twice makes it again with both', async ({ page }) => {
+  const sheet = pic({ prompt: 'A fox sheet', age: 2 });
+  const twice = pic({ prompt: 'Two foxes', params: { references: [sheet.id, sheet.id] }, age: 1 });
+  const p = await portal(page, { pictures: [sheet, twice], images: feature({ editMultiple: true }) });
+  await page.goto('/x/pithagoras-media/media');
+  await tile(page, 'Two foxes').click();
+  await viewer(page).getByRole('button', { name: 'Run again' }).click();
+  await expect.poll(() => p.state.generated.length).toBe(1);
+  expect(p.state.generated[0]).toEqual({ prompt: 'Two foxes', references: [sheet.id, sheet.id] });
 });

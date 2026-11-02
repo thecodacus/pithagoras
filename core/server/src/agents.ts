@@ -57,7 +57,16 @@ export function getAgent(id: string): Agent | undefined {
 
 /** The first agent: the one a chat, channel or routine goes to when none is named. */
 export function defaultAgent(): Agent {
-  return getAgent(DEFAULT_AGENT) ?? listAgents()[0];
+  // Its row alone where it is there, as it always is: the agents are read whole only where it is not.
+  return getAgent(DEFAULT_AGENT) ?? firstAgent(listAgents());
+}
+
+/**
+ * The first agent of these, all of them as listAgents gives them: what defaultAgent is, for a caller that has read
+ * the agents already and marks the first among them (folders.list's `home`), so the two cannot come apart.
+ */
+export function firstAgent(agents: Agent[]): Agent {
+  return agents.find((a) => a.id === DEFAULT_AGENT) ?? agents[0];
 }
 
 const NEW_CHAT_AGENT = "new_chat_agent";
@@ -65,11 +74,11 @@ const NEW_CHAT_AGENT = "new_chat_agent";
 /**
  * The agent a new chat started without a project or an agent goes to: the one
  * picked for it, else the first agent. An agent that has been deleted since is
- * not one, so the first agent takes over.
+ * not one, so the first agent takes over. Given the agents, a caller that has read them already reads them once.
  */
-export function newChatAgent(): Agent {
+export function newChatAgent(agents: Agent[] = listAgents()): Agent {
   const id = getSetting(NEW_CHAT_AGENT);
-  return (id ? getAgent(id) : undefined) ?? defaultAgent();
+  return (id ? agents.find((a) => a.id === id) : undefined) ?? firstAgent(agents);
 }
 
 /** Picks the agent new chats go to; the first agent is the one that needs no pick, so it clears it. */

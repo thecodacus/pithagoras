@@ -63,6 +63,7 @@ import {
   setLazyToolSets,
   toolGroupNames,
   updateSession,
+  type SessionRow,
 } from "./db.js";
 import { checkWorkspace, workspaceRoot } from "./workspaces.js";
 import { insideReal, isWithinText, realPath } from "./within.js";
@@ -449,8 +450,9 @@ function workingIn<T extends { workspace: string }>(dir: string, rows: T[]): T[]
 app.get("/api/projects", (req, res) => {
   const home = agentHomePath();
   // Each agent's home is a folder of chats of its own, named after the agent.
-  const fresh = newChatAgent().id;
-  const agents = listAgents().map((a) => ({ id: a.id, name: a.name, home: a.home, newChats: a.id === fresh }));
+  const all = listAgents();
+  const fresh = newChatAgent(all).id;
+  const agents = all.map((a) => ({ id: a.id, name: a.name, home: a.home, newChats: a.id === fresh }));
   try {
     if (!existsSync(WORKSPACE_ROOT)) return res.json({ root: WORKSPACE_ROOT, home, agents, projects: [] });
     // The agent each project works with, where it still exists; a blank slate says nothing.
@@ -741,6 +743,13 @@ app.put("/api/routines/:id/tools", async (req, res) => {
 });
 
 /**
+ * Whether the person can find a chat to stop it: every chat but one a server half started in a folder and keeps out
+ * of the lists. That one is the package's, which hears it deleted; a delete stops its run (sessions.discard) rather
+ * than wait for a Stop nobody can give.
+ */
+const findable = (session: SessionRow) => session.listed !== 0;
+
+/**
  * The project, its chats and its folder. Refused while any chat or routine run
  * in it is working, and while its folder holds repositories — itself, submodules,
  * clones in subfolders — with work that only the folder has — uncommitted
@@ -762,8 +771,9 @@ app.delete("/api/projects/:name", async (req, res) => {
       const unsaved = await unsavedWork(project.path);
       if (unsaved && holdsWork(unsaved)) return res.status(409).json(unsavedRefusal(unsaved));
     }
-    const chats = withoutChildren(workingIn(project.path, listSessions()));
-    if (chats.some((s) => sessions.isBusy(s.id) || sessions.backgroundWork(s.id))) {
+    // The chats a server half keeps out of the lists too: they work in the folder as the others do.
+    const chats = withoutChildren(workingIn(project.path, listSessions({ unlisted: true })));
+    if (chats.some((s) => findable(s) && (sessions.isBusy(s.id) || sessions.backgroundWork(s.id)))) {
       return res.status(409).json({ error: "A chat in this project is still working. Stop it first." });
     }
     const routines = routinesIn(project.path);
@@ -832,8 +842,8 @@ app.delete("/api/agents/:id", async (req, res) => {
     const agent = deletable(req.params.id);
     // Its chats and its conversations — those started on the Agent page and
     // through channels — and the one its heartbeat looks around in.
-    const chats = withoutChildren(workingIn(agent.home, [...listSessions(), ...listAgentSessions(), ...listHeartbeatSessions()]));
-    if (chats.some((s) => sessions.isBusy(s.id) || sessions.backgroundWork(s.id))) {
+    const chats = withoutChildren(workingIn(agent.home, [...listSessions({ unlisted: true }), ...listAgentSessions(), ...listHeartbeatSessions()]));
+    if (chats.some((s) => findable(s) && (sessions.isBusy(s.id) || sessions.backgroundWork(s.id)))) {
       return res.status(409).json({ error: "A chat with this agent is still working. Stop it first." });
     }
     if (heartbeat.isRunning(agent.id)) {
@@ -882,11 +892,11 @@ app.delete("/api/agents/:id", async (req, res) => {
 
 /**
  * SQLite stores pinned as 0/1; the API speaks booleans. A child chat names its parent, and says whether it is listed;
- * which package made it is the portal's to know. It also says when it waits on a person (`asking`), so that its
+ * which package made it, and whether anybody attends it, is the portal's to know. It also says when it waits on a person (`asking`), so that its
  * parent's row can say so: a child's dialogs are shown on its own page, which nobody may have open. Only a child's,
  * since asking every chat in the list for its questions would cost a query each, on every poll.
  */
-const toApi = ({ parent_id, listed, creator: _creator, ...s }: ReturnType<typeof getSession> & {}) => ({
+const toApi = ({ parent_id, listed, creator: _creator, unattended: _unattended, tools_from: _toolsFrom, ...s }: ReturnType<typeof getSession> & {}) => ({
   ...s,
   ...(parent_id ? { parent: parent_id, listed: listed === 1, ...(sessions.waitsOnPerson(s.id) ? { asking: true } : {}) } : {}),
   pinned: Boolean(s.pinned),

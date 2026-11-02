@@ -46,8 +46,9 @@ export function settingsRoutes(router: Router): void {
    * a picture. A tool is there only while it is on and has an address, and a
    * chat decides that when it loads, so a change in either reloads the idle
    * ones. So does one in whether the edit tool takes a list of pictures, which
-   * is the shape of its parameters. The rest — address, model, size, key — is
-   * read at each call and needs no reload.
+   * is the shape of its parameters, as editing being ready and taking several is
+   * the shape of generate_image's references. The rest — address, model, size,
+   * key, the Stable Diffusion switch — is read at each call and needs no reload.
    */
   router.put("/settings/images", json, async (req, res) => {
     const patch = parseImageGenerationPatch(req.body);

@@ -129,7 +129,9 @@ test("a model picked in a chat on the default is not kept as the default's", asy
   // Picked here: the chat is on a model of its own now, with seven levels.
   await page.getByTitle('model-a', { exact: true }).click();
   await page.getByRole('button', { name: 'More models' }).click();
-  await page.getByTitle('model-b', { exact: true }).click();
+  // By its name, not its title: the list opens under the pointer, and the title of the model it comes to rest on is
+  // lifted into the portal's own tooltip (tooltips.ts), so a title would find nothing.
+  await page.getByRole('group', { name: 'Models' }).getByRole('button', { name: 'Model B' }).click();
   await expect(page.getByTitle('Effort / thinking level')).toHaveText('medium');
   // Chat b is still on the default, which switches on and off.
   await open(page, 'Second chat', 'b');

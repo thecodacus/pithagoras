@@ -4,9 +4,9 @@ import { settled } from '../../../../tests/browser/settled';
 import { BASE, browserState } from './state';
 
 /**
- * The browser in voice mode (src/web/BrowserScreen.tsx, and src/calls.ts for which calls drive it): a window in the
- * middle that opens as the agent drives the browser, from the card of such a call, by its button and by B, and says
- * so when there is no browser to show.
+ * The browser in voice mode (src/web/BrowserScreen.tsx, and src/calls.ts for which calls drive it): a window at the
+ * side, or in the middle beside the conversation, that opens as the agent drives the browser, from the card of such a
+ * call, by its button and by B, and says so when there is no browser to show.
  */
 test.use({ installed: ['extensions/docker', 'extensions/browser'] });
 
@@ -31,14 +31,15 @@ async function voice(page: Page, state: Record<string, unknown> = RUNNING) {
 
 const windowOf = (page: Page) => page.locator('.voice-extension-window[data-extension="pithagoras-browser"]');
 
-test('the agent driving the browser opens it in the middle, its web UI through the server half, and its card says what it does', async ({ page }) => {
+test('the agent driving the browser opens it at the side, its web UI through the server half, and its card says what it does', async ({ page }) => {
   await voice(page);
   const browser = windowOf(page);
   await expect(browser).toHaveCount(0);
   // A Playwright MCP's tool, behind the MCP adapter.
   await page.getByRole('button', { name: 'Use browser', exact: true }).click();
   await expect(browser).toHaveClass(/is-open/);
-  await expect(browser).toHaveClass(/as-main/);
+  // Alone it stands at the side, as every window opened alone does, beside the orb.
+  await expect(browser).toHaveClass(/as-side/);
   await expect(browser.locator('iframe')).toHaveAttribute('src', `${BASE}/ui/`);
   await expect(browser.frameLocator('iframe').locator('body')).toHaveText('A browser, in view.');
   const card = page.getByLabel('Tool activity').getByRole('button', { name: /Opening a page/ });
@@ -117,4 +118,16 @@ test('a server half that does not answer when the window opens is said in it', a
   await page.route(`**${BASE}/state`, (route) => route.fulfill({ status: 500, json: { error: 'down' } }));
   await page.getByRole('button', { name: 'Use browser', exact: true }).click();
   await expect(windowOf(page)).toContainText('Could not connect to the browser viewer.');
+});
+
+test('alone at the side, it moves to the middle when the conversation opens, and back when it closes', async ({ page }) => {
+  await voice(page);
+  const browser = windowOf(page);
+  await page.getByRole('button', { name: 'Use browser', exact: true }).click();
+  await expect(browser).toHaveClass(/as-side/);
+  await page.getByRole('button', { name: 'Show the conversation' }).click();
+  await expect(page.locator('.voice-conversation-window')).toHaveClass(/as-side/);
+  await expect(browser).toHaveClass(/as-main/);
+  await page.getByRole('button', { name: 'Close the conversation' }).click();
+  await expect(browser).toHaveClass(/as-side/);
 });

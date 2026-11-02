@@ -259,7 +259,7 @@ test("a third look: a pattern is never slow on a long line, and what a line only
   }
 });
 
-test("after a suspected injection, a routine is not run: it works without this conversation's rules", () => {
+test("after a suspected injection, a routine is not run: it works in a conversation of its own, not held back as this one is", () => {
   const result = call(tainted(), "routine_run", { id: "r" });
   assert.equal(refused(result), true);
   assert.match(result.reason, /\(delegate\)/);

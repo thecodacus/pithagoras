@@ -10,8 +10,10 @@ import {
   imageEditingTarget,
   imageGenerationConfig,
   imageGenerationReady,
+  type ImageEditingTarget,
+  type ImageGenerationConfig,
 } from "./image-generation";
-import { forPicture, hasNative, type PictureSettings } from "./image-settings";
+import { forPicture, hasNative, nativeConflict, type PictureSettings } from "./image-settings";
 import { MAX_PICTURE_BYTES } from "./picture-files";
 
 /**
@@ -31,7 +33,9 @@ import { MAX_PICTURE_BYTES } from "./picture-files";
  * What a job does is what the agent's tools do — the same request, the same
  * checks of what comes back, the same limits and time — with the settings read
  * when it starts, so a change of the address needs no restart. Nothing in a job
- * holds a key, and what it says of a failure has none either.
+ * holds a key, and what it says of a failure has none either. A new picture with
+ * references goes to the editing endpoint, from noise, as generate_image sends
+ * one (see pi/generate-image-tool.ts).
  */
 
 /** How many pictures are being made at once. */
@@ -53,7 +57,7 @@ export interface PictureJob {
   finishedAt?: number;
   /** When it is done: the picture, in the gallery. */
   pictureId?: string;
-  /** When an edit was scaled down or compressed to fit what an edit takes: what was done to which, in words for the person. Left out when nothing was. */
+  /** When an edit's pictures, or a new picture's references, were scaled down or compressed to fit what an edit takes: what was done to which, in words for the person. Left out when nothing was. */
   notes?: string[];
   /** When it failed: why, in words with no secret in them. */
   error?: string;
@@ -160,6 +164,8 @@ export interface GenerateJob extends PictureSettings {
   prompt: string;
   /** One picture each: an endpoint that makes one at a time is asked for several as several, not for a number it may refuse. */
   count: number;
+  /** Pictures of the gallery, by their ids, that the new picture takes a character, an object or a style from, in the order the prompt refers to them. */
+  references?: string[];
 }
 
 /** What goes in the gallery of how a picture was asked for: the settings that were sent, and none that were not. */
@@ -188,18 +194,78 @@ const requestOf = ({ model, size, outputFormat, outputCompression, fromNoise, ne
 });
 
 /**
+ * The pictures of the gallery a request names, read now, and checked as the agent's tools check theirs before anything
+ * is sent: one that cannot be read refuses the request, saying which where there are several (`label` and its place).
+ */
+function readPictures(ids: string[], label: string): Buffer[] {
+  return ids.map((id, i) => {
+    try {
+      return readListed(id).bytes;
+    } catch (e) {
+      const which = ids.length > 1 ? `${label} ${i + 1}: ` : "";
+      // The Files panel's words for a picture that is too large ("download it instead") are no way forward for an edit.
+      const why =
+        refusalOf(e) === "too_large"
+          ? `The picture is over ${MAX_PICTURE_BYTES / 1024 / 1024} MB, which is more than can be read to be scaled down for an edit. Use a smaller picture.`
+          : (e as Error).message;
+      throw new JobRefusal(`${which}${why}`, 400);
+    }
+  });
+}
+
+/**
+ * The references of a new picture, and where they go: the editing endpoint, the one route that takes pictures. It must
+ * be on, and take as many as there are, as for an edit.
+ */
+function referencesOf(config: ImageGenerationConfig, ids: string[]): { target: ImageEditingTarget; images: Buffer[] } {
+  if (!imageEditingReady(config)) {
+    throw new JobRefusal("Reference pictures are sent to the image editing endpoint, and image editing is switched off or has no address: set it up under Media in Settings, or leave the references out", 409);
+  }
+  const target = imageEditingTarget(config);
+  try {
+    checkCount(ids.length, target.multiple);
+  } catch (e) {
+    throw new JobRefusal((e as Error).message, 400);
+  }
+  return { target, images: readPictures(ids, "Reference") };
+}
+
+/**
  * Starts one request for each picture asked for. The request is checked by
  * the caller (the API); what is checked here is whether the endpoint is
  * there to ask and whether there is room. Each picture has the next seed after
  * the one before it, so that a seed does not make the same picture several times.
+ *
+ * With references the pictures are read now, and each picture is asked of the
+ * editing endpoint with them, from noise (see pi/generate-image-tool.ts), always
+ * with the editing model, whatever model the request names, and with a size where
+ * there is one: the add-on's where the request has none, as without one
+ * stable-diffusion.cpp makes the picture in the first reference's size.
  */
 export function startGenerations(request: GenerateJob): PictureJob[] {
   const config = imageGenerationConfig();
   if (!imageGenerationReady(config)) throw new JobRefusal("Image generation is switched off, or has no address: set it up under Media in Settings", 409);
   if (!config.sdExtras && hasNative(request)) throw new JobRefusal(SD_OFF, 409);
   room(request.count);
+  const refs = request.references ? referencesOf(config, request.references) : undefined;
+  // A block of the description's own would be the one the server reads, and the picture would start from the first reference after all.
+  if (refs?.target.sdExtras && nativeConflict(request.prompt, { fromNoise: true })) {
+    throw new JobRefusal("The description has an sd_cpp_extra_args block of its own, which would hide the one that makes a picture with references start from noise: take it out of the description", 400);
+  }
   return Array.from({ length: request.count }, (_, i) => {
     const settings = forPicture(request, i);
+    if (refs) {
+      const size = settings.size || config.size;
+      // Always the editing model: a model typed for making pictures need not be one the editing endpoint has. From noise is recorded only where it was sent: the block goes only while the switch is on.
+      const withRefs = { ...settings, model: refs.target.model, size };
+      const params: PictureParams = { ...paramsOf({ ...withRefs, ...(refs.target.sdExtras ? { fromNoise: true } : {}) }), references: request.references };
+      const { images } = refs;
+      return start({ kind: "generate", prompt: request.prompt, ...(size ? { size } : {}) }, async (signal) => {
+        const asked = requestOf({ ...withRefs, fromNoise: true });
+        const { bytes, ext, notes } = await editImage(refs.target, { prompt: request.prompt, image: images.length > 1 ? images : images[0], ...asked, references: true }, { signal });
+        return { pictureId: addPagePicture({ bytes, ext, kind: "generated", prompt: request.prompt, params }).id, notes };
+      });
+    }
     // What is recorded is what was sent: the add-on's model and size are the defaults of a request that has none.
     const params = paramsOf({ ...settings, model: settings.model || config.model, size: settings.size || config.size });
     return start({ kind: "generate", prompt: request.prompt, ...(params.size ? { size: params.size } : {}) }, async (signal) => {
@@ -236,20 +302,7 @@ export function startEdit(request: EditJob): PictureJob[] {
   } catch (e) {
     throw new JobRefusal((e as Error).message, 400);
   }
-  const images: Buffer[] = [];
-  for (const [i, id] of request.sources.entries()) {
-    try {
-      images.push(readListed(id).bytes);
-    } catch (e) {
-      const which = request.sources.length > 1 ? `Picture ${i + 1}: ` : "";
-      // The Files panel's words for a picture that is too large ("download it instead") are no way forward for an edit.
-      const why =
-        refusalOf(e) === "too_large"
-          ? `The picture is over ${MAX_PICTURE_BYTES / 1024 / 1024} MB, which is more than can be read to be scaled down for an edit. Use a smaller picture.`
-          : (e as Error).message;
-      throw new JobRefusal(`${which}${why}`, 400);
-    }
-  }
+  const images = readPictures(request.sources, "Picture");
   return Array.from({ length: request.count }, (_, i) => {
     const settings = forPicture(request, i);
     // The size is the request's own: an edit has none of the add-on's, which is the size of a new picture.

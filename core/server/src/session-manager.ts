@@ -22,7 +22,7 @@ import { isDialog, showsDialogs } from "./pi/ui-requests.js";
 import { ASK_QUESTION_TOOL, asksQuestions, describeAnswers, readAnswers, type Answers, type Question } from "./pi/ask-question.js";
 import { CODEMODE_TOOL } from "./pi/codemode.js";
 import { CHAT_QUESTION, CHAT_QUESTION_END, holdAnswers, openChatQuestion, openChatQuestions, takeHeldAnswers, type ChatQuestion, type QuestionOutcome } from "./questions.js";
-import { forgetTaint } from "./pi/guard.js";
+import { flaggedResult, forgetTaint, sessionTainted, taintSession } from "./pi/guard.js";
 import { neutralise } from "./channels/framing.js";
 import { textOf } from "./pi/entries.js";
 import { removeSessionFiles } from "./session-files.js";
@@ -101,8 +101,11 @@ import {
   lazySetLabels,
   childSessions,
   deleteSession,
+  lastRunEvents,
+  flaggedEvents,
+  trustedResults,
 } from "./db.js";
-import { newChildChat, type ChildRun } from "./child-chats.js";
+import { newChildChat, newPackageChat, type ChatAnswer, type ChildRun } from "./child-chats.js";
 
 /**
  * Thinking markers that escape into the answer.
@@ -277,11 +280,17 @@ function plain(text: unknown): string {
 const hasRoutineTools = (session: SessionRow) =>
   session.kind === "agent" || (session.kind === "task" && agentAt(session.workspace) !== undefined);
 
-/** Whether the conversation gets the ask_question tool: see asksQuestions. */
+/** Whether the conversation gets the ask_question tool: see asksQuestions. Never in a chat nobody attends (child-chats.ts). */
 const canAsk = (session: SessionRow) => {
   const host = dialogHost(session);
-  return asksQuestions({ kind: host.kind, role: session.role }, onChannel(host));
+  return !session.unattended && asksQuestions({ kind: host.kind, role: session.role }, onChannel(host));
 };
+
+/**
+ * Whether somebody is there to answer a dialog an extension opens in the conversation, and a question the guard puts
+ * (see showsDialogs). A child chat's go where its parent's would (dialogHost); a chat nobody attends has nobody.
+ */
+const hasDialogs = (session: SessionRow) => !session.unattended && showsDialogs(dialogHost(session), onChannel(dialogHost(session)));
 
 /**
  * The chat's own switches turning the code tool off where its mode switches it on (modeHoldsCodemode): refused. With a
@@ -963,6 +972,10 @@ class SessionManager extends EventEmitter {
    */
   private inRun = new Set<string>();
 
+  /** Stops under way per session, and who waits for the run they stop to settle: see abort. */
+  private abortsUnderWay = new Map<string, number>();
+  private settleWaiters = new Map<string, Array<() => void>>();
+
   /** The extensions whose failure has been said since the last run began, per session. */
   private failuresSaid = new Map<string, Set<string>>();
 
@@ -1212,10 +1225,10 @@ class SessionManager extends EventEmitter {
       model: chosen.model || undefined,
       thinkingLevel: session.thinking_level || settings.thinkingLevel || undefined,
       sessionFile: session.pi_session_file || undefined,
-      routineTools: hasRoutineTools(session),
+      // Not in a chat nobody attends, for the reason a routine run has none: a routine that can make routines, unwatched, can build a chain.
+      routineTools: hasRoutineTools(session) && !session.unattended,
       questions: canAsk(session),
-      // A child chat's go where its parent's would: see dialogHost.
-      dialogs: showsDialogs(dialogHost(session), onChannel(dialogHost(session))),
+      dialogs: hasDialogs(session),
       // A routine run gets the report tool instead: it is the one kind of
       // session with nobody on the other end to read what it found.
       routineSlug: session.kind === "routine" ? session.routine_slug : undefined,
@@ -1425,7 +1438,11 @@ class SessionManager extends EventEmitter {
       if (msg.type === "agent_settled") {
         this.inRun.delete(sessionId);
         this.settleWaiting(sessionId);
-        if (!this.failed.delete(sessionId)) this.mark(sessionId, "idle");
+        // A stop that waits for this settle records the chat idle itself, as stopped: see abort.
+        const stoppedHere = (this.abortsUnderWay.get(sessionId) ?? 0) > 0;
+        if (!this.failed.delete(sessionId) && !stoppedHere) this.mark(sessionId, "idle");
+        for (const woken of this.settleWaiters.get(sessionId) ?? []) woken();
+        this.settleWaiters.delete(sessionId);
         if (client.reloadDue) void this.reloadSettled(sessionId, client);
       }
     });
@@ -2299,7 +2316,8 @@ class SessionManager extends EventEmitter {
         } else if (row.type === "portal_status" && p.status === "error") done(String(p.error ?? error ?? "The run failed"));
         // Stopped by the person: the edit is what they stopped, not undid.
         else if (row.type === "portal_status" && p.status === "idle" && p.aborted) done();
-        else if (row.type === "agent_settled") done(error ?? "The run ended without an answer");
+        // A Stop records the stopped run's settle before its own idle (see abort), so the settle says it too.
+        else if (row.type === "agent_settled") p.aborted ? done() : done(error ?? "The run ended without an answer");
         // Idle with no run begun: an extension took it, and that is all.
         else if (row.type === "portal_status" && p.status === "idle") done(started ? (error ?? "The run ended without an answer") : undefined);
       };
@@ -3026,6 +3044,29 @@ class SessionManager extends EventEmitter {
     }
   }
 
+  /**
+   * Resolves when the run that is going settles, at once when none is, and after `timeoutMs` at the latest: pi
+   * settles a run a moment after its abort() has returned (the extensions' handlers are awaited first), so a Stop that
+   * did not wait would record the chat idle ahead of the run's own settling.
+   */
+  private whenSettled(sessionId: string, timeoutMs = 10_000): Promise<void> {
+    if (!this.inRun.has(sessionId)) return Promise.resolve();
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        // Not left behind for the next settle to call.
+        const rest = (this.settleWaiters.get(sessionId) ?? []).filter((w) => w !== done);
+        if (rest.length) this.settleWaiters.set(sessionId, rest);
+        else this.settleWaiters.delete(sessionId);
+        done();
+      }, timeoutMs);
+      const done = () => {
+        clearTimeout(timer);
+        resolve();
+      };
+      this.settleWaiters.set(sessionId, [...(this.settleWaiters.get(sessionId) ?? []), done]);
+    });
+  }
+
   async abort(sessionId: string): Promise<void> {
     this.aborts.set(sessionId, (this.aborts.get(sessionId) ?? 0) + 1);
     const live = this.live.get(sessionId);
@@ -3051,6 +3092,7 @@ class SessionManager extends EventEmitter {
     const before = this.sending.get(sessionId);
     const tail = before ? before.then(() => gate) : gate;
     this.sending.set(sessionId, tail);
+    this.abortsUnderWay.set(sessionId, (this.abortsUnderWay.get(sessionId) ?? 0) + 1);
     try {
       const sentBefore = new Set(this.waiting.get(sessionId) ?? []);
       // Before the abort, which waits for the run to settle and would find them
@@ -3059,6 +3101,9 @@ class SessionManager extends EventEmitter {
       await this.whenHanded(sessionId);
       this.dropWaiting(sessionId, live.client, sentBefore);
       await live.client.abort().catch(() => {});
+      // The stopped run's settling comes after this: it is waited for, or it would be recorded behind the message
+      // that is sent next, and be taken for the end of the run that message starts.
+      await this.whenSettled(sessionId);
       // Cancelling a compaction does not end it. pi detaches the session from
       // agent events for the whole of compact() and reattaches in its own
       // finally, so between abortCompaction() returning and that finally running
@@ -3069,6 +3114,9 @@ class SessionManager extends EventEmitter {
       updateSession(sessionId, { status: "idle" });
       this.record(sessionId, "portal_status", { status: "idle", aborted: true });
     } finally {
+      const left = (this.abortsUnderWay.get(sessionId) ?? 1) - 1;
+      if (left > 0) this.abortsUnderWay.set(sessionId, left);
+      else this.abortsUnderWay.delete(sessionId);
       stopped();
       if (this.sending.get(sessionId) === tail) this.sending.delete(sessionId);
     }
@@ -3196,6 +3244,9 @@ class SessionManager extends EventEmitter {
     this.extensionUi.delete(sessionId);
     this.failuresSaid.delete(sessionId);
     this.inRun.delete(sessionId);
+    // A run that went with its pi settles no more: a Stop that waits for it is let go.
+    for (const woken of this.settleWaiters.get(sessionId) ?? []) woken();
+    this.settleWaiters.delete(sessionId);
     this.calls.delete(sessionId);
     toolCallsCutOff(sessionId);
     this.callWindows.delete(sessionId);
@@ -3315,25 +3366,60 @@ class SessionManager extends EventEmitter {
     return newChildChat(options, creator);
   }
 
+  /** Makes a chat of an agent's or a project's folder for the server half of `creator`: see newPackageChat. */
+  startChat(options: unknown, creator: string): SessionRow {
+    return newPackageChat(options, creator);
+  }
+
   /**
-   * Sends a child chat a message and waits for the run that takes it in to end: how it ended, and the last thing it
-   * said. Mid-run, `steer` takes it in after the step the run is on; without, it waits for the run to end, as a
-   * person's message does. It is sent as the person its parent last heard from: a child is held to the role and the
-   * person of the chat it works for. A run that fails, or a message refused, resolves as an error: it never throws
-   * for the run's sake.
+   * A child keeps no switch its parent has taken away since it was made: a tool the person switched off in the parent
+   * is off in the child before its next message (and in its pi, if that is up), and one the parent no longer has
+   * switched on is not on in the child. The other way, a child's own stricter switch stays, and a tool switched on
+   * in the parent later is not switched on for it. Its mode is the parent's from the start, and fixed from the
+   * parent's first message (api/modes.ts), so it cannot have moved.
+   */
+  private async holdToParentsTools(childId: string, parentId: string): Promise<void> {
+    const child = getSession(childId);
+    const parent = getSession(parentId);
+    // One that starts from the defaults has switches of its own, as a chat of the folder has.
+    if (!child || !parent || child.tools_from === "defaults") return;
+    const own = { off: parseToolsOff(child.tools_off), on: parseToolsOff(child.tools_on) };
+    const above = { off: parseToolsOff(parent.tools_off), on: parseToolsOff(parent.tools_on) };
+    const off = [...new Set([...own.off, ...above.off])];
+    const on = own.on.filter((name) => above.on.includes(name) && !off.includes(name));
+    if (off.length === own.off.length && on.length === own.on.length) return;
+    setSessionTools(childId, { off, on });
+    // A pi that is up has the old switches: told as setTools tells it.
+    const client = this.live.get(childId)?.client;
+    if (!client?.setToolsOff) return;
+    const reported = client.getTools ? await client.getTools() : [];
+    const piOff = this.piOff(childId, reported);
+    await client.setToolsOff(piOff, this.piLazy(piOff));
+  }
+
+  /**
+   * Sends a chat a server half made (a child, or one it started in a folder) a message and waits for the run that
+   * takes it in to end: how it ended, and the last thing it said. Mid-run, `steer` takes it in after the step the run
+   * is on; without, it waits for the run to end, as a person's message does. A child's is sent as the person its
+   * parent last heard from: a child is held to the role and the person of the chat it works for. A chat with no parent
+   * is sent as its own role, which is the primary user's. A run that fails, or a message refused, resolves as an
+   * error: it never throws for the run's sake.
    */
   async runChild(childId: string, message: string, options: { steer?: boolean } = {}): Promise<ChildRun> {
     const child = getSession(childId);
     const parent = child?.parent_id ? getSession(child.parent_id) : undefined;
-    if (!child || !parent) throw new Error(`There is no child chat ${childId}`);
-    const person = this.speaker.get(parent.id);
-    if (person) this.setSpeaker(childId, person);
-    const role = lower(child.role, this.speakerRole(parent.id));
-    if (role !== child.role || parent.last_person_key !== child.last_person_key) {
-      updateSession(childId, { role, last_person_key: parent.last_person_key });
-      // Its context files are picked by its role as its pi starts: one that was up has to start again. Not mid-run,
-      // where the role of the speaker set above holds every call.
-      if (role !== child.role && !this.isBusy(childId)) await this.stop(childId);
+    if (!child || (child.parent_id && !parent)) throw new Error(`There is no chat ${childId}`);
+    if (parent) {
+      const person = this.speaker.get(parent.id);
+      if (person) this.setSpeaker(childId, person);
+      const role = lower(child.role, this.speakerRole(parent.id));
+      if (role !== child.role || parent.last_person_key !== child.last_person_key) {
+        updateSession(childId, { role, last_person_key: parent.last_person_key });
+        // Its context files are picked by its role as its pi starts: one that was up has to start again. Not mid-run,
+        // where the role of the speaker set above holds every call.
+        if (role !== child.role && !this.isBusy(childId)) await this.stop(childId);
+      }
+      await this.holdToParentsTools(childId, parent.id);
     }
 
     let end!: (run: ChildRun) => void;
@@ -3343,7 +3429,13 @@ class SessionManager extends EventEmitter {
     let inRun = false;
     let answer = "";
     let failure: string | undefined;
-    const finish = (status: ChildRun["status"], error?: string) => end({ status, answer, ...(error ? { error } : {}) });
+    const finish = (status: ChildRun["status"], error?: string) => {
+      // What a child that was marked said is what a mark on it carried: the chat it worked for takes it in marked too, as a
+      // routine's report does, or its own words would be a way round the rules that hold a chat after outside content.
+      const marked = sessionTainted(childId);
+      if (marked && parent) taintSession(parent.id);
+      end({ status, answer, ...(marked ? { marked: true as const } : {}), ...(error ? { error } : {}) });
+    };
     const key = `session:${childId}`;
     const hear = (row: { seq?: number; type: string; payload: string }) => {
       let p: any = {};
@@ -3393,6 +3485,71 @@ class SessionManager extends EventEmitter {
     } finally {
       this.off(key, hear);
     }
+  }
+
+  /**
+   * Where the last run of a chat stands, read from its events and its row, so that it holds after the portal or a
+   * server half restarts: how it ended (or that it goes on), the last thing it said in it, as runChild hears them, and
+   * whether the guard has the chat marked. Undefined for a chat that never ran, or is not there.
+   */
+  lastAnswer(chatId: string): ChatAnswer | undefined {
+    const row = getSession(chatId);
+    const events = row && lastRunEvents(chatId);
+    if (!row || !events) return undefined;
+    let answer = "";
+    let failure: string | undefined;
+    let end: { status: ChildRun["status"]; error?: string } | undefined;
+    for (const event of events) {
+      let p: any = {};
+      try {
+        p = JSON.parse(event.payload);
+      } catch {
+        continue;
+      }
+      if (event.type === "message_end" && p.message?.role === "assistant") {
+        if (p.message.stopReason === "error") failure = String(p.message.errorMessage ?? "The model answered with an error");
+        else {
+          failure = undefined;
+          const said = (Array.isArray(p.message.content) ? p.message.content : []).filter((c: any) => c?.type === "text").map((c: any) => c.text).join("");
+          if (said.trim()) answer = said;
+        }
+      } else if (event.type === "portal_status" && p.status === "error") end = { status: "error", error: String(p.error ?? failure ?? "The run failed") };
+      else if (event.type === "portal_status" && p.status === "idle") end = p.aborted ? { status: "stopped" } : failure ? { status: "error", error: failure } : { status: "done" };
+      // The portal stopped while it ran: it was cut off, and its next start said so.
+      else if (event.type === "portal_status" && p.status === "interrupted") end = { status: "stopped", error: "The portal stopped while it ran" };
+    }
+    const now: ChatAnswer["status"] | undefined = row.status === "running" ? "running" : end?.status;
+    const status = now ?? (row.status === "error" ? "error" : "stopped");
+    const error = now === "running" ? undefined : (end?.error ?? (row.status === "error" ? (row.last_error ?? "The run failed") : undefined));
+    const marked = this.marked(chatId);
+    // As for runChild: what a marked child said is what the mark carried, and the chat it works for takes it in marked.
+    if (marked && row.parent_id) taintSession(row.parent_id);
+    return { status, answer, ...(marked ? { marked: true as const } : {}), ...(error ? { error } : {}) };
+  }
+
+  /**
+   * Whether the guard holds a chat as marked: the guard that runs for it says, and with none running, what it would
+   * find as it starts. A result it flagged that the person has not trusted (see flaggedIn in pi/guard.ts).
+   */
+  private marked(chatId: string): boolean {
+    if (sessionTainted(chatId)) return true;
+    const trusted = trustedResults(chatId);
+    for (const event of flaggedEvents(chatId)) {
+      let p: any;
+      try {
+        p = JSON.parse(event.payload);
+      } catch {
+        continue;
+      }
+      // A tool's result, or a message an extension wrote; not what the person or the model said, which only quotes one.
+      const content = event.type === "tool_execution_end" ? p.result?.content : p.message?.role === "custom" ? p.message.content : undefined;
+      const texts: string[] = typeof content === "string" ? [content] : Array.isArray(content) ? content.flatMap((c: any) => (c?.type === "text" && typeof c.text === "string" ? [c.text] : [])) : [];
+      if (texts.some((one) => {
+        const flag = flaggedResult(one);
+        return flag !== undefined && !trusted.has(flag.id);
+      })) return true;
+    }
+    return false;
   }
 
   /** Drop the running process so the next turn rebuilds it — used when a
@@ -3453,6 +3610,8 @@ export const sessions = new SessionManager();
 setChatBridge({
   tell: (chatId, extension, data) => sessions.tellExtension(chatId, extension, data),
   create: (options, creator) => sessions.createChild(options, creator),
+  start: (options, creator) => sessions.startChat(options, creator),
+  lastAnswer: (chatId) => sessions.lastAnswer(chatId),
   run: (chatId, message, options) => sessions.runChild(chatId, message, options),
   abort: (chatId) => sessions.abort(chatId),
   remove: (chatId) => sessions.deleteChat(chatId),

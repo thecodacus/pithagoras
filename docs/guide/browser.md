@@ -244,8 +244,9 @@ from edge to edge, with **Fullscreen** in its head. It docks, floats and is
 resized as every panel is (see [Files](/guide/files#panels)), and other pages
 open it by its name, `browser`.
 
-In [voice mode](/guide/voice) the browser is a window in the middle of the
-stage. It opens each time the agent drives a browser, Browser's tools or a
+In [voice mode](/guide/voice) the browser is a window at the side of the
+stage, as Files' is, and in the middle when the conversation or the pictures
+have the side. It opens each time the agent drives a browser, Browser's tools or a
 Playwright MCP's, and says when there is no browser to show or it cannot be
 reached. It can fill the stage (**Maximize**, and Escape, also from inside the
 page in it, gives the stage back), and it stays loaded while it is minimized.

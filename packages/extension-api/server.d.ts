@@ -34,6 +34,8 @@ export interface Chat {
   /** The folder the chat works in, as the chat names it. */
   workspace: string;
   status: "idle" | "running" | "error" | "interrupted";
+  /** What kind of chat it is. Not there for a task, a chat made on the portal's pages. */
+  kind?: Exclude<ChatKind, "task">;
   /**
    * The mode it was started in, as it stores it: "<package>/<id>" for an extension's (`modes.provide`), "custom/<id>"
    * for one the person made, the portal's own by name ("code"). Not there for Standard.
@@ -44,24 +46,67 @@ export interface Chat {
    * of its own.
    */
   parent?: string;
-  /** A child chat's: whether it shows in the chat lists, under its parent. One that does not is found by its id alone. */
+  /**
+   * A chat a server half made's (`chats.create`, `chats.start`): whether it shows in the chat lists, a child under its
+   * parent. One that does not is found by its id alone.
+   */
   listed?: boolean;
+  /** Made for nobody to attend (`ChildChatOptions.unattended`). */
+  unattended?: true;
 }
 
 /** What a child chat is made with: see `chats.create`. */
 export interface ChildChatOptions {
-  /** The chat it works for: its folder is the child's, and so are its role, its last speaker and its tool switches. */
+  /** The chat it works for: its folder is the child's, and so are its role, its last speaker and (see `tools`) its tool switches. */
   parent: string;
   title: string;
   /**
    * A mode the child may be put in, as a chat stores it (see `Chat.mode`). Left out, it is in its parent's, so a mode
-   * that took tools away does not stop at a child; "standard" puts it in none.
+   * that took tools away does not stop at a child; "standard" puts it in none, and the tools its parent's mode took
+   * away stay off for it. Naming its parent's own mode is the same as leaving it out, but is refused if that mode is
+   * not there for a child.
    */
   mode?: string;
-  /** The model it runs on; its mode's, or else its parent's, when left out. */
+  /** The model it runs on; the model of a mode that is named, else its parent's, when left out. */
   model?: ModelRef;
-  /** Whether it shows in the chat lists, under its parent (the default), or is found by its id alone. */
+  /**
+   * Whether it shows in the chat lists, under its parent (the default), or is found by its id alone. A child of a chat
+   * that is not listed is not listed either, whatever this says: it would stand in the lists on its own.
+   */
   listed?: boolean;
+  /**
+   * A chat nobody attends, wherever its parent is: for work the person does not watch, such as an answer an extension
+   * posts elsewhere. It is not offered `ask_question`; every dialog an extension opens in it is answered at once with
+   * its no-answer value (a confirm with false, a select or an input with nothing), as in a routine run; and a call the
+   * guard holds after a suspected prompt injection is refused rather than put to the person. The agent gets each
+   * refusal as the tool's result and goes on. It has no routine tools either (in an agent's home, where a chat has
+   * them), as a routine run has none. Kept with the chat, so it holds after the portal restarts. Its tools are the
+   * folder's `"defaults"` unless `tools` says otherwise. A child of an unattended chat is unattended itself, whoever
+   * makes it and whether or not it says so: its parent's page, where its dialogs would go, is one nobody opens.
+   */
+  unattended?: true;
+  /**
+   * Which tools it has: `"parent"` (the default, except for an unattended child) the tools the person switched off or
+   * on in its parent, and the ones its parent's mode took away where it is in another mode; it is held to its parent's
+   * switches as they are before each message. `"defaults"` the tools a new chat of the folder has in its mode, as
+   * Settings → Tools, its agent and its project say, with none of its parent's switches: for work of the package's that
+   * is not the conversation the person switched them for.
+   */
+  tools?: "parent" | "defaults";
+}
+
+/** What a chat a package starts in a folder is made with: see `chats.start`. */
+export interface StartChatOptions {
+  /** The folder of an agent or a project, by its path as `folders.list()` gives it (where it really is). */
+  folder: string;
+  title: string;
+  /**
+   * Whether it shows in the chat lists (the default), or is found by its id alone. One that does not is refused unless
+   * it is `unattended` too: with no parent, it has no row to say it waits on the person, nor a page anybody finds.
+   */
+  listed?: boolean;
+  /** A chat nobody attends: see `ChildChatOptions.unattended`. */
+  unattended?: true;
 }
 
 /**
@@ -71,6 +116,27 @@ export interface ChildChatOptions {
 export interface ChildRun {
   status: "done" | "stopped" | "error";
   answer: string;
+  /**
+   * Set when the child had read outside content that holds a chat back (the guard marked it). The portal has marked its
+   * parent with it already, so its rules for a marked chat hold what the parent does with this answer. That mark is in
+   * the guard that runs now: an answer handed on is written in the form of a flagged result for it to be found again
+   * when the guard is made again (see "Child chats" in the guide).
+   */
+  marked?: true;
+  error?: string;
+}
+
+/**
+ * Where the last run of a chat a package made stands (`chats.lastAnswer`), from what the portal keeps: `running` while
+ * it goes on, else how it ended as for `ChildRun` (a run the portal's restart cut off is `stopped`, with an `error`
+ * that says so). `answer` is the last thing it said in that run, which may be nothing (and, while it runs, the last
+ * message it finished). `marked` is there while the guard holds the chat as marked: it read something that looked like
+ * a prompt injection that the person has not trusted.
+ */
+export interface ChatAnswer {
+  status: "running" | ChildRun["status"];
+  answer: string;
+  marked?: true;
   error?: string;
 }
 
@@ -95,6 +161,21 @@ export interface FileEntry {
   link?: boolean;
   size: number;
   mtime: number;
+}
+
+/** The role of a person the agents work with, as People sets it: see "People" in the guide. */
+export type PersonRole = "primary" | "colleague" | "guest" | "unknown";
+
+/**
+ * Who is behind a request to the package's routes (`http.person`). Every login to the portal is its owner's for now:
+ * `{ id: "owner", name, role: "primary" }`, with the name People gives the person marked primary ("Owner" while nobody
+ * is). Check `role` where what a request asks the agents to do depends on who asks: logins with fewer rights would say
+ * theirs here.
+ */
+export interface RequestPerson {
+  id: string;
+  name: string;
+  role: PersonRole;
 }
 
 /** A file's text, or the fact that it is not text or is over 1 MB. */
@@ -126,9 +207,22 @@ export interface AgentFolder {
   /** Its agent's name for an agent's home, else its place under the workspace root. */
   name: string;
   kind: "agent" | "project" | "chat";
-  /** The first agent's home, which the sidebar calls Home. */
+  /**
+   * The first agent's home: the default agent, the one a chat, a channel or a routine goes to when none is named, and
+   * whose user the sandbox runs a chat as that is in no agent's home. It cannot be deleted, so one folder of `list` has
+   * it as long as its home is there.
+   */
   home?: true;
+  /**
+   * The home of the agent the New button starts the person's chats with: the first agent's (`home`) unless the person
+   * picked another on its Agent page ("New chats start here"). Where something new of the person's goes that belongs to
+   * no chat, such as a document made from a tab; the sidebar's house icon marks it.
+   */
+  newChats?: true;
 }
+
+/** Whose a chat is: see `chats.owner`. An agent's home or a project's folder, as `folders.list()` gives it. */
+export type ChatOwner = AgentFolder & { kind: "agent" | "project" };
 
 /**
  * A file opened by `files.open`, to read from `fd` and send. `mimeType` is what
@@ -311,6 +405,11 @@ export interface SubagentStart {
   detail?: string;
   /** It runs on after the tool call that started it has returned (in the background), so the end of that call is not its end. */
   detached?: boolean;
+  /**
+   * It works in a chat of the portal's (a child chat, `chats.create`), by that chat's id: its run is that chat's own
+   * transcript, which a page draws from there and opens at `/s/<chat>`, so it sends no `subagent:v1:event` of its own.
+   */
+  chat?: string;
 }
 
 export interface SubagentEvent {
@@ -512,7 +611,11 @@ export interface ServerPortal {
    * through, and hears of when one goes.
    */
   folders: {
-    /** Every agent's home, every project, and every folder a chat of any kind works in, each once, with what the person calls it. One that is gone is not listed. */
+    /**
+     * Every agent's home, every project, and every folder a chat of any kind works in, each once, with what the person
+     * calls it. One that is gone is not listed. The default agent's home is the one with `home`, the home of the agent
+     * New starts chats with the one with `newChats` (see AgentFolder).
+     */
     list(): AgentFolder[];
     /** Whether a folder, by its real path, is one the agents may work in: an agent's home, or one inside the workspace root. Only from one of these is what the agents made there to be served. */
     allowed(folder: string): boolean;
@@ -525,10 +628,11 @@ export interface ServerPortal {
     on(event: "removed", handler: (folder: string) => void): void;
     /**
      * What the person calls a folder, by its real path, whether or not `list` has it now: its agent's name for an
-     * agent's home (`home` for the first), its place under the workspace root for a folder inside it, its last part
-     * otherwise. For a folder something was kept for after the last chat in it went.
+     * agent's home (`home` for the first, `newChats` for the one New starts chats with, as in `AgentFolder`), its place
+     * under the workspace root for a folder inside it, its last part otherwise. For a folder something was kept for
+     * after the last chat in it went.
      */
-    label(folder: string): { name: string; home?: true };
+    label(folder: string): { name: string; home?: true; newChats?: true };
   };
   /**
    * What an earlier version of the portal kept for something it did itself and an extension now does: when a
@@ -708,6 +812,12 @@ export interface ServerPortal {
      */
     endWithLogin(end: () => void): () => void;
     /**
+     * Who is behind a request to the package's routes, or an upgrade under them, from the login it came with: nothing
+     * for one that is not signed in. The same in a server half in a process of its own, where the portal says it on
+     * the request it hands on (a header of that name the request came with is dropped).
+     */
+    person(req: IncomingMessage): RequestPerson | undefined;
+    /**
      * Sends a file opened by `files.open` as the portal sends its own: with
      * its type, a policy that keeps it from running anything, a version a
      * browser revalidates (304), and the part a player asks for (`Range`).
@@ -720,6 +830,10 @@ export interface ServerPortal {
   };
   chats: {
     get(id: string): Chat | undefined;
+    /**
+     * The task chats, as the sidebar lists them: pinned first, then the most recently active first (a run that starts or
+     * ends, a new title). Not those kept out of the lists (`listed: false`), and no other kind of session (see `inFolder`).
+     */
     list(): Chat[];
     /**
      * The sessions that work in a folder, of every kind: the tasks `list` gives, and also routine runs, conversations on the Agent page
@@ -737,6 +851,17 @@ export interface ServerPortal {
      * folder is.
      */
     folder(id: string): string;
+    /**
+     * Whose a chat is, for any chat (a person's, a child, a routine run, a channel conversation): the agent whose home
+     * it works in (`kind: "agent"`), by the same rule the sandbox picks the user a chat runs as by (the workspace
+     * stored for the chat; a link in it that leads elsewhere changes nothing), else the project it works in, a folder
+     * of it included, by where its folder really leads, as the project's settings are found (`kind: "project"`). The
+     * folder is given as `folders.list()` gives it: its real path, its name, and `home` or `newChats` on an agent's. A
+     * chat in a project is the project's, whichever agent the project is linked to. Nothing for a chat that is in
+     * neither (the workspace root itself, the folder kept from a deleted agent: the sandbox runs it as the first
+     * agent), for one whose agent's home or project folder is gone, and for no such chat.
+     */
+    owner(id: string): ChatOwner | undefined;
     /** To what the package drew on the pages open on a chat. Nothing is stored. */
     send(chatId: string, data: unknown): void;
     /** What a page that opens a chat is told first: where things stand. Nothing, to tell it nothing. */
@@ -794,9 +919,11 @@ export interface ServerPortal {
      * Makes a child chat of a chat, to give part of its work to: a chat like any other, in its parent's folder, whose
      * pi the portal starts with the guard, the sandbox, the tool layers and its mode, and with a transcript of its own
      * that the person opens at `/s/<id>`. It takes its parent's role and last speaker, so it is held to the person who
-     * asked, its parent's mode unless it is given one, and the tools the person switched off or on in the parent. A
+     * asked, its parent's mode unless it is given one, and the tools the person switched off or on in the parent unless
+     * it is to start from the folder's (`tools: "defaults"`). A
      * dialog it opens, and a question the guard asks, go where its parent's would: where nobody can answer on the
-     * portal's pages (a channel conversation, a routine run) the guard refuses for the child too. One level only:
+     * portal's pages (a channel conversation, a routine run) the guard refuses for the child too, and so it does in a
+     * child made `unattended`, which asks nobody anything. One level only:
      * refused for a parent that is a child itself, and for a heartbeat, which is held to reading by a role of its own.
      * Deleted with its parent, and each child's `deleted` is heard as the parent's is. Throws for options that cannot
      * be one: no such parent, no title, a model that is not a provider and an id, or a mode the child may not be put in
@@ -804,24 +931,53 @@ export interface ServerPortal {
      */
     create(options: ChildChatOptions): Chat;
     /**
+     * Starts a chat of an agent's or a project's folder for this package: a task chat with no parent, as one the person
+     * starts there with "+", in the primary role, in Standard mode on the default model, with the tools a new chat
+     * there has. For work of the package's own that belongs to no chat of the person's, such as the answer to a
+     * comment in a document. It is this package's as a child chat is: only it prompts, stops or removes it
+     * (`prompt`, `abort`, `remove`), and a message it sends is the primary user's. It goes with the folder's other chats
+     * when the project or the agent is deleted, listed or not, and each delete is heard as `deleted`; an unlisted one
+     * that is working is stopped then, where a listed one keeps the delete from going through until the person stops
+     * it. Throws for options that cannot be one: a folder that is not an agent's or a project's (one inside them
+     * included), no title, or `listed: false` without `unattended: true`. Keep its id: an unlisted one is in no list,
+     * and `children` finds children only, so the id is how the half reaches it again after a restart (`lastAnswer`).
+     *
+     * A message it is sent is the primary user's own words, and the chat is not marked by them: words from a document or
+     * from another person are outside content, which the agent reads through a tool with `guard: { outside: true }`
+     * rather than in the message. A pi tool that starts or prompts a chat declares `guard: { acts: ["delegate"] }`, as
+     * the subagent tool does, so that a marked chat cannot hand its work to a fresh one the guard holds nothing in.
+     */
+    start(options: StartChatOptions): Chat;
+    /**
      * The child chats of a chat that this package made, listed or not, oldest first: `chats.list` leaves the unlisted
      * out, so this is how a half finds the ones it made once it has lost its own record of them, to stop or remove them.
      */
     children(parent: string): Chat[];
     /**
-     * Sends a child chat this package made a message, and resolves once the run that takes it in has ended. A child
-     * that is working takes it after the run it is on, as a person's message does; with `steer`, after the step it is
-     * on. It is sent as the person its parent last heard from. A run that fails resolves as an `error`, and so does a
+     * Sends a chat this package made (a child, or one it started) a message, and resolves once the run that takes it in
+     * has ended. A chat that is working takes it after the run it is on, as a person's message does; with `steer`, after
+     * the step it is on. A child's is sent as the person its parent last heard from, a started chat's as the primary user. A run that fails resolves as an `error`, and so does a
      * command its speaker may not run; a command it may run is no message of the chat, and resolves as `done` at
-     * once when it started no run (with no answer), or when the run it started ends. This throws only for a chat that is not a child
-     * this package made, or a message with no words.
+     * once when it started no run (with no answer), or when the run it started ends. This throws only for a chat this package
+     * did not make, one that is not there (any more: "There is no chat <id>"), or a message with no words.
      */
     prompt(chatId: string, message: string, options?: { steer?: boolean }): Promise<ChildRun>;
-    /** Stops the run of a child chat this package made, as the person's Stop does: its `prompt` resolves as `stopped`. */
+    /**
+     * Where the last run of a chat this package made (a child, or one it started) stands, from what the portal keeps of
+     * the chat, so it holds across a restart of the server half or of the portal: for a half that lost a `prompt` it
+     * was waiting on, to tell a run that goes on from one that ended while it was away, and to have its answer.
+     * Nothing for a chat that has never run. Throws for a chat this package did not make, and for one that is not
+     * there any more, deleted by the person or with its project or agent ("There is no chat <id>"). `marked` says the answer is
+     * to be held like outside content. For a child, its parent is marked with it as `prompt` marks it, in the guard that
+     * runs for the parent now: none does after a restart, until the parent's pi starts again, and that mark is not kept.
+     * Hand a marked answer on in the flagged form (see `ChildRun.marked`), which the parent's guard finds again.
+     */
+    lastAnswer(chatId: string): ChatAnswer | undefined;
+    /** Stops the run of a chat this package made, as the person's Stop does: its `prompt` resolves as `stopped`. */
     abort(chatId: string): Promise<void>;
     /**
-     * Deletes a child chat this package made, stopping its run first: its transcript and files go, and `deleted` is
-     * heard once. Throws while the child's parent is being deleted, which takes the child with it.
+     * Deletes a chat this package made (a child, or one it started), stopping its run first: its transcript and files
+     * go, and `deleted` is heard once. Throws while a child's parent is being deleted, which takes the child with it.
      */
     remove(chatId: string): Promise<void>;
   };

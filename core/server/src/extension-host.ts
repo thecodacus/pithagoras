@@ -21,9 +21,10 @@ import { folderFiles } from "./folder-files.js";
 import { baseDir, setAgentAccess, type AgentAccess } from "./workspace-files.js";
 import { sendFile } from "./send-file.js";
 import { watchStream } from "./login-streams.js";
+import { requestPerson } from "./auth.js";
 import { personsEnv } from "./background.js";
 import { gitAt } from "./git.js";
-import { folderAllowed, folderLabel, listFolders } from "./agent-folders.js";
+import { chatOwner, folderAllowed, folderLabel, listFolders } from "./agent-folders.js";
 import { handoffDone, takeHandoff } from "./handoff.js";
 import { modelEndpoint, modelOf, modelProviders, type LiveModel } from "./models.js";
 import { mcpServer } from "./api/mcp.js";
@@ -31,7 +32,7 @@ import { holdMemory } from "./memory-holder.js";
 import { provideMode } from "./chat-modes.js";
 import { logFileLine, onLogLine, scrubSecrets, type LogLine } from "./logs.js";
 import type { Chat, ChatLife as Life, Ran, ServerPortal, Upgrade, VoiceProvider } from "@pithagoras/extension-api/server";
-import type { ChildRun } from "./child-chats.js";
+import type { ChatAnswer, ChildRun } from "./child-chats.js";
 
 /**
  * An extension's server half: a module of the package's that the portal loads
@@ -274,14 +275,18 @@ const crashes = new Map<string, ServerHalfCrash>();
 export const pagePushes = new EventEmitter();
 pagePushes.setMaxListeners(0);
 
-// No `mode` key for a chat in Standard, rather than one that is undefined.
+// No `mode` key for a chat in Standard, and no `kind` for a task, rather than one that is undefined.
 const chatOf = (row: SessionRow): Chat => ({
   id: row.id,
   title: row.title,
   workspace: row.workspace,
   status: row.status,
+  ...(row.kind !== "task" ? { kind: row.kind } : {}),
   ...(row.mode ? { mode: row.mode } : {}),
-  ...(row.parent_id ? { parent: row.parent_id, listed: row.listed === 1 } : {}),
+  ...(row.parent_id ? { parent: row.parent_id } : {}),
+  // Said for each chat a server half made, which alone can be kept out of the lists.
+  ...(row.parent_id || row.creator ? { listed: row.listed === 1 } : {}),
+  ...(row.unattended ? { unattended: true as const } : {}),
 });
 const say = (name: string, text: string) => console.log(`[extension ${name}] ${text}`);
 /**
@@ -489,6 +494,8 @@ let liveModel: LiveModel = async () => undefined;
 /** Child chats (child-chats.ts): made, run, stopped and deleted by the session manager. */
 let childChats: {
   create: (options: unknown, creator: string) => SessionRow;
+  start: (options: unknown, creator: string) => SessionRow;
+  lastAnswer: (chatId: string) => ChatAnswer | undefined;
   run: (chatId: string, message: string, options: { steer?: boolean }) => Promise<ChildRun>;
   abort: (chatId: string) => Promise<void>;
   remove: (chatId: string) => Promise<void>;
@@ -496,6 +503,10 @@ let childChats: {
   create: () => {
     throw new Error("Child chats are not available here");
   },
+  start: () => {
+    throw new Error("Chats are not started here");
+  },
+  lastAnswer: () => undefined,
   run: async () => ({ status: "error", answer: "", error: "Child chats are not available here" }),
   abort: async () => {},
   remove: async () => {},
@@ -507,7 +518,7 @@ export function setChatBridge(
   toolOffered = bridge.offers;
   reloadChats = bridge.reload;
   liveModel = bridge.model;
-  childChats = { create: bridge.create, run: bridge.run, abort: bridge.abort, remove: bridge.remove };
+  childChats = { create: bridge.create, start: bridge.start, lastAnswer: bridge.lastAnswer, run: bridge.run, abort: bridge.abort, remove: bridge.remove };
 }
 /** How a server half chooses voice mode's source, and asks which it is: the voice settings are the voice routes', which import the host. */
 let voiceSource: { choose(name: string, chosen: boolean): void; chosen(): string } = { choose: () => {}, chosen: () => "" };
@@ -546,11 +557,14 @@ function portalFor(ext: Running): ServerPortal {
     if (!row) throw new Error("No such chat");
     return baseDir(row.workspace);
   };
-  /** A child chat this package made, or a refusal that says why it is not one. */
-  const ownChild = (id: string) => {
+  /** A chat this package made (a child, or one it started in a folder), or a refusal that says why it is not one. */
+  const ownChat = (id: string) => {
     const row = getSession(id);
-    if (!row?.parent_id) throw new Error(`${id} is no child chat`);
-    if (row.creator !== name) throw new Error(`The child chat ${id} was made by another package: only that one may prompt, stop or remove it`);
+    // One that is gone (deleted by the person, or with its project or agent while the half was away) is said to be
+    // gone, not to be another's: a half that kept its id tells the two apart.
+    if (!row) throw new Error(`There is no chat ${id}: it was deleted, or never was`);
+    if (!row.creator) throw new Error(`${id} is no chat a package made: only a child chat or a chat a package started is prompted, stopped or removed`);
+    if (row.creator !== name) throw new Error(`The chat ${id} was made by another package: only that one may prompt, stop or remove it`);
   };
   const dataDir = () => {
     const dir = dataDirOf(name);
@@ -586,8 +600,8 @@ function portalFor(ext: Running): ServerPortal {
         ext.removed.push(handler);
       },
       label: (folder) => {
-        const { name, home } = folderLabel(folder);
-        return { name, ...(home ? { home: true as const } : {}) };
+        const { name, home, newChats } = folderLabel(folder);
+        return { name, ...(home ? { home: true as const } : {}), ...(newChats ? { newChats: true as const } : {}) };
       },
     },
     handoffs: {
@@ -729,6 +743,8 @@ function portalFor(ext: Running): ServerPortal {
         ext.upgrade = handler;
       },
       endWithLogin: watchStream,
+      // Read from the request's login as it came: the route's request, or an upgrade's, which no Express has seen.
+      person: (req) => requestPerson(req),
       // A file of no type said is sent as bytes, to be saved: it is drawn by nothing.
       send: (req, res, file, options = {}) =>
         sendFile(req, res, { ...file, mimeType: file.mimeType ?? "application/octet-stream" }, options.cache ?? "private, no-cache", options.download ?? (file.mimeType ? undefined : file.name)),
@@ -759,6 +775,10 @@ function portalFor(ext: Running): ServerPortal {
         return [...found.values()];
       },
       folder,
+      owner: (id) => {
+        const row = getSession(id);
+        return row ? chatOwner(row.workspace) : undefined;
+      },
       send: (chatId, data) => {
         const text = wire(name, data);
         if (text) pagePushes.emit(chatId, text);
@@ -774,20 +794,27 @@ function portalFor(ext: Running): ServerPortal {
       // A child chat is the package's that made it: only it prompts, stops or removes one. The person does all of
       // that on the child's own page, and its parent's delete takes it with it.
       create: (options) => chatOf(childChats.create(options, name)),
+      start: (options) => chatOf(childChats.start(options, name)),
       // Found again without the ids kept: the children of a chat this package made, listed or not (chats.list leaves
       // the unlisted out), after a restart of the half or a lost record.
       children: (parent) => childSessions(String(parent)).filter((row) => row.creator === name).map(chatOf),
       prompt: async (chatId, message, options = {}) => {
-        ownChild(chatId);
+        ownChat(chatId);
         if (typeof message !== "string" || !message.trim()) throw new TypeError("A child chat is sent a message with words in it");
         return scope.exit(() => childChats.run(chatId, message, { steer: options?.steer === true }));
       },
+      // From what the portal keeps, so a half that started again (in a process of its own, maybe) finds how a run ended
+      // while it was away.
+      lastAnswer: (chatId) => {
+        ownChat(chatId);
+        return childChats.lastAnswer(chatId);
+      },
       abort: async (chatId) => {
-        ownChild(chatId);
+        ownChat(chatId);
         await scope.exit(() => childChats.abort(chatId));
       },
       remove: async (chatId) => {
-        ownChild(chatId);
+        ownChat(chatId);
         await scope.exit(() => childChats.remove(chatId));
       },
       hold: (chatId) => {

@@ -321,7 +321,7 @@ test("a question is not put to the primary user for an approval that could not m
       await assert.rejects(tool.execute("call", { ...push, action }), /That cannot be approved: a result this conversation read looks like a prompt injection/, action);
     }
     // A subagent, and a schedule, are not put for any colleague: they would run with the primary user's rights.
-    await assert.rejects(tool.execute("call", { question: "A helper.", actionTool: "subagent", action: "task" }), /That cannot be approved: a subagent works without this guard/);
+    await assert.rejects(tool.execute("call", { question: "A helper.", actionTool: "subagent", action: "task" }), /That cannot be approved: a subagent works in a chat of its own/);
     await assert.rejects(tool.execute("call", { question: "A reminder.", actionTool: "routine_create", action: '{"name":"x"}' }), /That cannot be approved: a routine runs as the primary user/);
     assert.equal(spoken.length, 0, "the primary user was not asked");
     assert.equal(asked(), 0, "and nothing waits for an answer");

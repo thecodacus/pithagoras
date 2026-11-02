@@ -103,9 +103,11 @@ export function MediaPage() {
   const [picked, setPicked] = useState<ReadonlySet<string>>(new Set());
   useEffect(() => setPicked(new Set()), [filterKey]);
 
-  // What the forms are working on: for a picture, the words and the pictures to change; for a video, the words and the pictures to start from and end on.
+  // What the forms are working on: for a picture, the words, the pictures to change and a new picture's references; for a video, the words and the pictures to start from and end on.
   const [prompt, setPrompt] = useState("");
   const [sources, setSources] = useState<GalleryPicture[]>([]);
+  const [references, setReferences] = useState<GalleryPicture[]>([]);
+  const [referencesOpen, setReferencesOpen] = useState(false);
   const [videoPrompt, setVideoPrompt] = useState("");
   const [firstFrame, setFirstFrame] = useState<GalleryPicture | null>(null);
   const [lastFrame, setLastFrame] = useState<GalleryPicture | null>(null);
@@ -118,8 +120,12 @@ export function MediaPage() {
   // Which form is shown, where both can be: the person's choice, else the kind the gallery is showing.
   const [chosenMake, setChosenMake] = useState<"picture" | "video" | null>(null);
   const making: "picture" | "video" = chosenMake === "picture" && picturesOn ? "picture" : chosenMake === "video" && videosOn ? "video" : !picturesOn || show === "videos" ? "video" : "picture";
-  // Pictures are for the edit while it is the form's mode and it can be done: the gallery's tiles are what an edit is made of then.
-  const picking = making === "picture" && mode === "edit" && changes;
+  // Pictures are for the edit while it is the form's mode and it can be done: the gallery's tiles are what an edit is made of then. So they are a new picture's references while the form has those open in Generate.
+  const referring = making === "picture" && mode === "make" && makes && changes && referencesOpen;
+  const picking = (making === "picture" && mode === "edit" && changes) || referring;
+  // The pictures the boxes choose while picking: the edit's, or the references.
+  const chosenList = referring ? references : sources;
+  const setChosenList = referring ? setReferences : setSources;
   const multiple = !!images?.editMultiple;
   const promptRef = useRef<HTMLTextAreaElement>(null);
   const videoPromptRef = useRef<HTMLTextAreaElement>(null);
@@ -327,6 +333,7 @@ export function MediaPage() {
       const unlink = (p: GalleryPicture) => (p.from && deletedPictures.has(p.from) ? { ...p, from: null } : p);
       setOriginals((cur) => new Map([...cur].filter(([id]) => !deletedPictures.has(id)).map(([id, p]) => [id, unlink(p)])));
       setSources((cur) => cur.filter((p) => !deletedPictures.has(p.id)));
+      setReferences((cur) => cur.filter((p) => !deletedPictures.has(p.id)));
     }
     if (deletedVideos.size) {
       const freed = chosenVideos.filter((v) => deletedVideos.has(v.id) && v.origin === "page").reduce((sum, v) => sum + v.bytes, 0);
@@ -400,14 +407,14 @@ export function MediaPage() {
         : pickedPictures.length > MAX_SOURCES
           ? t("An edit takes at most {n} pictures", { n: MAX_SOURCES })
           : undefined;
-  /** A tick in a box while editing: the picture is taken into the edit, after the ones there, or out of it again; where the endpoint takes one, it takes the place of the one there is. */
+  /** A tick in a box while editing, or choosing references: the picture is taken in, after the ones there, or out again; where the endpoint takes one, it takes the place of the one there is. */
   const pick = useCallback(
     (id: string) => {
       const picture = pictureById.get(id);
       if (!picture) return;
-      setSources((cur) => (cur.some((p) => p.id === id) ? cur.filter((p) => p.id !== id) : addSources(cur, [picture], multiple).list));
+      setChosenList((cur) => (cur.some((p) => p.id === id) ? cur.filter((p) => p.id !== id) : addSources(cur, [picture], multiple).list));
     },
-    [pictureById, multiple],
+    [pictureById, multiple, setChosenList],
   );
 
   /** Pictures of the gallery by their ids, for a picture of it dragged or pasted into the form: those the page has, and the others asked for. */
@@ -434,11 +441,18 @@ export function MediaPage() {
       if (picture.kind === "generated") {
         // The settings it was made with, as they are recorded; the free fields an older version sent are not sent again.
         // What only stable-diffusion.cpp reads is sent only while the add-on says the endpoint is one: the picture keeps it, and it is not sent otherwise.
-        const { extra: _older, sources: _sources, masked: _masked, negativePrompt, seed, sampleSteps, strength: _strength, fromNoise: _noise, ...settings } = picture.params;
+        const { extra: _older, sources: _sources, masked: _masked, negativePrompt, seed, sampleSteps, strength: _strength, fromNoise: _noise, references: refs, model, ...rest } = picture.params;
+        // With references the model is always the editing endpoint's, and is not sent.
+        const settings = refs?.length ? rest : { ...rest, ...(model ? { model } : {}) };
+        // Made with references: with the same ones, all of them still in the gallery, or not again.
+        const found = refs?.length ? (await api.galleryPictures(refs)).pictures : [];
+        // Each by its id: the same picture may be a reference twice, and the gallery answers it once.
+        if (refs?.some((id) => !found.some((p) => p.id === id))) throw new Error(t("The reference pictures this was made with are not all in the gallery any more."));
         const { jobs: made } = await api.makePictures({
           prompt: picture.prompt,
           ...settings,
           ...(images?.sdExtras ? { ...(negativePrompt ? { negativePrompt } : {}), ...(seed !== undefined ? { seed } : {}), ...(sampleSteps !== undefined ? { sampleSteps } : {}) } : {}),
+          ...(refs?.length ? { references: refs } : {}),
         });
         pictures.started(made);
         setOpened(null);
@@ -522,7 +536,11 @@ export function MediaPage() {
   const lookFor = show === "images" ? t("Look for new pictures") : show === "videos" ? t("Look for new videos") : t("Look for new pictures and videos");
   const selectedName = show === "images" ? t("Selected pictures") : show === "videos" ? t("Selected videos") : t("Selected items");
   const galleryName = show === "images" ? t("Pictures") : show === "videos" ? t("Videos") : t("Media");
-  const hint = picking
+  const hint = referring
+    ? multiple
+      ? t("Tick pictures to use them as references, in the order you tick them. A click on a picture opens it.")
+      : t("Tick a picture to use it as a reference. A click on a picture opens it.")
+    : picking
     ? multiple
       ? t("Tick pictures to use them in the edit, in the order you tick them. A click on a picture opens it.")
       : t("Tick a picture to use it in the edit. A click on a picture opens it.")
@@ -579,10 +597,23 @@ export function MediaPage() {
         )}
         {pictures.notes.length > 0 && (
           <ui.WarnBanner onClose={pictures.clearNotes}>
-            <p>{t("A picture was changed to fit what an edit takes.")}</p>
-            {[...new Set(pictures.notes)].map((note) => (
-              <p key={note}>{note}</p>
-            ))}
+            {/* An edit's pictures are what is changed; a new picture's references (a job that makes one) are only what it is made with, and are said to be. */}
+            {(
+              [
+                ["edit", t("A picture was changed to fit what an edit takes.")],
+                ["generate", t("A reference picture was scaled down to fit what the editing endpoint takes.")],
+              ] as const
+            ).map(([kind, title]) => {
+              const said = [...new Set(pictures.notes.filter((note) => note.job.kind === kind).map((note) => note.text))];
+              return said.length ? (
+                <div key={kind}>
+                  <p>{title}</p>
+                  {said.map((note) => (
+                    <p key={note}>{note}</p>
+                  ))}
+                </div>
+              ) : null;
+            })}
           </ui.WarnBanner>
         )}
 
@@ -600,6 +631,10 @@ export function MediaPage() {
             onMode={setMode}
             sources={sources}
             onSources={setSources}
+            references={references}
+            onReferences={setReferences}
+            referencesOpen={referencesOpen}
+            onReferencesOpen={setReferencesOpen}
             onFind={find}
             onStarted={(made) => {
               pictures.started(made);
@@ -690,7 +725,7 @@ export function MediaPage() {
               {show === "images"
                 ? filtered
                   ? t("No pictures match these filters.")
-                  : picking
+                  : picking && !referring
                     ? t("No pictures yet. Put one in from this computer above to change it.")
                     : t("No pictures yet. Describe one above to make the first.")
                 : show === "videos"
@@ -713,16 +748,16 @@ export function MediaPage() {
                   );
                 }
                 const id = m.tile.picture?.id ?? m.tile.job?.pictureId ?? "";
-                const place = sources.findIndex((p) => p.id === id) + 1;
+                const place = chosenList.findIndex((p) => p.id === id) + 1;
                 return (
                   <li key={m.key}>
                     <PictureTile
                       tile={m.tile}
-                      mode={picking ? "pick" : "select"}
+                      mode={referring ? "reference" : picking ? "pick" : "select"}
                       selected={picking ? place > 0 : picked.has(selectionKey("picture", id))}
                       place={multiple ? place : 0}
-                      // At eight there is no ninth: the tiles that are not in the edit say so, and wait until one is taken out. Only while the boxes are the edit's: the pictures are kept for the way back, and Generate's boxes are for a download, a delete and a change.
-                      full={picking && multiple && sources.length >= MAX_SOURCES && place === 0}
+                      // At eight there is no ninth: the tiles that are not in the edit, or the references, say so, and wait until one is taken out. Only while the boxes are theirs: the pictures are kept for the way back, and Generate's boxes are otherwise for a download, a delete and a change.
+                      full={picking && multiple && chosenList.length >= MAX_SOURCES && place === 0}
                       onOpen={openPicture}
                       onToggle={picking ? pick : togglePicture}
                       onDismiss={pictures.dismiss}
@@ -762,8 +797,8 @@ export function MediaPage() {
                 onVideo={videosOn ? videoFrom : undefined}
                 onShown={pictureShown}
                 onEdit={editIt}
-                // While the form is in Edit, the pictures are taken into it from here as well, one after another, with the viewer open.
-                use={picking ? { on: sources.some((p) => p.id === picture.id), full: multiple && sources.length >= MAX_SOURCES, toggle: () => pick(picture.id) } : undefined}
+                // While the form is in Edit, or has its references open, the pictures are taken into it from here as well, one after another, with the viewer open.
+                use={picking ? { on: chosenList.some((p) => p.id === picture.id), full: multiple && chosenList.length >= MAX_SOURCES, toggle: () => pick(picture.id), as: referring ? "reference" : "edit" } : undefined}
                 onAgain={runAgainPicture}
                 onDelete={(p) => void remove([selectionKey("picture", p.id)])}
               />

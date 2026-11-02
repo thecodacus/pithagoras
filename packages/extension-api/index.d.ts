@@ -409,6 +409,17 @@ export interface ChatFeed {
   refreshBackground(): void;
 }
 
+/** A chat's events as `chats.useEvents` streams them. */
+export interface ChatEvents {
+  events: readonly PortalEvent[];
+  /** How the chat stands, as its events last said: "idle" until one says otherwise. */
+  status: "idle" | "running" | "error" | "interrupted";
+  /** What it has said so far is still being fetched. */
+  loading: boolean;
+  /** The portal has no such chat (deleted, or never made): nothing more is asked. */
+  missing: boolean;
+}
+
 /** The panels of the chat on screen, any of them, by name. */
 export interface PanelController {
   isOpen(key: string): boolean;
@@ -792,6 +803,13 @@ export interface Portal {
     use<T = ChatFeed>(chatId: string, pick?: (feed: ChatFeed) => T, same?: (a: T, b: T) => boolean): T;
     /** The same outside a component: told each time the chat changes. Returns the unsubscribe. */
     on(chatId: string, handler: (feed: ChatFeed) => void): () => void;
+    /**
+     * A hook: any chat's events by its id, streamed while the component is drawn, as the chat on screen streams its
+     * own: for drawing a chat beside the one on screen, such as a child chat's run (`ui.Transcript`). Of a long
+     * conversation its latest part, as a page load has it. One stream for each chat however many parts ask; nothing is
+     * asked without an id.
+     */
+    useEvents(chatId: string | undefined): ChatEvents;
   };
   shortcuts: {
     /** A shortcut of the extension's: see `Shortcut`. Its label is translated as the extension's own texts are. */
