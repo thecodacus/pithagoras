@@ -52,7 +52,7 @@ const OLD = { Id: "825eb3e279a0".padEnd(64, "0"), Name: "pithagoras-browser", Im
 test("Browser's server half does not start without Docker, which it requires, and starts after it", async () => {
   await host.syncServerHalves([halves.browser]);
   assert.equal(host.isServing("pithagoras-browser"), false);
-  assert.match(host.serverFailure("pithagoras-browser") ?? "", /It needs pithagoras-docker \(\^1\.0\.0\), which is not installed, or is switched off/);
+  assert.match(host.serverFailure("pithagoras-browser") ?? "", /It needs pithagoras-docker \(\^1\.4\.0\), which is not installed, or is switched off/);
 
   await host.syncServerHalves(both);
   assert.equal(host.serverFailure("pithagoras-browser"), undefined);
@@ -73,6 +73,12 @@ test("as it starts, the container and the profile the portal made are taken over
   const said = await logged(restart);
   assert.doesNotMatch(said, /could not take over/);
   assert.deepEqual(adopted().volumes, { "pithagoras_browser-profile": "pithagoras-browser" });
+});
+
+test("it tells Docker which image its container should run, so that pinning the image is enough for a warning on the containers made on the version before", async () => {
+  const { IMAGE, wantedImage } = await import("../src/server/service.ts");
+  assert.deepEqual(wantedImage({ name: "pithagoras-browser" } as never), { image: IMAGE });
+  assert.equal(wantedImage({ name: "pithagoras-browser-other" } as never), undefined);
 });
 
 test("the half stops without stopping the browser, and leaves it to the next start", async () => {

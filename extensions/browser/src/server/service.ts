@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { isIPv4 } from "node:net";
-import type { PullState } from "../../../docker/src/api";
+import type { ContainerInfo, PullState, WantedImage } from "../../../docker/src/api";
 import { browserVersion } from "./cdp";
 import { docker, portal } from "./host";
 import * as local from "./local";
@@ -24,6 +24,12 @@ import { putSettings, setting, type Settings } from "./store";
 
 export const IMAGE = "lscr.io/linuxserver/chromium:latest";
 export const CONTAINER = "pithagoras-browser";
+/**
+ * The image Docker's page (Settings → Docker) should find the browser container running (`containers.wantImage`). It is
+ * `latest` today, which Docker never warns of; whoever pins `IMAGE` to a version gets the warning, and the Update button,
+ * for the containers made on the version before, with no more work here.
+ */
+export const wantedImage = (container: ContainerInfo): WantedImage | undefined => (container.name === CONTAINER ? { image: IMAGE } : undefined);
 /** The name compose used, so an existing profile — and its logins — carries over. */
 export const VOLUME = process.env.BROWSER_VOLUME || "pithagoras_browser-profile";
 

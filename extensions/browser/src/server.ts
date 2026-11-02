@@ -1,10 +1,10 @@
 import type { ServerPortal } from "@pithagoras/extension-api/server";
 import { stopWatchingFrames, watchBrowserFrames } from "./server/frames";
 import { takeHandoff } from "./server/handoff";
-import { setPortal } from "./server/host";
+import { docker, setPortal } from "./server/host";
 import { uiUpgrade } from "./server/proxy";
 import { browserRoutes } from "./server/routes";
-import { adoptKept } from "./server/service";
+import { adoptKept, wantedImage } from "./server/service";
 import { connected, openStore } from "./server/store";
 import { browserTools, disconnect, forgetChat, offeredTools } from "./server/tools";
 
@@ -24,6 +24,12 @@ export default function browser(portal: ServerPortal) {
   setPortal(portal);
   openStore(portal.dataDir());
   takeHandoff();
+  // Docker's page tells when the container runs another pinned image than the one wanted now, and updates it.
+  try {
+    docker().containers.wantImage(wantedImage);
+  } catch (e) {
+    portal.log(`could not tell Docker which image the browser container should run: ${(e as Error).message}`);
+  }
   // The container and the profile the portal made before are Browser's to run: taken over by their names, in the
   // background, as Docker can take a while to answer.
   void adoptKept().catch((e) => portal.log(`could not take over the browser's container and profile: ${(e as Error).message}`));

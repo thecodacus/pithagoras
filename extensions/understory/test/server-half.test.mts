@@ -75,11 +75,17 @@ const OLD = {
 test("Understory's server half does not start without Docker, which it requires, and starts after it", async () => {
   await host.syncServerHalves([halves.understory]);
   assert.equal(host.isServing("pithagoras-understory"), false);
-  assert.match(host.serverFailure("pithagoras-understory") ?? "", /It needs pithagoras-docker \(\^1\.1\.0\), which is not installed, or is switched off/);
+  assert.match(host.serverFailure("pithagoras-understory") ?? "", /It needs pithagoras-docker \(\^1\.4\.0\), which is not installed, or is switched off/);
 
   await host.syncServerHalves(both);
   assert.equal(host.serverFailure("pithagoras-understory"), undefined);
   assert.deepEqual([host.isServing("pithagoras-docker"), host.isServing("pithagoras-understory")], [true, true]);
+});
+
+test("it tells Docker which image its container should run, so that pinning the image is enough for a warning on the containers made on the version before", async () => {
+  const { IMAGE, wantedImage } = await import("../src/server/service.ts");
+  assert.deepEqual(wantedImage({ name: "pithagoras-understory" } as never), { image: IMAGE });
+  assert.equal(wantedImage({ name: "pithagoras-understory-other" } as never), undefined);
 });
 
 test("it holds the agent's memory while its server is the chats': there, not switched off, and pi-mcp-adapter on", async () => {

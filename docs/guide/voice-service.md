@@ -465,6 +465,10 @@ The voice service needs no other speech server. One you run yourself on the same
 
 Rebuilding the portal does not recreate the voice container, except to put a running one on the portal's new network.
 
+### When the CUDA image changes
+
+An update of Voice may move its container to a newer CUDA image (for a newer GPU, say). The container you already have keeps running the old one, because Docker does not change the image of a container that exists. [Settings → Docker](/guide/docker#outdated-images-and-update) shows a warning under it, with an **Update** button: it downloads the new image, makes the container again on it with the same engines, GPU, settings and volumes (the models and builds in `pithagoras_voice-models` stay), and starts it again. The button is refused while Voice's setup is running. It changes the image only; a newer installer still needs the steps below.
+
 ### Recreate Voice after a portal update
 
 Voice's setup script is captured when its container is created. To apply a newer installer after updating Voice, end voice sessions, click **Uninstall** and leave **Also delete the downloaded engines and models** unticked, then click **Install voice** again. The models and builds in `pithagoras_voice-models` are reused; recreating is not a guarantee that every cached binary is rebuilt. The installer pins its runtime revisions rather than tracking upstream automatically.

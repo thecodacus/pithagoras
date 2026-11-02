@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import type { WantedImage } from "./api";
 
 /**
  * The forwarder: the way onto a network of an extension's that has no way out (`networks.reach`) for a portal in the
@@ -16,6 +17,14 @@ import { createHash } from "node:crypto";
  * language, so that the tests run the very program with their own. Downloaded the first time a forwarder is made.
  */
 export const FORWARDER_IMAGE = "node:22.23.4-alpine3.23";
+
+/**
+ * The wish for a forwarder (api.ts, `wantImage`), which is Docker's own and not its extension's to say: the image
+ * forwarders are made on now. A forwarder is made again, as its mark says, when an extension next reaches its container;
+ * one from before an update of this image is told on Docker's page until then.
+ */
+export const forwarderWish = (container: { name: string; labels: Record<string, string> }): WantedImage | undefined =>
+  FORWARDS_LABEL in container.labels && container.name.endsWith(forwarderName("")) ? { image: FORWARDER_IMAGE } : undefined;
 
 /** The label a forwarder and its own network carry: the network of the extension's it leads onto. */
 export const FORWARDS_LABEL = "pithagoras.forwards";
