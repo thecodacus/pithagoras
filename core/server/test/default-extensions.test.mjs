@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { inProcessHome } from "./server-harness.mjs";
@@ -43,11 +43,11 @@ chmodSync(path.join(bin, "pi"), 0o755);
 process.env.PATH = `${bin}${path.delimiter}${process.env.PATH}`;
 
 /** A folder of extensions, each a package by these names, and the list a fresh portal installs. */
-function shipped(names, defaults) {
+function shipped(names, defaults, requires = {}) {
   const dir = path.join(home, `shipped-${Math.random().toString(36).slice(2)}`);
   for (const [folder, name] of Object.entries(names)) {
     mkdirSync(path.join(dir, folder), { recursive: true });
-    writeFileSync(path.join(dir, folder, "package.json"), JSON.stringify({ name, version: "1.0.0" }));
+    writeFileSync(path.join(dir, folder, "package.json"), JSON.stringify({ name, version: "1.0.0", ...(requires[folder] ? { pithagoras: { requires: requires[folder] } } : {}) }));
   }
   writeFileSync(path.join(dir, "defaults.json"), JSON.stringify(defaults));
   return dir;
@@ -62,8 +62,8 @@ function removed(dir) {
   writeFileSync(settingsFile, JSON.stringify(settings));
 }
 
-const { defaultExtensions, installDefaultExtensions, replaceRetiredExtensions } = await import("../dist/default-extensions.js");
-const { extensionStash, setExtensionStash } = await import("../dist/db.js");
+const { defaultExtensions, defaultsChoice, extensionPresets, installDefaultExtensions, replaceRetiredExtensions } = await import("../dist/default-extensions.js");
+const { extensionStash, putSetting, setExtensionStash } = await import("../dist/db.js");
 
 test("what the list names is installed once, from its folder, and one removed is not put back", async () => {
   const dir = shipped({ terminal: "pithagoras-terminal", git: "pithagoras-git" }, ["terminal", "git"]);
@@ -202,4 +202,133 @@ test("an install of the theme package that fails leaves the entries in, and the 
   assert.deepEqual(await installDefaultExtensions(dir), []);
   assert.deepEqual(JSON.parse(readFileSync(settingsFile, "utf8")).packages, [path.join(dir, "themes")]);
   assert.deepEqual(Object.keys(extensionStash()), []);
+});
+
+/** A portal as a new one: nothing installed, nothing remembered. */
+function fresh() {
+  writeFileSync(state, "");
+  writeFileSync(settingsFile, JSON.stringify({ packages: [] }));
+  putSetting("default_extensions_installed", "[]");
+}
+
+/** Runs `fn` with PORTAL_DEFAULT_EXTENSIONS set to `value` (unset for undefined), and says what the portal logged as an error. */
+async function withChoice(value, fn) {
+  const was = process.env.PORTAL_DEFAULT_EXTENSIONS;
+  if (value === undefined) delete process.env.PORTAL_DEFAULT_EXTENSIONS;
+  else process.env.PORTAL_DEFAULT_EXTENSIONS = value;
+  const logged = [];
+  const error = console.error;
+  console.error = (...args) => logged.push(args.join(" "));
+  try {
+    return { result: await fn(), logged };
+  } finally {
+    console.error = error;
+    if (was === undefined) delete process.env.PORTAL_DEFAULT_EXTENSIONS;
+    else process.env.PORTAL_DEFAULT_EXTENSIONS = was;
+  }
+}
+
+/** The portal's own folder as it ships: every extension a preset names, Voice needing Docker for extensions. */
+const everyFolder = () =>
+  shipped(
+    { terminal: "pithagoras-terminal", files: "pithagoras-files", themes: "pithagoras-themes", git: "pithagoras-git", docker: "pithagoras-docker", docs: "pithagoras-docs", media: "pithagoras-media", canvas: "pithagoras-canvas", voice: "pithagoras-voice", browser: "pithagoras-browser" },
+    ["terminal", "files", "themes"],
+    { voice: { "pithagoras-docker": "^1.0.0" }, browser: { "pithagoras-docker": "^1.0.0" } },
+  );
+
+test("a portal that has Git, Canvases and Media keeps them when the list no longer names them, and one without them is not given them", async () => {
+  fresh();
+  const dir = shipped(
+    { terminal: "pithagoras-terminal", git: "pithagoras-git", files: "pithagoras-files", themes: "pithagoras-themes", canvas: "pithagoras-canvas", media: "pithagoras-media" },
+    ["terminal", "git", "files", "themes", "canvas", "media"],
+  );
+  assert.equal((await installDefaultExtensions(dir)).length, 6, "a portal of the older list installed all six");
+  const before = installedNow();
+  const kept = readFileSync(settingsFile, "utf8");
+
+  // The list the portal ships now.
+  writeFileSync(path.join(dir, "defaults.json"), JSON.stringify(["terminal", "files", "themes"]));
+  assert.deepEqual(await installDefaultExtensions(dir), []);
+  assert.deepEqual(installedNow(), before, "nothing is taken out");
+  assert.equal(readFileSync(settingsFile, "utf8"), kept, "nor is pi's list touched");
+
+  // One installed by hand and never recorded is as safe.
+  fresh();
+  writeFileSync(state, `${path.join(dir, "git")}\n`);
+  writeFileSync(settingsFile, JSON.stringify({ packages: [path.join(dir, "git")] }));
+  assert.deepEqual(await installDefaultExtensions(dir), ["terminal", "files", "themes"], "a new portal gets the three, and Git is left as it is");
+  assert.deepEqual(installedNow(), [path.join(dir, "git"), ...["terminal", "files", "themes"].map((f) => path.join(dir, f))]);
+});
+
+test("what a portal records is the folders it installed", async () => {
+  fresh();
+  const dir = shipped({ terminal: "pithagoras-terminal", files: "pithagoras-files", themes: "pithagoras-themes" }, ["terminal", "files", "themes"]);
+  await installDefaultExtensions(dir);
+  const { getSetting } = await import("../dist/db.js");
+  assert.deepEqual(JSON.parse(getSetting("default_extensions_installed")), ["terminal", "files", "themes"]);
+});
+
+test("the real list is Terminal, Files and the theme pack, and each preset adds to it from the folders the portal ships", () => {
+  const real = path.resolve(import.meta.dirname, "../../../extensions");
+  assert.deepEqual(defaultExtensions(real).map((ext) => ext.folder), ["terminal", "files", "themes"]);
+  const presets = Object.fromEntries(extensionPresets(real).map((preset) => [preset.id, preset]));
+  assert.deepEqual(Object.keys(presets), ["minimal", "developer", "creative", "everything"]);
+  assert.deepEqual(presets.minimal.folders, ["terminal", "files", "themes"]);
+  assert.deepEqual(presets.developer.folders, ["terminal", "files", "themes", "git", "docker", "docs"]);
+  assert.deepEqual(presets.creative.folders, ["terminal", "files", "themes", "media", "canvas", "voice"]);
+  assert.deepEqual(presets.developer.extensions, ["pithagoras-terminal", "pithagoras-files", "pithagoras-themes", "pithagoras-git", "pithagoras-docker", "pithagoras-docs"]);
+  const all = readdirSync(real, { withFileTypes: true }).filter((e) => e.isDirectory() && existsSync(path.join(real, e.name, "package.json"))).map((e) => e.name);
+  assert.deepEqual([...presets.everything.folders].sort(), all.sort(), "everything is every extension that comes with the portal");
+  for (const preset of Object.values(presets)) assert.equal(preset.folders.length, new Set(preset.folders).size, `${preset.id} names each once`);
+});
+
+test("PORTAL_DEFAULT_EXTENSIONS is off, the default set, a preset's name, or a list of the portal's extensions, and anything else is refused", () => {
+  const dir = everyFolder();
+  assert.deepEqual(defaultsChoice("off", dir), { folders: [] });
+  assert.deepEqual(defaultsChoice(" OFF ", dir), { folders: [] });
+  for (const same of [undefined, "", "on", "1", "true", "default"]) assert.deepEqual(defaultsChoice(same, dir), { folders: ["terminal", "files", "themes"] }, String(same));
+  assert.deepEqual(defaultsChoice("Developer", dir).folders, ["terminal", "files", "themes", "git", "docker", "docs"]);
+  assert.equal(defaultsChoice("everything", dir).folders.length, 10);
+  assert.deepEqual(defaultsChoice("terminal, git,pithagoras-media,git", dir), { folders: ["terminal", "git", "media"] }, "by folder or package name, each once");
+  for (const bad of ["developr", "terminal,gti", "terminal,", ",", "../outside", "on,off"]) {
+    const choice = defaultsChoice(bad, dir);
+    assert.deepEqual(choice.folders, ["terminal", "files", "themes"], `${bad}: the default set is what is installed`);
+    assert.match(choice.refused, /PORTAL_DEFAULT_EXTENSIONS=.*is refused.*preset \(minimal, developer, creative, everything\)/, bad);
+  }
+});
+
+test("a preset in PORTAL_DEFAULT_EXTENSIONS is installed at the start, with Docker for extensions before what needs it, and recorded", async () => {
+  fresh();
+  const dir = everyFolder();
+  const { result, logged } = await withChoice("creative", () => installDefaultExtensions(dir));
+  assert.deepEqual(result, ["terminal", "files", "themes", "media", "canvas", "docker", "voice"], "Docker comes in because Voice needs it, ahead of Voice");
+  assert.deepEqual(logged, []);
+  const { getSetting } = await import("../dist/db.js");
+  assert.deepEqual(JSON.parse(getSetting("default_extensions_installed")), result);
+  assert.deepEqual((await withChoice("creative", () => installDefaultExtensions(dir))).result, [], "once");
+});
+
+test("a list in PORTAL_DEFAULT_EXTENSIONS is installed in place of the default set", async () => {
+  fresh();
+  const dir = everyFolder();
+  const { result } = await withChoice("files,browser", () => installDefaultExtensions(dir));
+  assert.deepEqual(result, ["files", "docker", "browser"]);
+  assert.ok(!installedNow().includes(path.join(dir, "terminal")), "the default set is not added to a list");
+});
+
+test("a value that is refused installs the default set and says why in the log", async () => {
+  fresh();
+  const dir = everyFolder();
+  const { result, logged } = await withChoice("developr", () => installDefaultExtensions(dir));
+  assert.deepEqual(result, ["terminal", "files", "themes"]);
+  assert.equal(logged.length, 1);
+  assert.match(logged[0], /\[extensions\] PORTAL_DEFAULT_EXTENSIONS="developr" is refused: developr is neither a preset nor an extension that comes with the portal/);
+});
+
+test("off installs nothing, whatever else is named", async () => {
+  fresh();
+  const { result, logged } = await withChoice("off", () => installDefaultExtensions(everyFolder()));
+  assert.deepEqual(result, []);
+  assert.deepEqual(logged, []);
+  assert.deepEqual(installedNow(), []);
 });

@@ -3,7 +3,7 @@ import path from "node:path";
 import { bundledPath } from "./bundled.js";
 import { getSetting, packageRemoved, putSetting } from "./db.js";
 import { pi } from "./api/packages.js";
-import { followPackages, listInstalledPackages, preparingExtensions, switchPackage } from "./api/extensions.js";
+import { followPackages, listInstalledPackages, preparingExtensions, shippedExtensions, switchPackage } from "./api/extensions.js";
 import { isLocalSource, localPackagePath } from "./features.js";
 import { isSwitchedOff, sourceOf } from "./extension-switch.js";
 import { readPiSettings, updatePiSettings } from "./pi-settings.js";
@@ -25,9 +25,14 @@ import { readPiSettings, updatePiSettings } from "./pi-settings.js";
  * An extension the portal stopped shipping (Dusk and Warm, now themes of `themes`) is taken out of pi's list at the
  * start, and its replacement installed where it was in use: see replaceRetiredExtensions.
  *
+ * The list is short on purpose (Terminal, Files and the themes): the rest of what comes with the portal is the person's
+ * to choose, in the setup assistant's extension step (the presets below) or in Settings → Extensions. Shrinking the
+ * list takes nothing out of a portal that has the others: what was installed stays installed.
+ *
  * `PORTAL_DEFAULT_EXTENSIONS=off` installs none of them: a portal whose
  * operator chooses every extension, and the test portals, which start by the
- * hundred and have no use for them.
+ * hundred and have no use for them. A preset's name or a comma list of
+ * extensions (see defaultsChoice) installs that in place of the list, for a portal set up without the assistant.
  */
 
 const DONE = "default_extensions_installed";
@@ -42,14 +47,19 @@ export function stopInstallingDefaults(): void {
   stopping = true;
 }
 
-/** The folders the list names, with the package each holds. A name that is not a folder of the portal's is left out. */
-export function defaultExtensions(dir = bundledPath("extensions")): { folder: string; dir: string; name: string }[] {
+/**
+ * The folders the list names (or `folders`, where a choice of the operator's is installed in its place), with the
+ * package each holds. A name that is not a folder of the portal's is left out.
+ */
+export function defaultExtensions(dir = bundledPath("extensions"), folders?: string[]): { folder: string; dir: string; name: string }[] {
   if (!dir) return [];
-  let listed: unknown;
-  try {
-    listed = JSON.parse(readFileSync(path.join(dir, "defaults.json"), "utf8"));
-  } catch {
-    return [];
+  let listed: unknown = folders;
+  if (!folders) {
+    try {
+      listed = JSON.parse(readFileSync(path.join(dir, "defaults.json"), "utf8"));
+    } catch {
+      return [];
+    }
   }
   if (!Array.isArray(listed)) return [];
   const found: { folder: string; dir: string; name: string }[] = [];
@@ -64,6 +74,100 @@ export function defaultExtensions(dir = bundledPath("extensions")): { folder: st
     }
   }
   return found;
+}
+
+/**
+ * The sets the setup assistant offers, and `PORTAL_DEFAULT_EXTENSIONS` takes by name. Each is the default set and what
+ * it adds, by folder; "everything" is every extension that comes with the portal. Docker for extensions is listed
+ * before Voice: it is installed first either way (see withRequirements), but the list reads in the order it happens.
+ */
+const PRESETS: { id: string; adds: string[] | "all" }[] = [
+  { id: "minimal", adds: [] },
+  { id: "developer", adds: ["git", "docker", "docs"] },
+  { id: "creative", adds: ["media", "canvas", "voice"] },
+  { id: "everything", adds: "all" },
+];
+
+export interface ExtensionPreset {
+  id: string;
+  /** The folders of the portal's own extensions/ folder. */
+  folders: string[];
+  /** The package each folder holds, in the same order. */
+  extensions: string[];
+}
+
+/** The extensions in the portal's own folder; none where there is no folder to read. */
+const shippedExtensionsIn = (dir: string | undefined): ReturnType<typeof shippedExtensions> => {
+  try {
+    return dir ? shippedExtensions(dir) : [];
+  } catch {
+    return [];
+  }
+};
+
+/** The presets, with the folders and packages of this install: a folder the install does not have is left out. */
+export function extensionPresets(dir = bundledPath("extensions")): ExtensionPreset[] {
+  const names = new Map(shippedExtensionsIn(dir).map((ext) => [path.basename(ext.spec), ext.name]));
+  const minimal = defaultExtensions(dir).map((ext) => ext.folder);
+  return PRESETS.map(({ id, adds }) => {
+    const folders = [...new Set(adds === "all" ? [...minimal, ...names.keys()] : [...minimal, ...adds])].filter((folder) => names.has(folder));
+    return { id, folders, extensions: folders.map((folder) => names.get(folder)!) };
+  });
+}
+
+/**
+ * What PORTAL_DEFAULT_EXTENSIONS asks for, as the folders to install: nothing for `off`, the default set for nothing, `on`
+ * and the like, a preset's folders for its name (`developer`), and for a comma list (`terminal,files,git`) the folders it
+ * names, by folder or package name. Anything else is refused, whole: `refused` says so and the default set is what is
+ * installed, so a typo does not leave a new portal without even a terminal.
+ */
+export function defaultsChoice(value: string | undefined, dir = bundledPath("extensions")): { folders: string[]; refused?: string } {
+  const text = (value ?? "").trim().toLowerCase();
+  const standard = defaultExtensions(dir).map((ext) => ext.folder);
+  if (/^(off|0|false|no)$/.test(text)) return { folders: [] };
+  if (/^(|on|1|true|yes|default)$/.test(text)) return { folders: standard };
+  const presets = extensionPresets(dir);
+  const preset = presets.find((p) => p.id === text);
+  if (preset) return { folders: preset.folders };
+  const known = new Map<string, string>();
+  for (const ext of shippedExtensionsIn(dir)) {
+    known.set(path.basename(ext.spec), path.basename(ext.spec));
+    known.set(ext.name.toLowerCase(), path.basename(ext.spec));
+  }
+  const asked = text.split(",").map((name) => name.trim());
+  const folders = asked.map((name) => known.get(name));
+  if (folders.every(Boolean)) return { folders: [...new Set(folders as string[])] };
+  const unknown = asked.filter((name, i) => !folders[i]).map((name) => name || "(empty)");
+  return {
+    folders: standard,
+    refused:
+      `PORTAL_DEFAULT_EXTENSIONS="${value}" is refused: ${unknown.join(", ")} is neither a preset nor an extension that comes with the portal. ` +
+      `It takes off, a preset (${presets.map((p) => p.id).join(", ")}) or a comma list of ${[...new Set(known.values())].join(", ")}. ` +
+      `The extensions a portal starts with are installed instead`,
+  };
+}
+
+/**
+ * `folders` with the shipped extensions they cannot work without added, each before what needs it (a choice with Voice
+ * installs Docker for extensions first, as installing Voice from Settings does).
+ */
+function withRequirements(folders: string[], dir: string): string[] {
+  const shipped = shippedExtensionsIn(dir);
+  const byName = new Map(shipped.map((ext) => [ext.name, ext]));
+  const byFolder = new Map(shipped.map((ext) => [path.basename(ext.spec), ext]));
+  const order: string[] = [];
+  const seen = new Set<string>();
+  const visit = (folder: string) => {
+    if (seen.has(folder)) return;
+    seen.add(folder);
+    for (const need of Object.keys(byFolder.get(folder)?.requires ?? {})) {
+      const found = byName.get(need);
+      if (found) visit(path.basename(found.spec));
+    }
+    order.push(folder);
+  };
+  folders.forEach(visit);
+  return order;
 }
 
 /**
@@ -160,9 +264,11 @@ export async function installDefaultExtensions(dir = bundledPath("extensions")):
   } catch (e) {
     console.error("[extensions] could not take out the extensions the portal does not ship any more:", e);
   }
-  if (/^(off|0|false|no)$/i.test(process.env.PORTAL_DEFAULT_EXTENSIONS ?? "")) return [];
+  const choice = defaultsChoice(process.env.PORTAL_DEFAULT_EXTENSIONS, dir);
+  if (choice.refused) console.error(`[extensions] ${choice.refused}`);
+  if (!choice.folders.length) return [];
   const done = installedOnce();
-  const due = defaultExtensions(dir).filter((ext) => !done.includes(ext.folder));
+  const due = defaultExtensions(dir, dir ? withRequirements(choice.folders, dir) : choice.folders).filter((ext) => !done.includes(ext.folder));
   if (!due.length) return [];
   const names = new Set((await installedByName()).keys());
   const installed: string[] = [];

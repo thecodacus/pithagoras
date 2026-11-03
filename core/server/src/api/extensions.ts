@@ -15,6 +15,7 @@ import { bundledPath } from "../bundled.js";
 import { isServing, serverFailure, serverHalfStatus, serverHalvesStanding, serversSettled, syncServerHalves } from "../extension-host.js";
 import { logFileLine } from "../logs.js";
 import { planInstall, type InstalledExtension } from "../install-plan.js";
+import { extensionPresets } from "../default-extensions.js";
 
 const run = promisify(execFile);
 
@@ -612,6 +613,19 @@ export function extensionsRouter(): Router {
   router.get("/extensions/shipped", (_req, res) => {
     try {
       res.json({ extensions: shippedExtensions() });
+    } catch (e) {
+      res.status(500).json({ error: (e as Error).message });
+    }
+  });
+
+  /**
+   * The sets the setup assistant's extension step offers (default-extensions.ts), by the packages each holds. The page
+   * installs what a set holds that is missing through the same calls Settings does (the plan, then POST /packages), so
+   * the rule for who may is the same: anyone signed in.
+   */
+  router.get("/extensions/presets", (_req, res) => {
+    try {
+      res.json({ presets: extensionPresets().map(({ id, extensions }) => ({ id, extensions })) });
     } catch (e) {
       res.status(500).json({ error: (e as Error).message });
     }
