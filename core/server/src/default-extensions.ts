@@ -3,7 +3,7 @@ import path from "node:path";
 import { bundledPath } from "./bundled.js";
 import { getSetting, packageRemoved, putSetting } from "./db.js";
 import { pi } from "./api/packages.js";
-import { followPackages, listInstalledPackages, preparingExtensions, shippedExtensions, switchPackage } from "./api/extensions.js";
+import { followPackages, installingDefaults, listInstalledPackages, preparingExtensions, shippedExtensions, switchPackage } from "./api/extensions.js";
 import { isLocalSource, localPackagePath } from "./features.js";
 import { isSwitchedOff, sourceOf } from "./extension-switch.js";
 import { readPiSettings, updatePiSettings } from "./pi-settings.js";
@@ -257,7 +257,9 @@ const installedOnce = (): string[] => {
  * the folders it installed now. One that fails is said, and tried again on the
  * next start, as is one a stop came before (see stopInstallingDefaults).
  */
-export async function installDefaultExtensions(dir = bundledPath("extensions")): Promise<string[]> {
+export const installDefaultExtensions = (dir = bundledPath("extensions")): Promise<string[]> => installingDefaults(installDefaults(dir));
+
+async function installDefaults(dir: string | undefined): Promise<string[]> {
   // Before the list: what it finds installed is what is left, not what an earlier version of the portal shipped.
   try {
     await preparingExtensions(replaceRetiredExtensions(dir));

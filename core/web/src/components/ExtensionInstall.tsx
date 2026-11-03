@@ -81,13 +81,13 @@ function Needs({ name, needs, below }: { name: string; needs: InstallNeed[]; bel
  * list; without it the person is asked only when something else is needed.
  * `progress` is told each package as it is done, and null at the end.
  * `announced` is for a caller that has said already what the person gets (the setup assistant, whose step lists the
- * extensions that need Docker for extensions): what comes from the portal's own folder, or is switched on, is then done
- * without asking again. Anything else is still asked about.
+ * extensions that need Docker for extensions): what is installed from the portal's own folder is then done without asking
+ * again. Anything else is still asked about, switching on an extension that was switched off included: someone chose that.
  */
 export async function installExtension(spec: string, { ask, progress, announced }: { ask?: { title: string; message: ReactNode }; progress?: (step: InstallStep | null) => void; announced?: boolean } = {}): Promise<boolean> {
   const plan = await api.installPlan(spec);
   const name = plan.name ?? spec;
-  const known = announced && !ask && plan.needs.every((need) => need.action === "switch-on" || (need.action === "install" && need.from === "shipped"));
+  const known = announced && !ask && plan.needs.every((need) => need.action === "install" && need.from === "shipped");
   if (!known && (ask || plan.needs.length)) {
     const yes = await confirmDialog({
       title: ask?.title ?? t("Install {name}?", { name }),

@@ -325,7 +325,7 @@ test("a value that is refused installs the default set and says why in the log",
   assert.match(logged[0], /\[extensions\] PORTAL_DEFAULT_EXTENSIONS="developr" is refused: developr is neither a preset nor an extension that comes with the portal/);
 });
 
-test("off installs nothing, whatever else is named", async () => {
+test("off installs nothing", async () => {
   fresh();
   const { result, logged } = await withChoice("off", () => installDefaultExtensions(everyFolder()));
   assert.deepEqual(result, []);

@@ -32,6 +32,8 @@ export function useExtensionChoice() {
   const presets = useCached("extension-presets", api.extensionPresets, { freshMs: 60_000 });
   const installed = useInstalledPackages();
   const [picked, setPicked] = useState<Set<string> | null>(null);
+  // The set the person clicked, which stays the marked one while the choice is still that set's list.
+  const [pickedSet, setPickedSet] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState<Record<string, Progress>>({});
   const [step, setStep] = useState<InstallStep | null>(null);
@@ -56,7 +58,9 @@ export function useExtensionChoice() {
   const minimal = presets.value?.presets.find((p) => p.id === "minimal")?.extensions ?? [];
   const selected = picked ?? new Set(minimal);
   const wanted = (from: Iterable<string>) => new Set([...from, ...[...names].filter(have)].filter((name) => names.has(name)));
-  const active = presets.value?.presets.find((p) => {
+  // Several sets can come to the same once what is installed is counted in: the one clicked is then the marked one.
+  const clicked = presets.value?.presets.find((p) => p.id === pickedSet && picked && p.extensions.length === picked.size && p.extensions.every((name) => picked.has(name)));
+  const active = clicked?.id ?? presets.value?.presets.find((p) => {
     const a = wanted(p.extensions);
     const b = wanted(selected);
     return a.size === b.size && [...a].every((name) => b.has(name));
@@ -67,14 +71,16 @@ export function useExtensionChoice() {
   const needDocker = missing.filter((ext) => ext.requires && DOCKER in ext.requires && ext.name !== DOCKER && !have(DOCKER));
   const failed = Object.values(progress).some((p) => p.state === "failed");
 
-  const choose = (names: string[]) => {
+  const choose = (id: string, names: string[]) => {
     setPicked(new Set(names));
+    setPickedSet(id);
     setProgress({});
   };
   const toggle = (name: string) => {
     const next = new Set(selected);
     if (!next.delete(name)) next.add(name);
     setPicked(next);
+    setPickedSet(null);
     setProgress({});
   };
 
@@ -109,13 +115,17 @@ export function useExtensionChoice() {
     return ok;
   };
 
-  return { shipped, presets, list, have, selected, active, choose, toggle, missing, needDocker, failed, running, progress, step, run };
+  return { shipped, presets, list, have, reload: installed.reload, selected, active, choose, toggle, missing, needDocker, failed, running, progress, step, run };
 }
 
 export type ExtensionChoice = ReturnType<typeof useExtensionChoice>;
 
 export function ExtensionStep({ choice }: { choice: ExtensionChoice }) {
-  const { shipped, presets, list, have, selected, active, choose, toggle, needDocker, running, progress, step } = choice;
+  const { shipped, presets, list, have, reload, selected, active, choose, toggle, needDocker, running, progress, step } = choice;
+  // What is installed is asked again when the step is shown: the assistant opens with the page, and the portal may
+  // still have been installing what it starts with then.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => void reload(), []);
   const label = (name: string) => shippedLabel(name);
   const loadFailed = (!shipped.value && shipped.failed) || (!presets.value && presets.failed) || null;
   return (
@@ -140,7 +150,7 @@ export function ExtensionStep({ choice }: { choice: ExtensionChoice }) {
                   type="button"
                   role="radio"
                   aria-checked={on}
-                  onClick={() => choose(p.extensions)}
+                  onClick={() => choose(p.id, p.extensions)}
                   className={`rounded-xl px-3 py-2.5 text-left transition ${on ? "bg-accent/12 ring-1 ring-inset ring-accent/30" : "bg-fg/5 hover:bg-fg/10"}`}
                 >
                   <span className={`block text-sm font-medium ${on ? "text-accent" : "text-fg"}`}>{PRESETS[p.id] ? t(PRESETS[p.id].label) : p.id}</span>

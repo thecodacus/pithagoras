@@ -412,6 +412,17 @@ export const preparingExtensions = <T>(work: Promise<T>): Promise<T> => {
 };
 
 /**
+ * What a portal starts with is being installed (see installDefaultExtensions): an install asked for meanwhile waits for
+ * it, or two `pi install` would write pi's settings at the same time and one entry could be lost.
+ */
+let startingWith: Promise<unknown> = Promise.resolve();
+export const installingDefaults = <T>(work: Promise<T>): Promise<T> => {
+  startingWith = work.catch(() => {});
+  return work;
+};
+export const afterDefaultsInstalled = (): Promise<unknown> => startingWith;
+
+/**
  * Where a page fetches a file of a package's web folder from: under the half's revision, as a folder of its own, so
  * that what the module imports by a relative address is fetched under that revision too, and another revision is
  * other files to the page, every one of them.

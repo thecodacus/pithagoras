@@ -221,8 +221,10 @@ changed while it is open — it was committed, or put back — the view says so.
   commit made here is in the agent's history, and the agent's uncommitted work is
   what appears under Changes.
 - **It is an extension.** The panel is the `pithagoras-git` package from the
-  portal's `extensions/git`, installed when a portal starts for the first time
-  and listed under Settings → Extensions → Installed like any other. Turn it off
+  portal's `extensions/git`. A new portal does not have it: install it from
+  Settings → Extensions → Discover, or pick Developer in the [setup
+  assistant](/guide/models#setup-assistant). A portal that had it before keeps
+  it, and it is listed under Settings → Extensions → Installed like any other. Turn it off
   or remove it and the branch icon goes; install your own panel by the name
   `git` and it takes its place. Its HTTP routes are under
   `/api/x/pithagoras-git/chats/:id`; see the [HTTP API](/reference/api#git).

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { PASSWORD, cookieOf, login, portalOf } from "./auth-harness.mjs";
@@ -59,6 +59,43 @@ test("a portal started with a value PORTAL_DEFAULT_EXTENSIONS does not take says
     }
     assert.match(p.log(), /preset \(minimal, developer, creative, everything\)/);
     assert.equal((await fetch(`${p.base}/api/auth/status`)).status, 200);
+  } finally {
+    await p.stop();
+  }
+});
+
+test("an install asked for while the portal installs what it starts with waits for it, so two pi installs never write its settings at once", async () => {
+  const slow = testHome("extension-starting-");
+  const slowBin = path.join(slow, "bin");
+  mkdirSync(slowBin);
+  const events = path.join(slow, "events.txt");
+  // Each install takes a while and holds a lock: one that begins while another goes on is written down as an overlap.
+  writeFileSync(
+    path.join(slowBin, "pi"),
+    `#!/bin/sh
+case "$1" in
+  list) echo "User packages:" ;;
+  install)
+    if mkdir ${JSON.stringify(path.join(slow, "lock"))} 2>/dev/null; then
+      sleep 0.6
+      echo "install $2" >> ${JSON.stringify(events)}
+      rmdir ${JSON.stringify(path.join(slow, "lock"))}
+    else
+      echo "overlap $2" >> ${JSON.stringify(events)}
+    fi
+    ;;
+esac
+`,
+  );
+  chmodSync(path.join(slowBin, "pi"), 0o755);
+  const p = await portalOf({ PORTAL_PASSWORD: PASSWORD, PORTAL_DEFAULT_EXTENSIONS: "on", PATH: `${slowBin}${path.delimiter}${process.env.PATH}` }, slow);
+  try {
+    const cookie = cookieOf(await login(PASSWORD, p.base));
+    const res = await fetch(`${p.base}/api/packages`, { method: "POST", headers: { "Content-Type": "application/json", Cookie: cookie }, body: JSON.stringify({ spec: "/somewhere/else" }) });
+    assert.equal(res.status, 200);
+    const lines = readFileSync(events, "utf8").split("\n").filter(Boolean);
+    assert.deepEqual(lines.filter((line) => line.startsWith("overlap")), []);
+    assert.deepEqual(lines.map((line) => path.basename(line)), ["terminal", "files", "themes", "else"]);
   } finally {
     await p.stop();
   }

@@ -9,7 +9,7 @@ import express, { type Router } from "express";
 import semver from "semver";
 import { searchCatalog } from "../catalog.js";
 import { oneAtATime } from "../one-at-a-time.js";
-import { followPackages } from "./extensions.js";
+import { afterDefaultsInstalled, followPackages } from "./extensions.js";
 import { sessions } from "../session-manager.js";
 
 const run = promisify(execFile);
@@ -78,6 +78,7 @@ export function packagesRouter(): Router {
       });
     }
     try {
+      await afterDefaultsInstalled();
       const { stdout, stderr } = await pi(["install", spec]);
       await followPackages();
       // The open chats load it: an idle one at once, a working one at its next step. A folder installed again is
