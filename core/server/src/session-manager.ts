@@ -104,6 +104,7 @@ import {
   lastRunEvents,
   flaggedEvents,
   trustedResults,
+  noteServerWindow,
 } from "./db.js";
 import { newChildChat, newPackageChat, type ChatAnswer, type ChildRun } from "./child-chats.js";
 
@@ -1153,6 +1154,27 @@ class SessionManager extends EventEmitter {
   /** The session's model is being loaded, or has finished loading. */
   reportModelLoad(sessionId: string, load: unknown): void {
     this.record(sessionId, "portal_model", load);
+  }
+
+  /**
+   * The server refused a request of this chat for being past what it holds, and said what that is. The window the
+   * chat counted on was wrong, and pi compacts by it: told at once, it compacts the request that failed and sends it
+   * again, instead of failing the same way at every step. Held to it for the model in every chat, until a window is
+   * set for the model by hand.
+   */
+  async reportServerWindow(sessionId: string, model: string, tokens: number): Promise<void> {
+    const client = this.live.get(sessionId)?.client;
+    const state = await client?.getState().catch(() => undefined);
+    if (!state || state.model.id !== model) return;
+    const counted = state.model.contextWindow;
+    if (!noteServerWindow(state.model.provider, model, tokens)) return;
+    this.applyContextLimits();
+    if (counted && counted > tokens) {
+      this.record(sessionId, "portal_notice", {
+        text: `The model server holds ${tokens.toLocaleString("en-US")} tokens of context for a chat, not the ${counted.toLocaleString("en-US")} this chat counted on. It is compacted to fit from now on; set the window for the model in the context pill to change that.`,
+        warning: true,
+      });
+    }
   }
 
   /** What llama.cpp measured for the answer it just finished: kept on that answer's message_end. */

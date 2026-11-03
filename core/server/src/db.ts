@@ -2413,6 +2413,27 @@ export function getContextLimit(provider: string, model: string): number | undef
 /** `null` hands the model back to the default, or to what its definition says. */
 export function setContextLimit(provider: string, model: string, tokens: number | null): void {
   storeLimit(contextLimitKey(provider, model), tokens);
+  // Said by a person, after the server: what they say now is the window.
+  serverWindows.delete(contextLimitKey(provider, model));
+}
+
+/**
+ * What model servers have said their windows are, by model: see noteServerWindow. Kept in memory only, so a server
+ * set up differently later is not held to what it once was for longer than the portal runs.
+ */
+const serverWindows = new Map<string, number>();
+
+/**
+ * A server's own word for how much one chat of this model can hold (llama.cpp says so when a request goes past it).
+ * Holds the model to it, if it is less than the window the chat was counting on. True when that changed anything.
+ */
+export function noteServerWindow(provider: string, model: string, tokens: number): boolean {
+  if (contextLimitProblem(tokens)) return false;
+  const key = contextLimitKey(provider, model);
+  const known = serverWindows.get(key);
+  if (known !== undefined && known <= tokens) return false;
+  serverWindows.set(key, tokens);
+  return true;
 }
 
 const DEFAULT_LIMIT_KEY = "context_limit_default";
@@ -2436,9 +2457,17 @@ function storeLimit(key: string, tokens: number | null): void {
  * What was set for the model wins. Failing that, the default applies as a
  * ceiling, not as a size: a model that declares less than the default keeps
  * what it declares, since raising it would promise room it does not have.
- * `declared` is the model's own number, when it has one.
+ * `declared` is the model's own number, when it has one. What the model's server has said it holds (noteServerWindow)
+ * caps all of it.
  */
 export function contextWindowFor(provider: string, model: string, declared?: number): number | undefined {
+  const wanted = windowWanted(provider, model, declared);
+  // The server's word is the last: a window set for the model that it cannot hold was a mistake, not a choice.
+  const said = serverWindows.get(contextLimitKey(provider, model));
+  return said !== undefined && (wanted === undefined || said < wanted) ? said : wanted;
+}
+
+function windowWanted(provider: string, model: string, declared?: number): number | undefined {
   const own = getContextLimit(provider, model);
   if (own) return own;
   const fallback = getDefaultContextLimit();

@@ -36,6 +36,7 @@ import { bridgeExtensionUi, UI_RECEIVE } from "../extension-ui.js";
 import { hostExtensions } from "../extension-host.js";
 import { adapterTool, contextWindowFor, getSkipThinkingProviders, getVoiceInstructions, getVoiceModel, questionWaitMs, voiceSpeaks } from "../db.js";
 import { configStamp, isLlamaProvider } from "../providers.js";
+import { configuredCompaction, fitCompaction } from "../pi-settings.js";
 import { rereadConfig } from "./model-runtime.js";
 import { browserServers } from "../api/mcp.js";
 import { PI_BUILT_IN_TOOLS } from "../tool-policy.js";
@@ -987,6 +988,9 @@ export class SdkPiClient extends EventEmitter implements PiClient {
   ): Promise<PromptTaken> {
     // See `reloading`. Failed or not, the chat is what it left.
     if (this.reloading) await this.reloading.catch(() => {});
+    // pi's settings saves (its own model changes, a toggle in its menus) rebuild the settings and drop the fitted
+    // compaction numbers, and the check before a run reads them before any agent_start could say them again.
+    this.applyLimitQuietly();
     if (options?.voice) {
       this.useVoiceModel();
       this.voiceFirst?.arm(this.isIdle());
@@ -1844,14 +1848,32 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     if (current !== this.appliedModel) this.definitionWindows.set(key, current.contextWindow);
     const declared = this.modelRuntime.getModel(current.provider, current.id)?.contextWindow ?? this.definitionWindows.get(key);
     const wanted = contextWindowFor(current.provider, current.id, declared);
+    this.fitCompaction(key, wanted ?? current.contextWindow);
     if (wanted === current.contextWindow) return;
     const next = { ...current, contextWindow: wanted };
     this.appliedModel = next;
     this.session.agent.state.model = next;
   }
 
+  /**
+   * Give pi's compaction numbers the window can bear, for this model in this session: see fitCompaction. Put over
+   * the session's settings as an override for the model, so nothing is written to the file, and said again
+   * wherever the window is, since reading the file again (a reload, a change of "keep recent") takes it away.
+   */
+  private fitCompaction(modelKey: string, contextWindow: number | undefined): void {
+    const settings = this.session.settingsManager;
+    if (!contextWindow || typeof settings?.applyOverrides !== "function") return;
+    // The numbers the session itself has, the project's settings over the global ones as pi merges them, and not the
+    // global file alone: the override ranks above both, so numbers worked out from less would replace a project's own.
+    // Written when they are not lowered too, as the very numbers pi resolves anyway: an override cannot be taken away,
+    // and one left by an earlier, smaller window would otherwise stay.
+    const layers = [settings.getGlobalSettings?.() ?? {}, settings.getProjectSettings?.() ?? {}];
+    settings.applyOverrides({ compaction: { modelOverrides: { [modelKey]: fitCompaction(contextWindow, configuredCompaction(modelKey, layers)) } } });
+  }
+
   async setThinkingLevel(level: string): Promise<void> {
     this.session.setThinkingLevel(level);
+    this.applyLimitQuietly();
   }
 
   /**
@@ -1865,14 +1887,18 @@ export class SdkPiClient extends EventEmitter implements PiClient {
    */
   async refreshSettings(): Promise<void> {
     await this.session.settingsManager?.reload?.();
+    // The file read again has taken the window's share of compaction away.
+    this.applyLimitQuietly();
   }
 
   async setAutoCompaction(enabled: boolean): Promise<void> {
     this.session.setAutoCompactionEnabled(enabled);
+    this.applyLimitQuietly();
   }
 
   async setAutoRetry(enabled: boolean): Promise<void> {
     this.session.setAutoRetryEnabled(enabled);
+    this.applyLimitQuietly();
   }
 
   async compact(): Promise<void> {

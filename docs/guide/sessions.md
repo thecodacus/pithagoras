@@ -657,7 +657,20 @@ waiting for it to finish. Clicking it opens everything context-related:
 - input and output tokens, message count, tool calls, cost
 
 pi refuses to compact a session that is too short, and says so rather than
-failing quietly.
+failing quietly. When pi's own automatic compaction is what finds nothing to
+compact and the model has no room left to answer, the chat says that too
+("The model stopped before it answered …") instead of showing an empty reply.
+
+pi's compaction is made for windows of 128k and more: it keeps the last 20,000
+tokens word for word and holds 16,384 back for the answer. On a smaller window
+that leaves a chat that has not got that far nothing to compact, so the portal
+scales both to the window of the model: a sixth of the window is kept at most,
+and a quarter of it is held back (never less than 6,144 tokens, which pi needs
+below the window to ask the model for an answer at all; a window under 12,288
+tokens holds back half of it instead). A window of about 120k
+and more is left as pi has it. The tools, instructions and skills that every
+chat starts with count against the window as well: a window that is not much
+bigger than they are leaves no room for a conversation, whatever is compacted.
 
 ### The context window
 
@@ -666,6 +679,13 @@ window in the model's entry in `models.json`. That number cannot know how the
 server is run. llama.cpp with `--parallel 2` splits `ctx-size` between two
 slots, so a chat gets half of what the model's entry says: it is compacted far
 too late and then fails at the server.
+
+llama.cpp tells the portal when it refuses a request for being past its window,
+and says how large that window is. A chat that meets that learns it: the window
+of its model is held to what the server says, and the request that failed is
+compacted and sent again instead of failing the same way at every step. The chat
+shows a line saying so. This is kept until the portal restarts; the number set in
+the pill, below, is what makes it stay.
 
 Set what one chat really holds in the pill's **Context window** field; **Reset**
 goes back to the default (below) or, without one, the model's own number. The
