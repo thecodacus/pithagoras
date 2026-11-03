@@ -15,6 +15,7 @@ import { bundledPath } from "../bundled.js";
 import { isServing, serverFailure, serverHalfStatus, serverHalvesStanding, serversSettled, syncServerHalves } from "../extension-host.js";
 import { logFileLine } from "../logs.js";
 import { planInstall, type InstalledExtension } from "../install-plan.js";
+import { extensionPresets } from "../default-extensions.js";
 
 const run = promisify(execFile);
 
@@ -411,6 +412,17 @@ export const preparingExtensions = <T>(work: Promise<T>): Promise<T> => {
 };
 
 /**
+ * What a portal starts with is being installed (see installDefaultExtensions): an install asked for meanwhile waits for
+ * it, or two `pi install` would write pi's settings at the same time and one entry could be lost.
+ */
+let startingWith: Promise<unknown> = Promise.resolve();
+export const installingDefaults = <T>(work: Promise<T>): Promise<T> => {
+  startingWith = work.catch(() => {});
+  return work;
+};
+export const afterDefaultsInstalled = (): Promise<unknown> => startingWith;
+
+/**
  * Where a page fetches a file of a package's web folder from: under the half's revision, as a folder of its own, so
  * that what the module imports by a relative address is fetched under that revision too, and another revision is
  * other files to the page, every one of them.
@@ -612,6 +624,19 @@ export function extensionsRouter(): Router {
   router.get("/extensions/shipped", (_req, res) => {
     try {
       res.json({ extensions: shippedExtensions() });
+    } catch (e) {
+      res.status(500).json({ error: (e as Error).message });
+    }
+  });
+
+  /**
+   * The sets the setup assistant's extension step offers (default-extensions.ts), by the packages each holds. The page
+   * installs what a set holds that is missing through the same calls Settings does (the plan, then POST /packages), so
+   * the rule for who may is the same: anyone signed in.
+   */
+  router.get("/extensions/presets", (_req, res) => {
+    try {
+      res.json({ presets: extensionPresets().map(({ id, extensions }) => ({ id, extensions })) });
     } catch (e) {
       res.status(500).json({ error: (e as Error).message });
     }

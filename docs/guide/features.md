@@ -13,8 +13,8 @@ writes it into pi's own configuration as an MCP server, so it can also be seen,
 and undone, from Settings → MCP. Understory is the
 `pithagoras-understory` extension, which you install first (see
 [Memory: Understory](#memory-understory)). Image and video generation are
-the tools of the [Media](/guide/media) extension, which a portal installs when
-it first starts, and keep their settings in its own store.
+the tools of the [Media](/guide/media) extension, which you install from Settings → Extensions
+(or pick Creative in the setup assistant), and keep their settings in its own store.
 
 The first two are reference implementations behind a seam the portal already
 has, so a third-party equivalent can take their place without changing the

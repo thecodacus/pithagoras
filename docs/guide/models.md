@@ -69,12 +69,14 @@ you trust.
 ### Setup assistant
 
 Opened from the Providers page (**Setup assistant**), and offered on its own,
-once, when the portal has no model to talk to. It takes three steps — where the
-models come from, what new chats start with (model and effort), and what the
-agent can do besides, with a shortlist of packages. **Back** returns to the step
-before, and **Set up later** dismisses it in this browser; everything can be
-changed later in Settings, and **Setup assistant** on the Providers page opens
-it again.
+once, when the portal has no model to talk to. It takes four steps — where the
+models come from, what new chats start with (model and effort), which of the
+portal's own extensions to have (a set such as Developer or Creative, or a
+choice by hand; see [What a portal starts with](/guide/extensions#what-a-portal-starts-with)),
+and what the agent can do besides, with a shortlist of packages. **Back** returns
+to the step before, and **Set up later** dismisses it in this browser; everything
+can be changed later in Settings, and **Setup assistant** on the Providers page
+opens it again.
 
 ## Defaults
 
