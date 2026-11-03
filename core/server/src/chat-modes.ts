@@ -2,6 +2,19 @@ import { CODEMODE_TOOL } from "./pi/codemode.js";
 import type { ToolExceptions } from "./tool-policy.js";
 
 /**
+ * What a mode of the person's sets for the requests of its chats to the model, each where it is set. Merged over what
+ * the model's own definition (`samplingParams` in models.json) and the provider would use: a field not set leaves the
+ * one below. `topP`, `topK` and `minP` reach only the OpenAI-compatible APIs (see pi/request-params.ts).
+ */
+export interface ModeParams {
+  temperature?: number;
+  topP?: number;
+  topK?: number;
+  minP?: number;
+  maxTokens?: number;
+}
+
+/**
  * Chat modes: how a chat works, chosen above the message box before its first message and fixed once it has one.
  * A chat keeps its mode in sessions.mode: NULL for Standard, a mode of the portal's by its name, one the person made
  * as "custom/<id>", an extension's as "<package>/<id>". What a mode does past its tool layer is done by whoever
@@ -28,6 +41,8 @@ export interface ChatModeEntry {
   provider?: string;
   model?: string;
   thinkingLevel?: string;
+  /** Sent with every request of its chats to the model (a mode the person made). */
+  params?: ModeParams;
 }
 
 /** What a chat is when it says nothing about its mode. Stored as NULL. */

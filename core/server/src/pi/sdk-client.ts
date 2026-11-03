@@ -21,6 +21,8 @@ import { reportTool, reportToFor } from "./report-tool.js";
 import { OUTSIDE_CONTENT_GUIDELINE, declaredFiles, declaredGuard, guardExtension, type DeclaredGuard } from "./guard.js";
 import { CODEMODE_TOOL, CODEMODE_TOOLS, codemodeExtension } from "./codemode.js";
 import { findSessionFile } from "./session-file.js";
+import { withModeParams } from "./request-params.js";
+import type { ModeParams } from "../chat-modes.js";
 import { CONTEXT_FILES, SHARED_FILES } from "./context-files.js";
 import { heartbeatTool } from "./heartbeat-tool.js";
 import { ToolsGateway } from "./tools-gateway.js";
@@ -497,6 +499,8 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     codemode?: "only";
     /** Said after the portal's rules each time the prompt is built: the chat's mode's instructions. */
     modeLines?: () => string[];
+    /** The model parameters of the chat's mode, read at each request: see request-params.ts. */
+    modeParams?: () => ModeParams | undefined;
     /** The portal's session id, for tools that record against it. */
     sessionId?: string;
     /** The taint rules a run may act against after it read something untrusted, read at each call — see guardExtension. */
@@ -687,6 +691,8 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       ...(model ? { model } : {}),
       ...(opts.thinkingLevel ? { thinkingLevel: opts.thinkingLevel } : {}),
     });
+    // The chat's mode's model parameters, on the requests its agent makes (not on compactions): see request-params.ts.
+    if (opts.modeParams) session.agent.streamFunction = withModeParams(session.agent.streamFunction, opts.modeParams);
     filesOf = (name) => declaredFiles(session.getToolDefinition(name));
     guardOf = (name) => declaredGuard(session.getToolDefinition(name));
     fromAdapter = (name) => {

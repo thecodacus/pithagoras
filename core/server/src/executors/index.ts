@@ -8,6 +8,7 @@ import { removeStoppedRunner } from "./stale-container.js";
 import { PiRpcClient } from "../pi/rpc-client.js";
 import { SdkPiClient } from "../pi/sdk-client.js";
 import type { PiClient } from "../pi/types.js";
+import type { ModeParams } from "../chat-modes.js";
 
 export type ExecutorKind = "host" | "container";
 
@@ -48,6 +49,8 @@ export interface LaunchOptions {
   codemode?: "only";
   /** Said after the portal's rules each time the prompt is built: the chat's mode's instructions. */
   modeLines?: () => string[];
+  /** The model parameters of the chat's mode, read at each request of the chat. */
+  modeParams?: () => ModeParams | undefined;
   /** The agent whose heartbeat this session is, when it is one: gives it the note tool. */
   heartbeatAgent?: string;
   /** Told the chat's model when a spoken turn is about to run on another. */
@@ -115,6 +118,7 @@ export class HostExecutor implements Executor {
       lazySets: opts.lazySets,
       codemode: opts.codemode,
       modeLines: opts.modeLines,
+      modeParams: opts.modeParams,
       heartbeatAgent: opts.heartbeatAgent,
       rememberChatModel: opts.rememberChatModel,
       canReloadNow: opts.canReloadNow,

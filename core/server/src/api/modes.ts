@@ -38,7 +38,9 @@ export function modesRouter(): Router {
     const session = getSession(req.params.id);
     if (!session) return res.status(404).json({ error: "Not found" });
     res.json({
-      modes: modesFor(session).map(({ id, label, description, confirm, extension }) => ({ id, label, description, ...(confirm ? { confirm } : {}), ...(extension ? { extension } : {}) })),
+      modes: modesFor(session).map(({ id, label, description, confirm, extension, params }) => ({
+        id, label, description, ...(confirm ? { confirm } : {}), ...(extension ? { extension } : {}), ...(params ? { params } : {}),
+      })),
     });
   });
 
@@ -149,6 +151,11 @@ const modeToApi = (row: ChatModeRow) => ({
   provider: row.provider,
   model: row.model,
   thinkingLevel: row.thinking_level,
+  temperature: row.temperature,
+  topP: row.top_p,
+  topK: row.top_k,
+  minP: row.min_p,
+  maxTokens: row.max_tokens,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 });
@@ -163,6 +170,18 @@ function line(raw: unknown, what: string, max: number): string | { error: string
   const text = raw.replace(/\s+/g, " ").trim();
   return Array.from(text).length > max ? { error: `${what} can be at most ${max} characters.` } : text;
 }
+
+/**
+ * The model parameters a mode can set: the name in the request, the column, and what is allowed. The bounds are the
+ * widest any API takes (Anthropic's temperature stops at 1, and says so itself); `whole` is for counts.
+ */
+const PARAMS = [
+  { key: "temperature", column: "temperature", what: "Temperature", min: 0, max: 2, whole: false },
+  { key: "topP", column: "top_p", what: "Top P", min: 0, max: 1, whole: false },
+  { key: "topK", column: "top_k", what: "Top K", min: 0, max: 1000, whole: true },
+  { key: "minP", column: "min_p", what: "Min P", min: 0, max: 1, whole: false },
+  { key: "maxTokens", column: "max_tokens", what: "Max tokens", min: 1, max: 1_000_000, whole: true },
+] as const;
 
 type ModeFields = NonNullable<Parameters<typeof updateCustomMode>[1]>;
 
@@ -196,6 +215,19 @@ function modeFields(body: Record<string, unknown>): ModeFields | { error: string
     if (value === undefined) continue;
     if (value !== null && typeof value !== "string") return { error: `${key} must be text or null.` };
     fields[column] = value?.trim() || null;
+  }
+  // A number to set, or null to leave it to the model: a string that is a number is not one, so a form's text is refused.
+  for (const { key, column, what, min, max, whole } of PARAMS) {
+    const value = body[key];
+    if (value === undefined) continue;
+    if (value === null) {
+      fields[column] = null;
+      continue;
+    }
+    if (typeof value !== "number" || !Number.isFinite(value)) return { error: `${what} must be a number, or null to leave it to the model.` };
+    if (whole && !Number.isInteger(value)) return { error: `${what} must be a whole number.` };
+    if (value < min || value > max) return { error: `${what} must be between ${min} and ${max}.` };
+    fields[column] = value;
   }
   return fields;
 }
