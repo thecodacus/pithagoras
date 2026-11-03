@@ -103,6 +103,21 @@ tool, and a switch holds for both ways in: `mcp({ tool: "…" })` and
 script mode on, `mcp_script` is refused while one of the servers' tools is switched
 off, since a script says which tools it calls only as it runs.
 
+A tool that is off is also gone from what the model is told: the `mcp` tool leaves it
+out of a server's list, of a search (with its parameters) and of the status, and out of
+the description the tool is declared with, which names the servers and how many tools
+they have — in Code mode too, where the model reads that description in the code
+tool's. A server whose tools are all off is not listed, searched, connected or called
+at all, and the status shows it as switched off. A search that runs over several pages
+says how many tools a page shows rather than how many there are in all, since the
+total would count the ones that are off. Switching a tool back on brings it back.
+
+A server whose tools are named otherwise (its `toolPrefix`), or that a project brings
+in its own MCP configuration, has only the tools the adapter registers one by one in
+the lists. A switch holds for those the same, and they are left out of what the `mcp`
+tool says; the server as a whole is never taken for switched off, as what else it has
+behind the `mcp` tool is not known.
+
 The tools are read from the adapter's cache, so a server is listed once it has run
 at least once, and only where the adapter is installed and on — for every chat,
 or for a project that brings it in its own settings. Only the adapter's default
