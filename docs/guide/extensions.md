@@ -68,11 +68,48 @@ only once it is installed, so nothing is installed with it.
 ## What a portal starts with
 
 A fresh portal installs the extensions its own `extensions/defaults.json` names,
-once: today the [terminal](/guide/terminal), [Git](/guide/git), [Files](/guide/files), [Canvases](/guide/canvases), [Media](/guide/media) and the theme pack (Forest, Ocean,
-Rose, Amber, Mono, Dusk and Warm, chosen under Settings → This browser → Colours). They are ordinary packages from then on: listed under **Installed**,
-switched off or removed like any other, and one you removed is not put back
-when the portal starts again. To use your own in place of one of them, remove
-it and install yours. `PORTAL_DEFAULT_EXTENSIONS=off` installs none of them.
+once: the [terminal](/guide/terminal), [Files](/guide/files) and the theme pack
+(Forest, Ocean, Rose, Amber, Mono, Dusk and Warm, chosen under Settings → This
+browser → Colours). The rest that comes with Pithagoras ([Git](/guide/git),
+[Canvases](/guide/canvases), [Media](/guide/media), Browser, Voice, Understory
+and the others under **Comes with Pithagoras**) is yours to choose. These are
+ordinary packages from then on: listed under **Installed**, switched off or
+removed like any other, and one you removed is not put back when the portal
+starts again. To use your own in place of one of them, remove it and install
+yours. A portal that was started with more than this (Git, Canvases and Media
+were on the list once) keeps what it has: a smaller list uninstalls nothing.
+
+The first-run [setup assistant](/guide/models#setup-assistant) has a step for
+the rest, **Extensions**, after the provider and the model. It offers a set to
+start from:
+
+| Set | What it installs, besides what a portal starts with |
+| --- | --- |
+| **Minimal** | Nothing: Terminal, Files and the themes. The set the step starts on |
+| **Developer** | [Git](/guide/git), [Docker for extensions](/guide/docker) and [Documents](/guide/documents) |
+| **Creative** | [Media](/guide/media), [Canvases](/guide/canvases) and [Voice](/guide/voice-service) |
+| **Everything** | Every extension that comes with Pithagoras |
+
+or the extensions by hand: **Choose by hand** lists each one with a line on what
+it does and what it needs (Browser, Voice and Understory need Docker for
+extensions). What is installed is ticked and stays so; the others are yours to
+tick, and the step then says it is your own choice. **Install** adds what is
+missing of it, one extension after another, each the way **Install** in
+**Discover** does, with what it needs installed first, which the step says
+before it begins: a choice with Voice installs Docker for extensions first. Each
+extension's progress and each error is shown in the step. One that fails does not
+stop the others; **Try again** repeats what is left, and **Skip** goes on without
+it. Everything the step offers can be changed later in Settings → Extensions,
+and the step is for whoever may install an extension there: whoever is signed in.
+
+`PORTAL_DEFAULT_EXTENSIONS` sets what a portal installs by itself, for one that
+is not set up with the assistant. `off` installs none of them: you choose every
+extension yourself. A set's name (`minimal`, `developer`, `creative` or
+`everything`) installs that set in place of the list, and so does a list of
+extensions, by folder or package name, such as `terminal,files,themes,git`; an
+extension that needs another (Voice needs Docker for extensions) brings it. A
+value that is none of these is refused: the portal says so in its log and
+installs the list above instead. See [Deploying](/guide/deploying#environment).
 
 ## What is installed
 

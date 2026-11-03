@@ -2873,7 +2873,10 @@ other. `extensions/defaults.json` names those a portal starts with: each is
 installed once, as Discover installs one, and is an installed package from then
 on, switched off or removed the same way. One removed stays removed, and one
 already installed under its name, from anywhere, is left as it is, so your own
-can take its place. A portal that is updated installs what the list adds, once.
+can take its place. A portal that is updated installs what the list adds, once, and
+one that has more than the list (it was shorter once) keeps it. The list is short on
+purpose, and the setup assistant offers the rest in sets (`PORTAL_DEFAULT_EXTENSIONS`
+names one for a portal set up without it).
 
 Nothing in the portal's own code imports them, and none of them imports the
 portal's code: `npm run check:boundaries` holds that line, and CI runs it.
