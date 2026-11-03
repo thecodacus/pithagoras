@@ -24,10 +24,28 @@ interface Portal {
   login?: { shortPassword?: boolean; sso?: boolean; endSession?: string };
   /** The password the portal takes as the current one when it is changed. */
   currentPassword?: string;
+  /** The folder of a shipped extension whose install fails. */
+  extensionFails?: string;
+  /** How long installing a shipped extension takes. */
+  extensionDelay?: number;
 }
 
+/** The extensions that come with the portal, as the assistant's extension step is told of them. */
+const SHIPPED = [
+  ['terminal', 'Terminal'], ['files', 'Files'], ['themes', 'Themes'], ['git', 'Git'], ['docker', 'Docker'], ['docs', 'Documents'], ['media', 'Media'], ['canvas', 'Canvases'], ['voice', 'Voice'], ['browser', 'Browser'],
+].map(([folder, title]) => ({
+  name: `pithagoras-${folder}`, version: '1.0.0', description: `${title} as its package describes itself, at a length that no row has room for, with a second clause to run past it`, kinds: ['pithagoras'], spec: `/ext/${folder}`,
+  ...(folder === 'voice' || folder === 'browser' ? { requires: { 'pithagoras-docker': '^1.4.0' } } : {}),
+}));
+const PRESETS = [
+  { id: 'minimal', extensions: ['pithagoras-terminal', 'pithagoras-files', 'pithagoras-themes'] },
+  { id: 'developer', extensions: ['pithagoras-terminal', 'pithagoras-files', 'pithagoras-themes', 'pithagoras-git', 'pithagoras-docker', 'pithagoras-docs'] },
+  { id: 'creative', extensions: ['pithagoras-terminal', 'pithagoras-files', 'pithagoras-themes', 'pithagoras-media', 'pithagoras-canvas', 'pithagoras-voice'] },
+  { id: 'everything', extensions: SHIPPED.map((ext) => ext.name) },
+];
+
 /** The portal with no server: Settings, its search, and the setup assistant, over canned answers. */
-async function portal(page: Page, { models = true, slow = 0, slowSettings = 0, stored = {}, probe, probeDelay, homepage, openRouterFromEnv = false, installBringsModels = false, plainModel = false, settingsSaveDelay, providerNote, login, currentPassword = 'the current one' }: Portal = {}) {
+async function portal(page: Page, { models = true, slow = 0, slowSettings = 0, stored = {}, probe, probeDelay, homepage, openRouterFromEnv = false, installBringsModels = false, plainModel = false, settingsSaveDelay, providerNote, login, currentPassword = 'the current one', extensionFails, extensionDelay = 0 }: Portal = {}) {
   const calls: string[] = [];
   const passwordChanges: unknown[] = [];
   const providerSaves: { id: string; body: any }[] = [];
@@ -41,7 +59,10 @@ async function portal(page: Page, { models = true, slow = 0, slowSettings = 0, s
   ] : []);
   let saved: unknown = null;
   let installed: string[] = [];
-  await mockPortal(page, async ({ path: p, method, json }) => {
+  // A portal as a new one: what it starts with is installed, and the rest of the shipped extensions is not.
+  const shippedInstalled = ['terminal', 'files', 'themes'];
+  const shippedPosts: string[] = [];
+  await mockPortal(page, async ({ path: p, method, json, url }) => {
     calls.push(`${method} ${p}`);
     const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
     if (p === '/api/auth/status') return { authed: true, authRequired: Boolean(login), ...(login?.shortPassword ? { shortPassword: true } : {}), ...(login?.sso ? { oidc: { name: 'Example ID', only: true } } : {}) };
@@ -88,12 +109,27 @@ async function portal(page: Page, { models = true, slow = 0, slowSettings = 0, s
       ],
     };
     if (p === '/api/providers/status') return { status: { 'llama-swap': { state: 'up', ms: 12, listed: 1, missing: ['Gone'], loaded: ['model-a'] } } };
-    if (p === '/api/extensions') { await wait(slow * 3); return { settingsPath: '/a/settings.json', extensions: [{ spec: 'npm:pi-web-access', name: 'pi-web-access', settings: [{ key: 'braveApiKey', value: '', configured: false }, { key: 'safeSearch', value: true, configured: true }, { key: 'enableCache', value: '', configured: false }] }] }; }
+    if (p === '/api/extensions/shipped') return { extensions: SHIPPED };
+    if (p === '/api/extensions/presets') return { presets: PRESETS };
+    if (p === '/api/extensions/plan') {
+      const spec = url.searchParams.get('spec')!;
+      const needsDocker = /\/(voice|browser)$/.test(spec) && !shippedInstalled.includes('docker');
+      return { name: SHIPPED.find((ext) => ext.spec === spec)?.name, needs: needsDocker ? [{ name: 'pithagoras-docker', range: '^1.4.0', for: 'pithagoras-x', action: 'install', spec: '/ext/docker', from: 'shipped', version: '1.4.0' }] : [] };
+    }
+    if (p === '/api/extensions') { await wait(slow * 3); return { settingsPath: '/a/settings.json', extensions: [...shippedInstalled.map((folder) => ({ spec: `/ext/${folder}`, name: `pithagoras-${folder}`, settings: [] })), { spec: 'npm:pi-web-access', name: 'pi-web-access', settings: [{ key: 'braveApiKey', value: '', configured: false }, { key: 'safeSearch', value: true, configured: true }, { key: 'enableCache', value: '', configured: false }] }] }; }
     if (p === '/api/extensions/settings' && method === 'PUT') { extensionSaves.push(json()); return { ok: true }; }
     if (p === '/api/packages/catalog') return { packages: [
       { name: 'pi-web-access', version: '0.31.0', description: 'Web search for pi', weekly: 198311, keywords: ['pi-package'], provider: false, homepage },
       { name: 'pi-subagents', version: '0.71.0', description: 'Delegate to helpers', weekly: 100713, keywords: ['pi-package'], provider: false, date: new Date(Date.now() - 2 * 86400_000).toISOString() },
     ] };
+    if (p === '/api/packages' && method === 'POST' && json().spec.startsWith('/ext/')) {
+      const folder = json().spec.slice('/ext/'.length);
+      await wait(extensionDelay);
+      if (folder === extensionFails) return reply(500, { error: `npm error: could not install ${folder}` });
+      shippedPosts.push(folder);
+      shippedInstalled.push(folder);
+      return { ok: true, output: '' };
+    }
     if (p === '/api/packages' && method === 'POST') { installed.push(json().spec); return { ok: true, output: '' }; }
     if (p === '/api/providers/probe' && probe) {
       const asked: string = json().baseUrl;
@@ -107,7 +143,7 @@ async function portal(page: Page, { models = true, slow = 0, slowSettings = 0, s
     if (p.startsWith('/api/providers/') && method === 'PUT') { providerSaves.push({ id: decodeURIComponent(p.split('/').pop()!), body: json() }); return { ok: true, ...(providerNote ? { note: providerNote } : {}) }; }
     if (p === '/api/providers/probe') return reply(502, { error: 'Nothing answered at 127.0.0.1:8080 — is the server running, and reachable from here?' });
   }, { setup: 'fresh', settings: true });
-  return { calls, passwordChanges, saved: () => saved, installed: () => installed, providerSaves, settingsSaves, extensionSaves, savingMost: () => savingMost };
+  return { calls, passwordChanges, saved: () => saved, installed: () => installed, shippedPosts, shippedInstalled, providerSaves, settingsSaves, extensionSaves, savingMost: () => savingMost };
 }
 
 test('search finds a setting on another page and lights it up', async ({ page }) => {
@@ -357,6 +393,9 @@ test('with models, the assistant saves the model and effort, then offers package
   await setup.getByRole('radio', { name: 'high', exact: true }).click();
   await setup.getByRole('button', { name: 'Next' }).click();
   await expect.poll(() => api.saved()).toEqual({ provider: 'llama-swap', model: 'model-a', thinkingLevel: 'high' });
+  // Minimal is what a portal has already: nothing to install, and Next goes on.
+  await expect(setup.getByRole('radio', { name: /Minimal/ })).toHaveAttribute('aria-checked', 'true');
+  await setup.getByRole('button', { name: 'Next' }).click();
   await expect(setup.getByText('pi-subagents')).toBeVisible();
   await setup.getByRole('button', { name: 'Install pi-subagents' }).click();
   await page.getByRole('button', { name: 'Install', exact: true }).click();
@@ -365,6 +404,137 @@ test('with models, the assistant saves the model and effort, then offers package
   await expect.poll(() => api.installed()).toEqual(['npm:pi-subagents']);
   await setup.getByRole('button', { name: 'Done' }).click();
   await expect(setup).toBeHidden();
+});
+
+/** The assistant at its extension step. */
+async function atExtensions(page: Page) {
+  await page.goto('/settings/models');
+  await page.getByRole('button', { name: 'Setup assistant' }).click();
+  const setup = page.getByRole('dialog', { name: 'Set up Pithagoras' });
+  await setup.getByRole('button', { name: 'Next' }).click();
+  await expect(setup.getByLabel('Model for new chats')).toContainText('Model A');
+  await setup.getByRole('button', { name: 'Next' }).click();
+  await expect(setup.locator('.setup-step[aria-current="step"]')).toContainText('3. Extensions');
+  return setup;
+}
+
+test('the extension step offers four sets with Minimal chosen, says it can all be changed later, and installs nothing for Minimal', async ({ page }) => {
+  const api = await portal(page);
+  const setup = await atExtensions(page);
+  await expect(setup.getByText('All of it can be changed later in Settings → Extensions.')).toBeVisible();
+  const sets = setup.getByRole('radiogroup', { name: 'Set of extensions' });
+  await expect(sets.getByRole('radio')).toHaveText([/Minimal/, /Developer/, /Creative/, /Everything/]);
+  await expect(sets.getByRole('radio', { name: /Minimal/ })).toHaveAttribute('aria-checked', 'true');
+  await expect(sets.getByRole('radio', { name: /Minimal/ })).toContainText('Terminal, Files and the themes');
+  await expect(sets.getByRole('radio', { name: /Developer/ })).toContainText('Adds Git, Docker for extensions and Documents');
+  await expect(sets.getByRole('radio', { name: /Creative/ })).toContainText('Adds Media, Canvases and Voice');
+  // What is installed is ticked and cannot be unticked here; the rest is for the person.
+  await setup.getByText('Choose by hand').click();
+  for (const name of ['Terminal', 'Files', 'Themes']) await expect(setup.getByRole('checkbox', { name, exact: true })).toBeChecked();
+  await expect(setup.getByRole('checkbox', { name: 'Terminal', exact: true })).toBeDisabled();
+  await expect(setup.getByRole('checkbox', { name: 'Git', exact: true })).not.toBeChecked();
+  // Each row says what it does, in one line, and what it needs.
+  const voice = setup.getByRole('listitem').filter({ has: page.getByRole('checkbox', { name: 'Voice', exact: true }) });
+  await expect(voice).toContainText('Speech recognition and speech synthesis on this machine, for voice mode');
+  await expect(voice).toContainText('Needs Docker for extensions');
+  await expect(setup.getByRole('listitem').filter({ has: page.getByRole('checkbox', { name: 'Browser', exact: true }) })).toContainText('Needs Docker for extensions');
+  await expect(setup.getByRole('listitem').filter({ has: page.getByRole('checkbox', { name: 'Git', exact: true }) })).not.toContainText('Needs');
+  await expect(setup.getByRole('button', { name: 'Skip' })).toHaveCount(0);
+  await setup.getByRole('button', { name: 'Next' }).click();
+  await expect(setup.locator('.setup-step[aria-current="step"]')).toContainText('4. Agent');
+  expect(api.shippedPosts).toEqual([]);
+});
+
+test('Developer installs what it adds to what the portal has, through the same install calls as Settings, and goes on', async ({ page }) => {
+  const api = await portal(page, { extensionDelay: 300 });
+  const setup = await atExtensions(page);
+  await setup.getByRole('radio', { name: /Developer/ }).click();
+  await expect(setup.getByRole('radio', { name: /Developer/ })).toHaveAttribute('aria-checked', 'true');
+  const install = setup.getByRole('button', { name: 'Install 3 extensions' });
+  await install.click();
+  // Said as it goes: each one, and what has come in.
+  await expect(setup.getByRole('list', { name: 'Installing' })).toBeVisible();
+  await expect(install).toBeDisabled();
+  await expect(setup.getByRole('button', { name: 'Back' })).toBeDisabled();
+  await expect(setup.locator('.setup-step[aria-current="step"]')).toContainText('4. Agent');
+  expect(api.shippedPosts).toEqual(['git', 'docker', 'docs']);
+  expect(api.calls.filter((c) => c === 'GET /api/extensions/plan')).toHaveLength(3);
+});
+
+test('Creative installs Docker for extensions first, for Voice, and says so before it does', async ({ page }) => {
+  const api = await portal(page);
+  const setup = await atExtensions(page);
+  await setup.getByRole('radio', { name: /Creative/ }).click();
+  await expect(setup.getByText('Voice needs Docker for extensions, which is installed first.')).toBeVisible();
+  // No question per extension: the step has told the person already.
+  await setup.getByRole('button', { name: 'Install 3 extensions' }).click();
+  await expect(setup.locator('.setup-step[aria-current="step"]')).toContainText('4. Agent');
+  expect(api.shippedPosts).toEqual(['media', 'canvas', 'docker', 'voice']);
+});
+
+test('a choice by hand is installed as chosen, and shows as Your own choice', async ({ page }) => {
+  const api = await portal(page);
+  const setup = await atExtensions(page);
+  await setup.getByText('Choose by hand').click();
+  await setup.getByRole('checkbox', { name: 'Git', exact: true }).check();
+  await expect(setup.getByText('Your own choice')).toBeVisible();
+  await expect(setup.getByRole('radio', { checked: true })).toHaveCount(0);
+  await setup.getByRole('checkbox', { name: 'Browser', exact: true }).check();
+  await expect(setup.getByText('Browser needs Docker for extensions, which is installed first.')).toBeVisible();
+  await setup.getByRole('checkbox', { name: 'Git', exact: true }).uncheck();
+  await setup.getByRole('button', { name: 'Install 1 extension' }).click();
+  await expect(setup.locator('.setup-step[aria-current="step"]')).toContainText('4. Agent');
+  expect(api.shippedPosts).toEqual(['docker', 'browser']);
+  // Back to the step: what is installed is shown as installed.
+  await setup.getByRole('button', { name: 'Back' }).click();
+  await setup.getByText('Choose by hand').click();
+  await expect(setup.getByRole('checkbox', { name: 'Browser', exact: true })).toBeDisabled();
+});
+
+test('an extension that fails to install is said in the step, which stays, and the rest goes in; Skip goes on', async ({ page }) => {
+  const api = await portal(page, { extensionFails: 'git' });
+  const setup = await atExtensions(page);
+  await setup.getByRole('radio', { name: /Developer/ }).click();
+  await setup.getByRole('button', { name: 'Install 3 extensions' }).click();
+  await expect(setup.getByRole('alert').filter({ hasText: 'could not install git' })).toBeVisible();
+  await expect(setup.locator('.setup-step[aria-current="step"]')).toContainText('3. Extensions');
+  await expect.poll(() => api.shippedPosts).toEqual(['docker', 'docs']);
+  await expect(setup.getByRole('listitem').filter({ hasText: 'Documents' }).getByText('Installed')).toBeVisible();
+  await expect(setup.getByRole('button', { name: 'Try again' })).toBeEnabled();
+  await setup.getByRole('button', { name: 'Skip' }).click();
+  await expect(setup.locator('.setup-step[aria-current="step"]')).toContainText('4. Agent');
+});
+
+test('Skip leaves the step without installing what was chosen', async ({ page }) => {
+  const api = await portal(page);
+  const setup = await atExtensions(page);
+  await setup.getByRole('radio', { name: /Everything/ }).click();
+  await setup.getByRole('button', { name: 'Skip' }).click();
+  await expect(setup.locator('.setup-step[aria-current="step"]')).toContainText('4. Agent');
+  expect(api.shippedPosts).toEqual([]);
+});
+
+test('on a phone the extension step fits the dialog: the sets, the list and the way forward', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 800 });
+  await portal(page);
+  const setup = await atExtensions(page);
+  await setup.getByText('Choose by hand').click();
+  await setup.getByRole('radio', { name: /Everything/ }).click();
+  await expect(setup.getByRole('button', { name: 'Install 7 extensions' })).toBeInViewport({ ratio: 1 });
+  expect(await setup.evaluate((el) => [...el.querySelectorAll('*')].every((e) => e.getBoundingClientRect().right <= el.getBoundingClientRect().right + 1))).toBe(true);
+});
+
+test('the extension step is in German, with its sets and what each extension does', async ({ page }) => {
+  await portal(page);
+  await page.addInitScript(() => localStorage.setItem('pithagoras.language', 'de'));
+  await page.goto('/settings/models');
+  await page.getByRole('button', { name: 'Einrichtungsassistent' }).click();
+  const setup = page.getByRole('dialog', { name: 'Pithagoras einrichten' });
+  await setup.getByRole('button', { name: 'Weiter', exact: true }).click();
+  await setup.getByRole('button', { name: 'Weiter', exact: true }).click();
+  await expect(setup.getByRole('radio', { name: /Entwickler/ })).toContainText('Dazu Git, Docker für Erweiterungen und Dokumente');
+  await setup.getByRole('radio', { name: /Kreativ/ }).click();
+  await expect(setup.getByText('Sprachsteuerung braucht Docker für Erweiterungen, das zuerst installiert wird.')).toBeVisible();
 });
 
 test('Back leads to the step before on every step after the first, and leaving says where the assistant is found again', async ({ page }) => {
@@ -382,7 +552,11 @@ test('Back leads to the step before on every step after the first, and leaving s
   await setup.getByRole('button', { name: 'Next' }).click();
   await expect(current).toContainText('2. Model');
   await setup.getByRole('button', { name: 'Next' }).click();
-  await expect(current).toContainText('3. Agent');
+  await expect(current).toContainText('3. Extensions');
+  await setup.getByRole('button', { name: 'Next' }).click();
+  await expect(current).toContainText('4. Agent');
+  await setup.getByRole('button', { name: 'Back' }).click();
+  await expect(current).toContainText('3. Extensions');
   await setup.getByRole('button', { name: 'Back' }).click();
   await expect(current).toContainText('2. Model');
   await setup.getByRole('button', { name: 'Back' }).click();
@@ -415,7 +589,7 @@ test('while the model saves, Back and the choice wait: the save would land on th
   await setup.getByRole('button', { name: 'Next' }).click();
   await expect(setup.getByRole('button', { name: 'Back' })).toBeDisabled();
   await expect(setup.getByLabel('Model for new chats')).toBeDisabled();
-  await expect(setup.locator('.setup-step[aria-current="step"]')).toContainText('3. Agent');
+  await expect(setup.locator('.setup-step[aria-current="step"]')).toContainText('3. Extensions');
   await expect(setup.getByRole('button', { name: 'Back' })).toBeEnabled();
   expect(api.settingsSaves).toHaveLength(1);
 });

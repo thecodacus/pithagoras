@@ -80,11 +80,15 @@ function Needs({ name, needs, below }: { name: string; needs: InstallNeed[]; bel
  * `ask` is a question of the caller's own (npm's "Install it?"), asked with the
  * list; without it the person is asked only when something else is needed.
  * `progress` is told each package as it is done, and null at the end.
+ * `announced` is for a caller that has said already what the person gets (the setup assistant, whose step lists the
+ * extensions that need Docker for extensions): what comes from the portal's own folder, or is switched on, is then done
+ * without asking again. Anything else is still asked about.
  */
-export async function installExtension(spec: string, { ask, progress }: { ask?: { title: string; message: ReactNode }; progress?: (step: InstallStep | null) => void } = {}): Promise<boolean> {
+export async function installExtension(spec: string, { ask, progress, announced }: { ask?: { title: string; message: ReactNode }; progress?: (step: InstallStep | null) => void; announced?: boolean } = {}): Promise<boolean> {
   const plan = await api.installPlan(spec);
   const name = plan.name ?? spec;
-  if (ask || plan.needs.length) {
+  const known = announced && !ask && plan.needs.every((need) => need.action === "switch-on" || (need.action === "install" && need.from === "shipped"));
+  if (!known && (ask || plan.needs.length)) {
     const yes = await confirmDialog({
       title: ask?.title ?? t("Install {name}?", { name }),
       message: (

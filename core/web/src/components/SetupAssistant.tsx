@@ -6,6 +6,7 @@ import { Modal } from "./Modal";
 import { PackageCatalog } from "./PackageCatalog";
 import { KindIcon, ProviderEditor, StatusBadge, takenProviderIds, useInstalledPackages, useProviderStatus } from "./ProvidersPanel";
 import { Select } from "./Select";
+import { ExtensionStep, useExtensionChoice } from "./SetupExtensions";
 import { SetupNav, SetupSteps } from "./SetupSteps";
 import { EffortPicker, LoadFailed, ghostCls, primaryCls } from "./SettingsUi";
 import { msg, t, tp } from "../i18n";
@@ -17,13 +18,16 @@ import { dismissSetup as dismiss } from "../setup-state";
 const STEPS = [
   { title: msg("Provider"), lead: msg("Where the models come from") },
   { title: msg("Model"), lead: msg("What new chats start with") },
+  { title: msg("Extensions"), lead: msg("What the portal itself can do") },
   { title: msg("Agent"), lead: msg("What it can do besides") },
 ];
 
 /**
  * The first run, one step at a time: a provider, the model new chats start
- * with, and what the agent can do beyond its own tools. Each step is what
- * the matching Settings page does, and each can be changed there later.
+ * with, the portal's own extensions to start with, and what the agent can do
+ * beyond its own tools. Each step is what the matching Settings page does, and
+ * each can be changed there later. The extension step is open to whoever is
+ * signed in, as installing an extension in Settings is.
  * It opens by itself while no model can be used, until it is finished or
  * skipped; Settings → Providers opens it again.
  */
@@ -40,6 +44,7 @@ export function SetupAssistant({ onClose, onStartChat }: { onClose: () => void; 
   const [choice, setChoice] = useState<string | null>(null);
   const [effort, setEffort] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const extensions = useExtensionChoice();
 
   const list = models.value?.models ?? [];
   const ready = list.length > 0;
@@ -85,6 +90,11 @@ export function SetupAssistant({ onClose, onStartChat }: { onClose: () => void; 
     }
   };
 
+  // What is missing of the choice, installed here; the next step follows once every one of them is in.
+  const installExtensions = async () => {
+    if (extensions.missing.length === 0 || (await extensions.run())) go(3);
+  };
+
   const later = () => {
     dismiss("skipped");
     onClose();
@@ -110,13 +120,13 @@ export function SetupAssistant({ onClose, onStartChat }: { onClose: () => void; 
   return (
     <Modal
       title={t("Set up Pithagoras")}
-      subtitle={t("Three steps. Everything here can be changed later in Settings.")}
+      subtitle={t("Four steps. Everything here can be changed later in Settings.")}
       onClose={later}
       footer={
         <>
           <SetupNav
             onBack={step > 0 ? () => go(step - 1) : undefined}
-            busy={saving}
+            busy={saving || extensions.running}
             leave={<button type="button" onClick={later} className={ghostCls}>{t("Set up later")}</button>}
           >
             {step === 0 && (
@@ -130,6 +140,18 @@ export function SetupAssistant({ onClose, onStartChat }: { onClose: () => void; 
               </button>
             )}
             {step === 2 && (
+              <>
+                {(extensions.missing.length > 0 || extensions.failed) && (
+                  <button type="button" disabled={extensions.running} onClick={() => go(3)} className={ghostCls}>{t("Skip")}</button>
+                )}
+                <button type="button" disabled={extensions.running} onClick={() => void installExtensions()} className={primaryCls}>
+                  {extensions.running ? <LuRefreshCw className="h-4 w-4 animate-spin" /> : null}{" "}
+                  {extensions.failed ? t("Try again") : extensions.missing.length > 0 ? tp(extensions.missing.length, "Install {n} extension", "Install {n} extensions") : t("Next")}{" "}
+                  {!extensions.running && <LuArrowRight className="h-4 w-4" />}
+                </button>
+              </>
+            )}
+            {step === 3 && (
               <>
                 <button type="button" onClick={() => finish(false)} className={ghostCls}>{t("Done")}</button>
                 <button type="button" onClick={() => finish(true)} className={primaryCls}><LuRocket className="h-4 w-4" /> {t("Start a chat")}</button>
@@ -222,7 +244,9 @@ export function SetupAssistant({ onClose, onStartChat }: { onClose: () => void; 
           </fieldset>
         )}
 
-        {step === 2 && (
+        {step === 2 && <ExtensionStep choice={extensions} />}
+
+        {step === 3 && (
           <div className="mt-1">
             <p className="mb-4 text-sm text-fg-subtle">
               {t("pi reads, writes and runs commands on its own. Packages add more — searching the web, delegating to helpers, other tools. These are the most used; Settings → Extensions has the rest.")}
