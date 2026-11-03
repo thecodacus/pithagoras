@@ -1,8 +1,10 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { LuCheck, LuChevronLeft, LuChevronRight, LuLayers, LuPlus, LuRefreshCw, LuTrash2 } from "react-icons/lu";
 import { api, ApiError, type CustomMode } from "../api";
-import { t } from "../i18n";
+import { msg, t } from "../i18n";
+import { MODE_PARAMS, paramName, type ModeParamKey } from "../mode-params";
 import { useCached } from "../settings-cache";
+import { isEnter } from "../shortcuts";
 import { useFlash } from "../use-flash";
 import { confirmDialog } from "./ConfirmDialog";
 import { useUnsavedDraft } from "./Modal";
@@ -205,12 +207,14 @@ function ModeEditor({
     }
   };
 
-  /** A change saved as it is made. Drawn once the server has it: the tools below are read again after the code tool's. */
-  const change = async (patch: Parameters<typeof api.updateMode>[1]) => {
+  /** A change saved as it is made. Drawn once the server has it: the tools below are read again after the code tool's. False if it was refused. */
+  const change = async (patch: Parameters<typeof api.updateMode>[1]): Promise<boolean> => {
     try {
       onSaved(await api.updateMode(mode.id, patch));
+      return true;
     } catch (e) {
       onError((e as Error).message);
+      return false;
     }
   };
 
@@ -293,6 +297,22 @@ function ModeEditor({
         </div>
       </Section>
 
+      <Section
+        title={t("Model parameters")}
+        hint={t("Sent with every request of this mode's chats, over the model's own settings. An empty field leaves the model's own. Saved when you leave the field.")}
+      >
+        <div className="space-y-3 rounded-xl border border-line bg-raised/40 p-3">
+          <div className="grid gap-3 sm:grid-cols-2">
+            {MODE_PARAMS.map((key) => (
+              <ParamField key={key} name={key} value={mode[key]} onSave={(value) => change({ [key]: value })} />
+            ))}
+          </div>
+          <p className="text-[11px] text-fg-faint">
+            {t("Top P, Top K and Min P are sent to OpenAI-compatible servers only. Top K and Min P are for local servers and gateways such as llama.cpp, vLLM and Ollama; a hosted service may refuse them.")}
+          </p>
+        </div>
+      </Section>
+
       <Section title={t("Tools")}>
         <div className="space-y-3">
           <SwitchRow
@@ -308,5 +328,55 @@ function ModeEditor({
         </div>
       </Section>
     </>
+  );
+}
+
+/** What each parameter does, under its field. */
+const PARAM_HINTS: Record<ModeParamKey, string> = {
+  temperature: msg("0 to 2. Lower is steadier, higher is more varied."),
+  topP: msg("0 to 1. Chooses among the likeliest words that together make up this share."),
+  topK: msg("A whole number. Chooses among this many likeliest words; 0 is off."),
+  minP: msg("0 to 1. Leaves out words less likely than this share of the likeliest one."),
+  maxTokens: msg("A whole number. At most this many tokens per answer, and never more than the model can write."),
+};
+
+/**
+ * One parameter of a mode: its number, or nothing for the model's own. Saved when the field is left (or Enter is
+ * pressed). Text that is not a number is not sent; one the server refuses (out of range) is shown by the page's banner
+ * and the field goes back to what is saved.
+ */
+function ParamField({ name, value, onSave }: { name: ModeParamKey; value: number | null; onSave: (value: number | null) => Promise<boolean> }) {
+  const saved = value === null ? "" : String(value);
+  const [text, setText] = useState(saved);
+  const [bad, setBad] = useState(false);
+  // What the server keeps is what is shown: after a save, and when the mode is read again.
+  useEffect(() => {
+    setText(saved);
+    setBad(false);
+  }, [saved]);
+
+  const commit = async () => {
+    const entered = text.trim().replace(",", ".");
+    if (entered === saved) return setBad(false);
+    // Number("") is 0, and "1e3" or "0x10" are numbers that nobody means here: a plain decimal or nothing.
+    if (entered !== "" && !/^-?\d+(\.\d+)?$/.test(entered)) return setBad(true);
+    setBad(false);
+    if (!(await onSave(entered === "" ? null : Number(entered)))) setText(saved);
+  };
+
+  return (
+    <Field label={paramName(name)} hint={bad ? <span className="text-danger">{t("Enter a number, or leave the field empty.")}</span> : t(PARAM_HINTS[name])}>
+      <input
+        value={text}
+        inputMode="decimal"
+        onChange={(e) => setText(e.target.value)}
+        onBlur={() => void commit()}
+        onKeyDown={(e) => isEnter(e) && e.currentTarget.blur()}
+        placeholder={t("model's own")}
+        aria-label={paramName(name)}
+        aria-invalid={bad || undefined}
+        className={`${inputCls} font-mono`}
+      />
+    </Field>
   );
 }

@@ -165,6 +165,10 @@ A mode of yours has:
   chosen; left as **As the chat would have it**, nothing is written. Choosing
   another mode before the first message puts back what the mode wrote, unless
   you changed it in the chat since.
+- **Model parameters**: the temperature, Top P, Top K, Min P and the longest
+  answer (**Max tokens**) that every request of the mode's chats to the model
+  carries, see [below](#model-parameters-of-a-mode). A field left empty sets
+  nothing.
 - **Work through the code tool**: its chats work as in Code mode, the code tool
   alone offered to the model. Switching it on switches the code tool on in the
   mode's tools too, and switching it off takes that back: the code tool is then
@@ -177,15 +181,68 @@ A mode of yours has:
   still the last word, but where the mode switches the code tool on, they cannot
   switch it off, as in Code mode.
 
-These are saved as they are changed, except the texts.
+These are saved as they are changed, except the texts. A model parameter is
+saved when you leave its field, or press Enter.
 
-An edit reaches the chats already in the mode as follows: its tools and its
-instructions at once, from their next message; whether it works through the
+An edit reaches the chats already in the mode as follows: its tools, its
+instructions and its model parameters at once, from their next message; whether it works through the
 code tool when each chat's pi next starts, since which tools are offered one by
 one is fixed then; its model and effort never, as they were written into each
 chat when it was put in the mode. The code tool that switch also switches is one
 of the mode's tools, so it reaches the running chats at once: where it goes off,
 a chat that worked through it works as in Standard mode from its next message.
+
+#### Model parameters of a mode
+
+A mode can set how the model samples its answers, so that a *coder* mode answers
+steadily and a *creative* one more freely, without anyone changing a setting in
+each chat. Each field is a plain number, or empty:
+
+| Field | Allowed | What it does |
+| --- | --- | --- |
+| **Temperature** | 0 to 2 | Lower is steadier, higher is more varied |
+| **Top P** | 0 to 1 | Chooses among the likeliest words that together make up this share |
+| **Top K** | whole number, 0 to 1000 | Chooses among this many likeliest words; 0 is off |
+| **Min P** | 0 to 1 | Leaves out words less likely than this share of the likeliest one |
+| **Max tokens** | whole number, 1 to 1,000,000 | The longest answer of one request |
+
+A number outside its range, or text that is not a number, is refused with a
+message when you leave the field, and the field goes back to what was saved.
+
+What is sent is merged field by field. A field the mode sets wins over the same
+field in the model's own entry in `models.json` (`samplingParams`, which pi sends
+with every request to that model), and a field it leaves empty leaves the model's
+own or, if the entry has none, the provider's default. The portal has no
+parameters of its own for all chats, so there is nothing between the two. **Max
+tokens** is held to what the chat's model can write at most, so a mode used with
+a small model does not ask for more than it has.
+
+The values go to the model with every request of a chat in the mode, including a
+spoken turn and the chats of its subagents, which work in the same mode. They
+are read at each request, so an edit reaches a chat that is running from its next
+request, and deleting the mode takes them away at once. A compaction or a summary
+of a long chat is not one of them: it keeps the model's settings. A chat in
+Standard mode, Code mode or an extension's mode sends none of these.
+
+Which services take which field depends on the API the model is reached by:
+
+- **Temperature** and **Max tokens** are sent to every API pi speaks. Anthropic
+  takes no temperature while the model is thinking, nor for its newest models,
+  and leaves it out then.
+- **Top P**, **Top K** and **Min P** are sent only where the API is
+  OpenAI-compatible (chat completions and responses): llama.cpp, llama-swap,
+  vLLM, Ollama, LM Studio, OpenRouter and hosted OpenAI. Anthropic, Google,
+  Mistral and Bedrock models leave them out. Top K and Min P are not part of
+  OpenAI's own API, which may refuse a request that has them: set them for local
+  servers and gateways.
+
+A model that refuses sampling parameters, as some hosted reasoning models do,
+answers a request that has them with an error: leave the fields of a mode you use
+with such a model empty.
+
+The chat tells you what its mode sets: in the menu above the message box, under
+the mode's description, and in the header once the chat has started, in the line
+that shows when you point at the mode.
 
 Deleting a mode asks first. Its chats keep it, and their header says it is not
 available now; they work as in Standard mode from their next message. A new mode
