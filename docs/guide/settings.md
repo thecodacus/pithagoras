@@ -152,7 +152,7 @@ description and opens it. A mode's page has its name, description and
 instructions, saved with **Save**; the model and effort a chat put in it starts
 on, which use the same menus as **Defaults**; the
 [model parameters](/guide/sessions#model-parameters-of-a-mode) its chats send
-(temperature, Top P, Top K, Min P and the longest answer); whether its chats work
+(temperature, Top P, Top K, Min P and the most it writes in one request); whether its chats work
 through the code tool; and its tools, the same list as a project's. Each of those is
 saved as it is changed. The bin at the top deletes the mode, after asking.
 

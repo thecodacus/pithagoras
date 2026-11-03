@@ -15,7 +15,7 @@ test("the mode's values are added to the options of a request, and what the opti
   assert.deepEqual(calls[0].options, {
     reasoning: "high",
     temperature: 0.2,
-    samplingParams: { repeat_penalty: 1.1, temperature: 0.2, top_p: 0.9, top_k: 20, min_p: 0.05 },
+    samplingParams: { repeat_penalty: 1.1, top_p: 0.9, top_k: 20, min_p: 0.05 },
     maxTokens: 512,
   });
   assert.deepEqual(calls[0].rest, ["extra"]);
@@ -27,7 +27,22 @@ test("a request with no options, and a mode that sets one field, get that field 
   assert.deepEqual(calls[0].options, { samplingParams: { top_p: 0.5 } });
   const t = wrapped({ temperature: 0 });
   t.call({}, "ctx", {});
-  assert.deepEqual(t.calls[0].options, { temperature: 0, samplingParams: { temperature: 0 } }, "zero is set");
+  assert.deepEqual(t.calls[0].options, { temperature: 0 }, "zero is set");
+});
+
+test("the temperature goes into samplingParams only where the model's own entry has one to beat", () => {
+  // Without one, the adapter's guard decides: a ChatGPT sign-in's requests must not carry a temperature, and a copy in
+  // samplingParams would get past it.
+  const { call, calls } = wrapped({ temperature: 0.3 });
+  call({ maxTokens: 100 }, "ctx", {});
+  call({ samplingParams: { top_k: 40 }, samplingParamsByThinkingLevel: { high: {} } }, "ctx", {});
+  assert.deepEqual(calls.map((c) => c.options), [{ temperature: 0.3 }, { temperature: 0.3 }]);
+  call({ samplingParams: { temperature: 0.7 } }, "ctx", {});
+  call({ samplingParamsByThinkingLevel: { high: { temperature: 1 } } }, "ctx", {});
+  assert.deepEqual(calls.slice(2).map((c) => c.options), [
+    { temperature: 0.3, samplingParams: { temperature: 0.3 } },
+    { temperature: 0.3, samplingParams: { temperature: 0.3 } },
+  ]);
 });
 
 test("the maximum is held to the model's, and taken as it is where the model has none", () => {

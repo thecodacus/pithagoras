@@ -204,10 +204,11 @@ each chat. Each field is a plain number, or empty:
 | **Top P** | 0 to 1 | Chooses among the likeliest words that together make up this share |
 | **Top K** | whole number, 0 to 1000 | Chooses among this many likeliest words; 0 is off |
 | **Min P** | 0 to 1 | Leaves out words less likely than this share of the likeliest one |
-| **Max tokens** | whole number, 1 to 1,000,000 | The longest answer of one request |
+| **Max tokens** | whole number, 1 to 1,000,000 | The most the model writes in one request (see below for thinking) |
 
-A number outside its range, or text that is not a number, is refused with a
-message when you leave the field, and the field goes back to what was saved.
+A number outside its range is refused with a message when you leave the field,
+and the field goes back to what was saved. Text that is not a number is marked
+on the field and not saved.
 
 What is sent is merged field by field. A field the mode sets wins over the same
 field in the model's own entry in `models.json` (`samplingParams`, which pi sends
@@ -218,7 +219,9 @@ tokens** is held to what the chat's model can write at most, so a mode used with
 a small model does not ask for more than it has.
 
 The values go to the model with every request of a chat in the mode, including a
-spoken turn and the chats of its subagents, which work in the same mode. They
+spoken turn and the chats of its subagents while **Subagents work in the chat's
+mode** is on (see [The mode a subagent works in](/guide/features#the-mode-a-subagent-works-in));
+with it off the subagents work in Standard mode and send none of them. They
 are read at each request, so an edit reaches a chat that is running from its next
 request, and deleting the mode takes them away at once. A compaction or a summary
 of a long chat is not one of them: it keeps the model's settings. A chat in
@@ -226,9 +229,15 @@ Standard mode, Code mode or an extension's mode sends none of these.
 
 Which services take which field depends on the API the model is reached by:
 
-- **Temperature** and **Max tokens** are sent to every API pi speaks. Anthropic
-  takes no temperature while the model is thinking, nor for its newest models,
-  and leaves it out then.
+- **Temperature** and **Max tokens** are sent to every API pi speaks, except
+  that a ChatGPT or Codex sign-in takes no Max tokens (and, on ChatGPT, no
+  temperature either): the mode's value is left out there. Anthropic takes no
+  temperature while the model is thinking, nor for its newest models, and
+  leaves it out then.
+- **Max tokens** counts differently with thinking. On Anthropic it limits the
+  answer after the model has thought. On OpenAI-compatible servers (llama.cpp
+  and the like) the model's thinking counts toward it, so keep it well above
+  what the model thinks, or the answer may come out empty.
 - **Top P**, **Top K** and **Min P** are sent only where the API is
   OpenAI-compatible (chat completions and responses): llama.cpp, llama-swap,
   vLLM, Ollama, LM Studio, OpenRouter and hosted OpenAI. Anthropic, Google,

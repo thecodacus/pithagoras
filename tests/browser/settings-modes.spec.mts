@@ -228,6 +228,20 @@ test('a mode\'s model parameters are saved as the field is left, cleared when em
   await expect.poll(() => writes(state).at(-1)).toBe('PUT /api/chat-modes/research {"minP":0.05}');
   expect(state.modes[0]).toMatchObject({ temperature: 0.2, topP: 0.9, topK: 20, minP: 0.05, maxTokens: 512 });
 
+  // A number typed without the digit before or after the point is still a number.
+  await field('Top P').fill('.9');
+  await field('Top P').press('Enter');
+  await expect.poll(() => writes(state).at(-1)).toBe('PUT /api/chat-modes/research {"topP":0.9}');
+  await expect(dialog(page).getByText('Enter a number, or leave the field empty.')).toHaveCount(0);
+  await expect(field('Top P')).toHaveValue('0.9');
+  await field('Min P').fill('1.');
+  await field('Min P').press('Enter');
+  await expect.poll(() => writes(state).at(-1)).toBe('PUT /api/chat-modes/research {"minP":1}');
+  await expect(field('Min P')).toHaveValue('1');
+  await field('Min P').fill('0.05');
+  await field('Min P').press('Enter');
+  await expect.poll(() => writes(state).at(-1)).toBe('PUT /api/chat-modes/research {"minP":0.05}');
+
   // Emptied, it is the model's own again; the same text again is no write.
   await field('Top P').fill('');
   await field('Top P').press('Enter');

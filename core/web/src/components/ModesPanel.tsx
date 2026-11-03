@@ -337,7 +337,7 @@ const PARAM_HINTS: Record<ModeParamKey, string> = {
   topP: msg("0 to 1. Chooses among the likeliest words that together make up this share."),
   topK: msg("A whole number. Chooses among this many likeliest words; 0 is off."),
   minP: msg("0 to 1. Leaves out words less likely than this share of the likeliest one."),
-  maxTokens: msg("A whole number. At most this many tokens per answer, and never more than the model can write."),
+  maxTokens: msg("A whole number. At most this many tokens in a request, and never more than the model can write. On local servers the model's thinking counts too."),
 };
 
 /**
@@ -358,10 +358,12 @@ function ParamField({ name, value, onSave }: { name: ModeParamKey; value: number
   const commit = async () => {
     const entered = text.trim().replace(",", ".");
     if (entered === saved) return setBad(false);
-    // Number("") is 0, and "1e3" or "0x10" are numbers that nobody means here: a plain decimal or nothing.
-    if (entered !== "" && !/^-?\d+(\.\d+)?$/.test(entered)) return setBad(true);
+    // Number("") is 0, and "1e3" or "0x10" are numbers that nobody means here: a plain decimal (".9" and "1." included) or nothing.
+    if (entered !== "" && !/^-?(\d+\.?\d*|\.\d+)$/.test(entered)) return setBad(true);
     setBad(false);
-    if (!(await onSave(entered === "" ? null : Number(entered)))) setText(saved);
+    const number = entered === "" ? null : Number(entered);
+    // Shown as the server keeps it (".9" as 0.9), also when that is what was saved already and nothing else resets it.
+    setText((await onSave(number)) ? (number === null ? "" : String(number)) : saved);
   };
 
   return (
