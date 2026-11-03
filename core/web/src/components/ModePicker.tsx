@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import type { ChatMode } from "../api";
 import { translate } from "../extensions/strings";
 import { labelOf, msg, t } from "../i18n";
+import { paramsLine } from "../mode-params";
 import { useLeaveRef } from "../motion";
 import { useDismiss } from "../use-dismiss";
 import { confirmDialog } from "./ConfirmDialog";
@@ -28,6 +29,9 @@ export const modeLabel = (mode: ChatMode): string => (mode.extension ? translate
 /** The line that says what a mode does. */
 export const modeDescription = (mode: ChatMode): string =>
   mode.extension ? translate(mode.extension, mode.description) : labelOf(DESCRIPTIONS, mode.id, () => mode.description);
+
+/** The line that says what a mode does, and the model parameters it sets after it, where it sets any. */
+const describe = (mode: ChatMode): string => [modeDescription(mode), paramsLine(mode.params)].filter(Boolean).join("\n");
 
 /**
  * A stored mode that is not offered now (the person deleted it, its extension stopped): named by the part of what the
@@ -155,6 +159,7 @@ export function ModePicker({
               <span className="min-w-0 flex-1">
                 <span className={`block text-sm ${mode.confirm ? "text-warn" : "text-fg"}`}>{modeLabel(mode)}</span>
                 <span className="block text-xs text-fg-subtle">{modeDescription(mode)}</span>
+                {mode.params && <span className="block text-[11px] text-fg-faint">{paramsLine(mode.params)}</span>}
               </span>
               {mode.id === current && <LuCheck aria-hidden className="mt-0.5 h-3.5 w-3.5 shrink-0 text-accent" />}
             </button>
@@ -188,7 +193,7 @@ export function ModePill({ stored, modes }: { stored: string; modes: ChatMode[] 
   const gone = mode ? undefined : unavailable(stored);
   return (
     <span
-      title={mode ? modeDescription(mode) : gone!.title}
+      title={mode ? describe(mode) : gone!.title}
       className={`max-w-[12rem] truncate rounded-md px-2 py-0.5 text-[11px] max-md:max-w-[6rem] ${mode?.confirm ? "bg-warn/10 text-warn" : "bg-fg/5 text-fg-subtle"}`}
     >
       {mode ? modeLabel(mode) : gone!.label}

@@ -1248,6 +1248,9 @@ class SessionManager extends EventEmitter {
         const mode = modeOf(getSession(sessionId)?.mode);
         return mode?.instructions ? [mode.instructions] : [];
       },
+      // The model parameters of the mode, read at each request like its instructions: an edit reaches a running chat at
+      // its next request, and a deleted mode sets none.
+      modeParams: () => modeOf(getSession(sessionId)?.mode)?.params,
       // A chat that names no model is reopened on the model of its last answer,
       // and after a spoken turn on the voice model that would be the voice's.
       rememberChatModel: (provider, model) => keepChatModel(sessionId, provider, model),

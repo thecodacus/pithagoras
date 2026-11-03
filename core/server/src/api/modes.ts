@@ -38,7 +38,9 @@ export function modesRouter(): Router {
     const session = getSession(req.params.id);
     if (!session) return res.status(404).json({ error: "Not found" });
     res.json({
-      modes: modesFor(session).map(({ id, label, description, confirm, extension }) => ({ id, label, description, ...(confirm ? { confirm } : {}), ...(extension ? { extension } : {}) })),
+      modes: modesFor(session).map(({ id, label, description, confirm, extension, params }) => ({
+        id, label, description, ...(confirm ? { confirm } : {}), ...(extension ? { extension } : {}), ...(params ? { params } : {}),
+      })),
     });
   });
 
@@ -149,6 +151,7 @@ const modeToApi = (row: ChatModeRow) => ({
   provider: row.provider,
   model: row.model,
   thinkingLevel: row.thinking_level,
+  temperature: row.temperature,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 });
@@ -196,6 +199,15 @@ function modeFields(body: Record<string, unknown>): ModeFields | { error: string
     if (value === undefined) continue;
     if (value !== null && typeof value !== "string") return { error: `${key} must be text or null.` };
     fields[column] = value?.trim() || null;
+  }
+  // A number to set, or null to leave it to the model: a string that is a number is not one, so a form's text is refused.
+  // The bounds are the widest any API takes (Anthropic's temperature stops at 1, and says so itself).
+  const temperature = body.temperature;
+  if (temperature === null) fields.temperature = null;
+  else if (temperature !== undefined) {
+    if (typeof temperature !== "number" || !Number.isFinite(temperature)) return { error: "Temperature must be a number, or null to leave it to the model." };
+    if (temperature < 0 || temperature > 2) return { error: "Temperature must be between 0 and 2." };
+    fields.temperature = temperature;
   }
   return fields;
 }

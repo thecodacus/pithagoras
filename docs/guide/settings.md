@@ -150,8 +150,9 @@ that the menu above the message box of a new chat offers after Standard and
 Code mode. The page lists them, and **New mode** makes one from a name and a
 description and opens it. A mode's page has its name, description and
 instructions, saved with **Save**; the model and effort a chat put in it starts
-on, which use the same menus as **Defaults**; whether its chats work through
-the code tool; and its tools, the same list as a project's. Each of those is
+on, which use the same menus as **Defaults**; the
+[temperature](/guide/sessions#model-parameters-of-a-mode) its chats send; whether its chats work
+through the code tool; and its tools, the same list as a project's. Each of those is
 saved as it is changed. The bin at the top deletes the mode, after asking.
 
 ## Channels

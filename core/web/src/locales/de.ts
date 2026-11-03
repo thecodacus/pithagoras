@@ -1035,6 +1035,13 @@ const de: Locale = {
     "Choose a model too: a provider alone is not written into a chat.": "Wähle auch ein Modell: Ein Anbieter allein wird nicht in einen Chat übernommen.",
     "Work through the code tool": "Über das Code-Tool arbeiten",
     "The model writes a short script that calls the chat's tools, and is given only what it puts out; the tools are not offered one by one.": "Das Modell schreibt ein kurzes Skript, das die Tools des Chats aufruft, und bekommt nur, was es ausgibt; die Tools werden nicht einzeln angeboten.",
+    "Model parameters": "Modellparameter",
+    "Sent with every request of this mode's chats, over the model's own setting. Empty leaves it to the server's own default. Saved when you leave the field.": "Wird mit jeder Anfrage der Chats dieses Modus gesendet und hat Vorrang vor der eigenen Einstellung des Modells. Leer lässt die Voreinstellung des Servers gelten. Gespeichert, wenn du das Feld verlässt.",
+    "0 to 2. Lower is steadier, higher is more varied.": "0 bis 2. Niedriger ist gleichmäßiger, höher abwechslungsreicher.",
+    "Enter a number, or leave the field empty.": "Gib eine Zahl ein oder lass das Feld leer.",
+    "server's default": "vom Server",
+    // mode-params.ts
+    "Temperature": "Temperatur",
     // components/PackageCatalog.tsx
     "Install {name}?": "{name} installieren?",
     "It is installed from npm and runs inside pi with the same rights as the agent — reading files, running commands. Install packages you trust.": "Es wird von npm installiert und läuft in pi mit denselben Rechten wie der Agent — liest Dateien, führt Befehle aus. Installiere nur Pakete, denen du vertraust.",

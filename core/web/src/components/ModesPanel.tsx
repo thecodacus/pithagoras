@@ -2,7 +2,9 @@ import { useEffect, useState, type FormEvent } from "react";
 import { LuCheck, LuChevronLeft, LuChevronRight, LuLayers, LuPlus, LuRefreshCw, LuTrash2 } from "react-icons/lu";
 import { api, ApiError, type CustomMode } from "../api";
 import { t } from "../i18n";
+import { temperatureName } from "../mode-params";
 import { useCached } from "../settings-cache";
+import { isEnter } from "../shortcuts";
 import { useFlash } from "../use-flash";
 import { confirmDialog } from "./ConfirmDialog";
 import { useUnsavedDraft } from "./Modal";
@@ -205,12 +207,14 @@ function ModeEditor({
     }
   };
 
-  /** A change saved as it is made. Drawn once the server has it: the tools below are read again after the code tool's. */
-  const change = async (patch: Parameters<typeof api.updateMode>[1]) => {
+  /** A change saved as it is made. Drawn once the server has it: the tools below are read again after the code tool's. False if it was refused. */
+  const change = async (patch: Parameters<typeof api.updateMode>[1]): Promise<boolean> => {
     try {
       onSaved(await api.updateMode(mode.id, patch));
+      return true;
     } catch (e) {
       onError((e as Error).message);
+      return false;
     }
   };
 
@@ -293,6 +297,15 @@ function ModeEditor({
         </div>
       </Section>
 
+      <Section
+        title={t("Model parameters")}
+        hint={t("Sent with every request of this mode's chats, over the model's own setting. Empty leaves it to the server's own default. Saved when you leave the field.")}
+      >
+        <div className="rounded-xl border border-line bg-raised/40 p-3 sm:max-w-xs">
+          <TemperatureField value={mode.temperature} onSave={(value) => change({ temperature: value })} />
+        </div>
+      </Section>
+
       <Section title={t("Tools")}>
         <div className="space-y-3">
           <SwitchRow
@@ -308,5 +321,48 @@ function ModeEditor({
         </div>
       </Section>
     </>
+  );
+}
+
+/**
+ * The mode's temperature: its number, or nothing for the server's own default. Saved when the field is left (or Enter is
+ * pressed). Text that is not a number is not sent; one the server refuses (out of range) is shown by the page's banner
+ * and the field goes back to what is saved.
+ */
+function TemperatureField({ value, onSave }: { value: number | null; onSave: (value: number | null) => Promise<boolean> }) {
+  const saved = value === null ? "" : String(value);
+  const [text, setText] = useState(saved);
+  const [bad, setBad] = useState(false);
+  // What the server keeps is what is shown: after a save, and when the mode is read again.
+  useEffect(() => {
+    setText(saved);
+    setBad(false);
+  }, [saved]);
+
+  const commit = async () => {
+    const entered = text.trim().replace(",", ".");
+    if (entered === saved) return setBad(false);
+    // Number("") is 0, and "1e3" or "0x10" are numbers that nobody means here: a plain decimal (".9" and "1." included) or nothing.
+    if (entered !== "" && !/^-?(\d+\.?\d*|\.\d+)$/.test(entered)) return setBad(true);
+    setBad(false);
+    const number = entered === "" ? null : Number(entered);
+    // Shown as the server keeps it (".9" as 0.9), also when that is what was saved already and nothing else resets it.
+    setText((await onSave(number)) ? (number === null ? "" : String(number)) : saved);
+  };
+
+  return (
+    <Field label={temperatureName()} hint={bad ? <span className="text-danger">{t("Enter a number, or leave the field empty.")}</span> : t("0 to 2. Lower is steadier, higher is more varied.")}>
+      <input
+        value={text}
+        inputMode="decimal"
+        onChange={(e) => setText(e.target.value)}
+        onBlur={() => void commit()}
+        onKeyDown={(e) => isEnter(e) && e.currentTarget.blur()}
+        placeholder={t("server's default")}
+        aria-label={temperatureName()}
+        aria-invalid={bad || undefined}
+        className={`${inputCls} font-mono`}
+      />
+    </Field>
   );
 }

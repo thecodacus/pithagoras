@@ -115,7 +115,7 @@ test("a mode is made with an id from its name that no mode has and no chat store
   assert.equal(first.body.id, "deep-research");
   assert.deepEqual(
     { ...first.body, createdAt: undefined, updatedAt: undefined },
-    { id: "deep-research", label: "Deep research", description: "Reads first", codemode: false, instructions: "", provider: null, model: null, thinkingLevel: null, createdAt: undefined, updatedAt: undefined },
+    { id: "deep-research", label: "Deep research", description: "Reads first", codemode: false, instructions: "", provider: null, model: null, thinkingLevel: null, temperature: null, createdAt: undefined, updatedAt: undefined },
   );
   assert.equal((await call("POST", "/chat-modes", { label: "Deep research" })).body.id, "deep-research-2");
 
@@ -130,7 +130,7 @@ test("a mode is made with an id from its name that no mode has and no chat store
   assert.equal(changed.status, 200);
   assert.deepEqual(
     { ...changed.body, createdAt: undefined, updatedAt: undefined },
-    { id: "deep-research", label: "Slow research", description: "", codemode: true, instructions: "Read twice.", provider: "fake", model: "m", thinkingLevel: null, createdAt: undefined, updatedAt: undefined },
+    { id: "deep-research", label: "Slow research", description: "", codemode: true, instructions: "Read twice.", provider: "fake", model: "m", thinkingLevel: null, temperature: null, createdAt: undefined, updatedAt: undefined },
     "the id stays, and a blank is none",
   );
   assert.equal((await call("PUT", "/chat-modes/deep-research", { provider: null })).body.provider, null);

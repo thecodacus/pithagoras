@@ -2,6 +2,14 @@ import { CODEMODE_TOOL } from "./pi/codemode.js";
 import type { ToolExceptions } from "./tool-policy.js";
 
 /**
+ * What a mode of the person's sets for the requests of its chats to the model, where it is set. Only the temperature:
+ * it is the one parameter every API takes. Without it the request carries nothing and the server's own default applies.
+ */
+export interface ModeParams {
+  temperature?: number;
+}
+
+/**
  * Chat modes: how a chat works, chosen above the message box before its first message and fixed once it has one.
  * A chat keeps its mode in sessions.mode: NULL for Standard, a mode of the portal's by its name, one the person made
  * as "custom/<id>", an extension's as "<package>/<id>". What a mode does past its tool layer is done by whoever
@@ -28,6 +36,8 @@ export interface ChatModeEntry {
   provider?: string;
   model?: string;
   thinkingLevel?: string;
+  /** Sent with every request of its chats to the model (a mode the person made). */
+  params?: ModeParams;
 }
 
 /** What a chat is when it says nothing about its mode. Stored as NULL. */
