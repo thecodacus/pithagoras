@@ -134,6 +134,8 @@ export async function fakeDocker() {
     onExec?: (e: FakeExec) => { out?: string; err?: string; code?: number };
     onConnect?: (n: FakeNetwork, c: FakeContainer) => void;
     oldNetworks?: boolean;
+    /** Holds the answer to the next inspect of a container until the promise it gives settles: a page that reads a container while an update starts or ends. */
+    holdInspect?: (c: FakeContainer) => Promise<void> | undefined;
   } = {};
   const execs: FakeExec[] = [];
   /** The containers made, and those started (by name), in the order they were; and each change to one (`update`), by its name. */
@@ -249,13 +251,16 @@ export async function fakeDocker() {
       if ((m = /^\/containers\/([^/]+)\/json$/.exec(p))) {
         const c = find(m[1]);
         if (!c) return send(404, { message: `No such container: ${m[1]}` });
+        const held = runs.holdInspect?.(c);
+        if (held) runs.holdInspect = undefined;
+        const answer = (inspected: unknown) => (held ? void held.then(() => send(200, inspected)) : send(200, inspected));
         // Docker's create body is the container's Config, with its HostConfig and NetworkingConfig apart.
         const { HostConfig: madeHost, NetworkingConfig: _networking, ...config } = c.made ?? {};
         // What its image gives it, which the body did not say: as Docker's inspect holds it, merged in. An environment entry by a name the body gave replaces the image's.
         const given = [...imageInfo.values()].find((i) => i.Id === c.ImageId)?.Config;
         const made = (config.Env ?? []) as string[];
         const env = [...(given?.Env ?? []).map((e) => made.find((m) => m.split("=")[0] === e.split("=")[0]) ?? e), ...made.filter((m) => !(given?.Env ?? []).some((e) => e.split("=")[0] === m.split("=")[0]))];
-        return send(200, {
+        return answer({
           Id: c.Id,
           Name: `/${c.Name}`,
           Image: c.ImageId ?? c.Image,
