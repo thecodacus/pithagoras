@@ -465,6 +465,26 @@ test("the update is told as failed only where the container is as it was; where 
   assert.equal(((await person.overview()) as any).containers.find((c: any) => c.name === "up-b"), undefined, "no row of the name it lost");
 });
 
+test("an update that begins while the page reads a container is on that row whole, never as an empty update", async () => {
+  images();
+  const { d, person } = wanting(VOICE, "img:2");
+  docker.images.add("img:2");
+  await d.containers.create("up-e", { Image: "img:1" });
+  await d.containers.start("up-e");
+  docker.runs.onStart = STAYS;
+  // The page's look at up-e's image waits until the update has begun.
+  let begun!: () => void;
+  const updating = new Promise<void>((r) => (begun = r));
+  docker.runs.holdInspect = (c) => (c.Name === "up-e" ? updating : undefined);
+  const read = person.overview();
+  while (docker.runs.holdInspect) await delay(1);
+  await person.updateImage("up-e");
+  begun();
+  const row = ((await read) as { containers: any[] }).containers.find((c) => c.name === "up-e");
+  assert.ok(row.update?.active === true || row.update?.done, `the row has the update as it is: ${JSON.stringify(row.update)}`);
+  await ended(person, "up-e");
+});
+
 test("a container made again that does not stay up is taken away and the old one runs again; one that stays up is done", async () => {
   images();
   const { d, person } = wanting(VOICE, "img:2");
