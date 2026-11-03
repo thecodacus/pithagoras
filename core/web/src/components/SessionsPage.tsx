@@ -315,7 +315,7 @@ export const SessionsPage = memo(function SessionsPage({
 
   return (
     <div className="flex h-full flex-col">
-      <div ref={list} className="sessions-list flex-1 overflow-y-auto px-4 py-6">
+      <div ref={list} className="sessions-list scroll-steady flex-1 overflow-y-auto px-4 py-6">
         <div className="mx-auto w-full max-w-3xl">
           <PageHeader
             icon={<LuMessagesSquare />}

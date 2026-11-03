@@ -86,7 +86,7 @@ export function AgentPage({
 
   if (creating) {
     return (
-      <div className="flex h-full flex-col overflow-y-auto">
+      <div className="scroll-steady flex h-full flex-col overflow-y-auto">
         <AgentSetup
           onCancel={() => setCreating(false)}
           onSubmit={async (input) => {
@@ -152,7 +152,7 @@ function AgentCards({ agents, onOpen, onNew }: { agents: Agent[]; onOpen: (id: s
   // Still: a page of them all moving at once would be busy.
   const still = useRef<VoiceLevels>({ input: 0, output: 0 });
   return (
-    <div className="h-full overflow-y-auto px-4 py-6">
+    <div className="scroll-steady h-full overflow-y-auto px-4 py-6">
       <div className="mx-auto w-full max-w-3xl">
         <PageHeader
           icon={<LuBot />}
@@ -376,7 +376,7 @@ function AgentView({
   // knows who it is talking to.
   if (setup && !setup.initialised) {
     return (
-      <div className="flex h-full flex-col overflow-y-auto">
+      <div className="scroll-steady flex h-full flex-col overflow-y-auto">
         <div className="mx-auto w-full max-w-xl px-4 pt-6">{back}</div>
         <AgentSetup
           home={setup.home}
@@ -393,7 +393,7 @@ function AgentView({
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex-1 overflow-y-auto px-4 py-6">
+      <div className="scroll-steady flex-1 overflow-y-auto px-4 py-6">
         <div className="mx-auto w-full max-w-3xl">
           {back}
           <PageHeader

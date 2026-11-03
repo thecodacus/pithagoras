@@ -217,14 +217,14 @@ export function Modal({
                 const button = (e.target as HTMLElement).closest("button");
                 if (button && !button.hasAttribute("aria-expanded")) setInRail(false);
               }}
-              className={`min-h-0 flex-1 overflow-y-auto bg-canvas/40 p-2 sm:block sm:w-52 sm:flex-none sm:shrink-0 sm:border-r sm:border-line xl:w-60 xl:p-3 ${inRail ? "" : "hidden"}`}
+              className={`scroll-steady [--ground:color-mix(in_srgb,rgb(var(--canvas))_40%,rgb(var(--surface)))] min-h-0 flex-1 overflow-y-auto p-2 sm:block sm:w-52 sm:flex-none sm:shrink-0 sm:border-r sm:border-line xl:w-60 xl:p-3 ${inRail ? "" : "hidden"}`}
             >
               {rail}
             </nav>
-            <div className={`min-w-0 flex-1 overflow-y-auto px-5 py-4 sm:block xl:px-8 xl:py-6 ${inRail ? "hidden" : ""}`}>{body}</div>
+            <div className={`scroll-steady [--ground:rgb(var(--surface))] min-w-0 flex-1 overflow-y-auto px-5 py-4 sm:block xl:px-8 xl:py-6 ${inRail ? "hidden" : ""}`}>{body}</div>
           </div>
         ) : (
-          <div className="flex-1 overflow-y-auto px-5 py-4">{body}</div>
+          <div className="scroll-steady [--ground:rgb(var(--surface))] flex-1 overflow-y-auto px-5 py-4">{body}</div>
         )}
 
         {footer && <footer className="border-t border-line px-5 py-3">{footer}</footer>}

@@ -1,5 +1,6 @@
 import { type Page } from '@playwright/test';
 import { test, expect, mockPortal, reply } from './portal-mock';
+import { settled } from './settled';
 
 const RULES = ['pipe-to-shell', 'write-to-path', 'upload', 'read-credentials', 'publish', 'persist', 'delegate'].map((name) => ({ name, why: `why ${name}` }));
 
@@ -203,6 +204,10 @@ test('on a phone the status lines and long names fit', async ({ page }) => {
   });
   const value = dialog.getByText('Nobody is named, so the agent lets everybody in');
   const label = dialog.getByText('Primary user', { exact: true });
+  await expect(value).toBeVisible();
+  // The dialog rises 10px as it opens (ui-dialog-in, which plays whatever the animations switch says): two boxes
+  // read one after the other while it does are not where the other one was, and the check above has 5px to spare.
+  await settled(page);
   const [a, b] = [await label.boundingBox(), await value.boundingBox()];
   expect(a && b && (b.y >= a.y + a.height - 1 || b.x >= a.x + a.width)).toBeTruthy();
   const width = await dialog.evaluate((d) => d.scrollWidth - d.clientWidth);
