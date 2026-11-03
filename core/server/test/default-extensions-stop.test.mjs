@@ -40,5 +40,5 @@ test("a portal stopped while it installs what it starts with exits only once the
   const started = lines.filter((line) => line.startsWith("start ")).map((line) => line.slice(6));
   const ended = lines.filter((line) => line.startsWith("end ")).map((line) => line.slice(4));
   assert.deepEqual(ended, started, "every install that began had ended when the portal exited");
-  assert.ok(started.length < 4, `no install began once the portal was stopping: ${started.join(", ")}`);
+  assert.ok(started.length < 3, `no install began once the portal was stopping: ${started.join(", ")}`);
 });

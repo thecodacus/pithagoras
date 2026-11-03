@@ -650,10 +650,12 @@ export function dockerFor(dataDir: string, inContainer = existsSync("/.dockerenv
         (await containers()).map(async (c) => {
           const tracked = updates.get(c.name);
           if (tracked?.ended && now - tracked.ended > UPDATE_SHOWN_MS) updates.delete(c.name);
-          const { ended: _ended, ...update } = updates.get(c.name) ?? {};
           // A Docker that hiccups on one container's image does not take the page down.
           const imageWarning = await outdated(c).catch(() => undefined);
-          return { ...c, ...(imageWarning ? { imageWarning } : {}), ...(updates.has(c.name) ? { update: update as ImageUpdate } : {}) };
+          // Read once, after the wait: an update can start or end meanwhile, and the row shows it whole or not at all.
+          const entry = updates.get(c.name);
+          const { ended: _ended, ...update } = entry ?? {};
+          return { ...c, ...(imageWarning ? { imageWarning } : {}), ...(entry ? { update: update as ImageUpdate } : {}) };
         }),
       );
       return { available: true as const, version: version.Version ?? "", containers: all, volumes: await volumes() };

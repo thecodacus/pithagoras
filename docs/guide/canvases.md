@@ -7,9 +7,11 @@ In voice mode they are a window of the stage's, which <kbd>D</kbd> shows or
 hides. Documents can contain plain text or Markdown.
 
 Canvases are an extension, `pithagoras-canvas` from the portal's
-`extensions/canvas`, installed when a portal starts for the first time and
-listed under Settings → Extensions → Installed like any other: switch it off or
-remove it, and the button, the window and the agent's canvas tools go.
+`extensions/canvas`. A new portal does not have it: install it from Settings →
+Extensions → Discover, or pick Creative in the [setup
+assistant](/guide/models#setup-assistant). A portal that had it before keeps it.
+It is listed under Settings → Extensions → Installed like any other: switch it
+off or remove it, and the button, the window and the agent's canvas tools go.
 
 New canvases are temporary and held in the portal's memory. They remain available across tab refreshes but disappear when the portal restarts. Choose **Store canvas** beside the document picker to save the current document permanently; subsequent applied human edits and streamed AI writes auto-save. Existing saved canvases remain permanent.
 
