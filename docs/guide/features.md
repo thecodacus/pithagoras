@@ -151,12 +151,12 @@ messages, about 14 tokens more on every request, and `subagents` costs about
 **Subagents work in the chat's mode**, on by default: a subagent's chat is made
 in the [mode](/guide/sessions#modes) of the chat it works for, with that
 mode's tools, instructions and
-[model parameters](/guide/sessions#model-parameters-of-a-mode), and on the model and effort its chat is on now
+[temperature](/guide/sessions#model-parameters-of-a-mode), and on the model and effort its chat is on now
 (not the ones the mode starts a chat on). In a chat in **Code mode** the subagent
 works through the code tool as well, in a mode you made it has the mode's tool
 layer and instructions, and in an extension's mode it is in that mode. Off, every
 subagent works in Standard mode: without the code tool, the mode's instructions
-and model parameters, and an extension's mode. The tools its chat's mode switched off stay off for it
+and temperature, and an extension's mode. The tools its chat's mode switched off stay off for it
 (a mode with `bash` and `write` off gives no subagent either), and so do the ones
 you switched off in the chat itself; what Standard gives beyond those it has.
 

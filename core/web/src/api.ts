@@ -41,8 +41,8 @@ export interface ChatMode {
   confirm?: string;
   /** The package that offers it, whose translations its texts are shown through. */
   extension?: string;
-  /** The model parameters it sets, each where it sets one (a mode of the person's). */
-  params?: Partial<Record<"temperature" | "topP" | "topK" | "minP" | "maxTokens", number>>;
+  /** The model parameters it sets, where it sets any (a mode of the person's). */
+  params?: { temperature?: number };
 }
 
 /** A set of instructions the agent pulls in when the description matches. */
@@ -371,12 +371,8 @@ export interface CustomMode {
   provider: string | null;
   model: string | null;
   thinkingLevel: string | null;
-  /** What its chats' requests to the model carry; none leaves it to the model's own settings. */
+  /** The temperature its chats' requests to the model carry; none leaves it to the server's own default. */
   temperature: number | null;
-  topP: number | null;
-  topK: number | null;
-  minP: number | null;
-  maxTokens: number | null;
   createdAt: string;
   updatedAt: string;
 }

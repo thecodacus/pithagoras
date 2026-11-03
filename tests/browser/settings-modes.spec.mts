@@ -16,10 +16,6 @@ interface Mode {
   model: string | null;
   thinkingLevel: string | null;
   temperature: number | null;
-  topP: number | null;
-  topK: number | null;
-  minP: number | null;
-  maxTokens: number | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -46,10 +42,6 @@ const mode = (label: string, more: Partial<Mode> = {}): Mode => ({
   model: null,
   thinkingLevel: null,
   temperature: null,
-  topP: null,
-  topK: null,
-  minP: null,
-  maxTokens: null,
   createdAt: '',
   updatedAt: '',
   ...more,
@@ -140,11 +132,8 @@ async function portal(page: Page, { modes = [] as Mode[], refuse = false } = {})
   return state;
 }
 
-/** What the server lists of a mode that sets model parameters: only the ones it sets. */
-const paramsOf = (m: Mode) => {
-  const params = Object.fromEntries((['temperature', 'topP', 'topK', 'minP', 'maxTokens'] as const).filter((key) => m[key] !== null).map((key) => [key, m[key]]));
-  return Object.keys(params).length ? { params } : {};
-};
+/** What the server lists of a mode that sets a temperature. */
+const paramsOf = (m: Mode) => (m.temperature === null ? {} : { params: { temperature: m.temperature } });
 
 const dialog = (page: Page) => page.getByRole('dialog', { name: 'Settings' });
 const writes = (state: Portal) => state.writes.map(({ what, body }) => (body === undefined ? what : `${what} ${JSON.stringify(body)}`));
@@ -205,66 +194,60 @@ test('a mode is made, its texts saved, its code tool, model and tools switched a
   expect(writes(state).at(-1)).toBe('DELETE /api/chat-modes/focus');
 });
 
-test('a mode\'s model parameters are saved as the field is left, cleared when emptied, and a text that is no number or a number the server refuses is not kept', async ({ page }) => {
-  const state = await portal(page, { modes: [mode('Research', { topP: 0.9 })] });
+test('a mode\'s temperature is saved as the field is left, cleared when emptied, and a text that is no number or a number the server refuses is not kept', async ({ page }) => {
+  const state = await portal(page, { modes: [mode('Research')] });
   await page.goto('/settings/modes');
   await dialog(page).getByRole('button', { name: /^Research/ }).click();
-  const field = (name: string) => dialog(page).getByLabel(name, { exact: true });
-  await expect(field('Temperature')).toHaveValue('');
-  await expect(field('Temperature')).toHaveAttribute('placeholder', "model's own");
-  await expect(field('Top P')).toHaveValue('0.9');
+  const field = dialog(page).getByLabel('Temperature', { exact: true });
+  await expect(field).toHaveValue('');
+  await expect(field).toHaveAttribute('placeholder', "server's default");
+  // Only the temperature: the other sampling parameters are not offered.
+  for (const name of ['Top P', 'Top K', 'Min P', 'Max tokens']) await expect(dialog(page).getByLabel(name, { exact: true })).toHaveCount(0);
 
-  // Saved when the field is left or Enter is pressed, one number to a write; a comma is a decimal point.
-  await field('Temperature').fill('0,2');
-  await field('Temperature').press('Enter');
+  // Saved when the field is left or Enter is pressed; a comma is a decimal point.
+  await field.fill('0,2');
+  await field.press('Enter');
   await expect.poll(() => writes(state).at(-1)).toBe('PUT /api/chat-modes/research {"temperature":0.2}');
-  await field('Top K').fill('20');
-  await field('Max tokens').click();
-  await expect.poll(() => writes(state).at(-1)).toBe('PUT /api/chat-modes/research {"topK":20}');
-  await field('Max tokens').fill('512');
-  await field('Min P').fill('0.05');
-  await expect.poll(() => writes(state).at(-1)).toBe('PUT /api/chat-modes/research {"maxTokens":512}');
-  await field('Min P').press('Enter');
-  await expect.poll(() => writes(state).at(-1)).toBe('PUT /api/chat-modes/research {"minP":0.05}');
-  expect(state.modes[0]).toMatchObject({ temperature: 0.2, topP: 0.9, topK: 20, minP: 0.05, maxTokens: 512 });
+  expect(state.modes[0].temperature).toBe(0.2);
 
-  // A number typed without the digit before or after the point is still a number.
-  await field('Top P').fill('.9');
-  await field('Top P').press('Enter');
-  await expect.poll(() => writes(state).at(-1)).toBe('PUT /api/chat-modes/research {"topP":0.9}');
+  // A number typed without the digit before or after the point is still a number, and the field shows it as the server keeps it.
+  await field.fill('.9');
+  await field.press('Enter');
+  await expect.poll(() => writes(state).at(-1)).toBe('PUT /api/chat-modes/research {"temperature":0.9}');
   await expect(dialog(page).getByText('Enter a number, or leave the field empty.')).toHaveCount(0);
-  await expect(field('Top P')).toHaveValue('0.9');
-  await field('Min P').fill('1.');
-  await field('Min P').press('Enter');
-  await expect.poll(() => writes(state).at(-1)).toBe('PUT /api/chat-modes/research {"minP":1}');
-  await expect(field('Min P')).toHaveValue('1');
-  await field('Min P').fill('0.05');
-  await field('Min P').press('Enter');
-  await expect.poll(() => writes(state).at(-1)).toBe('PUT /api/chat-modes/research {"minP":0.05}');
+  await expect(field).toHaveValue('0.9');
+  await field.fill('1.');
+  await field.press('Enter');
+  await expect.poll(() => writes(state).at(-1)).toBe('PUT /api/chat-modes/research {"temperature":1}');
+  await expect(field).toHaveValue('1');
+  await field.fill('0.2');
+  await field.blur();
+  await expect.poll(() => writes(state).at(-1)).toBe('PUT /api/chat-modes/research {"temperature":0.2}');
 
-  // Emptied, it is the model's own again; the same text again is no write.
-  await field('Top P').fill('');
-  await field('Top P').press('Enter');
-  await expect.poll(() => writes(state).at(-1)).toBe('PUT /api/chat-modes/research {"topP":null}');
+  // The same text again is no write.
   const count = state.writes.length;
-  await field('Top P').click();
-  await field('Top P').press('Enter');
-  await field('Temperature').fill('0.2');
-  await field('Temperature').press('Enter');
+  await field.click();
+  await field.press('Enter');
   expect(state.writes.length).toBe(count);
 
   // Not a number: said on the field, nothing sent. A number the server refuses: its message in the banner, and the field as it was.
-  await field('Temperature').fill('warm');
-  await field('Temperature').press('Enter');
+  await field.fill('warm');
+  await field.press('Enter');
   await expect(dialog(page).getByText('Enter a number, or leave the field empty.')).toBeVisible();
-  await expect(field('Temperature')).toHaveAttribute('aria-invalid', 'true');
+  await expect(field).toHaveAttribute('aria-invalid', 'true');
   expect(state.writes.length).toBe(count);
-  await field('Temperature').fill('3');
-  await field('Temperature').press('Enter');
+  await field.fill('3');
+  await field.press('Enter');
   await expect(dialog(page).getByRole('alert')).toContainText('Temperature must be between 0 and 2.');
-  await expect(field('Temperature')).toHaveValue('0.2');
+  await expect(field).toHaveValue('0.2');
   await expect(dialog(page).getByText('Enter a number, or leave the field empty.')).toHaveCount(0);
   expect(state.modes[0].temperature).toBe(0.2);
+
+  // Emptied, it is the server's default again.
+  await field.fill('');
+  await field.press('Enter');
+  await expect.poll(() => writes(state).at(-1)).toBe('PUT /api/chat-modes/research {"temperature":null}');
+  expect(state.modes[0].temperature).toBeNull();
 });
 
 test('a provider chosen without a model says that a model is needed too, until one is chosen', async ({ page }) => {
@@ -319,12 +302,11 @@ test('Settings → Modes speaks German, and is found by the search', async ({ pa
   await expect(german.getByRole('switch', { name: 'Über das Code-Tool arbeiten' })).toBeVisible();
   await expect(german.getByRole('combobox', { name: 'Modell für diesen Modus' })).toContainText('Wie der Chat es ohnehin hätte');
   await expect(german.getByText('Wird in einen Chat übernommen, wenn er diesen Modus bekommt', { exact: false })).toBeVisible();
-  await expect(german.getByLabel('Temperatur', { exact: true })).toHaveAttribute('placeholder', 'vom Modell');
-  await expect(german.getByLabel('Max. Tokens', { exact: true })).toBeVisible();
+  await expect(german.getByLabel('Temperatur', { exact: true })).toHaveAttribute('placeholder', 'vom Server');
 });
 
 test('a chat offers your modes after the portal\'s, leads to Settings → Modes, lists one made there, and a mode with a model puts the chat on it', async ({ page }) => {
-  const state = await portal(page, { modes: [mode('Research', { description: 'Reads first', temperature: 0.2, topP: 0.9 })] });
+  const state = await portal(page, { modes: [mode('Research', { description: 'Reads first', temperature: 0.2 })] });
   await page.addInitScript(() => localStorage.setItem('sidebarCollapsed', 'true'));
   await page.goto('/s/a');
   await expect.poll(() => page.evaluate(() => (window as any).streams.some((s: any) => !s.closed))).toBe(true);
@@ -334,9 +316,9 @@ test('a chat offers your modes after the portal\'s, leads to Settings → Modes,
   const menu = page.getByRole('menu', { name: 'Modes' });
   await chip.click();
   await expect(menu.getByRole('menuitemradio')).toHaveText([/^Standard mode/, /^Code mode/, /^Research/]);
-  // A mode that sets model parameters says which, under what it does; one that sets none says nothing more.
+  // A mode that sets a temperature says so, under what it does; one that sets none says nothing more.
   await expect(menu.getByRole('menuitemradio', { name: /^Research/ })).toContainText('Reads first');
-  await expect(menu.getByRole('menuitemradio', { name: /^Research/ })).toContainText('Temperature 0.2 · Top P 0.9');
+  await expect(menu.getByRole('menuitemradio', { name: /^Research/ })).toContainText('Temperature 0.2');
   await expect(menu.getByRole('menuitemradio', { name: /^Code mode/ })).not.toContainText('Temperature');
   await menu.getByRole('menuitem', { name: 'New mode…' }).click();
   await expect(page).toHaveURL(/\/s\/a\/settings\/modes$/);

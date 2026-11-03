@@ -1,8 +1,8 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { LuCheck, LuChevronLeft, LuChevronRight, LuLayers, LuPlus, LuRefreshCw, LuTrash2 } from "react-icons/lu";
 import { api, ApiError, type CustomMode } from "../api";
-import { msg, t } from "../i18n";
-import { MODE_PARAMS, paramName, type ModeParamKey } from "../mode-params";
+import { t } from "../i18n";
+import { temperatureName } from "../mode-params";
 import { useCached } from "../settings-cache";
 import { isEnter } from "../shortcuts";
 import { useFlash } from "../use-flash";
@@ -299,17 +299,10 @@ function ModeEditor({
 
       <Section
         title={t("Model parameters")}
-        hint={t("Sent with every request of this mode's chats, over the model's own settings. An empty field leaves the model's own. Saved when you leave the field.")}
+        hint={t("Sent with every request of this mode's chats, over the model's own setting. Empty leaves it to the server's own default. Saved when you leave the field.")}
       >
-        <div className="space-y-3 rounded-xl border border-line bg-raised/40 p-3">
-          <div className="grid gap-3 sm:grid-cols-2">
-            {MODE_PARAMS.map((key) => (
-              <ParamField key={key} name={key} value={mode[key]} onSave={(value) => change({ [key]: value })} />
-            ))}
-          </div>
-          <p className="text-[11px] text-fg-faint">
-            {t("Top P, Top K and Min P are sent to OpenAI-compatible servers only. Top K and Min P are for local servers and gateways such as llama.cpp, vLLM and Ollama; a hosted service may refuse them.")}
-          </p>
+        <div className="rounded-xl border border-line bg-raised/40 p-3 sm:max-w-xs">
+          <TemperatureField value={mode.temperature} onSave={(value) => change({ temperature: value })} />
         </div>
       </Section>
 
@@ -331,21 +324,12 @@ function ModeEditor({
   );
 }
 
-/** What each parameter does, under its field. */
-const PARAM_HINTS: Record<ModeParamKey, string> = {
-  temperature: msg("0 to 2. Lower is steadier, higher is more varied."),
-  topP: msg("0 to 1. Chooses among the likeliest words that together make up this share."),
-  topK: msg("A whole number. Chooses among this many likeliest words; 0 is off."),
-  minP: msg("0 to 1. Leaves out words less likely than this share of the likeliest one."),
-  maxTokens: msg("A whole number. At most this many tokens in a request, and never more than the model can write. On local servers the model's thinking counts too."),
-};
-
 /**
- * One parameter of a mode: its number, or nothing for the model's own. Saved when the field is left (or Enter is
+ * The mode's temperature: its number, or nothing for the server's own default. Saved when the field is left (or Enter is
  * pressed). Text that is not a number is not sent; one the server refuses (out of range) is shown by the page's banner
  * and the field goes back to what is saved.
  */
-function ParamField({ name, value, onSave }: { name: ModeParamKey; value: number | null; onSave: (value: number | null) => Promise<boolean> }) {
+function TemperatureField({ value, onSave }: { value: number | null; onSave: (value: number | null) => Promise<boolean> }) {
   const saved = value === null ? "" : String(value);
   const [text, setText] = useState(saved);
   const [bad, setBad] = useState(false);
@@ -367,15 +351,15 @@ function ParamField({ name, value, onSave }: { name: ModeParamKey; value: number
   };
 
   return (
-    <Field label={paramName(name)} hint={bad ? <span className="text-danger">{t("Enter a number, or leave the field empty.")}</span> : t(PARAM_HINTS[name])}>
+    <Field label={temperatureName()} hint={bad ? <span className="text-danger">{t("Enter a number, or leave the field empty.")}</span> : t("0 to 2. Lower is steadier, higher is more varied.")}>
       <input
         value={text}
         inputMode="decimal"
         onChange={(e) => setText(e.target.value)}
         onBlur={() => void commit()}
         onKeyDown={(e) => isEnter(e) && e.currentTarget.blur()}
-        placeholder={t("model's own")}
-        aria-label={paramName(name)}
+        placeholder={t("server's default")}
+        aria-label={temperatureName()}
         aria-invalid={bad || undefined}
         className={`${inputCls} font-mono`}
       />

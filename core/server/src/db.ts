@@ -418,8 +418,8 @@ function schema(db: Database.Database): void {
     -- The chat modes the person made (Settings → Modes): a chat in one stores "custom/<id>". Its tool layer is
     -- exceptions to what the layers under it leave, as a project's are; codemode 1 has its chats work through the
     -- code tool alone; instructions are said in its chats' system prompt; provider, model and thinking_level, where
-    -- set, are written into a chat as it is put in the mode. temperature, top_p, top_k, min_p and max_tokens, where
-    -- set (NULL is unset), are sent with every request of its chats to the model, read from here each time.
+    -- set, are written into a chat as it is put in the mode. temperature, where set (NULL is unset), is sent with every
+    -- request of its chats to the model, read from here each time.
     CREATE TABLE IF NOT EXISTS chat_modes (
       id TEXT PRIMARY KEY,
       label TEXT NOT NULL,
@@ -432,10 +432,6 @@ function schema(db: Database.Database): void {
       model TEXT,
       thinking_level TEXT,
       temperature REAL,
-      top_p REAL,
-      top_k INTEGER,
-      min_p REAL,
-      max_tokens INTEGER,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -1341,11 +1337,9 @@ function migrate(d: Database.Database): void {
   if (noteCols.length && !noteCols.includes("pending_delivery")) {
     d.exec("ALTER TABLE notes ADD COLUMN pending_delivery INTEGER NOT NULL DEFAULT 0");
   }
-  // The model parameters of a mode (schema 17).
+  // The temperature of a mode: a portal built before it was added is at schema 16 already.
   const modeCols = (d.prepare("PRAGMA table_info(chat_modes)").all() as { name: string }[]).map((c) => c.name);
-  for (const [col, type] of [["temperature", "REAL"], ["top_p", "REAL"], ["top_k", "INTEGER"], ["min_p", "REAL"], ["max_tokens", "INTEGER"]] as const) {
-    if (!modeCols.includes(col)) d.exec(`ALTER TABLE chat_modes ADD COLUMN ${col} ${type}`);
-  }
+  if (modeCols.length && !modeCols.includes("temperature")) d.exec("ALTER TABLE chat_modes ADD COLUMN temperature REAL");
   seedCodemodeOff(d);
   // Last, because it reads the tables and settings above.
   if ((d.pragma("user_version", { simple: true }) as number) < 8) browserGrantsToSwitches(d);
@@ -1685,10 +1679,6 @@ export interface ChatModeRow {
   thinking_level: string | null;
   /** What its chats' requests to the model carry, where set: see ModeParams. */
   temperature: number | null;
-  top_p: number | null;
-  top_k: number | null;
-  min_p: number | null;
-  max_tokens: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -1719,7 +1709,7 @@ export function createCustomMode(fields: { label: string; description: string })
  */
 export function updateCustomMode(
   id: string,
-  fields: Partial<Pick<ChatModeRow, "label" | "description" | "codemode" | "instructions" | "provider" | "model" | "thinking_level" | "temperature" | "top_p" | "top_k" | "min_p" | "max_tokens">>,
+  fields: Partial<Pick<ChatModeRow, "label" | "description" | "codemode" | "instructions" | "provider" | "model" | "thinking_level" | "temperature">>,
 ): ChatModeRow | undefined {
   const d = getDb();
   d.transaction(() => {
@@ -1764,18 +1754,12 @@ export const customEntry = (row: ChatModeRow): ChatModeEntry => ({
   ...(row.provider ? { provider: row.provider } : {}),
   ...(row.model ? { model: row.model } : {}),
   ...(row.thinking_level ? { thinkingLevel: row.thinking_level } : {}),
-  ...(paramsOf(row) ? { params: paramsOf(row) } : {}),
+  ...(row.temperature !== null ? { params: paramsOf(row) } : {}),
 });
 
 /** The parameters a mode sets, by the names the request carries them under (see ModeParams); none where it sets none. */
-export function paramsOf(row: Pick<ChatModeRow, "temperature" | "top_p" | "top_k" | "min_p" | "max_tokens">): ModeParams | undefined {
-  const params: ModeParams = {};
-  if (row.temperature !== null) params.temperature = row.temperature;
-  if (row.top_p !== null) params.topP = row.top_p;
-  if (row.top_k !== null) params.topK = row.top_k;
-  if (row.min_p !== null) params.minP = row.min_p;
-  if (row.max_tokens !== null) params.maxTokens = row.max_tokens;
-  return Object.keys(params).length ? params : undefined;
+export function paramsOf(row: Pick<ChatModeRow, "temperature">): ModeParams | undefined {
+  return row.temperature !== null ? { temperature: row.temperature } : undefined;
 }
 
 /**

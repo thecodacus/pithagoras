@@ -165,10 +165,9 @@ A mode of yours has:
   chosen; left as **As the chat would have it**, nothing is written. Choosing
   another mode before the first message puts back what the mode wrote, unless
   you changed it in the chat since.
-- **Model parameters**: the temperature, Top P, Top K, Min P and the longest
-  answer (**Max tokens**) that every request of the mode's chats to the model
-  carries, see [below](#model-parameters-of-a-mode). A field left empty sets
-  nothing.
+- **Model parameters**: the **Temperature** that every request of the mode's
+  chats to the model carries, see [below](#model-parameters-of-a-mode). Left
+  empty, it sets nothing.
 - **Work through the code tool**: its chats work as in Code mode, the code tool
   alone offered to the model. Switching it on switches the code tool on in the
   mode's tools too, and switching it off takes that back: the code tool is then
@@ -181,11 +180,11 @@ A mode of yours has:
   still the last word, but where the mode switches the code tool on, they cannot
   switch it off, as in Code mode.
 
-These are saved as they are changed, except the texts. A model parameter is
+These are saved as they are changed, except the texts. The temperature is
 saved when you leave its field, or press Enter.
 
 An edit reaches the chats already in the mode as follows: its tools, its
-instructions and its model parameters at once, from their next message; whether it works through the
+instructions and its temperature at once, from their next message; whether it works through the
 code tool when each chat's pi next starts, since which tools are offered one by
 one is fixed then; its model and effort never, as they were written into each
 chat when it was put in the mode. The code tool that switch also switches is one
@@ -194,60 +193,37 @@ a chat that worked through it works as in Standard mode from its next message.
 
 #### Model parameters of a mode
 
-A mode can set how the model samples its answers, so that a *coder* mode answers
+A mode can set the **Temperature** of its chats, so that a *coder* mode answers
 steadily and a *creative* one more freely, without anyone changing a setting in
-each chat. Each field is a plain number, or empty:
+each chat. It is a plain number from 0 to 2: lower is steadier, higher is more
+varied. Temperature is the one parameter every API takes, so it is the only one
+a mode sets; the others (Top P, Top K, penalties and so on) are named differently
+or refused by some services, and are left to the model's own settings.
 
-| Field | Allowed | What it does |
-| --- | --- | --- |
-| **Temperature** | 0 to 2 | Lower is steadier, higher is more varied |
-| **Top P** | 0 to 1 | Chooses among the likeliest words that together make up this share |
-| **Top K** | whole number, 0 to 1000 | Chooses among this many likeliest words; 0 is off |
-| **Min P** | 0 to 1 | Leaves out words less likely than this share of the likeliest one |
-| **Max tokens** | whole number, 1 to 1,000,000 | The most the model writes in one request (see below for thinking) |
-
-A number outside its range is refused with a message when you leave the field,
+A number outside the range is refused with a message when you leave the field,
 and the field goes back to what was saved. Text that is not a number is marked
 on the field and not saved.
 
-What is sent is merged field by field. A field the mode sets wins over the same
-field in the model's own entry in `models.json` (`samplingParams`, which pi sends
-with every request to that model), and a field it leaves empty leaves the model's
-own or, if the entry has none, the provider's default. The portal has no
-parameters of its own for all chats, so there is nothing between the two. **Max
-tokens** is held to what the chat's model can write at most, so a mode used with
-a small model does not ask for more than it has.
+A chat in the mode sends the temperature with every request, or nothing at all
+when the field is empty: the portal has no temperature of its own for all chats,
+so then the server's own default applies. The mode's temperature wins over a
+`temperature` in the model's own entry in `models.json` (`samplingParams`, which
+pi sends with every request to that model); the rest of that entry stays.
 
-The values go to the model with every request of a chat in the mode, including a
-spoken turn and the chats of its subagents while **Subagents work in the chat's
-mode** is on (see [The mode a subagent works in](/guide/features#the-mode-a-subagent-works-in));
-with it off the subagents work in Standard mode and send none of them. They
-are read at each request, so an edit reaches a chat that is running from its next
-request, and deleting the mode takes them away at once. A compaction or a summary
-of a long chat is not one of them: it keeps the model's settings. A chat in
-Standard mode, Code mode or an extension's mode sends none of these.
+The temperature goes to the model with every request of a chat in the mode,
+including a spoken turn and the chats of its subagents while **Subagents work in
+the chat's mode** is on (see [The mode a subagent works in](/guide/features#the-mode-a-subagent-works-in));
+with it off the subagents work in Standard mode and send none. It is read at each
+request, so an edit reaches a chat that is running from its next request, and
+deleting the mode takes it away at once. A compaction or a summary of a long chat
+is not one of them: it keeps the model's settings. A chat in Standard mode, Code
+mode or an extension's mode sends none.
 
-Which services take which field depends on the API the model is reached by:
-
-- **Temperature** and **Max tokens** are sent to every API pi speaks, except
-  that a ChatGPT or Codex sign-in takes no Max tokens (and, on ChatGPT, no
-  temperature either): the mode's value is left out there. Anthropic takes no
-  temperature while the model is thinking, nor for its newest models, and
-  leaves it out then.
-- **Max tokens** counts differently with thinking. On Anthropic it limits the
-  answer after the model has thought. On OpenAI-compatible servers (llama.cpp
-  and the like) the model's thinking counts toward it, so keep it well above
-  what the model thinks, or the answer may come out empty.
-- **Top P**, **Top K** and **Min P** are sent only where the API is
-  OpenAI-compatible (chat completions and responses): llama.cpp, llama-swap,
-  vLLM, Ollama, LM Studio, OpenRouter and hosted OpenAI. Anthropic, Google,
-  Mistral and Bedrock models leave them out. Top K and Min P are not part of
-  OpenAI's own API, which may refuse a request that has them: set them for local
-  servers and gateways.
-
-A model that refuses sampling parameters, as some hosted reasoning models do,
-answers a request that has them with an error: leave the fields of a mode you use
-with such a model empty.
+Some services leave it out. Anthropic takes no temperature while the model is
+thinking, nor for its newest models, and a ChatGPT sign-in takes none at all: the
+mode's value is left out there, and the request is made without it. A model that
+refuses a temperature, as some hosted reasoning models do, answers with an error:
+leave the field of a mode you use with such a model empty.
 
 The chat tells you what its mode sets: in the menu above the message box, under
 the mode's description, and in the header once the chat has started, in the line

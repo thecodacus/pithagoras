@@ -1271,22 +1271,13 @@ chat. Every chat there was is one a person attends, and every child chat keeps
 its parent's switches, as before; nothing is left for an extension, and nothing
 needs doing.
 
+The same step adds the temperature a [mode you made](/guide/sessions#model-parameters-of-a-mode)
+can set for its chats. Every mode there is keeps setting none, so its chats send
+what they sent before.
+
 **Going back.** From `portal-v15-….db` it is only putting the backup in as
 under [Going back](#going-back), and an older backup needs what
 [Sub-chats in the chat list](#sub-chats-in-the-chat-list) says for it.
-
-## Modes can set model parameters
-
-A [mode you made](/guide/sessions#model-parameters-of-a-mode) can set the
-temperature, Top P, Top K, Min P and the longest answer of its chats. The
-upgrade (schema 17) adds these five fields to the modes. Every mode there is
-keeps setting none of them, so its chats send what they sent before; nothing is
-left for an extension, and nothing needs doing.
-
-**Going back.** From `portal-v16-….db` it is only putting the backup in as
-under [Going back](#going-back), and an older backup needs what
-[Chats an extension makes for nobody to attend](#chats-an-extension-makes-for-nobody-to-attend)
-says for it.
 
 ## Subagents work in chats of their own
 

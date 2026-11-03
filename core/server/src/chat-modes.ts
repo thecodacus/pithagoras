@@ -2,16 +2,11 @@ import { CODEMODE_TOOL } from "./pi/codemode.js";
 import type { ToolExceptions } from "./tool-policy.js";
 
 /**
- * What a mode of the person's sets for the requests of its chats to the model, each where it is set. Merged over what
- * the model's own definition (`samplingParams` in models.json) and the provider would use: a field not set leaves the
- * one below. `topP`, `topK` and `minP` reach only the OpenAI-compatible APIs (see pi/request-params.ts).
+ * What a mode of the person's sets for the requests of its chats to the model, where it is set. Only the temperature:
+ * it is the one parameter every API takes. Without it the request carries nothing and the server's own default applies.
  */
 export interface ModeParams {
   temperature?: number;
-  topP?: number;
-  topK?: number;
-  minP?: number;
-  maxTokens?: number;
 }
 
 /**
