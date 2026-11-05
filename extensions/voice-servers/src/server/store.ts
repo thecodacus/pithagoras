@@ -27,6 +27,11 @@ export interface Settings {
   ttsUrl?: string;
   /** Sent as `model` with each phrase. */
   ttsModel?: string;
+  /**
+   * The rate in Hz of the raw audio the speech server streams, which has no header to say it: used where its answer does
+   * not say (RAW_RATE_DEFAULT where left out). A WAV says its own.
+   */
+  rawSampleRate?: number;
   /** What an agent's voice is chosen from: typed in, or read from the server. */
   voices?: ServerVoice[];
   /**
@@ -84,6 +89,18 @@ export function saveSettings(next: Settings): void {
   if (!file) throw new Error("Voice servers' settings have not been read");
   writePrivately(file, JSON.stringify(next, null, 2));
   kept = next;
+}
+
+/** The rates voice mode plays, in Hz, and the one raw audio is taken to be at where nothing says. */
+export const RAW_RATE_MIN = 8000, RAW_RATE_MAX = 192000, RAW_RATE_DEFAULT = 24000;
+
+/** The sample rate of raw audio as it was sent, a number or text of digits: whole hertz in the range voice mode plays; undefined where empty. */
+function checkRawRate(given: unknown): number | undefined {
+  if (given === undefined || given === null || given === "") return undefined;
+  const rate = typeof given === "number" ? given : typeof given === "string" && /^\s*\d{1,7}\s*$/.test(given) ? Number(given) : NaN;
+  if (!Number.isInteger(rate) || rate < RAW_RATE_MIN || rate > RAW_RATE_MAX)
+    throw new Error(`The sample rate of raw audio is a whole number of hertz from ${RAW_RATE_MIN} to ${RAW_RATE_MAX}, or empty for ${RAW_RATE_DEFAULT}`);
+  return rate;
 }
 
 /** A field as it was sent; empty where it was not. */
@@ -148,7 +165,8 @@ export function checkSettings(value: Record<string, unknown> | undefined): Setti
     voices: listed,
     voice,
   };
-  const checked: Settings = { ...(Object.fromEntries(Object.entries(next).filter(([, v]) => v.length)) as Settings), ...(customVoices ? { customVoices } : {}), ...(speechServer ? { speechServer } : {}) };
+  const rawSampleRate = checkRawRate(value?.rawSampleRate);
+  const checked: Settings = { ...(Object.fromEntries(Object.entries(next).filter(([, v]) => v.length)) as Settings), ...(rawSampleRate ? { rawSampleRate } : {}), ...(customVoices ? { customVoices } : {}), ...(speechServer ? { speechServer } : {}) };
   checkCustom(checked);
   return checked;
 }

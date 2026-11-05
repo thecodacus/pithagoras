@@ -64,9 +64,10 @@ const LONG_SENTENCE = 220;
 const MIN_SOFT_CUT = 40;
 // Titles and common German and English abbreviations; a word that only ends like one is not caught.
 // A single letter covers initials and the pieces of "z. B.", "d. h.", "u. a." and "o. ä.".
-const ABBREVIATION = /(?<![\p{L}\p{N}])(?:mr|mrs|dr|prof|vs|etc|bzw|bspw|ca|usw|ggf|evtl|inkl|vgl|nr|abb|\p{L})\.$/iu;
+// Not preceded by a letter or digit, said without a lookbehind, which Safari before 16.4 cannot read.
+const ABBREVIATION = /(?:^|[^\p{L}\p{N}])(?:mr|mrs|dr|prof|vs|etc|bzw|bspw|ca|usw|ggf|evtl|inkl|vgl|nr|abb|\p{L})\.$/iu;
 // Words that stand before an ordinal, so a capitalised German noun after it ("im 3. Stock") is no sentence start.
-const BEFORE_ORDINAL = /(?<![\p{L}\p{N}])(?:am|im|vom|zum|zur|beim|der|die|das|dem|den|des|ab|seit)\s+\d{1,2}$/iu;
+const BEFORE_ORDINAL = /(?:^|[^\p{L}\p{N}])(?:am|im|vom|zum|zur|beim|der|die|das|dem|den|des|ab|seit)\s+\d{1,2}$/iu;
 const MONTH = /^(?:Januar|Februar|März|April|Mai|Juni|Juli|August|September|Oktober|November|Dezember)(?!\p{L})/u;
 
 /**
@@ -76,7 +77,7 @@ const MONTH = /^(?:Januar|Februar|März|April|Mai|Juni|Juli|August|September|Okt
  */
 function ordinalDot(text: string, i: number): boolean | undefined {
   const before = text.slice(0, i);
-  if (!/(?<![\d.,])\d{1,2}$/.test(before)) return false;
+  if (!/(?:^|[^\d.,])\d{1,2}$/.test(before)) return false;
   if (BEFORE_ORDINAL.test(before)) return true;
   const word = text.slice(i + 1).match(/^\s+(\S+)(\s?)/u);
   if (!word) return undefined;

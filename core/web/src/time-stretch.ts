@@ -6,34 +6,42 @@
  * WSOLA instead: the output is built from overlapping, windowed pieces of the
  * input, taken further apart than they are laid down, and each piece is
  * nudged to where it lines up best with the one before it so that the
- * waveform stays continuous. The pieces are short (40 ms at 24 kHz), which is
- * what keeps a voice's pitch; the nudge is what keeps it from buzzing.
+ * waveform stays continuous. The pieces are short (40 ms, whatever the sample
+ * rate), which is what keeps a voice's pitch; the nudge is what keeps it from
+ * buzzing.
  *
  * It streams: samples go in as they arrive from the speech service and
  * finished output comes out behind them, so a streamed reply starts about as
  * early as it did. `flush` gives what is left at the end.
  */
 
-import { joinSamples } from "./samples";
+import { DEFAULT_SAMPLE_RATE, joinSamples } from "./samples";
 
-const FRAME = 960;
-const HOP = FRAME / 2;
-/** How far a piece may move to line up: 10 ms either way. */
-const TOLERANCE = 240;
-/** Samples compared when lining up, every other one: enough to find the period, cheap enough for a phone. */
-const COMPARE = HOP;
+/** The sizes of the pieces, in samples, for one sample rate: 40 ms a piece, laid down every 20, lined up within 10 either way. */
+function sizes(sampleRate: number) {
+  const hop = Math.round(sampleRate * 0.02);
+  // Half a frame is what a window is overlapped by, so the frame is two of them.
+  return { frame: hop * 2, hop, tolerance: Math.round(sampleRate * 0.01) };
+}
 
 /** A periodic Hann window: two of them half a frame apart add up to exactly one. */
-const WINDOW = (() => {
-  const w = new Float32Array(FRAME);
-  for (let i = 0; i < FRAME; i++) w[i] = 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / FRAME);
+const windows = new Map<number, Float32Array>();
+function windowOf(frame: number): Float32Array {
+  let w = windows.get(frame);
+  if (!w) {
+    w = new Float32Array(frame);
+    for (let i = 0; i < frame; i++) w[i] = 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / frame);
+    windows.set(frame, w);
+  }
   return w;
-})();
+}
 
 export class TimeStretch {
+  private readonly size: { frame: number; hop: number; tolerance: number };
+  private readonly window: Float32Array;
   /** Input so far, after half a frame of silence (so the first piece does not fade in). */
-  private input = new Float32Array(HOP);
-  private length = HOP;
+  private input: Float32Array;
+  private length: number;
   /** Real samples taken in, and output given out, for the length the whole comes to. */
   private taken = 0;
   private given = 0;
@@ -42,12 +50,20 @@ export class TimeStretch {
   /** Where the last piece was taken from, in `input`. */
   private previous = 0;
   /** The half-finished half-frame at the end of the output, still to be overlapped. */
-  private tail = new Float32Array(HOP);
+  private tail: Float32Array;
   /** The first half-frame of output is the silence put in front: it is not given out. */
-  private skip = HOP;
+  private skip: number;
 
-  constructor(readonly rate: number) {
+  /** `rate` times as fast, for samples made at `sampleRate` Hz. */
+  constructor(readonly rate: number, sampleRate = DEFAULT_SAMPLE_RATE) {
     if (!(rate > 0)) throw new Error("The rate must be above zero");
+    if (!(sampleRate > 0)) throw new Error("The sample rate must be above zero");
+    this.size = sizes(sampleRate);
+    this.window = windowOf(this.size.frame);
+    this.input = new Float32Array(this.size.hop);
+    this.length = this.size.hop;
+    this.tail = new Float32Array(this.size.hop);
+    this.skip = this.size.hop;
   }
 
   private append(samples: Float32Array) {
@@ -63,12 +79,13 @@ export class TimeStretch {
   /** Where the next piece lines up best with what the last one would have gone on to. */
   private align(ideal: number, limit: number): number {
     if (this.frame === 0) return 0;
-    const natural = this.previous + HOP;
+    const { hop, tolerance } = this.size;
+    const natural = this.previous + hop;
     let best = ideal, score = -Infinity;
-    const from = Math.max(0, ideal - TOLERANCE), to = Math.min(limit, ideal + TOLERANCE);
+    const from = Math.max(0, ideal - tolerance), to = Math.min(limit, ideal + tolerance);
     for (let at = from; at <= to; at++) {
       let sum = 0;
-      for (let i = 0; i < COMPARE; i += 2) sum += this.input[natural + i] * this.input[at + i];
+      for (let i = 0; i < hop; i += 2) sum += this.input[natural + i] * this.input[at + i];
       if (sum > score) { score = sum; best = at; }
     }
     return best;
@@ -77,16 +94,17 @@ export class TimeStretch {
   /** Lay down every piece the input so far is enough for. */
   private run(end: boolean): Float32Array {
     const out: Float32Array[] = [];
+    const { frame, hop, tolerance } = this.size;
     while (true) {
-      const ideal = Math.round(this.frame * HOP * this.rate);
+      const ideal = Math.round(this.frame * hop * this.rate);
       // Past the end of what there is to read, with the silence at the end counted.
-      if (end ? ideal >= this.length : ideal + TOLERANCE + FRAME > this.length || this.previous + HOP + FRAME > this.length) break;
-      const at = this.align(ideal, Math.max(0, Math.min(this.length - FRAME, ideal + TOLERANCE)));
-      const piece = new Float32Array(FRAME);
-      for (let i = 0; i < FRAME; i++) piece[i] = (this.input[at + i] ?? 0) * WINDOW[i];
-      const done = new Float32Array(HOP);
-      for (let i = 0; i < HOP; i++) done[i] = this.tail[i] + piece[i];
-      this.tail = piece.slice(HOP);
+      if (end ? ideal >= this.length : ideal + tolerance + frame > this.length || this.previous + hop + frame > this.length) break;
+      const at = this.align(ideal, Math.max(0, Math.min(this.length - frame, ideal + tolerance)));
+      const piece = new Float32Array(frame);
+      for (let i = 0; i < frame; i++) piece[i] = (this.input[at + i] ?? 0) * this.window[i];
+      const done = new Float32Array(hop);
+      for (let i = 0; i < hop; i++) done[i] = this.tail[i] + piece[i];
+      this.tail = piece.slice(hop);
       this.previous = at;
       this.frame++;
       out.push(done);
@@ -116,28 +134,28 @@ export class TimeStretch {
   flush(): Float32Array {
     if (this.rate === 1) return new Float32Array(0);
     // Silence after the end, so the last pieces have something to overlap with.
-    this.append(new Float32Array(FRAME + TOLERANCE + HOP));
+    this.append(new Float32Array(this.size.frame + this.size.tolerance + this.size.hop));
     return this.run(true);
   }
 }
 
-/** One whole recording, made `rate` times as fast. */
-export function stretch(samples: Float32Array, rate: number): Float32Array {
+/** One whole recording made at `sampleRate` Hz, made `rate` times as fast. */
+export function stretch(samples: Float32Array, rate: number, sampleRate = DEFAULT_SAMPLE_RATE): Float32Array {
   if (rate === 1) return samples;
-  const s = new TimeStretch(rate);
+  const s = new TimeStretch(rate, sampleRate);
   return joinSamples([s.push(samples), s.flush()]);
 }
 
-/** Half a second at 24 kHz: a few milliseconds of work at a time. */
-const STEP = 12000;
+/** Half a second of samples: a few milliseconds of work at a time. */
+const stepOf = (sampleRate: number) => Math.round(sampleRate / 2);
 
 /**
  * `stretch` a little at a time, letting the page carry on in between: a
  * whole reply in one go holds up the orb and the microphone for a moment.
  */
-export async function stretchInSteps(samples: Float32Array, rate: number, signal: AbortSignal): Promise<Float32Array> {
+export async function stretchInSteps(samples: Float32Array, rate: number, signal: AbortSignal, sampleRate = DEFAULT_SAMPLE_RATE): Promise<Float32Array> {
   if (rate === 1) return samples;
-  const s = new TimeStretch(rate), out: Float32Array[] = [];
+  const s = new TimeStretch(rate, sampleRate), out: Float32Array[] = [], STEP = stepOf(sampleRate);
   for (let at = 0; at < samples.length; at += STEP) {
     out.push(s.push(samples.subarray(at, at + STEP)));
     await new Promise(resolve => setTimeout(resolve, 0));

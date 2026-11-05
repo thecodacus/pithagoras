@@ -2,7 +2,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import type { VoiceProvider } from "@pithagoras/extension-api/server";
 import { offered, serverOf, speechRequest, type SpeechRequest } from "./requests";
 import { storedAt, storeOnServer } from "./server-store";
-import { settings } from "./store";
+import { RAW_RATE_DEFAULT, settings } from "./store";
 import { findVoice } from "./voices";
 
 /**
@@ -63,8 +63,10 @@ async function post(url: string, request: SpeechRequest, retryBusy: boolean, sig
 /**
  * One phrase, as the speech server says it in `voice` where it is one of the voices offered, else in the voice chosen
  * on the page, else in its own. A WAV is asked for, which says its own rate, and its answer is labelled so whatever the
- * server calls it: voice mode reads it whole and plays it where it is mono 24 kHz 16-bit, and refuses it otherwise.
- * Breeze streams instead, raw 24 kHz PCM (audio.cpp calls it application/octet-stream), passed on as it comes.
+ * server calls it: voice mode reads it whole and plays it at that rate where it is mono or stereo, 16-bit integer or
+ * 32-bit float, and refuses it otherwise. Breeze streams instead, raw PCM (audio.cpp calls it application/octet-stream),
+ * passed on as it comes. So is the answer of any server that says `audio/pcm`. Raw PCM has no header: its rate is the one
+ * the server says (an `x-sample-rate` header, or a `rate=` parameter of the content type), else the one set for raw audio.
  *
  * A clone spoken with by Chatterbox-TTS-Server is stored there first where it is not stored at this address yet, and
  * again where the server answers that it does not have it (404), as after it was installed anew.
@@ -85,18 +87,15 @@ async function speak(text: string, { voice, signal }: { voice?: string; signal: 
     upstream = await send();
   }
   if (!upstream.ok) throw new Error(`The speech server answered HTTP ${upstream.status}`);
-  if (!request.pcm) return new Response(upstream.body, { headers: { "content-type": "audio/wav" } });
   const type = upstream.headers.get("content-type");
+  if (!request.pcm && !type?.startsWith("audio/pcm")) return new Response(upstream.body, { headers: { "content-type": "audio/wav" } });
   if (!type?.startsWith("audio/pcm") && !type?.startsWith("application/octet-stream")) {
     await upstream.body?.cancel();
     throw new Error(`The speech server answered ${type || "no type"}, not the PCM Breeze streams`);
   }
-  const rate = upstream.headers.get("x-sample-rate");
-  if (rate && rate !== "24000") {
-    await upstream.body?.cancel();
-    throw new Error(`The speech server answered audio at ${rate} Hz: voice mode plays 24 kHz`);
-  }
-  return new Response(upstream.body, { headers: { "content-type": "audio/pcm", "x-sample-rate": "24000" } });
+  // Voice mode checks that it is a rate it plays.
+  const rate = upstream.headers.get("x-sample-rate") ?? /;\s*rate\s*=\s*"?([^";\s]*)/i.exec(type)?.[1] ?? String(s.rawSampleRate ?? RAW_RATE_DEFAULT);
+  return new Response(upstream.body, { headers: { "content-type": "audio/pcm", "x-sample-rate": rate } });
 }
 
 export const provider: VoiceProvider = { label: "Voice servers", state, transcribe, speak };
