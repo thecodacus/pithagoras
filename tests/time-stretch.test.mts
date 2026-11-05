@@ -106,3 +106,21 @@ test('the pieces are as long in time at every sample rate, so streamed in parts 
   assert.ok(stepped.every((v, i) => Math.abs(v - whole[i]) < 1e-6));
   assert.throws(() => new TimeStretch(1.5, 0), /sample rate/);
 });
+
+test('the work for a second of speech does not grow with the sample rate', () => {
+  /** The fastest of a few runs, so a busy machine does not tip it. */
+  const best = (sampleRate: number) => {
+    const input = toneAt(sampleRate, 2, 120);
+    let fastest = Infinity;
+    for (let run = 0; run < 3; run++) {
+      const start = performance.now();
+      stretch(input, 1.5, sampleRate);
+      fastest = Math.min(fastest, performance.now() - start);
+    }
+    return fastest;
+  };
+  best(24000);
+  // Compared at every sample of a piece, 192 kHz takes 64 times as long as 24 kHz; held to a few times it keeps up on a phone.
+  const ratio = best(192000) / best(24000);
+  assert.ok(ratio < 8, `192 kHz takes ${ratio.toFixed(1)} times as long as 24 kHz`);
+});

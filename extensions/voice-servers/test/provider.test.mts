@@ -351,6 +351,13 @@ test("raw PCM reaches voice mode at its rate: streamed as 44.1 kHz from the serv
   upstream.answers.set("/v1/audio/speech", { type: "audio/pcm", headers: { "x-sample-rate": "300000" }, body: SAMPLES });
   const tooFast = await speech("Hello");
   assert.deepEqual([tooFast.status, (await tooFast.json()).error], [502, "Voice servers answered audio at 300000 Hz: voice mode plays 8000 to 192000 Hz"]);
+  // Stereo raw PCM would play as mono at twice the length: the channel count is not passed on, so it is refused here.
+  for (const type of ["audio/pcm;rate=44100;channels=2", 'audio/pcm; channels="2"']) {
+    upstream.answers.set("/v1/audio/speech", { type, body: SAMPLES });
+    const stereo = await speech("Hello");
+    assert.deepEqual([stereo.status, (await stereo.json()).error], [502, "The speech server answered audio with 2 channels: voice mode plays mono"], type);
+  }
+  assert.deepEqual(await rateOf({ type: "audio/pcm;rate=44100;channels=1" }), [200, "audio/pcm", "44100", SAMPLES]);
 });
 
 test("Breeze busy with a phrase before is asked again until it answers, and an answer that is not PCM is refused", async () => {

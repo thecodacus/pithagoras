@@ -568,6 +568,7 @@ These are the formats a speech server may answer in:
   samples or more than two channels say, is refused, and voice mode names what
   the server sent, as in *Expected mono or stereo 16-bit integer or 32-bit
   float audio from Voice servers, got mono 24-bit integer audio at 44100 Hz*.
+  A WAV is read whole, up to 64 MB; a server that sends more is let go of.
 - **Raw PCM** (mono, signed 16-bit little-endian), streamed. It has no header,
   so its rate is the one the server says, in an `x-sample-rate` header or a
   `rate=` parameter of its content type (`audio/pcm;rate=44100`). A server that

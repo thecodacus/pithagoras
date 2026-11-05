@@ -14,7 +14,7 @@
  *                                       raw PCM at 44100 Hz that says so in its content type, streamed in two pieces,
  *                                       "pcm300k": raw PCM at a rate no one plays, "pcmStereo": raw PCM that says it
  *                                       has two channels, "wav": 24 kHz, "wav22k", "wav44k", "wav48kStereoFloat" and
- *                                       "wav24bit" WAVs, "text", "notOk", "notResponse", "throws", or "hangs", which
+ *                                       "wav24bit" WAVs, "wavEndless": a WAV that streams on without end and without a length, "text", "notOk", "notResponse", "throws", or "hangs", which
  *                                       `transcribe` does too), whether `state` throws, what
  *                                       it answers in place of its own (null for its own), and whether `use(true)` fails
  *                                       or never settles
@@ -138,6 +138,16 @@ export default function (portal) {
           return audio("audio/wav", wav({ rate: 48000, float: true, channels: 2 }));
         case "wav24bit":
           return audio("audio/wav", wav({ rate: 44100, bits: 24 }));
+        case "wavEndless": {
+          // A WAV body that goes on for ever and says no length, one megabyte at a time, read only as it is asked for.
+          const stream = new ReadableStream({ pull: (controller) => controller.enqueue(new Uint8Array(1 << 20)) });
+          const cancel = stream.cancel.bind(stream);
+          stream.cancel = (reason) => {
+            asked.cancelled++;
+            return cancel(reason);
+          };
+          return new Response(stream, { headers: { "content-type": "audio/wav" } });
+        }
         case "text":
           return audio("text/plain", Buffer.from("not audio"));
         case "notOk":

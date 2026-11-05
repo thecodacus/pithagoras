@@ -17,11 +17,16 @@
 
 import { DEFAULT_SAMPLE_RATE, joinSamples } from "./samples";
 
-/** The sizes of the pieces, in samples, for one sample rate: 40 ms a piece, laid down every 20, lined up within 10 either way. */
+/**
+ * The sizes of the pieces, in samples, for one sample rate: 40 ms a piece, laid down every 20, lined up within 10 either
+ * way. Lining up compares samples `compare` apart and tries positions `search` apart (then every one around the best),
+ * which keeps the work for a second of speech the same at any rate: 24 kHz is searched as it always was.
+ */
 function sizes(sampleRate: number) {
   const hop = Math.round(sampleRate * 0.02);
+  const search = Math.max(1, Math.round(sampleRate / 24000));
   // Half a frame is what a window is overlapped by, so the frame is two of them.
-  return { frame: hop * 2, hop, tolerance: Math.round(sampleRate * 0.01) };
+  return { frame: hop * 2, hop, tolerance: Math.round(sampleRate * 0.01), search, compare: 2 * search };
 }
 
 /** A periodic Hann window: two of them half a frame apart add up to exactly one. */
@@ -37,7 +42,7 @@ function windowOf(frame: number): Float32Array {
 }
 
 export class TimeStretch {
-  private readonly size: { frame: number; hop: number; tolerance: number };
+  private readonly size: ReturnType<typeof sizes>;
   private readonly window: Float32Array;
   /** Input so far, after half a frame of silence (so the first piece does not fade in). */
   private input: Float32Array;
@@ -76,19 +81,30 @@ export class TimeStretch {
     this.length += samples.length;
   }
 
+  /** How well a piece taken from `at` goes on from what the last one would have gone on to. */
+  private overlap(natural: number, at: number): number {
+    let sum = 0;
+    for (let i = 0; i < this.size.hop; i += this.size.compare) sum += this.input[natural + i] * this.input[at + i];
+    return sum;
+  }
+
   /** Where the next piece lines up best with what the last one would have gone on to. */
   private align(ideal: number, limit: number): number {
     if (this.frame === 0) return 0;
-    const { hop, tolerance } = this.size;
+    const { hop, tolerance, search } = this.size;
     const natural = this.previous + hop;
-    let best = ideal, score = -Infinity;
     const from = Math.max(0, ideal - tolerance), to = Math.min(limit, ideal + tolerance);
-    for (let at = from; at <= to; at++) {
-      let sum = 0;
-      for (let i = 0; i < hop; i += 2) sum += this.input[natural + i] * this.input[at + i];
-      if (sum > score) { score = sum; best = at; }
-    }
-    return best;
+    const bestOf = (first: number, last: number, step: number, fallback: number) => {
+      let best = fallback, score = -Infinity;
+      for (let at = first; at <= last; at += step) {
+        const sum = this.overlap(natural, at);
+        if (sum > score) { score = sum; best = at; }
+      }
+      return best;
+    };
+    // Coarse over the whole range, then every position a step either way of the best.
+    const coarse = bestOf(from, to, search, ideal);
+    return search === 1 ? coarse : bestOf(Math.max(from, coarse - search + 1), Math.min(to, coarse + search - 1), 1, coarse);
   }
 
   /** Lay down every piece the input so far is enough for. */

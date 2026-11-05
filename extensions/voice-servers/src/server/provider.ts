@@ -93,6 +93,12 @@ async function speak(text: string, { voice, signal }: { voice?: string; signal: 
     await upstream.body?.cancel();
     throw new Error(`The speech server answered ${type || "no type"}, not the PCM Breeze streams`);
   }
+  // Only the rate is passed on, so the core cannot see a channel count of the type: mono is checked here.
+  const channels = /;\s*channels\s*=\s*"?([^";\s]*)/i.exec(type)?.[1];
+  if (channels !== undefined && channels !== "1") {
+    await upstream.body?.cancel();
+    throw new Error(`The speech server answered audio with ${channels} channels: voice mode plays mono`);
+  }
   // Voice mode checks that it is a rate it plays.
   const rate = upstream.headers.get("x-sample-rate") ?? /;\s*rate\s*=\s*"?([^";\s]*)/i.exec(type)?.[1] ?? String(s.rawSampleRate ?? RAW_RATE_DEFAULT);
   return new Response(upstream.body, { headers: { "content-type": "audio/pcm", "x-sample-rate": rate } });

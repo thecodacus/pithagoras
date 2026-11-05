@@ -87,6 +87,28 @@ function withInstructions<T extends { responseInstructions?: string; skipThinkin
 /** The largest WAV answer read whole: minutes of speech at the highest rate, far more than a phrase of 600 characters. */
 const MAX_WAV_BYTES = 64 * 1024 * 1024;
 /**
+ * A WAV answer read whole, but counted as it comes: a source that streams on without end (and says no length) is let go
+ * of at the limit, not buffered until the portal runs out of memory.
+ */
+async function readWav(answer: Response, label: string): Promise<Buffer> {
+  const tooMuch = () => new Error(`${label} answered more than ${MAX_WAV_BYTES >> 20} MB of audio`);
+  if (Number(answer.headers.get("content-length")) > MAX_WAV_BYTES) throw tooMuch();
+  if (!answer.body) return Buffer.alloc(0);
+  const reader = answer.body.getReader();
+  const pieces: Uint8Array[] = [];
+  let bytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytes += value.length;
+      if (bytes > MAX_WAV_BYTES) throw tooMuch();
+      pieces.push(value);
+    }
+  } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
+  return Buffer.concat(pieces);
+}
+/**
  * The rate of raw PCM, which has no header of its own: what the source says in an `x-sample-rate` header, else in a
  * `rate=` parameter of the content type, else 24 kHz, as a source that says nothing has always been played. Throws
  * where it is not a rate voice mode plays, or the PCM is not mono.
@@ -321,9 +343,7 @@ export function voiceRouter(): Router {
       const headers = { "Content-Type": "audio/pcm", "X-Sample-Format": "s16le", "Cache-Control": "no-store", "X-Accel-Buffering": "no" };
       // A WAV is read whole and checked, and its samples sent on at the rate its header gives.
       if (/^audio\/(wav|x-wav|wave|vnd\.wave)\b/.test(type)) {
-        if (Number(answer.headers.get("content-length")) > MAX_WAV_BYTES) throw new Error(`${label} answered more than ${MAX_WAV_BYTES >> 20} MB of audio`);
-        const wav = Buffer.from(await answer.arrayBuffer());
-        if (wav.length > MAX_WAV_BYTES) throw new Error(`${label} answered more than ${MAX_WAV_BYTES >> 20} MB of audio`);
+        const wav = await readWav(answer, label);
         const { rate, pcm } = wavAudio(wav, label);
         return res.set({ ...headers, "X-Sample-Rate": String(rate), "Server-Timing": `tts_headers;dur=${(performance.now() - started).toFixed(1)}` }).send(pcm);
       }

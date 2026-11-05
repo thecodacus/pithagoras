@@ -187,6 +187,7 @@ test("what voice mode cannot play is a 502 that names the source, and what it an
     ["pcm300k", "Speaker answered audio at 300000 Hz: voice mode plays 8000 to 192000 Hz", 1],
     ["pcmStereo", "Speaker answered audio with 2 channels: voice mode plays mono", 1],
     ["wav24bit", "Expected mono or stereo 16-bit integer or 32-bit float audio from Speaker, got mono 24-bit integer audio at 44100 Hz", 1],
+    ["wavEndless", "Speaker answered more than 64 MB of audio", 1],
     ["text", "Speaker answered text/plain: voice mode plays audio/pcm or audio/wav", 1],
     ["notOk", "Speaker answered HTTP 500", 1],
     ["notResponse", "Speaker gave no audio", 0],
