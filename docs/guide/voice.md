@@ -565,6 +565,12 @@ assistant text arrives, without waiting for the full reply. The browser buffers
 each spoken sentence or bounded phrase before playing it as one continuous
 buffer.
 
+A reply is cut at sentence ends, not at common abbreviations such as "z. B.",
+"bzw.", "ca.", "e.g." or "Dr.", and not after a day or ordinal number as in "am
+3. November". A sentence that runs past about 220 characters without an end is cut
+at its last comma, semicolon or colon, or at a space if it has none, so the pause
+falls where a reader would pause.
+
 This avoids interruptions within
 words when speech is generated slower than playback. The full text response does
 not need to finish.

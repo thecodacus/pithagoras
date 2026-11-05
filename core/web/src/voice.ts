@@ -58,8 +58,29 @@ export class StreamingSpeech {
   }
 }
 
+// Past this many characters without a sentence end, a long sentence is cut where a reader pauses.
+const LONG_SENTENCE = 220;
+// A comma that early would leave a stub, so such a sentence is cut at the space instead.
+const MIN_SOFT_CUT = 40;
+// Titles and common German and English abbreviations; a word that only ends like one is not caught.
+// A single letter covers initials and the pieces of "z. B.", "d. h.", "u. a." and "o. ä.".
+const ABBREVIATION = /(?<![\p{L}\p{N}])(?:mr|mrs|ms|dr|prof|st|vs|etc|bzw|bspw|ca|usw|ggf|ggfs|evtl|inkl|exkl|zzgl|vgl|nr|str|abb|tel|std|sog|mio|mrd|approx|incl|esp|fig|\p{L})\.$/iu;
+const MONTH = /^(?:Januar|Februar|März|April|Mai|Juni|Juli|August|September|Oktober|November|Dezember)(?!\p{L})/u;
+
+/**
+ * "am 3. November", "1. Platz": a day or ordinal number is no sentence end when a lower-case word,
+ * a number or a month follows. Undefined while the next word has not arrived yet.
+ */
+function ordinalDot(text: string, i: number): boolean | undefined {
+  if (!/(?<![\d.,])\d{1,2}$/.test(text.slice(0, i))) return false;
+  const word = text.slice(i + 1).match(/^\s+(\S+)(\s?)/u);
+  if (!word) return undefined;
+  if (/^[\p{Ll}\d]/u.test(word[1])) return true;
+  return word[2] ? MONTH.test(word[1]) : undefined;
+}
+
 function speechBoundary(text: string): number {
-  let fence = false, inline = false, brackets = 0, link = false, end = 0;
+  let fence = false, inline = false, brackets = 0, link = false, end = 0, soft = 0;
   for (let i = 0; i < text.length; i++) {
     if (text.startsWith('```', i)) { fence = !fence; i += 2; continue; }
     if (fence) continue;
@@ -69,11 +90,14 @@ function speechBoundary(text: string): number {
     if (text[i] === ']') { brackets = Math.max(0, brackets - 1); if (text[i + 1] === '(') link = true; }
     if (link) { if (text[i] === ')') link = false; continue; }
     if (brackets) continue;
+    if (/[,;:]/.test(text[i]) && /\s/.test(text[i + 1] || '')) soft = i + 1;
     const punctuation = /[.!?。！？]/.test(text[i]);
     const boundary = punctuation && (/[。！？]/.test(text[i]) || /\s/.test(text[i + 1] || ''));
-    // Avoid common title/initial/decimal breaks; the next sentence or completion flushes them.
-    const abbreviation = text[i] === '.' && /(?:\b(?:Mr|Mrs|Ms|Dr|Prof|St|vs|etc)|\b[A-Za-z])\.$/i.test(text.slice(0, i + 1));
-    if ((boundary && !abbreviation) || text[i] === '\n' || text[i] === '—' || (i >= 240 && /\s/.test(text[i]))) return i + 1;
+    // Avoid abbreviation, initial, decimal and ordinal breaks; the next sentence or completion flushes them.
+    // An ordinal still waiting for its next word is held back the same way.
+    const abbreviation = text[i] === '.' && (ABBREVIATION.test(text.slice(0, i + 1)) || ordinalDot(text, i) !== false);
+    if ((boundary && !abbreviation) || text[i] === '\n' || text[i] === '—') return i + 1;
+    if (i >= LONG_SENTENCE && /\s/.test(text[i])) return soft >= MIN_SOFT_CUT ? soft : i + 1;
   }
   return end;
 }
