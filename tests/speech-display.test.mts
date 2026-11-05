@@ -37,6 +37,7 @@ test('German and English abbreviations and ordinals do not end a spoken phrase',
    'Siehe Nr. 5 und vgl. Abb. 3, ggf. evtl. inkl. Versand.',
    'Das Treffen ist am 3. November um zehn Uhr, danach gibt es Essen.',
    'Er kam am 1. dann am 2. und wieder am 3. mit dem Zug an.',
+   'Beim Rennen kam er auf den 1. Platz und wohnt im 3. Stock des Hauses.',
    'Mr. Smith and Dr. Meyer said so, e.g. in the first half of the year.',
   ];
   assert.deepEqual(phrases(sentences.join(' '), step), sentences);
@@ -45,6 +46,10 @@ test('German and English abbreviations and ordinals do not end a spoken phrase',
 test('words that only end like an abbreviation, and real sentence ends, still cut', () => {
  const text = 'Das ist ein Gebiet. Er mag die Oma. Wir haben 3 Äpfel. Danach gehen wir heim.';
  assert.deepEqual(phrases(text), ['Das ist ein Gebiet.', 'Er mag die Oma.', 'Wir haben 3 Äpfel.', 'Danach gehen wir heim.']);
+ // Words that are real words or units are no abbreviation; a number before a capital word outside an ordinal slot ends the sentence.
+ const ends = ['Die Latenz ist 20 ms.', 'Er aß eine reife fig.', 'Ich bin heute genau 25.', 'Morgen gehen wir heim.'];
+ assert.deepEqual(phrases(ends.join(' ')), ends);
+ assert.deepEqual(phrases(ends.join(' '), 5), ends);
  assert.deepEqual(phrases('I have 3 apples. Then I leave now. Is that really so? Yes, it is so.', 4), ['I have 3 apples.', 'Then I leave now.', 'Is that really so?', 'Yes, it is so.']);
 });
 test('a long sentence is cut at its last comma before 220 characters', () => {

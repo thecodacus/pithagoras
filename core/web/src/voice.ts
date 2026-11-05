@@ -64,15 +64,20 @@ const LONG_SENTENCE = 220;
 const MIN_SOFT_CUT = 40;
 // Titles and common German and English abbreviations; a word that only ends like one is not caught.
 // A single letter covers initials and the pieces of "z. B.", "d. h.", "u. a." and "o. ä.".
-const ABBREVIATION = /(?<![\p{L}\p{N}])(?:mr|mrs|ms|dr|prof|st|vs|etc|bzw|bspw|ca|usw|ggf|ggfs|evtl|inkl|exkl|zzgl|vgl|nr|str|abb|tel|std|sog|mio|mrd|approx|incl|esp|fig|\p{L})\.$/iu;
+const ABBREVIATION = /(?<![\p{L}\p{N}])(?:mr|mrs|dr|prof|vs|etc|bzw|bspw|ca|usw|ggf|evtl|inkl|vgl|nr|abb|\p{L})\.$/iu;
+// Words that stand before an ordinal, so a capitalised German noun after it ("im 3. Stock") is no sentence start.
+const BEFORE_ORDINAL = /(?<![\p{L}\p{N}])(?:am|im|vom|zum|zur|beim|der|die|das|dem|den|des|ab|seit)\s+\d{1,2}$/iu;
 const MONTH = /^(?:Januar|Februar|März|April|Mai|Juni|Juli|August|September|Oktober|November|Dezember)(?!\p{L})/u;
 
 /**
- * "am 3. November", "1. Platz": a day or ordinal number is no sentence end when a lower-case word,
- * a number or a month follows. Undefined while the next word has not arrived yet.
+ * "am 3. November", "im 3. Stock": a day or ordinal number is no sentence end after an article or
+ * preposition, or when a lower-case word, a number or a month follows. Undefined while the next
+ * word has not arrived yet.
  */
 function ordinalDot(text: string, i: number): boolean | undefined {
-  if (!/(?<![\d.,])\d{1,2}$/.test(text.slice(0, i))) return false;
+  const before = text.slice(0, i);
+  if (!/(?<![\d.,])\d{1,2}$/.test(before)) return false;
+  if (BEFORE_ORDINAL.test(before)) return true;
   const word = text.slice(i + 1).match(/^\s+(\S+)(\s?)/u);
   if (!word) return undefined;
   if (/^[\p{Ll}\d]/u.test(word[1])) return true;
