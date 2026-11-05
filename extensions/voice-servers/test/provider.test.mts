@@ -128,7 +128,7 @@ test("a phrase is sent as OpenAI's speech takes it, asking for WAV, and the answ
   await assert.rejects(provider.speak("Hello", { signal }), { message: "No speech synthesis address is set" });
 });
 
-test("voice mode plays a 24 kHz WAV, and refuses one at another rate", async () => {
+test("voice mode plays a WAV at the rate it says, 24 kHz or not, and refuses one it cannot read", async () => {
   answering();
   await put({ sttUrl: RECOGNITION, ttsUrl: SPEECH });
   const played = await speech("Hello");
@@ -136,9 +136,20 @@ test("voice mode plays a 24 kHz WAV, and refuses one at another rate", async () 
   assert.equal(played.headers.get("content-type"), "audio/pcm");
   assert.equal(played.headers.get("x-sample-rate"), "24000");
   assert.deepEqual(Buffer.from(await played.arrayBuffer()), SAMPLES);
-  upstream.answers.set("/v1/audio/speech", { type: "audio/wav", body: wav(SAMPLES, 22050) });
+  // Another rate is played at that rate, with the setting for raw audio beside the point.
+  await put({ sttUrl: RECOGNITION, ttsUrl: SPEECH, rawSampleRate: 16000 });
+  for (const rate of [22050, 44100, 48000]) {
+    upstream.answers.set("/v1/audio/speech", { type: "audio/wav", body: wav(SAMPLES, rate) });
+    const other = await speech("Hello");
+    assert.deepEqual([other.status, other.headers.get("content-type"), other.headers.get("x-sample-rate")], [200, "audio/pcm", String(rate)]);
+    assert.deepEqual(Buffer.from(await other.arrayBuffer()), SAMPLES);
+  }
+  upstream.answers.set("/v1/audio/speech", { type: "audio/wav", body: Buffer.from("not a recording") });
   const refused = await speech("Hello");
-  assert.deepEqual([refused.status, await refused.json()], [502, { error: "Expected mono 24 kHz 16-bit audio from Voice servers" }]);
+  assert.deepEqual([refused.status, await refused.json()], [502, { error: "Voice servers returned invalid WAV audio" }]);
+  upstream.answers.set("/v1/audio/speech", { type: "audio/wav", body: wav(SAMPLES, 4000) });
+  const slow = await speech("Hello");
+  assert.deepEqual([slow.status, (await slow.json()).error], [502, "Expected audio from 8000 to 192000 Hz from Voice servers, got mono 16-bit integer audio at 4000 Hz"]);
 });
 
 test("a server that fails, or answers without a transcript, is said so", async () => {
@@ -289,7 +300,67 @@ test("Breeze-TTS's own server is sent its form: the text, the description, guida
   assert.deepEqual(await formOf((await sent()).last), { text: "Hello there", cfg_scale: "4", seed: "42" });
 });
 
-test("Breeze busy with a phrase before is asked again until it answers, and an answer that is not 24 kHz PCM is refused", async () => {
+test("raw PCM has no header: its rate is the one the server says in a header or its content type, else the one set for raw audio, else 24 kHz", async () => {
+  await custom(true);
+  await put({ sttUrl: RECOGNITION, ttsUrl: SPEECH, ttsModel: "breeze" });
+  await server("breeze-audiocpp");
+  const signal = new AbortController().signal;
+  /** The rate the PCM voice mode is given is labelled with, for what the speech server answered. */
+  const rateOf = async (answer: { type: string; headers?: Record<string, string> }) => {
+    upstream.answers.set("/v1/audio/speech", { ...answer, body: SAMPLES });
+    const spoken = await provider.speak("Hello", { signal });
+    assert.equal(spoken.headers.get("content-type"), "audio/pcm");
+    assert.deepEqual(Buffer.from(await spoken.arrayBuffer()), SAMPLES);
+    return spoken.headers.get("x-sample-rate");
+  };
+  const octets = { type: "application/octet-stream" };
+  // Nothing said, nothing set: 24 kHz, as audio.cpp's Breeze speaks.
+  assert.equal(await rateOf(octets), "24000");
+  assert.equal(await rateOf({ type: "audio/pcm" }), "24000");
+  // The setting is what raw audio is at where the server says nothing.
+  await put({ sttUrl: RECOGNITION, ttsUrl: SPEECH, ttsModel: "breeze", rawSampleRate: 44100 });
+  assert.equal(await rateOf(octets), "44100");
+  assert.equal(await rateOf({ type: "audio/pcm" }), "44100");
+  // What the server says wins over it: a header first, then a parameter of the type.
+  assert.equal(await rateOf({ type: "audio/pcm", headers: { "x-sample-rate": "48000" } }), "48000");
+  assert.equal(await rateOf({ type: "audio/pcm;rate=22050" }), "22050");
+  assert.equal(await rateOf({ type: 'audio/pcm; channels=1; rate="16000"' }), "16000");
+  assert.equal(await rateOf({ type: "application/octet-stream;rate=32000", headers: { "x-sample-rate": "8000" } }), "8000");
+  // Breeze's own server is the same.
+  await server("breeze-tts");
+  assert.equal(await rateOf(octets), "44100");
+  assert.equal(await rateOf({ type: "audio/pcm", headers: { "x-sample-rate": "48000" } }), "48000");
+  // A fixed-voice server that answers raw PCM, though a WAV was asked for, is played too.
+  await server("fixed");
+  assert.equal(await rateOf({ type: "audio/pcm", headers: { "x-sample-rate": "48000" } }), "48000");
+  assert.equal(await rateOf({ type: "audio/pcm" }), "44100");
+});
+
+test("raw PCM reaches voice mode at its rate: streamed as 44.1 kHz from the server, or from the setting, and a rate that is not played is refused", async () => {
+  await custom(true);
+  await put({ sttUrl: RECOGNITION, ttsUrl: SPEECH, ttsModel: "breeze", rawSampleRate: 44100 });
+  await server("breeze-audiocpp");
+  const rateOf = async (answer: { type: string; headers?: Record<string, string> }) => {
+    upstream.answers.set("/v1/audio/speech", { ...answer, body: SAMPLES });
+    const played = await speech("Hello");
+    return [played.status, played.headers.get("content-type"), played.headers.get("x-sample-rate"), Buffer.from(await played.arrayBuffer())];
+  };
+  assert.deepEqual(await rateOf({ type: "application/octet-stream" }), [200, "audio/pcm", "44100", SAMPLES]);
+  assert.deepEqual(await rateOf({ type: "audio/pcm", headers: { "x-sample-rate": "48000" } }), [200, "audio/pcm", "48000", SAMPLES]);
+  assert.deepEqual(await rateOf({ type: "audio/pcm;rate=22050" }), [200, "audio/pcm", "22050", SAMPLES]);
+  upstream.answers.set("/v1/audio/speech", { type: "audio/pcm", headers: { "x-sample-rate": "300000" }, body: SAMPLES });
+  const tooFast = await speech("Hello");
+  assert.deepEqual([tooFast.status, (await tooFast.json()).error], [502, "Voice servers answered audio at 300000 Hz: voice mode plays 8000 to 192000 Hz"]);
+  // Stereo raw PCM would play as mono at twice the length: the channel count is not passed on, so it is refused here.
+  for (const type of ["audio/pcm;rate=44100;channels=2", 'audio/pcm; channels="2"']) {
+    upstream.answers.set("/v1/audio/speech", { type, body: SAMPLES });
+    const stereo = await speech("Hello");
+    assert.deepEqual([stereo.status, (await stereo.json()).error], [502, "The speech server answered audio with 2 channels: voice mode plays mono"], type);
+  }
+  assert.deepEqual(await rateOf({ type: "audio/pcm;rate=44100;channels=1" }), [200, "audio/pcm", "44100", SAMPLES]);
+});
+
+test("Breeze busy with a phrase before is asked again until it answers, and an answer that is not PCM is refused", async () => {
   await custom(true);
   await put({ sttUrl: RECOGNITION, ttsUrl: SPEECH, ttsModel: "breeze" });
   const signal = new AbortController().signal;
@@ -308,8 +379,6 @@ test("Breeze busy with a phrase before is asked again until it answers, and an a
   await put({ sttUrl: RECOGNITION, ttsUrl: SPEECH, ttsModel: "breeze" });
   upstream.answers.set("/v1/audio/speech", { type: "audio/wav", body: wav(SAMPLES, 24000) });
   await assert.rejects(provider.speak("Hello", { signal }), { message: "The speech server answered audio/wav, not the PCM Breeze streams" });
-  upstream.answers.set("/v1/audio/speech", { type: "audio/pcm", headers: { "x-sample-rate": "48000" }, body: SAMPLES });
-  await assert.rejects(provider.speak("Hello", { signal }), { message: "The speech server answered audio at 48000 Hz: voice mode plays 24 kHz" });
   upstream.answers.set("/v1/audio/speech", { status: 400, body: JSON.stringify({ error: "speech streaming requires a model configured with mode=streaming" }) });
   await assert.rejects(provider.speak("Hello", { signal }), { message: "The speech server answered HTTP 400" });
   // A server with fixed voices is asked once: a 409 there is its answer.

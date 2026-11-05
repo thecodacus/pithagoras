@@ -90,7 +90,7 @@ test('the addresses, models and voices are typed in and saved together, and Esca
   const dialog = await open(page);
   const save = dialog.getByRole('button', { name: 'Save', exact: true });
   await expect(save).toBeDisabled();
-  await expect(dialog.getByText('The speech server has to answer 24 kHz mono WAV.', { exact: false })).toBeVisible();
+  await expect(dialog.getByText('The speech server answers a WAV file, mono or stereo, at 8 to 192 kHz, or raw PCM.', { exact: false })).toBeVisible();
   await dialog.getByLabel('Speech recognition URL').fill('http://127.0.0.1:8178/inference');
   await dialog.getByLabel('Speech recognition model').fill('whisper-1');
   await dialog.getByLabel('Input language').fill('de');
@@ -98,6 +98,10 @@ test('the addresses, models and voices are typed in and saved together, and Esca
   await dialog.getByLabel('Dictation model').fill('accurate');
   await dialog.getByLabel('Speech synthesis URL').fill('http://127.0.0.1:8880/v1/audio/speech');
   await dialog.getByLabel('Speech synthesis model').fill('kokoro');
+  // Empty, it is 24000: the field says so, and says what it is for.
+  await expect(dialog.getByLabel('Sample rate of raw audio')).toHaveAttribute('placeholder', '24000');
+  await expect(dialog.getByText('Used when the speech server streams raw audio', { exact: false })).toBeVisible();
+  await dialog.getByLabel('Sample rate of raw audio').fill('44100');
   await dialog.getByRole('textbox', { name: 'Voices' }).fill('af_heart\nbm_george = George\n\n');
   // Custom voices are off: their switch, and nothing else of them.
   await expect(dialog.getByRole('switch', { name: 'Custom voices' })).not.toBeChecked();
@@ -122,7 +126,7 @@ test('the addresses, models and voices are typed in and saved together, and Esca
     body: {
       sttUrl: 'http://127.0.0.1:8178/inference', sttModel: 'whisper-1', language: 'de',
       dictationUrl: 'http://127.0.0.1:8179/inference', dictationModel: 'accurate',
-      ttsUrl: 'http://127.0.0.1:8880/v1/audio/speech', ttsModel: 'kokoro',
+      ttsUrl: 'http://127.0.0.1:8880/v1/audio/speech', ttsModel: 'kokoro', rawSampleRate: '44100',
       voices: [{ id: 'af_heart', name: 'af_heart' }, { id: 'bm_george', name: 'George' }], voice: 'bm_george',
     },
   }]);
@@ -301,7 +305,8 @@ test.describe('in a browser set to German', () => {
     await portal(page, { sttUrl: 'http://127.0.0.1:8178/inference' });
     await page.goto('/settings/x/pithagoras-voice-servers');
     const dialog = page.getByRole('dialog', { name: 'Einstellungen' });
-    await expect(dialog.getByText('Der Sprachserver muss 24-kHz-Mono-WAV liefern.', { exact: false })).toBeVisible();
+    await expect(dialog.getByText('Der Sprachserver antwortet mit einer WAV-Datei, Mono oder Stereo, mit 8 bis 192 kHz, oder mit rohem PCM.', { exact: false })).toBeVisible();
+    await expect(dialog.getByLabel('Abtastrate von rohem Audio')).toHaveAttribute('placeholder', '24000');
     await expect(dialog.getByLabel('URL der Spracherkennung')).toHaveValue('http://127.0.0.1:8178/inference');
     await expect(dialog.getByRole('button', { name: 'Für den Sprachmodus verwenden' })).toBeEnabled();
     await expect(dialog.getByRole('button', { name: 'Stimmen vom Server lesen' })).toBeDisabled();

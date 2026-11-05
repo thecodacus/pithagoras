@@ -33,6 +33,8 @@ export interface ServerSettings {
   dictationModel?: string;
   ttsUrl?: string;
   ttsModel?: string;
+  /** Hz: a number as saved, or as typed on the page. */
+  rawSampleRate?: number | string;
   voices?: ServerVoice[];
   voice?: string;
 }

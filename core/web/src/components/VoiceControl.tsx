@@ -13,9 +13,9 @@ import { api, json, type PortalEvent, type PromptOptions } from "../api";
 import { micError } from "../mic-error";
 import type { Item } from "../transcript";
 import { LiveTranscription } from "../live-transcription";
-import { preparePcmSpeech, readPcmStream, playAudioBuffer, bufferOf } from "../pcm-stream";
+import { preparePcmSpeech, readPcmStream, playAudioBuffer, bufferOf, sampleRateOf } from "../pcm-stream";
 import { stretchInSteps } from "../time-stretch";
-import { joinSamples } from "../samples";
+import { DEFAULT_SAMPLE_RATE, joinSamples } from "../samples";
 import { asksToRepeat, couldAskToRepeat } from "../voice-commands";
 import { isImage, pending, type Attachment } from "../attachments";
 import { VOICE_RATES } from "./VoiceSettings";
@@ -186,7 +186,7 @@ export function VoiceControl({ sessionId, folder, items, running, work, onSend, 
   };
   const maxTurn = useRef<ReturnType<typeof setTimeout>>();
   // The spoken error line, asked for as voice mode started, in the chat's own voice: its audio once it is there, or nothing.
-  const errorLine = useRef<{ ready: Promise<ArrayBuffer | undefined> } | null>(null);
+  const errorLine = useRef<{ ready: Promise<{ bytes: ArrayBuffer; sampleRate: number } | undefined> } | null>(null);
 
   useEffect(() => {
     if (!error || error !== fadingError || enabled || starting) return;
@@ -377,7 +377,7 @@ export function VoiceControl({ sessionId, folder, items, running, work, onSend, 
       const kept = phrase.stretched;
       // One cut short by an earlier Repeat is worked out again.
       if (kept?.rate === rate && (kept.ready || !kept.signal.aborted)) return kept.samples;
-      const stretched: NonNullable<KeptPhrase["stretched"]> = { rate, signal: controller.signal, samples: stretchInSteps(joinSamples(phrase.samples), rate, controller.signal) };
+      const stretched: NonNullable<KeptPhrase["stretched"]> = { rate, signal: controller.signal, samples: stretchInSteps(joinSamples(phrase.samples), rate, controller.signal, phrase.sampleRate) };
       stretched.samples.then(() => { stretched.ready = true; }, () => {});
       phrase.stretched = stretched;
       return stretched.samples;
@@ -401,14 +401,16 @@ export function VoiceControl({ sessionId, folder, items, running, work, onSend, 
    */
   const prepareErrorLine = (version: number) => {
     const current = () => mounted.current && epoch.current === version;
-    const fetchLine = async (): Promise<ArrayBuffer | undefined> => {
+    const fetchLine = async () => {
       for (let attempt = 0; ; attempt++) {
         try {
           const response = await fetch(`/api/sessions/${sessionId}/voice/speech`, {
             method: "POST", headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ text: t("An error occurred.") }),
           });
-          if (response.ok && response.headers.get("content-type")?.startsWith("audio/pcm")) return await response.arrayBuffer();
+          const sampleRate = sampleRateOf(response.headers);
+          // Kept with the rate it was spoken at, as it is played from the bytes alone.
+          if (response.ok && response.headers.get("content-type")?.startsWith("audio/pcm") && sampleRate) return { bytes: await response.arrayBuffer(), sampleRate };
         } catch {}
         if (attempt >= ERROR_LINE_WAITS_MS.length || !current()) return undefined;
         await new Promise(resolve => setTimeout(resolve, ERROR_LINE_WAITS_MS[attempt]));
@@ -427,11 +429,11 @@ export function VoiceControl({ sessionId, folder, items, running, work, onSend, 
       // It may still be on its way, as the speech model is often just coming up when voice mode begins.
       const line = errorLine.current;
       let timer: ReturnType<typeof setTimeout> | undefined;
-      const bytes = line && await Promise.race([line.ready, new Promise<undefined>(resolve => { timer = setTimeout(() => resolve(undefined), ERROR_LINE_WAIT_MS); })]);
+      const kept = line && await Promise.race([line.ready, new Promise<undefined>(resolve => { timer = setTimeout(() => resolve(undefined), ERROR_LINE_WAIT_MS); })]);
       clearTimeout(timer);
       signal.throwIfAborted();
-      if (!bytes) throw new Error(t("The spoken error line is not available, so the error is shown in writing only. The speech model was not ready when voice mode started."));
-      response = new Response(bytes.slice(0), { headers: { "content-type": "audio/pcm", "x-sample-rate": "24000" } });
+      if (!kept) throw new Error(t("The spoken error line is not available, so the error is shown in writing only. The speech model was not ready when voice mode started."));
+      response = new Response(kept.bytes.slice(0), { headers: { "content-type": "audio/pcm", "x-sample-rate": String(kept.sampleRate) } });
     } else {
       response = await fetch(`/api/sessions/${sessionId}/voice/speech`, {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -448,9 +450,11 @@ export function VoiceControl({ sessionId, folder, items, running, work, onSend, 
     let buffer: AudioBuffer | undefined;
     let stream: Awaited<ReturnType<typeof preparePcmSpeech>> | undefined;
     // Kept for Repeat once it is played; a phrase prepared and then cancelled was never heard.
-    const phrase = { samples: [] as Float32Array[], sampleRate: 24000 };
-    const options = { rate: speed.current, ...(kind === 'reply' ? { record: (samples: Float32Array) => { phrase.samples.push(samples); } } : {}) };
-    if (!response.headers.get("content-type")?.startsWith("audio/pcm") || response.headers.get("x-sample-rate") !== "24000" || !body) throw new Error(t("Unsupported speech stream"));
+    // Made at the rate the speech server speaks at: the audio context resamples it to its output.
+    const sampleRate = sampleRateOf(response.headers);
+    const phrase = { samples: [] as Float32Array[], sampleRate: sampleRate ?? DEFAULT_SAMPLE_RATE };
+    const options = { rate: speed.current, sampleRate: phrase.sampleRate, ...(kind === 'reply' ? { record: (samples: Float32Array) => { phrase.samples.push(samples); } } : {}) };
+    if (!response.headers.get("content-type")?.startsWith("audio/pcm") || !sampleRate || !body) throw new Error(t("Unsupported speech stream"));
     // Played as it arrives, unless the pipeline speaks one phrase after another.
     if (!sequential.current) stream = await preparePcmSpeech(body, audio, signal, options);
     else buffer = await readPcmStream(body, audio, signal, options);

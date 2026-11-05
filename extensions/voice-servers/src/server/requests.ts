@@ -45,7 +45,7 @@ export function offered(s: Pick<Settings, "voices" | "customVoices" | "speechSer
     .map(({ id, name }) => ({ id, name }));
 }
 
-/** A request for one phrase: a JSON body or a form, and whether it is answered with raw 24 kHz PCM as it speaks rather than a WAV. */
+/** A request for one phrase: a JSON body or a form, and whether it is answered with raw PCM as it speaks rather than a WAV. */
 export type SpeechRequest = { json: Record<string, unknown>; pcm: boolean } | { form: FormData; pcm: boolean };
 
 /** A clone's recording, as audio.cpp takes it inline. */

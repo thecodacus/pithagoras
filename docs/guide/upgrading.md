@@ -742,7 +742,7 @@ addresses:
   is gone. `GET /api/voice` answers the source, its voices and voice mode's own
   settings, with no addresses, `runtime`, `providers`, `managed` or `lazyLoad`;
   `PUT /api/voice` takes those settings alone, and `DELETE /api/voice/provider`
-  stops using the source. `…/voice/speech` answers 24 kHz PCM, never WAV (see
+  stops using the source. `…/voice/speech` answers PCM (with its rate in `X-Sample-Rate`), never WAV (see
   [Voice](/reference/api#voice)). A script that used the old addresses needs the
   new ones.
 - `VOICE_GPU`, `VOICE_VRAM_RESERVE_MIB`, `NVIDIA_SMI`, `PORTAL_CONTAINER_NAME`
