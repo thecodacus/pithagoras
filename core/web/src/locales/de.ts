@@ -833,6 +833,7 @@ const de: Locale = {
     "Keep this order": "Diese Reihenfolge behalten",
     "Move {option} up": "{option} nach oben",
     "Move {option} down": "{option} nach unten",
+    "Expand": "Ausklappen",
     // components/VoiceModeSettings.tsx, SandboxSettings.tsx
     "Same as the chat": "Wie der Chat",
     "Applying…": "Wird angewendet…",
