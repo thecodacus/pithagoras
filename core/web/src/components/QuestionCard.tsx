@@ -46,9 +46,9 @@ function answerOf(q: AgentQuestion, d: Draft): string | string[] | undefined {
  * The agent asking the person several things at once: choose one, choose several, type, or put options in order.
  * Drawn in the chat above the message box, not over the page: the rest of the page stays as it is, and Esc
  * closes nothing. A big card covers the chat behind it, so it can be minimized to its heading to keep reading,
- * and the draft is kept while it is away. The server keeps the question until it ends, so it is back after a
- * reload. It answers the same request route as an extension's menu (see ExtensionDialog), with the answers by
- * question.
+ * and the draft and the list's place are kept while it is away. The server keeps the question until it ends, so
+ * it is back after a reload. It answers the same request route as an extension's menu (see ExtensionDialog),
+ * with the answers by question.
  */
 export function QuestionCard({
   sessionId,
@@ -68,6 +68,9 @@ export function QuestionCard({
   const [error, setError] = useState("");
   const [minimized, setMinimized] = useState(false);
   const card = useRef<HTMLElement>(null);
+  const toggle = useRef<HTMLButtonElement>(null);
+  const list = useRef<HTMLDivElement>(null);
+  const scrolled = useRef(0);
   const heading = title || t("Questions from the agent");
 
   const change = (id: string, patch: Partial<Draft>) => setDrafts((all) => ({ ...all, [id]: { ...all[id], ...patch } }));
@@ -121,6 +124,17 @@ export function QuestionCard({
     if (el) arrows.current.set(key, el);
     else arrows.current.delete(key);
   };
+  // Fold the card to its heading so the chat behind it can be read. The draft stays in state, and the list
+  // comes back scrolled to where it was folded.
+  const fold = (m: boolean) => {
+    if (m) scrolled.current = list.current?.scrollTop ?? 0;
+    setMinimized(m);
+  };
+  // Folded, the focus stays on the toggle; unfolded, the list is put back where it was folded.
+  useLayoutEffect(() => {
+    if (minimized) { toggle.current?.focus(); return; }
+    if (list.current) list.current.scrollTop = scrolled.current;
+  }, [minimized]);
 
   return (
     <section
@@ -135,9 +149,11 @@ export function QuestionCard({
         </div>
         <h2 className="min-w-0 flex-1 text-sm font-medium text-fg">{heading}</h2>
         <button
+          ref={toggle}
           type="button"
-          onClick={() => setMinimized((m) => !m)}
+          onClick={() => fold(!minimized)}
           aria-expanded={!minimized}
+          aria-controls={`question-body-${requestId}`}
           aria-label={minimized ? t("Expand") : t("Minimize")}
           className="rounded-md p-1 text-fg-muted transition hover:bg-fg/10"
         >
@@ -146,9 +162,9 @@ export function QuestionCard({
       </header>
 
       {minimized ? null : (
-        <>
+        <div id={`question-body-${requestId}`} className="flex min-h-0 flex-1 flex-col">
       {error && <p role="alert" className="border-b border-line px-4 py-3 text-sm text-danger">{error}</p>}
-      <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4">
+      <div ref={list} className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4">
         {questions.map((q) => {
           const d = drafts[q.id];
           const legend = `${q.question}${q.optional ? ` (${t("optional")})` : ""}`;
@@ -263,7 +279,7 @@ export function QuestionCard({
           <LuCheck className="h-3.5 w-3.5" /> {t("Submit")}
         </button>
       </footer>
-        </>
+        </div>
       )}
     </section>
   );

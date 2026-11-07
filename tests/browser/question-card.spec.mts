@@ -334,6 +334,10 @@ test('a big card can be minimized to its heading, and the draft is kept while it
   // Something is put in, and then the card is folded away to keep reading the chat above it.
   await card.getByRole('radio', { name: /SQLite/ }).check();
   await card.getByRole('textbox', { name: 'Anything else?' }).fill('soon');
+  // The list is scrolled down before it is folded away, so that it comes back where it was folded.
+  const list = card.locator('div.overflow-y-auto');
+  await expect.poll(() => list.evaluate((el) => el.scrollHeight - el.clientHeight)).toBeGreaterThanOrEqual(120);
+  await list.evaluate((el) => { el.scrollTop = 120; });
   const minimize = card.getByRole('button', { name: 'Minimize' });
   await expect(minimize).toHaveAttribute('aria-expanded', 'true');
   await minimize.click();
@@ -351,6 +355,8 @@ test('a big card can be minimized to its heading, and the draft is kept while it
   await expect(submit).toBeVisible();
   await expect(card.getByRole('radio', { name: /SQLite/ })).toBeChecked();
   await expect(card.getByRole('textbox', { name: 'Anything else?' })).toHaveValue('soon');
+  // …and the list where it was folded.
+  await expect.poll(() => list.evaluate((el) => el.scrollTop)).toBe(120);
 });
 
 test('an extension\'s dialog still opens over the page beside a question in the chat', async ({ page }) => {
