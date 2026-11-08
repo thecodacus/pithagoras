@@ -325,6 +325,40 @@ test('a conversation started on the Agent page is asked in the chat the same way
   expect(answered).toEqual([{ id: 'q1', value: { db: 'Postgres' } }]);
 });
 
+test('a big card can be minimized to its heading, and the draft is kept while it is away', async ({ page }) => {
+  await portal(page);
+  const card = await open(page);
+  const submit = card.getByRole('button', { name: 'Submit' });
+  await expect(submit).toBeVisible();
+
+  // Something is put in, and then the card is folded away to keep reading the chat above it.
+  await card.getByRole('radio', { name: /SQLite/ }).check();
+  await card.getByRole('textbox', { name: 'Anything else?' }).fill('soon');
+  // The list is scrolled down before it is folded away, so that it comes back where it was folded.
+  const list = card.locator('div.overflow-y-auto');
+  await expect.poll(() => list.evaluate((el) => el.scrollHeight - el.clientHeight)).toBeGreaterThanOrEqual(120);
+  await list.evaluate((el) => { el.scrollTop = 120; });
+  const minimize = card.getByRole('button', { name: 'Minimize' });
+  await expect(minimize).toHaveAttribute('aria-expanded', 'true');
+  await minimize.click();
+  const expand = card.getByRole('button', { name: 'Expand' });
+  await expect(card).toBeVisible();
+  await expect(expand).toHaveAttribute('aria-expanded', 'false');
+  // Down to its heading: the questions and the buttons are gone, and the card is as short as that heading.
+  await expect(submit).toBeHidden();
+  await expect(card.getByRole('radio', { name: /SQLite/ })).toHaveCount(0);
+  const box = (await card.boundingBox())!;
+  expect(box.height).toBeLessThan(60);
+
+  // Back to it: everything is there as it was, with what was put in.
+  await expand.click();
+  await expect(submit).toBeVisible();
+  await expect(card.getByRole('radio', { name: /SQLite/ })).toBeChecked();
+  await expect(card.getByRole('textbox', { name: 'Anything else?' })).toHaveValue('soon');
+  // …and the list where it was folded.
+  await expect.poll(() => list.evaluate((el) => el.scrollTop)).toBe(120);
+});
+
 test('an extension\'s dialog still opens over the page beside a question in the chat', async ({ page }) => {
   const { answered } = await portal(page);
   const card = await open(page);

@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState } from "react";
-import { LuArrowDown, LuArrowUp, LuCheck, LuMessageCircleQuestion } from "react-icons/lu";
+import { LuArrowDown, LuArrowUp, LuCheck, LuChevronDown, LuChevronUp, LuMessageCircleQuestion } from "react-icons/lu";
 import { api } from "../api";
 import { t } from "../i18n";
 import type { Item } from "../transcript";
@@ -45,8 +45,10 @@ function answerOf(q: AgentQuestion, d: Draft): string | string[] | undefined {
 /**
  * The agent asking the person several things at once: choose one, choose several, type, or put options in order.
  * Drawn in the chat above the message box, not over the page: the rest of the page stays as it is, and Esc
- * closes nothing. The server keeps the question until it ends, so it is back after a reload. It answers the same
- * request route as an extension's menu (see ExtensionDialog), with the answers by question.
+ * closes nothing. A big card covers the chat behind it, so it can be minimized to its heading to keep reading,
+ * and the draft and the list's place are kept while it is away. The server keeps the question until it ends, so
+ * it is back after a reload. It answers the same request route as an extension's menu (see ExtensionDialog),
+ * with the answers by question.
  */
 export function QuestionCard({
   sessionId,
@@ -64,7 +66,11 @@ export function QuestionCard({
   const [drafts, setDrafts] = useState<Record<string, Draft>>(() => Object.fromEntries(questions.map((q) => [q.id, emptyDraft(q)])));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [minimized, setMinimized] = useState(false);
   const card = useRef<HTMLElement>(null);
+  const toggle = useRef<HTMLButtonElement>(null);
+  const list = useRef<HTMLDivElement>(null);
+  const scrolled = useRef(0);
   const heading = title || t("Questions from the agent");
 
   const change = (id: string, patch: Partial<Draft>) => setDrafts((all) => ({ ...all, [id]: { ...all[id], ...patch } }));
@@ -118,6 +124,17 @@ export function QuestionCard({
     if (el) arrows.current.set(key, el);
     else arrows.current.delete(key);
   };
+  // Fold the card to its heading so the chat behind it can be read. The draft stays in state, and the list
+  // comes back scrolled to where it was folded.
+  const fold = (m: boolean) => {
+    if (m) scrolled.current = list.current?.scrollTop ?? 0;
+    setMinimized(m);
+  };
+  // Folded, the focus stays on the toggle; unfolded, the list is put back where it was folded.
+  useLayoutEffect(() => {
+    if (minimized) { toggle.current?.focus(); return; }
+    if (list.current) list.current.scrollTop = scrolled.current;
+  }, [minimized]);
 
   return (
     <section
@@ -126,15 +143,28 @@ export function QuestionCard({
       aria-label={heading}
       className="float-in flex max-h-[min(32rem,50dvh)] w-full flex-col overflow-hidden rounded-2xl border border-accent/30 bg-surface shadow-pop outline-none"
     >
-      <header className="flex items-center gap-3 border-b border-line px-4 py-2.5">
+      <header className={`flex items-center gap-3 px-4 py-2.5${minimized ? "" : " border-b border-line"}`}>
         <div className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-accent/12 text-accent">
           <LuMessageCircleQuestion aria-hidden className="h-4 w-4" />
         </div>
         <h2 className="min-w-0 flex-1 text-sm font-medium text-fg">{heading}</h2>
+        <button
+          ref={toggle}
+          type="button"
+          onClick={() => fold(!minimized)}
+          aria-expanded={!minimized}
+          aria-controls={`question-body-${requestId}`}
+          aria-label={minimized ? t("Expand") : t("Minimize")}
+          className="rounded-md p-1 text-fg-muted transition hover:bg-fg/10"
+        >
+          {minimized ? <LuChevronUp className="h-4 w-4" /> : <LuChevronDown className="h-4 w-4" />}
+        </button>
       </header>
 
+      {minimized ? null : (
+        <div id={`question-body-${requestId}`} className="flex min-h-0 flex-1 flex-col">
       {error && <p role="alert" className="border-b border-line px-4 py-3 text-sm text-danger">{error}</p>}
-      <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4">
+      <div ref={list} className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4">
         {questions.map((q) => {
           const d = drafts[q.id];
           const legend = `${q.question}${q.optional ? ` (${t("optional")})` : ""}`;
@@ -249,6 +279,8 @@ export function QuestionCard({
           <LuCheck className="h-3.5 w-3.5" /> {t("Submit")}
         </button>
       </footer>
+        </div>
+      )}
     </section>
   );
 }
