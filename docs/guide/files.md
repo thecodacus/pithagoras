@@ -118,6 +118,41 @@ is kept there as a revision, marked as an outside change, and a page that has
 the document open is told of it; deleting or renaming such a file is dealt with
 as [Documents](/guide/documents#a-file-that-is-deleted-or-renamed) describes.
 
+## Other file sources
+
+An extension can show a file tree of its own in Files — a cloud drive, a wiki,
+a bucket — as a second place to look beside the chat's folder. When there is one,
+a row of tabs appears under the buttons at the top: the chat's folder first,
+then each source by the name its extension gave it. Without one, nothing is
+different.
+
+- **Browse and read** a source as you do the folder: folders and files, the path
+  at the top to go back, text in the editor, markdown as a page, and the download
+  button on a row or in an open file. A file that is not text, or is over 1 MB,
+  is not shown; download it.
+- **Read-only** unless its extension lets Files save into it. A read-only source
+  says so on an open file ("Read-only"), has no **Save**, and its text cannot be
+  typed into. A source that can be saved to is edited like any file here; the
+  save is checked against the time the file was read at, as in the folder, when
+  the source gives one. Nothing is made, uploaded, renamed or deleted in a source
+  from here, whatever it can save, and a drop on it is ignored.
+- **Each one on its own.** A source that is slow shows "Loading…" in its own tab
+  while the chat's folder, one click away, is there at once; one that fails shows
+  its reason in its own tab and the folder is not affected. The tabs are read
+  when Files opens and again with **Refresh**, so a source whose extension started
+  later shows after one.
+- **Not mixed.** A source's paths are its own. What the agent reads and writes is
+  in the chat's folder, so **Follow** brings you back to it, and a file another
+  panel opens in Files (from Git, say) is opened in the folder. Nothing of the
+  folder is sent to a source, and no source is given the folder's path.
+- **Whose.** A source is offered per chat: its extension is told which chat is
+  open, whose chat it is (the agent or project) and who is at the page, and can
+  show it to some chats and not others, as the folder is the chat's own.
+
+Which sources there are depends on the extensions installed: see
+[Showing a file tree in Files](/guide/extension-ui#showing-a-file-tree-in-files)
+for how an extension adds one.
+
 ## Watching the agent
 
 Files follows the agent. When it reads a file, or writes or edits one, that file

@@ -2125,6 +2125,96 @@ installed with it, and it waits as above until what it requires is there.
 Before anything is installed, Discover says what one that comes with the portal
 requires ("Needs pithagoras-docker").
 
+### Showing a file tree in Files
+
+[Files](/guide/files) can show a file tree of your extension — a cloud drive, a
+wiki, a bucket — as a root of its own beside the chat's folder, with the same
+file view: browsing, reading, downloading, and saving where you let it. Files
+(`pithagoras-files`) is an extension that [gives others something to build
+on](#building-on-another-extension), so yours names it in its package.json and
+registers a source with what `portal.extensions.use` gives it:
+
+```json
+"pithagoras": { "server": "./server.js", "requires": { "pithagoras-files": "^0.1.0" } }
+```
+
+(`"optional"` in place of `"requires"` if your extension is useful without
+Files: `use` then gives nothing when Files is not there.)
+
+```js
+export default function (portal) {
+  const files = portal.extensions.use("pithagoras-files");
+  files.sources.register({
+    id: "cloud",
+    label: "Nextcloud",
+    // Which chats and people see it: asked each time Files lists its sources.
+    visible: ({ chatId, owner, person }) => owner?.kind === "agent" && person?.role === "primary",
+    // The folder at `path` ("" is the root), in the source's own paths.
+    list: async (path) => (await client.propfind(path)).map((f) => ({ name: f.name, type: f.isDir ? "dir" : "file", size: f.size, mtime: f.modified })),
+    // Text is shown; bytes are only offered as a download.
+    read: async (path) => {
+      const body = await client.get(path);
+      return isText(body) ? { content: body.toString("utf8"), mtime: body.modified } : { bytes: body, mtime: body.modified };
+    },
+    // Optional. A link to open or download with (http or https); without it the file is sent through Files.
+    url: (path) => `https://cloud.example/index.php/apps/files/?dir=${encodeURIComponent(path)}`,
+    // Optional. Without it the source is read-only. Throw an error with code "conflict" if `expected` (the mtime it was read with) is stale.
+    write: async (path, content, { expected }) => ({ mtime: await client.put(path, content, expected) }),
+  });
+  // A server half's stop function: a source is not taken away by itself when your extension is switched off.
+  return () => files.sources.unregister("cloud");
+}
+```
+
+- **`id`** is letters, digits, `.`, `_` and `-` (64 at most, starting with a
+  letter or digit); no two sources share one, and registering the same id again
+  from your extension replaces the earlier one. **`label`** is the tab's name:
+  it is shown as you give it, so translate it yourself if you want it translated.
+  `register` throws a `TypeError` for a source that is not shaped as above, or
+  whose id another extension has; `unregister(id)` takes away your own and does
+  nothing for another's.
+- **Paths are the source's own**, as Files received them from the page:
+  `""` is the root, and `a/b` is a file or folder in `a`. Files does not resolve,
+  clean or interpret them (no `..` handling, no root): a source over a file system
+  or a URL must check them itself, as `portal.files` does for the chat's folder.
+  Only a path without a NUL, up to 4,096 characters, reaches you.
+- **`list`** gives `{ name, type: "file" | "dir", size?, mtime? }` for each thing
+  directly in the folder. Names with a `/` or no name, and a type other than
+  these, are left out; Files sorts them (folders first) and shows 2,000 at most.
+- **`read`** gives `{ content, mtime? }` (text, shown up to 1 MB, over that it is
+  offered as a download) or `{ bytes, mtime? }` (offered as a download). Give
+  `mtime` when you can: Files looks at the open file now and then and reloads it
+  when `mtime` or size changed, and a save is checked against it.
+- **`write`** present makes the source writable: the file view lets the person
+  edit text and save it. It is called with the file's new text and, beside the
+  context, `expected` when the person read the file with an `mtime`. It may return
+  `{ mtime }` for the file as saved. Creating, renaming, deleting and uploading
+  are not part of it; the source is only saved to.
+- **Every call is given a context** as its last argument: `chatId`, `owner` (whose
+  chat it is: an agent's or a project's, as `chats.owner` has it) and `person` (who is at the page, as `http.person`). It is how a source
+  follows the chat's owner. `visible` gets the same, and a source it says no to is
+  not listed and its routes answer "no such source". A `visible` that throws or
+  does not answer in 5 seconds counts as no. The context never has the chat's
+  folder, and the chat's folder is never given a source's path.
+- **Errors.** A call that throws is shown in the source's own tab. An error with a
+  `code` of `missing`, `conflict`, `invalid`, `exists`, `too_large` or `failed`
+  keeps the meaning it has for the chat's folder (404, 409, 400, 409, 413, 500)
+  and its message is shown as it is; any other error is shown as
+  "Label: message". A call that has not answered in 30 seconds is cut off and
+  reported as that source not answering. Nothing a source does holds up the chat's
+  folder.
+- **Download.** With `url`, the download buttons go to that address (Files
+  redirects to it; an address that is not `http:` or `https:` is refused).
+  Without it Files sends what `read` gives as a file. There is no archive of a
+  source's folder.
+- **Pictures** in a source are offered as downloads: Files shows pictures through
+  the portal's picture route for the chat's folder.
+- This is written for a server half in the portal's process. A half in a
+  [process of its own](#a-server-half-in-a-process-of-its-own) gets Files'
+  functions as promises and its callbacks are called across, but a source is an
+  object made of callbacks, and registering one from there is not something the
+  portal tests.
+
 ### Extensions it installs
 
 An extension can install a package it wrote itself, load it again after a
