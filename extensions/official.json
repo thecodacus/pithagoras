@@ -1,0 +1,44 @@
+[
+  {
+    "name": "@pithagoras/blender",
+    "description": "Blender for Pithagoras: a headless Blender 5.2 with GPU rendering run in a container through Docker, its tools in every chat, and its live viewport in a panel beside the chat",
+    "kinds": ["pithagoras"],
+    "repository": "prometheion/pithagoras-extensions",
+    "spec": "npm:@pithagoras/blender"
+  },
+  {
+    "name": "@pithagoras/godot",
+    "description": "Godot for Pithagoras: the real Godot 4.7 editor on the GPU, run in a container through Docker, streamed into a panel beside the chat, with its tools in every chat",
+    "kinds": ["pithagoras"],
+    "repository": "prometheion/pithagoras-extensions",
+    "spec": "npm:@pithagoras/godot"
+  },
+  {
+    "name": "@pithagoras/inline-ui",
+    "description": "Inline UI for Pithagoras: the agent shows the person an interactive card of its own HTML in the chat, sandboxed and with no network, and what the person does in it comes back to the agent as events",
+    "kinds": ["pithagoras"],
+    "repository": "prometheion/pithagoras-extensions",
+    "spec": "npm:@pithagoras/inline-ui"
+  },
+  {
+    "name": "@pithagoras/nextcloud",
+    "description": "Nextcloud for Pithagoras: runs the Nextcloud MCP server in its own container and brings its Files & Sharing, Deck, Calendar, Contacts, Mail, News, Collectives, Cookbook, Shopping List and Notes into a chat panel",
+    "kinds": ["pithagoras"],
+    "repository": "prometheion/pithagoras-extensions",
+    "spec": "npm:@pithagoras/nextcloud"
+  },
+  {
+    "name": "@pithagoras/office",
+    "description": "Word and Excel documents in OnlyOffice, edited by you and your agents together",
+    "kinds": ["pithagoras"],
+    "repository": "prometheion/pithagoras-extensions",
+    "spec": "npm:@pithagoras/office"
+  },
+  {
+    "name": "@pithagoras/flair-avatar",
+    "description": "A 3D avatar for Pithagoras voice mode: a VRM model drawn where the orb is, which lip-syncs, blinks, breathes and looks at you",
+    "kinds": ["pithagoras"],
+    "repository": "prometheion/pithagoras-flair",
+    "spec": "npm:@pithagoras/flair-avatar"
+  }
+]

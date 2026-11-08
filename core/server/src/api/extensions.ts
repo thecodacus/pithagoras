@@ -89,6 +89,42 @@ export function shippedExtensions(dir = bundledPath("extensions")): ShippedExten
   return out.sort((x, y) => x.name.localeCompare(y.name));
 }
 
+/** The repositories the official extensions that do not ship with the portal live in. */
+export const OFFICIAL_REPOSITORIES = ["prometheion/pithagoras-extensions", "prometheion/pithagoras-flair"] as const;
+
+/** An official extension that does not ship with the portal, listed in extensions/official.json and installed from npm. */
+export interface OfficialExtension {
+  name: string;
+  description: string;
+  kinds: PackageKind[];
+  /** The GitHub repository its folder is in. */
+  repository: (typeof OFFICIAL_REPOSITORIES)[number];
+  /** What it is installed by: not a git spec, as pi installs a git repository from its root and these are folders of one. */
+  spec: string;
+}
+
+/** The entries of extensions/official.json; one that is not whole is left out, as a list is not worth losing over it. */
+export function officialExtensions(dir = bundledPath("extensions")): OfficialExtension[] {
+  if (!dir) return [];
+  let listed: unknown;
+  try {
+    listed = JSON.parse(readFileSync(path.join(dir, "official.json"), "utf8"));
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(listed)) return [];
+  const kinds: string[] = ["pi", "pithagoras", "themes"];
+  return listed.filter(
+    (e): e is OfficialExtension =>
+      typeof e?.name === "string" &&
+      typeof e.description === "string" &&
+      typeof e.spec === "string" &&
+      (OFFICIAL_REPOSITORIES as readonly string[]).includes(e.repository) &&
+      Array.isArray(e.kinds) &&
+      e.kinds.every((kind: unknown) => typeof kind === "string" && kinds.includes(kind)),
+  );
+}
+
 /**
  * `pi list` nests by indentation: a scope heading, each package spec, then the
  * directory it was installed into.
@@ -627,6 +663,14 @@ export function extensionsRouter(): Router {
     } catch (e) {
       res.status(500).json({ error: (e as Error).message });
     }
+  });
+
+  /**
+   * The official extensions that do not ship with the portal (extensions/official.json). A list in the portal, not one
+   * fetched from GitHub: it is there offline and at once, and the repositories' own pages say more.
+   */
+  router.get("/extensions/official", (_req, res) => {
+    res.json({ extensions: officialExtensions() });
   });
 
   /**
