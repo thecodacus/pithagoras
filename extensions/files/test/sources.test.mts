@@ -66,7 +66,7 @@ async function withApi(fn: (base: string, h: { registry: SourceRegistry; workspa
       if (id !== "chat") throw new Error("No such chat");
       return WORKSPACE;
     },
-    { registry, who: (_req, chatId) => ({ chatId, owner: { path: "/agents/one", name: "One", kind: "agent" }, person }), timeoutMs },
+    { registry, who: (_req, chatId) => ({ chatId, owner: { name: "One", kind: "agent" }, person }), timeoutMs },
   );
   app.use("/api/x/pithagoras-files", router);
   const server = createServer(app).listen(0);
@@ -139,6 +139,34 @@ test("Files gives the hook through portal.provide, as the extension named in req
   }
 });
 
+test("a source is told whose chat it is, but not where the owner's folder is on this machine", async () => {
+  let factory: ((consumer: { name: string }) => unknown) | undefined;
+  const router = express.Router();
+  files({
+    router,
+    http: { json: () => express.json(), person: () => person },
+    files: {},
+    chats: { folder: () => WORKSPACE, owner: () => ({ path: "/srv/agents/one", name: "One", kind: "agent", home: true }) },
+    provide: (f: typeof factory) => (factory = f),
+  } as never);
+  const given: SourceContext[] = [];
+  const mine = factory!({ name: "pithagoras-nextcloud" }) as { sources: { register(s: FilesSource): void } };
+  mine.sources.register(source({ visible: (c) => (given.push(c), true), list: (_p, c) => (given.push(c), []) }));
+  const server = createServer(express().use("/api/x/pithagoras-files", router)).listen(0);
+  try {
+    const base = `http://127.0.0.1:${(server.address() as { port: number }).port}/api/x/pithagoras-files/chats/chat`;
+    await get(`${base}/sources`);
+    await get(`${base}/sources/cloud/files${q("")}`);
+    assert.equal(given.length, 3);
+    for (const c of given) {
+      assert.deepEqual(c.owner, { name: "One", kind: "agent", home: true });
+      assert.ok(!JSON.stringify(c).includes("/srv/agents"), "the owner's folder reached the source");
+    }
+  } finally {
+    server.close();
+  }
+});
+
 test("the page is told which sources there are, and which can be written", async () => {
   await withApi(async (base, { registry }) => {
     assert.deepEqual(await get(`${base}/sources`), { status: 200, sources: [] });
@@ -164,7 +192,7 @@ test("who may see a source follows the chat's owner: it is asked with the chat, 
     mine.sources.register(source({ id: "broken", visible: () => Promise.reject(new Error("no")) }));
     mine.sources.register(source({ id: "slow", visible: () => new Promise<boolean>(() => {}) }));
     assert.deepEqual(((await get(`${base}/sources`)).sources as { id: string }[]).map((s) => s.id), ["mine"]);
-    assert.deepEqual(asked[0], { chatId: "chat", owner: { path: "/agents/one", name: "One", kind: "agent" }, person });
+    assert.deepEqual(asked[0], { chatId: "chat", owner: { name: "One", kind: "agent" }, person });
     // Not seen, so not reachable by its address either.
     for (const id of ["other", "broken", "slow", "nobody"]) assert.deepEqual(await get(`${base}/sources/${id}/files${q("")}`), { status: 404, error: "There is no such source", code: "missing" });
     assert.equal((await get(`${base}/sources/mine/files${q("")}`)).status, 200);
@@ -197,16 +225,19 @@ test("a source's folder is listed in its own paths: folders first, bad entries l
               { name: "link", type: "link" as never },
               { name: "n\0ul", type: "file" },
               { name: "a.txt", type: "file", size: Number.NaN },
+              { name: "..", type: "dir" },
+              { name: ".", type: "dir" },
+              { name: "a\\b", type: "file" },
             ];
           },
         },
         seen,
       ),
     );
-    const listed = await get(`${base}/sources/cloud/files${q("Docs/../x")}`);
+    const listed = await get(`${base}/sources/cloud/files${q("Docs/sub dir/x")}`);
     assert.equal(listed.status, 200);
     // The path is the source's own, passed on as it came: nothing resolves it, against the chat's folder or otherwise.
-    assert.deepEqual(seen.calls, ["list Docs/../x"]);
+    assert.deepEqual(seen.calls, ["list Docs/sub dir/x"]);
     assert.deepEqual(listed.entries, [
       { name: "sub", type: "dir", size: 0, mtime: 0 },
       { name: "a.txt", type: "file", size: 0, mtime: 0 },
@@ -218,20 +249,37 @@ test("a source's folder is listed in its own paths: folders first, bad entries l
     assert.ok(!JSON.stringify(seen.contexts).includes(WORKSPACE));
     await get(`${base}/files${q("Docs")}`);
     assert.deepEqual(workspace, ['list ["Docs"]']);
-    assert.deepEqual(seen.calls, ["list Docs/../x"]);
+    assert.deepEqual(seen.calls, ["list Docs/sub dir/x"]);
     // A path with a NUL, or a list that is not one, is not passed on.
     assert.equal((await get(`${base}/sources/cloud/files${q("a\0b")}`)).status, 400);
   });
 });
 
-test("a file is read as the file view reads one: text, bytes as a file that has none to show, one over 1 MB, and a look that finds it unchanged", async () => {
+test("a way out in a path never reaches a source: the page builds paths from names it was listed, so none has one", async () => {
+  await withApi(async (base, { registry }) => {
+    const seen = { calls: [] as string[], contexts: [] as SourceContext[] };
+    registry.forConsumer("ext").sources.register(source({ write: () => {} }, seen));
+    for (const bad of ["..", "../x", "Docs/../x", "Docs/..", "/etc/x", "/", "a\\b", "a//b", "a/./b", ".", "Docs/", "a\0b"]) {
+      for (const route of ["files", "file"]) assert.deepEqual(await get(`${base}/sources/cloud/${route}${q(bad)}`), { status: 400, error: "That is not a path", code: "invalid" }, `${route} ${JSON.stringify(bad)}`);
+      assert.equal((await put(`${base}/sources/cloud/file${q(bad)}`, { content: "x" })).status, 400, `put ${JSON.stringify(bad)}`);
+      assert.equal((await fetch(`${base}/sources/cloud/file${q(bad, "&download=1")}`, { redirect: "manual" })).status, 400, `download ${JSON.stringify(bad)}`);
+    }
+    assert.deepEqual(seen.calls, []);
+    // Names with dots in them, and the root, are paths.
+    assert.equal((await get(`${base}/sources/cloud/files${q("")}`)).status, 200);
+    assert.equal((await get(`${base}/sources/cloud/files${q("Docs/.hidden/..x")}`)).status, 200);
+    assert.deepEqual(seen.calls, ["list ", "list Docs/.hidden/..x"]);
+  });
+});
+
+test("a file is read as the file view reads one: text, bytes as a file that has none to show, one over 1 MB, and always in full", async () => {
   await withApi(async (base, { registry }) => {
     registry.forConsumer("ext").sources.register(source());
     assert.deepEqual(await get(`${base}/sources/cloud/file${q("Docs/readme.md")}`), { status: 200, binary: false, size: 5, mtime: 9, content: "# Hi\n" });
     assert.deepEqual(await get(`${base}/sources/cloud/file${q("pic.bin")}`), { status: 200, binary: true, size: 4, mtime: 11 });
     assert.deepEqual(await get(`${base}/sources/cloud/file${q("big.txt")}`), { status: 200, binary: true, size: 1024 * 1024 + 1, mtime: 12 });
-    assert.deepEqual(await get(`${base}/sources/cloud/file${q("Docs/readme.md", "&since=9&size=5")}`), { status: 200, unchanged: true });
-    assert.equal((await get(`${base}/sources/cloud/file${q("Docs/readme.md", "&since=8&size=5")}`)).content, "# Hi\n");
+    // A look at whether it changed is the chat folder's: a source's file is sent whole (the page does not watch one).
+    assert.equal((await get(`${base}/sources/cloud/file${q("Docs/readme.md", "&since=9&size=5")}`)).content, "# Hi\n");
     // A refusal with a code keeps its status.
     assert.deepEqual(await get(`${base}/sources/cloud/file${q("nope")}`), { status: 404, error: "There is no such file", code: "missing" });
   });

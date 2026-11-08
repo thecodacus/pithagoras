@@ -106,7 +106,8 @@ export const listSources = (sessionId: string) => portal.api.json<{ sources: Sou
 export interface Reader {
   list(dir: string): Promise<{ path: string; entries: FileEntry[]; truncated: boolean }>;
   read(file: string): Promise<FileContent>;
-  readIfChanged(file: string, known: { mtime: number; size: number }): Promise<FileContent | { unchanged: true }>;
+  /** A cheap look at whether the file is as it was known: only where the tree can tell without sending it (the chat's folder, by a stat). A source cannot, so the file is not watched. */
+  readIfChanged?(file: string, known: { mtime: number; size: number }): Promise<FileContent | { unchanged: true }>;
   save(file: string, content: string, mtime?: number): Promise<{ ok: true; size: number; mtime: number }>;
   downloadUrl(file: string): string;
 }
@@ -122,7 +123,6 @@ export const folderReader = (sessionId: string): Reader => ({
 export const sourceReader = (sessionId: string, source: string): Reader => ({
   list: (dir) => portal.api.json(ofSource(sessionId, source, "files", dir)),
   read: (file) => portal.api.json(ofSource(sessionId, source, "file", file)),
-  readIfChanged: (file, known) => portal.api.json(ofSource(sessionId, source, "file", file, `&since=${known.mtime}&size=${known.size}`)),
   save: (file, content, mtime) => portal.api.json(ofSource(sessionId, source, "file", file), { method: "PUT", body: JSON.stringify({ content, mtime }) }),
   downloadUrl: (file) => ofSource(sessionId, source, "file", file, "&download=1"),
 });

@@ -33,6 +33,7 @@ export const de: Record<string, string | Plural> = {
   "Upload a folder": "Ordner hochladen",
   "Looking through the dropped folders…": "Die abgelegten Ordner werden durchsucht…",
   "Skipped {path}: it is not a path inside the folder.": "{path} übersprungen: Das ist kein Pfad innerhalb des Ordners.",
+  "Skipped {path}: it could not be read.": "{path} übersprungen: Es konnte nicht gelesen werden.",
   "…and {n} more.": "…und {n} weitere.",
   "Show the full path of this folder": "Den vollständigen Pfad dieses Ordners zeigen",
   "Hide the full path": "Vollständigen Pfad ausblenden",

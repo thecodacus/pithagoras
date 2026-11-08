@@ -11,7 +11,7 @@ type Node = { dir: true; kids: Map<string, Node> } | { dir: false; body: string 
 const folder = (): Node => ({ dir: true, kids: new Map() });
 
 /** What a drop is made of: a name for a file, or a folder with what is in it. */
-type Spec = string | { dir: string; kids: Spec[] };
+type Spec = string | { dir: string; kids: Spec[] } | { broken: string };
 
 /**
  * The chat page with its Files panel over a folder in memory, answered the way the portal answers the three calls an upload makes: the
@@ -95,7 +95,9 @@ async function drop(page: Page, specs: Spec[], { entries = true } = {}) {
       const entryOf = (spec: any): any =>
         typeof spec === 'string'
           ? { isFile: true, isDirectory: false, name: spec, file: (ok: (f: File) => void) => ok(fileOf(spec)) }
-          : {
+          : spec.broken
+            ? { isFile: true, isDirectory: false, name: spec.broken, file: (_ok: unknown, fail: (e: Error) => void) => fail(new Error('gone')) }
+            : {
               isFile: false,
               isDirectory: true,
               name: spec.dir,
@@ -112,7 +114,7 @@ async function drop(page: Page, specs: Spec[], { entries = true } = {}) {
             };
       const dt = new DataTransfer();
       // What the browser shows for a dropped folder as well: one empty "file" with its name.
-      Object.defineProperty(dt, 'files', { value: specs.map((s: any) => fileOf(typeof s === 'string' ? s : s.dir)) });
+      Object.defineProperty(dt, 'files', { value: specs.map((s: any) => fileOf(typeof s === 'string' ? s : (s.dir ?? s.broken))) });
       if (entries) Object.defineProperty(dt, 'items', { value: specs.map((s: any) => ({ kind: 'file', webkitGetAsEntry: () => entryOf(s) })) });
       list.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }));
     },
@@ -177,7 +179,8 @@ test('a name that is taken gets a number in a subfolder: for the folder dropped 
 test('one file that fails does not stop the rest, and says which', async ({ page }) => {
   const server = await files(page, { failing: ['bad.txt'] });
   await drop(page, [{ dir: 'proj', kids: ['a.txt', 'bad.txt', { dir: 'src', kids: ['b.txt'] }] }, 'z.txt']);
-  await expect(page.getByRole('alert')).toContainText('The file bad.txt could not be uploaded');
+  // By its path: the words of the server do not say which of a few hundred files it was.
+  await expect(page.getByRole('alert')).toContainText('proj/bad.txt: The file bad.txt could not be uploaded');
   expect(server.tree()).toEqual(['proj/', 'proj/a.txt', 'proj/src/', 'proj/src/b.txt', 'z.txt']);
   await expect(page.getByText(/^Uploading \d+ files?…$/)).toHaveCount(0);
 });
@@ -188,6 +191,14 @@ test('a hostile name in a dropped folder is skipped and never sent, the rest goe
   await expect(page.getByRole('alert')).toContainText('Skipped proj/..: it is not a path inside the folder.');
   expect(server.tree()).toEqual(['proj/', 'proj/ok.txt']);
   expect(server.calls).toEqual(['folder proj', 'file proj/ok.txt']);
+});
+
+test('an entry the browser cannot read is said so, not taken for a bad path, and the rest goes up', async ({ page }) => {
+  const server = await files(page);
+  await drop(page, [{ dir: 'proj', kids: ['ok.txt', { broken: 'gone.txt' }] }]);
+  await expect(page.getByRole('alert')).toContainText('Skipped proj/gone.txt: it could not be read.');
+  await expect(page.getByRole('alert')).not.toContainText('not a path');
+  expect(server.tree()).toEqual(['proj/', 'proj/ok.txt']);
 });
 
 test('the folder button picks a folder and uploads its whole tree', async ({ page }) => {

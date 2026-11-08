@@ -158,6 +158,16 @@ export const FilesPanel = memo(function FilesPanel({
   const [sources, setSources] = useState<SourceInfo[]>([]);
   const rootRef = useRef(root);
   rootRef.current = root;
+  // Counts the changes of tree: work that started in one and ends after a change must not put its result into the other.
+  const rootGen = useRef(0);
+  // What the chat's folder has to say about work that ended while a source was shown (a failed upload, rename, delete), until the folder is shown again.
+  const lateNote = useRef<string | null>(null);
+  /** True when the person has gone to a source since work on the chat's folder began: its result is the folder's, so it waits there. */
+  const away = (problem: string | null) => {
+    if (rootRef.current === null) return false;
+    if (problem) lateNote.current = problem;
+    return true;
+  };
   const home = useMemo(() => folderReader(sessionId), [sessionId]);
   const reader = useMemo(() => (root === null ? home : sourceReader(sessionId, root)), [home, sessionId, root]);
   const source = root === null ? undefined : (sources.find((x) => x.id === root) ?? { id: root, label: root, writable: false });
@@ -236,7 +246,9 @@ export const FilesPanel = memo(function FilesPanel({
           if (ask !== listAsk.current) return;
           setEntries(r.entries);
           setTruncated(r.truncated);
-          setListError(null);
+          // The chat's folder shows what its work said while a source was in front (see `away`); a source starts clean.
+          setListError(rootRef.current === null ? lateNote.current : null);
+          if (rootRef.current === null) lateNote.current = null;
         })
         .catch((e) => {
           if (ask !== listAsk.current) return;
@@ -322,7 +334,7 @@ export const FilesPanel = memo(function FilesPanel({
         setSaveError(null);
       };
       if (!watching) setRereading(true);
-      return (watching ? reader.readIfChanged(path, known!) : reader.read(path))
+      return (watching && reader.readIfChanged ? reader.readIfChanged(path, known!) : reader.read(path))
         .then((r) => {
           if (ask !== fileAsk.current) return;
           if ("unchanged" in r) return;
@@ -352,7 +364,8 @@ export const FilesPanel = memo(function FilesPanel({
 
   // The open file is looked at now and then: a change made outside this panel (another device, a cron job, the agent's shell) shows by itself.
   // Not while the page is hidden, and a look that finds nothing new changes nothing on screen.
-  const watched = file && !file.loading && !file.error ? file.path : null;
+  // Not in a source: each look would fetch the whole file from wherever it is (a cloud, over the network), every few seconds, for as long as it is open. Refresh reads it again.
+  const watched = file && !file.loading && !file.error && !source ? file.path : null;
   useEffect(() => {
     if (!watched) return;
     const timer = setInterval(() => {
@@ -398,6 +411,7 @@ export const FilesPanel = memo(function FilesPanel({
       if (!ok || ask !== revealAsk.current) return;
       setFollowing(false);
       // A path of the chat's folder: from a source it is shown after going back to the folder.
+      if (rootRef.current !== null) rootGen.current++;
       setRoot(null);
       setDir(parentOf(target));
       void loadFile(target, false, home);
@@ -422,6 +436,7 @@ export const FilesPanel = memo(function FilesPanel({
     // What was asked of the one that is left is not the answer for the one that comes: both lists and the file are stale at once.
     fileAsk.current++;
     listAsk.current++;
+    rootGen.current++;
     setFile(null);
     setEntries([]);
     setTruncated(false);
@@ -470,13 +485,17 @@ export const FilesPanel = memo(function FilesPanel({
     if (!file || file.binary || saving || !writable) return;
     setSaving(true);
     setSaveError(null);
+    const gen = rootGen.current;
     try {
       const r = await reader.save(file.path, draft, overwrite ? undefined : file.mtime);
+      // The person went to another tree while it was written: the file shown there is not this one.
+      if (gen !== rootGen.current) return;
       // A read of the file still out (Refresh, the agent's change) may have found it as it was before this save: shown now, its old text would pass for saved.
       fileAsk.current++;
       setFile({ ...file, saved: draft, mtime: r.mtime, size: r.size, error: undefined });
       setChanged(false);
     } catch (e) {
+      if (gen !== rootGen.current) return;
       // By the code, not the sentence: the server's wording is not this page's to depend on.
       if (isApiError(e) && e.body.code === "conflict") setChanged(true);
       else setSaveError((e as Error).message);
@@ -507,6 +526,7 @@ export const FilesPanel = memo(function FilesPanel({
     } catch (e) {
       problem = (e as Error).message;
     }
+    if (away(problem)) return;
     // After the reload, which clears an error: this one is about what was just tried.
     await loadDir(dir);
     if (problem) setListError(problem);
@@ -547,6 +567,7 @@ export const FilesPanel = memo(function FilesPanel({
       const unsaved = entry.type === "dir" && !entry.link ? await api.fileUnsaved(sessionId, path).then((r) => r.unsaved, () => null) : null;
       const gone = await deleteAsking(unsaved, (u) => askToRemove(entry, u), (discard) => api.deleteFile(sessionId, path, discard));
       if (!gone) return;
+      if (away(null)) return;
       // What is open and shown now, not when the delete was clicked: the person may have moved on while it was asked.
       const open = fileRef.current;
       if (open && within(path, open.path)) {
@@ -565,6 +586,7 @@ export const FilesPanel = memo(function FilesPanel({
         return next;
       });
     }
+    if (away(problem)) return;
     await loadDir(dirRef.current);
     if (problem) setListError(problem);
   };
@@ -586,6 +608,7 @@ export const FilesPanel = memo(function FilesPanel({
     } catch (e) {
       problem = (e as Error).message;
     }
+    if (away(problem)) return;
     await loadDir(dir);
     if (problem) return setListError(problem);
     // A new file is made to be written in.
@@ -602,7 +625,7 @@ export const FilesPanel = memo(function FilesPanel({
    */
   const upload = async (tree: Tree) => {
     const count = countFiles(tree);
-    if (!count && !tree.dirs.length && !tree.problems.length) return;
+    if (!count && !tree.dirs.length && !tree.problems.length && !tree.unreadable.length) return;
     const into = dir;
     setUploading((n) => n + count);
     const result = await uploadTree(
@@ -612,12 +635,18 @@ export const FilesPanel = memo(function FilesPanel({
       tree,
       () => setUploading((n) => n - 1),
     );
+    const problems = [
+      ...tree.problems.map((path) => t("Skipped {path}: it is not a path inside the folder.", { path })),
+      ...tree.unreadable.map((path) => t("Skipped {path}: it could not be read.", { path })),
+      ...result.problems,
+    ];
+    const note = problems.length ? [...problems.slice(0, 5), ...(problems.length > 5 ? [t("…and {n} more.", { n: problems.length - 5 })] : [])].join(" ") : null;
+    if (away(note)) return;
     await loadDir(dirRef.current);
-    const problems = [...tree.problems.map((path) => t("Skipped {path}: it is not a path inside the folder.", { path })), ...result.problems];
-    if (problems.length) setListError([...problems.slice(0, 5), ...(problems.length > 5 ? [t("…and {n} more.", { n: problems.length - 5 })] : [])].join(" "));
+    if (note) setListError(note);
   };
   /** Plain files, as the file picker and a browser without folder drops give them. */
-  const uploadFiles = (files: File[]) => upload({ dirs: [], files, problems: [] });
+  const uploadFiles = (files: File[]) => upload({ dirs: [], files, problems: [], unreadable: [] });
   /** What was dropped, as the browser's entries (taken during the drop): folders are walked to their end first. */
   const uploadEntries = async (entries: Entry[]) => {
     setReading(true);
@@ -766,12 +795,11 @@ export const FilesPanel = memo(function FilesPanel({
       </div>
       {/* Only where an extension gave a tree: the chat's folder is then one of two or more, and the others are as near as it is. */}
       {tabs.length > 0 && (
-        <div role="tablist" aria-label={t("What to look at")} className="flex shrink-0 flex-wrap items-center gap-1 border-b border-line px-3 py-1 text-xs">
+        <div role="group" aria-label={t("What to look at")} className="flex shrink-0 flex-wrap items-center gap-1 border-b border-line px-3 py-1 text-xs">
           {[{ id: null, label: rootName, title: folder }, ...tabs.map((x) => ({ id: x.id as string | null, label: x.label, title: x.label }))].map((tab) => (
             <button
               key={tab.id === null ? "folder" : `source:${tab.id}`}
-              role="tab"
-              aria-selected={tab.id === root}
+              aria-pressed={tab.id === root}
               onClick={() => void switchRoot(tab.id)}
               title={tab.title}
               className={`max-w-[12rem] truncate rounded-md px-2 py-0.5 transition ${tab.id === root ? "bg-accent/12 text-accent ring-1 ring-inset ring-accent/25" : "text-fg-subtle hover:bg-fg/5 hover:text-fg"}`}

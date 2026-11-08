@@ -17,8 +17,10 @@ export interface TreeDir {
 export interface Tree {
   dirs: TreeDir[];
   files: File[];
-  /** What was left out before anything was sent, and why. */
+  /** What was left out before anything was sent because its name is not one inside the folder. */
   problems: string[];
+  /** What was left out because the browser could not read it (it was gone since the drop, or not allowed). */
+  unreadable: string[];
 }
 
 /** What the upload needs of the server: the two calls Files already has. */
@@ -34,7 +36,9 @@ const MAX_NUMBER = 999;
 
 /** A name that may be one folder or one file: what the server's own check lets through, so that nothing is sent that it would refuse for the path. */
 export function plainName(name: string): boolean {
-  if (!name.trim() || name === "." || name === "..") return false;
+  // Trimmed as the server trims a name, so that ". " is the "." it will take it for.
+  const bare = name.trim();
+  if (!bare || bare === "." || bare === "..") return false;
   if (/[/\\\0]/.test(name)) return false;
   return new TextEncoder().encode(name).length <= MAX_NAME_BYTES;
 }
@@ -52,7 +56,7 @@ const emptyDir = (name: string): TreeDir => ({ name, dirs: [], files: [] });
  * a NUL — leaves its file out and is said.
  */
 export function treeOfPaths(files: Iterable<File>): Tree {
-  const tree: Tree = { dirs: [], files: [], problems: [] };
+  const tree: Tree = { dirs: [], files: [], problems: [], unreadable: [] };
   for (const file of files) {
     const rel = (file as File & { webkitRelativePath?: string }).webkitRelativePath || "";
     if (!rel) {
@@ -114,9 +118,9 @@ const readAll = async (dir: Entry): Promise<Entry[]> => {
 /** Where a file of the entries API can be read from; rejects for one that was unreadable (gone since the drop, or a permission). */
 const fileOf = (entry: Entry) => new Promise<File>((ok, fail) => entry.file!(ok, fail));
 
-async function walk(entry: Entry, into: TreeDir | Tree, trail: string, problems: string[]): Promise<void> {
+async function walk(entry: Entry, into: TreeDir | Tree, trail: string, tree: Tree): Promise<void> {
   const here = trail ? `${trail}/${entry.name}` : entry.name;
-  if (!plainName(entry.name)) return void problems.push(here);
+  if (!plainName(entry.name)) return void tree.problems.push(here);
   try {
     if (entry.isFile) {
       into.files.push(await fileOf(entry));
@@ -125,16 +129,16 @@ async function walk(entry: Entry, into: TreeDir | Tree, trail: string, problems:
     if (!entry.isDirectory) return;
     const dir = emptyDir(entry.name);
     into.dirs.push(dir);
-    for (const child of await readAll(entry)) await walk(child, dir, here, problems);
+    for (const child of await readAll(entry)) await walk(child, dir, here, tree);
   } catch {
-    problems.push(here);
+    tree.unreadable.push(here);
   }
 }
 
 /** The tree of what was dropped, folders walked to their end. Empty folders are kept: they are made. */
 export async function treeOfEntries(entries: Entry[]): Promise<Tree> {
-  const tree: Tree = { dirs: [], files: [], problems: [] };
-  for (const entry of entries) await walk(entry, tree, "", tree.problems);
+  const tree: Tree = { dirs: [], files: [], problems: [], unreadable: [] };
+  for (const entry of entries) await walk(entry, tree, "", tree);
   return tree;
 }
 
@@ -152,7 +156,7 @@ export interface TreeResult {
  * its files go into that one: nothing is merged and nothing replaced. A file
  * that fails is a problem and the rest goes on; a folder that cannot be made
  * takes its files and folders with it, each of those counted as one that
- * failed. `done` is called once for each file, uploaded or not.
+ * failed and the folder named as the problem. `done` is called once for each file, uploaded or not.
  */
 export async function uploadTree(
   api: TreeApi,
@@ -163,10 +167,11 @@ export async function uploadTree(
 ): Promise<TreeResult> {
   const problems: string[] = [];
   const say = (e: unknown) => (e as Error)?.message || String(e);
-  const failAll = (dir: TreeDir, why: string) => {
-    problems.push(why);
+  // Each problem names where it happened: with a few hundred files in subfolders, the server's words alone do not say which one.
+  const at = (dir: string, name: string) => (dir ? `${dir}/${name}` : name);
+  const failAll = (dir: TreeDir) => {
     for (const file of dir.files) done(file);
-    for (const sub of dir.dirs) failAll(sub, why);
+    for (const sub of dir.dirs) failAll(sub);
   };
   const makeFolder = async (dir: string, name: string): Promise<string> => {
     for (let n = 1; n <= MAX_NUMBER; n++) {
@@ -183,7 +188,7 @@ export async function uploadTree(
       try {
         await api.uploadFile(dir, file);
       } catch (e) {
-        problems.push(say(e));
+        problems.push(`${at(dir, file.name)}: ${say(e)}`);
       } finally {
         done(file);
       }
@@ -193,7 +198,8 @@ export async function uploadTree(
       try {
         made = await makeFolder(dir, sub.name);
       } catch (e) {
-        failAll(sub, say(e));
+        problems.push(`${at(dir, sub.name)}: ${say(e)}`);
+        failAll(sub);
         continue;
       }
       await put(made, sub);

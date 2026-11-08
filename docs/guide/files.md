@@ -60,7 +60,12 @@ box and its conversation use as well.
   gets a number — `photos (2)` — and its files go into that one: folders are
   never merged. The counter at the top counts every file of the tree. A file
   that fails does not stop the others; the reasons are listed above the folder
-  (the first five, and how many more). A browser that cannot read dropped
+  (the first five, and how many more), each with the path of the file or folder
+  it is about. What cannot be uploaded is told apart: a name that is not a path
+  inside the folder, and something the browser could not read (it was gone
+  since the drop, or not allowed). If you go to another tab while an upload is
+  running, it finishes in the background, and its reasons are there when you are
+  back in the chat's folder. A browser that cannot read dropped
   folders uploads the plain files of a drop, as before.
 - **Rename** a file or a folder with the pencil on its row. Enter keeps the new
   name, Escape leaves it. It is a new name in the same folder, and never replaces
@@ -122,14 +127,17 @@ as [Documents](/guide/documents#a-file-that-is-deleted-or-renamed) describes.
 
 An extension can show a file tree of its own in Files — a cloud drive, a wiki,
 a bucket — as a second place to look beside the chat's folder. When there is one,
-a row of tabs appears under the buttons at the top: the chat's folder first,
+a row of buttons appears under the ones at the top, the one for what you are
+looking at pressed: the chat's folder first,
 then each source by the name its extension gave it. Without one, nothing is
 different.
 
 - **Browse and read** a source as you do the folder: folders and files, the path
   at the top to go back, text in the editor, markdown as a page, and the download
   button on a row or in an open file. A file that is not text, or is over 1 MB,
-  is not shown; download it.
+  is not shown; download it. An open file is not looked at every few seconds as
+  the folder's is (that would fetch the whole file from the source each time);
+  **Refresh** reads it again.
 - **Read-only** unless its extension lets Files save into it. A read-only source
   says so on an open file ("Read-only"), has no **Save**, and its text cannot be
   typed into. A source that can be saved to is edited like any file here; the

@@ -21,7 +21,8 @@ async function open(
     sources = [] as Source[],
     sourcesList,
     answer = {} as Record<string, (route: Route, what: 'files' | 'file') => Promise<void> | void>,
-  }: { sources?: Source[]; sourcesList?: (route: Route) => Promise<void> | void; answer?: Record<string, (route: Route, what: 'files' | 'file') => Promise<void> | void> } = {},
+    visible = false,
+  }: { visible?: boolean; sources?: Source[]; sourcesList?: (route: Route) => Promise<void> | void; answer?: Record<string, (route: Route, what: 'files' | 'file') => Promise<void> | void> } = {},
 ) {
   const asked: string[] = [];
   const saved: { source: string; path: string; body: { content: string; mtime?: number } }[] = [];
@@ -69,7 +70,8 @@ async function open(
     if (!file) return route.fulfill({ status: 404, json: { error: 'There is no such file', code: 'missing' } });
     return route.fulfill({ json: file.binary ? { binary: true, size: 4, mtime: file.mtime } : { binary: false, content: file.content, size: file.content!.length, mtime: file.mtime } });
   });
-  await page.addInitScript(() => Object.defineProperty(document, 'visibilityState', { get: () => 'hidden' }));
+  // Hidden unless a test is about what the page does by itself now and then (the watch looks only while it is visible).
+  await page.addInitScript((state) => Object.defineProperty(document, 'visibilityState', { get: () => state }), visible ? 'visible' : 'hidden');
   await page.setViewportSize({ width: 1300, height: 800 });
   await page.goto('/tests/chat.html?phase=switch');
   await page.getByRole('button', { name: 'Files', exact: true }).click();
@@ -77,7 +79,7 @@ async function open(
   return { asked, saved };
 }
 
-const tab = (page: Page, name: string) => page.getByRole('tab', { name });
+const tab = (page: Page, name: string | RegExp) => page.getByRole('group', { name: 'What to look at' }).getByRole('button', { name });
 const hold = () => {
   let release!: () => void;
   const held = new Promise<void>((r) => (release = r));
@@ -86,23 +88,25 @@ const hold = () => {
 
 test('without a source there is only the chat folder: no tabs, and nothing else changes', async ({ page }) => {
   await open(page);
-  await expect(page.getByRole('tablist')).toHaveCount(0);
+  await expect(page.getByRole('group', { name: 'What to look at' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'New file', exact: true })).toBeVisible();
 });
 
 test('a source whose list cannot be had leaves no tabs and no error over the chat folder', async ({ page }) => {
   await open(page, { sourcesList: (route) => route.fulfill({ status: 500, json: { error: 'boom' } }) });
-  await expect(page.getByRole('tablist')).toHaveCount(0);
+  await expect(page.getByRole('group', { name: 'What to look at' })).toHaveCount(0);
   await expect(page.getByRole('alert')).toHaveCount(0);
 });
 
 test('a source is a second root beside the chat folder, read-only without write, and its file opens in the same view', async ({ page }) => {
   const { asked } = await open(page, { sources: [nextcloud, notes] });
-  await expect(page.getByRole('tablist', { name: 'What to look at' })).toBeVisible();
-  await expect(tab(page, 'Nextcloud')).toHaveAttribute('aria-selected', 'false');
-  await expect(page.getByRole('tab', { selected: true })).toHaveCount(1);
+  await expect(page.getByRole('group', { name: 'What to look at' })).toBeVisible();
+  // Buttons that are pressed, as the other toggles of the panel are: there is no tab panel for the tab pattern's keys to move between.
+  await expect(tab(page, 'Nextcloud')).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.getByRole('group', { name: 'What to look at' }).locator('[aria-pressed="true"]')).toHaveCount(1);
+  await expect(page.getByRole('tab')).toHaveCount(0);
   await tab(page, 'Nextcloud').click();
-  await expect(tab(page, 'Nextcloud')).toHaveAttribute('aria-selected', 'true');
+  await expect(tab(page, 'Nextcloud')).toHaveAttribute('aria-pressed', 'true');
   // Its own tree: not the chat folder's work.txt.
   await expect(page.getByRole('button', { name: /^todo\.md/ })).toBeVisible();
   await expect(page.getByRole('button', { name: /^Photos$/ })).toBeVisible();
@@ -148,11 +152,11 @@ test('the chat folder stays what it was beside a source: its controls, its files
     emit('tool_execution_end', { toolCallId: 'c1', toolName: 'read', result: { content: [{ type: 'text', text: 'work' }] } });
   });
   await page.waitForTimeout(300);
-  await expect(tab(page, 'Nextcloud')).toHaveAttribute('aria-selected', 'true');
+  await expect(tab(page, 'Nextcloud')).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByRole('button', { name: /^todo\.md/ })).toBeVisible();
   expect(asked.filter((a) => a.startsWith('folder read'))).toEqual([]);
   // Back to the folder: everything is there again.
-  await page.getByRole('tab', { name: /^(?!Nextcloud)/ }).first().click();
+  await tab(page, /^(?!Nextcloud)/).first().click();
   await expect(page.getByRole('button', { name: /^work\.txt/ })).toBeVisible();
   await expect(page.getByRole('button', { name: 'New file', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Upload a folder', exact: true })).toBeVisible();
@@ -182,7 +186,7 @@ test('a source that fails says so in its own root, and the chat folder is untouc
   await tab(page, 'Nextcloud').click();
   await expect(page.getByRole('alert')).toHaveCount(0);
   await expect(page.getByRole('button', { name: /^todo\.md/ })).toBeVisible();
-  await page.getByRole('tab', { name: /^(?!Nextcloud|Broken)/ }).first().click();
+  await tab(page, /^(?!Nextcloud|Broken)/).first().click();
   await expect(page.getByRole('button', { name: /^work\.txt/ })).toBeVisible();
   await expect(page.getByRole('alert')).toHaveCount(0);
   await page.getByRole('button', { name: /^work\.txt/ }).click();
@@ -203,7 +207,7 @@ test('a slow source shows loading in its own root only, and its late answer does
   await tab(page, 'Slow cloud').click();
   await expect(page.getByText('Loading…')).toBeVisible();
   // The folder is one click away, and shows at once.
-  await page.getByRole('tab', { name: /^(?!Nextcloud|Slow cloud)/ }).first().click();
+  await tab(page, /^(?!Nextcloud|Slow cloud)/).first().click();
   await expect(page.getByRole('button', { name: /^work\.txt/ })).toBeVisible();
   await expect(page.getByText('Loading…')).toHaveCount(0);
   release();
@@ -229,4 +233,100 @@ test('files dropped on a source are not uploaded, and the browser is not left to
   expect(prevented).toBe(true);
   await page.waitForTimeout(200);
   expect(uploads).toEqual([]);
+});
+
+test('an upload that ends after the person went to a source leaves the source alone, and its problem waits in the chat folder', async ({ page }) => {
+  const { held, release } = hold();
+  await page.route('**/api/sessions/*/upload*', async (route) => {
+    await held;
+    await route.fulfill({ status: 500, json: { error: 'The disk is full' } });
+  });
+  const { asked } = await open(page, { sources: [nextcloud] });
+  await page.getByTestId('files-list').evaluate((list) => {
+    const dt = new DataTransfer();
+    dt.items.add(new File(['x'], 'late.txt'));
+    list.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }));
+  });
+  await expect(page.getByText('Uploading 1 file…')).toBeVisible();
+  await tab(page, 'Nextcloud').click();
+  await page.getByRole('button', { name: /^Photos$/ }).click();
+  await expect(page.getByRole('button', { name: /^beach\.txt/ })).toBeVisible();
+  const listed = asked.filter((a) => a.startsWith('folder list')).length;
+  release();
+  await expect(page.getByText(/^Uploading \d+ files?…$/)).toHaveCount(0);
+  await page.waitForTimeout(300);
+  // Still the source's own folder: no listing of the chat folder was drawn in it, no error of the upload, and no workspace path was asked of the source.
+  await expect(page.getByRole('button', { name: /^beach\.txt/ })).toBeVisible();
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  expect(asked.filter((a) => a.startsWith('folder list')).length).toBe(listed);
+  expect(asked.filter((a) => a.startsWith('cloud')).every((a) => !/late\.txt|work\.txt/.test(a))).toBe(true);
+  // Back in the chat folder, what the upload had to say is there.
+  await tab(page, /^(?!Nextcloud)/).first().click();
+  await expect(page.getByRole('button', { name: /^work\.txt/ })).toBeVisible();
+  await expect(page.getByRole('alert')).toContainText('The disk is full');
+});
+
+test('a new file made in the chat folder is not opened in the source the person went to meanwhile', async ({ page }) => {
+  const { held, release } = hold();
+  const { asked } = await open(page, { sources: [nextcloud] });
+  // Later routes win: the make-a-file call waits.
+  await page.route('**/api/x/pithagoras-files/chats/*/file?*', async (route) => {
+    if (route.request().method() !== 'PUT') return route.fallback();
+    await held;
+    await route.fulfill({ json: { ok: true, size: 0, mtime: 1 } });
+  });
+  await page.getByRole('button', { name: 'New file', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Name of the new file' }).fill('fresh.txt');
+  await page.getByRole('textbox', { name: 'Name of the new file' }).press('Enter');
+  await tab(page, 'Nextcloud').click();
+  await expect(page.getByRole('button', { name: /^todo\.md/ })).toBeVisible();
+  release();
+  await page.waitForTimeout(400);
+  // The source still shows its own folder, with nothing open, and was never asked for the new file.
+  await expect(page.getByRole('button', { name: /^todo\.md/ })).toBeVisible();
+  await expect(page.getByRole('textbox', { name: /^Contents of/ })).toHaveCount(0);
+  expect(asked.filter((a) => a.startsWith('cloud')).every((a) => !/fresh/.test(a))).toBe(true);
+});
+
+test('a save that ends after the person went to the chat folder does not open its file there', async ({ page }) => {
+  const { held, release } = hold();
+  await open(page, {
+    sources: [notes],
+    answer: {
+      notes: async (route, what) => {
+        if (route.request().method() === 'PUT') {
+          await held;
+          return route.fulfill({ json: { ok: true, size: 6, mtime: 99 } });
+        }
+        if (what === 'files') return route.fulfill({ json: { path: '', entries: [{ name: 'idea.txt', type: 'file', size: 4, mtime: 3 }], truncated: false } });
+        return route.fulfill({ json: { binary: false, content: 'idea', size: 4, mtime: 3 } });
+      },
+    },
+  });
+  await tab(page, 'Notes').click();
+  await page.getByRole('button', { name: /^idea\.txt/ }).click();
+  await page.getByRole('textbox', { name: 'Contents of idea.txt' }).fill('better');
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  // The save is out; the person leaves, giving up what is not saved (as far as they can tell).
+  await tab(page, /^(?!Notes)/).first().click();
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Discard' }).click();
+  await expect(page.getByRole('button', { name: /^work\.txt/ })).toBeVisible();
+  release();
+  await page.waitForTimeout(300);
+  // The chat folder is as it was: its list, no file of the source's open in it.
+  await expect(page.getByRole('button', { name: /^work\.txt/ })).toBeVisible();
+  await expect(page.getByRole('textbox', { name: /^Contents of/ })).toHaveCount(0);
+  await expect(page.getByText('idea.txt')).toHaveCount(0);
+});
+
+test('a source file is not looked at again and again: it is read when opened and on Refresh', async ({ page }) => {
+  // Visible, so the watch (every few seconds) is on where there is one.
+  const { asked } = await open(page, { sources: [nextcloud], visible: true });
+  await tab(page, 'Nextcloud').click();
+  await page.getByRole('button', { name: /^todo\.md/ }).click();
+  await expect(page.getByRole('region', { name: 'Rendered todo.md' })).toBeVisible();
+  await page.waitForTimeout(3600);
+  expect(asked.filter((a) => a.startsWith('cloud GET file todo.md'))).toEqual(['cloud GET file todo.md']);
+  await page.getByRole('button', { name: 'Refresh', exact: true }).click();
+  await expect.poll(() => asked.filter((a) => a.startsWith('cloud GET file todo.md')).length).toBe(2);
 });

@@ -52,7 +52,12 @@ const SHOWN_BYTES = 1024 * 1024;
 export default function files(portal: ServerPortal) {
   const registry = new SourceRegistry();
   // What a source is given of who asks: never the chat's folder.
-  const who = (req: Request, chatId: string): SourceContext => ({ chatId, owner: portal.chats.owner(chatId), person: portal.http.person(req) });
+  const who = (req: Request, chatId: string): SourceContext => {
+    // Without the owner's folder on disk: a source may send its context on (a header, an error report).
+    const held = portal.chats.owner(chatId);
+    const owner = held ? (({ path: _folder, ...rest }) => rest)(held) : undefined;
+    return { chatId, owner, person: portal.http.person(req) };
+  };
   // What an extension that builds on Files is given: the way to show its own file tree beside the chat's folder (src/sources.ts).
   portal.provide((consumer) => registry.forConsumer(consumer.name));
   routes(portal.router, portal.http.json(), portal.files, (id) => portal.chats.folder(id), { registry, who });
@@ -266,16 +271,22 @@ function failSource(res: Response, source: FilesSource, e: unknown) {
   res.status(502).json({ error: message ? `${source.label}: ${message}` : `${source.label} could not be reached`, code: "source" });
 }
 
-/** A path in a source's own tree: text without a NUL, as the page has it. Nothing else is made of it, so it can never be read against the chat's folder. */
+/**
+ * A path in a source's own tree, as the page builds one: names joined by `/`, `""` for the root. Nothing else is made of it, so it can never be
+ * read against the chat's folder. A way out (`..`, a leading `/`, a `\`, an empty or `.` part) is refused here: the page never sends one, and a
+ * source that scopes its tree (by chat, by base folder) must not have to catch it.
+ */
 const sourcePath = (req: Request): string | undefined => {
   const given = req.query.path ?? "";
-  return typeof given === "string" && given.length <= 4096 && !given.includes("\0") ? given : undefined;
+  if (typeof given !== "string" || given.length > 4096 || given.includes("\0") || given.includes("\\")) return undefined;
+  if (given && given.split("/").some((part) => part === "" || part === "." || part === "..")) return undefined;
+  return given;
 };
 
 /** What a source listed, as the page lists a folder: well-formed entries only, folders first. */
 function listed(entries: unknown): { entries: { name: string; type: "file" | "dir"; size: number; mtime: number }[]; truncated: boolean } {
   const out = (Array.isArray(entries) ? (entries as SourceEntry[]) : [])
-    .filter((e) => e && typeof e.name === "string" && e.name && !e.name.includes("/") && !e.name.includes("\0") && (e.type === "file" || e.type === "dir"))
+    .filter((e) => e && typeof e.name === "string" && e.name && e.name !== "." && e.name !== ".." && !/[/\\\0]/.test(e.name) && (e.type === "file" || e.type === "dir"))
     .map((e) => ({ name: e.name, type: e.type, size: e.type === "file" && Number.isFinite(e.size) ? Number(e.size) : 0, mtime: Number.isFinite(e.mtime) ? Number(e.mtime) : 0 }));
   out.sort((a, b) => Number(b.type === "dir") - Number(a.type === "dir") || a.name.localeCompare(b.name));
   return { entries: out.slice(0, LISTED), truncated: out.length > LISTED };
@@ -362,8 +373,6 @@ function sourceRoutes(router: Router, json: RequestHandler, folderOf: (id: strin
         return void res.send(bytes);
       }
       const read = shown(await ask(source, () => source.read(at, context)));
-      // A page that only wants to know whether the file is still as it read it (`since` is its time, `size` its size).
-      if (req.query.since !== undefined && Number(req.query.since) === read.mtime && Number(req.query.size) === read.size) return void res.json({ unchanged: true });
       res.json(read);
     } catch (e) {
       failSource(res, source, e);

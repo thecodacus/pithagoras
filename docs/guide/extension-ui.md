@@ -2135,7 +2135,7 @@ on](#building-on-another-extension), so yours names it in its package.json and
 registers a source with what `portal.extensions.use` gives it:
 
 ```json
-"pithagoras": { "server": "./server.js", "requires": { "pithagoras-files": "^0.1.0" } }
+"pithagoras": { "server": "./server.js", "requires": { "pithagoras-files": "^0.2.0" } }
 ```
 
 (`"optional"` in place of `"requires"` if your extension is useful without
@@ -2173,29 +2173,34 @@ export default function (portal) {
   `register` throws a `TypeError` for a source that is not shaped as above, or
   whose id another extension has; `unregister(id)` takes away your own and does
   nothing for another's.
-- **Paths are the source's own**, as Files received them from the page:
-  `""` is the root, and `a/b` is a file or folder in `a`. Files does not resolve,
-  clean or interpret them (no `..` handling, no root): a source over a file system
-  or a URL must check them itself, as `portal.files` does for the chat's folder.
-  Only a path without a NUL, up to 4,096 characters, reaches you.
+- **Paths are the source's own**: `""` is the root, and `a/b` is a file or folder
+  in `a`. The page builds them from names you listed, so Files refuses what it
+  never sends (a `..` or `.` part, an empty part such as `a//b`, a leading `/`, a
+  `\`, a NUL, more than 4,096 characters) before you are called. It does not
+  resolve or clean the rest: a source over a file system or a URL still joins
+  and checks the path against its own base folder, and a source that keeps each
+  chat's files apart (by `chatId`) must put the path under that chat's folder
+  itself, not take it from `path` alone.
 - **`list`** gives `{ name, type: "file" | "dir", size?, mtime? }` for each thing
-  directly in the folder. Names with a `/` or no name, and a type other than
+  directly in the folder. Names with a `/` or `\`, `.` or `..` or no name, and a type other than
   these, are left out; Files sorts them (folders first) and shows 2,000 at most.
 - **`read`** gives `{ content, mtime? }` (text, shown up to 1 MB, over that it is
   offered as a download) or `{ bytes, mtime? }` (offered as a download). Give
-  `mtime` when you can: Files looks at the open file now and then and reloads it
-  when `mtime` or size changed, and a save is checked against it.
+  `mtime` when you can: a save is checked against it. Files does not watch a
+  source's open file, as it does the chat folder's (that would fetch the whole file
+  again every few seconds); Refresh reads it again.
 - **`write`** present makes the source writable: the file view lets the person
   edit text and save it. It is called with the file's new text and, beside the
   context, `expected` when the person read the file with an `mtime`. It may return
   `{ mtime }` for the file as saved. Creating, renaming, deleting and uploading
   are not part of it; the source is only saved to.
 - **Every call is given a context** as its last argument: `chatId`, `owner` (whose
-  chat it is: an agent's or a project's, as `chats.owner` has it) and `person` (who is at the page, as `http.person`). It is how a source
+  chat it is: an agent's or a project's, as `chats.owner` has it, without its `path`) and `person` (who is at the page, as `http.person`). It is how a source
   follows the chat's owner. `visible` gets the same, and a source it says no to is
   not listed and its routes answer "no such source". A `visible` that throws or
   does not answer in 5 seconds counts as no. The context never has the chat's
-  folder, and the chat's folder is never given a source's path.
+  folder, nor where the owner's folder is on the machine, and the chat's folder
+  is never given a source's path.
 - **Errors.** A call that throws is shown in the source's own tab. An error with a
   `code` of `missing`, `conflict`, `invalid`, `exists`, `too_large` or `failed`
   keeps the meaning it has for the chat's folder (404, 409, 400, 409, 413, 500)

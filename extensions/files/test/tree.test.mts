@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { countFiles, treeOfEntries, treeOfPaths, uploadTree, type Entry, type TreeApi } from '../src/tree.ts';
+import { countFiles, plainName, treeOfEntries, treeOfPaths, uploadTree, type Entry, type TreeApi } from '../src/tree.ts';
 
 /** A file as the folder picker gives it: with its path from the picked folder. */
 const picked = (rel: string, body = 'x') => {
@@ -67,6 +67,15 @@ test('a path with a way out is left out and said, and nothing of it is sent', as
   assert.deepEqual(server.calls, ['folder proj', 'file proj/ok.txt']);
 });
 
+test('a name with spaces around a dot is the way out the server takes it for', () => {
+  // The server trims a name before it checks it, so ". " is "." there.
+  for (const name of ['. ', ' ..', '.. ', ' . ', '\t..\n']) assert.equal(plainName(name), false, JSON.stringify(name));
+  const file = new File(['x'], 'f.txt');
+  Object.defineProperty(file, 'webkitRelativePath', { value: 'proj/.. /f.txt' });
+  assert.deepEqual(treeOfPaths([file]).problems, ['proj/.. /f.txt']);
+  assert.equal(plainName(' x'), true);
+});
+
 test('a file whose own name is a way out is left out', () => {
   const file = new File(['x'], '..');
   Object.defineProperty(file, 'webkitRelativePath', { value: 'proj/a' });
@@ -104,7 +113,8 @@ test('one file that fails does not stop the rest, and every file is counted', as
   const done: string[] = [];
   const result = await uploadTree(server.api, server.isTaken, '', tree, (f) => done.push(f.name));
   assert.deepEqual(server.files, ['proj/a.txt', 'proj/src/c.txt']);
-  assert.deepEqual(result.problems, ['Could not upload bad.txt (500)']);
+  // Named by its path: the server's words alone do not say which of a few hundred files it was.
+  assert.deepEqual(result.problems, ['proj/bad.txt: Could not upload bad.txt (500)']);
   assert.equal(done.length, 3);
 });
 
@@ -119,7 +129,7 @@ test('a folder that cannot be made counts its files as failed and the rest goes 
   const done: string[] = [];
   const result = await uploadTree(server.api, server.isTaken, '', tree, (f) => done.push(f.name));
   assert.deepEqual(server.files, ['open/c.txt']);
-  assert.ok(result.problems.length >= 1 && result.problems.every((p) => p === 'Not allowed'));
+  assert.deepEqual(result.problems, ['locked: Not allowed']);
   assert.deepEqual(done.sort(), ['a.txt', 'b.txt', 'c.txt']);
 });
 
@@ -158,9 +168,11 @@ test('a dropped folder is walked to its end, in batches, and an empty folder is 
   assert.deepEqual(server.calls.filter((c) => c.startsWith('folder')), ['folder proj', 'folder proj/empty', 'folder proj/src']);
 });
 
-test('an entry that cannot be read, or has a hostile name, is a problem and the others are kept', async () => {
+test('an entry that cannot be read, or has a hostile name, is a problem of its own kind and the others are kept', async () => {
   const broken: Entry = { isFile: true, isDirectory: false, name: 'broken.txt', file: (_ok, fail) => fail(new Error('gone')) };
   const tree = await treeOfEntries([entryDir('proj', [entryFile('ok.txt'), broken, entryFile('..')])]);
-  assert.deepEqual(tree.problems.sort(), ['proj/..', 'proj/broken.txt']);
+  // Told apart: an unreadable file is not "not a path inside the folder".
+  assert.deepEqual(tree.problems, ['proj/..']);
+  assert.deepEqual(tree.unreadable, ['proj/broken.txt']);
   assert.deepEqual(tree.dirs[0].files.map((f) => f.name), ['ok.txt']);
 });

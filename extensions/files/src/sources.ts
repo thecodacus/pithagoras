@@ -13,8 +13,8 @@ import type { ChatOwner, RequestPerson } from "@pithagoras/extension-api/server"
 /** What every call to a source is told about who asks: the chat the panel is open on, whose it is, and the person at the page. Never the chat's folder. */
 export interface SourceContext {
   chatId: string;
-  /** Whose the chat is: an agent's or a project's (see `chats.owner`). Nothing for a chat that is in neither. */
-  owner?: ChatOwner;
+  /** Whose the chat is: an agent's or a project's (see `chats.owner`), without its `path`: where it is on this machine is not a source's to know. Nothing for a chat that is in neither. */
+  owner?: Omit<ChatOwner, "path">;
   person?: RequestPerson;
 }
 
