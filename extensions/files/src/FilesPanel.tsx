@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   LuArrowLeft,
   LuBookOpen,
@@ -22,7 +22,7 @@ import {
   LuTrash2,
   LuUpload,
 } from "react-icons/lu";
-import { api, type FileEntry, type Unsaved } from "./files-api";
+import { api, folderReader, listSources, sourceReader, type FileEntry, type SourceInfo, type Unsaved } from "./files-api";
 import type { FileActivity } from "./activity";
 import { flushFileDraft, keepFileDraft, readFileDraft } from "./drafts";
 import { bytesLabel, isEnter, isEscape, within } from "./helpers";
@@ -153,6 +153,18 @@ export const FilesPanel = memo(function FilesPanel({
   const [dropping, setDropping] = useState(false);
   // A dropped folder being looked through, before the number of files in it is known.
   const [reading, setReading] = useState(false);
+  // The tree being looked at: the chat's folder (null) or a source another extension gave (its id), and the sources there are.
+  const [root, setRoot] = useState<string | null>(null);
+  const [sources, setSources] = useState<SourceInfo[]>([]);
+  const rootRef = useRef(root);
+  rootRef.current = root;
+  const home = useMemo(() => folderReader(sessionId), [sessionId]);
+  const reader = useMemo(() => (root === null ? home : sourceReader(sessionId, root)), [home, sessionId, root]);
+  const source = root === null ? undefined : (sources.find((x) => x.id === root) ?? { id: root, label: root, writable: false });
+  // Only the chat's folder is made, uploaded into, renamed in and deleted from here; a source can be saved in where it says so.
+  const writable = !source || source.writable;
+  // A source that went away while it was shown stays a tab, so that there is a way back.
+  const tabs = source && !sources.some((x) => x.id === source.id) ? [...sources, source] : sources;
   const picker = useRef<HTMLInputElement>(null);
   const folderPicker = useRef<HTMLInputElement>(null);
 
@@ -193,8 +205,8 @@ export const FilesPanel = memo(function FilesPanel({
   // Kept while there are changes, for a panel that is unmounted with them: switching chat or leaving the page.
   useEffect(() => {
     if (!keepDraft) return;
-    keepFileDraft(sessionId, dirty && file ? { path: file.path, text: draft, saved: file.saved, mtime: file.mtime, size: file.size, writing } : null);
-  }, [keepDraft, sessionId, dirty, file, draft, writing]);
+    keepFileDraft(sessionId, dirty && file && root === null ? { path: file.path, text: draft, saved: file.saved, mtime: file.mtime, size: file.size, writing } : null);
+  }, [keepDraft, sessionId, dirty, file, draft, writing, root]);
   // Written before it goes: unmounting must not lose what was typed a moment ago. Closing the panel on purpose forgets it first.
   useEffect(() => (keepDraft ? () => flushFileDraft(sessionId) : undefined), [keepDraft, sessionId]);
   // An edit brought back may be of a file that changed meanwhile: told the way a save would, instead of at the save.
@@ -212,14 +224,14 @@ export const FilesPanel = memo(function FilesPanel({
     // Once, for what the panel opened with.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  const root = folder.split("/").filter(Boolean).pop() || "folder";
+  const rootName = folder.split("/").filter(Boolean).pop() || "folder";
 
   const loadDir = useCallback(
     (path: string) => {
       const ask = ++listAsk.current;
       setListing(true);
-      return api
-        .listFiles(sessionId, path)
+      return reader
+        .list(path)
         .then((r) => {
           if (ask !== listAsk.current) return;
           setEntries(r.entries);
@@ -235,23 +247,37 @@ export const FilesPanel = memo(function FilesPanel({
           if (ask === listAsk.current) setListing(false);
         });
     },
-    [sessionId],
+    [reader],
   );
 
   useEffect(() => {
     void loadDir(dir);
   }, [loadDir, dir]);
 
+  // The trees other extensions gave, asked for on their own: the chat's folder is shown without waiting for them, and without them should the
+  // question fail (the ones there were stay).
+  const loadSources = useCallback(
+    () =>
+      listSources(sessionId).then(
+        (r) => setSources(r.sources),
+        () => {},
+      ),
+    [sessionId],
+  );
+  useEffect(() => {
+    void loadSources();
+  }, [loadSources]);
+
   const loadFile = useCallback(
-    (path: string, write = false) => {
+    (path: string, write = false, from = reader) => {
       const ask = ++fileAsk.current;
       setWriting(write);
       setChanged(false);
       setSaveError(null);
       setFile({ path, loading: true, binary: false, size: 0, mtime: 0, saved: "" });
       setDraft("");
-      return api
-        .readFile(sessionId, path)
+      return from
+        .read(path)
         .then((r) => {
           if (ask !== fileAsk.current) return;
           const text = r.binary ? "" : r.content;
@@ -264,7 +290,7 @@ export const FilesPanel = memo(function FilesPanel({
           setFile({ path, loading: false, error: (e as Error).message, binary: false, size: 0, mtime: 0, saved: "" });
         });
     },
-    [sessionId],
+    [reader],
   );
 
   /**
@@ -296,7 +322,7 @@ export const FilesPanel = memo(function FilesPanel({
         setSaveError(null);
       };
       if (!watching) setRereading(true);
-      return (watching ? api.readFileIfChanged(sessionId, path, known!) : api.readFile(sessionId, path))
+      return (watching ? reader.readIfChanged(path, known!) : reader.read(path))
         .then((r) => {
           if (ask !== fileAsk.current) return;
           if ("unchanged" in r) return;
@@ -321,7 +347,7 @@ export const FilesPanel = memo(function FilesPanel({
           if (!watching) setRereading(false);
         });
     },
-    [sessionId],
+    [reader],
   );
 
   // The open file is looked at now and then: a change made outside this panel (another device, a cron job, the agent's shell) shows by itself.
@@ -344,6 +370,8 @@ export const FilesPanel = memo(function FilesPanel({
   useEffect(() => {
     if (!activity || activity.seq <= handled.current) return;
     handled.current = activity.seq;
+    // The agent works in the chat's folder: its paths mean nothing in a source, which the panel is then not following (looking at one lets go).
+    if (rootRef.current !== null) return;
     // What the agent did may have added to a folder, wherever the panel is looking.
     void loadDir(dir);
     // It changed the file that is open: that shows, followed or not, read again where it is. An edit in the way is asked about, not replaced.
@@ -351,7 +379,7 @@ export const FilesPanel = memo(function FilesPanel({
     if (!following) return;
     if (dirtyRef.current) return;
     setDir(parentOf(activity.path));
-    void loadFile(activity.path);
+    void loadFile(activity.path, false, home);
     // Only a new activity should do this, not a change of folder.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activity?.seq]);
@@ -369,8 +397,10 @@ export const FilesPanel = memo(function FilesPanel({
     void mayLeave().then((ok) => {
       if (!ok || ask !== revealAsk.current) return;
       setFollowing(false);
+      // A path of the chat's folder: from a source it is shown after going back to the folder.
+      setRoot(null);
       setDir(parentOf(target));
-      void loadFile(target);
+      void loadFile(target, false, home);
     });
     // Only a new ask, not a new folder or a new file.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -382,6 +412,26 @@ export const FilesPanel = memo(function FilesPanel({
     fileAsk.current++;
     setFile(null);
     setDir(path);
+  };
+
+  /** Looks at another tree: the chat's folder (null) or a source. True once it is shown; false if the person kept what they had open. */
+  const switchRoot = async (next: string | null): Promise<boolean> => {
+    if (next === rootRef.current) return true;
+    if (!(await mayLeave())) return false;
+    setFollowing(false);
+    // What was asked of the one that is left is not the answer for the one that comes: both lists and the file are stale at once.
+    fileAsk.current++;
+    listAsk.current++;
+    setFile(null);
+    setEntries([]);
+    setTruncated(false);
+    setListError(null);
+    setListing(next !== null);
+    setRenaming(null);
+    setCreating(null);
+    setDir("");
+    setRoot(next);
+    return true;
   };
 
   const openEntry = async (entry: FileEntry) => {
@@ -404,22 +454,24 @@ export const FilesPanel = memo(function FilesPanel({
   };
 
   // Clicked again while following, it lets go: what is open stays where it is.
-  const toggleFollow = () => {
+  const toggleFollow = async () => {
     if (following) return setFollowing(false);
+    // The agent's files are the chat folder's.
+    if (!(await switchRoot(null))) return;
     setFollowing(true);
     if (activity && !dirtyRef.current) {
       handled.current = activity.seq;
       setDir(parentOf(activity.path));
-      void loadFile(activity.path);
+      void loadFile(activity.path, false, home);
     }
   };
 
   const save = async (overwrite = false) => {
-    if (!file || file.binary || saving) return;
+    if (!file || file.binary || saving || !writable) return;
     setSaving(true);
     setSaveError(null);
     try {
-      const r = await api.saveFile(sessionId, file.path, draft, overwrite ? undefined : file.mtime);
+      const r = await reader.save(file.path, draft, overwrite ? undefined : file.mtime);
       // A read of the file still out (Refresh, the agent's change) may have found it as it was before this save: shown now, its old text would pass for saved.
       fileAsk.current++;
       setFile({ ...file, saved: draft, mtime: r.mtime, size: r.size, error: undefined });
@@ -585,8 +637,8 @@ export const FilesPanel = memo(function FilesPanel({
     <div className="flex h-full min-h-0 flex-col text-sm">
       <div className="flex shrink-0 items-center gap-1 border-b border-line px-3 py-1.5 text-xs text-fg-subtle">
         <nav aria-label={t("Folder")} className="flex min-w-0 flex-1 flex-wrap items-center gap-x-0.5 overflow-hidden">
-          <button onClick={() => void goTo("")} className="max-w-full truncate rounded px-1 py-0.5 hover:bg-fg/5 hover:text-fg" title={folder}>
-            {root}
+          <button onClick={() => void goTo("")} className="max-w-full truncate rounded px-1 py-0.5 hover:bg-fg/5 hover:text-fg" title={source ? source.label : folder}>
+            {source ? source.label : rootName}
           </button>
           {crumbs.map((name, i) => (
             <span key={i} className="flex min-w-0 max-w-full items-center gap-0.5">
@@ -598,7 +650,7 @@ export const FilesPanel = memo(function FilesPanel({
           ))}
         </nav>
         <button
-          onClick={toggleFollow}
+          onClick={() => void toggleFollow()}
           aria-pressed={following}
           title={following ? t("Stop showing what the agent reads and changes") : t("Show what the agent reads and changes")}
           className={`flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 transition ${
@@ -608,7 +660,7 @@ export const FilesPanel = memo(function FilesPanel({
           <LuLocateFixed aria-hidden className="h-3.5 w-3.5" />
           <span>{following ? t("Following") : t("Follow")}</span>
         </button>
-        {!file && (
+        {!file && !source && (
           <>
             <button
               onClick={() => startCreate("file")}
@@ -668,15 +720,17 @@ export const FilesPanel = memo(function FilesPanel({
             />
           </>
         )}
-        <button
-          onClick={() => setShowPath((v) => !v)}
-          aria-pressed={showPath}
-          title={showPath ? t("Hide the full path") : t("Show the full path of this folder")}
-          aria-label={showPath ? t("Hide the full path") : t("Show the full path")}
-          className={`shrink-0 rounded p-1 transition hover:bg-fg/5 hover:text-fg ${showPath ? "text-accent" : "text-fg-faint"}`}
-        >
-          <LuMapPin aria-hidden className="h-3.5 w-3.5" />
-        </button>
+        {!source && (
+          <button
+            onClick={() => setShowPath((v) => !v)}
+            aria-pressed={showPath}
+            title={showPath ? t("Hide the full path") : t("Show the full path of this folder")}
+            aria-label={showPath ? t("Hide the full path") : t("Show the full path")}
+            className={`shrink-0 rounded p-1 transition hover:bg-fg/5 hover:text-fg ${showPath ? "text-accent" : "text-fg-faint"}`}
+          >
+            <LuMapPin aria-hidden className="h-3.5 w-3.5" />
+          </button>
+        )}
         <button
           onClick={toggleHidden}
           aria-pressed={showHidden}
@@ -690,6 +744,7 @@ export const FilesPanel = memo(function FilesPanel({
         <button
           onClick={() => {
             void loadDir(dir);
+            void loadSources();
             if (file) void rereadFile(file.path);
           }}
           title={t("Refresh")}
@@ -698,16 +753,35 @@ export const FilesPanel = memo(function FilesPanel({
         >
           <LuRefreshCw aria-hidden className={`h-3.5 w-3.5 ${listing || rereading ? "animate-spin" : ""}`} />
         </button>
-        <a
-          href={api.archiveDownloadUrl(sessionId, dir)}
-          title={dir ? t("Download this folder as a .tar.gz") : t("Download the whole folder as a .tar.gz")}
-          aria-label={t("Download this folder")}
-          className="shrink-0 rounded p-1 text-fg-faint transition hover:bg-fg/5 hover:text-fg"
-        >
-          <LuDownload aria-hidden className="h-3.5 w-3.5" />
-        </a>
+        {!source && (
+          <a
+            href={api.archiveDownloadUrl(sessionId, dir)}
+            title={dir ? t("Download this folder as a .tar.gz") : t("Download the whole folder as a .tar.gz")}
+            aria-label={t("Download this folder")}
+            className="shrink-0 rounded p-1 text-fg-faint transition hover:bg-fg/5 hover:text-fg"
+          >
+            <LuDownload aria-hidden className="h-3.5 w-3.5" />
+          </a>
+        )}
       </div>
-      {showPath && (
+      {/* Only where an extension gave a tree: the chat's folder is then one of two or more, and the others are as near as it is. */}
+      {tabs.length > 0 && (
+        <div role="tablist" aria-label={t("What to look at")} className="flex shrink-0 flex-wrap items-center gap-1 border-b border-line px-3 py-1 text-xs">
+          {[{ id: null, label: rootName, title: folder }, ...tabs.map((x) => ({ id: x.id as string | null, label: x.label, title: x.label }))].map((tab) => (
+            <button
+              key={tab.id === null ? "folder" : `source:${tab.id}`}
+              role="tab"
+              aria-selected={tab.id === root}
+              onClick={() => void switchRoot(tab.id)}
+              title={tab.title}
+              className={`max-w-[12rem] truncate rounded-md px-2 py-0.5 transition ${tab.id === root ? "bg-accent/12 text-accent ring-1 ring-inset ring-accent/25" : "text-fg-subtle hover:bg-fg/5 hover:text-fg"}`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      )}
+      {showPath && !source && (
         // Cut at the start, not the end: what tells folders apart is the last part. rtl moves the ellipsis; bdi keeps the path itself left to right.
         <div className="shrink-0 truncate border-b border-line px-3 py-1 text-left font-mono text-[11px] text-fg-subtle [direction:rtl]" title={dir ? `${folder}/${dir}` : folder}>
           <bdi data-testid="files-full-path">{dir ? `${folder}/${dir}` : folder}</bdi>
@@ -721,6 +795,7 @@ export const FilesPanel = memo(function FilesPanel({
               <LuArrowLeft aria-hidden className="h-3.5 w-3.5" />
             </button>
             <span className="min-w-0 flex-1 truncate font-mono text-xs text-fg" title={file.path}>
+              {source ? `${source.label}: ` : ""}
               {file.path}
               {dirty && (
                 <span className="ml-1 text-accent" title={t("Not saved")}>
@@ -731,7 +806,12 @@ export const FilesPanel = memo(function FilesPanel({
             {!file.loading && !file.error && (
               <span className="shrink-0 text-[10px] text-fg-faint">{bytesLabel(file.size)}</span>
             )}
-            <a href={api.fileDownloadUrl(sessionId, file.path)} title={t("Download this file")} aria-label={t("Download this file")} className="shrink-0 rounded p-1 text-fg-faint transition hover:bg-fg/5 hover:text-fg">
+            {!writable && !file.loading && !file.error && (
+              <span className="shrink-0 rounded bg-fg/5 px-1.5 py-0.5 text-[10px] text-fg-subtle" title={t("This source cannot be changed from here")}>
+                {t("Read-only")}
+              </span>
+            )}
+            <a href={reader.downloadUrl(file.path)} title={t("Download this file")} aria-label={t("Download this file")} className="shrink-0 rounded p-1 text-fg-faint transition hover:bg-fg/5 hover:text-fg">
               <LuDownload aria-hidden className="h-3.5 w-3.5" />
             </a>
             {!file.binary && !file.loading && !file.error && isMarkdown(file.path) && (
@@ -748,7 +828,7 @@ export const FilesPanel = memo(function FilesPanel({
                 {asPage ? <LuCode aria-hidden className="h-3.5 w-3.5" /> : <LuBookOpen aria-hidden className="h-3.5 w-3.5" />}
               </button>
             )}
-            {!file.binary && !file.loading && !file.error && (
+            {writable && !file.binary && !file.loading && !file.error && (
               <button
                 onClick={() => void save()}
                 disabled={!dirty || saving}
@@ -781,21 +861,23 @@ export const FilesPanel = memo(function FilesPanel({
             </p>
           ) : file.loading ? (
             <p className="px-3 py-3 text-xs text-fg-subtle">{t("Loading…")}</p>
-          ) : file.binary && looksLikePicture(file.path) ? (
+          ) : file.binary && looksLikePicture(file.path) && !source ? (
             <FilePicture key={`${file.path}@${file.mtime}`} src={api.pictureUrl(sessionId, file.path, file.mtime)} name={file.path} />
           ) : file.binary ? (
             <p className="p-6 text-center text-xs text-fg-subtle">{t("Not text, or too large to show. Download it to open it.")}</p>
           ) : asPage && isMarkdown(file.path) ? (
             // The draft, not the saved text: what is typed shows at once, and the page is never behind the source.
             <div role="region" aria-label={t("Rendered {path}", { path: file.path })} className="prose prose-sm min-h-0 max-w-none flex-1 overflow-auto p-3">
-              <Markdown>{folderPictures(draft, folder, (p) => api.pictureUrl(sessionId, p), parentOf(file.path))}</Markdown>
+              {/* A picture is shown from the chat's folder; a source has no route for pictures, and what its page names is its own. */}
+              <Markdown>{source ? draft : folderPictures(draft, folder, (p) => api.pictureUrl(sessionId, p), parentOf(file.path))}</Markdown>
             </div>
           ) : (
             <textarea
               value={draft}
+              readOnly={!writable}
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={(e) => {
-                if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
+                if (writable && (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
                   e.preventDefault();
                   void save();
                 }
@@ -811,8 +893,9 @@ export const FilesPanel = memo(function FilesPanel({
           onDragOver={(e) => {
             if (!e.dataTransfer.types.includes("Files")) return;
             e.preventDefault();
-            e.dataTransfer.dropEffect = "copy";
-            setDropping(true);
+            // Nothing is put into a source from here, and it is said so by the pointer; the drop is still caught, or the browser opens the file.
+            e.dataTransfer.dropEffect = source ? "none" : "copy";
+            setDropping(!source);
           }}
           onDragLeave={(e) => {
             if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropping(false);
@@ -821,6 +904,7 @@ export const FilesPanel = memo(function FilesPanel({
             if (!e.dataTransfer.files.length) return;
             e.preventDefault();
             setDropping(false);
+            if (source) return;
             // Taken now: the entries of a drop cannot be asked for after the event. A browser without them has the plain files, and a folder is no use among those.
             const entries = droppedEntries(e.dataTransfer.items);
             void (entries ? uploadEntries(entries) : uploadFiles([...e.dataTransfer.files]));
@@ -828,6 +912,7 @@ export const FilesPanel = memo(function FilesPanel({
           data-testid="files-list"
           className={`min-h-0 flex-1 overflow-y-auto p-1.5 ${dropping ? "bg-accent/5 ring-2 ring-inset ring-accent/40" : ""}`}
         >
+          {listing && !listError && entries.length === 0 && source && <p className="px-2 py-3 text-xs text-fg-subtle">{t("Loading…")}</p>}
           {reading && (
             <p role="status" className="px-2 py-1.5 text-xs text-fg-subtle">
               {t("Looking through the dropped folders…")}
@@ -867,7 +952,9 @@ export const FilesPanel = memo(function FilesPanel({
             </p>
           )}
           {!listError && !listing && !creating && shown.length === 0 && (
-            <p className="px-2 py-3 text-xs text-fg-subtle">{entries.length === 0 ? t("Nothing in this folder yet — drop files here to upload them.") : t("Nothing here but hidden files.")}</p>
+            <p className="px-2 py-3 text-xs text-fg-subtle">
+              {entries.length === 0 ? (source ? t("Nothing in this folder.") : t("Nothing in this folder yet — drop files here to upload them.")) : t("Nothing here but hidden files.")}
+            </p>
           )}
           {shown.map((entry) => (
             <div key={entry.name} className="group flex items-center rounded-lg px-1 transition hover:bg-fg/5 focus-within:bg-fg/5">
@@ -920,9 +1007,9 @@ export const FilesPanel = memo(function FilesPanel({
                   </button>
                   {/* Out of the way until the row is pointed at, but always there on a touch screen, which cannot point. */}
                   <div className="files-row-actions flex shrink-0 items-center opacity-0 transition focus-within:opacity-100 group-hover:opacity-100 [@media(pointer:coarse)]:opacity-100">
-                    {entry.type !== "link" && (
+                    {entry.type !== "link" && !(source && entry.type === "dir") && (
                       <a
-                        href={entry.type === "dir" ? api.archiveDownloadUrl(sessionId, join(dir, entry.name)) : api.fileDownloadUrl(sessionId, join(dir, entry.name))}
+                        href={entry.type === "dir" ? api.archiveDownloadUrl(sessionId, join(dir, entry.name)) : reader.downloadUrl(join(dir, entry.name))}
                         title={entry.type === "dir" ? t("Download {name} as a .tar.gz", { name: entry.name }) : t("Download {name}", { name: entry.name })}
                         aria-label={t("Download {name}", { name: entry.name })}
                         className="rounded p-1 text-fg-faint transition hover:bg-fg/10 hover:text-fg"
@@ -930,25 +1017,30 @@ export const FilesPanel = memo(function FilesPanel({
                         <LuDownload aria-hidden className="h-3.5 w-3.5" />
                       </a>
                     )}
-                    <button
-                      onClick={() => startRename(entry)}
-                      title={t("Rename {name}", { name: entry.name })}
-                      aria-label={t("Rename {name}", { name: entry.name })}
-                      className="rounded p-1 text-fg-faint transition hover:bg-fg/10 hover:text-fg"
-                    >
-                      <LuPencil aria-hidden className="h-3.5 w-3.5" />
-                    </button>
-                    {/* Off by aria-disabled, not disabled: while the question is open this button is where focus goes back to, and a button that is disabled keeps none. remove() ignores the click. */}
-                    <button
-                      onClick={() => void remove(entry)}
-                      aria-disabled={removing.has(join(dir, entry.name))}
-                      aria-busy={removing.has(join(dir, entry.name))}
-                      title={t("Delete {name}", { name: entry.name })}
-                      aria-label={t("Delete {name}", { name: entry.name })}
-                      className="rounded p-1 text-fg-faint transition hover:bg-danger/10 hover:text-danger aria-disabled:opacity-60"
-                    >
-                      {removing.has(join(dir, entry.name)) ? <LuRefreshCw aria-hidden className="h-3.5 w-3.5 animate-spin" /> : <LuTrash2 aria-hidden className="h-3.5 w-3.5" />}
-                    </button>
+                    {/* Renamed and deleted in the chat's folder only: a source is read, and saved where it can be. */}
+                    {!source && (
+                      <>
+                        <button
+                          onClick={() => startRename(entry)}
+                          title={t("Rename {name}", { name: entry.name })}
+                          aria-label={t("Rename {name}", { name: entry.name })}
+                          className="rounded p-1 text-fg-faint transition hover:bg-fg/10 hover:text-fg"
+                        >
+                          <LuPencil aria-hidden className="h-3.5 w-3.5" />
+                        </button>
+                        {/* Off by aria-disabled, not disabled: while the question is open this button is where focus goes back to, and a button that is disabled keeps none. remove() ignores the click. */}
+                        <button
+                          onClick={() => void remove(entry)}
+                          aria-disabled={removing.has(join(dir, entry.name))}
+                          aria-busy={removing.has(join(dir, entry.name))}
+                          title={t("Delete {name}", { name: entry.name })}
+                          aria-label={t("Delete {name}", { name: entry.name })}
+                          className="rounded p-1 text-fg-faint transition hover:bg-danger/10 hover:text-danger aria-disabled:opacity-60"
+                        >
+                          {removing.has(join(dir, entry.name)) ? <LuRefreshCw aria-hidden className="h-3.5 w-3.5 animate-spin" /> : <LuTrash2 aria-hidden className="h-3.5 w-3.5" />}
+                        </button>
+                      </>
+                    )}
                   </div>
                 </>
               )}

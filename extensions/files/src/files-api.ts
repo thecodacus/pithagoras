@@ -83,3 +83,46 @@ export const api = {
   /** A picture in the chat's folder, by its path there. `version` is anything that changes when the file does. */
   pictureUrl: (sessionId: string, path: string, version?: string | number) => at(sessionId, "picture", path, version === undefined ? "" : `&v=${encodeURIComponent(String(version))}`),
 };
+
+/** A file tree another extension gave Files (see src/sources.ts), shown as a root beside the chat's folder. */
+export interface SourceInfo {
+  id: string;
+  label: string;
+  /** Whether the file view may save in it; without, it is read-only. */
+  writable: boolean;
+}
+
+/** A route of one source, at Files' own server half: its paths are its own, never the chat folder's. */
+const ofSource = (sessionId: string, source: string, route: string, path: string, more = "") =>
+  portal.api.url(`/chats/${encodeURIComponent(sessionId)}/sources/${encodeURIComponent(source)}/${route}?path=${encodeURIComponent(path)}${more}`);
+
+/** The sources there are for this chat, as the person at this page may see them. */
+export const listSources = (sessionId: string) => portal.api.json<{ sources: SourceInfo[] }>(portal.api.url(`/chats/${encodeURIComponent(sessionId)}/sources`));
+
+/**
+ * What the file view asks of the tree it shows, whichever it is: the chat's folder or one source. Each has its own paths, so a path
+ * from one is only ever asked of that one.
+ */
+export interface Reader {
+  list(dir: string): Promise<{ path: string; entries: FileEntry[]; truncated: boolean }>;
+  read(file: string): Promise<FileContent>;
+  readIfChanged(file: string, known: { mtime: number; size: number }): Promise<FileContent | { unchanged: true }>;
+  save(file: string, content: string, mtime?: number): Promise<{ ok: true; size: number; mtime: number }>;
+  downloadUrl(file: string): string;
+}
+
+export const folderReader = (sessionId: string): Reader => ({
+  list: (dir) => api.listFiles(sessionId, dir),
+  read: (file) => api.readFile(sessionId, file),
+  readIfChanged: (file, known) => api.readFileIfChanged(sessionId, file, known),
+  save: (file, content, mtime) => api.saveFile(sessionId, file, content, mtime),
+  downloadUrl: (file) => api.fileDownloadUrl(sessionId, file),
+});
+
+export const sourceReader = (sessionId: string, source: string): Reader => ({
+  list: (dir) => portal.api.json(ofSource(sessionId, source, "files", dir)),
+  read: (file) => portal.api.json(ofSource(sessionId, source, "file", file)),
+  readIfChanged: (file, known) => portal.api.json(ofSource(sessionId, source, "file", file, `&since=${known.mtime}&size=${known.size}`)),
+  save: (file, content, mtime) => portal.api.json(ofSource(sessionId, source, "file", file), { method: "PUT", body: JSON.stringify({ content, mtime }) }),
+  downloadUrl: (file) => ofSource(sessionId, source, "file", file, "&download=1"),
+});
