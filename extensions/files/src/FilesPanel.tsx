@@ -12,6 +12,7 @@ import {
   LuFileText,
   LuFolder,
   LuFolderPlus,
+  LuFolderUp,
   LuLink,
   LuLocateFixed,
   LuMapPin,
@@ -26,6 +27,7 @@ import type { FileActivity } from "./activity";
 import { flushFileDraft, keepFileDraft, readFileDraft } from "./drafts";
 import { bytesLabel, isEnter, isEscape, within } from "./helpers";
 import { folderPictures } from "./pictures";
+import { countFiles, droppedEntries, treeOfEntries, treeOfPaths, uploadTree, type Entry, type Tree } from "./tree";
 import { deleteAsking, unsavedNotes } from "./unsaved";
 import { confirmDialog, isApiError, local, Markdown, t, tp, useLanguage } from "./portal";
 
@@ -149,7 +151,10 @@ export const FilesPanel = memo(function FilesPanel({
   // Files on their way up, and whether some are being dragged over the list.
   const [uploading, setUploading] = useState(0);
   const [dropping, setDropping] = useState(false);
+  // A dropped folder being looked through, before the number of files in it is known.
+  const [reading, setReading] = useState(false);
   const picker = useRef<HTMLInputElement>(null);
+  const folderPicker = useRef<HTMLInputElement>(null);
 
   const dirty = !!file && !file.binary && !file.loading && draft !== file.saved;
   const dirtyRef = useRef(dirty);
@@ -538,23 +543,39 @@ export const FilesPanel = memo(function FilesPanel({
     }
   };
 
-  /** Into the folder being looked at. A name that is taken gets a number; nothing is replaced. */
-  const upload = async (files: File[]) => {
-    if (!files.length) return;
+  /**
+   * A tree of files and folders into the folder being looked at. The folders are made first, one by one, then each file goes up with the
+   * upload route that single files use. A name that is taken gets a number, for a folder as for a file; nothing is replaced.
+   * A file that fails does not stop the rest, and the counter counts every file of the tree.
+   */
+  const upload = async (tree: Tree) => {
+    const count = countFiles(tree);
+    if (!count && !tree.dirs.length && !tree.problems.length) return;
     const into = dir;
-    setUploading((n) => n + files.length);
-    const problems: string[] = [];
-    for (const file of files) {
-      try {
-        await api.uploadFile(sessionId, into, file);
-      } catch (e) {
-        problems.push((e as Error).message);
-      } finally {
-        setUploading((n) => n - 1);
-      }
+    setUploading((n) => n + count);
+    const result = await uploadTree(
+      { createFolder: (at, name) => api.createFolder(sessionId, at, name), uploadFile: (at, file) => api.uploadFile(sessionId, at, file) },
+      (e) => isApiError(e) && e.body.code === "exists",
+      into,
+      tree,
+      () => setUploading((n) => n - 1),
+    );
+    await loadDir(dirRef.current);
+    const problems = [...tree.problems.map((path) => t("Skipped {path}: it is not a path inside the folder.", { path })), ...result.problems];
+    if (problems.length) setListError([...problems.slice(0, 5), ...(problems.length > 5 ? [t("…and {n} more.", { n: problems.length - 5 })] : [])].join(" "));
+  };
+  /** Plain files, as the file picker and a browser without folder drops give them. */
+  const uploadFiles = (files: File[]) => upload({ dirs: [], files, problems: [] });
+  /** What was dropped, as the browser's entries (taken during the drop): folders are walked to their end first. */
+  const uploadEntries = async (entries: Entry[]) => {
+    setReading(true);
+    let tree: Tree;
+    try {
+      tree = await treeOfEntries(entries);
+    } finally {
+      setReading(false);
     }
-    await loadDir(dir);
-    if (problems.length) setListError(problems.join(" "));
+    await upload(tree);
   };
 
   const crumbs = dir ? dir.split("/") : [];
@@ -621,7 +642,28 @@ export const FilesPanel = memo(function FilesPanel({
               onChange={(e) => {
                 const files = [...(e.target.files ?? [])];
                 e.target.value = "";
-                void upload(files);
+                void uploadFiles(files);
+              }}
+            />
+            <button
+              onClick={() => folderPicker.current?.click()}
+              title={t("Upload a folder here, with everything in it — or drop it on the list")}
+              aria-label={t("Upload a folder")}
+              className="shrink-0 rounded p-1 text-fg-faint transition hover:bg-fg/5 hover:text-fg"
+            >
+              <LuFolderUp aria-hidden className="h-3.5 w-3.5" />
+            </button>
+            <input
+              ref={folderPicker}
+              type="file"
+              hidden
+              // Not in React's types: the picker takes a folder and gives every file in it, each with its path from that folder.
+              {...({ webkitdirectory: "", directory: "" } as object)}
+              data-testid="files-folder-input"
+              onChange={(e) => {
+                const files = [...(e.target.files ?? [])];
+                e.target.value = "";
+                void upload(treeOfPaths(files));
               }}
             />
           </>
@@ -779,10 +821,18 @@ export const FilesPanel = memo(function FilesPanel({
             if (!e.dataTransfer.files.length) return;
             e.preventDefault();
             setDropping(false);
-            void upload([...e.dataTransfer.files]);
+            // Taken now: the entries of a drop cannot be asked for after the event. A browser without them has the plain files, and a folder is no use among those.
+            const entries = droppedEntries(e.dataTransfer.items);
+            void (entries ? uploadEntries(entries) : uploadFiles([...e.dataTransfer.files]));
           }}
+          data-testid="files-list"
           className={`min-h-0 flex-1 overflow-y-auto p-1.5 ${dropping ? "bg-accent/5 ring-2 ring-inset ring-accent/40" : ""}`}
         >
+          {reading && (
+            <p role="status" className="px-2 py-1.5 text-xs text-fg-subtle">
+              {t("Looking through the dropped folders…")}
+            </p>
+          )}
           {uploading > 0 && (
             <p role="status" className="px-2 py-1.5 text-xs text-fg-subtle">
               {tp(uploading, "Uploading {n} file…", "Uploading {n} files…")}

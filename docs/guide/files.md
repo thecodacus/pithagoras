@@ -52,6 +52,16 @@ box and its conversation use as well.
   place once all of it has arrived, so an upload cut short leaves nothing
   behind. Up to 2 GB a file. Files dropped on the message box go to the chat's
   folder as well — see [Pictures and files](/guide/sessions#pictures-and-files).
+- **Upload a folder** with the folder-arrow button next to the upload arrow, or
+  by dropping a folder on the list. Its whole tree goes in the folder you are
+  in: the folders are made first, then each file goes into its own, and an
+  empty folder is made too (a picked folder has no way to say that it had one,
+  so only a dropped one keeps its empty folders). A folder whose name is taken
+  gets a number — `photos (2)` — and its files go into that one: folders are
+  never merged. The counter at the top counts every file of the tree. A file
+  that fails does not stop the others; the reasons are listed above the folder
+  (the first five, and how many more). A browser that cannot read dropped
+  folders uploads the plain files of a drop, as before.
 - **Rename** a file or a folder with the pencil on its row. Enter keeps the new
   name, Escape leaves it. It is a new name in the same folder, and never replaces
   something that is already there.

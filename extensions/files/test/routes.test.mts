@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { inProcessHome } from "../../../core/server/test/server-harness.mjs";
 
@@ -250,4 +250,52 @@ test("a refusal for another reason is not taken for unsaved work", async () => {
     // Every refusal names its kind; only "unsaved" is the question about work that would be lost.
     assert.equal(res.code, "missing");
   });
+});
+
+test("a folder tree, as the panel sends it, cannot reach out of the chat's folder by a folder's name, a path, or a link", async () => {
+  const { filesRouter } = await import("../../../core/server/dist/api/files.js");
+  const { createSession } = await import("../../../core/server/dist/db.js");
+  const tree = path.join(work, "tree-chat");
+  mkdirSync(tree);
+  const target = path.join(home, "tree-outside");
+  mkdirSync(target);
+  symlinkSync(target, path.join(tree, "escape"));
+  createSession({ id: "tree", title: "tree", workspace: tree, executor: "host" });
+  const app = express();
+  // As the portal mounts them: an upload is not parsed, and Files' routes are its own.
+  app.use((req, res, next) => (req.path.endsWith("/upload") ? next() : express.json()(req, res, next)));
+  app.use("/api", filesRouter());
+  const router = express.Router();
+  routes(router, express.json(), folderFiles, () => baseDir(tree));
+  app.use("/api/x/pithagoras-files", router);
+  const server = app.listen(0);
+  const origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  const folder = (dir: string, name: unknown) => send(`${origin}/api/x/pithagoras-files/chats/tree`, `/folder?path=${encodeURIComponent(dir)}`, "POST", { name });
+  const upload = (dir: string, name: string) =>
+    fetch(`${origin}/api/sessions/tree/upload?path=${encodeURIComponent(dir)}&name=${encodeURIComponent(name)}`, { method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: "x" }).then(answer);
+  try {
+    // A name that is a way out, as a relative path from the client would make one.
+    for (const name of ["..", ".", "../outside", "a/b", "/etc", "a\\b", "a\0b", ""]) assert.equal((await folder("", name)).status, 400, JSON.stringify(name));
+    // A place that is a way out.
+    for (const dir of ["..", "../tree-outside", "/etc", "escape", "escape/sub", "a/../../x"]) {
+      // Refused, or not found: an absolute path is read from the chat's folder, where there is no such place.
+      assert.ok([400, 404].includes((await folder(dir, "x")).status), `folder in ${dir}`);
+      assert.ok([400, 404].includes((await upload(dir, "x.txt")).status), `upload to ${dir}`);
+    }
+    for (const name of ["../x.txt", "a/../../x.txt", "/etc/passwd", ".."]) assert.equal((await upload("", name)).status, 400, name);
+    assert.equal((await folder("..", "x")).status, 400);
+    assert.equal((await folder("escape", "x")).status, 400);
+    assert.deepEqual(readdirSync(target), []);
+    assert.deepEqual(readdirSync(tree).sort(), ["escape"]);
+    // The tree itself: the folder is made, a second of the name is refused with its code (the panel numbers it), and a file goes in.
+    assert.deepEqual(await folder("", "proj"), { status: 200, ok: true, path: "proj" });
+    assert.deepEqual(await folder("", "proj"), { status: 409, error: 'There is already something called "proj" here', code: "exists" });
+    assert.equal((await folder("", "proj (2)")).path, "proj (2)");
+    assert.equal((await folder("proj", "src")).path, "proj/src");
+    assert.equal((await upload("proj/src", "a.txt")).path, "proj/src/a.txt");
+    assert.equal((await upload("proj/src", "a.txt")).path, "proj/src/a (2).txt");
+    assert.deepEqual(readdirSync(target), []);
+  } finally {
+    server.close();
+  }
 });
