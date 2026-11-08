@@ -303,3 +303,11 @@ test('a card of what comes with the portal, and one of the packages on npm, open
     catalog.pop();
   }
 });
+
+test('an installed extension opens its cut-off description too', async ({ page }) => {
+  await portal(page, [ext({ spec: '/app/extensions/long', name: 'pithagoras-long', version: '1.0.0', kinds: ['pithagoras'], description: long })]);
+  await page.goto('/settings/extensions');
+  const card = page.getByRole('tabpanel', { name: 'Installed' }).getByRole('listitem').filter({ hasText: 'pithagoras-long' });
+  await card.getByRole('button', { name: 'More' }).click();
+  await expect(card.getByRole('button', { name: 'Less' })).toBeVisible();
+});

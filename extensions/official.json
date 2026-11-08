@@ -22,7 +22,7 @@
   },
   {
     "name": "@pithagoras/nextcloud",
-    "description": "Nextcloud for Pithagoras: runs the Nextcloud MCP server in its own container and brings its Files & Sharing, Deck, Calendar, Contacts, Mail, News, Collectives, Cookbook, Shopping List and Notes into a chat panel",
+    "description": "Nextcloud for Pithagoras: runs the Nextcloud MCP server in its own container and brings its Files & Sharing, Deck, Calendar, Contacts, Mail, News, Collectives, Cookbook, Shopping List and Notes into a chat panel.",
     "kinds": ["pithagoras"],
     "repository": "prometheion/pithagoras-extensions",
     "spec": "npm:@pithagoras/nextcloud"

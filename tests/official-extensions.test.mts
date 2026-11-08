@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { OFFICIAL_REPOSITORIES, officialExtensions } from '../core/server/src/api/extensions.ts';
+import { OFFICIAL_REPOSITORIES, extensionsRouter, officialExtensions } from '../core/server/src/api/extensions.ts';
 
 /**
  * Settings → Extensions → Discover lists the official extensions that do not ship with the portal from
@@ -45,4 +45,12 @@ test('the portal reads every entry of the list, and leaves out one that is not w
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('GET /extensions/official answers with the list', () => {
+  const route = (extensionsRouter() as any).stack.find((l: any) => l.route?.path === '/extensions/official' && l.route.methods.get);
+  assert.ok(route, 'the route is registered');
+  let body: any;
+  route.route.stack[0].handle({}, { json: (b: unknown) => (body = b) });
+  assert.deepEqual(body.extensions.map((e: any) => e.name), listed.map((e) => e.name));
 });
