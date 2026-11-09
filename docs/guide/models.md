@@ -95,7 +95,10 @@ choice under the chat box, and a running chat is never rewritten.
   `EXECUTOR=container`, where pi runs beyond the portal's reach.
 - **Kept when compacting** — how much of the most recent conversation is kept
   word for word; only what is older becomes a summary. pi's default is a third of
-  a 64k window, which is why compacting can look as though it did nothing.
+  a 64k window, which is why compacting can look as though it did nothing. On a
+  window under 120k the portal holds the number to a sixth of the window, so a
+  small window is not left with nothing to compact; the number here is the most it
+  keeps.
 - **Routine reports** — where a scheduled run reports to. See
   [Routines](/guide/routines).
 

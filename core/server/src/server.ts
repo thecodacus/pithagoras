@@ -1857,6 +1857,7 @@ startLlamaProxy(
   (sessionId, prefill) => sessions.reportPrefill(sessionId, prefill),
   (sessionId, load) => sessions.reportModelLoad(sessionId, load),
   (sessionId, timings) => sessions.reportTimings(sessionId, timings),
+  (sessionId, model, tokens) => sessions.reportServerWindow(sessionId, model, tokens),
 );
 sessions.startReaper();
 // Folders put aside for removal that a stop cut short: see folder-removal.ts.

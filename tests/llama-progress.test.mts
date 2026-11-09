@@ -2,7 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import {once} from 'node:events';
-import {startLlamaProxy,proxyBaseUrl,forgetSession,modelLoaded} from '../core/server/src/llama-progress.ts';
+import {startLlamaProxy,proxyBaseUrl,forgetSession,modelLoaded,serverWindowIn} from '../core/server/src/llama-progress.ts';
 test('progress survives split SSE packets while response is forwarded unchanged',async()=>{
  const frames='data: {"prompt_progress":{"total":100,"processed":40,"cache":10,"time_ms":200}}\n\ndata: [DONE]\n\n';
  const upstream=http.createServer((req,res)=>{if(req.method==='GET'){res.writeHead(404).end();return;}let body='';req.on('data',c=>body+=c);req.on('end',()=>{assert.equal(JSON.parse(body).return_progress,true);res.writeHead(200,{'Content-Type':'text/event-stream'});res.write(frames.slice(0,35));setTimeout(()=>res.end(frames.slice(35)),30);});});
@@ -193,4 +193,23 @@ test('LLAMA_DISK_CACHE_MODELS names models with spaces around them too, and a se
   if(was===undefined)delete process.env.LLAMA_DISK_CACHE_MODELS;else process.env.LLAMA_DISK_CACHE_MODELS=was;
   forgetSession('test-trim');upstream.closeAllConnections();upstream.close();
  }
+});
+
+const exceeded='{"error":{"code":400,"message":"request (140013 tokens) exceeds the available context size (131072 tokens), try increasing it","type":"exceed_context_size_error","n_prompt_tokens":140013,"n_ctx":131072}}';
+test('the window llama-server says it has is read from the answer to a request that went past it, and from nothing else',()=>{
+ assert.equal(serverWindowIn(exceeded),131072);
+ for(const other of ['{"error":{"code":400,"message":"bad request","type":"invalid_request_error"}}','{"error":{"type":"exceed_context_size_error","n_ctx":"big"}}','{"n_ctx":4096}','not json','']) assert.equal(serverWindowIn(other),undefined,other);
+});
+test('a request refused for its size reports the window the server has, and is answered to pi as it was',async()=>{
+ const upstream=http.createServer((req,res)=>{req.resume();req.on('end',()=>{res.writeHead(400,{'Content-Type':'application/json'});res.end(exceeded);});});
+ upstream.listen(0,'127.0.0.1');await once(upstream,'listening');
+ const windows:any[]=[];startLlamaProxy(()=>{},undefined,undefined,(id,model,tokens)=>windows.push({id,model,tokens}));
+ await new Promise(resolve=>setTimeout(resolve,20));
+ const origin=`http://127.0.0.1:${(upstream.address() as any).port}`;
+ try{
+  const base=proxyBaseUrl('test-window',origin)!;
+  const r=await fetch(base+'/v1/chat/completions',{method:'POST',body:JSON.stringify({stream:true,model:'big'})});
+  assert.equal(r.status,400);assert.equal(await r.text(),exceeded);
+  assert.deepEqual(windows,[{id:'test-window',model:'big',tokens:131072}]);
+ }finally{forgetSession('test-window');upstream.closeAllConnections();upstream.close();}
 });
