@@ -158,10 +158,36 @@ test("speech is passed on as 24 kHz PCM, as the source streams it or from the WA
   assert.equal((await asked()).cancelled, 0, "nothing played is cancelled");
 });
 
+test("speech at another rate than 24 kHz is played at its own: a WAV says it in its header, PCM in a header, in its content type, or not at all", async () => {
+  const played = async (answer, rate, samples) => {
+    const got = await speak();
+    assert.equal(got.status, 200, answer);
+    assert.deepEqual([got.headers.get("content-type"), got.headers.get("x-sample-rate"), got.headers.get("x-sample-format")], ["audio/pcm", String(rate), "s16le"], answer);
+    assert.deepEqual([...new Uint8Array(await got.arrayBuffer())], samples, answer);
+  };
+  for (const [answer, rate, samples] of [
+    // The WAVs: mono 16-bit as it is; stereo float mixed to mono (half of full scale, then silence).
+    ["wav44k", 44100, [0, 0, 255, 127]],
+    ["wav22k", 22050, [0, 0, 255, 127]],
+    ["wav48kStereoFloat", 48000, [0, 64, 0, 0]],
+    // The raw PCM: a header, a content type, and nothing, which is 24 kHz as it always was.
+    ["pcm44k", 44100, [0, 0, 255, 127]],
+    ["pcm48k", 48000, [0, 0, 255, 127]],
+    ["pcmType", 44100, [0, 0, 255, 127]],
+    ["pcmBare", 24000, [0, 0, 255, 127]],
+  ]) {
+    await set({ answer });
+    await played(answer, rate, samples);
+  }
+  await set({ answer: "pcm" });
+});
+
 test("what voice mode cannot play is a 502 that names the source, and what it answered is let go of", async () => {
   for (const [answer, error, cancels] of [
-    ["pcm48k", "Speaker answered audio at 48000 Hz: voice mode plays 24 kHz", 1],
-    ["wav22k", "Expected mono 24 kHz 16-bit audio from Speaker", 1],
+    ["pcm300k", "Speaker answered audio at 300000 Hz: voice mode plays 8000 to 192000 Hz", 1],
+    ["pcmStereo", "Speaker answered audio with 2 channels: voice mode plays mono", 1],
+    ["wav24bit", "Expected mono or stereo 16-bit integer or 32-bit float audio from Speaker, got mono 24-bit integer audio at 44100 Hz", 1],
+    ["wavEndless", "Speaker answered more than 64 MB of audio", 1],
     ["text", "Speaker answered text/plain: voice mode plays audio/pcm or audio/wav", 1],
     ["notOk", "Speaker answered HTTP 500", 1],
     ["notResponse", "Speaker gave no audio", 0],

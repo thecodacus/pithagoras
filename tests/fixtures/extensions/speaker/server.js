@@ -9,8 +9,13 @@
  *                                       whose body was cancelled
  *   PUT  /api/x/test-speaker/settings   { ready?, speaks?, voices?, answer?, stateThrows?, stateAnswers?, fails?, hangs? }:
  *                                       whether `state` answers, whether it speaks, the voices it offers, what `speak`
- *                                       answers ("pcm", "pcm48k", "wav", "wav22k", "text", "notOk", "notResponse",
- *                                       "throws", or "hangs", which `transcribe` does too), whether `state` throws, what
+ *                                       answers ("pcm": raw PCM that says 24000 Hz, "pcmBare": raw PCM that says nothing of its rate,
+ *                                       "pcm44k" and "pcm48k": raw PCM that says its rate in a header, "pcmType":
+ *                                       raw PCM at 44100 Hz that says so in its content type, streamed in two pieces,
+ *                                       "pcm300k": raw PCM at a rate no one plays, "pcmStereo": raw PCM that says it
+ *                                       has two channels, "wav": 24 kHz, "wav22k", "wav44k", "wav48kStereoFloat" and
+ *                                       "wav24bit" WAVs, "wavEndless": a WAV that streams on without end and without a length, "text", "notOk", "notResponse", "throws", or "hangs", which
+ *                                       `transcribe` does too), whether `state` throws, what
  *                                       it answers in place of its own (null for its own), and whether `use(true)` fails
  *                                       or never settles
  *   POST /api/x/test-speaker/choose     { chosen }: `portal.voice.choose`
@@ -24,22 +29,37 @@
 /** Two samples of mono 16-bit PCM. */
 const PCM = Buffer.from([0, 0, 255, 127]);
 
-/** A phrase as a speech engine that answers with a WAV gives it: mono, 16-bit, two samples, at `rate`. */
-function wav(rate) {
+/**
+ * A phrase as a speech engine that answers with a WAV gives it: two samples at `rate`, mono 16-bit integers; with
+ * `float`, 32-bit floats (one full-scale sample and one silent); with `channels` 2, the second channel silent in the
+ * first sample and equal to the first in the second; with `bits` 24, 24-bit integers, which voice mode does not read.
+ */
+function wav({ rate, float = false, channels = 1, bits = float ? 32 : 16 }) {
+  const samples = float ? [1, 0] : [0, 32767];
+  const sample = (value) => {
+    const bytes = Buffer.alloc(bits / 8);
+    if (float) bytes.writeFloatLE(value);
+    else if (bits === 16) bytes.writeInt16LE(value);
+    else bytes.writeIntLE(value << 8, 0, 3);
+    return bytes;
+  };
+  const frames = samples.map((value, i) => Buffer.concat(channels === 1 ? [sample(value)] : [sample(value), sample(i === 0 ? 0 : value)]));
+  const data = Buffer.concat(frames);
+  const frame = (bits / 8) * channels;
   const header = Buffer.alloc(44);
   header.write("RIFF");
-  header.writeUInt32LE(36 + PCM.length, 4);
+  header.writeUInt32LE(36 + data.length, 4);
   header.write("WAVEfmt ", 8);
   header.writeUInt32LE(16, 16);
-  header.writeUInt16LE(1, 20);
-  header.writeUInt16LE(1, 22);
+  header.writeUInt16LE(float ? 3 : 1, 20);
+  header.writeUInt16LE(channels, 22);
   header.writeUInt32LE(rate, 24);
-  header.writeUInt32LE(rate * 2, 28);
-  header.writeUInt16LE(2, 32);
-  header.writeUInt16LE(16, 34);
+  header.writeUInt32LE(rate * frame, 28);
+  header.writeUInt16LE(frame, 32);
+  header.writeUInt16LE(bits, 34);
   header.write("data", 36);
-  header.writeUInt32LE(PCM.length, 40);
-  return Buffer.concat([header, PCM]);
+  header.writeUInt32LE(data.length, 40);
+  return Buffer.concat([header, data]);
 }
 
 export default function (portal) {
@@ -56,11 +76,11 @@ export default function (portal) {
     fails: false,
     hangs: false,
   };
-  /** A body whose cancelling is counted. */
-  const body = (bytes) => {
+  /** A body, in one piece or the pieces given, whose cancelling is counted. */
+  const body = (bytes, ...more) => {
     const stream = new ReadableStream({
       start(controller) {
-        controller.enqueue(new Uint8Array(bytes));
+        for (const piece of [bytes, ...more]) controller.enqueue(new Uint8Array(piece));
         controller.close();
       },
     });
@@ -91,16 +111,43 @@ export default function (portal) {
     async speak(text, { voice, signal }) {
       watch(signal);
       asked.spoken.push({ text, voice: voice ?? null });
-      const audio = (type, bytes, more = {}) => new Response(body(bytes), { headers: { "content-type": type, ...more } });
+      const audio = (type, bytes, more = {}, ...rest) => new Response(body(bytes, ...rest), { headers: { "content-type": type, ...more } });
       switch (settings.answer) {
         case "pcm":
           return audio("audio/pcm", PCM, { "x-sample-rate": "24000" });
+        case "pcmBare":
+          return audio("audio/pcm", PCM);
+        case "pcm44k":
+          return audio("audio/pcm", PCM, { "x-sample-rate": "44100" });
         case "pcm48k":
           return audio("audio/pcm", PCM, { "x-sample-rate": "48000" });
+        case "pcmType":
+          // Streamed, in two pieces, the second cutting the first sample of a pair short.
+          return audio("audio/pcm;rate=44100", PCM.subarray(0, 3), {}, PCM.subarray(3));
+        case "pcm300k":
+          return audio("audio/pcm", PCM, { "x-sample-rate": "300000" });
+        case "pcmStereo":
+          return audio("audio/pcm;rate=44100;channels=2", PCM);
         case "wav":
-          return audio("audio/wav", wav(24000));
+          return audio("audio/wav", wav({ rate: 24000 }));
         case "wav22k":
-          return audio("audio/wav", wav(22050));
+          return audio("audio/wav", wav({ rate: 22050 }));
+        case "wav44k":
+          return audio("audio/wav", wav({ rate: 44100 }));
+        case "wav48kStereoFloat":
+          return audio("audio/wav", wav({ rate: 48000, float: true, channels: 2 }));
+        case "wav24bit":
+          return audio("audio/wav", wav({ rate: 44100, bits: 24 }));
+        case "wavEndless": {
+          // A WAV body that goes on for ever and says no length, one megabyte at a time, read only as it is asked for.
+          const stream = new ReadableStream({ pull: (controller) => controller.enqueue(new Uint8Array(1 << 20)) });
+          const cancel = stream.cancel.bind(stream);
+          stream.cancel = (reason) => {
+            asked.cancelled++;
+            return cancel(reason);
+          };
+          return new Response(stream, { headers: { "content-type": "audio/wav" } });
+        }
         case "text":
           return audio("text/plain", Buffer.from("not audio"));
         case "notOk":

@@ -6,6 +6,7 @@ import { getSession, getSetting, putSetting, setVoiceSpeaks } from "../db.js";
 import { agentFor } from "../project-agent.js";
 import { setVoiceChooser, voiceProviders, within } from "../extension-host.js";
 import type { ProvidedVoice, VoiceProvider } from "@pithagoras/extension-api/server";
+import { DEFAULT_SAMPLE_RATE, MAX_SAMPLE_RATE, MIN_SAMPLE_RATE, playableRate, wavAudio } from "../wav.js";
 
 const DEFAULT_VAD = { positiveSpeechThreshold: 0.65, negativeSpeechThreshold: 0.35, minSpeechMs: 256, preSpeechPadMs: 320, redemptionMs: 1000 };
 export interface VoiceConfig {
@@ -83,31 +84,45 @@ function withInstructions<T extends { responseInstructions?: string; skipThinkin
   return { ...value, responseInstructions: voiceInstructions(value.responseInstructions), defaultResponseInstructions: DEFAULT_VOICE_INSTRUCTIONS, responseInstructionsOff: !voiceRulesOn(),
     skipThinkingProviders: value.skipThinkingProviders ?? [...DEFAULT_SKIP_THINKING_PROVIDERS], defaultSkipThinkingProviders: [...DEFAULT_SKIP_THINKING_PROVIDERS] };
 }
-/** The samples of a RIFF/WAVE buffer, checked to be what the player expects. `label` is what answered with it. */
-export function wavPcm(wav: Buffer, label: string): Buffer {
-  if (wav.length < 44 || wav.toString("ascii", 0, 4) !== "RIFF" || wav.toString("ascii", 8, 12) !== "WAVE")
-    throw new Error(`${label} returned invalid WAV audio`);
-  let format = false;
-  for (let at = 12; at + 8 <= wav.length;) {
-    const id = wav.toString("ascii", at, at + 4), size = wav.readUInt32LE(at + 4);
-    if (id === "fmt ") {
-      if (size < 16 || at + 24 > wav.length || wav.readUInt16LE(at + 8) !== 1 || wav.readUInt16LE(at + 10) !== 1 || wav.readUInt32LE(at + 12) !== 24000 || wav.readUInt16LE(at + 22) !== 16)
-        throw new Error(`Expected mono 24 kHz 16-bit audio from ${label}`);
-      format = true;
+/** The largest WAV answer read whole: minutes of speech at the highest rate, far more than a phrase of 600 characters. */
+const MAX_WAV_BYTES = 64 * 1024 * 1024;
+/**
+ * A WAV answer read whole, but counted as it comes: a source that streams on without end (and says no length) is let go
+ * of at the limit, not buffered until the portal runs out of memory.
+ */
+async function readWav(answer: Response, label: string): Promise<Buffer> {
+  const tooMuch = () => new Error(`${label} answered more than ${MAX_WAV_BYTES >> 20} MB of audio`);
+  if (Number(answer.headers.get("content-length")) > MAX_WAV_BYTES) throw tooMuch();
+  if (!answer.body) return Buffer.alloc(0);
+  const reader = answer.body.getReader();
+  const pieces: Uint8Array[] = [];
+  let bytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytes += value.length;
+      if (bytes > MAX_WAV_BYTES) throw tooMuch();
+      pieces.push(value);
     }
-    if (id === "data") {
-      // Samples are only meaningful once the fmt chunk has described them.
-      if (!format) throw new Error(`Expected mono 24 kHz 16-bit audio from ${label}`);
-      // A writer that does not know the length up front leaves a placeholder
-      // size behind. The response is fully buffered, so its end is the truth.
-      const end = size && at + 8 + size <= wav.length ? at + 8 + size : wav.length;
-      const pcm = wav.subarray(at + 8, end);
-      if (!pcm.length || pcm.length % 2) throw new Error(`${label} returned invalid PCM audio`);
-      return pcm;
-    }
-    at += 8 + size + (size % 2);
-  }
-  throw new Error(`${label} returned no audio data`);
+  } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
+  return Buffer.concat(pieces);
+}
+/**
+ * The rate of raw PCM, which has no header of its own: what the source says in an `x-sample-rate` header, else in a
+ * `rate=` parameter of the content type, else 24 kHz, as a source that says nothing has always been played. Throws
+ * where it is not a rate voice mode plays, or the PCM is not mono.
+ */
+function pcmRate(headers: Headers, label: string): number {
+  const type = headers.get("content-type") ?? "";
+  const param = (name: string) => new RegExp(`;\\s*${name}\\s*=\\s*"?([^";\\s]*)`, "i").exec(type)?.[1];
+  const channels = param("channels");
+  if (channels !== undefined && channels !== "1") throw new Error(`${label} answered audio with ${channels} channels: voice mode plays mono`);
+  const said = headers.get("x-sample-rate") ?? param("rate");
+  if (said === null || said === undefined) return DEFAULT_SAMPLE_RATE;
+  const rate = /^\d{1,7}$/.test(said.trim()) ? Number(said) : NaN;
+  if (!playableRate(rate)) throw new Error(`${label} answered audio at ${said} Hz: voice mode plays ${MIN_SAMPLE_RATE} to ${MAX_SAMPLE_RATE} Hz`);
+  return rate;
 }
 /** Voice mode listens and speaks through an extension that is not running, or offers nothing now: said, rather than anything else used. */
 class SourceAbsent extends Error {
@@ -325,18 +340,18 @@ export function voiceRouter(): Router {
       answer = given;
       if (!answer.ok) throw new Error(`${label} answered HTTP ${answer.status}`);
       const type = answer.headers.get("content-type") ?? "";
-      const headers = { "Content-Type": "audio/pcm", "X-Sample-Rate": "24000", "X-Sample-Format": "s16le", "Cache-Control": "no-store", "X-Accel-Buffering": "no" };
-      // A WAV is read whole and checked, and its samples sent on.
+      const headers = { "Content-Type": "audio/pcm", "X-Sample-Format": "s16le", "Cache-Control": "no-store", "X-Accel-Buffering": "no" };
+      // A WAV is read whole and checked, and its samples sent on at the rate its header gives.
       if (/^audio\/(wav|x-wav|wave|vnd\.wave)\b/.test(type)) {
-        const pcm = wavPcm(Buffer.from(await answer.arrayBuffer()), label);
-        return res.set({ ...headers, "Server-Timing": `tts_headers;dur=${(performance.now() - started).toFixed(1)}` }).send(pcm);
+        const wav = await readWav(answer, label);
+        const { rate, pcm } = wavAudio(wav, label);
+        return res.set({ ...headers, "X-Sample-Rate": String(rate), "Server-Timing": `tts_headers;dur=${(performance.now() - started).toFixed(1)}` }).send(pcm);
       }
       if (!/^audio\/pcm\b/.test(type)) throw new Error(`${label} answered ${type || "no type"}: voice mode plays audio/pcm or audio/wav`);
       // PCM is passed on as it comes, checked before anything of it is sent.
-      const rate = answer.headers.get("x-sample-rate");
-      if (rate !== null && rate !== "24000") throw new Error(`${label} answered audio at ${rate} Hz: voice mode plays 24 kHz`);
+      const rate = pcmRate(answer.headers, label);
       if (!answer.body) throw new Error(`${label} gave no audio`);
-      res.set({ ...headers, "Server-Timing": `tts_headers;dur=${(performance.now() - started).toFixed(1)}` });
+      res.set({ ...headers, "X-Sample-Rate": String(rate), "Server-Timing": `tts_headers;dur=${(performance.now() - started).toFixed(1)}` });
       res.flushHeaders();
       const reader = answer.body.getReader();
       let bytes = 0;
