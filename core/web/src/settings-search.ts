@@ -38,6 +38,7 @@ export const SETTINGS_INDEX: SettingEntry[] = [
   { tab: "skills", title: msg("Skills"), words: "skill procedure import repository fähigkeiten" },
   { tab: "mcp", title: msg("MCP servers"), words: "mcp model context protocol server adapter tools" },
   { tab: "extensions", section: msg("Comes with Pithagoras"), title: msg("Extensions that come with Pithagoras"), words: "shipped bundled built-in included sample notes dusk mitgeliefert" },
+  { tab: "extensions", section: msg("Official extensions"), title: msg("Official extensions"), words: "office blender godot nextcloud inline avatar flair prometheion repository offiziell" },
   { tab: "extensions", section: msg("Find packages"), title: msg("Find packages"), words: "browse catalog gallery npm pi-package search discover katalog paket" },
   { tab: "extensions", section: msg("Install by name"), title: msg("Install a package"), words: "install npm git url path spec installieren" },
   { tab: "extensions", section: msg("Installed"), title: msg("Installed packages"), words: "extensions packages installed remove uninstall switch off update filter kind type pi pithagoras erweiterungen" },

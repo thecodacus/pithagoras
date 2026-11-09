@@ -1130,6 +1130,7 @@ export const api = {
     json<{ extensions: ExtensionInfo[]; settingsPath: string }>("/api/extensions"),
   /** What comes with the portal and can be installed with a click. */
   shippedExtensions: () => json<{ extensions: ShippedExtension[] }>("/api/extensions/shipped"),
+  officialExtensions: () => json<{ extensions: OfficialExtension[] }>("/api/extensions/official"),
   /** The sets the setup assistant offers, by the packages each holds. */
   extensionPresets: () => json<{ presets: ExtensionPreset[] }>("/api/extensions/presets"),
   /** What installing `spec` brings with it: the extensions it requires that are not there as it needs them. */
@@ -1326,6 +1327,15 @@ export interface ShippedExtension {
   spec: string;
   /** The extensions it cannot work without, each with the versions it takes. */
   requires?: Record<string, string>;
+}
+
+/** An official extension that does not come with the portal, installed from npm (`spec`) and kept in `repository` on GitHub. */
+export interface OfficialExtension {
+  name: string;
+  description: string;
+  kinds: PackageKind[];
+  repository: string;
+  spec: string;
 }
 
 /**

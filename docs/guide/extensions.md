@@ -26,12 +26,28 @@ are a portal concept with a separate format and a separate install directory.
 ## Installing
 
 Settings → Extensions has two views. **Installed** is what you have; **Discover**
-is what there is to install, in three parts: **Comes with Pithagoras**, **Find
-packages** and **Install by name**.
+is what there is to install, in four parts: **Comes with Pithagoras**, **Official
+extensions**, **Find packages** and **Install by name**.
 
 **Comes with Pithagoras** lists the extensions shipped with the portal itself
 (a pack of seven themes, the terminal, Git, Files, Canvases, [Media](/guide/media), [Documents](/guide/documents),
 [Docker for extensions](/guide/docker), [Kanban](/guide/kanban), the agent's [Browser](/guide/browser), the [voice service](/guide/voice-service), [Voice servers](/guide/voice-servers), [Understory](/guide/features#memory-understory), the agent's memory, and [Creator mode](/guide/creator-mode), a chat mode in which the agent writes and installs extensions), each installed from the portal's own folder with one click.
+
+**Official extensions** lists the extensions that are made for Pithagoras but do not
+come with it. They live in two repositories of the project's organization:
+[pithagoras-extensions](https://github.com/prometheion/pithagoras-extensions)
+(Office, Blender, Godot, Inline UI and Nextcloud: more for the agent to work with)
+and [pithagoras-flair](https://github.com/prometheion/pithagoras-flair) (cosmetic
+and opinionated ones, such as the 3D avatar for voice mode). Each card has the
+same look as the ones above it, with a small label that names its repository and
+links to it, and **Install** puts the package in from npm, with what it needs. One
+that is installed already says so. The list is part of the portal, not fetched
+from GitHub, so it is there offline; a newer extension shows up in it with the
+next version of the portal, and can be installed by its npm name (below) before.
+
+A description that does not fit on a card is cut after two lines and has **More**
+under it, which opens all of it (and **Less** closes it again), on the cards of
+Discover and of Installed alike.
 
 **Find packages** searches the npm registry for packages published for pi — by
 keyword, with a separate search for packages that bring a model provider — and

@@ -14,6 +14,12 @@ const shipped = [
   { name: 'pithagoras-notes', version: '0.2.0', kinds: ['pi', 'pithagoras'], spec: '/app/extensions/notes', description: 'Notes pinned to a chat.' },
   { name: 'pithagoras-themes', version: '0.1.0', kinds: ['themes'], spec: '/app/extensions/themes', description: 'More colours.' },
 ];
+const long = 'A long description that runs over two lines at the width of a card, so that it is cut where the second line ends, and that says a good deal more than that before it is done: '.repeat(3).trim();
+const official = [
+  { name: '@pithagoras/office', description: 'Word and Excel documents.', kinds: ['pithagoras'], repository: 'prometheion/pithagoras-extensions', spec: 'npm:@pithagoras/office' },
+  { name: '@pithagoras/blender', description: long, kinds: ['pithagoras'], repository: 'prometheion/pithagoras-extensions', spec: 'npm:@pithagoras/blender' },
+  { name: '@pithagoras/flair-avatar', description: 'A 3D avatar for voice mode.', kinds: ['pithagoras'], repository: 'prometheion/pithagoras-flair', spec: 'npm:@pithagoras/flair-avatar' },
+];
 const catalog = [{ name: 'pi-subagents', version: '1.1.0', description: 'Helpers for pi.', keywords: ['pi-package'], provider: false }];
 
 async function portal(page: Page, installed: unknown[]) {
@@ -21,10 +27,12 @@ async function portal(page: Page, installed: unknown[]) {
   await mockPortal(page, ({ path, method, json }) => {
     if (path === '/api/extensions' && method === 'GET') return { settingsPath: '/a/settings.json', extensions: installed };
     if (path === '/api/extensions/shipped') return { extensions: shipped };
+    if (path === '/api/extensions/official') return { extensions: official };
     if (path === '/api/packages/catalog') return { packages: catalog };
     if (path === '/api/packages' && method === 'POST') {
-      posts.push(json().spec);
-      installed.push(colours);
+      const spec: string = json().spec;
+      posts.push(spec);
+      installed.push(spec.startsWith('npm:') ? ext({ spec, name: spec.slice(4), version: '1.0.0', kinds: ['pithagoras'] }) : colours);
       return { ok: true, output: '' };
     }
     return undefined;
@@ -119,6 +127,11 @@ test('a search of Settings opens the view its section is in', async ({ page }) =
   await expect(dialog.getByRole('tab', { name: 'Discover' })).toHaveAttribute('aria-selected', 'true');
   await expect(dialog.locator('[data-setting="Install by name"]')).toHaveClass(/setting-flash/);
   await expect(dialog.getByRole('textbox', { name: 'Install by name' })).toBeInViewport();
+
+  await dialog.getByLabel('Search settings').fill('official extensions');
+  await dialog.getByRole('option', { name: /Official extensions/ }).click();
+  await expect(dialog.getByRole('tab', { name: 'Discover' })).toHaveAttribute('aria-selected', 'true');
+  await expect(dialog.locator('[data-setting="Official extensions"]')).toHaveClass(/setting-flash/);
 
   await dialog.getByLabel('Search settings').fill('installed packages');
   await dialog.getByRole('option', { name: /Installed packages/ }).click();
@@ -216,4 +229,85 @@ test('Settings takes the room a screen has: nearly all of a laptop, most of a wi
   size = await box(page, dialog);
   expect(size.width).toBeLessThanOrEqual(390);
   await beside(page, 0, 1).toBe(false);
+});
+
+test('the official extensions that do not come with the portal are listed between the shipped ones and the search, each with its repository', async ({ page }) => {
+  const posts = await portal(page, [web, notes]);
+  await page.goto('/settings/extensions');
+  await page.getByRole('tab', { name: 'Discover' }).click();
+  const view = page.getByRole('tabpanel', { name: 'Discover' });
+  const headings = await view.getByRole('heading', { level: 3 }).allTextContents();
+  expect(headings).toEqual(['Comes with Pithagoras', 'Official extensions', 'Find packages', 'Install by name']);
+
+  const section = view.locator('[data-setting="Official extensions"]');
+  await expect(section.getByRole('listitem')).toHaveCount(3);
+  // The pill names the repository and links to it.
+  const office = section.getByRole('listitem').filter({ hasText: '@pithagoras/office' });
+  await expect(office.getByRole('link', { name: 'pithagoras-extensions' })).toHaveAttribute('href', 'https://github.com/prometheion/pithagoras-extensions');
+  await expect(office).toContainText('Pithagoras');
+  await expect(section.getByRole('listitem').filter({ hasText: 'flair-avatar' }).getByRole('link', { name: 'pithagoras-flair' })).toHaveAttribute('href', 'https://github.com/prometheion/pithagoras-flair');
+
+  // Install goes through the install path every extension takes, by the package's npm name.
+  await section.getByRole('button', { name: 'Install @pithagoras/office' }).click();
+  await expect(office).toContainText('Installed');
+  expect(posts).toEqual(['npm:@pithagoras/office']);
+  await expect(section.getByRole('button', { name: 'Install @pithagoras/blender' })).toBeVisible();
+});
+
+test('an official extension that is installed already says so', async ({ page }) => {
+  await portal(page, [web, ext({ spec: 'npm:@pithagoras/blender', name: '@pithagoras/blender', version: '0.1.1', kinds: ['pithagoras'] })]);
+  await page.goto('/settings/extensions');
+  await page.getByRole('tab', { name: 'Discover' }).click();
+  const section = page.getByRole('tabpanel', { name: 'Discover' }).locator('[data-setting="Official extensions"]');
+  await expect(section.getByRole('listitem').filter({ hasText: '@pithagoras/blender' })).toContainText('Installed');
+  await expect(section.getByRole('button', { name: 'Install @pithagoras/blender' })).toHaveCount(0);
+  await expect(section.getByRole('button', { name: 'Install @pithagoras/office' })).toBeVisible();
+});
+
+test('a description that is cut off opens with More and closes with Less, on every card of Discover', async ({ page }) => {
+  await portal(page, [web]);
+  await page.goto('/settings/extensions');
+  await page.getByRole('tab', { name: 'Discover' }).click();
+  const section = page.getByRole('tabpanel', { name: 'Discover' }).locator('[data-setting="Official extensions"]');
+  const blender = section.getByRole('listitem').filter({ hasText: '@pithagoras/blender' });
+  const text = blender.getByText(/^A long description/);
+  const height = async () => (await text.boundingBox())!.height;
+  // A short one is not cut, and has no button.
+  await expect(section.getByRole('listitem').filter({ hasText: '@pithagoras/office' }).getByRole('button', { name: 'More' })).toHaveCount(0);
+
+  await expect(blender.getByRole('button', { name: 'More' })).toHaveAttribute('aria-expanded', 'false');
+  const cut = await height();
+  await blender.getByRole('button', { name: 'More' }).click();
+  await expect(blender.getByRole('button', { name: 'Less' })).toHaveAttribute('aria-expanded', 'true');
+  expect(await height()).toBeGreaterThan(cut + 10);
+  await blender.getByRole('button', { name: 'Less' }).click();
+  await expect(blender.getByRole('button', { name: 'More' })).toBeVisible();
+  expect(await height()).toBeLessThanOrEqual(cut);
+});
+
+test('a card of what comes with the portal, and one of the packages on npm, open their descriptions too', async ({ page }) => {
+  shipped.push({ name: 'pithagoras-long', version: '1.0.0', kinds: ['pi'], spec: '/app/extensions/long', description: long });
+  catalog.push({ name: 'pi-long', version: '1.0.0', description: long, keywords: ['pi-package'], provider: false });
+  try {
+    await portal(page, [web]);
+    await page.goto('/settings/extensions');
+    await page.getByRole('tab', { name: 'Discover' }).click();
+    const view = page.getByRole('tabpanel', { name: 'Discover' });
+    for (const name of ['pithagoras-long', 'pi-long']) {
+      const card = view.getByRole('listitem').filter({ hasText: name });
+      await card.getByRole('button', { name: 'More' }).click();
+      await expect(card.getByRole('button', { name: 'Less' })).toBeVisible();
+    }
+  } finally {
+    shipped.pop();
+    catalog.pop();
+  }
+});
+
+test('an installed extension opens its cut-off description too', async ({ page }) => {
+  await portal(page, [ext({ spec: '/app/extensions/long', name: 'pithagoras-long', version: '1.0.0', kinds: ['pithagoras'], description: long })]);
+  await page.goto('/settings/extensions');
+  const card = page.getByRole('tabpanel', { name: 'Installed' }).getByRole('listitem').filter({ hasText: 'pithagoras-long' });
+  await card.getByRole('button', { name: 'More' }).click();
+  await expect(card.getByRole('button', { name: 'Less' })).toBeVisible();
 });

@@ -144,8 +144,9 @@ resumes the conversation.
 
 ## More extensions
 
-Extensions that are not part of the portal live in repositories of their own. Each is a package you install by its
-npm name in **Settings → Extensions → Discover**:
+Extensions that are not part of the portal live in repositories of their own. They are listed under **Official
+extensions** in **Settings → Extensions → Discover**, each installed with one click, and each is a package you can
+also install by its npm name:
 
 - [prometheion/pithagoras-extensions](https://github.com/prometheion/pithagoras-extensions) — extensions that give
   the agent more to work with.

@@ -4,7 +4,7 @@ import { api, type CatalogPackage } from "../api";
 import { ago, compactCount, webLink } from "../package-names";
 import { InstallProgress, installExtension, type InstallStep } from "./ExtensionInstall";
 import { load, peek } from "../settings-cache";
-import { gridCls, inputCls } from "./SettingsUi";
+import { Clamped, gridCls, inputCls } from "./SettingsUi";
 import { formatNumber, t } from "../i18n";
 import { SkeletonGroup } from "./Skeleton";
 
@@ -138,7 +138,7 @@ export function PackageCatalog({
                       <p className="truncate text-sm text-fg">{p.name}</p>
                       <span className="font-mono text-[10px] text-fg-faint">v{p.version}</span>
                     </div>
-                    {p.description && <p className="mt-0.5 line-clamp-2 text-xs text-fg-subtle">{p.description}</p>}
+                    {p.description && <Clamped className="mt-0.5">{p.description}</Clamped>}
                     <p className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-[10px] text-fg-faint">
                       {p.weekly !== undefined && (
                         <span className="inline-flex items-center gap-1" title={t("{n} downloads last week", { n: formatNumber(p.weekly) })}>
