@@ -39,7 +39,7 @@ async function runPi(args: string[]): Promise<{ stdout: string; stderr: string }
 // A package spec is passed to the CLI as a single argument (never a shell
 // string), but keep it to shapes pi documents so typos fail fast and nothing
 // odd reaches execFile.
-const SPEC_RE = /^(npm:|git:|https:\/\/|\.{0,2}\/)[\w@./:+-]+$/;
+const SPEC_RE = /^(npm:|git:|https:\/\/|\.{0,2}\/)[\w@./:+ -]+$/;
 /** An npm package within a range of versions, as an extension that requires it says it: `npm:<name>@^1.0.0` (see install-plan.ts). */
 const inRange = (spec: string) => {
   const match = /^npm:((?:@[\w.~-]+\/)?[\w.~-]+)@(.+)$/.exec(spec);
