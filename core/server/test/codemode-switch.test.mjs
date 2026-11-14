@@ -105,7 +105,7 @@ test("code mode cannot be marked lazy: its row says so, and a mark that names it
 });
 
 test("a tool that is offered to scripts only cannot be marked lazy either: nothing would be kept out of the prompt", async () => {
-  // As a session reports it (pi's `codemode` exposure): the model is never offered it, so the gateway has nothing to reach.
+  // As a session reports it (pi's `codemode` exposure): the model is never offered it, so `tool_search` has nothing to reach.
   db.rememberTools([
     db.remembered({ name: "scripted", source: "pi-scripts", scriptsOnly: true }),
     db.remembered({ name: "direct", source: "pi-scripts" }),

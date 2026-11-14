@@ -341,7 +341,7 @@ test('a replace with text as long as the old document is written, whole or in on
 // A canvas_write that is lazy is called through the `tool_search` tool: its text is in `args`, one level further in.
 function through(controller:any,id:string,raw:string,name='tool_search'){controller.observe({type:'message_update',assistantMessageEvent:{type:'toolcall_delta',contentIndex:0,delta:raw,partial:{content:[{type:'toolCall',name,id}]}}});}
 const call=(args:unknown)=>({action:'call',name:'canvas_write',args});
-test('a write through the tools tool is decoded the same however it is cut up, as an object or as the text of one',()=>{
+test('a write through the tool_search tool is decoded the same however it is cut up, as an object or as the text of one',()=>{
  const text='Ünï "quoted" \\ slash\nline\ttab \u{1F600} end \u2603 done';
  const write={canvas_id:'abc',revision:3,operation:'replace',content:text};
  for(const [what,raw] of [['an object',JSON.stringify(call(write))+'\n'],['its text',JSON.stringify(call(JSON.stringify(write)))+'\n']]){
@@ -365,7 +365,7 @@ test('a write through the tools tool is decoded the same however it is cut up, a
   '[1,2,3]','{"action":null}',
  ])assert.equal(new GatewayWriteStream().push(raw),undefined,raw);
 });
-test('a write through the tools tool is saved as it streams in, and survives an interruption',async()=>{
+test('a write through the tool_search tool is saved as it streams in, and survives an interruption',async()=>{
  const {controller,tools}=setup();offered='lazy';
  const row=value(await tools.canvas_create.execute('create',{title:'Lazy'}));
  through(controller,'write',`{"action":"call","name":"canvas_write","args":{"canvas_id":"${row.id}","revision":0,"operation":"replace","content":"First`);
@@ -384,7 +384,7 @@ test('a write through the tools tool is saved as it streams in, and survives an 
  assert.equal(value(await tools.canvas_write.execute('text',JSON.parse(inner))).revision,again.revision+1);
  assert.equal(readCanvas('s1',row.id).content,'First line\nSecond Third "quoted"\nfourth');
 });
-test('a call through the tools tool is no write to follow unless canvas_write is reached that way, or is not a write at all',async()=>{
+test('a call through the tool_search tool is no write to follow unless canvas_write is reached that way, or is not a write at all',async()=>{
  const {controller,tools}=setup();
  const row=value(await tools.canvas_create.execute('create',{title:'Direct'}));
  const raw=JSON.stringify(call({canvas_id:row.id,revision:0,operation:'replace',content:'not written'}));
@@ -392,7 +392,7 @@ test('a call through the tools tool is no write to follow unless canvas_write is
  through(controller,'refused',raw);
  assert.equal(readCanvas('s1',row.id).content,'');
  offered='lazy';
- // A search of the lazy tools, a call of another one, or a call by another name than the tools tool's.
+ // A search of the lazy tools, a call of another one, or a call by another name than tool_search's.
  through(controller,'search',JSON.stringify({action:'search',query:'canvas'}));
  through(controller,'other',JSON.stringify({action:'call',name:'canvas_read',args:{canvas_id:row.id,content:'x'}}));
  through(controller,'misnamed',raw,'something_else');
@@ -417,7 +417,7 @@ test('a canvas_write that the model cannot call by its own name writes nothing, 
  delta(controller,'offered',raw);
  assert.equal(readCanvas('s1',row.id).content,'Hello world');
 });
-test('a call of the tools tool that is no canvas_write after all takes back what was written on its way, and a real one keeps it',async()=>{
+test('a call of the tool_search tool that is no canvas_write after all takes back what was written on its way, and a real one keeps it',async()=>{
  const {controller,tools}=setup();offered='lazy';
  const row=value(await tools.canvas_create.execute('create',{title:'Sneaky'}));
  value(await tools.canvas_write.execute('first',{canvas_id:row.id,revision:0,operation:'replace',content:'Before.'}));

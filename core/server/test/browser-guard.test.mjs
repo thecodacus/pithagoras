@@ -1114,8 +1114,8 @@ test("an approval is not asked for through mcp where the conversation's taint or
   assert.equal(approvalCannotHelp("mcp", JSON.stringify({ tool: "files_read_file", args: { path: "notes/today.md" } }), undefined), undefined);
 });
 
-test("a flagged result that came back through the tools tool holds the conversation like any other, then and after a reload, until it is trusted", () => {
-  // The gateway runs the hooks under the inner tool's name; what pi keeps of it is the outer result of `tools`.
+test("a flagged result that came back through the tool_search tool (here by its old name, tools) holds the conversation like any other, then and after a reload, until it is trusted", () => {
+  // tool_search runs the hooks under the inner tool's name; what pi keeps of it is the outer result, here of an old chat's `tools`.
   const h = guardAs({ session: "trust-lazy" });
   const out = read(h, "mcp__pages__page", { url: "https://x.test" }, INJECTION);
   const history = [{ type: "message", message: { role: "toolResult", toolName: "tools", content: out.content } }];

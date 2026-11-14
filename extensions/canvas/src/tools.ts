@@ -119,7 +119,7 @@ export class WriteStream {
     if(this.closed){this.text+=this.high;this.high='';}
   }
 }
-/** How far the start of a call through the `tools` tool is read: what is before its `args`. */
+/** How far the start of a call through the `tool_search` tool is read: what is before its `args`. */
 type GatewayHead={at:number;text:boolean} | 'more' | 'dead';
 /**
  * The start of `{"action":"call","name":"canvas_write","args":…`: the strings before `args`, and where the
@@ -144,7 +144,7 @@ function readGatewayHead(raw: string): GatewayHead {
   }
 }
 /**
- * A canvas_write that is called through the `tools` tool, as it streams in: the same write as WriteStream follows,
+ * A canvas_write that is called through the `tool_search` tool, as it streams in: the same write as WriteStream follows,
  * with its arguments nested in `args` — an object, or the JSON text of one, which is then in a string that is
  * decoded as it comes. Followed only when `name` comes before `args`, as the tool's schema has them: else
  * nothing is known of the call until its text is all there, and it is written when the tool runs.
@@ -212,7 +212,7 @@ export class CanvasTools {
   private errors = new Map<string, string>();
   /**
    * `offered`: how canvas_write is offered to the model now. By its own name a call of it is a write to follow; a
-   * call of the `tools` tool is one where it is lazy, and a call through it of a tool that is not lazy is refused.
+   * call of the `tool_search` tool is one where it is lazy, and a call through it of a tool that is not lazy is refused.
    */
   constructor(private store: CanvasStore, private session: string, private offered: () => "direct" | "lazy" | undefined) {}
   private apply(call: string, p: any) {

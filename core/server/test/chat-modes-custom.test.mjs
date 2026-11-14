@@ -15,7 +15,7 @@ import { inProcessHome } from "./server-harness.mjs";
  */
 inProcessHome("pithagoras-chat-modes-custom-");
 mkdirSync(path.join(process.env.PI_CODING_AGENT_DIR, "extensions"), { recursive: true });
-// A tool the portal marks lazy (below): reached through the `tools` tool, unless the chat works through the code tool.
+// A tool the portal marks lazy (below): reached through the `tool_search` tool, unless the chat works through the code tool.
 writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR, "extensions", "lazy.ts"), `
 export default function (pi) {
   pi.registerTool({

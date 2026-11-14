@@ -326,7 +326,7 @@ test.describe('in the chat', () => {
     await expect(preview(page, 'A river at noon')).toHaveClass(/is-making/);
   });
 
-  test('a call of a picture tool through the tools tool, as a lazy one is made, is the preview a direct one is', async ({ page }) => {
+  test('a call of a picture tool through the tool_search tool (here by its old name, tools), as a lazy one is made, is the preview a direct one is', async ({ page }) => {
     await open(page);
     const lazy = (toolCallId: string, args: unknown) =>
       page.evaluate(([id, call]) => (window as any).emit('tool_execution_start', (window as any).startPayload(id, 'tools', call)), [toolCallId, { action: 'call', ...(args as object) }] as const);

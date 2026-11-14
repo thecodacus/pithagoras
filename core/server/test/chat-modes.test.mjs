@@ -15,7 +15,7 @@ import { inProcessHome } from "./server-harness.mjs";
  */
 inProcessHome("pithagoras-chat-modes-");
 mkdirSync(path.join(process.env.PI_CODING_AGENT_DIR, "extensions"), { recursive: true });
-// A tool the portal marks lazy (below): not offered one by one, and reached through the `tools` tool in a Standard chat.
+// A tool the portal marks lazy (below): not offered one by one, and reached through the `tool_search` tool in a Standard chat.
 writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR, "extensions", "lazy.ts"), `
 export default function (pi) {
   pi.registerTool({
@@ -258,7 +258,7 @@ test("in Code mode the code tool is on as the mode's layer, the chat is listed a
   assert.ok(!sessions.piOff(id).includes("codemode"), "pi still has it");
 });
 
-test("in Code mode only the code tool is declared, and a script reaches a lazy tool, also after a reload; in Standard the lazy tool is behind the tools tool", async () => {
+test("in Code mode only the code tool is declared, and a script reaches a lazy tool, also after a reload; in Standard the lazy tool is behind the tool_search tool", async () => {
   const id = chat();
   await put(id, "code");
   const ran = globalThis.lazyOneRan ?? 0;
