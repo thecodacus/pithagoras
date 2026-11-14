@@ -143,6 +143,9 @@ export class McpRuntime {
       loadConfig: (ctx: any) => this.loadConfig(ctx),
       // The first prompt waits this long for the servers whose tools are declared (pi's default is 10 s too).
       startupWaitMs: 10_000,
+      // pi's `/mcp login` opens the sign-in page in a browser of the machine it runs on, which is the portal's host and not
+      // the person's: the address is said in the chat (pi notifies it too), and nothing is opened there.
+      openUrl: () => undefined,
     });
     return [
       { name: "mcp", factory: mcp },

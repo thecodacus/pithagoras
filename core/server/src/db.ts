@@ -3427,7 +3427,10 @@ export function lazySetLabels(names: Iterable<string>): { label: string; tools: 
   if (!wanted.size) return [];
   const given = toolGroupNames();
   const groups = new Map<string, string[]>();
-  for (const tool of knownTools()) {
+  // What a chat reported and what is remembered of the servers that have run: a tool of a server no chat reported yet is a tool too.
+  const known = knownTools();
+  const reported = new Set(known.map((tool) => tool.name));
+  for (const tool of [...known, ...mcpView().catalogue.filter((tool) => !reported.has(tool.name))]) {
     if (!wanted.has(tool.name)) continue;
     const set = toolSetOf(tool);
     const label = given[set] ?? set;

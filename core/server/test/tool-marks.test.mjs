@@ -448,6 +448,21 @@ test("an MCP server is a set like any other: lazy or direct by its mark, or by t
   assert.ok(!page.tools.some((t) => t.name.startsWith("mcp__notes__")));
 });
 
+test("a server that has run in no chat the portal has heard from is counted and named by what the portal kept of it", async () => {
+  writeMcp({ kept: { command: "k" } });
+  const cache = await import("../dist/mcp-tools.js");
+  cache.rememberServerTools("kept", "h", ["one", "two", "three"].map((name) => ({ name: `mcp__kept__${name}`, original: name, description: `The ${name} tool.`, parameters: { type: "object", properties: {} }, tokens: 1500 })));
+  try {
+    // No chat reported its tools, yet the threshold knows them: 4,500 tokens is over the limit, so the server goes lazy by its size.
+    assert.deepEqual((await json("/api/tools")).resolved.lazy.includes("kept"), true);
+    const chat = await json("/api/sessions", "POST", {});
+    assert.ok(headOf(chat.id).lazy.includes("kept"));
+    assert.match(headOf(chat.id).hint, /kept \(mcp__kept__one, mcp__kept__three, mcp__kept__two\)/, "named with its tools, though no chat reported them");
+  } finally {
+    cache.dropCachedServers(["kept"]);
+  }
+});
+
 test("the route that set an MCP server's lazy setting on its own is gone: the server's mark is the one switch, like any set's", async () => {
   writeMcp({ notes: { command: "n" } });
   assert.equal((await send("/api/mcp/servers/notes/direct", "PUT", { direct: true })).status, 404);
