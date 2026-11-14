@@ -7,16 +7,16 @@ import type { CanvasStore } from "./store";
  *
  * The text arrives in the chat's events (`portal.chats.onEvent`), as the
  * model writes the call's arguments: `observe` follows them, for a call of
- * canvas_write by its own name, or one through the `tools` tool where it is
+ * canvas_write by its own name, or one through the `tool_search` tool where it is
  * lazy. Which of the two the model can make now is asked of the portal
  * (`portal.chats.offers`), because a call by a name the tool is not offered
  * under is refused and never runs, and its text is nobody's to write.
  */
 
 /** The portal's tool that searches, describes and calls the tools a chat has as lazy. */
-const GATEWAY_TOOL = "tools";
+const SEARCH_TOOL = "tool_search";
 
-/** The call a call of the `tools` tool makes: the tool it calls, and its arguments. Nothing for a search or a describe. */
+/** The call a call of the `tool_search` tool makes: the tool it calls, and its arguments. Nothing for a search or a describe. */
 function calledThrough(args: unknown): { name: string; args: Record<string, unknown> } | undefined {
   const plain = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
   if (!plain(args) || args.action !== "call" || typeof args.name !== "string") return undefined;
@@ -235,10 +235,10 @@ export class CanvasTools {
       if (!tool?.id) return;
       let stream = this.streams.get(tool.id);
       if (!stream) {
-        // Called as it is, or through the `tools` tool where it is lazy: the same text, one level further in.
+        // Called as it is, or through the `tool_search` tool where it is lazy: the same text, one level further in.
         const how = this.offered();
         if (tool.name === "canvas_write" && how === "direct") stream = new WriteStream();
-        else if (tool.name === GATEWAY_TOOL && how === "lazy") stream = new GatewayWriteStream();
+        else if (tool.name === SEARCH_TOOL && how === "lazy") stream = new GatewayWriteStream();
         else return;
         this.streams.set(tool.id, stream);
       }
@@ -251,12 +251,12 @@ export class CanvasTools {
         this.finish(tool.id, true);
       }
     }
-    // The call is whole now, and what runs is what JSON makes of it: the last of a key given twice. A call of the `tools` tool
+    // The call is whole now, and what runs is what JSON makes of it: the last of a key given twice. A call of the `tool_search` tool
     // that is not a canvas_write after all leaves the text that was written on its way out of the document.
-    if (event.type === "tool_execution_start" && event.toolName === GATEWAY_TOOL && calledThrough(event.args)?.name !== "canvas_write") this.discard(event.toolCallId);
+    if (event.type === "tool_execution_start" && event.toolName === SEARCH_TOOL && calledThrough(event.args)?.name !== "canvas_write") this.discard(event.toolCallId);
     if (event.type === "tool_execution_end") {
       if (event.isError) this.finish(event.toolCallId, true);
-      // A call through the `tools` tool that was no write leaves its stream behind.
+      // A call through the `tool_search` tool that was no write leaves its stream behind.
       this.streams.delete(event.toolCallId);
     }
     if (event.type === "agent_end" || event.type === "agent_settled" || (event.type === "message_end" && ["aborted", "error"].includes(event.message?.stopReason))) this.interrupt();

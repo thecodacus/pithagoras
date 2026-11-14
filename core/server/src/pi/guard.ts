@@ -20,7 +20,7 @@ import { loadedAt, loadedPlaces, type LoadedAs, type LoadedPlace } from "./loade
 import { loadedByLinks } from "./loaded-links.js";
 // Only the names: a heartbeat's note is registered for heartbeats alone, and is how one says what it read.
 import { HEARTBEAT_ROLE, NOTE_TOOL } from "./heartbeat-names.js";
-import { GATEWAY_TOOL } from "./tools-gateway-names.js";
+import { TOOL_SEARCH } from "./tool-search-names.js";
 import { runsAsPrimary } from "./runs-as-primary.js";
 
 /**
@@ -64,7 +64,7 @@ const UNTRUSTED_COMMAND = /\b(himalaya|mutt|neomutt|notmuch|offlineimap|mbsync|c
  *
  * A server's tools are its words however they are called: through the adapter's
  * `mcp` tool, or under their own names (`jira_get_issue`), which the adapter
- * registers where a server's tools are direct and the tools gateway runs where
+ * registers where a server's tools are direct and `tool_search` runs where
  * they are lazy. An issue comment or a mail body a server hands back is whoever
  * wrote it. A server the person counts as their own (trustedMcpServers) is not
  * outside content, by any of those ways; the browser always is, whoever runs it,
@@ -138,9 +138,10 @@ function proxiedServer(input: Record<string, unknown>, mcp: Pick<McpView, "serve
  * out is off for pi too, and the adapter would not reach it anyway; a tool of
  * another extension whose name merely starts like a server's is no script's.
  *
- * The `tools` tool, which reaches a conversation's lazy tools, is another such way: `tools({ action:
- * "call", name })` runs the tool of that name, so it is held to the switches the same, for any tool and
- * not only a server's. A lazy tool is on, and so not in `off`; one that is off is refused, lazy or not.
+ * `tool_search`, which reaches a conversation's lazy tools, is another such way, and holds itself to the switches: it
+ * finds and describes only the tools that are on, and refuses a call of one that is off. The call it makes goes
+ * through the guard as a call of the tool it names, which is refused here for a tool that is off (see the nested call
+ * below), so the switches hold however the call is made.
  */
 export function switchedOffVia(
   toolName: string,
@@ -148,20 +149,13 @@ export function switchedOffVia(
   off: ReadonlySet<string>,
   given?: Pick<McpView, "servers" | "serverTool">,
 ): string | undefined {
-  if (!off.size || (toolName !== GATEWAY_TOOL && toolName !== "mcp" && toolName !== "mcp_script" && toolName !== "mcpScript")) {
+  if (!off.size || (toolName !== "mcp" && toolName !== "mcp_script" && toolName !== "mcpScript")) {
     return undefined;
   }
   // The adapter takes a name with hyphens for underscores (findToolByName). Dots are taken as underscores
   // here as well, though the adapter keeps a server's (mcpPrefix): wider than the adapter, this only refuses
   // more, and a name it might take one day is not a way round.
   const same = (name: string) => name.replace(/[-.]/g, "_");
-  if (toolName === GATEWAY_TOOL) {
-    // Searching names nothing, and lists only what is lazy. Describing a tool is a way to it too: its
-    // parameters are what the model is not to learn of a tool it was told is off.
-    const asked = typeof input.name === "string" ? same(input.name.trim()) : "";
-    if ((input.action !== "call" && input.action !== "describe") || !asked) return undefined;
-    return [...off].find((name) => same(name) === asked);
-  }
   const mcp = given ?? mcpView();
   if (toolName === "mcp") {
     const server = typeof input.server === "string" && input.server ? same(input.server) : undefined;
@@ -1174,7 +1168,7 @@ const envelope = (id: string) => ({
  * group conversation changes sender between messages and a launch-time list
  * would freeze capability to whoever happened to speak first.
  *
- * The gateway to the lazy tools is read-only too, but not by its name: see gatewayNow.
+ * The tool that reaches the lazy tools is read-only too, but not by its name: see searchNow.
  */
 const READ_ONLY = new Set(["read", "grep", "find", "ls", "ask_primary", NOTE_TOOL]);
 
@@ -1376,7 +1370,7 @@ const subjectOf = (toolName: string, input: Record<string, unknown>) =>
   toolName === "bash" ? cmd(input) : target(input) || JSON.stringify(input);
 
 /** Tools that are never approved on files: a command, and the ways to a tool server's tools or to other tools. */
-const NEVER_FILES = new Set(["bash", "mcp", "mcp_script", "mcpScript", "codemode", GATEWAY_TOOL]);
+const NEVER_FILES = new Set(["bash", "mcp", "mcp_script", "mcpScript", "codemode", TOOL_SEARCH]);
 
 /**
  * The files a call of a tool is approved for, where the tool's own definition
@@ -2039,12 +2033,12 @@ export function guardExtension(
   /** What this conversation has switched off, read at each call: see switchedOffVia. */
   offNow: () => ReadonlySet<string> = () => new Set(),
   /**
-   * Whether the tool called `tools` that pi runs is the portal's gateway to the lazy tools. The name is any
-   * extension's to use, and pi keeps the first tool of a name, so a tool of that name is the gateway only if it
-   * is that one: the guard trusts the gateway, which runs what it calls through the guard again, and not a tool
-   * that merely has its name. Read at each call, as an extension may be loaded later.
+   * Whether the tool called `tool_search` that pi runs is the portal's. The name is any extension's to use, and pi
+   * keeps the first tool of a name, so a tool of that name is the portal's only if it is that one: the guard trusts it,
+   * which runs what it calls through the guard again, and not a tool that merely has its name. Read at each call, as
+   * an extension may be loaded later.
    */
-  gatewayNow: () => boolean = () => false,
+  searchNow: () => boolean = () => false,
   /** The files a tool declares it is approved for (see declaredFiles), read from its definition at each call. */
   filesOf: (toolName: string) => readonly string[] | undefined = () => undefined,
   /** Whether the MCP adapter registered a tool of this name in this session: a server's tool, whatever it is called (see untrustedResult). */
@@ -2184,9 +2178,8 @@ export function guardExtension(
           sessionId: portalSessionId,
         });
 
-      // Held to what the gateway is only if it is the gateway: see gatewayNow.
-      const gateway = event.toolName === GATEWAY_TOOL && gatewayNow();
-      const readOnly = READ_ONLY.has(event.toolName) || gateway;
+      // Held to what tool_search is only if it is the portal's: see searchNow.
+      const readOnly = READ_ONLY.has(event.toolName) || (event.toolName === TOOL_SEARCH && searchNow());
 
       // Before anything that could allow it: a tool switched off is off for
       // everybody, and no rule or approval switches it back on.
@@ -2200,20 +2193,17 @@ export function guardExtension(
             "Say that it is switched off rather than looking for another way to it.",
         };
       }
-      const offTool = event.toolName === GATEWAY_TOOL && !gateway ? undefined : switchedOffVia(event.toolName, event.input ?? {}, offNow());
+      const offTool = switchedOffVia(event.toolName, event.input ?? {}, offNow());
       if (offTool) {
         note("refused", `Switched off in this conversation: ${offTool}`);
         return {
           block: true,
           reason:
-            event.toolName === GATEWAY_TOOL
-              ? `Refused: "${offTool}" is switched off in this conversation, and the ${GATEWAY_TOOL} tool does not reach it ` +
-                "either. Say that it is switched off rather than looking for another way to it."
-              : event.toolName !== "mcp"
-                ? `Refused: "${offTool}" is switched off in this conversation, and an MCP script could reach it. ` +
-                  "Call the MCP tools you need one at a time instead."
-                : `Refused: "${offTool}" is switched off in this conversation, and the mcp tool does not reach it ` +
-                  "either. Say that it is switched off rather than looking for another way to it.",
+            event.toolName !== "mcp"
+              ? `Refused: "${offTool}" is switched off in this conversation, and an MCP script could reach it. ` +
+                "Call the MCP tools you need one at a time instead."
+              : `Refused: "${offTool}" is switched off in this conversation, and the mcp tool does not reach it ` +
+                "either. Say that it is switched off rather than looking for another way to it.",
         };
       }
 

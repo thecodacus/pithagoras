@@ -13,6 +13,8 @@ import path from "node:path";
 import type { Draft, LoadError, PiClient, PiTool, PromptTaken } from "./pi/types.js";
 import { effectiveOff, exceptionsFor, heldOffUnshown, toolEnabled, toolSource } from "./tool-policy.js";
 import { scriptedMark } from "./tool-layers.js";
+import { parseHead, type LazyHead } from "./tool-lazy.js";
+import { buildLazyHead } from "./lazy-head.js";
 import { unlisted } from "./mcp-offer.js";
 import { projectOf } from "./workspaces.js";
 import { findServerBuiltin, picturesRefused, runBuiltin } from "./pi/builtins.js";
@@ -97,8 +99,9 @@ import {
   onChannel,
   dialogHost,
   lazyMarks,
-  lazyToolNames,
-  lazySetLabels,
+  setLazyHead,
+  agentDirect,
+  modeDirect,
   childSessions,
   deleteSession,
   lastRunEvents,
@@ -1292,7 +1295,7 @@ class SessionManager extends EventEmitter {
     void client
       .getTools?.()
       .then((tools) => {
-        // A lazy tool that this chat was started with, because nobody had seen it before, is taken out of its list again.
+        // A tool that this chat was started with, because nobody had seen it before, and that is off by default, is taken out of its list again.
         if (rememberTools(tools.map(remembered)).length) return this.applyToolDefaults();
       })
       .catch(() => {
@@ -2791,21 +2794,66 @@ class SessionManager extends EventEmitter {
   }
 
   /**
-   * Of the tools marked lazy, the ones this conversation has on: not offered one by one, and reached
-   * through the `tools` tool. What is off (piOff) is off for good and so not among them. `sets` names
-   * what they are, for the hint to the model.
+   * What the chat's pi is told about its lazy tools: which sets are lazy in it, and the line that names them. Made when
+   * the chat first starts, from the marks, the threshold's resolution and what its mode and agent keep in the model's
+   * list, and kept with the chat (`sessions.lazy_head`) from then on: reused when it is reopened after a restart and when
+   * it is reloaded, so that the tools array and the system prompt, which the model's provider caches, do not change while
+   * the chat lasts. Made again only by `readToolsAgain`, which the person asks for.
    */
-  piLazy(off: string[]): { tools: string[]; sets: string[] } {
-    const gone = new Set(off);
-    const tools = [...lazyToolNames()].filter((name) => !gone.has(name)).sort();
-    return { tools, sets: lazySetLabels(tools) };
+  lazyHeadFor(sessionId: string): LazyHead {
+    const session = getSession(sessionId);
+    const kept = parseHead(session?.lazy_head);
+    if (kept) return kept;
+    const head = this.freshLazyHead(sessionId);
+    if (session) setLazyHead(sessionId, head);
+    return head;
   }
 
-  /** What pi is told about the tools when a conversation starts: the ones that are off, and the lazy ones that are on. */
-  private toolsFor(sessionId: string): { toolsOff: string[]; toolsLazy: string[]; lazySets: string[]; toolsSeen: () => ReadonlySet<string> } {
+  /** The head the chat would have if it started now: what a mode of the person's and the agent's it works with keep in the list stays there. */
+  private freshLazyHead(sessionId: string): LazyHead {
+    const session = getSession(sessionId);
+    return buildLazyHead([...modeDirect(session?.mode), ...agentDirect(agentIdOf(session?.workspace))]);
+  }
+
+  /** What pi is told about the tools when a conversation starts: the ones that are off, and what the chat froze about the lazy ones. */
+  private toolsFor(sessionId: string): { toolsOff: string[]; lazy: LazyHead; rememberLazy: (head: LazyHead) => void; toolsSeen: () => ReadonlySet<string> } {
     const toolsOff = this.piOff(sessionId);
-    const lazy = this.piLazy(toolsOff);
-    return { toolsOff, toolsLazy: lazy.tools, lazySets: lazy.sets, toolsSeen: () => new Set(knownTools().map((t) => t.name)) };
+    return {
+      toolsOff,
+      lazy: this.lazyHeadFor(sessionId),
+      rememberLazy: (head) => setLazyHead(sessionId, head),
+      toolsSeen: () => new Set(knownTools().map((t) => t.name)),
+    };
+  }
+
+  /**
+   * Read the tools again, as the person asks: what is lazy in the chat is decided afresh from the marks and the threshold as
+   * they are now, and kept as the chat's from then on. The one deliberate change of what the model is sent first, which
+   * costs the prompt cache from the start of it. The chat is reloaded for it, now or, where it is working, once it can be.
+   * True when the head changed.
+   */
+  async readToolsAgain(sessionId: string): Promise<boolean> {
+    if (!getSession(sessionId)) return false;
+    const head = this.freshLazyHead(sessionId);
+    const was = parseHead(getSession(sessionId)?.lazy_head);
+    const same = was && JSON.stringify(was) === JSON.stringify({ ...head, outside: was.outside || head.outside, voice: was.voice });
+    if (same) return false;
+    setLazyHead(sessionId, head);
+    const client = this.live.get(sessionId)?.client;
+    if (client) {
+      client.useHead?.(head);
+      if (this.isBusy(sessionId) || this.reloadCutsOff(sessionId)) client.reloadDue = true;
+      else await client.reload();
+    }
+    return true;
+  }
+
+  /** Whether what the chat froze about its lazy tools differs from what it would be now: the page offers to read the tools again. */
+  lazyHeadStale(sessionId: string): boolean {
+    const was = parseHead(getSession(sessionId)?.lazy_head);
+    if (!was) return false;
+    const head = this.freshLazyHead(sessionId);
+    return JSON.stringify(was.lazy) !== JSON.stringify(head.lazy) || JSON.stringify(was.direct) !== JSON.stringify(head.direct);
   }
 
   /**
@@ -2874,8 +2922,9 @@ class SessionManager extends EventEmitter {
           enabled: toolEnabled(name, defaults, exceptions),
           ...(held && name === CODEMODE_TOOL ? { byMode: true as const } : {}),
           defaultOn: !defaults.includes(name),
-          // Not offered one by one but found through the `tools` tool, or an MCP server's through `mcp`: the page says so beside the switch.
-          ...scriptedMark(mark, scripted),
+          // Not offered one by one but found through `tool_search`, or an MCP server's through `mcp`: the page says so beside the switch.
+          // In a chat that is running it is what the chat froze that says so, which the marks may have left behind.
+          ...scriptedMark(client?.offers && mark.mcp === undefined ? { ...mark, lazy: client.offers(name) === "lazy" ? (true as const) : undefined } : mark, scripted),
         };
       }),
       live: Boolean(listed.length),
@@ -2928,7 +2977,7 @@ class SessionManager extends EventEmitter {
     setSessionTools(sessionId, { off: [...own.off, ...kept], on: own.on });
     const off = this.offFor(sessionId, listed.map((t) => t.name), view.known().keys());
     const piOff = this.piOff(sessionId, reported, view);
-    await client?.setToolsOff?.(piOff, this.piLazy(piOff));
+    await client?.setToolsOff?.(piOff);
     return off;
   }
 
@@ -2964,7 +3013,7 @@ class SessionManager extends EventEmitter {
         try {
           const listed = client.getTools ? await client.getTools() : [];
           const off = this.piOff(sessionId, listed, view, homes);
-          await client.setToolsOff?.(off, this.piLazy(off));
+          await client.setToolsOff?.(off);
           return true;
         } catch (e) {
           console.error(`[portal] could not apply the tool defaults to ${sessionId}: ${(e as Error).message}`);
@@ -3397,7 +3446,7 @@ class SessionManager extends EventEmitter {
     if (!client?.setToolsOff) return;
     const reported = client.getTools ? await client.getTools() : [];
     const piOff = this.piOff(childId, reported);
-    await client.setToolsOff(piOff, this.piLazy(piOff));
+    await client.setToolsOff(piOff);
   }
 
   /**
