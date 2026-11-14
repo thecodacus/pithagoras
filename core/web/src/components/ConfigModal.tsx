@@ -67,7 +67,8 @@ import type { Tab } from "../settings-tabs";
 import { serialSaver } from "../serial-saver";
 import { local } from "../safe-storage";
 import { SETTINGS_INDEX, searchSettings, type SettingEntry } from "../settings-search";
-import { usePalette, useTheme, type Theme } from "../theme";
+import { chooseAppearance, usePalette, useAppearance, useTheme, type Theme } from "../theme";
+import { APPEARANCE_RANGE, STOCK_APPEARANCE, type Appearance as Scales } from "../tokens";
 import { choose as chooseTheme, useThemes } from "../extensions/themes";
 import { humanKey, typed } from "../setting-values";
 import { effortLabel } from "../effort";
@@ -788,6 +789,34 @@ const THEMES: { value: Theme; label: string; icon: ReactNode }[] = [
 ];
 
 /**
+ * One of the person's two scales, as a slider in whole percent of what the theme has: a hundred is no change. Drawn with
+ * its range at both ends, and the value as text, so that it reads without the slider.
+ */
+function Scale({ name, hint, label, value, onChange }: { name: keyof Scales; hint: string; label: string; value: number; onChange: (next: number) => void }) {
+  const [least, most] = APPEARANCE_RANGE[name];
+  return (
+    <div className="mt-4">
+      <div className="flex items-baseline justify-between gap-2">
+        <label htmlFor={`scale-${name}`} className="text-xs text-fg-muted">{label}</label>
+        <span className="tabular-nums text-xs text-fg">{value} %</span>
+      </div>
+      <input
+        id={`scale-${name}`}
+        type="range"
+        min={least}
+        max={most}
+        step={5}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        aria-describedby={`scale-${name}-hint`}
+        className="mt-1.5 h-1 w-full cursor-pointer appearance-none rounded-full bg-raised accent-accent sm:w-72 sm:block"
+      />
+      <span id={`scale-${name}-hint`} className="mt-1 block text-2xs text-fg-faint">{hint}</span>
+    </div>
+  );
+}
+
+/**
  * Light, dark, or whichever the system is — as three cards, each a glimpse of
  * itself. And, where an installed extension brought any, whose colours: the
  * portal's own or a theme's (see extensions/themes.ts).
@@ -796,6 +825,7 @@ function Appearance() {
   const { theme, setTheme } = useTheme();
   const brought = useThemes();
   const chosen = usePalette();
+  const scales = useAppearance();
   // The one chosen is offered before its extension is loaded as well: it is what is painted.
   const colours = [
     { value: "", label: t("The portal's own") },
@@ -835,6 +865,25 @@ function Appearance() {
           }}
         />
       </Field>
+    )}
+    <Scale
+      name="text"
+      label={t("Text size")}
+      hint={t("How big the text is, as a share of the theme's. Everything made of text follows; pictures and icons do not.")}
+      value={scales.text}
+      onChange={(text) => chooseAppearance({ ...scales, text })}
+    />
+    <Scale
+      name="density"
+      label={t("Spacing")}
+      hint={t("How much room there is inside things and between them. Sizes of icons, pictures and columns stay as they are.")}
+      value={scales.density}
+      onChange={(density) => chooseAppearance({ ...scales, density })}
+    />
+    {(scales.text !== STOCK_APPEARANCE.text || scales.density !== STOCK_APPEARANCE.density) && (
+      <button type="button" onClick={() => chooseAppearance(STOCK_APPEARANCE)} className="mt-3 text-xs text-fg-muted underline-offset-2 hover:text-fg hover:underline">
+        {t("Back to 100 %")}
+      </button>
     )}
     </>
   );

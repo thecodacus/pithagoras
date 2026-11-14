@@ -43,7 +43,8 @@ const FONT = /^[\p{L}\p{N}_ "',.-]{1,200}$/u;
 
 /** A value as the variable takes it: the length or the font stack as it was given, or null for anything that is not one. */
 export function tokenValue(name: string, value: unknown): string | null {
-  const rule = (TOKEN_RULES as Record<string, Rule>)[name];
+  // Own names only: `constructor` and `__proto__` are on every object.
+  const rule = Object.hasOwn(TOKEN_RULES, name) ? (TOKEN_RULES as Record<string, Rule>)[name] : undefined;
   if (!rule || typeof value !== "string") return null;
   const text = value.trim();
   if (rule === "font") return FONT.test(text) ? text : null;

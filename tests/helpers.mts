@@ -42,3 +42,15 @@ export function renamesOnDisk(work: () => void): { to: string; synced: boolean }
   }
   return renamed;
 }
+
+/** What a theme must never carry into the page: a rule of CSS, a request, or a way out of its declaration. */
+export const HOSTILE_TOKENS: [string, string][] = [
+  ["radius-lg", "url(https://example.test/x.png)"], ["radius-lg", "expression(alert(1))"], ["radius-lg", "0.5rem; color: red"], ["radius-lg", "0.5rem} body{display:none"],
+  ["radius-lg", "0.5rem !important"], ["radius-lg", "calc(1rem + 2rem)"], ["radius-lg", "var(--canvas)"], ["radius-lg", "\\30 .5rem"], ["radius-lg", "0.5rem/*"], ["radius-lg", "0.5rem\n}"],
+  ["radius-lg", "-1rem"], ["radius-lg", "9rem"], ["radius-lg", "1e1rem"], ["radius-lg", "1"], ["radius-lg", "inherit"],
+  ["pad", "5rem"], ["pad", "0"], ["text-base", "100px"], ["text-base", "0.1rem"], ["chat-max", "10000rem"], ["nav-width", "1px"],
+  ["font-sans", "url(https://example.test/a.woff2)"], ["font-sans", "Inter; background: url(x)"], ["font-sans", "Inter, url(//example.test/a)"], ["font-sans", "x} body { display: none"],
+  ["font-sans", "x/* "], ["font-sans", "@import 'https://example.test/x.css'"], ["font-sans", "expression(1)"], ["font-sans", "a\\;b"], ["font-sans", "a<script>"], ["font-sans", "a:b"],
+  ["font-sans", "x".repeat(201)], ["font-sans", ""], ["font-mono", "a !important"], ["font-mono", "var(--font-sans)"],
+  ["z-confirm", "1"], ["z-dialog", "99999"], ["color", "red"], ["background", "url(x)"], ["--radius-lg", "1rem"], ["__proto__", "1rem"], ["constructor", "1rem"],
+];

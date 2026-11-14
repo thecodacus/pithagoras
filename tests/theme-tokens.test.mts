@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import vm from "node:vm";
+import { HOSTILE_TOKENS } from "./helpers.mts";
 import { appearanceOf, tokensOf, tokenStyles, tokenValue, TOKEN_NAMES } from "../core/web/src/tokens.ts";
 
 /**
@@ -70,4 +71,16 @@ test("before the app: a stored value that cannot be read does not take the chose
   const { set, theme } = painted({ "pithagoras.theme": "dark", ...palette({ "radius-lg": "0.75rem" }), "pithagoras.appearance": "{" });
   assert.equal(theme, "dark");
   assert.equal(set["--accent"], "1 2 3");
+});
+
+test("before the app: a theme that carries a rule of CSS, a url or a way out of its declaration is not painted, as in the app", () => {
+  for (const [name, value] of HOSTILE_TOKENS) {
+    const kept = palette({ "radius-md": "0.5rem" });
+    // Written as JSON, as the browser keeps it: `__proto__` is an own name there.
+    kept["pithagoras.palette"] = JSON.parse(`{"id":"x/y","name":"Y","dark":{"accent":"1 2 3"},"tokens":{"radius-md":"0.5rem",${JSON.stringify(name)}:${JSON.stringify(value)}}}`);
+    assert.equal(tokensOf((kept["pithagoras.palette"] as { tokens: unknown }).tokens), null, `${name}: ${value}`);
+    const { set } = painted(kept);
+    assert.deepEqual(Object.keys(set).filter((key) => TOKEN_NAMES.includes(key.slice(2) as never)), [], `${name}: ${value}`);
+    assert.equal(set["--accent"], "1 2 3", "the colours are still painted");
+  }
 });

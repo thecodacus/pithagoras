@@ -211,10 +211,10 @@
   input[type="range"]:focus-visible::-moz-range-thumb { box-shadow: 0 0 0 2px rgb(var(--surface)), 0 0 0 4px rgb(var(--accent)); }
   input[type="range"]:disabled { opacity: .4; cursor: not-allowed; }
 
-  input[type="file"] { font-size: 12px; color: rgb(var(--fg-muted)); }
+  input[type="file"] { font-size: calc(var(--text-base) * 0.75); color: rgb(var(--fg-muted)); }
   input[type="file"]::file-selector-button {
     margin-right: 10px; padding: 5px 12px; border: 1px solid rgb(var(--line)); border-radius: 8px; cursor: pointer;
-    background: rgb(var(--raised)); color: rgb(var(--fg)); font: inherit; font-size: 12px; transition: background .18s, border-color .18s;
+    background: rgb(var(--raised)); color: rgb(var(--fg)); font: inherit; font-size: calc(var(--text-base) * 0.75); transition: background .18s, border-color .18s;
   }
   input[type="file"]::file-selector-button:hover { background: rgb(var(--fg) / .1); border-color: rgb(var(--fg-faint)); }
 
@@ -273,7 +273,7 @@
 .prompt-shell:focus-within { border-color: rgb(var(--fg-subtle)); box-shadow: 0 8px 30px #00000012; }
 /* A menu opened from the composer rises over the conversation, where the way back to its end floats: it steps aside until the menu closes. */
 .prompt-shell:has(.composer-menu) .jump-to-end { display: none; }
-.prompt-input { display: block; width: 100%; min-height: 58px; max-height: 200px; resize: none; border: 0; background: transparent; padding: 5px 8px 10px; font-size: 14px; line-height: 1.6; color: rgb(var(--fg)); outline: none !important; box-shadow: none; }
+.prompt-input { display: block; width: 100%; min-height: 58px; max-height: 200px; resize: none; border: 0; background: transparent; padding: 5px 8px 10px; font-size: calc(var(--text-base) * 0.875); line-height: 1.6; color: rgb(var(--fg)); outline: none !important; box-shadow: none; }
 .prompt-input::placeholder { color: rgb(var(--fg-subtle)); }
 .prompt-action { display: grid; place-items: center; height: 36px; width: 36px; flex-shrink: 0; border-radius: 12px; color: rgb(var(--fg-muted)); transition: color .18s, background .18s, transform .18s; }
 .prompt-action:hover { color: rgb(var(--fg)); background: rgb(var(--fg) / .065); }

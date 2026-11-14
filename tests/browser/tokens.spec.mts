@@ -13,8 +13,8 @@ const session = { id: 'a', title: 'First chat', workspace: '/w/site', status: 'i
 async function portal(page: Page, kept: { tokens?: Record<string, string>; appearance?: { text: number; density: number } }, url = '/sessions') {
   await mockPortal(page, ({ path: p }) => {
     if (p === '/api/sessions') return { sessions: [session], executor: 'host' };
-    // The theme the browser has kept is one the portal still has, or it would be put away as one whose extension is gone.
-    if (p === '/api/extension-ui') return { extensions: [{ name: 'test', version: '1', themes: [{ id: 'look', name: 'Look', dark: { accent: '#0a141e' } }] }] };
+    // The theme the browser has kept is one the portal still has, as it was kept, or it would be put away as one whose extension is gone, or painted as the extension has it now.
+    if (p === '/api/extension-ui') return { extensions: [{ name: 'test', version: '1', themes: [{ id: 'look', name: 'Look', dark: { accent: '#0a141e' }, ...(kept.tokens ? { tokens: kept.tokens } : {}) }] }] };
   }, { settings: true });
   await page.addInitScript(({ tokens, appearance }) => {
     localStorage.setItem('pithagoras.theme', 'dark');
@@ -101,4 +101,91 @@ test('a theme with a value that is not one is not painted, and the app says the 
   // Refused whole: the radius it also said is not painted, and the font is the portal's.
   expect(await css(page, '.nav-item', 'border-top-left-radius')).toBe('8px');
   expect(await css(page, 'body', 'font-family')).toContain('ui-sans-serif');
+});
+
+/** A package that brings a theme with new tokens beside its colours, and one whose tokens are hostile, as the portal's server lists them. */
+const SOFT = { id: 'soft', name: 'Soft', dark: { accent: '#7aa2f7' }, tokens: { 'radius-lg': '1.25rem', 'radius-md': '0px', 'font-sans': '"Fixture Face", serif', pad: '0.35rem', gap: '0.5rem', 'text-base': '1.125rem' } };
+const HOSTILE = { id: 'hostile', name: 'Hostile', dark: { accent: '#ff0000' }, tokens: { 'radius-lg': '0px', 'font-sans': 'x; background: url(https://example.test/x.png)' } };
+
+async function themed(page: Page, themes: unknown[]) {
+  await mockPortal(page, ({ path: p }) => {
+    if (p === '/api/sessions') return { sessions: [session], executor: 'host' };
+    if (p === '/api/extension-ui') return { extensions: [{ name: 'look-pkg', version: '1', themes }] };
+  }, { settings: true });
+  await page.addInitScript(() => localStorage.setItem('pithagoras.theme', 'dark'));
+  await page.goto('/settings/browser');
+}
+
+test('a theme with new tokens, chosen in Settings, changes the radius, the font and the density of the whole page, and goes with the theme', async ({ page }) => {
+  await themed(page, [SOFT]);
+  const dialog = page.getByRole('dialog', { name: 'Settings' });
+  const colours = dialog.getByRole('combobox', { name: 'Colours' });
+  const rows = '.nav-item';
+  await expect(page.locator(rows).first()).toBeVisible();
+  // As the portal ships.
+  expect(await css(page, rows, 'border-top-left-radius')).toBe('8px');
+  expect(await css(page, rows, 'padding-left')).toBe('10px');
+  await colours.click();
+  await page.getByRole('option', { name: /Soft/ }).click();
+  // rounded-lg is the theme's, rounded-md too, the font is its stack, a row's px-2.5 is 2.5 of its unit and gap-2.5 as well.
+  await expect.poll(() => css(page, rows, 'border-top-left-radius')).toBe('20px');
+  expect(await css(page, 'body', 'font-family')).toBe('"Fixture Face", serif');
+  expect(await css(page, rows, 'padding-left')).toBe('14px');
+  expect(await css(page, rows, 'column-gap')).toBe('20px');
+  expect(await css(page, 'body', 'font-size')).toBe('18px');
+  // Kept whole, painted again at the next start.
+  await page.reload();
+  await expect(page.locator(rows).first()).toBeVisible();
+  expect(await css(page, rows, 'border-top-left-radius')).toBe('20px');
+  // Back to the portal's own: all of it is.
+  await colours.click();
+  await page.getByRole('option', { name: "The portal's own" }).click();
+  await expect.poll(() => css(page, rows, 'border-top-left-radius')).toBe('8px');
+  expect(await css(page, rows, 'padding-left')).toBe('10px');
+  expect(await css(page, 'body', 'font-family')).toContain('ui-sans-serif');
+});
+
+test('a theme whose tokens are hostile is not offered, and nothing of it reaches the page', async ({ page }) => {
+  const requested: string[] = [];
+  page.on('request', (request) => requested.push(request.url()));
+  await themed(page, [HOSTILE, { ...SOFT, id: 'good', name: 'Good' }]);
+  await expect(page.locator('.nav-item').first()).toBeVisible();
+  // The package's themes are registered together: one that is refused fails the package, so none of them is on offer.
+  await expect(page.getByRole('dialog', { name: 'Settings' }).getByRole('combobox', { name: 'Colours' })).toHaveCount(0);
+  expect(await css(page, '.nav-item', 'border-top-left-radius')).toBe('8px');
+  expect(await page.evaluate(() => document.documentElement.getAttribute('style') ?? '')).not.toMatch(/url|example\.test|background/);
+  expect(requested.filter((url) => url.includes('example.test'))).toEqual([]);
+});
+
+test("the person's text size and spacing sliders change what is made of text and of padding, and are kept", async ({ page }) => {
+  await themed(page, [SOFT]);
+  const dialog = page.getByRole('dialog', { name: 'Settings' });
+  const colours = dialog.getByRole('combobox', { name: 'Colours' });
+  await expect(colours).toBeVisible();
+  const size = dialog.getByRole('slider', { name: 'Text size' });
+  const spacing = dialog.getByRole('slider', { name: 'Spacing' });
+  await expect(size).toHaveValue('100');
+  await expect(spacing).toHaveValue('100');
+  // The select is set in the stylesheet in px (13px), not by a utility: it follows the text size as well.
+  expect(await css(page, '.ui-select-md', 'font-size')).toBe('13px');
+  await size.fill('120');
+  await spacing.fill('140');
+  await expect(dialog.getByText('120 %')).toBeVisible();
+  await expect.poll(() => css(page, '.nav-item', 'padding-left')).toBe('14px');
+  expect(await css(page, 'body', 'font-size')).toBe('19.2px');
+  expect(await css(page, '.ui-select-md', 'font-size')).toBe('15.6px');
+  // Over a theme's own unit: its 0.35rem with the person's 90 %.
+  await colours.click();
+  await page.getByRole('option', { name: /Soft/ }).click();
+  await spacing.fill('90');
+  await expect.poll(() => css(page, '.nav-item', 'padding-left')).toBe('12.6px');
+  // Kept in this browser, and back with one click.
+  await page.reload();
+  await expect(dialog.getByRole('slider', { name: 'Text size' })).toHaveValue('120');
+  expect(await css(page, 'body', 'font-size')).toBe('21.6px');
+  await dialog.getByRole('button', { name: 'Back to 100 %' }).click();
+  await expect(dialog.getByRole('slider', { name: 'Text size' })).toHaveValue('100');
+  await expect(dialog.getByRole('slider', { name: 'Spacing' })).toHaveValue('100');
+  await expect(dialog.getByRole('button', { name: 'Back to 100 %' })).toHaveCount(0);
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('pithagoras.appearance') ?? '{}'))).toEqual({ text: 100, density: 100 });
 });

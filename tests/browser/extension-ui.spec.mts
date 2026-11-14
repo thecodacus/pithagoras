@@ -566,14 +566,25 @@ test('a theme an extension brought is chosen in Settings or switched to by an ex
   await page.goto('/s/a');
   expect(await colour('--accent')).toBe('34 211 238');
 
-  // An extension switches the theme: the whole page is in the other's colours, the terminal's included.
+  // An extension switches the theme to another package's: the person is asked, and a no changes nothing.
   await header(page).getByRole('button', { name: 'Switch to Dusk' }).click();
+  const ask = page.getByRole('alertdialog', { name: 'Change the colours?' });
+  await expect(ask).toContainText('probe wants to change the colours to Dusk.');
+  await ask.getByRole('button', { name: 'Cancel' }).click();
+  await expect(ask).toHaveCount(0);
+  expect(await colour('--accent')).toBe('34 211 238');
+  // A yes: the whole page is in the other's colours, the terminal's included.
+  await header(page).getByRole('button', { name: 'Switch to Dusk' }).click();
+  await ask.getByRole('button', { name: 'Change colours' }).click();
   await expect.poll(() => colour('--accent')).toBe('255 121 198');
   expect(await colour('--canvas')).toBe('27 22 38');
   expect(await colour('--terminal')).toBe('21 17 30');
   // Faded into, as a change of theme is.
   await expect.poll(() => page.evaluate(() => getComputedStyle(document.documentElement).backgroundColor)).toBe('rgb(27, 22, 38)');
+  // Leaving another package's theme for the portal's own is asked the same.
   await header(page).getByRole('button', { name: "Back to the portal's colours" }).click();
+  await expect(ask).toContainText("probe wants to go back to the portal's own colours.");
+  await ask.getByRole('button', { name: 'Change colours' }).click();
   await expect.poll(() => colour('--accent')).toBe('34 211 238');
 
   // A person chooses it where the portal's own look is chosen.

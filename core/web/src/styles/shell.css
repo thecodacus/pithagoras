@@ -44,7 +44,7 @@
 .sidebar-rail-button[aria-current="page"]::before { content: ""; position: absolute; left: -7px; top: 50%; width: 2px; height: 16px; border-radius: 0 2px 2px 0; background: rgb(var(--accent)); transform: translateY(-50%); }
 .sidebar-rail-button svg { width: 17px; height: 17px; }
 .sidebar-rail-button .status-dot { position: absolute; top: 5px; right: 5px; width: 6px; height: 6px; border: 1.5px solid rgb(var(--surface)); box-sizing: content-box; }
-.sidebar-rail-button .status-working { position: absolute; top: -1px; right: -1px; width: 13px; height: 13px; font-size: 9px; background: rgb(var(--surface)); }
+.sidebar-rail-button .status-working { position: absolute; top: -1px; right: -1px; width: 13px; height: 13px; font-size: calc(var(--text-base) * 0.5625); background: rgb(var(--surface)); }
 .sidebar-rail hr { width: 20px; margin: 6px 0; border: 0; border-top: 1px solid rgb(var(--line)); }
 .sidebar-content { animation: fade-in .3s var(--ease-out) both; }
 @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
@@ -119,7 +119,7 @@
 
 /* ── The setup assistant: where you are, as a line that fills ── */
 .setup-steps { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 6px; }
-.setup-step { display: flex; flex-direction: column; gap: 6px; font-size: 11px; color: rgb(var(--fg-faint)); transition: color .3s; }
+.setup-step { display: flex; flex-direction: column; gap: 6px; font-size: calc(var(--text-base) * 0.6875); color: rgb(var(--fg-faint)); transition: color .3s; }
 .setup-step::before { content: ""; height: 3px; border-radius: 99px; background: linear-gradient(90deg, rgb(var(--accent)) 50%, rgb(var(--fg) / .08) 50%) right / 200% 100%; transition: background-position .5s var(--ease-out); }
 .setup-step.is-done, .setup-step.is-current { color: rgb(var(--fg)); }
 .setup-step.is-done::before, .setup-step.is-current::before { background-position: left; }
