@@ -114,6 +114,9 @@ test("a page the model reads through tool_search itself is flagged where it is, 
   const [read, held] = own(results);
   assert.equal(read.toolName, "tool_search");
   assert.equal(textOf(read).match(/<<<untrusted:/g)?.length, 1);
+  // Wrapped on the way out once more, the first wrap's markers would be defaced inside the second.
+  assert.doesNotMatch(textOf(read), /marker removed/, "wrapped once");
+  assert.match(textOf(read), /<<<untrusted:[0-9a-f]{16}>>> \(suspected prompt injection: /, "and flagged, where it was wrapped");
   assert.match(textOf(held), /Refused \(publish\)/);
 });
 
