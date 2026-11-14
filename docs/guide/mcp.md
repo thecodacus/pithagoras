@@ -8,6 +8,10 @@ calls, and what the model is shown of the tools goes through the portal's own
 
 Settings → **MCP**.
 
+A portal that ran its servers on `pi-mcp-adapter` moves them at the first start of this version. What the move did,
+and what is left to look at, is the report at the top of this page; what to do is in
+[Upgrading](/guide/upgrading#mcp-servers-run-on-pi-s-own-mcp-support).
+
 ## Where it is written
 
 `<agent dir>/mcp.json` — `/data/home/.pi/agent/mcp.json` in the container. It is
