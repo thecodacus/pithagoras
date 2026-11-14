@@ -21,7 +21,7 @@ import { DEFAULT_ORB } from '../../core/server/src/orb-style';
  *    ones, which the portal's markdown ships with), so the same pictures come out of any machine with the same browser.
  *    No pixel may differ by more than Playwright's own colour threshold: a rounded corner is anti-aliased a shade
  *    differently from one run to the next, and a shifted edge or a changed size is far more than that;
- *  - the styles: for every distinct element (its tag and classes) of a scene, the computed values that tokens set
+ *  - the styles: for every distinct kind of element (its tag and its values) of a scene, and how many there are, the computed values that tokens set
  *    (type, spacing, rounding, borders, layers, shadow, widths a class limits). The browser resolves `0.75rem` and
  *    `var(--radius-xl)` to the same pixels, so these stay equal across the move, and a difference names the element.
  */
@@ -147,7 +147,11 @@ const SCENES: Scene[] = [
   harness('agents'),
 ];
 
-/** What a scene's elements are drawn with, by the values the tokens set: one line for each distinct tag, classes and values. */
+/**
+ * What a scene's elements are drawn with, by the values the tokens set: one line for each distinct tag and set of
+ * values, with how many elements have it. Their classes are not part of it: the same look may be written as another
+ * class (a literal that became a named step), and the look is what has to stay.
+ */
 async function styles(page: Page) {
   return page.evaluate(() => {
     const props = [
@@ -157,18 +161,17 @@ async function styles(page: Page) {
       'border-top-width', 'border-right-width', 'border-bottom-width', 'border-left-width', 'z-index', 'max-width', 'min-width', 'max-height', 'min-height',
       'box-shadow', 'transition-duration', 'animation-duration',
     ];
-    const rows = new Set<string>();
+    const rows = new Map<string, number>();
     for (const el of document.body.querySelectorAll('*')) {
       if (el.closest('script,style,noscript')) continue;
       const css = getComputedStyle(el);
       if (css.display === 'none') continue;
       // What an animation is drawing right now is a moment's value, not the element's style.
       const moving = css.animationName !== 'none';
-      const own = el.namespaceURI === 'http://www.w3.org/2000/svg' ? (el.getAttribute('class') ?? '') : el.className;
-      const classes = String(own).split(/\s+/).filter(Boolean).sort().join(' ');
-      rows.add(`${el.localName}.${classes} | ${props.map((p) => (moving && p === 'box-shadow' ? '~' : css.getPropertyValue(p))).join(' | ')}`);
+      const row = `${el.localName} | ${props.map((p) => (moving && p === 'box-shadow' ? '~' : css.getPropertyValue(p))).join(' | ')}`;
+      rows.set(row, (rows.get(row) ?? 0) + 1);
     }
-    return [...rows].sort();
+    return [...rows].map(([row, count]) => `${count}x ${row}`).sort();
   });
 }
 
