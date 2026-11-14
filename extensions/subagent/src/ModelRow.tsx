@@ -23,7 +23,7 @@ export function ModelRow({ chat, models }: { chat: Chat; models: readonly MenuMo
   };
   return (
     <div className="px-3 py-1.5">
-      <p className="text-[11px] text-fg-subtle">{t("Subagents in this chat run on")}</p>
+      <p className="text-2xs text-fg-subtle">{t("Subagents in this chat run on")}</p>
       <Select
         aria-label={t("Subagents in this chat run on")}
         size="sm"

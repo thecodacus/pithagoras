@@ -811,7 +811,7 @@ export const FilesPanel = memo(function FilesPanel({
       )}
       {showPath && !source && (
         // Cut at the start, not the end: what tells folders apart is the last part. rtl moves the ellipsis; bdi keeps the path itself left to right.
-        <div className="shrink-0 truncate border-b border-line px-3 py-1 text-left font-mono text-[11px] text-fg-subtle [direction:rtl]" title={dir ? `${folder}/${dir}` : folder}>
+        <div className="shrink-0 truncate border-b border-line px-3 py-1 text-left font-mono text-2xs text-fg-subtle [direction:rtl]" title={dir ? `${folder}/${dir}` : folder}>
           <bdi data-testid="files-full-path">{dir ? `${folder}/${dir}` : folder}</bdi>
         </div>
       )}
@@ -832,10 +832,10 @@ export const FilesPanel = memo(function FilesPanel({
               )}
             </span>
             {!file.loading && !file.error && (
-              <span className="shrink-0 text-[10px] text-fg-faint">{bytesLabel(file.size)}</span>
+              <span className="shrink-0 text-3xs text-fg-faint">{bytesLabel(file.size)}</span>
             )}
             {!writable && !file.loading && !file.error && (
-              <span className="shrink-0 rounded bg-fg/5 px-1.5 py-0.5 text-[10px] text-fg-subtle" title={t("This source cannot be changed from here")}>
+              <span className="shrink-0 rounded bg-fg/5 px-1.5 py-0.5 text-3xs text-fg-subtle" title={t("This source cannot be changed from here")}>
                 {t("Read-only")}
               </span>
             )}
@@ -1031,7 +1031,7 @@ export const FilesPanel = memo(function FilesPanel({
                     )}
                     <span className="min-w-0 flex-1 truncate">{entry.name}</span>
                     {entry.link && entry.type !== "link" && <LuLink aria-label={t("A link")} className="h-3 w-3 shrink-0 text-fg-faint" />}
-                    {entry.type === "file" && <span className="shrink-0 text-[10px] text-fg-faint">{bytesLabel(entry.size)}</span>}
+                    {entry.type === "file" && <span className="shrink-0 text-3xs text-fg-faint">{bytesLabel(entry.size)}</span>}
                   </button>
                   {/* Out of the way until the row is pointed at, but always there on a touch screen, which cannot point. */}
                   <div className="files-row-actions flex shrink-0 items-center opacity-0 transition focus-within:opacity-100 group-hover:opacity-100 [@media(pointer:coarse)]:opacity-100">

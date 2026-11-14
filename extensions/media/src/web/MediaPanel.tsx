@@ -28,7 +28,7 @@ export function MediaPanel() {
       )}
       <ImagesAddon onError={setError} />
       <VideosAddon onError={setError} />
-      <p className="text-[11px] text-fg-faint">{t("Which chats' agents get the tools is set in the tool lists (Settings → Agent → Tools), in the {group} group.", { group: portal.extension })}</p>
+      <p className="text-2xs text-fg-faint">{t("Which chats' agents get the tools is set in the tool lists (Settings → Agent → Tools), in the {group} group.", { group: portal.extension })}</p>
     </>
   );
 }

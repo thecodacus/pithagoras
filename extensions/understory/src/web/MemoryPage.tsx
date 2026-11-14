@@ -57,7 +57,7 @@ const typesIn = (node: MemoryNode | null): string[] =>
 function TypeBadge({ type, className = "" }: { type: string; className?: string }) {
   const colourOf = useContext(Colours);
   return (
-    <span className={`inline-flex min-w-0 items-center gap-1 rounded bg-fg/5 px-1.5 py-0.5 text-[10px] text-fg-muted ${className}`}>
+    <span className={`inline-flex min-w-0 items-center gap-1 rounded bg-fg/5 px-1.5 py-0.5 text-3xs text-fg-muted ${className}`}>
       <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: colourOf(type) }} />
       <span className="truncate">{type}</span>
     </span>
@@ -265,7 +265,7 @@ export function MemoryPage() {
                 type="button"
                 onClick={() => openView("issues")}
                 title={validation.conformant ? t("The bundle is well-formed") : tp(validation.issues.length, "{n} issue in the bundle", "{n} issues in the bundle")}
-                className={`rounded px-1.5 py-0.5 text-[10px] ${validation.conformant ? "bg-ok/10 text-ok" : "bg-warn/10 text-warn"}`}
+                className={`rounded px-1.5 py-0.5 text-3xs ${validation.conformant ? "bg-ok/10 text-ok" : "bg-warn/10 text-warn"}`}
               >
                 {validation.conformant ? t("conformant") : tp(validation.issues.length, "{n} issue", "{n} issues")}
               </button>
@@ -412,7 +412,7 @@ function TreeNode({ node, depth, open, onOpen }: { node: MemoryNode; depth: numb
           {expanded ? <LuChevronDown className="h-3 w-3 shrink-0" /> : <LuChevronRight className="h-3 w-3 shrink-0" />}
           <LuFolder className="h-3.5 w-3.5 shrink-0 text-fg-faint" />
           <span className="min-w-0 flex-1 truncate">{node.name}/</span>
-          <span className="shrink-0 text-[10px] text-fg-faint">{countNotes(node)}</span>
+          <span className="shrink-0 text-3xs text-fg-faint">{countNotes(node)}</span>
         </button>
         {expanded && (
           <ul className="space-y-0.5">
@@ -461,7 +461,7 @@ function Hits({ hits, asked, open, onOpen }: { hits: MemoryHit[]; asked: string;
             className={`w-full rounded-lg px-2.5 py-2 text-left transition ${open === h.path ? "bg-accent/12" : "hover:bg-fg/5"}`}
           >
             <p className={`truncate text-xs ${open === h.path ? "text-accent" : "text-fg"}`}>{h.title || h.path}</p>
-            {(h.description || h.snippet) && <p className="mt-0.5 line-clamp-2 text-[11px] text-fg-faint">{h.description || h.snippet}</p>}
+            {(h.description || h.snippet) && <p className="mt-0.5 line-clamp-2 text-2xs text-fg-faint">{h.description || h.snippet}</p>}
           </button>
         </li>
       ))}
@@ -773,7 +773,7 @@ function Note({
                   className={`${codeAreaCls} mt-1 resize-y`}
                 />
               </label>
-              <p className="font-mono text-[10px] text-fg-faint">{path}</p>
+              <p className="font-mono text-3xs text-fg-faint">{path}</p>
               <div className="flex items-center justify-end gap-2">
                 <button type="button" onClick={cancelEdit} disabled={busy} className="rounded-lg px-3 py-1.5 text-sm text-fg-muted hover:bg-fg/5">
                   {t("Cancel")}
@@ -792,8 +792,8 @@ function Note({
             <>
               <header className="rounded-xl border border-line bg-raised/40 p-4">
                 {(f?.type || (Array.isArray(f?.tags) && f.tags.length) || when) && (
-                  <p className="flex flex-wrap items-center gap-1.5 text-[11px]">
-                    {f?.type && <TypeBadge type={f.type} className="text-[11px]" />}
+                  <p className="flex flex-wrap items-center gap-1.5 text-2xs">
+                    {f?.type && <TypeBadge type={f.type} className="text-2xs" />}
                     {(Array.isArray(f?.tags) ? f.tags : []).map((t) => (
                       <span key={String(t)} className="rounded bg-fg/5 px-1.5 py-0.5 text-fg-subtle">
                         #{String(t)}
@@ -804,7 +804,7 @@ function Note({
                 )}
                 <h3 className="mt-2 text-lg font-semibold text-fg">{title}</h3>
                 {f?.description && <p className="mt-1 text-sm text-fg-muted">{f.description}</p>}
-                <p className="mt-2 font-mono text-[10px] text-fg-faint">{path}</p>
+                <p className="mt-2 font-mono text-3xs text-fg-faint">{path}</p>
               </header>
               <div className="md prose prose-sm mt-4 max-w-none text-sm text-fg">
                 <MemoryMarkdown text={concept.body} from={path} onOpen={onOpen} />
@@ -1053,7 +1053,7 @@ function LogView({ writable, onOpen, onBack, onCleared }: { writable: boolean; o
               {recent.map((c, i) => (
                 <li key={i} className="relative text-sm">
                   <span className="absolute -left-[1.3rem] top-1.5 h-2 w-2 rounded-full bg-accent/60" />
-                  <p className="flex items-center gap-2 text-[11px] text-fg-faint">
+                  <p className="flex items-center gap-2 text-2xs text-fg-faint">
                     {c.date}
                     <span className="rounded bg-fg/5 px-1.5 py-0.5 text-fg-subtle">{c.action}</span>
                   </p>
@@ -1151,7 +1151,7 @@ function ToolCall({ part }: { part: ToolPart }) {
   return (
     <span
       title={part.errorText || undefined}
-      className={`inline-flex items-center gap-1 rounded bg-fg/5 px-1.5 py-0.5 font-mono text-[11px] ${state === "failed" ? "text-warn" : "text-fg-subtle"}`}
+      className={`inline-flex items-center gap-1 rounded bg-fg/5 px-1.5 py-0.5 font-mono text-2xs ${state === "failed" ? "text-warn" : "text-fg-subtle"}`}
     >
       {state === "running" ? <LuRefreshCw className="h-3 w-3 animate-spin" /> : state === "failed" ? <LuTriangleAlert className="h-3 w-3" /> : <LuCircleCheck className="h-3 w-3 text-ok" />}
       {toolName(part)}
@@ -1281,7 +1281,7 @@ function Issues({ validation, onOpen, onBack }: { validation: MemoryValidation |
                 <li key={i} className="flex items-start gap-2 rounded-lg border border-line bg-raised/40 px-3 py-2">
                   <LuTriangleAlert className={`mt-0.5 h-3.5 w-3.5 shrink-0 ${issue.severity === "error" ? "text-danger" : "text-warn"}`} />
                   <div className="min-w-0">
-                    <button type="button" onClick={() => onOpen(issue.path)} className="font-mono text-[11px] text-accent hover:underline">
+                    <button type="button" onClick={() => onOpen(issue.path)} className="font-mono text-2xs text-accent hover:underline">
                       {issue.path}
                     </button>
                     <p className="text-xs text-fg-muted">{issue.message}</p>

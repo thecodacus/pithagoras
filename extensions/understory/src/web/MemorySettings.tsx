@@ -206,7 +206,7 @@ export function MemorySettings() {
         </ui.ErrorBanner>
       )}
       {/* The page's head, drawn by Settings, has the memory's name and mark already. */}
-      <p className="rounded-xl border border-line bg-raised/40 p-3 text-[11px] text-fg-faint">
+      <p className="rounded-xl border border-line bg-raised/40 p-3 text-2xs text-fg-faint">
         {tx("A memory that grows: plain markdown on disk, cross-linked and kept tidy, which the agent looks things up in and adds to through its {tools} tools. The portal can run it for you, or point the agent at one you run yourself.", { tools: <code>memory_*</code> })}
       </p>
 
@@ -215,12 +215,12 @@ export function MemorySettings() {
           <div className="flex flex-wrap items-center gap-2">
             <p className="text-sm text-fg">{t("Run it here")}</p>
             {runsHere && (
-              <span className={`inline-flex items-center gap-1 text-[11px] ${m.container === "running" ? "text-ok" : "text-fg-subtle"}`}>
+              <span className={`inline-flex items-center gap-1 text-2xs ${m.container === "running" ? "text-ok" : "text-fg-subtle"}`}>
                 <LuCheck className="h-3 w-3" /> {m.container === "running" ? t("running") : t("stopped")}
               </span>
             )}
           </div>
-          <p className="text-[11px] text-fg-faint">
+          <p className="text-2xs text-fg-faint">
             {t("In a container of its own beside the portal, with its memory in a volume that stays when it is removed or made again.")}
           </p>
 
@@ -242,7 +242,7 @@ export function MemorySettings() {
               ))}
             </div>
             {form.source === "auto" ? (
-              <p className="text-[11px] text-fg-faint">
+              <p className="text-2xs text-fg-faint">
                 {t("The model the chat asking is on — the one already loaded, so no second model is started for the memory. When no chat is asking, as when it tidies up, the one that asked last; before any has, the default model for new chats. It needs a model with an OpenAI-compatible API, as local servers and OpenRouter have.")}
                 {!m.autoPossible && ` ${t("Not now: the port Understory reaches the chat's model at could not be taken. UNDERSTORY_LLM_PORT sets another.")}`}
               </p>
@@ -270,7 +270,7 @@ export function MemorySettings() {
                     options={providerModels.map((id) => ({ value: id, label: id }))}
                   />
                 </div>
-                <p className="text-[11px] text-fg-faint sm:col-span-2">{t("Its address and key are taken from the provider each time Understory is started.")}</p>
+                <p className="text-2xs text-fg-faint sm:col-span-2">{t("Its address and key are taken from the provider each time Understory is started.")}</p>
               </div>
             ) : (
               <div className="grid gap-2 sm:grid-cols-2">
@@ -348,7 +348,7 @@ export function MemorySettings() {
                     aria-label={t("Tidy up at")}
                     className="rounded-lg border border-line bg-raised/60 px-2 py-1 text-sm tabular-nums outline-none focus:border-accent/60"
                   />
-                  <span className="text-[11px] text-fg-faint">{t("the portal's time ({zone})", { zone: m.timeZone })}</span>
+                  <span className="text-2xs text-fg-faint">{t("the portal's time ({zone})", { zone: m.timeZone })}</span>
                 </label>
               )}
               {form.dream === "interval" && (
@@ -364,7 +364,7 @@ export function MemorySettings() {
                   ]}
                 />
               )}
-              <p className="mt-1 text-[11px] text-fg-faint">
+              <p className="mt-1 text-2xs text-fg-faint">
                 {t("Understory's own pass over the memory — merging, linking and pruning notes with the model above, which costs tokens each time, and does nothing when the memory is already tidy.")}{" "}
                 {form.dream === "time"
                   ? t("At a time of day the portal starts it, once a day while Understory runs; Understory's own timer stays off.")
@@ -373,7 +373,7 @@ export function MemorySettings() {
                     : ""}
               </p>
               {(runsHere || m.lastDream) && (
-                <p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
+                <p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-2xs">
                   {m.lastDream && (
                     <span className={m.lastDream.ok ? "text-fg-muted" : "text-warn"}>
                       {t("Last: {when} — {said}", { when: formatDateTime(m.lastDream.at), said: m.lastDream.said })}
@@ -407,7 +407,7 @@ export function MemorySettings() {
           </fieldset>
 
           {foreign && (
-            <p role="alert" className="text-[11px] text-warn">
+            <p role="alert" className="text-2xs text-warn">
               {t("A container named pithagoras-understory is there that the portal did not make. It is left alone: rename or remove it to run Understory here.")}
             </p>
           )}
@@ -465,9 +465,9 @@ export function MemorySettings() {
               </>
             )}
           </div>
-          {m.pulling.active && <p className="font-mono text-[11px] text-fg-faint">{m.pulling.line}</p>}
-          {m.pulling.error && <p role="alert" className="text-[11px] text-warn">{m.pulling.error}</p>}
-          {!runsHere && <p className="text-[11px] text-fg-faint">{t("Installing downloads its image the first time.")}</p>}
+          {m.pulling.active && <p className="font-mono text-2xs text-fg-faint">{m.pulling.line}</p>}
+          {m.pulling.error && <p role="alert" className="text-2xs text-warn">{m.pulling.error}</p>}
+          {!runsHere && <p className="text-2xs text-fg-faint">{t("Installing downloads its image the first time.")}</p>}
         </section>
       )}
 
@@ -475,7 +475,7 @@ export function MemorySettings() {
         <details open={!m.available} className="rounded-xl border border-line p-3">
           <summary className="cursor-pointer text-xs text-fg-muted">{m.available ? t("Or use one you run yourself") : t("Use one you run yourself")}</summary>
           <div className="mt-3 space-y-2">
-            {!m.available && <p className="text-[11px] text-fg-faint">{t("The portal cannot reach Docker here, so it cannot run Understory itself.")}</p>}
+            {!m.available && <p className="text-2xs text-fg-faint">{t("The portal cannot reach Docker here, so it cannot run Understory itself.")}</p>}
             <label className="block text-xs text-fg-muted">
               {t("Understory's MCP address")}
               <input
@@ -486,7 +486,7 @@ export function MemorySettings() {
                 className={`${inputCls} mt-1.5 font-mono text-xs`}
               />
             </label>
-            <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
+            <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-2xs">
               {u.reachable ? (
                 <span className="inline-flex items-center gap-1 text-ok">
                   <LuCheck className="h-3 w-3" /> {t("Something answers there")}
@@ -500,10 +500,10 @@ export function MemorySettings() {
                 {u.tokenSet ? t("A token is set and sent.") : t("No token (MEMORY_UNDERSTORY_AUTH_TOKEN) — only needed when Understory has an AUTH_TOKEN.")}
               </span>
             </p>
-            <p className="text-[11px] text-fg-faint">
+            <p className="text-2xs text-fg-faint">
               {tx("Its model and how often it tidies up are set in its own environment ({llm}, {dream}):", { llm: <code>LLM_*</code>, dream: <code>DREAM_INTERVAL</code> })}
             </p>
-            <pre className="overflow-x-auto rounded-lg bg-fg/5 p-2 font-mono text-[11px] text-fg-muted">{COMPOSE}</pre>
+            <pre className="overflow-x-auto rounded-lg bg-fg/5 p-2 font-mono text-2xs text-fg-muted">{COMPOSE}</pre>
           </div>
         </details>
       )}

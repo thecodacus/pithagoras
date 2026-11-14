@@ -70,7 +70,7 @@ export function History() {
         <button
           type="button"
           onClick={() => show({ kind: "compare" })}
-          className="flex w-full items-center gap-1.5 border-b border-line px-3 py-1.5 text-left text-[11px] text-fg-subtle transition hover:bg-fg/5 hover:text-fg"
+          className="flex w-full items-center gap-1.5 border-b border-line px-3 py-1.5 text-left text-2xs text-fg-subtle transition hover:bg-fg/5 hover:text-fg"
         >
           <LuGitCompareArrows aria-hidden className="h-3.5 w-3.5" />
           {t("Compare this branch with its base — what a pull request would show")}
@@ -100,7 +100,7 @@ function CommitList({ commits }: { commits: Commit[] }) {
             className="flex w-full flex-col gap-0.5 border-b border-line/50 px-3 py-1.5 text-left transition hover:bg-fg/5"
           >
             <span className="flex min-w-0 items-center gap-1">
-              {c.parents.length > 1 && <span className="shrink-0 text-[10px] text-fg-faint">{t("merge")}</span>}
+              {c.parents.length > 1 && <span className="shrink-0 text-3xs text-fg-faint">{t("merge")}</span>}
               <span className="min-w-0 flex-1 truncate text-xs text-fg">{c.subject}</span>
             </span>
             <span className="flex min-w-0 items-center gap-1.5 text-[10.5px] text-fg-faint">

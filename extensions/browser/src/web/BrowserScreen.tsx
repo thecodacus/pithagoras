@@ -43,7 +43,7 @@ export function BrowserPanel() {
 /** What the panel has in its head: Fullscreen, for the panel alone, the one beside it staying where it is. */
 export function PanelActions({ panel }: PanelProps) {
   return (
-    <button type="button" onClick={() => panel.fullscreen()} className="rounded px-1.5 py-0.5 text-[11px] text-fg-faint transition hover:text-fg">
+    <button type="button" onClick={() => panel.fullscreen()} className="rounded px-1.5 py-0.5 text-2xs text-fg-faint transition hover:text-fg">
       {t("Fullscreen")}
     </button>
   );

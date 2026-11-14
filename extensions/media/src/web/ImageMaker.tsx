@@ -360,7 +360,7 @@ export function ImageMaker({
         </div>
       </div>
       {referenceModel && (
-        <p id="image-model-hint" className="mt-1 text-[11px] text-fg-faint">
+        <p id="image-model-hint" className="mt-1 text-2xs text-fg-faint">
           {features.editModel ? t("Reference pictures use the editing model: {name}", { name: features.editModel }) : t("Reference pictures use the editing endpoint's own model.")}
         </p>
       )}
@@ -384,13 +384,13 @@ export function ImageMaker({
             />
           </div>
           {numberField("outputCompression", t("Compression"), compressible ? "0–100" : "", { disabled: !compressible, describedBy: "image-compression-hint" })}
-          <p id="image-compression-hint" className="text-[11px] text-fg-faint sm:col-span-2">
+          <p id="image-compression-hint" className="text-2xs text-fg-faint sm:col-span-2">
             {compressible ? t("How strongly the file is compressed, from 0 to 100, as the endpoint reads it. Empty is its own.") : t("Choose JPEG or WebP as the file format to set a compression.")}
           </p>
           {/* What is not in the OpenAI image format: plain fields like the ones above, there only where the add-on says the endpoint reads them, and with a way to that setting where it does not. */}
           {sd ? (
             <>
-              <p className="mt-1 text-[11px] text-fg-faint sm:col-span-2">
+              <p className="mt-1 text-2xs text-fg-faint sm:col-span-2">
                 {t("For stable-diffusion.cpp servers only: these are added to the description as a block that its server reads.")}
               </p>
               <div className="grid gap-2 sm:col-span-2 sm:grid-cols-3">
@@ -398,7 +398,7 @@ export function ImageMaker({
                 {numberField("sampleSteps", t("Steps"), empty)}
                 {editing && numberField("strength", t("Strength"), empty, { disabled: fromNoise, describedBy: "image-strength-hint" })}
               </div>
-              {count > 1 && <p className="text-[11px] text-fg-faint sm:col-span-2">{t("With a seed, each of the pictures takes the next one, so that they are not all the same.")}</p>}
+              {count > 1 && <p className="text-2xs text-fg-faint sm:col-span-2">{t("With a seed, each of the pictures takes the next one, so that they are not all the same.")}</p>}
               <label className="block text-xs text-fg-muted sm:col-span-2">
                 {t("Negative prompt")}
                 <textarea
@@ -413,7 +413,7 @@ export function ImageMaker({
               </label>
               {editing && (
                 <>
-                  <p id="image-strength-hint" className="text-[11px] text-fg-faint sm:col-span-2">
+                  <p id="image-strength-hint" className="text-2xs text-fg-faint sm:col-span-2">
                     {fromNoise
                       ? t("There is no strength when the result starts from noise.")
                       : t("The strength tends to decide how far the result may go from the first picture. A high one, such as 0.75 or more, keeps it close to that picture, and the other pictures then have little or no effect. A lower one gives them more influence.")}
@@ -439,7 +439,7 @@ export function ImageMaker({
                         </button>
                       ))}
                     </div>
-                    <p id="edit-start-hint" className="mt-1 text-[11px] text-fg-faint">
+                    <p id="edit-start-hint" className="mt-1 text-2xs text-fg-faint">
                       {fromNoise
                         ? t("The result starts from noise only. The description and all the pictures are used as references; strength and a mask do not apply.")
                         : t("The first picture is the base that is built on. Strength and a mask work on it.")}
@@ -449,7 +449,7 @@ export function ImageMaker({
               )}
             </>
           ) : (
-            <p className="mt-1 text-[11px] text-fg-faint sm:col-span-2">
+            <p className="mt-1 text-2xs text-fg-faint sm:col-span-2">
               {tx("Using stable-diffusion.cpp? Switch on “Stable Diffusion extra settings” under {settings} for more options.", {
                 settings: (
                   <Link to={settingsPage()} className="text-accent hover:underline">
@@ -525,8 +525,8 @@ export function ImageMaker({
                 className={`h-16 w-16 rounded-lg border object-cover ${masking && i === 0 ? "border-accent ring-2 ring-accent" : "border-line"}`}
               />
             </button>
-            {list.length > 1 && <span className="pointer-events-none absolute bottom-0.5 left-0.5 rounded bg-surface/85 px-1 text-[10px] tabular-nums text-fg">{i + 1}</span>}
-            {masking && i === 0 && <span className="pointer-events-none absolute left-0.5 top-0.5 rounded bg-accent px-1 text-[10px] text-accent-fg">{t("Mask")}</span>}
+            {list.length > 1 && <span className="pointer-events-none absolute bottom-0.5 left-0.5 rounded bg-surface/85 px-1 text-3xs tabular-nums text-fg">{i + 1}</span>}
+            {masking && i === 0 && <span className="pointer-events-none absolute left-0.5 top-0.5 rounded bg-accent px-1 text-3xs text-accent-fg">{t("Mask")}</span>}
             <button
               type="button"
               onClick={() => {
@@ -593,7 +593,7 @@ export function ImageMaker({
             title={t("Add pictures from this computer")}
             className="grid h-16 w-16 place-items-center rounded-lg border border-dashed border-line text-fg-muted transition hover:border-accent/60 hover:bg-accent/5 hover:text-accent"
           >
-            <span className="grid place-items-center gap-0.5 text-[11px]">
+            <span className="grid place-items-center gap-0.5 text-2xs">
               <LuPlus aria-hidden className="h-4 w-4" />
               {t("Add")}
             </span>
@@ -660,7 +660,7 @@ export function ImageMaker({
           >
             {m.icon}
             {m.label}
-            {!m.ready && <span className="text-[11px] text-fg-faint">{t("not set up")}</span>}
+            {!m.ready && <span className="text-2xs text-fg-faint">{t("not set up")}</span>}
           </button>
         ))}
       </div>
@@ -682,7 +682,7 @@ export function ImageMaker({
                 ? tp(sources.length, "The {n} picture to work from, in the order the description can refer to them", "The {n} pictures to work from, in the order the description can refer to them")
                 : t("The picture to change")}
             </p>
-            {multiple && <span className="ml-auto shrink-0 text-[11px] tabular-nums text-fg-subtle">{t("{n} of {max} pictures", { n: sources.length, max: MAX_SOURCES })}</span>}
+            {multiple && <span className="ml-auto shrink-0 text-2xs tabular-nums text-fg-subtle">{t("{n} of {max} pictures", { n: sources.length, max: MAX_SOURCES })}</span>}
           </div>
           {showRow ? (
             pictureRow("edit-sources-heading")
@@ -697,14 +697,14 @@ export function ImageMaker({
             {moveNote}
           </p>
           {multiple && sources.length > 1 && (
-            <p className="mt-2 text-[11px] text-fg-muted">
+            <p className="mt-2 text-2xs text-fg-muted">
               {fromNoise
                 ? t("Starting from noise, all the pictures are references, so the first one tends to count less than it does as the base. The endpoint still gets them in this order, which you can change by dragging a picture or with the arrows under it.")
                 : t("The first picture counts most: it is the one that is changed or carried over, and the others are extra references. Drag a picture to another place, or use the arrows under it, to change the order; the endpoint gets them in this order.")}
             </p>
           )}
           {(sources.length > 0 || !multiple) && (
-            <p className={`mt-2 text-[11px] ${refused ? "rounded-lg bg-warn/10 px-2 py-1.5 text-warn" : "text-fg-faint"}`} role={refused ? "alert" : undefined}>
+            <p className={`mt-2 text-2xs ${refused ? "rounded-lg bg-warn/10 px-2 py-1.5 text-warn" : "text-fg-faint"}`} role={refused ? "alert" : undefined}>
               {why ??
                 (multiple
                   ? t("The description can name them by their place: “the first picture”, “the second picture”. Pick more from the gallery below, drop or paste them here, or add them from this computer.")
@@ -776,7 +776,7 @@ export function ImageMaker({
                       ? tp(references.length, "The {n} reference picture, in the order the description can refer to them", "The {n} reference pictures, in the order the description can refer to them")
                       : t("Reference pictures: a character, an object or a style to carry into the new picture")}
                   </p>
-                  {multiple && <span className="ml-auto shrink-0 text-[11px] tabular-nums text-fg-subtle">{t("{n} of {max} pictures", { n: references.length, max: MAX_SOURCES })}</span>}
+                  {multiple && <span className="ml-auto shrink-0 text-2xs tabular-nums text-fg-subtle">{t("{n} of {max} pictures", { n: references.length, max: MAX_SOURCES })}</span>}
                 </div>
                 {showRow ? (
                   pictureRow("reference-heading")
@@ -791,16 +791,16 @@ export function ImageMaker({
                   {moveNote}
                 </p>
                 {multiple && references.length > 1 && (
-                  <p className="mt-2 text-[11px] text-fg-muted">
+                  <p className="mt-2 text-2xs text-fg-muted">
                     {t("The description can name them by their place: “the first picture”, “the second picture”. Drag a picture to another place, or use the arrows under it, to change the order; the endpoint gets them in this order.")}
                   </p>
                 )}
                 {references.length > 0 &&
                   (sd ? (
-                    <p className="mt-2 text-[11px] text-fg-faint">{t("The new picture starts from noise: the references guide it, and none of them is changed.")}</p>
+                    <p className="mt-2 text-2xs text-fg-faint">{t("The new picture starts from noise: the references guide it, and none of them is changed.")}</p>
                   ) : (
                     // Not known of the endpoint: what happens on a stable-diffusion.cpp server is said, and what to switch on for it.
-                    <p className="mt-2 rounded-lg bg-warn/10 px-2 py-1.5 text-[11px] text-warn">
+                    <p className="mt-2 rounded-lg bg-warn/10 px-2 py-1.5 text-2xs text-warn">
                       {tx("Stable Diffusion extra settings are off, so a stable-diffusion.cpp server starts from the first reference, and the picture may come out as a reworked copy of it. Switch them on under {settings} to start from noise. Other endpoints use the pictures as references either way.", {
                         settings: (
                           <Link to={settingsPage()} className="text-accent hover:underline">
@@ -811,10 +811,10 @@ export function ImageMaker({
                     </p>
                   ))}
                 {references.length > 0 && !fields.width.trim() && !fields.height.trim() && !features.size && (
-                  <p className="mt-2 text-[11px] text-fg-faint">{t("No size is set, so the endpoint may make the picture in the size and shape of the first reference. Set a width and height to choose them.")}</p>
+                  <p className="mt-2 text-2xs text-fg-faint">{t("No size is set, so the endpoint may make the picture in the size and shape of the first reference. Set a width and height to choose them.")}</p>
                 )}
                 {(refused || !multiple) && (
-                  <p className={`mt-2 text-[11px] ${refused ? "rounded-lg bg-warn/10 px-2 py-1.5 text-warn" : "text-fg-faint"}`} role={refused ? "alert" : undefined}>
+                  <p className={`mt-2 text-2xs ${refused ? "rounded-lg bg-warn/10 px-2 py-1.5 text-warn" : "text-fg-faint"}`} role={refused ? "alert" : undefined}>
                     {why ?? t("This editing endpoint takes one reference picture, and a picture you add takes the place of the one there is. To use several, switch on “Several pictures per edit”.")}{" "}
                     <Link to={settingsPage()} className="text-accent hover:underline">
                       {t("Set it up under Media in Settings")}

@@ -13,7 +13,7 @@ interface Made {
   enabled?: boolean;
 }
 
-const pill = "rounded-md bg-fg/5 px-1.5 py-0.5 text-[10px] leading-4 text-fg-subtle";
+const pill = "rounded-md bg-fg/5 px-1.5 py-0.5 text-3xs leading-4 text-fg-subtle";
 
 /**
  * Creator mode's page in Settings: what agents made in Creator mode chats, newest first, each with whether it is
@@ -97,7 +97,7 @@ export function MadePage() {
                     })
                   : t("Made in a chat that was deleted")}
               </p>
-              <p className="mt-0.5 flex flex-wrap gap-x-3 text-[11px] text-fg-faint">
+              <p className="mt-0.5 flex flex-wrap gap-x-3 text-2xs text-fg-faint">
                 <span>{portal.format.dateTime(one.at)}</span>
                 <span className="font-mono" title={one.digest}>
                   {one.digest.slice(0, 12)}

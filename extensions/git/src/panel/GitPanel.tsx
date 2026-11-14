@@ -312,14 +312,14 @@ export const GitPanel = memo(function GitPanel({
         />
         {state.operation && <Operation />}
         {busy && (
-          <p role="status" className="shrink-0 border-b border-line bg-accent/5 px-3 py-1 text-[11px] text-accent">
+          <p role="status" className="shrink-0 border-b border-line bg-accent/5 px-3 py-1 text-2xs text-accent">
             {t(busy.label, busy.vars)}…
           </p>
         )}
         {stale}
         {error && <ErrorNote onClose={() => setError(null)}>{error}</ErrorNote>}
         {said && (
-          <p role="status" className="mx-2 mt-2 flex items-start gap-1 rounded-lg bg-fg/5 px-2 py-1.5 font-mono text-[11px] text-fg-subtle">
+          <p role="status" className="mx-2 mt-2 flex items-start gap-1 rounded-lg bg-fg/5 px-2 py-1.5 font-mono text-2xs text-fg-subtle">
             <span className="min-w-0 flex-1 whitespace-pre-wrap break-words">{said}</span>
             <button type="button" onClick={() => setSaid(null)} aria-label={t("Dismiss")} className="shrink-0 rounded px-1 hover:text-fg">
               ✕
@@ -331,7 +331,7 @@ export const GitPanel = memo(function GitPanel({
             <button
               type="button"
               onClick={() => setStack((s) => s.slice(0, -1))}
-              className="flex shrink-0 items-center gap-1 border-b border-line px-3 py-1 text-left text-[11px] text-fg-subtle transition hover:bg-fg/5 hover:text-fg"
+              className="flex shrink-0 items-center gap-1 border-b border-line px-3 py-1 text-left text-2xs text-fg-subtle transition hover:bg-fg/5 hover:text-fg"
             >
               <LuArrowLeft aria-hidden className="h-3 w-3" /> {t("Back")}
             </button>
@@ -402,7 +402,7 @@ function BranchBar({ onBranches, onRefresh }: { onBranches: () => void; onRefres
             </BarButton>
             <BarButton label={repo.behind ? t("Pull {n} — fast-forward only", { n: repo.behind }) : t("Pull — fast-forward only")} disabled={!!busy || !repo.upstream} onClick={() => void act(msg("Pulling"), () => gitApi.pull(id))}>
               <LuArrowDown aria-hidden className="h-3.5 w-3.5" />
-              {repo.behind > 0 && <span className="text-[10px]">{repo.behind}</span>}
+              {repo.behind > 0 && <span className="text-3xs">{repo.behind}</span>}
             </BarButton>
             <BarButton
               label={repo.upstream ? (repo.ahead ? t("Push {n}", { n: repo.ahead }) : t("Push")) : t("Publish this branch to the remote")}
@@ -410,7 +410,7 @@ function BranchBar({ onBranches, onRefresh }: { onBranches: () => void; onRefres
               onClick={() => void act(repo.upstream ? msg("Pushing") : msg("Publishing"), () => gitApi.push(id))}
             >
               <LuArrowUp aria-hidden className="h-3.5 w-3.5" />
-              {repo.upstream ? repo.ahead > 0 && <span className="text-[10px]">{repo.ahead}</span> : <span className="text-[10px]">{t("Publish")}</span>}
+              {repo.upstream ? repo.ahead > 0 && <span className="text-3xs">{repo.ahead}</span> : <span className="text-3xs">{t("Publish")}</span>}
             </BarButton>
           </>
         )}

@@ -271,10 +271,10 @@ export function ImagesAddon({ onError }: { onError: (e: string) => void }) {
             />
           </label>
         </div>
-        <p className="text-[11px] text-fg-faint">
+        <p className="text-2xs text-fg-faint">
           {tx("Any server with an OpenAI-style {route}. The key goes only to this address. Empty model and size mean the server's own.", { route: <code>images/generations</code> })}
         </p>
-        <p className="text-[11px] text-fg-faint">
+        <p className="text-2xs text-fg-faint">
           {t("The time limit is how long the portal waits for one picture: {min} to {max} seconds, {default} by default.", TIMEOUT)}
         </p>
         <div className="flex flex-wrap items-center gap-2">
@@ -316,7 +316,7 @@ export function ImagesAddon({ onError }: { onError: (e: string) => void }) {
         defaultOpen={!!(images.editBaseUrl || images.editModel || images.editMaxSize)}
       >
         <fieldset disabled={busy} className="space-y-3">
-          <p className="text-[11px] text-fg-faint">
+          <p className="text-2xs text-fg-faint">
             {tx("Changing pictures that exist, with an OpenAI-style {route}. The original stays; the result is a new picture.", { route: <code>images/edits</code> })}
           </p>
           <div className="grid gap-2 sm:grid-cols-2">
@@ -366,10 +366,10 @@ export function ImagesAddon({ onError }: { onError: (e: string) => void }) {
               />
             </label>
           </div>
-          <p className="text-[11px] text-fg-faint">
+          <p className="text-2xs text-fg-faint">
             {t("Leave the address empty to edit with the server above, and the model empty for the server's own. A key goes only to the address it was given for.")}
           </p>
-          <p className="text-[11px] text-fg-faint">
+          <p className="text-2xs text-fg-faint">
             {t("The maximum picture size is the most pixels a picture sent to be edited may have, such as 2048x2048. Empty is no limit.")}
           </p>
           <div className="flex flex-wrap items-center gap-2">
@@ -405,7 +405,7 @@ export function ImagesAddon({ onError }: { onError: (e: string) => void }) {
           onChange={(editMultiple) => void change({ editMultiple })}
           disabled={busy || !!editDraft}
         />
-        <p className="text-[11px] text-fg-faint">
+        <p className="text-2xs text-fg-faint">
           {t("Switch it on only if the editing endpoint takes more than one picture in a request.")}
         </p>
         <ui.SwitchRow
@@ -420,7 +420,7 @@ export function ImagesAddon({ onError }: { onError: (e: string) => void }) {
           // Saving a new address of another server takes it off again, so it waits for the save as the other switches of the endpoint do.
           disabled={busy || !!draft || !!editDraft}
         />
-        <p className="text-[11px] text-fg-faint">
+        <p className="text-2xs text-fg-faint">
           {t("Only for a stable-diffusion.cpp server: it adds a seed, steps, a negative prompt and, for edits, a strength and starting from noise, as a block in the description. Any other endpoint would take the block as part of the description. A new picture made with reference pictures, on the Media page or by the agent, starts from noise only while this is on: off, a stable-diffusion.cpp server starts from the first reference.")}
         </p>
       </ui.DetailsGroup>
@@ -640,16 +640,16 @@ export function VideosAddon({ onError }: { onError: (e: string) => void }) {
             />
           </label>
         </div>
-        <p className="text-[11px] text-fg-faint">
+        <p className="text-2xs text-fg-faint">
           {tx("The address of a {server} server, such as {example}. The key goes only to this address. Empty model, size, frames and frame rate mean the server's own.", {
             server: <b>{(videos.backends.find((b) => b.id === videos.backend) ?? videos.backends[0])?.label ?? "stable-diffusion.cpp"}</b>,
             example: <code>http://localhost:1234</code>,
           })}
         </p>
-        <p className="text-[11px] text-fg-faint">
+        <p className="text-2xs text-fg-faint">
           {t("The time limit is how long the portal waits for one video, in the server's queue and while it is made: {min} to {max} seconds, {default} by default.", VIDEO_TIMEOUT_SECONDS)}
         </p>
-        <p className="text-[11px] text-fg-faint">
+        <p className="text-2xs text-fg-faint">
           {t("The disk limit is what the videos made on the Media page may take together; at the limit no new one is made there. Empty is no limit.")}
         </p>
         <div className="flex flex-wrap items-center gap-2">

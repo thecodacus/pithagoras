@@ -181,7 +181,7 @@ export function BrowserPage() {
             </span>
             <button
               onClick={() => act(() => api.connect())}
-              className="shrink-0 rounded-lg bg-accent/12 px-2.5 py-1 text-[11px] text-accent ring-1 ring-inset ring-accent/25 transition hover:bg-accent/20"
+              className="shrink-0 rounded-lg bg-accent/12 px-2.5 py-1 text-2xs text-accent ring-1 ring-inset ring-accent/25 transition hover:bg-accent/20"
             >
               {t("Connect the agent")}
             </button>
@@ -196,7 +196,7 @@ export function BrowserPage() {
             </span>
             <button
               onClick={() => act(() => api.disconnect())}
-              className="shrink-0 rounded-lg bg-fg/5 px-2.5 py-1 text-[11px] text-fg-muted transition hover:bg-fg/10"
+              className="shrink-0 rounded-lg bg-fg/5 px-2.5 py-1 text-2xs text-fg-muted transition hover:bg-fg/10"
             >
               {t("Disconnect")}
             </button>
@@ -254,7 +254,7 @@ export function BrowserPage() {
                 />
                 <button
                   onClick={() => frameWrap.current?.requestFullscreen?.()}
-                  className="absolute right-2 top-2 rounded-lg bg-canvas/80 px-2 py-1 text-[11px] text-fg-muted backdrop-blur transition hover:text-fg"
+                  className="absolute right-2 top-2 rounded-lg bg-canvas/80 px-2 py-1 text-2xs text-fg-muted backdrop-blur transition hover:text-fg"
                 >
                   <LuMaximize className="mr-1 inline h-3 w-3" /> {t("Fullscreen")}
                 </button>
@@ -283,7 +283,7 @@ export function BrowserPage() {
                   className="rounded-xl border border-line bg-raised/40 px-3 py-2"
                 >
                   <p className="truncate text-sm text-fg">{p.title || t("Untitled")}</p>
-                  <p className="truncate font-mono text-[11px] text-fg-faint">{p.url}</p>
+                  <p className="truncate font-mono text-2xs text-fg-faint">{p.url}</p>
                 </li>
               ))}
             </ul>
@@ -296,7 +296,7 @@ export function BrowserPage() {
             <LuShieldCheck className="h-3.5 w-3.5 text-fg-faint" />
             <h3 className="text-sm font-medium text-fg">{t("Where it may go")}</h3>
           </div>
-          <p className="text-[11px] text-fg-faint">{tx("The sites the browser may reach are the list in {place}, which holds for every tool that says where it goes. An empty list means any site.", { place: guardLink })}</p>
+          <p className="text-2xs text-fg-faint">{tx("The sites the browser may reach are the list in {place}, which holds for every tool that says where it goes. An empty list means any site.", { place: guardLink })}</p>
         </section>
 
         <section>
@@ -328,10 +328,10 @@ export function BrowserPage() {
                     className="flex w-full items-center gap-2 rounded-xl border border-line bg-raised/40 px-3 py-2 text-left transition hover:bg-fg/5"
                   >
                     <span className="min-w-0 flex-1 truncate text-sm text-fg">{s.title}</span>
-                    <span className="shrink-0 text-[11px] text-fg-faint">
+                    <span className="shrink-0 text-2xs text-fg-faint">
                       {s.allowed ? t("on") : t("off")}
                     </span>
-                    <span className="shrink-0 text-[11px] text-fg-faint">{Object.hasOwn(SESSION_KIND, s.kind) ? t(SESSION_KIND[s.kind]) : s.kind}</span>
+                    <span className="shrink-0 text-2xs text-fg-faint">{Object.hasOwn(SESSION_KIND, s.kind) ? t(SESSION_KIND[s.kind]) : s.kind}</span>
                   </button>
                 </li>
               ))}
@@ -341,10 +341,10 @@ export function BrowserPage() {
                   className="flex items-center gap-2 rounded-xl border border-line bg-raised/40 px-3 py-2"
                 >
                   <span className="min-w-0 flex-1 truncate text-sm text-fg">{r.name}</span>
-                  <span className="shrink-0 text-[11px] text-fg-faint">
+                  <span className="shrink-0 text-2xs text-fg-faint">
                     {r.allowed ? t("on") : t("off")}
                   </span>
-                  <span className="shrink-0 text-[11px] text-fg-faint">{t("routine")}</span>
+                  <span className="shrink-0 text-2xs text-fg-faint">{t("routine")}</span>
                 </li>
               ))}
             </ul>
@@ -405,7 +405,7 @@ function InstallPanel({
       <p className="text-sm text-fg">
         {i.container === "stopped" ? t("The browser is installed but stopped") : t("No browser yet")}
       </p>
-      <p className="mt-1 text-[11px] text-fg-faint">
+      <p className="mt-1 text-2xs text-fg-faint">
         {dockerMode
           ? t("It runs as its own container — nothing is added to the portal, and removing it leaves only the profile.")
           : `${t("Using the Chrome already on this machine ({binary}).", { binary: i.binary ?? "" })}${

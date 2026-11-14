@@ -108,7 +108,7 @@ export function VoiceService() {
     </div>
     {install?.chosen && <p role="status" className="text-xs text-fg-faint">{t("In use for voice mode")}</p>}
     {install?.error && <p role="alert" className="text-xs text-danger">{install.error}</p>}
-    {install?.progress && <details open={install.state==='starting'||install.state==='failed'||install.busy}><summary className="text-xs cursor-pointer text-fg-muted">{t("Setup log")}</summary><pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-all text-[10px] text-fg-faint" aria-label={t("Voice setup log")}>{install.progress}</pre></details>}
+    {install?.progress && <details open={install.state==='starting'||install.state==='failed'||install.busy}><summary className="text-xs cursor-pointer text-fg-muted">{t("Setup log")}</summary><pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-all text-3xs text-fg-faint" aria-label={t("Voice setup log")}>{install.progress}</pre></details>}
     <p className="text-xs text-fg-faint">{t("Stopping releases GPU memory and keeps your models.")}</p>
     {install?.choice && <YourVoice engine={install.choice.tts} onError={setFailure} />}
     <div className="mt-4 border-t border-line pt-4 space-y-2">

@@ -79,7 +79,7 @@ export function BrowserInstall({
               onError("");
               api.suggestPassword().then((r) => setPassword(r.password), (e) => onError((e as Error).message));
             }}
-            className="rounded-lg bg-fg/5 px-2.5 py-1.5 text-[11px] text-fg-muted transition hover:bg-fg/10 disabled:opacity-40"
+            className="rounded-lg bg-fg/5 px-2.5 py-1.5 text-2xs text-fg-muted transition hover:bg-fg/10 disabled:opacity-40"
           >
             {t("Suggest one")}
           </button>
@@ -120,9 +120,9 @@ export function BrowserInstall({
         )}
       </div>
 
-      {i.pulling.active && <p className="mt-2 font-mono text-[11px] text-fg-faint">{i.pulling.line}</p>}
+      {i.pulling.active && <p className="mt-2 font-mono text-2xs text-fg-faint">{i.pulling.line}</p>}
       {i.pulling.error && (
-        <p role="alert" className="mt-2 text-[11px] text-danger">
+        <p role="alert" className="mt-2 text-2xs text-danger">
           {i.pulling.error}
         </p>
       )}

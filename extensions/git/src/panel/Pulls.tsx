@@ -29,7 +29,7 @@ function StateBadge({ pull }: { pull: Pick<PullSummary, "state" | "isDraft"> }) 
     MERGED: tc("merged", "pull request state"),
     CLOSED: tc("closed", "pull request state"),
   };
-  return <span className={`shrink-0 rounded px-1 text-[10px] ring-1 ring-inset ${look[state] ?? "text-fg-subtle ring-line"}`}>{named[state] ?? state.toLowerCase()}</span>;
+  return <span className={`shrink-0 rounded px-1 text-3xs ring-1 ring-inset ${look[state] ?? "text-fg-subtle ring-line"}`}>{named[state] ?? state.toLowerCase()}</span>;
 }
 
 /** What reviewers decided, as GitHub names it, in words. */
@@ -104,7 +104,7 @@ export function Pulls() {
       <button
         type="button"
         onClick={() => show({ kind: "compare" })}
-        className="flex w-full items-center gap-1.5 border-b border-line px-3 py-1.5 text-left text-[11px] text-fg-subtle transition hover:bg-fg/5 hover:text-fg"
+        className="flex w-full items-center gap-1.5 border-b border-line px-3 py-1.5 text-left text-2xs text-fg-subtle transition hover:bg-fg/5 hover:text-fg"
       >
         <LuGitCompareArrows aria-hidden className="h-3.5 w-3.5" />
         {t("Compare {branch} with its base", { branch: repo.branch ?? "HEAD" })}
@@ -296,10 +296,10 @@ function OpenPull({ onOpened }: { onOpened: (n?: number) => void }) {
         aria-label={t("Description of the pull request")}
         className="resize-y rounded border border-line bg-canvas px-2 py-1 text-xs text-fg outline-none focus:border-accent/60"
       />
-      <div className="flex flex-wrap items-center gap-2 text-[11px] text-fg-subtle">
+      <div className="flex flex-wrap items-center gap-2 text-2xs text-fg-subtle">
         <label className="flex items-center gap-1">
           {t("into")}
-          <input value={base} onChange={(e) => change({ base: e.target.value })} aria-label={t("Base branch")} spellCheck={false} className="w-28 rounded border border-line bg-canvas px-1 py-0.5 font-mono text-[11px] text-fg" />
+          <input value={base} onChange={(e) => change({ base: e.target.value })} aria-label={t("Base branch")} spellCheck={false} className="w-28 rounded border border-line bg-canvas px-1 py-0.5 font-mono text-2xs text-fg" />
         </label>
         <label className="flex cursor-pointer items-center gap-1">
           <input type="checkbox" checked={draft} onChange={(e) => change({ draft: e.target.checked })} className="h-3 w-3 accent-accent" />
@@ -447,7 +447,7 @@ export function PullView({ n }: { n: number }) {
                   { value: "rebase", label: t("Rebase") },
                 ]}
               />
-              <label className="flex cursor-pointer items-center gap-1 text-[11px] text-fg-subtle">
+              <label className="flex cursor-pointer items-center gap-1 text-2xs text-fg-subtle">
                 <input type="checkbox" checked={deleteBranch} onChange={(e) => setDeleteBranch(e.target.checked)} className="h-3 w-3 accent-accent" />
                 {t("delete branch")}
               </label>
