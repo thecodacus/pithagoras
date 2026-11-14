@@ -556,10 +556,11 @@ export class McpMigration {
       if (cacheKey !== undefined) used.add(cacheKey);
       const found = cacheKey === undefined ? undefined : state.cache[cacheKey];
       const cache = found?.tools.length ? found : undefined;
-      let newName = foldedName(name);
+      // An entry that is pi's already is left under the name it has: what pi takes or refuses of it is pi's to say. It still holds its namespace.
+      let newName = isNativeEntry(raw) ? name : foldedName(name);
       let clash: string | undefined;
       const space = mcpNamespace(newName);
-      if (taken.has(space)) {
+      if (taken.has(space) && !isNativeEntry(raw)) {
         clash = taken.get(space);
         for (let n = 2; ; n++) {
           const next = `${newName}_${n}`;

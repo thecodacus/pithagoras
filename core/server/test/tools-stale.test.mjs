@@ -7,7 +7,8 @@ import { inProcessHome } from "./server-harness.mjs";
 const home = inProcessHome("pithagoras-stale-");
 const settings = path.join(process.env.PI_CODING_AGENT_DIR, "settings.json");
 const listPackages = (packages) => writeFileSync(settings, JSON.stringify({ packages }));
-writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR, "mcp.json"), JSON.stringify({ mcpServers: { jira: { command: "jira-mcp" } } }));
+// In pi's own keys (an `exposure`): an entry without one is the old adapter's, and the first start moves it.
+writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR, "mcp.json"), JSON.stringify({ mcpServers: { jira: { command: "jira-mcp", exposure: "deferred" } } }));
 const OFF = (source) => ({ source, extensions: [], skills: [], prompts: [], themes: [] });
 
 const { createSession, forgetPackageTools, knownTools, rememberTools, shownTools } = await import("../dist/db.js");
@@ -81,7 +82,7 @@ test("an MCP server's tools are kept when a package is uninstalled: they are no 
   writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR, "mcp.json"), JSON.stringify({ mcpServers: { jira: { command: "jira-mcp", enabled: false } } }));
   assert.equal(shownTools().some((t) => t.name === "mcp__jira__search"), false);
   assert.ok(names().includes("mcp__jira__search"));
-  writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR, "mcp.json"), JSON.stringify({ mcpServers: { jira: { command: "jira-mcp" } } }));
+  writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR, "mcp.json"), JSON.stringify({ mcpServers: { jira: { command: "jira-mcp", exposure: "deferred" } } }));
 });
 
 test("a project bringing the user's package in its own settings does not take its tools from it", () => {

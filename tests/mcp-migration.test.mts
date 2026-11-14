@@ -225,6 +225,10 @@ test("an entry that is pi's already is left as it is, and is not switched off wi
   const m = migrate({ ours: native }, { adapter: "absent" });
   assert.deepEqual(written(m, "ours"), native);
   assert.equal(m.finish().servers[0].state, "native");
+  // What pi takes or refuses of an entry that is pi's is pi's to say: it keeps its name, whatever it looks like, and still holds its namespace.
+  const kept = migrate({ "a.b": native, "c-d": native, c_d: native, "e-f": native, e_f: { command: "x" } });
+  assert.deepEqual(Object.keys(kept.finish().mcpServers), ["a.b", "c-d", "c_d", "e-f", "e_f_2"]);
+  assert.equal((kept.finish().mcpServers.e_f_2 as Record<string, unknown>).enabled, false, "the adapter's entry that pi would take for a native one is told apart, and off");
   assert.deepEqual(adapterKeysOf({ command: "x", includeTools: ["a"], auth: "bearer" }), ["includeTools", "auth"]);
   assert.deepEqual(adapterKeysOf({ command: "x", auth: { provider: "p" }, enabled: false }), []);
   assert.deepEqual(adapterKeysOf({ url: "https://x/mcp", oauth: { redirectUri: "http://localhost/cb" } }), ["oauth"]);
