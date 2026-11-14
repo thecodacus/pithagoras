@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { LuChevronDown, LuChevronRight } from "react-icons/lu";
 import type { PortalTool } from "../api";
-import { CODEMODE_HELD, displayName, groupSummary, groupTools, sourceName, toolTitle, type ToolGroup } from "../tool-groups";
+import { CODEMODE_HELD, MARK_TITLE, displayName, groupSummary, groupTools, markCls, markName, sourceName, toolTitle, type ToolGroup } from "../tool-groups";
 import { useOpenGroups } from "../use-open-groups";
 import { t } from "../i18n";
 
@@ -19,8 +19,8 @@ export function ToolGroupList({
   roomy,
   naming,
   beside,
-  onLazy,
-  lazyFixed,
+  onMark,
+  markFixed,
 }: {
   tools: PortalTool[];
   /** The names given to groups, which stand in for what installed them. */
@@ -33,10 +33,10 @@ export function ToolGroupList({
   naming?: (group: ToolGroup) => ReactNode;
   /** What goes after the name of a group, before the switch for all of it. */
   beside?: (group: ToolGroup) => ReactNode;
-  /** Settings only: mark one tool lazy, or take the mark away. Without it the label is only shown. */
-  onLazy?: (tool: PortalTool) => void;
-  /** A tool whose own mark cannot be changed: lazy because its whole set is, or an MCP server's, whose setting is the server's. */
-  lazyFixed?: (tool: PortalTool) => boolean;
+  /** Settings only: mark one tool lazy, or direct, or take the mark away (auto). Without it the label is only shown. */
+  onMark?: (tool: PortalTool) => void;
+  /** A tool whose own mark cannot be changed: an MCP server's, whose setting is the server's. */
+  markFixed?: (tool: PortalTool) => boolean;
 }) {
   const groups = useOpenGroups();
   return (
@@ -103,32 +103,29 @@ export function ToolGroupList({
                         {t("cached")}
                       </span>
                     )}
-                    {/* Not in the model's list one by one, but on: it finds the tool through the `tools` tool, or an MCP server's through `mcp`. */}
-                    {onLazy ? (
+                    {/* Not in the model's list one by one, but on: it finds the tool through `tool_search`, or an MCP server's through `mcp`. */}
+                    {onMark ? (
                       !tool.noLazy && (
                         <button
                           type="button"
-                          disabled={busy || !tool.enabled || lazyFixed?.(tool)}
-                          aria-pressed={Boolean(tool.lazy)}
-                          aria-label={t("Lazy {name}", { name: tool.name })}
+                          disabled={busy || markFixed?.(tool)}
+                          aria-label={t("Lazy or direct {name}", { name: tool.name })}
                           onClick={(e) => {
                             // The tool sits in a label whose click flips its switch.
                             e.preventDefault();
-                            onLazy(tool);
+                            onMark(tool);
                           }}
-                          // A fixed mark is not the tool's to change, switched on or not: its own title says where it is set.
-                          title={!tool.enabled && !lazyFixed?.(tool) ? t("This tool is off by default, so it is not offered to the model, lazy or not, except where an agent, project, routine or chat switches it on. Switch it on here to change its lazy mark.") : tool.mcp ? t("Set for the whole server, with the lazy button of its group: it is the server's \"Register tools directly\", turned off. A lazy tool is not in the model's list one by one; the model finds and calls it through the `mcp` tool.") : t("Not in the model's list one by one: it finds and calls this tool through the `tools` tool.")}
-                          className={`shrink-0 rounded border px-1 text-[10px] disabled:cursor-not-allowed ${tool.enabled ? "disabled:opacity-60" : "disabled:opacity-40"} ${
-                            tool.lazy ? "border-accent/40 bg-accent/15 text-accent" : "border-transparent text-fg-faint hover:text-fg"
-                          }`}
+                          // A fixed mark is not the tool's to change: its own title says where it is set.
+                          title={tool.mcp ? t("Set for the whole server, with the lazy button of its group: it is the server's \"Register tools directly\", turned off. A lazy tool is not in the model's list one by one; the model finds and calls it through the `mcp` tool.") : t(MARK_TITLE)}
+                          className={`shrink-0 rounded border px-1 text-[10px] disabled:cursor-not-allowed disabled:opacity-60 ${markCls(tool)}`}
                         >
-                          {t("lazy")}
+                          {tool.mcp ? t("lazy") : markName(tool)}
                         </button>
                       )
                     ) : (
                       tool.lazy && (
                         <span
-                          title={tool.mcp ? t("Not in the model's list one by one: it finds and calls this tool through the `mcp` tool.") : t("Not in the model's list one by one: it finds and calls this tool through the `tools` tool.")}
+                          title={tool.mcp ? t("Not in the model's list one by one: it finds and calls this tool through the `mcp` tool.") : t("Not in the model's list one by one: it finds and calls this tool through the `tool_search` tool.")}
                           className="shrink-0 rounded border border-line px-1 text-[10px] text-fg-faint"
                         >
                           {t("lazy")}

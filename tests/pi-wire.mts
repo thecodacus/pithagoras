@@ -219,6 +219,43 @@ export async function callThrough(): Promise<(pi: any) => void> {
 }
 
 /**
+ * The portal's own tool search (`core/server/src/pi/tool-search.ts`) over the same group, as a chat that froze it lazy has it:
+ * `factory` is its extension, with the group's tools and one plain tool beside it, and `attach` is what the portal's client
+ * does once the session exists. What `callThrough` stands in for, so that the prefix test runs the real tool.
+ */
+export async function realSearch(): Promise<{ factory: (pi: any) => void; attach: (session: any) => void }> {
+  const { Type } = await import("typebox");
+  const { ToolSearch } = await import("../core/server/src/pi/tool-search.ts");
+  const search = new ToolSearch({
+    v: 1,
+    lazy: GROUP.map((name) => `<tool>${name}`),
+    direct: [],
+    hint: "These tools are not in your list: alpha (alpha_open, alpha_read). Search them with the tool_search tool before you say you cannot do something.",
+    outside: false,
+    voice: [],
+  });
+  const factory = (p: any) => {
+    for (const name of [...GROUP, "plain_tool"]) {
+      p.registerTool({
+        name,
+        label: name,
+        description: `${name} does one thing with its argument.`,
+        promptSnippet: `${name} snippet`,
+        promptGuidelines: [`${name} rule`],
+        parameters: schema(Type),
+        async execute(_id: string, args: any) {
+          return reply(`${name} ran ${JSON.stringify(args)}`);
+        },
+      });
+    }
+    search.extension(p);
+  };
+  const attach = (session: any) =>
+    search.attach({ session: () => session, lazy: (tool) => (GROUP as readonly string[]).includes(String(tool.name)), off: () => new Set(), label: () => "alpha" });
+  return { factory, attach };
+}
+
+/**
  * pi's own way of offering a found tool, for the tests to compare with: the tools of the group are registered `deferred`,
  * and the search activates them, so the next request declares them (a tool added to the list, or a mid-conversation
  * update, whichever the provider's adapter can send).

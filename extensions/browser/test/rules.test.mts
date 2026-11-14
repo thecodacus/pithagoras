@@ -101,11 +101,13 @@ test("for every set of browser tools that is on, the rules of their own pi print
 test("a conversation is told what the browser tools that are on need, whichever of the others are off", async () => {
   /** A new conversation, with the tools in `off` switched off and `lazy` kept out of its list: the rules are those of what is on. */
   const check = async (label: string, { off = [] as string[], lazy = [] as string[] } = {}) => {
-    const request = await ask({ toolsOff: off, ...(lazy.length ? { toolsLazy: lazy, lazySets: ["pithagoras-browser"] } : {}) });
+    const request = await ask({ toolsOff: off, ...(lazy.length ? { lazy: { v: 1, lazy: lazy.map((name) => `<tool>${name}`), direct: [], hint: "", outside: false, voice: [] } } : {}) });
     const on = NAMES.filter((name) => !off.includes(name));
     assert.deepEqual(names(request).filter((name) => name.startsWith("browser_")), on.filter((name) => !lazy.includes(name)), `${label}: the tools offered`);
     const system = systemOf(request);
-    assert.deepEqual(has(system), expected(on), label);
+    // The rules of a lazy tool come with the search that finds it, at the end of the context, and are not in the head; that a page is data is, for
+    // a lazy tool as for any: the guard's short envelope relies on it.
+    assert.deepEqual(has(system), { ...expected(on.filter((name) => !lazy.includes(name))), untrusted: on.length > 0 }, label);
     // Browser's tools have rules of their own, and a Playwright server's, of which there is none here, are not said.
     assert.ok(!system.includes(BROWSER_READING_RULE) && !system.includes(BROWSER_SCREENSHOT_RULE), `${label}: no Playwright rules`);
   };
@@ -116,7 +118,7 @@ test("a conversation is told what the browser tools that are on need, whichever 
   for (const on of NAMES) await check(`only ${on} on`, { off: NAMES.filter((name) => name !== on) });
   // Every one off: nothing is said about the browser.
   await check("all off", { off: [...NAMES] });
-  // Lazy tools: the gateway says the rules of those that are on and not switched off.
+  // Lazy tools: their rules are not said in the head (tool_search brings them with its hits), and the rule that a page is data is.
   await check("all lazy", { lazy: [...NAMES] });
   await check("all lazy, browser_snapshot off", { lazy: [...NAMES], off: ["browser_snapshot"] });
   await check("one lazy, the rest off", { lazy: ["browser_navigate"], off: NAMES.filter((name) => name !== "browser_navigate") });

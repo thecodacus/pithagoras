@@ -7,7 +7,8 @@ import { inProcessHome } from "./helpers.mts";
 // back fails here. The caps are the lengths agreed for each tool (about a quarter of a token to the character is
 // the measure, as in the review of issue #183), with a little room for a word to be changed.
 inProcessHome("pitha-tool-texts-");
-const { ToolsGateway } = await import("../core/server/src/pi/tools-gateway.ts");
+const { ToolSearch } = await import("../core/server/src/pi/tool-search.ts");
+const { lazyHintOf } = await import("../core/server/src/lazy-head.ts");
 const { askPrimaryTool } = await import("../core/server/src/pi/ask-primary.ts");
 const { askQuestionTool } = await import("../core/server/src/pi/ask-question.ts");
 const { heartbeatTool } = await import("../core/server/src/pi/heartbeat-tool.ts");
@@ -42,7 +43,9 @@ const cost = (tool: Registered) =>
   tokens(tool.description) + tokens(JSON.stringify(tool.parameters)) + (tool.promptSnippet ? tokens(`- ${tool.name}: ${tool.promptSnippet}`) : 0);
 
 const all: Registered[] = [];
-load(new ToolsGateway(["browser", "media"]).extension, all);
+// With the line that names what is behind it, as a chat that has two groups lazy says it.
+const head = { v: 1 as const, lazy: ["browser", "media"], direct: [], hint: lazyHintOf([{ label: "Browser", tools: ["browser_click", "browser_navigate", "browser_snapshot", "browser_type"] }, { label: "Media", tools: ["generate_image", "edit_image", "show_image"] }]), outside: false, voice: [] };
+load(new ToolSearch(head).extension, all);
 load(askPrimaryTool("s"), all);
 load(askQuestionTool(), all);
 load(heartbeatTool("a", "s"), all);
@@ -63,7 +66,7 @@ load(subagentIn({ mode: "background", keep: true }), subagentBackgroundKept);
 /** The most each tool may cost, in tokens: what was agreed, as the review of issue #183 measured it, and 10 for a changed word. */
 const ROOM = 10;
 const AGREED: Record<string, number> = {
-  tools: 154,
+  tool_search: 167,
   ask_primary: 218,
   ask_question: 393,
   activity_note: 131,
@@ -117,8 +120,8 @@ test("a value outside the list of an enum is refused before the tool runs, as it
     validateToolArguments(find(name), { type: "toolCall", id: "1", name, arguments: args });
   const refused = (name: string, args: Record<string, unknown>) => assert.throws(() => check(name, args), /Validation failed/, `${name} ${JSON.stringify(args)}`);
 
-  assert.equal(check("tools", { action: "describe", name: "x" }).action, "describe");
-  refused("tools", { action: "destroy" });
+  assert.equal(check("tool_search", { action: "describe", name: "x" }).action, "describe");
+  refused("tool_search", { action: "destroy" });
   assert.equal(check("ask_question", { questions: [{ question: "Q?", kind: "ranking", options: ["a", "b"] }] }).questions[0].kind, "ranking");
   refused("ask_question", { questions: [{ question: "Q?", kind: "sorting" }] });
 });

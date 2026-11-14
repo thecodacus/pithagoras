@@ -1,17 +1,17 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { LuCheck, LuPencil, LuX } from "react-icons/lu";
-import { api, ApiError } from "../api";
-import { LoadFailed, Section } from "./SettingsUi";
+import { api, ApiError, type LazyLimits, type ToolMark } from "../api";
+import { LoadFailed, Section, WarnBanner, ghostCls, inputSmCls } from "./SettingsUi";
 import { Select } from "./Select";
 import { ToolGroupList } from "./ToolGroupList";
-import { displayName, nextOff, sourceName, sourceOf } from "../tool-groups";
+import { MARK_TITLE, displayName, markCls, markName, nextMark, nextOff, sourceName, sourceOf } from "../tool-groups";
 import { isEnter, isEscape } from "../shortcuts";
-import { t, tp } from "../i18n";
+import { formatNumber, t, tp } from "../i18n";
 
 /** What ask_question may wait for, in minutes; 0 is until it is answered. The server holds the same list. */
 const QUESTION_WAITS = [0, 5, 15, 30, 60];
 
-/** How a single tool is marked lazy next to the sets; the server keys it the same way (lazyToolEntry). */
+/** How a single tool is marked next to the sets; the server keys it the same way (lazyToolEntry). */
 const lazyEntry = (name: string): string => `<tool>${name}`;
 
 /**
@@ -38,8 +38,20 @@ export function ToolDefaults({ onError }: { onError: (e: string) => void }) {
   const [tries, setTries] = useState(0);
   const [busy, setBusy] = useState(false);
   const [names, setNames] = useState<Record<string, string>>({});
-  /** What is marked lazy: sets as the list keys them, and single tools as `<tool>name`. */
-  const [lazy, setLazy] = useState<string[]>([]);
+  /** What is marked, on sets as the list keys them and on single tools as `<tool>name`: lazy or direct. What has none is auto. */
+  const [marks, setMarks] = useState<Record<string, ToolMark>>({});
+  /** The sets the threshold made lazy, and whether it could not make the list fit. */
+  const [resolved, setResolved] = useState<{ lazy: string[]; over: boolean }>({ lazy: [], over: false });
+  /** What the model's list holds now, with what is lazy taken out of it. */
+  const [listed, setListed] = useState<{ tokens: number; tools: number } | null>(null);
+  const [limits, setLimits] = useState<LazyLimits>({ tokens: 3000, tools: 20 });
+  const [defaultLimits, setDefaultLimits] = useState<LazyLimits>({ tokens: 3000, tools: 20 });
+  /** What is typed in the two limit fields, which is saved when one is left. */
+  const [typed, setTyped] = useState<{ tokens: string; tools: string }>({ tokens: "3000", tools: "20" });
+  /** The sets the threshold made lazy since the person last looked. */
+  const [notice, setNotice] = useState<string[]>([]);
+  /** Whether the limit fields have been filled in: a list read again after a save must not take from under a field being typed in. */
+  const typedFrom = useRef(false);
   const [questionWait, setQuestionWait] = useState(0);
   /** The group being renamed, and what has been typed so far. */
   const [renaming, setRenaming] = useState<{ source: string; value: string } | null>(null);
@@ -52,7 +64,16 @@ export function ToolDefaults({ onError }: { onError: (e: string) => void }) {
         setTools(r.tools);
         setOff(r.off);
         setNames(r.names ?? {});
-        setLazy(r.lazy ?? []);
+        setMarks(r.marks ?? {});
+        setResolved(r.resolved ?? { lazy: [], over: false });
+        setListed(r.listed ?? null);
+        if (r.limits) {
+          setLimits(r.limits);
+          if (!typedFrom.current) setTyped({ tokens: String(r.limits.tokens), tools: String(r.limits.tools) });
+          typedFrom.current = true;
+        }
+        if (r.defaultLimits) setDefaultLimits(r.defaultLimits);
+        setNotice(r.lazyNotice ?? []);
         setQuestionWait(r.questionWaitMinutes ?? 0);
       })
       // A deployment where this cannot work says so in place of the list — the
@@ -90,19 +111,57 @@ export function ToolDefaults({ onError }: { onError: (e: string) => void }) {
   };
 
   /**
-   * Make a set or a single tool lazy, or ordinary again. Lazy touches no switch: the tool stays on or
-   * off as it was, and only the model's list changes.
+   * Set what a set or a single tool is marked: lazy, direct, or nothing (auto: the threshold decides). A mark touches no
+   * switch: the tool stays on or off as it was, and only the model's list changes. What the threshold made lazy may
+   * change with it, so the list is read again.
    */
-  const flipLazy = async (entry: string) => {
-    const wanted = lazy.includes(entry) ? lazy.filter((s) => s !== entry) : [...lazy, entry];
+  const setMark = async (entry: string, next: ToolMark | undefined) => {
+    const wanted = { ...marks };
+    if (next) wanted[entry] = next;
+    else delete wanted[entry];
     setBusy(true);
     try {
-      const r = await api.setLazyToolSets(wanted);
-      setLazy(r.lazy);
+      const r = await api.setToolMarks(wanted);
+      setMarks(r.marks);
+      setResolved(r.resolved);
+      setTries((n) => n + 1);
     } catch (e) {
       onError((e as Error).message);
     } finally {
       setBusy(false);
+    }
+  };
+
+  /** Save the limits of the threshold, when a field is left: anything that is not a whole number goes back to what was saved. */
+  const saveLimits = async () => {
+    const whole = (text: string) => (/^\d{1,8}$/.test(text.trim()) ? Number(text.trim()) : undefined);
+    const next = { tokens: whole(typed.tokens), tools: whole(typed.tools) };
+    if (next.tokens === undefined || next.tools === undefined) {
+      setTyped({ tokens: String(limits.tokens), tools: String(limits.tools) });
+      return;
+    }
+    if (next.tokens === limits.tokens && next.tools === limits.tools) return;
+    // What is saved is what is typed from now on: a field left again before the answer comes is judged against it.
+    const before = limits;
+    setLimits({ tokens: next.tokens, tools: next.tools });
+    try {
+      const r = await api.setLazyLimits({ tokens: next.tokens, tools: next.tools });
+      setLimits(r.limits);
+      setResolved(r.resolved);
+      setTries((n) => n + 1);
+    } catch (e) {
+      setLimits(before);
+      setTyped({ tokens: String(before.tokens), tools: String(before.tools) });
+      onError((e as Error).message);
+    }
+  };
+
+  const dismissNotice = async () => {
+    setNotice([]);
+    try {
+      await api.dismissLazyNotice();
+    } catch (e) {
+      onError((e as Error).message);
     }
   };
 
@@ -185,6 +244,71 @@ export function ToolDefaults({ onError }: { onError: (e: string) => void }) {
         />
       </Section>
 
+      <Section
+        title={t("Lazy above")}
+        hint={t("When the model's list of tools gets long, whole groups that have no mark of their own are taken out of it and found through tool_search instead, the largest first, until the list has fewer tokens and tools than this. A group marked direct stays in the list. 0 turns a limit off. It reaches the chats that start from now on.")}
+      >
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="text-xs text-fg-muted">
+            {t("Tokens of tool declarations")}
+            <input
+              inputMode="numeric"
+              value={typed.tokens}
+              onChange={(e) => setTyped({ ...typed, tokens: e.target.value })}
+              onBlur={saveLimits}
+              onKeyDown={(e) => isEnter(e) && (e.target as HTMLInputElement).blur()}
+              className={`${inputSmCls} mt-1 w-32`}
+              aria-label={t("Tokens of tool declarations")}
+            />
+          </label>
+          <label className="text-xs text-fg-muted">
+            {t("Number of tools")}
+            <input
+              inputMode="numeric"
+              value={typed.tools}
+              onChange={(e) => setTyped({ ...typed, tools: e.target.value })}
+              onBlur={saveLimits}
+              onKeyDown={(e) => isEnter(e) && (e.target as HTMLInputElement).blur()}
+              className={`${inputSmCls} mt-1 w-32`}
+              aria-label={t("Number of tools")}
+            />
+          </label>
+          {(limits.tokens !== defaultLimits.tokens || limits.tools !== defaultLimits.tools) && (
+            <button
+              type="button"
+              className={ghostCls}
+              onClick={() => {
+                setTyped({ tokens: String(defaultLimits.tokens), tools: String(defaultLimits.tools) });
+                void api
+                  .setLazyLimits(defaultLimits)
+                  .then((r) => {
+                    setLimits(r.limits);
+                    setResolved(r.resolved);
+                    setTries((n) => n + 1);
+                  })
+                  .catch((e) => onError((e as Error).message));
+              }}
+            >
+              {t("Back to {tokens} tokens or {tools} tools", { tokens: formatNumber(defaultLimits.tokens), tools: String(defaultLimits.tools) })}
+            </button>
+          )}
+        </div>
+        {listed && (
+          <p className="mt-2 text-xs text-fg-subtle">
+            {t("The model's list holds {tokens} tokens in {tools} tools.", { tokens: formatNumber(listed.tokens), tools: String(listed.tools) })}
+            {resolved.over && " " + t("That is over the limits, and nothing more can be taken out of it: what is left is pi's own tools, the portal's own small ones and what is marked direct.")}
+          </p>
+        )}
+      </Section>
+
+      {notice.length > 0 && (
+        <WarnBanner onClose={dismissNotice} className="mb-4">
+          {t("The list of tools got long, so the model now finds {groups} through tool_search instead of having them in its list. Mark a group direct to keep it there.", {
+            groups: notice.map((source) => displayName(source, names)).join(", "),
+          })}
+        </WarnBanner>
+      )}
+
       {!tools.length ? (
         <p className="rounded-xl border border-line bg-raised/40 px-3 py-2 text-xs text-fg-subtle">
           {t("Nothing listed yet. Tools appear once a conversation has run — that is when pi builds the list of what its extensions registered.")}
@@ -196,14 +320,19 @@ export function ToolDefaults({ onError }: { onError: (e: string) => void }) {
               the second changes while this is open. */}
           <ToolGroupList
             roomy
-            tools={tools.map((tool) => ({
-              ...tool,
-              enabled: !off.includes(tool.name),
-              // Marked as a set or on its own: found through the `tools` tool, which the list says beside it. An MCP server's tool is the server's to say.
-              lazy: tool.mcp !== undefined ? tool.lazy : !tool.noLazy && (lazy.includes(sourceOf(tool)) || lazy.includes(lazyEntry(tool.name))) ? (true as const) : undefined,
-            }))}
-            onLazy={(tool) => flipLazy(lazyEntry(tool.name))}
-            lazyFixed={(tool) => tool.mcp !== undefined || lazy.includes(sourceOf(tool))}
+            tools={tools.map((tool) => {
+              // An MCP server's tool is lazy by the server's setting; any other by the mark on it or on its set, else by the threshold.
+              const mark = tool.mcp !== undefined || tool.noLazy ? undefined : marks[lazyEntry(tool.name)] ?? marks[sourceOf(tool)];
+              const isLazy = tool.mcp !== undefined ? tool.lazy : tool.noLazy ? undefined : mark ? mark === "lazy" : resolved.lazy.includes(sourceOf(tool));
+              return {
+                ...tool,
+                enabled: !off.includes(tool.name),
+                ...(mark ? { mark } : tool.mcp === undefined && !tool.noLazy ? { auto: true as const } : {}),
+                lazy: isLazy ? (true as const) : undefined,
+              };
+            })}
+            onMark={(tool) => setMark(lazyEntry(tool.name), nextMark(tool.mark))}
+            markFixed={(tool) => tool.mcp !== undefined}
             names={names}
             busy={busy}
             onFlip={flip}
@@ -253,28 +382,24 @@ export function ToolDefaults({ onError }: { onError: (e: string) => void }) {
                 {/* Not for pi's own tools: those are always offered. An MCP server's group has the server's setting. */}
                 {group.tools.some((tool) => !tool.noLazy) && (() => {
                   const server = group.tools.find((tool) => tool.mcp !== undefined)?.mcp;
-                  const pressed = server !== undefined ? group.tools.every((tool) => tool.lazy) : lazy.includes(group.source);
-                  // Nothing in the set is offered while every tool is off, so there is nothing for a mark to change.
-                  const idle = group.allOff;
+                  const own = marks[group.source];
+                  const lazyNow = server !== undefined ? group.tools.every((tool) => tool.lazy) : own ? own === "lazy" : resolved.lazy.includes(group.source);
+                  const state = { mark: server !== undefined ? undefined : own, lazy: lazyNow ? (true as const) : undefined };
                   return (
                     <button
                       type="button"
-                      disabled={busy || idle}
-                      aria-pressed={pressed}
-                      onClick={() => (server !== undefined ? flipMcp(server, pressed) : flipLazy(group.source))}
+                      disabled={busy}
+                      aria-pressed={lazyNow}
+                      onClick={() => (server !== undefined ? flipMcp(server, lazyNow) : setMark(group.source, nextMark(own)))}
                       title={
-                        idle
-                          ? t("All of its tools are off by default, so none is offered to the model, lazy or not, except where an agent, project, routine or chat switches them on. Switch one on here to change the lazy mark.")
-                          : server !== undefined
+                        server !== undefined
                           ? t("Lazy: the server's tools are not in the model's list one by one; the model finds and calls them through the `mcp` tool. It is the server's \"Register tools directly\", turned off, and it applies to chats that start from now on. They stay on or off as they are.")
-                          : t("Lazy: its tools are not in the model's list one by one; the model finds and calls them through the `tools` tool, so nothing in the set is lost to it. They stay on or off as they are; an off tool is not reachable that way. Tools that turn up later start lazy too.")
+                          : t(MARK_TITLE)
                       }
-                      aria-label={t("Lazy {name}", { name: displayName(group.source, names) })}
-                      className={`shrink-0 rounded px-1.5 py-0.5 text-[11px] transition hover:bg-fg/5 disabled:cursor-not-allowed disabled:opacity-50 ${
-                        pressed ? "bg-accent/15 text-accent" : "text-fg-subtle hover:text-fg"
-                      }`}
+                      aria-label={t("Lazy or direct {name}", { name: displayName(group.source, names) })}
+                      className={`shrink-0 rounded border px-1.5 py-0.5 text-[11px] transition disabled:cursor-not-allowed disabled:opacity-50 ${server !== undefined ? (lazyNow ? "border-accent/40 bg-accent/15 text-accent" : "border-transparent text-fg-subtle hover:text-fg") : markCls(state)}`}
                     >
-                      {t("lazy")}
+                      {server !== undefined ? t("lazy") : markName(state)}
                     </button>
                   );
                 })()}

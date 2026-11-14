@@ -3397,13 +3397,15 @@ export function lazyToolNames(): Set<string> {
  * adapter leaves it to its `mcp` tool, which is the server's setting "Register tools directly" turned off, and not by any
  * mark: `mcp` names that server, for the page to say where the one switch for it is.
  */
-export function lazyMarks(view: McpView = mcpView()): (tool: Pick<KnownTool, "name" | "source" | "package">) => { lazy?: true; mark?: Mark; auto?: true; mcp?: string } {
+export function lazyMarks(view: McpView = mcpView()): (tool: Pick<KnownTool, "name" | "source" | "package"> & { inline?: boolean; scriptsOnly?: boolean; cached?: boolean }) => { lazy?: true; mark?: Mark; auto?: true; mcp?: string } {
   const portal = lazyToolNames();
   const marks = toolMarks();
   const servers = mcpServerNames();
   return (tool) => {
     const direct = view.direct(tool);
     if (direct === undefined) {
+      // pi's own tools and the portal's code mode have no mark to give: they are always in the list.
+      if (!lazyAllowed(tool, servers)) return {};
       const mark = marks[lazyToolEntry(tool.name)] ?? marks[toolSetOf(tool, servers)];
       return { ...(portal.has(tool.name) ? { lazy: true as const } : {}), ...(mark ? { mark } : { auto: true as const }) };
     }

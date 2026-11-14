@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { callThrough, nativeLoading, pi, wireSession, GROUP, type Captured } from "./pi-wire.mts";
+import { nativeLoading, pi, realSearch, wireSession, GROUP, type Captured } from "./pi-wire.mts";
 
 /**
  * The cache rule of the tool search (issue #361, 2.4): what is in the tools array and the system prompt does not
@@ -30,8 +30,9 @@ const call = (name: string, args: unknown = {}) => ({ name, args });
 const model = async (row: (typeof ROWS)[number]) => (await pi.ModelRuntime.create()).getModel(row.provider, row.id);
 
 /** What one chat asked of the model, from its first request to its last: the head of each, as text. */
-async function heads(row: (typeof ROWS)[number], extension: (pi: any) => void, script: (n: number) => any): Promise<Captured[]> {
+async function heads(row: (typeof ROWS)[number], extension: (pi: any) => void, script: (n: number) => any, attach?: (session: any) => void): Promise<Captured[]> {
   const { session, requests } = await wireSession(await model(row), [extension], script);
+  attach?.(session);
   try {
     await session.prompt("Open the thing.");
   } finally {
@@ -42,19 +43,20 @@ async function heads(row: (typeof ROWS)[number], extension: (pi: any) => void, s
 
 for (const row of ROWS) {
   test(`${row.row}: the tools array and the system prompt are the same after a search, a call and a direct call by name`, async () => {
-    const extension = await callThrough();
+    const { factory, attach } = await realSearch();
     // A search, a call through it, the found tool by its own name (it is left out of the list but still runs), and the answer.
     const script = [call("tool_search", { action: "search", query: "open" }), call("tool_search", { action: "call", name: GROUP[0], args: { x: "a" } }), call(GROUP[1], { x: "b" }), "Done."];
-    const requests = await heads(row, extension, (n) => script[n]);
+    const requests = await heads(row, factory, (n) => script[n], attach);
     assert.equal(requests.length, 4, "a request before the search, and one after each answer");
     for (const [i, request] of requests.entries()) {
       assert.equal(request.tools, requests[0].tools, `the tools array of request ${i} is request 0's`);
       assert.equal(request.system, requests[0].system, `the system prompt of request ${i} is request 0's`);
     }
-    // And the head is the one of a chat that has a tool search: the group is out of it, the other tools are in.
+    // And the head is the one of a chat that has a tool search: the group is out of it, the other tools are in, and the line that names the group is.
     for (const name of GROUP) {
       assert.doesNotMatch(requests[0].tools, new RegExp(name), `${name} is not declared`);
-      assert.doesNotMatch(requests[0].system, new RegExp(name), `${name} is not in the system prompt's tools or rules`);
+      // The one line that says what is behind the search names the tools, so the name is in the prompt; their snippets and rules are not.
+      assert.doesNotMatch(requests[0].system, new RegExp(`${name} (snippet|rule)`), `${name} is not in the system prompt's tools or rules`);
     }
     assert.match(requests[0].tools, /plain_tool/);
     assert.match(requests[0].tools, /tool_search/);

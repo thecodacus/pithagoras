@@ -269,6 +269,15 @@ export interface CompactionSettings {
   keepRecentTokens: number;
 }
 
+/** What a tool set or a single tool is marked: always behind `tool_search`, or always in the model's list. Without a mark the threshold decides. */
+export type ToolMark = "lazy" | "direct";
+
+/** What the model's list may hold before groups that have no mark go lazy: tokens of declarations and number of tools; 0 turns a part off. */
+export interface LazyLimits {
+  tokens: number;
+  tools: number;
+}
+
 /** A tool a conversation could use, and whether it is switched on for it. */
 export interface PortalTool {
   name: string;
@@ -284,8 +293,12 @@ export interface PortalTool {
   inline?: true;
   /** An MCP server's tool listed from the adapter's cache: the server starts when one of its tools is first used. */
   cached?: true;
-  /** Not in the list the model is given one by one but found through the `tools` tool, or an MCP server's through `mcp`: on or off like any other. */
+  /** Not in the list the model is given one by one but found through `tool_search`, or an MCP server's through `mcp`: on or off like any other. */
   lazy?: true;
+  /** What was set on the tool or its set: `lazy` or `direct`. Settings → Tools only. */
+  mark?: ToolMark;
+  /** Nothing is set on the tool or its set, so the threshold decides. Settings → Tools only. */
+  auto?: true;
   /** An MCP server's tool: the server, whose setting "Register tools directly" says whether the tool is lazy. */
   mcp?: string;
   /** Settings → Tools only: one of pi's own tools or the adapter's `mcp`, which cannot be made lazy. */
@@ -633,9 +646,12 @@ export const api = {
     }),
   /** What an agent's chats and own runs start with: its exceptions to the portal-wide default, `live` always false. */
   agentTools: (id: string) =>
-    json<{ tools: PortalTool[]; live: boolean; off: string[]; names: Record<string, string> }>(
+    json<{ tools: PortalTool[]; live: boolean; off: string[]; names: Record<string, string>; keepDirect?: string[] }>(
       `/api/agents/${encodeURIComponent(id)}/tools`
     ),
+  /** The sets and tools the agent's chats keep in the model's list whatever the marks and the threshold say. */
+  setAgentDirect: (id: string, entries: string[]) =>
+    json<{ entries: string[] }>(`/api/agents/${encodeURIComponent(id)}/direct`, { method: "PUT", body: JSON.stringify({ entries }) }),
   setAgentTools: (id: string, off: string[]) =>
     json<{ off: string[]; applied: number }>(`/api/agents/${encodeURIComponent(id)}/tools`, {
       method: "PUT",
@@ -673,7 +689,10 @@ export const api = {
   deleteMode: (id: string) => changesModes(json<{ ok: true }>(`/api/chat-modes/${encodeURIComponent(id)}`, { method: "DELETE" })),
   /** What every chat in a mode starts with: its exceptions to Settings → Tools, `live` always false. */
   modeTools: (id: string) =>
-    json<{ tools: PortalTool[]; live: boolean; off: string[]; names: Record<string, string> }>(`/api/chat-modes/${encodeURIComponent(id)}/tools`),
+    json<{ tools: PortalTool[]; live: boolean; off: string[]; names: Record<string, string>; keepDirect?: string[] }>(`/api/chat-modes/${encodeURIComponent(id)}/tools`),
+  /** The sets and tools the mode's chats keep in the model's list whatever the marks and the threshold say. */
+  setModeDirect: (id: string, entries: string[]) =>
+    json<{ entries: string[] }>(`/api/chat-modes/${encodeURIComponent(id)}/direct`, { method: "PUT", body: JSON.stringify({ entries }) }),
   setModeTools: (id: string, off: string[]) =>
     changesModes(json<{ off: string[]; applied: number }>(`/api/chat-modes/${encodeURIComponent(id)}/tools`, { method: "PUT", body: JSON.stringify({ off }) })),
   deleteSession: (id: string) => json<{ ok: true }>(`/api/sessions/${id}`, { method: "DELETE" }),
@@ -728,17 +747,32 @@ export const api = {
   /** Every tool the portal has seen, for setting a default without opening a chat. */
   toolDefaults: () =>
     json<{
-      tools: { name: string; source: string; defaultOn: boolean; inline?: true; lazy?: true; mcp?: string; noLazy?: true }[];
+      tools: { name: string; source: string; defaultOn: boolean; inline?: true; lazy?: true; mark?: ToolMark; auto?: true; mcp?: string; noLazy?: true }[];
       off: string[];
       names: Record<string, string>;
-      /** What is marked lazy: tool sets, and single tools as `<tool>name`. Opt-in; nothing is lazy until somebody marks it. */
-      lazy?: string[];
+      /** What is marked, on tool sets and on single tools as `<tool>name`: lazy, or direct. What has no mark is auto: the threshold decides. */
+      marks?: Record<string, ToolMark>;
+      /** The sets the threshold made lazy, and whether the list is over its limits with every set it may take out taken out. */
+      resolved?: { lazy: string[]; over: boolean };
+      /** What the model's list holds now, with what is lazy taken out of it. */
+      listed?: { tokens: number; tools: number };
+      limits?: LazyLimits;
+      defaultLimits?: LazyLimits;
+      /** The sets the threshold made lazy since the person last looked. */
+      lazyNotice?: string[];
       /** How long ask_question waits for an answer; 0 is until it is answered. */
       questionWaitMinutes?: number;
     }>("/api/tools"),
-  /** Which tool sets and single tools (`<tool>name`) are lazy: not in the model's list one by one, found through the `tools` tool. */
-  setLazyToolSets: (lazy: string[]) =>
-    json<{ lazy: string[]; applied: number }>("/api/tools/lazy", { method: "PUT", body: JSON.stringify({ lazy }) }),
+  /** What is marked lazy (not in the model's list one by one, found through `tool_search`) or direct, by tool set or `<tool>name`. */
+  setToolMarks: (marks: Record<string, ToolMark>) =>
+    json<{ marks: Record<string, ToolMark>; resolved: { lazy: string[]; over: boolean } }>("/api/tools/marks", { method: "PUT", body: JSON.stringify({ marks }) }),
+  /** How big the model's list may get before groups with no mark go lazy. */
+  setLazyLimits: (limits: LazyLimits) =>
+    json<{ limits: LazyLimits; resolved: { lazy: string[]; over: boolean } }>("/api/tools/lazy-limits", { method: "PUT", body: JSON.stringify(limits) }),
+  /** The person has read what the threshold made lazy. */
+  dismissLazyNotice: () => json<{ ok: true }>("/api/tools/lazy-notice", { method: "DELETE" }),
+  /** Read a chat's tools again: what is lazy in it is decided afresh, which costs the prompt cache from its start. */
+  readToolsAgain: (sessionId: string) => json<{ changed: boolean }>(`/api/sessions/${sessionId}/tools/read-again`, { method: "POST" }),
   /** How long the agent's ask_question waits for an answer, in minutes; 0 is until it is answered. */
   setQuestionWait: (waitMinutes: number) =>
     json<{ waitMinutes: number }>("/api/ask-question", { method: "PUT", body: JSON.stringify({ waitMinutes }) }),
@@ -747,7 +781,7 @@ export const api = {
     json<{ off: string[]; applied: number }>("/api/tools", { method: "PUT", body: JSON.stringify({ off }) }),
   /** What this conversation could use. `live` is false when pi is not running to ask. */
   tools: (sessionId: string) =>
-    json<{ tools: PortalTool[]; live: boolean; off: string[]; names: Record<string, string> }>(
+    json<{ tools: PortalTool[]; live: boolean; off: string[]; names: Record<string, string>; lazyStale?: boolean }>(
       `/api/sessions/${sessionId}/tools`
     ),
   /** What each package is called here; everything unnamed keeps its own name. */
