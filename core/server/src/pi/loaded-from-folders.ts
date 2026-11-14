@@ -50,11 +50,9 @@ export const LOADED_IN_FOLDERS: LoadedEntry[] = [
   { name: AGENT_NAME_FILE, by: "portal", as: "agent-name" },
   // ... and the heartbeat asks what it is told to watch from this one, as the primary user's own words.
   { name: WATCH_FILE, by: "heartbeat", as: "watch" },
-  // pi's MCP support: the tool servers it starts, each a process of the portal, from the project's own `.pi/mcp.json`
-  // (only in a trusted project, and never while the sandbox is on). Before the `.pi` folder, which holds it as well.
-  { name: ".pi/mcp.json", by: "pi", as: "tools" },
   // pi: the project's instructions, from the folder and from every one above it, and the folders it loads
-  // its settings, system prompt, extensions, skills, prompts and themes from, and its packages.
+  // its settings, system prompt, extensions, skills, prompts and themes from, and its packages. The tool servers its MCP
+  // support starts, each a process of the portal, are in its `.pi/mcp.json` (only in a trusted project, and never while the sandbox is on).
   // pi reads the first of these a folder has, AGENTS.override.md before AGENTS.md (pi 1.x).
   { name: "AGENTS.override.md", by: "pi", as: "instructions", above: true },
   { name: "AGENTS.md", by: "pi", as: "instructions", above: true },

@@ -234,6 +234,9 @@ function transportOf(entry: Record<string, unknown>): "stdio" | "http" | "unknow
 export function validateEntry(name: string, entry: unknown, others: Iterable<string> = []): string | null {
   const problem = entryProblem(name, entry);
   if (problem) return problem;
+  // pi takes a blank one as a command to run or an address to open, and fails on it at every start: not worth writing.
+  const e = entry as Record<string, unknown>;
+  if ((typeof e.command === "string" && !e.command.trim()) || (typeof e.url === "string" && !e.url.trim())) return `server "${name}" needs a command or an address that is not blank`;
   const clash = [...others].find((other) => other !== name && mcpNamespace(other) === mcpNamespace(name));
   return clash ? `"${name}" would be taken for "${clash}": pi puts - and _ together, and takes one of the two` : null;
 }
@@ -440,8 +443,10 @@ export function mcpRouter(): Router {
   router.put("/mcp/raw", (req, res) => {
     const content = req.body?.content;
     if (typeof content !== "string") return res.status(400).json({ error: "content required" });
+    // Unlike the portal, which has always read a file with comments in it, pi reads this one with a plain JSON.parse: a comment
+    // saved here would make its own command line and a container's pi skip every server.
     try {
-      JSON.parse(stripComments(content));
+      JSON.parse(content);
     } catch (e) {
       return res.status(400).json({ error: `Not valid JSON: ${(e as Error).message}` });
     }

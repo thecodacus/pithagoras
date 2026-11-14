@@ -3756,7 +3756,7 @@ export interface McpView {
   off: ReadonlySet<string>;
   catalogue: KnownTool[];
   gone: string[];
-  /** What the portal remembers of every tool, read when first asked for. */
+  /** What the portal remembers of every tool, as it is when asked: the view is kept while the file and the settings are as they were, and a tool is remembered by a write of the settings. */
   known: () => Map<string, KnownTool>;
 }
 
@@ -3828,8 +3828,7 @@ export function mcpView(): McpView {
 
 function readMcpView(): McpView {
   const config = readableMcpConfig();
-  let known: Map<string, KnownTool> | undefined;
-  const knownNow = () => (known ??= new Map(knownTools().map((t) => [t.name, t])));
+  const knownNow = () => new Map(knownTools().map((t) => [t.name, t]));
   if (!config) return { servers: [], off: new Set(), catalogue: [], gone: [], known: knownNow };
   const servers = Object.keys(config.mcpServers ?? {});
   const off = new Set(servers.filter((name) => { const entry = config.mcpServers[name]; return !entry || typeof entry !== "object" || !entryEnabled(entry) || entry.exposure === "hidden"; }));

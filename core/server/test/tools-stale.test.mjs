@@ -71,14 +71,17 @@ test("uninstalling forgets whatever is no longer listed, however the request wro
   assert.deepEqual(names(), ["bash", "other", "todo_mine"]);
 });
 
-test("an MCP server's tools are kept when the adapter is uninstalled", () => {
-  listPackages(["npm:pi-mcp-adapter", "npm:pi-other"]);
-  rememberTools([{ name: "jira_search", source: "pi-mcp-adapter", package: "npm:pi-mcp-adapter" }]);
+test("an MCP server's tools are kept when a package is uninstalled: they are no package's", () => {
   listPackages(["npm:pi-other"]);
-  forgetPackageTools("npm:pi-mcp-adapter");
-  assert.deepEqual(names(), ["bash", "jira_search", "other", "todo_mine"]);
-  // Hidden all the same, since nothing registers them while the adapter is gone.
-  assert.equal(shownTools().some((t) => t.name === "jira_search"), false);
+  rememberTools([{ name: "mcp__jira__search", source: "jira", server: "jira", package: null }]);
+  forgetPackageTools("npm:pi-other");
+  assert.deepEqual(names(), ["bash", "mcp__jira__search", "other", "todo_mine"]);
+  assert.equal(shownTools().some((t) => t.name === "mcp__jira__search"), true, "and listed, as the server is in the file");
+  // The server switched off in the file: its tools are remembered, and not listed.
+  writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR, "mcp.json"), JSON.stringify({ mcpServers: { jira: { command: "jira-mcp", enabled: false } } }));
+  assert.equal(shownTools().some((t) => t.name === "mcp__jira__search"), false);
+  assert.ok(names().includes("mcp__jira__search"));
+  writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR, "mcp.json"), JSON.stringify({ mcpServers: { jira: { command: "jira-mcp" } } }));
 });
 
 test("a project bringing the user's package in its own settings does not take its tools from it", () => {
