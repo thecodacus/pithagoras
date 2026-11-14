@@ -60,8 +60,9 @@ for (const row of ROWS) {
     assert.match(requests[0].tools, /tool_search/);
     // That the system prompt read here is the prompt: pi lists the tools that are declared in it.
     assert.match(requests[0].system, /plain_tool snippet/);
-    // What the model did is in the history of the last request, by name, though the group was never declared.
-    assert.match(JSON.stringify(requests[3].body), new RegExp(GROUP[1]));
+    // What the model did is in the history of the last request, as a call by name, though the group was never declared:
+    // every adapter keeps the block (a tool_use, a function_call, a toolUse, a functionCall).
+    assert.match(JSON.stringify(requests[3].body), new RegExp(`"name":"${GROUP[1]}"`));
   });
 
   test(`${row.row}: with pi's own loading of a found tool the head ${row.native.tools === "holds" ? "holds" : "changes"} (the control)`, async () => {
