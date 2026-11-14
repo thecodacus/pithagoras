@@ -17,81 +17,22 @@
 /**
  * The name the portal gave the MCP it attached the agent's browser as.
  *
- * Its tools arrive named `browser_<whatever>`, and they are switched here like
+ * Its tools arrive named `mcp__browser__<whatever>`, and they are switched here like
  * any other server's: having the browser is having its tools, and there is no
  * second switch for it.
  */
 export const BROWSER_MCP = "browser";
 
 /**
- * How the adapter starts the names of a server's tools, in its default `server` mode
- * (getServerPrefix): the server's name with its hyphens as underscores, and its dots
- * kept. `brave-search` registers `brave_search_brave_web_search`, and `docs.v2`
- * registers `docs.v2_search`. A tool's own dots are written as underscores
- * (formatToolName), a server's are not: `docs_v2_search` is the tool `v2_search` of
- * a server called `docs`.
- */
-export function mcpPrefix(server: string): string {
-  return server.replace(/-/g, "_");
-}
-
-/**
- * How the adapter starts the names of a server's tools in the naming it is set to
- * (`toolPrefix`, getServerPrefix): `server` is mcpPrefix; `short` leaves out a
- * closing `mcp` (`docs-mcp` names its tools `docs_…`); `mcp` puts `mcp__` before
- * it; `none` starts them with nothing, a tool's own name being all of it.
- */
-export function mcpPrefixAs(server: string, naming: string): string {
-  if (naming === "none") return "";
-  if (naming === "short") return server.replace(/-?mcp$/i, "").replace(/-/g, "_") || "mcp";
-  if (naming === "mcp") return `mcp__${mcpPrefix(server)}`;
-  return mcpPrefix(server);
-}
-
-/**
- * Could a tool of this name be this server's, as the adapter names them? What
- * every place that tells a tool's server by its name goes by, so that none of
- * them gives a tool to a server another would not. In the naming given, the
- * default where none is: one that names a tool by its own name alone could have
- * a tool of any name.
- */
-export function mcpClaims(server: string, name: string, naming = "server"): boolean {
-  const prefix = mcpPrefixAs(server, naming);
-  return !prefix || name.startsWith(`${prefix}_`);
-}
-
-/**
- * Which MCP server a tool came through, if any.
+ * What to file a tool under: its MCP server where it has one, its package otherwise.
  *
- * Everything behind the adapter registers itself as one package, so a machine
- * with three servers attached had one group of forty tools called
- * `pi-mcp-adapter`. Nobody thinks of them that way: they think "the browser
- * one", "the Jira one". The adapter names a tool `<server>_<tool>` (mcpPrefix),
- * so the server is recoverable from the name given the list of configured servers.
- *
- * The longest match wins, or a server called `browser` would claim the tools
- * of one called `browser_staging`.
- *
- * What is returned is the name as configured.
+ * Everything pi's MCP support registers is one extension's, so a machine with three servers attached would have one group
+ * of forty tools. Nobody thinks of them that way: they think "the browser one", "the Jira one". pi names a tool
+ * `mcp__<server>__<tool>` and gives it the namespace `mcp__<server>`, from which the portal's client says which server it is
+ * (SdkPiClient.serverOf); it is remembered with the tool (`server`), so that no name is ever taken apart to find it.
  */
-export function mcpServerOf(name: string, servers: Iterable<string>): string | undefined {
-  let best: string | undefined;
-  let bestLength = -1;
-  for (const server of servers) {
-    if (!mcpClaims(server, name)) continue;
-    const length = mcpPrefix(server).length;
-    if (length > bestLength) {
-      best = server;
-      bestLength = length;
-    }
-  }
-  return best;
-}
-
-
-/** What to file a tool under: its MCP server where it has one, its package otherwise. */
-export function toolSource(name: string, source: string, servers: Iterable<string>): string {
-  return mcpServerOf(name, servers) ?? source;
+export function toolSource(tool: { source: string; server?: string }): string {
+  return tool.server ?? tool.source;
 }
 
 /** What the web app calls the tools that say nothing about where they came from: pi's own among them. */
@@ -108,8 +49,8 @@ export const PI_BUILT_IN_TOOLS = ["read", "bash", "edit", "write", "grep", "find
  * The tool set a tool belongs to: the box the tool lists show it in, which is also what
  * can be made lazy.
  */
-export function toolSetOf(tool: { name: string; source: string }, servers: Iterable<string>): string {
-  return toolSource(tool.name, tool.source, servers).trim() || BUILT_IN_SET;
+export function toolSetOf(tool: { source: string; server?: string }): string {
+  return toolSource(tool).trim() || BUILT_IN_SET;
 }
 
 export interface ToolExceptions {

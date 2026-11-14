@@ -20,7 +20,6 @@ export function ToolGroupList({
   naming,
   beside,
   onMark,
-  markFixed,
 }: {
   tools: PortalTool[];
   /** The names given to groups, which stand in for what installed them. */
@@ -36,7 +35,6 @@ export function ToolGroupList({
   /** Settings only: mark one tool lazy, or direct, or take the mark away (auto). Without it the label is only shown. */
   onMark?: (tool: PortalTool) => void;
   /** A tool whose own mark cannot be changed: an MCP server's, whose setting is the server's. */
-  markFixed?: (tool: PortalTool) => boolean;
 }) {
   const groups = useOpenGroups();
   return (
@@ -97,35 +95,34 @@ export function ToolGroupList({
                     {/* What is listed is what the server had when it last ran, not what it has now. */}
                     {tool.cached && (
                       <span
-                        title={t("Listed from the MCP adapter's cache: the server starts when one of its tools is first used.")}
+                        title={t("Listed from what was kept of the server when it last ran: it starts when one of its tools is first used.")}
                         className="shrink-0 rounded border border-line px-1 text-[10px] text-fg-faint"
                       >
                         {t("cached")}
                       </span>
                     )}
-                    {/* Not in the model's list one by one, but on: it finds the tool through `tool_search`, or an MCP server's through `mcp`. */}
+                    {/* Not in the model's list one by one, but on: it finds the tool through `tool_search`. */}
                     {onMark ? (
                       !tool.noLazy && (
                         <button
                           type="button"
-                          disabled={busy || markFixed?.(tool)}
+                          disabled={busy}
                           aria-label={t("Lazy or direct {name}", { name: tool.name })}
                           onClick={(e) => {
                             // The tool sits in a label whose click flips its switch.
                             e.preventDefault();
                             onMark(tool);
                           }}
-                          // A fixed mark is not the tool's to change: its own title says where it is set.
-                          title={tool.mcp ? t("Set for the whole server, with the lazy button of its group: it is the server's \"Register tools directly\", turned off. A lazy tool is not in the model's list one by one; the model finds and calls it through the `mcp` tool.") : t(MARK_TITLE)}
+                          title={t(MARK_TITLE)}
                           className={`shrink-0 rounded border px-1 text-[10px] disabled:cursor-not-allowed disabled:opacity-60 ${markCls(tool)}`}
                         >
-                          {tool.mcp ? t("lazy") : markName(tool)}
+                          {markName(tool)}
                         </button>
                       )
                     ) : (
                       tool.lazy && (
                         <span
-                          title={tool.mcp ? t("Not in the model's list one by one: it finds and calls this tool through the `mcp` tool.") : t("Not in the model's list one by one: it finds and calls this tool through the `tool_search` tool.")}
+                          title={t("Not in the model's list one by one: it finds and calls this tool through the `tool_search` tool.")}
                           className="shrink-0 rounded border border-line px-1 text-[10px] text-fg-faint"
                         >
                           {t("lazy")}

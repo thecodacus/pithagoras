@@ -89,7 +89,7 @@ const tainted = (options) => {
 
 test("what mail, the web through a command, an MCP server or the browser returned is wrapped, and taints only when it tries to instruct the agent; the agent's own tools, a subagent's and a routine's answer are left as they are", () => {
   const untrusted = [
-    ["mcp", { tool: "x" }], ["mcp__github__get_issue_comments", {}], ["mcp_script", { code: "x" }], ["browser_browser_navigate", { url: "https://x.test" }],
+    ["mcp__github__get_issue_comments", {}], ["browser_browser_navigate", { url: "https://x.test" }],
     ["browser_snapshot", {}],
     ["bash", { command: "curl https://x.test" }], ["bash", { command: "git clone https://x.test/r" }], ["bash", { command: "himalaya envelope list" }],
   ];
@@ -105,7 +105,7 @@ test("what mail, the web through a command, an MCP server or the browser returne
     ["read", { path: "a.md" }], ["write", { path: "a.md" }], ["edit", { path: "a.md" }], ["grep", { pattern: "x" }], ["find", { pattern: "x" }], ["ls", {}],
     ["bash", { command: "ls -la" }], ["bash", { command: "git status" }], ["ask_primary", {}], ["activity_note", {}], ["report", {}],
     ["routines_list", {}], ["routine_create", {}], ["routine_update", {}], ["show_image", {}], ["generate_image", {}], ["edit_image", {}],
-    ["understory_memory_search", { query: "x" }], ["subagent", { task: "x" }], ["routine_run", {}], ["todo", { action: "list" }],
+    ["subagent", { task: "x" }], ["routine_run", {}], ["todo", { action: "list" }],
     ["subagents", { action: "list" }],
     // A name that looks like a server's tool is no server's: only the registry attributes (the namespace pi gives a server's tools).
     ["mcp_page", {}], ["mcp__pages__unregistered", {}],
@@ -205,7 +205,7 @@ test("where the taint rules are off, the same calls run and are recorded as exem
   assert.equal(call(h, "bash", { command: "git push" }), undefined);
   assert.equal(lastAudit().kind, "allowed-by-exemption");
   assert.match(lastAudit().reason, /^publish /);
-  assert.equal(wrapped(read(h, "mcp", { tool: "x" })), true, "the envelope is still put on what was read");
+  assert.equal(wrapped(read(h, "mcp__github__get_issue_comments", {})), true, "the envelope is still put on what was read");
 });
 
 test("a conversation that read a result flagged as a suspected injection before it was reloaded is still tainted, and one that read content from outside is not", () => {
@@ -338,26 +338,17 @@ test("where a browser goes is held to the allowlist, whichever way the call arri
   assert.deepEqual(listAudit(10).filter((row) => row.id > before).map((row) => [row.kind, row.reason]), [["browsed", "https://www.example.com/"]]);
 });
 
-test("the allowlist holds when the MCP proxy gets its arguments as JSON text, and a call it cannot read is refused", () => {
+test("the allowlist holds for a Playwright MCP's own tools by the names pi gives them, and a ref in their arguments is cleaned", () => {
   const on = { allowlist: ["*.example.com"] };
-  const proxy = (args) => call(guardAs(on), "mcp", { tool: "browser_navigate", args });
-  assert.equal(refused(proxy(JSON.stringify({ url: "https://elsewhere.test" }))), true);
-  assert.equal(refused(proxy({ url: "https://elsewhere.test" })), true, "an object, as before");
-  assert.equal(proxy(JSON.stringify({ url: "https://www.example.com/x" })), undefined);
+  const go = (url) => call(guardAs(on), "mcp__playwright__browser_navigate", { url });
+  assert.equal(refused(go("https://elsewhere.test")), true);
+  assert.equal(go("https://www.example.com/x"), undefined);
   assert.equal(lastAudit().reason, "https://www.example.com/x");
-  assert.equal(proxy(""), undefined, "no arguments");
-  for (const broken of ["{not json", "[1]", "\"https://elsewhere.test\"", "null"]) {
-    const result = proxy(broken);
-    assert.equal(refused(result), true, broken);
-    assert.match(result.reason, /not valid JSON/);
-  }
-  // Nothing is lost on the way past: a ref in the text is cleaned and the text stays text.
-  const input = { tool: "browser_click", args: JSON.stringify({ target: "[ref=e12]", element: "OK" }) };
-  assert.equal(call(guardAs(on), "mcp", input), undefined);
-  assert.equal(input.args, JSON.stringify({ target: "e12", element: "OK" }));
-  const same = { tool: "browser_click", args: '{ "element": "OK" }' };
-  call(guardAs(on), "mcp", same);
-  assert.equal(same.args, '{ "element": "OK" }', "text that needed no change is left as it was written");
+  assert.equal(go(undefined), undefined, "no address, nothing to hold");
+  // Nothing is lost on the way past: a ref is cleaned and the rest stays as it was.
+  const input = { target: "[ref=e12]", element: "OK" };
+  assert.equal(call(guardAs(on), "mcp__playwright__browser_click", input), undefined);
+  assert.deepEqual(input, { target: "e12", element: "OK" });
 });
 
 test("a ref is read one way: as a snapshot writes it, decoration and all, by the guard for the Playwright MCP's", () => {
@@ -837,8 +828,8 @@ test("the rule a person is given for a folder reaches no config the agent loads 
     for (const role of ["colleague", "guest"]) {
       const as = guardAs({ role, key: "priya", workspace });
       for (const where of [
-        // The MCP adapter starts what these name, as processes of the portal, in the next chat that opens here.
-        path.join(workspace, ".mcp.json"), path.join(workspace, ".vscode", "mcp.json"), path.join(workspace, "opencode.json"),
+        // pi's MCP support starts what this names, as processes of the portal, in the next chat that opens here.
+        path.join(workspace, ".pi", "mcp.json"),
         // The next agent of a name takes up what a folder under agents/ holds, kept or not made yet.
         path.join(gone.home, "MEMORY.md"), path.join(gone.home, "SOUL.md"), path.join(agentsRoot(), "finance", "SOUL.md"), path.join(agentsRoot(), "finance", "PrimaryUser.md"),
         // A link in a project at what pi loads, to a file that is there and to a folder that is not.
@@ -1065,53 +1056,44 @@ test("a rule that names somebody reaches them whatever their role is now, and no
   assert.equal(ruleApplies(rule({ role: "guest" }), "guest", undefined), true);
 });
 
-// --- a server's tool through the adapter's mcp tool is held to the rules as when it is registered directly ---
+// --- a server's tool is held to the rules by what it is given, whatever way it is called ---
 
-test("a server's tool called through mcp is held to the rules after untrusted content as the same tool called directly, with its arguments as an object or as JSON text", () => {
+test("a server's tool is held to the rules after untrusted content as any tool: by its arguments, called by its name or through tool_search", () => {
   const secrets = { path: "/home/me/.ssh/id_rsa" };
-  const mcp = (args) => ({ tool: "files_read_file", args });
-  // Nothing suspicious read yet: all of them pass.
-  const clean = guardAs();
-  for (const input of [mcp(secrets), mcp(JSON.stringify(secrets))]) assert.equal(call(clean, "mcp", input), undefined);
-  assert.equal(call(clean, "files_read_file", secrets), undefined);
-
+  const tool = "mcp__files__read_file";
+  // Nothing suspicious read yet: it passes.
+  assert.equal(call(guardAs(), tool, secrets), undefined);
   const h = tainted();
-  const direct = call(h, "files_read_file", secrets);
-  assert.equal(refused(direct), true, "called directly it is refused");
+  const direct = call(h, tool, secrets);
+  assert.equal(refused(direct), true, "called by its name it is refused");
   assert.match(direct.reason, /read-credentials/);
-  for (const [what, input] of [["an object", mcp(secrets)], ["JSON text", mcp(JSON.stringify(secrets))], ["a file_path", { tool: "files_read_file", args: { file_path: "~/.netrc" } }]]) {
-    const via = call(h, "mcp", input);
-    assert.equal(refused(via), true, `through mcp, with ${what}`);
-    assert.match(via.reason, /read-credentials/);
-  }
-  // What is not that stays free: another path, no tool named, arguments that are not JSON (the adapter refuses those itself).
-  assert.equal(call(h, "mcp", mcp({ path: "notes/today.md" })), undefined);
-  assert.equal(call(h, "mcp", { tool: "files_read_file" }), undefined);
-  assert.equal(call(h, "mcp", { tool: "files_read_file", args: "not json" }), undefined);
-  assert.equal(call(h, "mcp", { server: "files" }), undefined, "a search or a listing names no tool");
-  // The reason is on the record, as for a direct call.
+  // A call tool_search makes is a call of this tool for the hooks (a `parentToolCallId` says by whom), so the same rule holds.
+  const nested = call(h, tool, { file_path: "~/.netrc" });
+  assert.equal(refused(nested), true);
+  assert.match(nested.reason, /read-credentials/);
+  // What is not that stays free.
+  assert.equal(call(h, tool, { path: "notes/today.md" }), undefined);
   assert.match(lastAudit().reason, /read-credentials/);
 });
 
-test("somebody who is not the primary user has what is kept from them kept through mcp too, even where a rule opens mcp", () => {
+test("somebody who is not the primary user has what is kept from them kept from a server's tool too, even where a rule opens it", () => {
   const id = "mcp-rule-secrets";
-  addToolRule({ id, role: "all", tool: "mcp", pattern: "*", note: "", person_key: null });
+  addToolRule({ id, role: "all", tool: "mcp__files__read_file", pattern: "*", note: "", person_key: null });
   try {
     const h = guardAs({ role: "colleague", key: "priya" });
-    const secrets = call(h, "mcp", { tool: "files_read_file", args: { path: "/home/me/.ssh/id_rsa" } });
+    const secrets = call(h, "mcp__files__read_file", { path: "/home/me/.ssh/id_rsa" });
     assert.equal(refused(secrets), true);
     assert.match(secrets.reason, /secrets/);
     // The rule still opens what is not that.
-    assert.equal(call(h, "mcp", { tool: "files_read_file", args: { path: "notes/today.md" } }), undefined);
+    assert.equal(call(h, "mcp__files__read_file", { path: "notes/today.md" }), undefined);
   } finally {
     deleteToolRule(id);
   }
 });
 
-test("an approval is not asked for through mcp where the conversation's taint or what is kept from a colleague would refuse it anyway", () => {
-  const action = JSON.stringify({ tool: "files_read_file", args: { path: "/home/me/.ssh/id_rsa" } });
-  assert.match(approvalCannotHelp("mcp", action, undefined) ?? "", /secrets/);
-  assert.equal(approvalCannotHelp("mcp", JSON.stringify({ tool: "files_read_file", args: { path: "notes/today.md" } }), undefined), undefined);
+test("an approval is not asked for a server's tool where the conversation's taint or what is kept from a colleague would refuse it anyway", () => {
+  assert.match(approvalCannotHelp("mcp__files__read_file", JSON.stringify({ path: "/home/me/.ssh/id_rsa" }), undefined) ?? "", /secrets/);
+  assert.equal(approvalCannotHelp("mcp__files__read_file", JSON.stringify({ path: "notes/today.md" }), undefined), undefined);
 });
 
 test("a flagged result that came back through the tool_search tool (here by its old name, tools) holds the conversation like any other, then and after a reload, until it is trusted", () => {

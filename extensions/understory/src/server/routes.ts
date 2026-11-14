@@ -55,7 +55,7 @@ async function understoryState() {
   const url = typeof server?.entry.url === "string" && server.entry.url ? server.entry.url : understoryDefaultUrl();
   const [reached, runtime] = await Promise.all([reachable(url), service.status()]);
   return {
-    // As the chats see it: on only with the adapter its tools come through.
+    // As the chats see it: there, and not switched off.
     enabled: server?.on === true,
     url,
     tokenSet: Boolean(understoryTokenOf(server?.entry) ?? process.env[UNDERSTORY_TOKEN_ENV]),
@@ -87,19 +87,25 @@ async function understoryState() {
 async function switchUnderstory(enabled: boolean, url?: string): Promise<{ reloaded: number; waiting: number }> {
   const { mcp } = portal();
   if (!enabled) return mcp.set(UNDERSTORY, undefined);
-  // Kept: whatever else somebody put in the entry by hand, except how it signs in, which is said anew.
-  const { disabled: _off, auth: _a, bearerToken: _t, bearerTokenEnv: _e, ...had } = mcp.get(UNDERSTORY)?.entry ?? {};
+  // Kept: whatever else somebody put in the entry by hand, except how it signs in (the Authorization header), which is said anew.
+  // The keys of the old adapter are not kept either: the entry is pi's now, and the sign-in is said in a header.
+  const { disabled: _old, enabled: _on, headers: hadHeaders, auth: _a, bearerToken: _t, bearerTokenEnv: _e, lifecycle: _l, directTools: _d, ...had } = mcp.get(UNDERSTORY)?.entry ?? {};
+  const { Authorization: _auth, ...otherHeaders } = (hadHeaders && typeof hadHeaders === "object" ? hadHeaders : {}) as Record<string, string>;
+  const entry = (made: Record<string, unknown>) => ({
+    ...had,
+    ...made,
+    ...(Object.keys(otherHeaders).length || made.headers ? { headers: { ...otherHeaders, ...(made.headers as Record<string, string> | undefined) } } : {}),
+  });
   // An address given is the one meant; without one, the portal's own Understory where it runs one.
   return mcp.set(
     UNDERSTORY,
     url === undefined && (await service.installed())
-      ? { ...had, ...understoryEntry(service.managedUrl(), { token: await service.heldToken() }) }
-      : {
-          ...had,
-          ...understoryEntry(url ?? (typeof had.url === "string" && had.url ? had.url : understoryDefaultUrl()), {
+      ? entry(understoryEntry(service.managedUrl(), { token: await service.heldToken() }))
+      : entry(
+          understoryEntry(url ?? (typeof had.url === "string" && had.url ? had.url : understoryDefaultUrl()), {
             ...(process.env[UNDERSTORY_TOKEN_ENV] ? { tokenEnv: UNDERSTORY_TOKEN_ENV } : {}),
           }),
-        },
+        ),
     { trusted: true },
   );
 }

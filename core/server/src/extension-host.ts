@@ -9,7 +9,7 @@ import semver from "semver";
 import express, { type NextFunction, type Request, type RequestHandler, type Response, type Router } from "express";
 import { agentOf, defaultAgent, listAgents } from "./agents.js";
 import { dataDirOf } from "./extension-data.js";
-import { childSessions, getSession, getSetting, listSessions, putSetting, recordAudit, sessionsByWorkspace, setServerHalfOffers, setServerHalvesAsked, setTrustedMcpServers, toolExceptions, trustedMcpServers, untrustMcpServer, type SessionRow } from "./db.js";
+import { childSessions, getSession, getSetting, listSessions, putSetting, recordAudit, sessionsByWorkspace, setMcpApprove, setServerHalfOffers, setServerHalvesAsked, setToolMarks, setTrustedMcpServers, toolExceptions, toolMarks, trustedMcpServers, untrustMcpServer, type SessionRow } from "./db.js";
 import { EXECUTOR_KIND } from "./executor-kind.js";
 import { takes, type ServerHalf } from "./extension-ui.js";
 import { moduleAt } from "./half-modules.js";
@@ -689,14 +689,31 @@ function portalFor(ext: Running): ServerPortal {
       // The portal's own work, which it asks for: not its code (see scope).
       set: (server, entry, options = {}) =>
         scope.exit(async () => {
-          // Imported when first asked: it installs packages through what starts and stops these halves, which imports this module.
           const { setMcpServer } = await import("./mcp-entry.js");
-          await setMcpServer(server, entry);
+          const written = await setMcpServer(server, entry);
           // Counted as the person's own on the extension's word, and no longer once the server is gone: Settings → Guard
           // lists only the servers there are, so a name left trusted could not be taken out, and would trust whatever
           // server is given that name next.
-          if (entry === undefined) untrustMcpServer(server);
-          else if (options.trusted === true) setTrustedMcpServers([...trustedMcpServers(), server]);
+          if (entry === undefined) {
+            untrustMcpServer(server);
+            setMcpApprove(server, undefined);
+            // Its mark goes with it, so that a server given that name later is not marked unasked.
+            const marks = toolMarks();
+            if (marks[server]) {
+              delete marks[server];
+              setToolMarks(marks);
+            }
+          } else {
+            if (options.trusted === true) setTrustedMcpServers([...trustedMcpServers(), server]);
+            // The tools that ask for a confirmation: what the entry said in the old way, and what the call says.
+            const approve = [...written.approve, ...(Array.isArray(options.approve) ? options.approve.filter((glob): glob is string => typeof glob === "string") : [])];
+            if (approve.length || options.approve !== undefined) setMcpApprove(server, approve);
+            // What the extension says of how the model is offered the server's tools is where the person's own mark starts, and no further:
+            // a mark the person set is theirs.
+            const marks = toolMarks();
+            const exposure = (written.entry as { exposure?: unknown } | undefined)?.exposure;
+            if (!marks[server] && (exposure === "direct" || exposure === "deferred")) setToolMarks({ ...marks, [server]: exposure === "direct" ? "direct" : "lazy" });
+          }
           return reloadChats();
         }),
     },
