@@ -1,5 +1,5 @@
-import { lazySetLabels, resolvedLazy, sizedTools, toolMarks } from "./db.js";
-import { headLazy, type LazyHead } from "./tool-lazy.js";
+import { knownTools, lazySetLabels, resolvedLazy, sizedTools, toolMarks } from "./db.js";
+import { headLazy, ruleTag, type LazyHead } from "./tool-lazy.js";
 import { TOOL_SEARCH } from "./pi/tool-search-names.js";
 
 /** How many groups the hint names, and how many of a group's tools: it is in the system prompt of every request of the chat. */
@@ -36,6 +36,13 @@ export function buildLazyHead(pinned: readonly string[] = [], off: ReadonlySet<s
   const head = { lazy: [...lazy].sort(), direct: [...direct].sort() };
   // The tools that are lazy in it and may be: judged as the marks do (lazyAllowed), so that a mark on a set whose tools cannot be lazy names none.
   const names = tools.filter((tool) => tool.allowed && headLazy(head, tool) && !off.has(tool.name)).map((tool) => tool.name);
-  if (!names.length) return { v: 1, lazy: [], direct: head.direct, hint: "", outside: false, voice: [] };
-  return { v: 1, ...head, hint: lazyHintOf(lazySetLabels(names)), outside: false, voice: [] };
+  if (!names.length) return { v: 1, lazy: [], direct: head.direct, hint: "", outside: false, voice: [], tag: ruleTag() };
+  // What the lazy tools say of themselves that stays in the head (decision 13): the line that outside content is data, and
+  // their lines for a spoken turn. From what they said when a chat last registered them, so that it is said from the first
+  // request and a lazy tool that registers late adds nothing to the prompt. One no chat has registered yet adds its own
+  // when it does (see keepHead in pi/sdk-client.ts): the one change of the head left, and only for a tool new to the portal.
+  const said = new Map(knownTools().map((tool) => [tool.name, tool]));
+  const lazyTools = names.map((name) => said.get(name));
+  const voice = [...new Set(lazyTools.flatMap((tool) => tool?.voice ?? []))];
+  return { v: 1, ...head, hint: lazyHintOf(lazySetLabels(names)), outside: lazyTools.some((tool) => tool?.outside === true), voice, tag: ruleTag() };
 }

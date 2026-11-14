@@ -1,3 +1,5 @@
+import { randomBytes } from "node:crypto";
+
 /**
  * Which tools are lazy: not in the list the model is offered, found and called through `tool_search` instead.
  *
@@ -54,7 +56,7 @@ export const toolEntry = (name: string): string => `<tool>${name}`;
 export interface Resolution {
   /** The sets it made lazy. */
   lazy: string[];
-  /** The list is over a limit even with every group it may take out taken out: nothing is made lazy by size then, and the page says so. */
+  /** The list is over a limit even with every group it may take out taken out (those are lazy all the same), and the page says so. */
   over: boolean;
 }
 
@@ -125,10 +127,10 @@ export function resolveThreshold(tools: readonly SizedTool[], marks: Marks, limi
     tokens -= next.tokens;
     count -= next.count;
   }
-  // With every group it may take out taken out, the list is still over: that is not for the threshold to fix, and a model that
-  // has to search for tools it could have had in its list is no gain. Nothing is made lazy by size, and the page says so.
-  if (!within(tokens, count, 1)) return { lazy: [], over: true };
-  return { lazy: [...lazy.keys()].sort(), over: false };
+  // With every group it may take out taken out, the list can still be over, from what it may not take (pi's own tools, the
+  // portal's small ones, what is marked direct). The groups stay out all the same: each one out is a list that is shorter
+  // by its size, and one that went lazy before does not come back unannounced because something else grew. The page says so.
+  return { lazy: [...lazy.keys()].sort(), over: !within(tokens, count, 1) };
 }
 
 /** The tokens a tool's declaration costs, where it was not measured: its text and an average schema, at four characters to a token. */
@@ -166,7 +168,17 @@ export interface LazyHead {
   outside: boolean;
   /** What the lazy tools ask to be told in a spoken turn. */
   voice: string[];
+  /**
+   * What the rule lines of `tool_search`'s results start with after "Rule", and the head's one sentence about them names
+   * (see ruleLinesNote in pi/tool-search.ts): random, and made with the head, so that no page, file or server a tool reads
+   * can write a line the model takes for one of the tools' rules. Frozen with the rest, so it costs no cache. Empty in a head
+   * stored before it had one, which lazyHeadFor gives one as it reads it.
+   */
+  tag: string;
 }
+
+/** A tag for a new head: see LazyHead.tag. */
+export const ruleTag = (): string => randomBytes(4).toString("hex");
 
 /** A stored head, or nothing where there is none or it is not one this version wrote. */
 export function parseHead(raw: unknown): LazyHead | undefined {
@@ -175,14 +187,14 @@ export function parseHead(raw: unknown): LazyHead | undefined {
     const head = JSON.parse(raw);
     const strings = (v: unknown): v is string[] => Array.isArray(v) && v.every((s) => typeof s === "string");
     if (head?.v !== 1 || !strings(head.lazy) || !strings(head.direct) || typeof head.hint !== "string" || typeof head.outside !== "boolean" || !strings(head.voice)) return undefined;
-    return { v: 1, lazy: head.lazy, direct: head.direct, hint: head.hint, outside: head.outside, voice: head.voice };
+    return { v: 1, lazy: head.lazy, direct: head.direct, hint: head.hint, outside: head.outside, voice: head.voice, tag: typeof head.tag === "string" && /^[0-9a-f]{8}$/.test(head.tag) ? head.tag : "" };
   } catch {
     return undefined;
   }
 }
 
 /** A head of a chat with nothing lazy. */
-export const NO_LAZY: LazyHead = { v: 1, lazy: [], direct: [], hint: "", outside: false, voice: [] };
+export const NO_LAZY: LazyHead = { v: 1, lazy: [], direct: [], hint: "", outside: false, voice: [], tag: "" };
 
 /**
  * Whether a tool is lazy in a chat with this head: its own entry decides first, then its set's. A tool a head does not

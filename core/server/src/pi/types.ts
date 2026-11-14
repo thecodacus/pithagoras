@@ -48,13 +48,17 @@ export interface PiTool {
   approvalFiles?: string[];
   /** What its declaration costs the model's list, in tokens: what the threshold of the lazy tools adds up. */
   tokens?: number;
+  /** Declares that it returns outside content (`guard.outside`), for the head of a chat it is lazy in (see LazyHead). */
+  outside?: true;
+  /** What it asks to be told in a spoken turn (`voiceGuidelines`), for the head of a chat it is lazy in. */
+  voice?: string[];
   /** False when this conversation has it switched off. */
   enabled: boolean;
   /** Whether it is on by default, so the page can say where a chat disagrees. */
   defaultOn?: boolean;
   /** The code tool, on in a chat whose mode switches it on: the chat's own switch cannot turn it off (see setTools). */
   byMode?: true;
-  /** Not offered one by one but found through the `tools` tool: a tool marked lazy. It is on, and switched like any other. */
+  /** Not offered one by one but found through the `tool_search` tool: a tool marked lazy. It is on, and switched like any other. */
   lazy?: true;
 }
 

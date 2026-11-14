@@ -38,6 +38,8 @@ export interface ChatModeEntry {
   thinkingLevel?: string;
   /** Sent with every request of its chats to the model (a mode the person made). */
   params?: ModeParams;
+  /** The sets and single tools (`<tool>name`) its chats keep in the model's list whatever the threshold says (an extension's: see modeDirect). */
+  keepDirect?: string[];
 }
 
 /** What a chat is when it says nothing about its mode. Stored as NULL. */
@@ -63,7 +65,7 @@ const provided: ChatModeEntry[] = [];
  * `extension` offers `mode` (see portal.modes.provide): a chat in it stores "<extension>/<id>". Returns what takes it
  * away again. Throws for an id the package offers already.
  */
-export function provideMode(extension: string, mode: { id: string; label: string; description: string; confirm?: string }): () => void {
+export function provideMode(extension: string, mode: { id: string; label: string; description: string; confirm?: string; keepDirect?: string[] }): () => void {
   const entry: ChatModeEntry = { ...mode, id: `${extension}/${mode.id}`, extension };
   if (provided.some((one) => one.id === entry.id)) throw new TypeError(`${extension} offers the mode "${mode.id}" already`);
   provided.push(entry);

@@ -1224,7 +1224,9 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     const prepare = agent?.prepareNextTurnWithContext;
     if (!rule || !loader || typeof prepare !== "function") return;
     agent.prepareNextTurnWithContext = async (turn: unknown, signal: unknown) => {
-      if (this.reloadDue && this.canReloadNow?.()) {
+      // Not for a head the person asked to read again: that changes what the model is sent first, which a run that goes on
+      // keeps (see useHead); the reload waits for the run to be over.
+      if (this.reloadDue && !this.nextHead && this.canReloadNow?.()) {
         try {
           await this.reload();
         } catch (e) {
@@ -1489,8 +1491,12 @@ export class SdkPiClient extends EventEmitter implements PiClient {
   keepHead(head: LazyHead): void {
     this.head = head;
     this.search?.setHead(head);
+    // A head to read again is what is stored already, and what the chat has after its reload: what was said now goes into it,
+    // or the store would be given the old head back.
+    const next = this.nextHead;
+    if (next) this.nextHead = { ...next, outside: next.outside || head.outside, voice: [...new Set([...next.voice, ...head.voice])] };
     try {
-      this.rememberLazy?.(head);
+      this.rememberLazy?.(this.nextHead ?? head);
     } catch (e) {
       console.error(`[portal] could not keep what the lazy tools said: ${(e as Error).message}`);
     }
@@ -1749,8 +1755,20 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       ...(this.offByDefault(String(tool.name)) ? { offByDefault: true as const } : {}),
       tokens: this.declarationTokens(String(tool.name), tool),
       ...((files) => (files ? { approvalFiles: [...files] } : {}))(declaredFiles(this.session.getToolDefinition(String(tool.name)))),
+      ...this.saysOfItself(String(tool.name)),
       enabled: !this.switchedOff.has(String(tool.name)),
     }));
+  }
+
+  /**
+   * What a tool says of itself that a chat it is lazy in keeps in its head from the start: that it returns outside content,
+   * and the lines for a spoken turn. Remembered with the tool, so that the head of the next chat is made with them, and a
+   * lazy tool that registers late changes nothing in the prompt (see buildLazyHead).
+   */
+  private saysOfItself(name: string): { outside?: true; voice?: string[] } {
+    const definition = this.session.getToolDefinition(name) as { voiceGuidelines?: unknown } | undefined;
+    const voice = Array.isArray(definition?.voiceGuidelines) ? definition.voiceGuidelines.filter((line: unknown): line is string => typeof line === "string" && line.trim() !== "") : [];
+    return { ...(declaredGuard(definition)?.outside ? { outside: true as const } : {}), ...(voice.length ? { voice } : {}) };
   }
 
   /**

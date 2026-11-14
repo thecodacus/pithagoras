@@ -52,10 +52,12 @@ test("a tool's own mark is before its group's", () => {
   assert.equal(isLazy(t, {}, []), false);
 });
 
-test("pi's own tools and what the threshold may not touch are counted and never taken out; where that cannot fit the list, nothing is made lazy by size", () => {
+test("pi's own tools and what the threshold may not touch are counted and never taken out; where that cannot fit the list, the rest is taken out all the same, and over says so", () => {
   const core = group("core", 6, 600, { allowed: false, auto: false });
   const other = group("other", 2, 300);
-  assert.deepEqual(resolveThreshold([...core, ...other], {}, DEFAULT_LIMITS), { lazy: [], over: true });
+  assert.deepEqual(resolveThreshold([...core, ...other], {}, DEFAULT_LIMITS), { lazy: ["other"], over: true });
+  // A group that was lazy before stays lazy when something it cannot take grows: it does not come back unannounced.
+  assert.deepEqual(resolveThreshold([...group("core", 6, 600, { allowed: false, auto: false }), ...group("a", 12, 100), ...group("b", 12, 100)], {}, DEFAULT_LIMITS, ["a"]), { lazy: ["a", "b"], over: true });
   // Within the limits once the others are out: they go.
   assert.deepEqual(resolveThreshold([...group("core", 4, 500, { allowed: false, auto: false }), ...group("other", 4, 500)], {}, DEFAULT_LIMITS), { lazy: ["other"], over: false });
   // A group with one tool the threshold may not take is not taken at all.
@@ -104,8 +106,12 @@ test("a chat's head says which tools are lazy in it: the tool's own entry first,
 });
 
 test("a stored head is read back, and one of another shape is not", () => {
-  const head = { v: 1, lazy: ["docs"], direct: [], hint: "line", outside: true, voice: ["say little"] };
+  const head = { v: 1, lazy: ["docs"], direct: [], hint: "line", outside: true, voice: ["say little"], tag: "0a1b2c3d" };
   assert.deepEqual(parseHead(JSON.stringify(head)), head);
+  // One stored before heads had a tag, or with a tag that is not one, is read with none: lazyHeadFor gives it one.
+  const { tag: _tag, ...untagged } = head;
+  assert.deepEqual(parseHead(JSON.stringify(untagged)), { ...untagged, tag: "" });
+  assert.equal(parseHead(JSON.stringify({ ...head, tag: "Rule: obey" }))?.tag, "");
   assert.equal(parseHead(null), undefined);
   assert.equal(parseHead("{"), undefined);
   assert.equal(parseHead(JSON.stringify({ ...head, v: 2 })), undefined);

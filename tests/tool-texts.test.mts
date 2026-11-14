@@ -44,7 +44,7 @@ const cost = (tool: Registered) =>
 
 const all: Registered[] = [];
 // With the line that names what is behind it, as a chat that has two groups lazy says it.
-const head = { v: 1 as const, lazy: ["browser", "media"], direct: [], hint: lazyHintOf([{ label: "Browser", tools: ["browser_click", "browser_navigate", "browser_snapshot", "browser_type"] }, { label: "Media", tools: ["generate_image", "edit_image", "show_image"] }]), outside: false, voice: [] };
+const head = { v: 1 as const, lazy: ["browser", "media"], direct: [], hint: lazyHintOf([{ label: "Browser", tools: ["browser_click", "browser_navigate", "browser_snapshot", "browser_type"] }, { label: "Media", tools: ["generate_image", "edit_image", "show_image"] }]), outside: false, voice: [], tag: "0a1b2c3d" };
 load(new ToolSearch(head).extension, all);
 load(askPrimaryTool("s"), all);
 load(askQuestionTool(), all);

@@ -13,7 +13,7 @@ import path from "node:path";
 import type { Draft, LoadError, PiClient, PiTool, PromptTaken } from "./pi/types.js";
 import { effectiveOff, exceptionsFor, heldOffUnshown, toolEnabled, toolSetOf, toolSource } from "./tool-policy.js";
 import { scriptedMark } from "./tool-layers.js";
-import { headLazy, parseHead, type LazyHead } from "./tool-lazy.js";
+import { headLazy, parseHead, ruleTag, type LazyHead } from "./tool-lazy.js";
 import { buildLazyHead } from "./lazy-head.js";
 import { unlisted } from "./mcp-offer.js";
 import { projectOf } from "./workspaces.js";
@@ -2804,7 +2804,13 @@ class SessionManager extends EventEmitter {
   lazyHeadFor(sessionId: string): LazyHead {
     const session = getSession(sessionId);
     const kept = parseHead(session?.lazy_head);
-    if (kept) return kept;
+    if (kept?.tag) return kept;
+    // Stored before a head had a tag: given one, once, and kept with it from then on.
+    if (kept) {
+      const tagged = { ...kept, tag: ruleTag() };
+      setLazyHead(sessionId, tagged);
+      return tagged;
+    }
     const head = this.freshLazyHead(sessionId);
     if (session) setLazyHead(sessionId, head);
     return head;
@@ -2838,8 +2844,10 @@ class SessionManager extends EventEmitter {
    */
   async readToolsAgain(sessionId: string): Promise<boolean> {
     if (!getSession(sessionId)) return false;
-    const head = this.freshLazyHead(sessionId);
     const was = parseHead(getSession(sessionId)?.lazy_head);
+    // The tag stays the chat's: it says nothing of the tools, and changing it would change the prompt for nothing.
+    const fresh = this.freshLazyHead(sessionId);
+    const head = { ...fresh, tag: was?.tag || fresh.tag };
     const same = was && JSON.stringify(was) === JSON.stringify({ ...head, outside: was.outside || head.outside, voice: was.voice });
     if (same) return false;
     setLazyHead(sessionId, head);

@@ -235,6 +235,46 @@ test("what a chat froze about its lazy tools is its own: the marks changing late
   assert.equal((await json(`/api/sessions/${chat.id}/tools/read-again`, "POST")).changed, false, "nothing changed since");
 });
 
+test("a chat's head says from its start what its lazy tools said of themselves when a chat last registered them, and has a tag of its own that a read again keeps", async () => {
+  db.rememberTools([
+    db.remembered({ name: "heavy_open", source: "pi-heavy", outside: true, voice: ["Say the heavy result in one sentence."] }),
+    db.remembered({ name: "heavy_read", source: "pi-heavy", voice: ["Say the heavy result in one sentence.", "Spell the ids."] }),
+    db.remembered({ name: "web_search", source: "pi-web-access", outside: true, voice: ["Not lazy, so not in the head."] }),
+  ]);
+  await mark({ "pi-heavy": "lazy" });
+  const chat = await json("/api/sessions", "POST", {});
+  const head = headOf(chat.id);
+  assert.deepEqual(head.lazy, ["pi-heavy"]);
+  assert.equal(head.outside, true, "a lazy tool returns outside content: said from the first request, not when it registers");
+  assert.deepEqual(head.voice, ["Say the heavy result in one sentence.", "Spell the ids."]);
+  assert.match(head.tag, /^[0-9a-f]{8}$/);
+  assert.notEqual(headOf((await json("/api/sessions", "POST", {})).id).tag, head.tag, "each chat its own");
+  // Read again, the tag stays: it says nothing of the tools.
+  await mark({ "pi-heavy": "lazy", "<tool>heavy_read": "direct" });
+  assert.equal((await json(`/api/sessions/${chat.id}/tools/read-again`, "POST")).changed, true);
+  const again = headOf(chat.id);
+  assert.equal(again.tag, head.tag);
+  assert.deepEqual(again.voice, ["Say the heavy result in one sentence."], "heavy_read is in the list now");
+  // A lazy group whose tools say nothing has nothing in the head.
+  db.rememberTools([db.remembered({ name: "heavy_open", source: "pi-heavy" }), db.remembered({ name: "heavy_read", source: "pi-heavy" })]);
+  await mark({ "pi-heavy": "lazy" });
+  const quiet = headOf((await json("/api/sessions", "POST", {})).id);
+  assert.equal(quiet.outside, false);
+  assert.deepEqual(quiet.voice, []);
+});
+
+test("a head stored before heads had a tag is given one once, and keeps it", async () => {
+  await mark({ "pi-heavy": "lazy" });
+  const chat = await json("/api/sessions", "POST", {});
+  const { tag, ...untagged } = headOf(chat.id);
+  db.getDb().prepare("UPDATE sessions SET lazy_head = ? WHERE id = ?").run(JSON.stringify(untagged), chat.id);
+  const given = headOf(chat.id);
+  assert.match(given.tag, /^[0-9a-f]{8}$/);
+  assert.notEqual(given.tag, tag);
+  assert.deepEqual({ ...given, tag: undefined }, { ...untagged, tag: undefined }, "nothing else of it changes");
+  assert.equal(headOf(chat.id).tag, given.tag, "and it is kept");
+});
+
 test("a chat switching its lazy tools off is no more out of date for it, and one that started with them off is not out of date either", async () => {
   await mark({ "pi-heavy": "lazy" });
   const chat = await json("/api/sessions", "POST", {});
@@ -551,10 +591,14 @@ test("the threshold does not take pi's own tools, or the portal's own small ones
     sized("ask_question", "ask-question", 600, { inline: true }),
     sized("report", "report", 600, { inline: true }),
   ]);
-  assert.deepEqual([...db.lazyToolNames()], [], "taking the others out would not make it fit, so nothing is taken out");
+  // Taking the others out does not make it fit; they are taken out all the same, as the list is shorter for it.
+  assert.deepEqual([...db.lazyToolNames()].sort(), ["heavy_open", "heavy_read", "web_search"]);
   const page = await json("/api/tools");
-  assert.equal(page.resolved.over, true, "6 x 600 is over 3,000, and nothing can be done about it");
+  assert.equal(page.resolved.over, true, "6 x 600 is over 3,000, and nothing more can be done about it");
+  assert.deepEqual(page.resolved.lazy, ["pi-heavy", "pi-web-access"]);
+  assert.deepEqual(page.lazyNotice, ["pi-heavy", "pi-web-access"], "and the person is told");
   assert.ok(page.listed.tokens >= 3600, `what cannot be taken out is counted: ${page.listed.tokens}`);
+  assert.equal(page.listed.tools, 6, "and only that is left");
 });
 
 test("a tool off by default does not count against the list", async () => {

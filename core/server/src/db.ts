@@ -3450,12 +3450,14 @@ export function lazySetLabels(names: Iterable<string>): { label: string; tools: 
 }
 
 /**
- * What a mode of the person's, or an agent, keeps in the model's list whatever the marks and the threshold say, so that
- * the group a mode exists for is not hidden by being the largest: sets, and single tools as `<tool>name`.
+ * What a mode keeps in the model's list whatever the marks and the threshold say, so that the group a mode exists for is
+ * not hidden by being the largest: sets, and single tools as `<tool>name`. A mode of the person's says it on its tools
+ * page, an extension's as it offers the mode (`keepDirect` of portal.modes.provide), and an agent on its own (agentDirect).
  */
 export function modeDirect(id: string | null | undefined): string[] {
-  const mode = id?.startsWith(CUSTOM) ? customMode(id.slice(CUSTOM.length)) : undefined;
-  return parseToolsOff(mode?.keep_direct);
+  if (!id) return [];
+  if (id.startsWith(CUSTOM)) return parseToolsOff(customMode(id.slice(CUSTOM.length))?.keep_direct);
+  return [...(providedModes().find((mode) => mode.id === id)?.keepDirect ?? [])];
 }
 
 export function agentDirect(agent: string | null | undefined): string[] {
@@ -3508,6 +3510,10 @@ export interface KnownTool {
   approvalFiles?: string[];
   /** What its declaration (name, description, parameters, snippet) costs the model's list, in tokens: what the threshold adds up. */
   tokens?: number;
+  /** Declares that it returns outside content (`guard.outside`): a chat in which it is lazy says the line about that from its start. */
+  outside?: true;
+  /** What it asks to be told in a spoken turn (`voiceGuidelines`): kept in the head of a chat in which it is lazy, from its start. */
+  voice?: string[];
 }
 
 /** The parameters that hold the files a tool is approved for, as it last declared them: see declaredFiles in guard.ts. */
@@ -3516,7 +3522,7 @@ export function approvalFilesOf(toolName: string): string[] | undefined {
 }
 
 /** A tool a session reported, as it is remembered. */
-export const remembered = (t: { name: string; source: string; description?: string; package?: string; inline?: true; scriptsOnly?: true; offByDefault?: true; approvalFiles?: string[]; tokens?: number }): KnownTool => ({
+export const remembered = (t: { name: string; source: string; description?: string; package?: string; inline?: true; scriptsOnly?: true; offByDefault?: true; approvalFiles?: string[]; tokens?: number; outside?: true; voice?: string[] }): KnownTool => ({
   name: t.name,
   source: t.source,
   description: t.description,
@@ -3526,6 +3532,8 @@ export const remembered = (t: { name: string; source: string; description?: stri
   ...(t.offByDefault ? { offByDefault: true } : {}),
   ...(t.approvalFiles?.length ? { approvalFiles: t.approvalFiles } : {}),
   ...(typeof t.tokens === "number" ? { tokens: t.tokens } : {}),
+  ...(t.outside ? { outside: true } : {}),
+  ...(t.voice?.length ? { voice: t.voice } : {}),
 });
 
 /**
@@ -3584,6 +3592,8 @@ export function knownTools(): KnownTool[] {
         ...(t.scriptsOnly === true ? { scriptsOnly: true } : {}),
         ...(Array.isArray(t.approvalFiles) && t.approvalFiles.length && t.approvalFiles.every((n: unknown) => typeof n === "string") ? { approvalFiles: t.approvalFiles as string[] } : {}),
         ...(typeof t.tokens === "number" && t.tokens >= 0 ? { tokens: t.tokens } : {}),
+        ...(t.outside === true ? { outside: true } : {}),
+        ...(Array.isArray(t.voice) && t.voice.length && t.voice.every((line: unknown) => typeof line === "string") ? { voice: t.voice as string[] } : {}),
       }));
   } catch {
     return [];
@@ -4071,6 +4081,9 @@ export function rememberTools(reported: KnownTool[]): string[] {
       ...(tool.approvalFiles?.length ? { approvalFiles: tool.approvalFiles } : {}),
       // As the latest report measured it; a report that did not keeps what was measured.
       ...((tool.tokens ?? before?.tokens) !== undefined ? { tokens: tool.tokens ?? before?.tokens } : {}),
+      // As its latest report says, as the files are: what a tool stopped declaring is no longer said for it.
+      ...(tool.outside ? { outside: true } : {}),
+      ...(tool.voice?.length ? { voice: tool.voice } : {}),
     });
   }
   const sorted = [...merged.values()].sort((a, b) => a.name.localeCompare(b.name));
