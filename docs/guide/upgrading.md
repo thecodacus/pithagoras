@@ -206,6 +206,25 @@ back is still wrapped, by their package. A pi package of yours that hands back a
 words under such a name (another MCP bridge, say) is now trusted as the extension it is, so its tools have to say so:
 `guard: { outside: true }` on their definition ([What the guard holds a tool to](/guide/extension-ui#what-the-guard-holds-a-tool-to)).
 
+## MCP servers run on pi's own MCP support
+
+The portal no longer needs `pi-mcp-adapter`: pi has MCP support of its own, and the portal's chats use it. It
+reads the same file, `mcp.json` in pi's agent folder, in pi's own shape (`exposure`, `toolExposure`, `enabled`,
+`headers`, `env`; the adapter's `lifecycle`, `directTools`, `includeTools`, `excludeTools`, `approveTools` and
+bearer keys are not pi's). A server's tools are named `mcp__<server>__<tool>` and not `<server>_<tool>`, and
+anything stored by the old names (switches, marks, approvals) has to be moved to the new ones. The adapter is left
+out of every chat, whoever lists it, so the two never both connect a server.
+
+An MCP server is a group of tools like any other: it has the three marks and counts for the threshold, by the size
+of its tools as the portal remembers them from when it last ran. A lazy server is not started with a chat, only
+when the model first searches for or calls one of its tools, and is stopped again after ten minutes without use.
+What changes for a server you had without the adapter's "Register tools directly": it is lazy as before, found
+through `tool_search` and no longer through `mcp`. See [MCP servers](/guide/mcp).
+
+The adapter's `mcp.json` keys that pi has no word for are not carried over by the portal's forms. A server with
+`disabled: true` is still off. Servers whose configuration a project brought in its own `.mcp.json`,
+`.vscode/mcp.json` or `opencode.json` are no longer read: pi reads only `.pi/mcp.json` of a project it trusts.
+
 ## The password moves into the database
 
 A portal used to take its password from `PORTAL_PASSWORD`. It now keeps it, hashed, in its database, chosen in the browser and changed under Settings → Authentication (see [The password](/guide/deploying#the-password)). What the first start after the upgrade does:
@@ -1384,8 +1403,7 @@ no server. Those of a dotted server removed before the upgrade stay listed under
 The portal's pi, and the `pi` in the image, move from 0.82 to 1.1. The
 extensions and packages you installed stay at their versions; one written for an
 older pi may need an update of its own, as pi 1.0 changed parts of its extension
-and provider interfaces. `pi-mcp-adapter` 2.18.0, which the portal installs,
-works as before. pi now reads `AGENTS.override.md` before `AGENTS.md` in a
+and provider interfaces. pi now reads `AGENTS.override.md` before `AGENTS.md` in a
 folder. If you use Azure, its provider is renamed from `azure-openai-responses`
 to `azure`: rename it in pi's `auth.json`, `models.json` and `settings.json`, or
 sign in again. A portal run from a checkout needs Node 22.19 or later.

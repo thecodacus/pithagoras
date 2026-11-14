@@ -105,8 +105,8 @@ checked. Choose before the first message: from then on the chat keeps it.
   them. Every tool that is on in the chat is in a script's reach. Lazy marks do
   not apply here, since nothing is offered one by one anyway: a script finds the
   tools that do not fit in the description with `searchTools`, and the `tool_search`
-  tool is not offered. An MCP server whose tools are not registered one by one
-  stays behind the adapter's `mcp` tool, which a script calls like any other.
+  tool is not offered. Every MCP server is connected with such a chat, and a
+  script calls its tools like any other.
   A script has no time limit; **Stop** ends it. The
   [guard](/guide/security#marking-untrusted-output) holds each call a script
   makes as it holds the model's own. In the chat's tools, `codemode` is on and

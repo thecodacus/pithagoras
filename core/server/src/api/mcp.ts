@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import express, { type Router } from "express";
 import { writeFileAtomic } from "../atomic-write.js";
-import { SERVER_NAME_RE, clashes, commandValues, entryProblem, mcpNamespace } from "../mcp-config.js";
+import { SERVER_NAME_RE, clashes, commandValues, entryProblem, mcpNamespace, withExposure } from "../mcp-config.js";
 import { piAgentDir } from "../pi-settings.js";
 import { BROWSER_MCP } from "../tool-policy.js";
 
@@ -356,7 +356,7 @@ export function mcpRouter(): Router {
     }
     // A rename removes the old name, and its tools are not the new one's (see writeMcpText).
     if (from && from !== name) delete config.mcpServers[from];
-    config.mcpServers[name] = req.body.entry;
+    config.mcpServers[name] = withExposure(req.body.entry);
     try {
       writeMcpFile(config);
       res.json({ ok: true, commands: commandValues(req.body.entry) });
@@ -421,7 +421,7 @@ export function mcpRouter(): Router {
         skipped.push({ name, reason: `A server called ${name} already exists` });
         continue;
       }
-      config.mcpServers[name] = entry as Record<string, unknown>;
+      config.mcpServers[name] = withExposure(entry as Record<string, unknown>);
       added.push(name);
       const run = commandValues(entry);
       if (run.length) commands[name] = run;

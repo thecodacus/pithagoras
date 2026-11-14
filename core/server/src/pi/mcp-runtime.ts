@@ -116,8 +116,6 @@ export interface McpRuntimeOptions {
   connectWaitMs?: number;
   idleMs?: number;
   idleCheckMs?: number;
-  /** Told what a server offered when it connected, after it was kept: the portal remembers the tools. */
-  connected?: (server: string, tools: CachedTool[]) => void;
 }
 
 export class McpRuntime {
@@ -246,7 +244,6 @@ export class McpRuntime {
       const sorted = found.sort((a, b) => a.name.localeCompare(b.name));
       try {
         rememberServerTools(server, configHash(planned.server.entry), sorted);
-        this.options.connected?.(server, sorted);
       } catch (e) {
         console.error(`[portal] could not keep the tools of ${server}: ${(e as Error).message}`);
       }

@@ -173,6 +173,8 @@ test("a lazy server that has run before is found in the cache, and started when 
     assert.equal(count("start beta"), 1, "not started by a chat that does not want it");
     const r = await say([search("describe", { name: "mcp__beta__two" }), search("call", { name: "mcp__beta__two", args: { text: "y" } })]);
     assert.match(textOf(r.results[0]), /The two tool of beta/, "described from the cache");
+    // Words of a server the person has not said is theirs, though it is not running: judged by what is kept of it, as if it were.
+    assert.match(textOf(r.results[0]), /<<<untrusted:/, "wrapped as the words of a server that is not trusted");
     assert.match(textOf(r.results[1]), /beta\/two says/);
     assert.equal(count("start beta"), 2, "started for the call, and once");
     // The old name the adapter gave it finds it, for the history of a chat from before.
@@ -304,4 +306,91 @@ test("what a chat reads of a project: pi's override rule, no auth, no server of 
   assert.deepEqual(untrusted.servers.map((one) => one.name).sort(), ["alpha", "my-notes"]);
   assert.equal(untrusted.servers.find((one) => one.name === "alpha").entry.enabled, undefined);
   assert.deepEqual(untrusted.errors, []);
+});
+
+test("a tool that is confirmed each time runs when the person says yes, and not when they say no", async () => {
+  reset();
+  writeServers({ beta: entry("beta", "read_it,delete_it") });
+  db.setTrustedMcpServers(["beta"]);
+  db.setMcpApprove("beta", ["delete_*"]);
+  let answer = true;
+  const { client, say } = await chat({ lazy: head(), dialogs: true });
+  const asked = [];
+  client.on("event", (e) => {
+    if (e?.type === "extension_ui_request" && e.method === "confirm") {
+      asked.push(e);
+      client.respondUi(e.id, { value: answer });
+    }
+  });
+  try {
+    const yes = await say([{ name: "mcp__beta__delete_it", args: { text: "a" } }]);
+    assert.equal(asked.length, 1);
+    assert.match(asked[0].title, /mcp__beta__delete_it/);
+    assert.match(asked[0].message, /"text":"a"|text/);
+    assert.match(textOf(yes.results[0]), /beta\/delete_it says/);
+    answer = false;
+    const no = await say([{ name: "mcp__beta__delete_it", args: { text: "b" } }]);
+    assert.equal(asked.length, 2);
+    assert.match(JSON.stringify(no.results[0]), /not confirmed/);
+    assert.equal(count("tools/call delete_it"), 1, "only the call that was confirmed reached the server");
+    // The server's other tools are not asked about.
+    await say([{ name: "mcp__beta__read_it", args: {} }]);
+    assert.equal(asked.length, 2);
+    // A call tool_search makes of it is a call of it: asked as well.
+    answer = true;
+    const lazy = await chat({ lazy: head(["beta"]), dialogs: true });
+    lazy.client.on("event", (e) => {
+      if (e?.type === "extension_ui_request" && e.method === "confirm") {
+        asked.push(e);
+        lazy.client.respondUi(e.id, { value: true });
+      }
+    });
+    try {
+      await lazy.say([search("search", { query: "delete" }), search("call", { name: "mcp__beta__delete_it", args: {} })]);
+      assert.equal(asked.length, 3, "asked through the search too");
+    } finally {
+      await close(lazy.client);
+    }
+  } finally {
+    await close(client);
+    db.setMcpApprove("beta", undefined);
+    db.setTrustedMcpServers([]);
+  }
+});
+
+test("a chat that works through the code tool alone has every server connected with it, and a script calls its tools like any other", async () => {
+  reset();
+  writeServers({ alpha: entry("alpha"), beta: entry("beta") });
+  // The head says beta is lazy, as the marks say: not here, where nothing is offered one by one.
+  const { client, say } = await chat({ lazy: head(["beta"]), codemode: "only" });
+  try {
+    const r = await say([{ name: "codemode", args: { code: 'const a = await tools.mcp__alpha__one({ text: "x" }); const b = await tools.mcp__beta__two({ text: "y" }); return JSON.stringify([a, b]);' } }]);
+    assert.equal(count("start alpha"), 1);
+    assert.equal(count("start beta"), 1, "connected with the chat: a script finds it with searchTools");
+    assert.match(textOf(r.results[0]), /alpha\/one says/);
+    assert.match(textOf(r.results[0]), /beta\/two says/);
+    // Not declared to the model, and no tool_search: the code tool is the one door. pi's list of the servers is not in the prompt.
+    assert.deepEqual(names(r.requests[0]).filter((n) => /mcp__|tool_search/.test(n)), []);
+    assert.doesNotMatch(JSON.stringify(r.requests), /MCP servers whose tools/);
+  } finally {
+    await close(client);
+  }
+});
+
+test("the old MCP adapter is in no chat, whoever lists it", async () => {
+  reset();
+  writeServers({});
+  // An extension of the agent folder at a path of the adapter's: what a package installed from npm looks like on disk.
+  const dir = path.join(agent, "extensions", "pi-mcp-adapter");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(path.join(dir, "index.ts"), 'export default function (pi) { pi.registerTool({ name: "mcp", label: "mcp", description: "the adapter", parameters: { type: "object", properties: {} }, async execute() { return { content: [{ type: "text", text: "adapter" }], details: {} }; } }); }\n');
+  const { client, say } = await chat({ lazy: head() });
+  try {
+    const r = await say(["Hi."]);
+    assert.ok(!names(r.requests[0]).includes("mcp"), "its tool is not in the list");
+    assert.equal((await client.getTools()).some((tool) => tool.name === "mcp"), false);
+  } finally {
+    await close(client);
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

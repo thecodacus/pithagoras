@@ -23,7 +23,7 @@ async function asksBeforeClosing(page: Page, field: Locator, typed: string) {
   await expect(field).toHaveValue(typed);
 }
 
-const MCP = { path: '/a/mcp.json', exists: true, adapterInstalled: true, adapterSpec: 'npm:pi-mcp-adapter', servers: [], settings: {}, raw: '{}', parseError: null };
+const MCP = { path: '/a/mcp.json', exists: true, clashes: [], servers: [], raw: '{}', parseError: null };
 
 test('Escape over an MCP server form that was filled in asks first; one that was only opened closes at once', async ({ page }) => {
   await portal(page, { '/api/mcp': MCP });

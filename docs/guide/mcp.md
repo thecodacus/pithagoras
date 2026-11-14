@@ -1,30 +1,44 @@
 # MCP servers
 
 MCP is how the agent reaches tools it does not ship with — a filesystem server,
-a GitHub server, a company's internal one. Support comes from the
-[`pi-mcp-adapter`](https://pi.dev/packages/pi-mcp-adapter) extension; the portal
-owns the configuration and the adapter does the connecting.
+a GitHub server, a company's internal one. pi has MCP support of its own, and the
+portal runs the servers on it: the portal owns the configuration, pi connects and
+calls, and what the model is shown of the tools goes through the portal's own
+[tool search](/guide/extensions#lazy-tools).
 
-Settings → **MCP**. If the adapter is not installed the panel says so and
-offers to install it, because until then nothing reads this configuration.
+Settings → **MCP**.
 
 ## Where it is written
 
-`<agent dir>/mcp.json` — `/data/home/.pi/agent/mcp.json` in the container. The
-adapter reads several files in precedence order; this is the pi-global one, so
-it applies to every session in the portal. A project-local `.mcp.json` would
-only reach one workspace, which is the wrong shape here.
+`<agent dir>/mcp.json` — `/data/home/.pi/agent/mcp.json` in the container. It is
+pi's own file in pi's own shape (pi's `docs/mcp.md` has every key), so the `pi`
+command line and a container's pi read the same one. It applies to every session
+in the portal.
+
+What is the portal's own is not in it: whether you count a server's answers as
+your own (Settings → Guard), which of its tools ask before they run, and whether
+its tools are lazy are kept in the portal's database by the server's name. The
+file stays valid for pi alone.
 
 The file holds the servers' keys, and the token the portal made for its own
 memory, so it is readable by the account the portal runs as and no other. It is
 written whole or not at all: a full disk leaves the file as it was.
 
 An extension can write a server of its own into the file as well, when you
-switch it on from the extension's page, and installs the adapter where it is
-missing. The server is listed and switched here like any other.
+switch it on from the extension's page. The server is listed and switched here
+like any other.
 
-Changes are read when a session starts. A session already running keeps the
-servers it connected with, so restart it to pick up a new one.
+Open chats are loaded again when the file changes, as soon as they can be: at
+once where a chat is idle, and between two steps of a run where it works. A chat
+keeps the servers it connected with until then.
+
+A **project** can bring servers of its own in `.pi/mcp.json`, which pi reads only
+in a project it trusts (and never while the [sandbox](/guide/sandbox) is on). An
+entry in it with no `command` and no `url` only changes `enabled`, `exposure` or
+`toolExposure` of the server of that name here, and keeps the rest of it. A
+project cannot define a server again that this file has, or send a credential
+somewhere with `auth`. No other tool's configuration — `.mcp.json`,
+`.vscode/mcp.json`, `opencode.json` — is read.
 
 ## Adding a server
 
@@ -49,15 +63,18 @@ A server in the snippet whose name you already have is not imported over it: it
 is listed as skipped, and the one you have stays as it is.
 
 **The form.** Name, transport, then the fields for that transport. A server is
-`stdio` (a local process), `http` (a URL), or a Unix socket — exactly one of
-them.
-A name that another server has is refused, whether the server is new or renamed:
-it would replace that one, with everything the form does not show.
+`stdio` (a local process) or `http` (a URL). A name is letters, digits, `_` and
+`-`; two names that differ only in `-` and `_` are one server to pi, and the
+second is refused. A name that another server has is refused too, whether the
+server is new or renamed: it would replace that one, with everything the form
+does not show. A server that pi would skip is marked in the list, with why.
 
 **The file.** "Edit the file directly" at the bottom of the panel, for anything
-the form does not cover: OAuth blocks, tracing, per-server timeouts. The form
-preserves fields it does not show, so an edit made there is not lost by a later
-edit in the form.
+the form does not cover: OAuth blocks, `toolExposure`. It is plain JSON, as pi
+reads it: comments are refused there (a file written by hand with comments is
+still read by the portal, but not by pi's command line). The form preserves
+fields it does not show, so an edit made there is not lost by a later edit in the
+form.
 
 ## Secrets
 
@@ -67,83 +84,94 @@ Do not put a token in this file. For stdio servers, reference the environment:
 GITHUB_TOKEN=${GITHUB_TOKEN}
 ```
 
-`${VAR}` is expanded when the server launches. For HTTP servers with a bearer
-token, the form asks for the *name* of the environment variable
-(`bearerTokenEnv`), not the token. OAuth credentials never touch the file at
-all — the adapter stores them in the OS credential store.
+`${VAR}` is expanded when the server launches, and works in `headers` as well:
+`Authorization: Bearer ${DOCS_TOKEN}`. A value that **starts with `!`** is run as a
+command and its output used (`"!echo Bearer $(gh auth token)"`), also for an HTTP
+server. That is a command the portal's user runs, as a `command` is; the panel
+says which servers have one.
+
+A server that asks for OAuth is signed in to with `pi mcp login <name>` in a
+terminal; pi stores the credentials in `mcp-auth.json` in the agent folder.
+Signing in from the portal is not built yet.
 
 ## Tools, and how many of them
 
-By default the adapter exposes one `mcp` proxy tool and the model asks it for
-what it needs. That keeps the system prompt small no matter how many servers are
-configured.
+An MCP server is a group of tools like any other, with the same three marks
+(auto, lazy, direct) and the same [threshold](/guide/extensions#the-threshold) in
+Settings → Tools: a server of a few tools stays in the model's list; a large one
+(a Playwright server of two dozen tools) goes behind `tool_search`, which finds
+and calls its tools. The tools are named `mcp__<server>__<tool>`.
 
-**Register tools directly** puts a server's tools in the system prompt instead,
-costing roughly 150–300 tokens each. Worth it for a server with a handful of
-tools the agent uses constantly; expensive for a server with sixty.
+A server that is lazy is **not started** with a chat. It is started when the
+model first searches for or calls one of its tools, and stopped again after ten
+minutes without use, so a chat that never needs a server never runs it. What the
+search finds before the server is up is what the portal kept of what it offered
+when it last ran, which is what the lists in Settings → Tools show for a server
+that has not run in a chat. A server nothing is known of yet counts as lazy; its
+first search starts it and waits for it.
 
-That is the same switch as **lazy** for an MCP server in [Settings → Tools](/guide/extensions#lazy-tools): off
-means lazy, and it is the default. The server's tools are then not in the system prompt, and the model finds
-and calls them through the `mcp` tool. The Tools page changes this one setting, for the whole server; a
-list of tool names under `directTools` in `mcp.json` is read as it stands, and the page shows each tool by it.
-Understory's server, which its extension writes, keeps its tools registered directly. A change reaches the chats
-that start after it.
+A server that is direct (marked so, or small enough) is started with the chat, and
+its tools are in the model's list from the first request. An extension that
+writes a server with `exposure: "direct"` starts it that way, until you set a
+mark of your own.
 
-`Only these tools` / `Except these tools` take names or globs and are the way to
-keep a large server from crowding the prompt.
+A chat that works through the [code tool](/guide/sessions#modes) alone has every
+server connected, and a script calls the tools like any other.
+
+pi's three resource tools (`list_mcp_resources`, `list_mcp_resource_templates`,
+`read_mcp_resource`) reach every server with resources, and are lazy with the lazy
+servers.
 
 ## What the tool lists show
 
 In the Tools lists (Settings → Tools, an agent's, a project's, a routine's, a
 chat's) an MCP server is a group like any other: switched on or off as a whole
-with the group's switch, or tool by tool. Every tool the server offers is listed,
-whether the model gets it registered directly or reaches it through the `mcp`
-tool, and a switch holds for both ways in: `mcp({ tool: "…" })` and
-`mcp({ describe: "…" })` of a tool that is off are refused. With the adapter's
-script mode on, `mcp_script` is refused while one of the servers' tools is switched
-off, since a script says which tools it calls only as it runs.
+with the group's switch, or tool by tool. Every tool the server offered when it
+last ran is listed. A tool that is switched off is not found by the search,
+cannot be called through it, and is never named to the model.
 
-The tools are read from the adapter's cache, so a server is listed once it has run
-at least once, and only where the adapter is installed and on — for every chat,
-or for a project that brings it in its own settings. Only the adapter's default
-tool names (`<server>_<tool>`) are listed this way.
+What the configuration says no to is not listed: a server switched off, or a tool
+the file hides (`toolExposure`). A tool marked **cached** is listed from what the
+portal kept of the server when it last ran: it is not running in this chat, and
+starts when the tool is first used.
 
-What the configuration says no to is not listed at all: a server switched off,
-a tool left out by `Only these tools` or `Except these tools`, or one the server
-no longer has. A chat that is running is told at once: one that had such a tool
-loaded from before has it off from then on, through the `mcp` tool too. Nothing
-is written down against it, so it comes back the way it was when the
-configuration allows it again. A file that cannot be read is taken as it last
-could be, so a typo neither hides a tool nor hands back one it had taken away.
+## Tools that ask first
 
-A tool marked **cached** is listed from the adapter's cache: its server starts
-only when one of its tools is first used (`lifecycle` lazy, the default), so the
-list is what the server had when it last ran.
+An extension that writes a server can name tools whose calls are confirmed each
+time (`approve`, patterns of the server's own tool names such as `delete_*`): the
+person is asked in the chat before the call runs, and where nobody can be asked (a
+routine, a heartbeat, a channel chat) it is refused.
 
 ## Disabling
 
-The toggle on each row sets `disabled: true` — the server stays configured and
+The toggle on each row sets `enabled: false` — the server stays configured and
 visible but is never connected. Better than deleting a server you are debugging.
-Deleting one, or renaming it, also takes its tools out of the Tools list, and a
-chat still running with it has them off from then on, as with one switched off —
-whatever took it out of the file: this panel, switching a feature such as
-Understory off, or an edit made by hand. The portal remembers which servers it
-last saw in the file, so an edit made by hand is noticed the next time the tools
-are listed or a chat starts, and one made while the portal was stopped when it
-starts again. A file that cannot be read takes nothing out, and nor does one that
-is not there, as for a moment while an editor or a script puts a new one in its
-place: the file there next is compared with the servers last seen, so a file
-deleted for good takes its servers out once a new one is written. Only this
-file's servers count: one the adapter loads from a project's own `.mcp.json` or
-from anywhere else is not judged, though where its name is that of a server
-taken out of this file, or starts with it and an underscore, its tools are taken
-for that server's. The first time the portal looks at the file it has nothing to
-compare it with, so a tool left behind by a server taken out by hand before then
-stays listed. To be rid of it, add the server again under its name here, with
-any entry, and remove it.
+(`disabled: true`, which the old adapter wrote, still means off.)
+Deleting one, or renaming it, also takes its tools out of the Tools list and what
+the portal kept of what it offered, whatever took it out of the file: this panel,
+switching a feature such as Understory off, or an edit made by hand. The portal
+remembers which servers it last saw in the file, so an edit made by hand is
+noticed the next time the tools are listed or a chat starts, and one made while
+the portal was stopped when it starts again. A file that cannot be read takes
+nothing out, and nor does one that is not there, as for a moment while an editor
+or a script puts a new one in its place: the file there next is compared with the
+servers last seen. Only this file's servers count: one a project's own
+`.pi/mcp.json` brings is not judged. The first time the portal looks at the file
+it has nothing to compare it with, so a tool left behind by a server taken out by
+hand before then stays listed. To be rid of it, add the server again under its
+name here, with any entry, and remove it.
 
-::: tip The adapter has its own commands
-`/mcp` opens its status panel, `/mcp tools` lists what is available, and
-`/mcp reconnect` refreshes a server. They work in the portal's command palette
-like any other extension command.
+::: tip pi has its own commands
+`pi mcp list` connects to every server and prints what is wrong with it,
+`pi mcp add` and `pi mcp remove` change the file, and `pi mcp login <name>` signs
+in to a server that asks. They read the same `mcp.json`.
 :::
+
+## With `EXECUTOR=container`
+
+The pi that runs in the container is pi's command line: it reads the same
+`mcp.json`, and the portal's marks, threshold and `tool_search` are not there. So
+every server the portal writes carries an `exposure` in the file (`deferred`
+unless an extension or a mark says `direct`), and pi's own tool search finds its
+tools. A mark set in Settings → Tools is said in the file as well, `lazy` as
+`deferred` and `direct` as `direct`.

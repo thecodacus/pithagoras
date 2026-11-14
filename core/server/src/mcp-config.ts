@@ -190,6 +190,14 @@ export function mcpToolNames(server: string, tools: readonly string[], elsewhere
   return names;
 }
 
+/**
+ * The entry with an `exposure` of its own: what the portal writes where nothing says. In a chat the person's mark decides how a
+ * server's tools are offered, and the file's `exposure` is how pi alone reaches them (its command line, a container's pi): a
+ * server with none is `codemode` to pi, which leaves its tools unreachable where nothing runs scripts, so a server the portal
+ * writes is `deferred`, pi's own `tool_search` finding its tools there.
+ */
+export const withExposure = <T extends Record<string, unknown>>(entry: T): T => (entry.exposure === undefined ? { ...entry, exposure: "deferred" } : entry);
+
 /** The namespace of a server in the form pi has it: hyphens as underscores. Two servers with the same one cannot both connect. */
 export { mcpNamespace };
 

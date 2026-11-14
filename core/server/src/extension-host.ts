@@ -28,6 +28,7 @@ import { chatOwner, folderAllowed, folderLabel, listFolders } from "./agent-fold
 import { handoffDone, takeHandoff } from "./handoff.js";
 import { modelEndpoint, modelOf, modelProviders, type LiveModel } from "./models.js";
 import { mcpServer } from "./api/mcp.js";
+import { commandValues } from "./mcp-config.js";
 import { holdMemory } from "./memory-holder.js";
 import { provideMode } from "./chat-modes.js";
 import { logFileLine, onLogLine, scrubSecrets, type LogLine } from "./logs.js";
@@ -691,6 +692,9 @@ function portalFor(ext: Running): ServerPortal {
         scope.exit(async () => {
           const { setMcpServer } = await import("./mcp-entry.js");
           const written = await setMcpServer(server, entry);
+          // A value that runs a command is code the portal's user runs, as a `command` is: left on the record.
+          const commands = commandValues(written.entry);
+          if (commands.length) recordAudit({ kind: "mcp-command", tool: "portal.mcp.set", subject: server, reason: `${name} wrote the MCP server ${server} with values that run a command: ${commands.join(", ")}`, personKey: undefined, sessionId: undefined });
           // Counted as the person's own on the extension's word, and no longer once the server is gone: Settings → Guard
           // lists only the servers there are, so a name left trusted could not be taken out, and would trust whatever
           // server is given that name next.
@@ -711,8 +715,7 @@ function portalFor(ext: Running): ServerPortal {
             // What the extension says of how the model is offered the server's tools is where the person's own mark starts, and no further:
             // a mark the person set is theirs.
             const marks = toolMarks();
-            const exposure = (written.entry as { exposure?: unknown } | undefined)?.exposure;
-            if (!marks[server] && (exposure === "direct" || exposure === "deferred")) setToolMarks({ ...marks, [server]: exposure === "direct" ? "direct" : "lazy" });
+            if (!marks[server] && (written.said === "direct" || written.said === "deferred")) setToolMarks({ ...marks, [server]: written.said === "direct" ? "direct" : "lazy" });
           }
           return reloadChats();
         }),

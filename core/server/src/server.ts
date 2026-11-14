@@ -89,7 +89,7 @@ import { EXECUTOR_KIND } from "./executor-kind.js";
 import { sessions, CodemodeHeld, CommandFailed, IMAGE_ROOT } from "./session-manager.js";
 import { ImageError, MAX_IMAGE_BYTES, MAX_IMAGES, imagePath, mimeOf, parseImages, saveImages } from "./prompt-images.js";
 import { defaultsFor, toolSource } from "./tool-policy.js";
-import { mcpRouter, onMcpWritten } from "./api/mcp.js";
+import { mcpRouter, mcpServerNames, onMcpWritten } from "./api/mcp.js";
 import { authMode, changePassword, checkPassword, isAuthed, issueCookie, passwordRefused, requireAuth, setUpPassword, shortPassword, signOut } from "./auth.js";
 import { activeSso, endSessionUrl, oidcRouter, providerFor, rememberProvider } from "./oidc-login.js";
 import { CALLBACK_PATH, OidcConfigError, discover, parseOidcConfig, shownForm } from "./oidc.js";
@@ -1386,6 +1386,12 @@ app.put("/api/tools/marks", (req, res) => {
     return res.status(400).json({ error: `Cannot be lazy: ${refused.join(", ")}. pi's built-in tools are always offered.`, code: "lazy-refused" });
   }
   const stored = setToolMarks(given as Record<string, "lazy" | "direct">);
+  // A mark on an MCP server is said in mcp.json as well, for pi's own command line and a container's pi.
+  const servers = new Set(mcpServerNames());
+  for (const [entry, one] of Object.entries(stored)) {
+    if (!servers.has(entry) || before[entry] === one) continue;
+    import("./mcp-entry.js").then(({ sayMarkInFile }) => sayMarkInFile(entry, one)).catch((e) => console.error(`[portal] could not say the mark of ${entry} in mcp.json: ${(e as Error).message}`));
+  }
   res.json({ marks: stored, resolved: resolvedLazy() });
 });
 

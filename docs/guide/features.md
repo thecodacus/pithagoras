@@ -679,7 +679,7 @@ always costs minutes of its model.
 gives the agent [Understory](https://github.com/thecodacus/understory) as its
 memory: a memory that grows, plain markdown on disk, cross-linked and
 maintained, which the agent looks things up in and adds to through its tools
-(`understory_memory_query`, `…_add`, `…_update`, `…_status`, `…_maintain`).
+(`mcp__understory__memory_query`, `…_add`, `…_update`, `…_status`, `…_maintain`).
 The bundle is human-readable and git-diffable.
 
 Neither Understory nor [Docker](/guide/docker), which it requires, is installed
@@ -834,15 +834,13 @@ wrong instead of showing an empty memory.
 
 Switching it on:
 
-1. installs `pi-mcp-adapter` if it is not installed yet, which makes MCP servers
-   into tools;
-2. writes an `understory` server into `mcp.json`, with its tools directly in the
-   agent's tool list — the Understory run here with its token, or the
-   address given;
-3. counts what its server says as your own words, so the guard neither marks
+1. writes an `understory` server into `mcp.json`, with its tools directly in the
+   agent's tool list (until you give the server a mark of your own in Settings →
+   Tools) — the Understory run here with its token, or the address given;
+2. counts what its server says as your own words, so the guard neither marks
    nor checks it: it is added to the trusted MCP servers in **Settings → Guard**,
    where you can take it out (see [Prompt injection](/guide/security#marking-untrusted-output));
-4. stops reading `MEMORY.md`.
+3. stops reading `MEMORY.md`.
 
 Switching it off removes the server, takes it out of the trusted servers again,
 and `MEMORY.md` is read again. Removing the Understory run here switches it off

@@ -471,8 +471,8 @@ loaded again to have it, and the busy ones that have it after `/reload`.
 
 | | |
 | --- | --- |
-| `GET /api/x/pithagoras-understory/state` | `{ enabled, url, tokenSet, reachable, managed }`: whether Understory is the agent's memory now (its `understory` server in `mcp.json`, not switched off, and `pi-mcp-adapter` on), the address the chats reach it at, whether a token is sent, and whether anything answers there. `managed` is the Understory run here: `{ available, image, container, pulling, url, config, autoPossible, providers, dreaming, lastDream, nextDream, timeZone }` — `container` is `absent`, `stopped`, `running` or `foreign` (one by its name that is not Understory's), `pulling` `{ active, line, error? }`, `config` never holds a key (`hasKey` instead), `autoPossible` whether its model server listens (`UNDERSTORY_LLM_PORT`), so that the chat's model can be chosen |
-| `PUT …/use` | `{ enabled, url? }` — writes or removes the `understory` MCP server (installing `pi-mcp-adapter` if needed), and adds it to the trusted servers in Settings → Guard, or takes it out. 409 while `mcp.json` cannot be read, and, for the Understory run here, while what the portal kept of it has not been taken up |
+| `GET /api/x/pithagoras-understory/state` | `{ enabled, url, tokenSet, reachable, managed }`: whether Understory is the agent's memory now (its `understory` server in `mcp.json`, not switched off), the address the chats reach it at, whether a token is sent, and whether anything answers there. `managed` is the Understory run here: `{ available, image, container, pulling, url, config, autoPossible, providers, dreaming, lastDream, nextDream, timeZone }` — `container` is `absent`, `stopped`, `running` or `foreign` (one by its name that is not Understory's), `pulling` `{ active, line, error? }`, `config` never holds a key (`hasKey` instead), `autoPossible` whether its model server listens (`UNDERSTORY_LLM_PORT`), so that the chat's model can be chosen |
+| `PUT …/use` | `{ enabled, url? }` — writes or removes the `understory` MCP server, and adds it to the trusted servers in Settings → Guard, or takes it out. 409 while `mcp.json` cannot be read, and, for the Understory run here, while what the portal kept of it has not been taken up |
 | `PUT …/config` | `{ llm: { source: "auto" } \| { source: "provider", provider, model } \| { source: "custom", baseUrl, model, format, apiKey? }, dreamInterval, dreamAt }` — `auto` (the default) thinks with the model of the chat asking — `dreamAt` ("03:00") tidies up once a day at that time and wins over `dreamInterval` — the model and tidying up of the Understory run here; an installed one is made again with them, started where it was running. `apiKey` left out keeps the saved one. 400 for `auto` while the model server could not take its port; 409 for an installed one while what the portal kept of it has not been taken up |
 | `POST …/install` | Pull, create and start the Understory run here, and make it the agent's memory. 409 for a container by its name that is not Understory's |
 | `DELETE …/install` | Remove it (the memory stays in its volume; `?memory=forget` deletes it too), and switch it off as the memory where it was |
@@ -676,13 +676,11 @@ Each agent has a home folder of its own, with its own `SOUL.md`,
 
 | Route | Purpose |
 | --- | --- |
-| `GET /api/mcp` | Read configured servers and settings. |
-| `PUT /api/mcp/servers/:name` | Add or update a server. `{ entry, from? }`: with `from` it is a rename. A name that another server has is refused with 409 and `code: "exists"`. |
-| `PUT /api/mcp/servers/:name/direct` | `{ direct }` — the server's "Register tools directly" (`directTools`) on its own, nothing else of the entry changed. `true` registers the tools one by one; `false` leaves them to the adapter's `mcp` tool, which the tool lists call lazy. 404 for a server that is not there, 400 for a `direct` that is not a boolean. Read when a chat starts |
-| `DELETE /api/mcp/servers/:name` | Remove a server. |
-| `PUT /api/mcp/settings` | Update MCP settings. |
-| `POST /api/mcp/import` | `{ text }` — import pasted server configuration. A server whose name is taken is not replaced: it is listed in `skipped` with the reason, beside those it could not use. |
-| `PUT /api/mcp/raw` | Save the raw configuration after JSON validation. |
+| `GET /api/mcp` | The servers in pi's `mcp.json`: `{ path, exists, servers, clashes, raw, parseError }`. Each server is `{ name, entry, transport, disabled, problem, commands }`: `problem` is why pi would skip the entry (or null), `commands` the places in it whose value pi runs as a command (`env.TOKEN`, a value that starts with `!`), and `clashes` the pairs of names that differ only in `-` and `_`. |
+| `PUT /api/mcp/servers/:name` | Add or update a server. `{ entry, from? }`: with `from` it is a rename. The entry is held to pi's rules: a name of letters, digits, `_` and `-`, one `command` or `url` that is not blank, and what else pi checks. A name that another server has is refused with 409 and `code: "exists"`, one pi would take for another's (`-` and `_` are one) with 400. Answers `{ ok, commands }`. |
+| `DELETE /api/mcp/servers/:name` | Remove a server, with its tools. |
+| `POST /api/mcp/import` | `{ text }` — import pasted server configuration. A server whose name is taken is not replaced: it is listed in `skipped` with the reason, beside those it could not use; `commands` names the places of each added server that run a command. |
+| `PUT /api/mcp/raw` | Save the raw configuration after JSON validation: plain JSON, as pi reads it, so a comment is refused. |
 
 ## Skills
 

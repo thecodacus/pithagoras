@@ -9,7 +9,6 @@ import { inProcessHome } from "./server-harness.mjs";
 // counted as the person's own; an approval taken back before it is spent; a trusted flagged result untrusted.
 const home = inProcessHome("guard-settings-");
 const agent = process.env.PI_CODING_AGENT_DIR;
-writeFileSync(path.join(agent, "settings.json"), JSON.stringify({ packages: ["npm:pi-mcp-adapter@2.18.0"] }));
 writeFileSync(
   path.join(agent, "mcp.json"),
   JSON.stringify({ mcpServers: { jira: { command: "j" }, notes: { url: "http://localhost:3900/mcp" }, browser: { command: "npx", args: ["@playwright/mcp"] } } }),

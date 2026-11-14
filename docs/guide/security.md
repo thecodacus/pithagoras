@@ -58,8 +58,8 @@ any tool.
 What is wrapped: mail and the web read through a command (`curl`, `wget`, `ssh`,
 `git clone` and the like), the tools of an MCP server, the browser, and a tool
 that declares outside content. A
-server's tools count however they are called: through the adapter's `mcp` tool,
-under their own names (`jira_get_issue`) where its tools are direct, and through
+server's tools count however they are called: under their own names
+(`mcp__jira__get_issue`) where its tools are direct, and through
 the `tool_search` tool where they are lazy. A tool that pi's own MCP support registers
 (`mcp__<server>__<tool>`) belongs to the server pi recorded for it, never to the
 server its name looks like: a tool called `mcp_page` that an extension brought is that
@@ -162,7 +162,7 @@ problem are held: put to you where you are there to answer (see
 | `upload` | Data carried out: `curl`/`wget` with a body (`-d`, `-F`, `-T`, alone or folded into a group like `-sd`; `--data*`, `--form`, `--json`, `--post-data`, `--post-file`, `--body-*`) or a `POST`, `PUT` or `PATCH`; `scp` or `rsync` to another machine; a pipe or a file into `nc`, `socat`, `telnet` or `ssh`; mail sent (`mail`, `sendmail`, `mutt -s`, `himalaya … send`); httpie with a body; `gh gist create` and a write through `gh api`; a copy to an S3, GCS or rclone remote; a script's own `requests.post` or `fetch` with a body |
 | `read-credentials` | `auth.json`, `.env`, `.ssh/`, tokens, also among the files a tool declares it takes |
 | `publish` | `git push` is not undoable from here, also with git's options before it (`git -C repo push`, `git -c k=v push`) |
-| `persist` | What outlives the conversation: a routine, `cron`, a systemd unit, a shell start-up file, and a change to what the agent loads as its own (`AGENTS.md`, `CLAUDE.md`, its context files, `WATCH.md`, `.pi/`, `.agents/`, `.mcp.json`; see [what a colleague may do](/people/roles#what-a-colleague-may-do)), by a tool or by a command that writes there (a redirect, `tee`, `cp`, `mv`, `ln`, `sed -i`, a download's `-o`, a clone) |
+| `persist` | What outlives the conversation: a routine, `cron`, a systemd unit, a shell start-up file, and a change to what the agent loads as its own (`AGENTS.md`, `CLAUDE.md`, its context files, `WATCH.md`, `.pi/`, `.agents/`; see [what a colleague may do](/people/roles#what-a-colleague-may-do)), by a tool or by a command that writes there (a redirect, `tee`, `cp`, `mv`, `ln`, `sed -i`, a download's `-o`, a clone) |
 | `delegate` | A `subagent` and a routine work in a conversation of their own, which has not read what this one read and so is not held back as it is: a tainted session may start neither, nor send a subagent at work a message (that is a `subagent` call too). Listing and stopping its subagents (`subagents`) stays open. A chat's mark never passes down to its subagents, since a tainted chat starts none, and a subagent's own mark passes up to its chat. A subagent's chat is guarded on its own, and marked by what it reads itself. When it was marked, the chat it worked for is marked as its answer comes back, and stays marked when the chat is opened again, so what it relays is held like outside content. Nothing it says reaches that chat before: `subagents` lists none of what one at work has said, and gives what one it stopped had only once its run has ended, held the same way |
 
 A tool that declares that every call of it is the shape of one of these rules
@@ -336,7 +336,7 @@ What it does not do:
 The guard also enforces what a teammate may do, checked per tool call so it
 follows whoever is speaking. That is documented under [People](/people/). What
 a colleague or a guest may write stops short of everything that the portal, pi,
-its MCP adapter or an agent's heartbeat load on their own, which would put their
+its MCP support or an agent's heartbeat load on their own, which would put their
 words, their tools or a process into your next conversation, and nothing opens
 the tools that would run what they write with your rights (a subagent, a
 routine): the list is under

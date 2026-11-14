@@ -258,14 +258,14 @@ test("while what the portal kept has not been taken up, its container keeps the 
     assert.deepEqual([on.status, on.body.error], [409, saved.body.error]);
     assert.deepEqual(machine.made(), [], "not made again");
     assert.deepEqual([store.setting("token"), store.setting("config")], [undefined, undefined], "no token made, and nothing saved: what the portal kept is still to be taken up");
-    assert.equal(servers().understory.bearerToken, kept);
+    assert.equal(servers().understory.headers.Authorization, `Bearer ${kept}`);
 
     // Taken up, it is made again with the token it had, which the entry carries.
     store.putSettings({ token: kept });
     assert.equal((await call("PUT", "/config", custom)).status, 200);
     assert.equal(envOf(machine.understory()!).AUTH_TOKEN, kept);
     assert.equal((await call("PUT", "/use", { enabled: true })).status, 200);
-    assert.equal(servers().understory.bearerToken, kept);
+    assert.equal(servers().understory.headers.Authorization, `Bearer ${kept}`);
   } finally {
     store.putSettings(had);
     putServers({});
