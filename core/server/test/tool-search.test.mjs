@@ -215,8 +215,10 @@ export default function (pi) {
     if (event.toolName === "stop_refused") return { block: true, reason: "refused, and stop", terminate: true };
     if (event.toolName === "slow_write") await new Promise((resolve) => setTimeout(resolve, 400));
   });
+  // As pi's MCP support registers a server's tool: the namespace is what tells the guard whose words it returns.
   pi.registerTool({
-    name: "mcp_page",
+    name: "mcp__pages__page",
+    namespace: { name: "mcp__pages" },
     label: "Page",
     description: "Read a web page.",
     parameters: { type: "object", properties: { url: { type: "string" } } },
@@ -455,8 +457,8 @@ test("a lazy tool can be called by its own name too: it is active, only not decl
 test("a lazy tool's result is wrapped as somebody else's words, and the next push is refused", async () => {
   // Nobody answers a dialog here, as in a routine's run: see guard-asks.test.mjs for where the push is asked about.
   const { results } = await run(
-    [via("call", { name: "mcp_page", args: { url: "https://example.test" } }), { name: "bash", args: { command: "git push origin main" } }],
-    { lazy: headOf("mcp_page"), dialogs: false },
+    [via("call", { name: "mcp__pages__page", args: { url: "https://example.test" } }), { name: "bash", args: { command: "git push origin main" } }],
+    { lazy: headOf("mcp__pages__page"), dialogs: false },
   );
   assert.equal(results.length, 2);
   assert.match(textOf(results[0]), /<<<untrusted:[0-9a-f]{16}>>>/, "the guard saw the result of the tool it was called through");
@@ -466,8 +468,8 @@ test("a lazy tool's result is wrapped as somebody else's words, and the next pus
 
 test("the same push is refused when the page tool is called by its own name", async () => {
   const { results } = await run(
-    [{ name: "mcp_page", args: { url: "https://example.test" } }, { name: "bash", args: { command: "git push origin main" } }],
-    { lazy: headOf("mcp_page"), dialogs: false },
+    [{ name: "mcp__pages__page", args: { url: "https://example.test" } }, { name: "bash", args: { command: "git push origin main" } }],
+    { lazy: headOf("mcp__pages__page"), dialogs: false },
   );
   assert.match(textOf(results[0]), /<<<untrusted:/);
   assert.match(textOf(results[1]), /Refused \(publish\)/);
@@ -883,7 +885,7 @@ test("a result a lazy tool returned that looks like a prompt injection is flagge
   const events = [];
   const push = { name: "bash", args: { command: "git push origin main" } };
   // The third request is made after the person trusted the result.
-  script = [via("call", { name: "mcp_page", args: { url: "https://example.test" } }), push];
+  script = [via("call", { name: "mcp__pages__page", args: { url: "https://example.test" } }), push];
   Object.defineProperty(script, 2, {
     get() {
       const text = events.find((e) => e.type === "tool_execution_end")?.result.content.map((part) => part.text).join("\n");
@@ -894,7 +896,7 @@ test("a result a lazy tool returned that looks like a prompt injection is flagge
   model.requests.length = 0;
   // Nobody answers a dialog here, so the push before the trust is refused rather than asked about.
   const client = await SdkPiClient.create({
-    cwd: chat(), sessionDir: mkdtempSync(path.join(home, "chat-")), provider: "fake", modelId: "m", sessionId: session, lazy: headOf("mcp_page"), dialogs: false,
+    cwd: chat(), sessionDir: mkdtempSync(path.join(home, "chat-")), provider: "fake", modelId: "m", sessionId: session, lazy: headOf("mcp__pages__page"), dialogs: false,
   });
   client.on("event", (e) => events.push(e));
   try {
@@ -908,7 +910,7 @@ test("a result a lazy tool returned that looks like a prompt injection is flagge
   // The result of `tool_search` carries the flag, as the chat reads it to offer trusting it or removing its turn.
   const lazyText = ends[0].result.content.map((c) => c.text).join("\n");
   assert.equal(ends[0].toolName, "tool_search");
-  assert.equal(ends[0].portalCalledTool, "mcp_page");
+  assert.equal(ends[0].portalCalledTool, "mcp__pages__page");
   assert.deepEqual(flaggedResult(lazyText)?.signals, ["override"]);
   assert.equal(ends[1].isError, true);
   assert.match(textOf(ends[1]), /Refused \(publish\).*looks like a prompt injection/);

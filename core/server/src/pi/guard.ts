@@ -20,7 +20,9 @@ import { loadedAt, loadedPlaces, type LoadedAs, type LoadedPlace } from "./loade
 import { loadedByLinks } from "./loaded-links.js";
 // Only the names: a heartbeat's note is registered for heartbeats alone, and is how one says what it read.
 import { HEARTBEAT_ROLE, NOTE_TOOL } from "./heartbeat-names.js";
-import { TOOL_SEARCH } from "./tool-search-names.js";
+import { LISTED_TOOLS_KEY, TOOL_SEARCH } from "./tool-search-names.js";
+import { MCP_RESOURCE_TOOLS, isResourceTool, serverOfArgument, serversOfNamespace } from "./mcp-origin.js";
+import { BROWSER_MCP } from "../tool-policy.js";
 import { runsAsPrimary } from "./runs-as-primary.js";
 
 /**
@@ -53,6 +55,39 @@ import { runsAsPrimary } from "./runs-as-primary.js";
 const UNTRUSTED_COMMAND = /\b(himalaya|mutt|neomutt|notmuch|offlineimap|mbsync|curl|wget|lynx|w3m|ssh|scp)\b|\bgit\s+(?:clone|fetch|pull)\b|\b(?:npm|pnpm|yarn|pip3?|uv)\s+(?:install|add|sync)\b/;
 
 /**
+ * What the guard knows of where a tool came from, for judging its result: told by the session's registry and not by the
+ * tool's name (see mcp-origin.ts).
+ */
+interface Origin {
+  /** The adapter registered it: a server's tool, whatever it is called. */
+  adapter: boolean;
+  /** pi's namespace of the tool where its MCP support registered it (`mcp__<server>`): the tool is that server's. */
+  namespace?: string;
+  /** The tool declares that what it returns is outside content (see declaredGuard). */
+  outside: boolean;
+}
+
+/**
+ * Whether a server's words are not the person's own: a tool of an MCP server is its server's, and the server is trusted
+ * (trustedMcpServers) or it is not. By its namespace for a tool pi's MCP support registered, which names the server as
+ * pi has it, folded to the configured names; the server of the adapter's by its name, as the adapter gives them (onlyServerOf).
+ * A server that is not configured, and a namespace two configured servers could be, is no trusted one's, and the browser's
+ * never is, whoever runs it.
+ */
+function serverWords(toolName: string, origin: Origin, mcp: Pick<McpView, "servers" | "naming" | "serverTool">): boolean {
+  const trusted = trustedMcpServers();
+  if (origin.namespace !== undefined) {
+    const servers = serversOfNamespace(origin.namespace, mcp.servers);
+    return !servers.length || servers.some((server) => server === BROWSER_MCP || !trusted.has(server));
+  }
+  // A tool the adapter registered is a server's whatever it is called (the adapter can name them without the
+  // server, and merges servers from configs other than the portal's), and one whose server is not told is no trusted one's.
+  if (!(origin.adapter || mcp.serverTool(toolName))) return false;
+  const server = onlyServerOf(toolName, mcp);
+  return server === undefined || !trusted.has(server);
+}
+
+/**
  * Does what this call returned carry somebody else's words? Mail and the web
  * read through a command, an MCP server the portal does not control, and the
  * browser, which reads pages anyone can write. The agent's own tools, a
@@ -62,27 +97,46 @@ const UNTRUSTED_COMMAND = /\b(himalaya|mutt|neomutt|notmuch|offlineimap|mbsync|c
  * (SessionManager.runChild), and the subagent extension writes that answer to the
  * chat as a flagged result, which flaggedIn finds again when the guard is made again.
  *
- * A server's tools are its words however they are called: through the adapter's
- * `mcp` tool, or under their own names (`jira_get_issue`), which the adapter
- * registers where a server's tools are direct and `tool_search` runs where
- * they are lazy. An issue comment or a mail body a server hands back is whoever
- * wrote it. A server the person counts as their own (trustedMcpServers) is not
- * outside content, by any of those ways; the browser always is, whoever runs it,
- * and so is what a tool that declares it outside content (`outside`, see
- * declaredGuard) returns.
+ * A server's tools are its words however they are called: under their own names (`mcp__jira__get_issue`, told by
+ * their namespace), through the adapter's `mcp` tool, or as `tool_search` runs them where they are lazy (the call it makes is
+ * judged as the call of the tool it names, so a result is judged where it is made). An issue comment or a mail body a
+ * server hands back is whoever wrote it. A server the person counts as their own (trustedMcpServers) is not outside
+ * content, by any of those ways; the browser always is, whoever runs it, and so is what a tool that declares it outside
+ * content (`outside`, see declaredGuard) returns.
+ *
+ * Two more ways to a server's words go by what they are given. The resource tools are shared by every server and name
+ * theirs in the `server` argument: a listing of every server's, and a server that is not configured, are no trusted one's.
+ * And what the portal's search and describe show of the tools is the tools' own words, their descriptions and parameters,
+ * which an untrusted server writes and which arrive at the end of the context, where recency makes them the more effective:
+ * such a result is outside content when it shows a tool of a server that is not trusted (`listed`, the names the search says
+ * it quoted), and not when every tool it shows is the portal's, an extension's or a trusted server's.
  */
-function untrustedResult(toolName: string, input: Record<string, unknown>, fromAdapter: boolean, outside: boolean): boolean {
+function untrustedResult(
+  toolName: string,
+  input: Record<string, unknown>,
+  origin: Origin,
+  /** The tools whose words a result of the portal's own search or describe holds: "unknown" where it does not say. */
+  listed?: readonly string[] | "unknown",
+  originOf: (name: string) => Origin = () => ({ adapter: false, outside: false }),
+): boolean {
   if (toolName === "bash") return UNTRUSTED_COMMAND.test(cmd(input));
-  if (outside || browserCall(toolName, input).isBrowser) return true;
-  // A script runs any tool of any server, and says which only as it runs.
-  if (/^mcp_/.test(toolName)) return true;
-  const trusted = (server: string | undefined) => server !== undefined && trustedMcpServers().has(server);
+  if (origin.outside || browserCall(toolName, input).isBrowser) return true;
+  // The adapter's script runs any tool of any server, and says which only as it runs. These two names are the adapter's:
+  // no pattern of names stands for it, since a name that merely starts with `mcp_` is no server's.
+  if (ADAPTER_SCRIPTS.includes(toolName)) return true;
   const mcp = mcpView();
+  if (listed !== undefined) return listed === "unknown" || listed.some((name) => serverWords(name, originOf(name), mcp));
+  if (isResourceTool(toolName)) {
+    const server = serverOfArgument(input.server, mcp.servers);
+    return server === undefined || server === BROWSER_MCP || !trustedMcpServers().has(server);
+  }
+  const trusted = (server: string | undefined) => server !== undefined && trustedMcpServers().has(server);
   if (toolName === "mcp") return !trusted(proxiedServer(input, mcp));
-  // A tool the adapter registered is a server's whatever it is called (the adapter can name them without the
-  // server, and merges servers from configs other than the portal's), and one whose server is not told is no trusted one's.
-  return (fromAdapter || mcp.serverTool(toolName)) && !trusted(onlyServerOf(toolName, mcp));
+  return serverWords(toolName, origin, mcp);
 }
+
+/** The adapter's script tool, by the two names it has been registered under. Gone with the adapter. */
+const ADAPTER_SCRIPTS: readonly string[] = ["mcp_script", "mcpScript"];
 
 /**
  * The server a tool's name is of, where no other configured server could have it: with `my-notes` and `my`, the name
@@ -1369,8 +1423,8 @@ export const literalPattern = (text: string): string => text.replace(/[\\*]/g, "
 const subjectOf = (toolName: string, input: Record<string, unknown>) =>
   toolName === "bash" ? cmd(input) : target(input) || JSON.stringify(input);
 
-/** Tools that are never approved on files: a command, and the ways to a tool server's tools or to other tools. */
-const NEVER_FILES = new Set(["bash", "mcp", "mcp_script", "mcpScript", "codemode", TOOL_SEARCH]);
+/** Tools that are never approved on files: a command, and the ways to a tool server's tools, its resources, or to other tools. */
+const NEVER_FILES = new Set(["bash", "mcp", ...ADAPTER_SCRIPTS, ...MCP_RESOURCE_TOOLS, "codemode", TOOL_SEARCH]);
 
 /**
  * The files a call of a tool is approved for, where the tool's own definition
@@ -2050,7 +2104,11 @@ export function guardExtension(
    * primary user is speaking, a call a rule holds after a suspected injection is put to them instead of refused.
    */
   dialogs = false,
+  /** pi's MCP namespace of a tool its MCP support registered in this session (`mcp__<server>`), from its definition: see mcp-origin.ts. */
+  namespaceOf: (toolName: string) => string | undefined = () => undefined,
 ) {
+  /** Where a tool came from, as the session knows it now. */
+  const originOf = (name: string, outside = guardOf(name)?.outside === true): Origin => ({ adapter: fromAdapter(name), namespace: namespaceOf(name), outside });
   return (pi: any): void => {
     // Per session, not global: a taint belongs to the conversation that read the
     // content, and this factory runs once per session. It is held by each result
@@ -2125,8 +2183,15 @@ export function guardExtension(
       // What the calls this one made read is this one's to carry: a script that read a page and returned it hands the page on.
       const carried = typeof event.toolCallId === "string" ? readByCalls.get(event.toolCallId) : undefined;
       if (carried) readByCalls.delete(event.toolCallId);
-      const outside = guardOf(String(event.toolName ?? ""))?.outside === true;
-      const untrusted = untrustedResult(String(event.toolName ?? ""), event.input ?? {}, fromAdapter(String(event.toolName ?? "")), outside) || carried !== undefined;
+      const toolName = String(event.toolName ?? "");
+      const origin = originOf(toolName);
+      const outside = origin.outside;
+      // The portal's own search and describe say which tools they quoted; only the portal's tool is read so (searchNow). A result
+      // that does not say, and is no failure, is held for outside content.
+      const quoting = toolName === TOOL_SEARCH && searchNow() && !event.isError && (event.input?.action === "search" || event.input?.action === "describe");
+      const quoted = quoting ? event.details?.[LISTED_TOOLS_KEY] : undefined;
+      const listed = quoting ? (Array.isArray(quoted) ? quoted.filter((name): name is string => typeof name === "string") : "unknown") : undefined;
+      const untrusted = untrustedResult(toolName, event.input ?? {}, origin, listed, originOf) || carried !== undefined;
       if (!untrusted) return compact ? { content: formatted } : undefined;
 
       // Wrapped as data whatever it says; it taints the conversation only when it looks like it tries to instruct the agent.

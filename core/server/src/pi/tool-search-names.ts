@@ -56,3 +56,10 @@ export function calledToolOf(payload: any): string {
   const called = isSearchTool(name) ? payload?.[CALLED_TOOL_KEY] : undefined;
   return typeof called === "string" && called ? called : name;
 }
+
+/**
+ * What a search or a describe puts on its result's details: the names of the tools whose words it shows (their names,
+ * descriptions and parameters). The guard reads it to tell whether the result holds text from an MCP server the person has
+ * not said is their own (see untrustedResult): the tool says which tools it quoted, and the guard says whose they are.
+ */
+export const LISTED_TOOLS_KEY = "portalListedTools";

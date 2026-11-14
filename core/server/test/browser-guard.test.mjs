@@ -61,10 +61,17 @@ test("the paragraph the short envelope leaves out is the portal's, said of any o
 // It says what it blocked on the console, once for each of the hundreds of calls below.
 mock.method(console, "warn", () => {});
 
+/**
+ * pi's registry as the guard sees it: the namespace a tool of an MCP server was registered under, which attributes it
+ * (a name alone does not). Other tools, whatever they are called, have none.
+ */
+const NAMESPACES = { mcp__github__get_issue_comments: "mcp__github", mcp__pages__page: "mcp__pages" };
+const namespaceOf = (name) => NAMESPACES[name];
+
 /** A guard as a session of this role has it, its handlers by name. `guardOf`: what the tools declare, the stand-in browser tools' unless told. */
 function guardAs({ role = "primary", key, exempt = [], allowlist = [], workspace, session = "s", skills = [], guardOf = declaredBrowser } = {}) {
   const h = {};
-  guardExtension("t", () => ({ role, key }), session, () => new Set(exempt), () => allowlist, workspace, skills, () => new Set(), () => false, () => undefined, () => false, guardOf)({ on: (k, f) => (h[k] = f) });
+  guardExtension("t", () => ({ role, key }), session, () => new Set(exempt), () => allowlist, workspace, skills, () => new Set(), () => false, () => undefined, () => false, guardOf, false, namespaceOf)({ on: (k, f) => (h[k] = f) });
   return h;
 }
 const call = (h, toolName, input = {}) => h.tool_call({ toolName, input });
@@ -82,7 +89,7 @@ const tainted = (options) => {
 
 test("what mail, the web through a command, an MCP server or the browser returned is wrapped, and taints only when it tries to instruct the agent; the agent's own tools, a subagent's and a routine's answer are left as they are", () => {
   const untrusted = [
-    ["mcp", { tool: "x" }], ["mcp_github_get_issue_comments", {}], ["browser_browser_navigate", { url: "https://x.test" }],
+    ["mcp", { tool: "x" }], ["mcp__github__get_issue_comments", {}], ["mcp_script", { code: "x" }], ["browser_browser_navigate", { url: "https://x.test" }],
     ["browser_snapshot", {}],
     ["bash", { command: "curl https://x.test" }], ["bash", { command: "git clone https://x.test/r" }], ["bash", { command: "himalaya envelope list" }],
   ];
@@ -100,6 +107,8 @@ test("what mail, the web through a command, an MCP server or the browser returne
     ["routines_list", {}], ["routine_create", {}], ["routine_update", {}], ["show_image", {}], ["generate_image", {}], ["edit_image", {}],
     ["understory_memory_search", { query: "x" }], ["subagent", { task: "x" }], ["routine_run", {}], ["todo", { action: "list" }],
     ["subagents", { action: "list" }],
+    // A name that looks like a server's tool is no server's: only the registry attributes (the namespace pi gives a server's tools).
+    ["mcp_page", {}], ["mcp__pages__unregistered", {}],
   ];
   for (const [tool, input] of own) {
     const h = guardAs();
@@ -1108,7 +1117,7 @@ test("an approval is not asked for through mcp where the conversation's taint or
 test("a flagged result that came back through the tools tool holds the conversation like any other, then and after a reload, until it is trusted", () => {
   // The gateway runs the hooks under the inner tool's name; what pi keeps of it is the outer result of `tools`.
   const h = guardAs({ session: "trust-lazy" });
-  const out = read(h, "mcp_page", { url: "https://x.test" }, INJECTION);
+  const out = read(h, "mcp__pages__page", { url: "https://x.test" }, INJECTION);
   const history = [{ type: "message", message: { role: "toolResult", toolName: "tools", content: out.content } }];
   const flag = flaggedResult(out.content[0].text);
   assert.deepEqual(flag?.signals, ["override"]);
@@ -1124,7 +1133,7 @@ test("a flagged result that came back through the tools tool holds the conversat
   assert.equal(call(third, "bash", { command: "git push" }), undefined, "and when it is opened again");
   // Removed with its turn: the history has nothing flagged left.
   const removed = guardAs({ session: "trust-lazy-removed" });
-  read(removed, "mcp_page", {}, INJECTION);
+  read(removed, "mcp__pages__page", {}, INJECTION);
   assert.equal(refused(call(removed, "bash", { command: "git push" })), true);
   const reopened = guardAs({ session: "trust-lazy-removed" });
   reopened.session_start({ type: "session_start", reason: "startup" }, { sessionManager: { getEntries: () => [] } });

@@ -27,6 +27,7 @@ import { CONTEXT_FILES, SHARED_FILES } from "./context-files.js";
 import { heartbeatTool } from "./heartbeat-tool.js";
 import { ToolSearch } from "./tool-search.js";
 import { CALLED_TOOL_KEY, TOOL_SEARCH, calledThrough } from "./tool-search-names.js";
+import { mcpNamespaceOf } from "./mcp-origin.js";
 import { NO_LAZY, headLazy, type LazyHead } from "../tool-lazy.js";
 import { askPrimaryTool } from "./ask-primary.js";
 import { ASK_QUESTION_SOURCE, askQuestionTool } from "./ask-question.js";
@@ -537,6 +538,8 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     let filesOf: (name: string) => readonly string[] | undefined = () => undefined;
     // Whether the MCP adapter registered a tool, from what the session knows of it once there is one: see untrustedResult.
     let fromAdapter: (name: string) => boolean = () => false;
+    // The namespace pi's MCP support registered a tool under, from its definition once the session has it: see mcp-origin.ts.
+    let namespaceOf: (name: string) => string | undefined = () => undefined;
     // What a tool declares the guard is to hold it to, from its definition once the session has it: see declaredGuard.
     let guardOf: (name: string) => DeclaredGuard | undefined = () => undefined;
     // The line that outside content is data, while a tool that declares it is on or lazy: asked once the session is there (below).
@@ -574,6 +577,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
             (name) => fromAdapter(name),
             (name) => guardOf(name),
             opts.dialogs !== false,
+            (name) => namespaceOf(name),
           ) },
         // Offered only while the conversation has a lazy tool: see applyToolsOff.
         { name: "tool-search", factory: search.extension },
@@ -696,6 +700,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     if (opts.modeParams) session.agent.streamFunction = withModeParams(session.agent.streamFunction, opts.modeParams);
     filesOf = (name) => declaredFiles(session.getToolDefinition(name));
     guardOf = (name) => declaredGuard(session.getToolDefinition(name));
+    namespaceOf = (name) => mcpNamespaceOf(session.getToolDefinition(name));
     fromAdapter = (name) => {
       const tool = (session.getAllTools?.() ?? []).find((one: any) => one?.name === name);
       return tool !== undefined && adapterTool({ source: sourceLabel(tool.sourceInfo), package: packageOf(tool.sourceInfo) });

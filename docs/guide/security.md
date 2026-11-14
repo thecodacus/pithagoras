@@ -60,7 +60,16 @@ What is wrapped: mail and the web read through a command (`curl`, `wget`, `ssh`,
 that declares outside content. A
 server's tools count however they are called: through the adapter's `mcp` tool,
 under their own names (`jira_get_issue`) where its tools are direct, and through
-the `tool_search` tool where they are lazy. An issue comment or a mail body a server
+the `tool_search` tool where they are lazy. A tool that pi's own MCP support registers
+(`mcp__<server>__<tool>`) belongs to the server pi recorded for it, never to the
+server its name looks like: a tool called `mcp_page` that an extension brought is that
+extension's. The resource tools
+(`list_mcp_resources`, `list_mcp_resource_templates`, `read_mcp_resource`) belong to
+the server they are asked for, and a listing of every server's counts as outside
+content. What `tool_search` shows when you search or describe is the tools' own
+descriptions and parameters, which the server wrote: such a result is wrapped when it
+shows a tool of a server you have not counted as your own, and left as it is when every
+tool it shows is the portal's, an extension's, or a trusted server's. An issue comment or a mail body a server
 hands back is whoever wrote it, and so is what a server from a config other than
 the portal's hands back, or one whose tools are named without the server. A
 server you run yourself can be counted as your own, and its output is then

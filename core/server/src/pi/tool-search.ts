@@ -1,6 +1,6 @@
 import { Type } from "typebox";
 import { fail, say } from "./tool-result.js";
-import { TOOL_SEARCH } from "./tool-search-names.js";
+import { LISTED_TOOLS_KEY, TOOL_SEARCH } from "./tool-search-names.js";
 import { oneOf } from "./tool-schema.js";
 import { rank, type Rankable } from "./tool-rank.js";
 import type { LazyHead } from "../tool-lazy.js";
@@ -68,6 +68,9 @@ interface Lazy extends Rankable {
   /** The name of its set, as the person knows it. */
   label: string;
 }
+
+/** A result of a search or a describe, with the names of the tools whose words it holds: see LISTED_TOOLS_KEY. */
+const listing = (text: string, names: readonly string[]) => ({ ...say(text), details: { [LISTED_TOOLS_KEY]: [...names] } });
 
 /** The first line of a description, shortened: enough to tell tools apart. */
 function blurb(description: string): string {
@@ -291,19 +294,22 @@ export class ToolSearch {
     return fail(`There is no lazy tool called "${name}". Use search to find the names.`);
   }
 
-  private search(query: string): ReturnType<typeof say> {
+  private search(query: string): ReturnType<typeof listing> {
     const tools = this.candidates();
-    if (!tools.length) return say("There are no lazy tools in this conversation.");
+    if (!tools.length) return listing("There are no lazy tools in this conversation.", []);
     const text = query.trim();
     if (!text) {
       // No words: the groups and what is in them, for the model that does not know what to ask for.
       const groups = new Map<string, Lazy[]>();
       for (const tool of tools) groups.set(tool.label, [...(groups.get(tool.label) ?? []), tool]);
-      const lines = [...groups].sort(([a], [b]) => a.localeCompare(b)).map(([label, members]) => `- ${label} (${members.length}): ${members.map((m) => m.name).slice(0, 12).join(", ")}${members.length > 12 ? ", …" : ""}`);
-      return say(`${tools.length} lazy tool${tools.length === 1 ? "" : "s"} in ${groups.size} group${groups.size === 1 ? "" : "s"}:\n${lines.join("\n")}\n\nSearch with words for what you need; describe gives one tool's parameters.`);
+      const sorted = [...groups].sort(([a], [b]) => a.localeCompare(b));
+      const lines = sorted.map(([label, members]) => `- ${label} (${members.length}): ${members.map((m) => m.name).slice(0, 12).join(", ")}${members.length > 12 ? ", …" : ""}`);
+      // The names of each group's first twelve are the words of the list.
+      const named = sorted.flatMap(([, members]) => members.slice(0, 12).map((m) => m.name));
+      return listing(`${tools.length} lazy tool${tools.length === 1 ? "" : "s"} in ${groups.size} group${groups.size === 1 ? "" : "s"}:\n${lines.join("\n")}\n\nSearch with words for what you need; describe gives one tool's parameters.`, named);
     }
     const found = rank(tools, text);
-    if (!found.length) return say(`No lazy tool matches "${text}". Search with other words, or with none to list the groups.`);
+    if (!found.length) return listing(`No lazy tool matches "${text}". Search with other words, or with none to list the groups.`, []);
     const shown = found.slice(0, HITS);
     const detailed = shown.slice(0, DETAILED);
     let out = `${found.length} lazy tool${found.length === 1 ? "" : "s"} matching "${text}":`;
@@ -317,15 +323,15 @@ export class ToolSearch {
     out += "\n\nDescribe a tool for all of its description, then call it.";
     // A result is the model's context from here on: kept to a size. What does not fit is what is least likely to be wanted.
     if (out.length > RESULT_CHARS) out = `${out.slice(0, RESULT_CHARS).trimEnd()}\n[cut: narrow the search]`;
-    return say(out);
+    return listing(out, shown.map((tool) => tool.name));
   }
 
-  private describe(name: string): ReturnType<typeof say> {
+  private describe(name: string): ReturnType<typeof listing> {
     const tool = this.find(name, false);
     const parameters = JSON.stringify(tool.parameters ?? {});
     const shown = parameters.length > DESCRIBE_CHARS ? `${parameters.slice(0, DESCRIBE_CHARS)}…[cut]` : parameters;
     const rules = this.rulesOf([tool], this.candidates(), true);
-    return say(`${tool.name}\n\n${tool.description || "(no description)"}\n\nParameters (JSON schema):\n${shown}${rules.length ? `\n\n${rules.join("\n")}` : ""}`);
+    return listing(`${tool.name}\n\n${tool.description || "(no description)"}\n\nParameters (JSON schema):\n${shown}${rules.length ? `\n\n${rules.join("\n")}` : ""}`, [tool.name]);
   }
 
   private async call(name: string, rawArgs: unknown, signal: AbortSignal | undefined, onUpdate: unknown, ctx: any) {
