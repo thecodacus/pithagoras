@@ -109,10 +109,10 @@ test('a theme with a value that is not one is not painted, and the app says the 
 const SOFT = { id: 'soft', name: 'Soft', dark: { accent: '#7aa2f7' }, tokens: { 'radius-lg': '1.25rem', 'radius-md': '0px', 'font-sans': '"Fixture Face", serif', pad: '0.35rem', gap: '0.5rem', 'text-base': '1.125rem' } };
 const HOSTILE = { id: 'hostile', name: 'Hostile', dark: { accent: '#ff0000' }, tokens: { 'radius-lg': '0px', 'font-sans': 'x; background: url(https://example.test/x.png)' } };
 
-async function themed(page: Page, themes: unknown[]) {
+async function themed(page: Page, themes: unknown[], more: unknown[] = []) {
   await mockPortal(page, ({ path: p }) => {
     if (p === '/api/sessions') return { sessions: [session], executor: 'host' };
-    if (p === '/api/extension-ui') return { extensions: [{ name: 'look-pkg', version: '1', themes }] };
+    if (p === '/api/extension-ui') return { extensions: [{ name: 'look-pkg', version: '1', themes }, ...more] };
   }, { settings: true });
   await page.addInitScript(() => localStorage.setItem('pithagoras.theme', 'dark'));
   await page.goto('/settings/browser');
@@ -147,13 +147,16 @@ test('a theme with new tokens, chosen in Settings, changes the radius, the font 
   expect(await css(page, 'body', 'font-family')).toContain('ui-sans-serif');
 });
 
-test('a theme whose tokens are hostile is not offered, and nothing of it reaches the page', async ({ page }) => {
+test('a package with a theme whose tokens are hostile fails alone: none of its themes is offered, nothing of it reaches the page, and another package is not touched', async ({ page }) => {
   const requested: string[] = [];
   page.on('request', (request) => requested.push(request.url()));
-  await themed(page, [HOSTILE, { ...SOFT, id: 'good', name: 'Good' }]);
-  await expect(page.locator('.nav-item').first()).toBeVisible();
-  // The package's themes are registered together: one that is refused fails the package, so none of them is on offer.
-  await expect(page.getByRole('dialog', { name: 'Settings' }).getByRole('combobox', { name: 'Colours' })).toHaveCount(0);
+  await themed(page, [HOSTILE, { ...SOFT, id: 'good', name: 'Good' }], [{ name: 'fine-pkg', version: '1', themes: [{ id: 'ok', name: 'Fine', dark: { accent: '#00ff00' } }] }]);
+  const colours = page.getByRole('dialog', { name: 'Settings' }).getByRole('combobox', { name: 'Colours' });
+  // The package that is fine is on offer, which says the list was gone through; the hostile one's themes are not, not even its good one.
+  await expect(colours).toBeVisible();
+  await colours.click();
+  await expect(page.getByRole('option')).toHaveText([/^The portal's own/, /^Fine/]);
+  await page.keyboard.press('Escape');
   expect(await css(page, '.nav-item', 'border-top-left-radius')).toBe('8px');
   expect(await page.evaluate(() => document.documentElement.getAttribute('style') ?? '')).not.toMatch(/url|example\.test|background/);
   expect(requested.filter((url) => url.includes('example.test'))).toEqual([]);
