@@ -51,3 +51,25 @@ test("a pasted config adds the servers that are new and leaves the one of the sa
   assert.equal(servers().github.command, undefined);
   assert.equal(servers().pasted.command, "pasted-mcp");
 });
+
+const json = async (method, url, body) => {
+  const res = await fetch(`${base}${url}`, { method, headers: { "content-type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
+  return { status: res.status, body: await res.json() };
+};
+
+test("the status, the mark and the questions are the running portal's, and a rename leaves them behind", async () => {
+  const marked = await json("PUT", "/api/mcp/servers/pasted/mark", { mark: "direct" });
+  assert.equal(marked.status, 200, JSON.stringify(marked.body));
+  assert.equal((await json("PUT", "/api/mcp/servers/pasted/approve", { approve: ["drop_*"] })).status, 200);
+  let state = (await json("GET", "/api/mcp/status")).body.servers.pasted;
+  assert.deepEqual([state.mark, state.lazy, state.by, state.approve], ["direct", false, "mark", ["drop_*"]]);
+  assert.equal(servers().pasted.exposure, "direct", "said in the file for pi alone");
+  // The Tools page's own route keeps the same marks, and refuses what it refused before.
+  assert.equal((await json("PUT", "/api/tools/marks", { marks: { pasted: "direct", "<tool>read": "lazy" } })).status, 400);
+  assert.equal((await json("PUT", "/api/tools/marks", { marks: { pasted: "direct", fresh: "lazy" } })).status, 200);
+  // A rename takes the questions with the old name; the form says them again under the new one.
+  assert.equal((await put("renamed", servers().pasted, "pasted")).status, 200);
+  state = (await json("GET", "/api/mcp/status")).body.servers.renamed;
+  assert.deepEqual(state.approve, []);
+  assert.equal((await json("PUT", "/api/mcp/servers/pasted/approve", { approve: ["x"] })).status, 404);
+});
