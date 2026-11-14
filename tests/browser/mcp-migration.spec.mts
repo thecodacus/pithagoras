@@ -25,13 +25,18 @@ const REPORT = {
   notes: [],
 };
 
-async function portal(page: Page, migration: { report: unknown; notice: boolean } | null, path = '/') {
+async function portal(page: Page, migration: { report: unknown; notice: boolean } | null, path = '/', imports: Record<string, unknown> = {}) {
   const sent: string[] = [];
   const mcp = { path: '/a/mcp.json', exists: true, clashes: [], raw: '{}', parseError: null, servers: [] };
   let view = migration ? { ...migration } : { report: null, notice: false };
-  await mockPortal(page, ({ path: url, method }) => {
+  await mockPortal(page, ({ path: url, method, json }) => {
     if (url === '/api/mcp') return mcp;
     if (url === '/api/mcp/migration' && method === 'GET') return view;
+    if (url === '/api/mcp/import-folder' && method === 'POST') {
+      const { folder, file } = json();
+      sent.push(`import ${folder} ${file}`);
+      return imports[file] ?? { ok: true, added: [], skipped: [], commands: {} };
+    }
     if (url === '/api/mcp/migration/notice' && method === 'DELETE') {
       sent.push(method);
       view = { ...view, notice: false };
@@ -98,4 +103,26 @@ test('a file that cannot be read says that nothing was moved, and the dismiss in
   await report.getByRole('button', { name: 'Dismiss' }).click();
   await expect.poll(() => sent).toEqual(['DELETE']);
   await expect(line).toHaveCount(0);
+});
+
+test("a folder's own MCP files are taken into the user's configuration from the report, and what came of it is said", async ({ page }) => {
+  const { sent, dialog } = await portal(page, { report: REPORT, notice: false }, '/settings/mcp', {
+    '.pi/mcp.json': { ok: true, added: ['tracker'], skipped: [{ name: 'override', reason: 'server "override" needs "command" or "url"' }], commands: {} },
+    '.mcp.json': { ok: true, added: [], skipped: [{ name: 'local', reason: 'A server called local already exists' }], commands: {} },
+  });
+  const report = dialog.getByRole('region', { name: "Moved to pi's own MCP support" });
+  await report.getByRole('button', { name: 'Import .pi/mcp.json of /work/one into the user config' }).click();
+  await expect(report.getByRole('status')).toContainText('Added tracker, switched off: look at what each one runs, then switch it on.');
+  await expect(report.getByRole('status')).toContainText('Skipped override: server "override" needs "command" or "url"');
+  await report.getByRole('button', { name: 'Import .mcp.json of /work/one into the user config' }).click();
+  await expect(report.getByText('Skipped local: A server called local already exists')).toBeVisible();
+  expect(sent).toEqual(['import /work/one .pi/mcp.json', 'import /work/one .mcp.json']);
+});
+
+test('a refusal of the import is said where the button is', async ({ page }) => {
+  const { dialog } = await portal(page, { report: REPORT, notice: false }, '/settings/mcp', {});
+  await page.route('**/api/mcp/import-folder', (route) => route.fulfill({ status: 404, json: { error: 'That folder is not in the report' } }));
+  const report = dialog.getByRole('region', { name: "Moved to pi's own MCP support" });
+  await report.getByRole('button', { name: 'Import .pi/mcp.json of /work/one into the user config' }).click();
+  await expect(report.getByRole('alert')).toContainText('That folder is not in the report');
 });

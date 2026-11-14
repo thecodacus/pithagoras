@@ -485,13 +485,14 @@ in the list. Where a group exists for one purpose, a [mode of yours](/guide/sess
 the mode's or the agent's tools page. Without it the largest-first rule could leave out exactly the group the mode is for.
 A mode an extension offers says the same with `keepDirect` (see [Chat modes](/guide/extension-ui#chat-modes)).
 
-An MCP server's tools do not take part: they are lazy by the server's own setting (see below), and the threshold
-counts the ones that are in the list and does not take them out.
+An MCP server takes part like any other group (see below): its tools count with the size the portal remembers of
+them, and the threshold takes a large server out of the list whole.
 
 ### Setting the marks
 
 **Settings → Tools** has a button on the header of each group and one beside each tool that shows the mark: **auto**,
-**lazy** or **direct**. Clicking it goes from auto to lazy to direct and back. Marking a group makes every tool of
+**lazy** or **direct**. Clicking it goes from auto to lazy to direct and back. A group on **auto** shows what the threshold made of it,
+*auto* or *auto, lazy*, and the tip of the button says why in words (the model's list was over the limits, or it stays in the list). Marking a group makes every tool of
 it lazy or direct, including tools that turn up in it later. A mark is no switch: the tools stay on or off as
 they were, and a mark on a tool that is off changes nothing in the chats where it stays off. In a chat in Code mode, or in a
 [mode of yours](/guide/sessions#modes-you-make) that works through the code tool, the marks do not apply: every
@@ -509,7 +510,7 @@ by its own name, or a lazy one called through `tool_search`. A switched-off one 
 answered "not found", and writes nothing. If a call through `tool_search` turns out to be another tool's (a key
 given twice, the last one counts), only known when the call is whole, the text that came is taken out again.
 
-**An MCP server** is a group like any other: marked auto, lazy or direct, and counted by the threshold with the size
+**An MCP server** is a group like any other: marked auto, lazy or direct (also from the server's form in [Settings → MCP](/guide/mcp#what-each-server-s-row-says)), and counted by the threshold with the size
 of its tools, which the portal remembers from when the server last ran (a server nothing is known of yet counts as
 lazy). Its tools are named `mcp__<server>__<tool>`. A lazy server is not started with the chat but when the model
 first searches for or calls one of its tools, and is stopped again after ten minutes of not being used (see

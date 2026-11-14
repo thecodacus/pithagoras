@@ -4,6 +4,10 @@ import { test, expect, mockPortal } from './portal-mock';
 /** Settings → MCP over canned answers, with every save that was sent. */
 async function portal(page: Page) {
   const saves: string[] = [];
+  const status = {
+    github: { lazy: true, by: 'threshold', tools: { count: 38, tokens: 9200, at: 1, stale: false }, approve: ['delete_*'], trusted: false },
+    notes: { mark: 'direct', lazy: false, by: 'mark', tools: null, approve: [], trusted: true },
+  };
   const mcp = {
     path: '/a/mcp.json', exists: true, clashes: [], raw: '{}', parseError: null,
     servers: [
@@ -13,6 +17,15 @@ async function portal(page: Page) {
   };
   await mockPortal(page, ({ path, method, json }) => {
     if (path === '/api/mcp') return mcp;
+    if (path === '/api/mcp/status') return { servers: status, limits: { tokens: 3000, tools: 20 } };
+    if (path.startsWith('/api/mcp/servers/') && path.endsWith('/mark') && method === 'PUT') {
+      saves.push(`mark ${path.split('/')[4]} ${json().mark}`);
+      return { marks: {}, resolved: { lazy: [], over: false } };
+    }
+    if (path.startsWith('/api/mcp/servers/') && path.endsWith('/approve') && method === 'PUT') {
+      saves.push(`approve ${path.split('/')[4]} ${json().approve.join('|')}`);
+      return { approve: json().approve };
+    }
     if (path.startsWith('/api/mcp/servers/') && method === 'PUT') {
       saves.push(`${path.slice('/api/mcp/servers/'.length)} from ${json().from}`);
       return { ok: true };
@@ -51,4 +64,35 @@ test('a server cannot be renamed onto another, and keeps its own name for an edi
   await name.fill('notes');
   await dialog.getByRole('button', { name: 'Save' }).click();
   await expect.poll(() => saves).toEqual(['notes from notes']);
+});
+
+test('each server says what a chat does with its tools and what is known of them, where the server is listed', async ({ page }) => {
+  const { dialog } = await portal(page);
+  const github = dialog.getByRole('button', { name: /^github/ }).first();
+  await expect(github).toContainText("auto, lazy now: the model's list is over the limits · 38 tools, about 9,200 tokens · asks first: delete_*");
+  const notes = dialog.getByRole('button', { name: /^notes/ }).first();
+  await expect(notes).toContainText("direct: always in the model's list · never connected, so its tools are not known yet");
+});
+
+test("a server's mark and the tools that ask first are saved with the server, and only when they changed", async ({ page }) => {
+  const { saves, dialog } = await portal(page);
+  await dialog.getByRole('button', { name: /^github/ }).first().click();
+  await expect(dialog.getByText("Now: auto, lazy now: the model's list is over the limits. 38 tools, about 9,200 tokens.")).toBeVisible();
+  // Nothing changed: only the entry is saved.
+  await dialog.getByRole('button', { name: 'Save' }).click();
+  await expect.poll(() => saves).toEqual(['github from github']);
+  await dialog.getByRole('button', { name: /^github/ }).first().click();
+  await dialog.getByRole('radio', { name: 'Direct' }).click();
+  await dialog.getByRole('textbox', { name: 'Ask before these tools' }).fill('delete_*\ncreate_*');
+  await dialog.getByRole('button', { name: 'Save' }).click();
+  await expect.poll(() => saves).toEqual(['github from github', 'github from github', 'mark github direct', 'approve github delete_*|create_*']);
+});
+
+test('a renamed server has its mark and its questions said again under the new name', async ({ page }) => {
+  const { saves, dialog } = await portal(page);
+  await dialog.getByRole('button', { name: /^notes/ }).first().click();
+  await dialog.getByPlaceholder('filesystem', { exact: true }).fill('memo');
+  await dialog.getByRole('textbox', { name: 'Ask before these tools' }).fill('drop');
+  await dialog.getByRole('button', { name: 'Save' }).click();
+  await expect.poll(() => saves).toEqual(['memo from notes', 'mark memo direct', 'approve memo drop']);
 });

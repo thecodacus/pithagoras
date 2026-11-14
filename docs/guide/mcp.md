@@ -72,6 +72,9 @@ is listed as skipped, and the one you have stays as it is.
 second is refused. A name that another server has is refused too, whether the
 server is new or renamed: it would replace that one, with everything the form
 does not show. A server that pi would skip is marked in the list, with why.
+Under the transport fields the form has pi's `description` and request `timeout`,
+and the two settings that are the portal's own: **Tools in the model's list** and
+**Ask before these tools** (see below).
 
 **The file.** "Edit the file directly" at the bottom of the panel, for anything
 the form does not cover: OAuth blocks, `toolExposure`. It is plain JSON, as pi
@@ -139,12 +142,35 @@ the file hides (`toolExposure`). A tool marked **cached** is listed from what th
 portal kept of the server when it last ran: it is not running in this chat, and
 starts when the tool is first used.
 
+## What each server's row says
+
+Under the name of each server the list says what a chat that starts now does with
+its tools and what is known of them: *direct: always in the model's list*, *lazy:
+found through tool_search*, or, for a server with no mark of its own, what the
+threshold made of it (*auto, lazy now: the model's list is over the limits*, *auto,
+in the model's list: small enough to stay there*, or *auto, lazy until it has run
+once: its size is not known yet*), then how many tools the portal remembers of it
+and about how many tokens they take, or that it has never connected. The form of a
+server shows the same line. It is the state every chat that starts from now on
+gets: a chat that is running keeps the list it started with.
+
+**Tools in the model's list** in the form is the mark: **Auto** (the threshold
+decides), **Lazy** or **Direct**, the same mark Settings → Tools shows on the
+server's group. A mark you set is said in `mcp.json` as well (`exposure`:
+`deferred` for lazy), so that pi's command line and a container's pi, which have
+no threshold, reach the server's tools the way you chose; **Auto** leaves the file
+as it was. A server in the file with `toolExposure` entries has them kept, and the
+form says how many; they are changed in the file.
+
 ## Tools that ask first
 
-An extension that writes a server can name tools whose calls are confirmed each
-time (`approve`, patterns of the server's own tool names such as `delete_*`): the
-person is asked in the chat before the call runs, and where nobody can be asked (a
-routine, a heartbeat, a channel chat) it is refused.
+**Ask before these tools** in the form takes patterns of the server's own tool
+names, one per line, with `*` for any characters: `delete_*` asks before every tool
+of the server that starts with `delete_`. The person is asked in the chat before the
+call runs, and where nobody can be asked (a routine, a heartbeat, a channel chat)
+the call is refused. An extension that writes a server can name the same tools with
+`approve`, and a server moved from the old adapter has its `approveTools` here. The
+patterns are kept by the server's name in the portal, not in the file.
 
 ## Disabling
 

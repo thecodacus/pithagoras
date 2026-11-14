@@ -201,8 +201,8 @@ when it first starts again. Old chats keep their calls of `tools` in their histo
 the tools they called.
 
 A tool is no longer counted as an MCP server's by a name that starts with `mcp_`: the guard asks pi which server a
-tool came from, and a name proves nothing, as any extension can register one. What the pi-mcp-adapter's tools hand
-back is still wrapped, by their package. A pi package of yours that hands back another server's or somebody else's
+tool came from, and a name proves nothing, as any extension can register one. Servers that pi's own MCP support runs
+are told by the namespace pi gave their tools (see [MCP servers](#mcp-servers-run-on-pi-s-own-mcp-support) below). A pi package of yours that hands back another server's or somebody else's
 words under such a name (another MCP bridge, say) is now trusted as the extension it is, so its tools have to say so:
 `guard: { outside: true }` on their definition ([What the guard holds a tool to](/guide/extension-ui#what-the-guard-holds-a-tool-to)).
 
@@ -288,7 +288,10 @@ you have looked at them (Settings → MCP → On), and change what it lists:
   instructions. They are scanned, not changed; the tools are called `mcp__<server>__<tool>` now.
 - **Folders that bring their own MCP configuration or the adapter.** A project's `.pi/mcp.json` in the adapter's keys is
   **not connected** until it is written in pi's. What the adapter read from `.mcp.json`, `.vscode/mcp.json` and
-  `opencode.json` is not read by pi: paste it into Settings → MCP.
+  `opencode.json` is not read by pi. The report lists each such folder with a button for every file that can be taken over
+  (`.pi/mcp.json`, `.mcp.json`, `.vscode/mcp.json`): **Import into the user config** adds its servers to your own
+  `mcp.json`, **switched off**, so that you look at what each one runs before you switch it on (a name you already
+  have is not replaced). `opencode.json` has another shape: paste its servers into Settings → MCP.
 - **Servers that signed in with OAuth** sign in again with `pi mcp login <name>`; signing in from the portal is not
   built yet.
 - **An extension that writes a server with the adapter's keys** (`portal.mcp.set`) keeps working for one release: the
