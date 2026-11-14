@@ -55,12 +55,14 @@ interface Portal {
   writes: { what: string; body: unknown }[];
   /** How often a mode's tools were read. */
   toolReads: number;
+  /** What each mode keeps in the model's list, by its id. */
+  keepDirect: Record<string, string[]>;
   /** The chat, `a`: its mode and its model. */
   chat: { mode: string | null; model: string | null };
 }
 
 async function portal(page: Page, { modes = [] as Mode[], refuse = false } = {}): Promise<Portal> {
-  const state: Portal = { modes: [...modes], off: {}, writes: [], toolReads: 0, chat: { mode: null, model: null } };
+  const state: Portal = { modes: [...modes], off: {}, writes: [], toolReads: 0, keepDirect: {}, chat: { mode: null, model: null } };
   const offOf = (id: string) => (state.off[id] ??= ['codemode']);
   const at = new Date().toISOString();
   const session = () => ({ id: 'a', title: 'A chat', workspace: '/w/site', status: 'idle', kind: 'task', pinned: false, updated_at: at, provider: null, model: state.chat.model, thinking_level: null, mode: state.chat.mode });
@@ -99,11 +101,17 @@ async function portal(page: Page, { modes = [] as Mode[], refuse = false } = {})
         live: false,
         off,
         names: {},
+        keepDirect: state.keepDirect[tools[1]] ?? [],
         tools: [
           { name: 'codemode', source: 'pithagoras', inline: true, enabled: !off.includes('codemode'), defaultOn: false },
-          { name: 'web_search', source: 'pi-web-access', enabled: !off.includes('web_search'), defaultOn: true },
+          { name: 'web_search', source: 'pi-web-access', enabled: !off.includes('web_search'), defaultOn: true, auto: true },
         ],
       };
+    }
+    const direct = /^\/api\/chat-modes\/([^/]+)\/direct$/.exec(p);
+    if (direct && method === 'PUT') {
+      state.keepDirect[direct[1]] = json().entries;
+      return { entries: json().entries };
     }
     if (tools && method === 'PUT') {
       state.off[tools[1]] = json().off;
@@ -339,4 +347,20 @@ test('a chat offers your modes after the portal\'s, leads to Settings → Modes,
   await expect(chip).toHaveText('Brief');
   // The mode wrote its model into the chat: the pill under the box says so.
   await expect(page.getByRole('button', { name: 'Model: Model B' })).toBeVisible();
+});
+
+test('a mode keeps a group of tools in the model\'s list from its tools, and lets the marks and the threshold decide again', async ({ page }) => {
+  const state = await portal(page, { modes: [mode('Browsing')] });
+  await page.goto('/settings/modes');
+  await dialog(page).getByRole('button', { name: /^Browsing/ }).click();
+  const keep = dialog(page).getByRole('button', { name: "Keep pi-web-access in the model's list" });
+  await expect(keep).toHaveAttribute('aria-pressed', 'false');
+  // The portal's own code tool has no mark, so no button.
+  await expect(dialog(page).getByRole('button', { name: /^Keep pithagoras/ })).toHaveCount(0);
+  await keep.click();
+  await expect(keep).toHaveAttribute('aria-pressed', 'true');
+  expect(writes(state).at(-1)).toBe('PUT /api/chat-modes/browsing/direct {"entries":["pi-web-access"]}');
+  await keep.click();
+  await expect(keep).toHaveAttribute('aria-pressed', 'false');
+  expect(writes(state).at(-1)).toBe('PUT /api/chat-modes/browsing/direct {"entries":[]}');
 });
