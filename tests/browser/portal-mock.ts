@@ -109,6 +109,8 @@ const portalBase = ({ path, method, url }: Ask): Answer => {
   if (path === '/api/voice') return { provider: '', ready: false, speech: true, voices: [], enabled: false };
   // A portal that is not run from a checkout: nothing to update, no notice.
   if (path === '/api/update') return { kind: 'none', boot: 'boot-a' };
+  // Nothing was moved to pi's own MCP support: no line at the top, no report in Settings → MCP.
+  if (path === '/api/mcp/migration') return { report: null, notice: false };
   if (/^\/api\/sessions\/[^/]+\/background$/.test(path)) return { supported: true, jobs: [], statuses: [], widgets: [] };
   if (/^\/api\/sessions\/[^/]+\/events\/before$/.test(path)) return { events: [], more: false };
   // No modes to choose from: a chat draws no picker unless a test offers some.
