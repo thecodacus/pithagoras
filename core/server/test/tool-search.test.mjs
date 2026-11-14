@@ -528,6 +528,25 @@ test("a tool a chat's head does not name is in the list, whatever the marks say 
   }
 });
 
+test("a head the person asks to read again is taken up by the reload, and not before: the prompt is not changed under a chat that goes on", async () => {
+  const { client, ask } = await chatOf({ lazy: headOf("docs_open") });
+  try {
+    const [first] = await ask();
+    assert.ok(names(first).includes("docs_export") && !names(first).includes("docs_open"));
+    client.useHead({ ...headOf("docs_open", "docs_export"), hint: "A new line." });
+    const [second] = await ask();
+    assert.deepEqual(names(second), names(first), "asked for, not yet read: the same tools");
+    assert.equal(systemOf(second), systemOf(first));
+    await client.reload();
+    const [third] = await ask();
+    assert.ok(!names(third).includes("docs_export") && !names(third).includes("docs_open"), "after the reload both are lazy");
+    assert.match(systemOf(third), /A new line\./);
+    assert.doesNotMatch(systemOf(first), /A new line\./);
+  } finally {
+    client.dispose();
+  }
+});
+
 test("the model is told which lazy tools it has, and only while something is lazy", async () => {
   const hinted = await run([], { lazy: { ...headOf("docs_open"), hint: lazyHintOf([{ label: "Browser", tools: ["browser_click"] }, { label: "docs", tools: ["docs_open"] }]) } });
   assert.match(systemOf(hinted.requests[0]), /These tools are not in your list: Browser \(browser_click\); docs \(docs_open\)\./);
