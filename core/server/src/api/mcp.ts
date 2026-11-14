@@ -323,6 +323,60 @@ export function chatServers(cwd: string, projectTrusted: boolean): { servers: Ch
   return { servers: [...servers.values()], errors };
 }
 
+export interface ImportResult {
+  added: string[];
+  skipped: { name: string; reason: string }[];
+  /** The places in each added server whose value pi runs as a command. */
+  commands: Record<string, string[]>;
+}
+
+/**
+ * Put servers into the user's file: the ones a README handed out, or those of a project's own file. A server whose name is
+ * taken is not replaced (what is there is somebody's setup), one pi would skip is listed with why, and nothing is written
+ * when nothing was added. `off` writes them switched off, for what the person has not read yet; `prepare` may change an
+ * entry first, or refuse it by throwing. A file that cannot be read stops it, as the form's save does.
+ */
+export function importServers(incoming: Record<string, unknown>, options: { off?: boolean; prepare?: (name: string, entry: unknown) => unknown } = {}): ImportResult {
+  const { config, error } = readMcpFile();
+  if (error) throw Object.assign(new Error(`Fix the file first: ${error}`), { status: 409 });
+  const added: string[] = [];
+  const skipped: ImportResult["skipped"] = [];
+  const commands: Record<string, string[]> = {};
+  for (const [name, given] of Object.entries(incoming)) {
+    if (name === "settings" || name === "imports" || name === "autoEnableCodemode") continue;
+    if (!SERVER_NAME_RE.test(name)) {
+      skipped.push({ name, reason: "Unusable name" });
+      continue;
+    }
+    let entry = given;
+    try {
+      entry = options.prepare ? options.prepare(name, given) : given;
+    } catch (e) {
+      skipped.push({ name, reason: (e as Error).message });
+      continue;
+    }
+    const problem = validateEntry(name, entry, Object.keys(config.mcpServers));
+    if (problem) {
+      skipped.push({ name, reason: problem });
+      continue;
+    }
+    // As the form's save refuses it: what is there is somebody's setup, and a pasted README snippet would replace it unseen.
+    if (Object.prototype.hasOwnProperty.call(config.mcpServers, name)) {
+      skipped.push({ name, reason: `A server called ${name} already exists` });
+      continue;
+    }
+    config.mcpServers[name] = withExposure({ ...(entry as Record<string, unknown>), ...(options.off ? { enabled: false } : {}) });
+    added.push(name);
+    const run = commandValues(entry);
+    if (run.length) commands[name] = run;
+  }
+  if (added.length) writeMcpFile(config);
+  return { added, skipped, commands };
+}
+
+/** What a file of servers says, comments and all: the portal has always read them, and so do other tools' files. */
+export const parseMcpText = (text: string): unknown => JSON.parse(stripComments(text));
+
 export function mcpRouter(): Router {
   const router = express.Router();
 
@@ -413,43 +467,12 @@ export function mcpRouter(): Router {
       obj.mcpServers && typeof obj.mcpServers === "object" ? obj.mcpServers : obj
     ) as Record<string, unknown>;
 
-    const { config, error } = readMcpFile();
-    if (error) return res.status(409).json({ error: `Fix the file first: ${error}` });
-
-    const added: string[] = [];
-    const skipped: { name: string; reason: string }[] = [];
-    const commands: Record<string, string[]> = {};
-    for (const [name, entry] of Object.entries(incoming)) {
-      if (name === "settings" || name === "imports" || name === "autoEnableCodemode") continue;
-      if (!SERVER_NAME_RE.test(name)) {
-        skipped.push({ name, reason: "Unusable name" });
-        continue;
-      }
-      const problem = validateEntry(name, entry, Object.keys(config.mcpServers));
-      if (problem) {
-        skipped.push({ name, reason: problem });
-        continue;
-      }
-      // As the form's save refuses it: what is there is somebody's setup, and a pasted README snippet would replace it unseen.
-      if (Object.prototype.hasOwnProperty.call(config.mcpServers, name)) {
-        skipped.push({ name, reason: `A server called ${name} already exists` });
-        continue;
-      }
-      config.mcpServers[name] = withExposure(entry as Record<string, unknown>);
-      added.push(name);
-      const run = commandValues(entry);
-      if (run.length) commands[name] = run;
-    }
-    if (!added.length && !skipped.length) {
-      return res.status(400).json({ error: "No servers found in that JSON" });
-    }
     try {
-      if (added.length) {
-        writeMcpFile(config);
-      }
-      res.json({ ok: true, added, skipped, commands });
+      const done = importServers(incoming);
+      if (!done.added.length && !done.skipped.length) return res.status(400).json({ error: "No servers found in that JSON" });
+      res.json({ ok: true, ...done });
     } catch (e) {
-      res.status(500).json({ error: (e as Error).message });
+      res.status((e as { status?: number }).status ?? 500).json({ error: (e as Error).message });
     }
   });
 

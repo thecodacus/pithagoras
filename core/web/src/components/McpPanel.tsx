@@ -14,9 +14,9 @@ import {
   LuTerminal,
   LuTrash2,
 } from "react-icons/lu";
-import { api, type McpConfigView, type McpServerEntry, type McpServerView } from "../api";
+import { api, type McpConfigView, type McpServerEntry, type McpServerState, type McpServerView, type ToolMark } from "../api";
 import { Field, LoadFailed, Segments, btnCls, codeAreaCls, gridCls, inputCls, primaryCls } from "./SettingsUi";
-import { msg, t, tx } from "../i18n";
+import { formatNumber, msg, t, tp, tx } from "../i18n";
 import { McpMigrationSection } from "./McpMigrationReport";
 
 
@@ -51,9 +51,34 @@ function textToPairs(text: string, sep: string): Record<string, string> | undefi
   return Object.keys(out).length ? out : undefined;
 }
 
+type Exposure = ToolMark | "auto";
+
+const EXPOSURES: { id: Exposure; label: string }[] = [
+  { id: "auto", label: msg("Auto") },
+  { id: "lazy", label: msg("Lazy") },
+  { id: "direct", label: msg("Direct") },
+];
+
+/** What a chat that starts now does with a server's tools, in words: the mark, or what the threshold made of an auto server. */
+function exposureText(state: McpServerState): string {
+  if (state.by === "mark") return state.lazy ? t("lazy: found through tool_search") : t("direct: always in the model's list");
+  if (state.by === "threshold") return t("auto, lazy now: the model's list is over the limits");
+  if (state.by === "unknown") return t("auto, lazy until it has run once: its size is not known yet");
+  return t("auto, in the model's list: small enough to stay there");
+}
+
+/** What is remembered of a server's tools: how many and how much of the model's list they take. */
+function toolsText(state: McpServerState): string {
+  if (!state.tools) return t("never connected, so its tools are not known yet");
+  const known = tp(state.tools.count, "{n} tool, about {tokens} tokens", "{n} tools, about {tokens} tokens", { tokens: formatNumber(state.tools.tokens) });
+  return state.tools.stale ? `${known} ${t("(as of before its entry was changed)")}` : known;
+}
+
 /** MCP servers, as pi's own MCP support reads them: the file is pi's, and the panel edits it. */
 export function McpPanel({ onError }: { onError: (e: string) => void }) {
   const [view, setView] = useState<McpConfigView | null>(null);
+  /** What the portal says of each server beyond its file; nothing where it cannot say, and the page is as the file shows it. */
+  const [states, setStates] = useState<Record<string, McpServerState>>({});
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState<string | null>(null);
   const [editing, setEditing] = useState<{ name: string | null } | null>(null);
@@ -62,7 +87,9 @@ export function McpPanel({ onError }: { onError: (e: string) => void }) {
 
   const load = async () => {
     try {
-      setView(await api.mcp());
+      const [next, status] = await Promise.all([api.mcp(), api.mcpStatus().then((r) => r.servers, () => ({}) as Record<string, McpServerState>)]);
+      setView(next);
+      setStates(status);
       setFailed(null);
     } catch (e) {
       // With nothing read yet, the page says so itself, with a way to try again; the banner is for a refresh.
@@ -103,10 +130,15 @@ export function McpPanel({ onError }: { onError: (e: string) => void }) {
     return (
       <ServerForm
         server={existing}
+        state={existing ? states[existing.name] : undefined}
         taken={view.servers.filter((s) => s.name !== existing?.name).map((s) => s.name)}
         onBack={() => setEditing(null)}
-        onSave={async (name, entry) => {
+        onSave={async (name, entry, settings) => {
           await api.saveMcpServer(name, entry, existing?.name);
+          // What the portal keeps by the server's name follows a rename only by being said again under the new one.
+          const moved = existing !== undefined && existing.name !== name;
+          if (settings.exposure !== (states[existing?.name ?? ""]?.mark ?? "auto") || (moved && settings.exposure !== "auto")) await api.setMcpMark(name, settings.exposure);
+          if (settings.approve.join("\n") !== (states[existing?.name ?? ""]?.approve ?? []).join("\n") || (moved && settings.approve.length)) await api.setMcpApprove(name, settings.approve);
           setEditing(null);
           await load();
         }}
@@ -132,7 +164,7 @@ export function McpPanel({ onError }: { onError: (e: string) => void }) {
         </section>
       )}
 
-      <McpMigrationSection />
+      <McpMigrationSection onImported={() => void load()} />
 
       <section className="mb-6 rounded-xl border border-line bg-raised/40 p-3">
         <div className="flex items-center gap-2">
@@ -180,6 +212,7 @@ export function McpPanel({ onError }: { onError: (e: string) => void }) {
               <ServerRow
                 key={s.name}
                 server={s}
+                state={states[s.name]}
                 onOpen={() => setEditing({ name: s.name })}
                 onToggle={() =>
                   act(() => {
@@ -219,11 +252,13 @@ export function McpPanel({ onError }: { onError: (e: string) => void }) {
 
 function ServerRow({
   server,
+  state,
   onOpen,
   onToggle,
   onDelete,
 }: {
   server: McpServerView;
+  state?: McpServerState;
   onOpen: () => void;
   onToggle: () => void;
   onDelete: () => void;
@@ -251,6 +286,13 @@ function ServerRow({
         <p className="truncate font-mono text-xs text-fg-faint">{summary}</p>
         {/* What pi would skip it for, and the values it would run as a command: both are said where the server is. */}
         {server.problem && <p className="truncate text-xs text-danger">{server.problem}</p>}
+        {/* What a chat does with its tools, and what is known of them: the state the threshold left it in is said here, where the server is. */}
+        {state && !server.disabled && (
+          <p className="truncate text-xs text-fg-faint" title={`${exposureText(state)}. ${toolsText(state)}`}>
+            {exposureText(state)} · {toolsText(state)}
+            {state.approve.length > 0 && ` · ${t("asks first: {tools}", { tools: state.approve.join(", ") })}`}
+          </p>
+        )}
         {server.commands.length > 0 && (
           <p className="truncate text-xs text-warn">{t("Runs a command for {names}", { names: server.commands.join(", ") })}</p>
         )}
@@ -353,16 +395,18 @@ function ImportBox({
 
 function ServerForm({
   server,
+  state,
   taken,
   onBack,
   onSave,
   onError,
 }: {
   server?: McpServerView;
+  state?: McpServerState;
   /** The names of the other servers: a new or renamed one on any of them would replace it. */
   taken: string[];
   onBack: () => void;
-  onSave: (name: string, entry: McpServerEntry) => Promise<void>;
+  onSave: (name: string, entry: McpServerEntry, settings: { exposure: Exposure; approve: string[] }) => Promise<void>;
   onError: (e: string) => void;
 }) {
   const e = server?.entry ?? {};
@@ -379,10 +423,13 @@ function ServerForm({
   const [description, setDescription] = useState(e.description ?? "");
   const [timeout, setTimeoutSeconds] = useState(e.timeout === undefined ? "" : String(e.timeout));
   const [disabled, setDisabled] = useState(e.enabled === false || e.disabled === true);
+  /** The portal's own mark on the server, which is not in the file, and the tools that ask first. */
+  const [exposure, setExposure] = useState<Exposure>(state?.mark ?? "auto");
+  const [approve, setApprove] = useState((state?.approve ?? []).join("\n"));
   const [saving, setSaving] = useState(false);
   const nameTaken = taken.includes(name.trim());
   // Whatever it was opened with is not a draft; the first look at the fields is what they are compared with.
-  const fields = JSON.stringify([name, transport, command, args, env, cwd, url, headers, description, timeout, disabled]);
+  const fields = JSON.stringify([name, transport, command, args, env, cwd, url, headers, description, timeout, disabled, exposure, approve]);
   const opened = useRef(fields);
   useUnsavedDraft(!saving && fields !== opened.current);
 
@@ -414,7 +461,7 @@ function ServerForm({
 
     setSaving(true);
     try {
-      await onSave(name.trim(), next);
+      await onSave(name.trim(), next, { exposure, approve: lines(approve) });
     } catch (err) {
       onError((err as Error).message);
     } finally {
@@ -512,6 +559,26 @@ function ServerForm({
         </Field>
         <Field label={t("Request timeout")} hint={t("Seconds; empty is pi's default")}>
           <input className={inputCls} value={timeout} inputMode="numeric" onChange={(ev) => setTimeoutSeconds(ev.target.value)} />
+        </Field>
+
+        <Field
+          label={t("Tools in the model's list")}
+          hint={t("Auto: the threshold decides, by how long the list is (Settings → Tools). Lazy: the model finds and calls the tools through tool_search, and the server starts when one is first used. Direct: the tools are always in the list, and the server starts with the chat.")}
+        >
+          <Segments label={t("Tools in the model's list")} size="md" className="flex gap-2" value={exposure} options={EXPOSURES} onChange={setExposure} />
+          {state && (
+            <p className="mt-1.5 text-xs text-fg-faint">
+              {t("Now: {state}. {tools}.", { state: exposureText(state), tools: toolsText(state) })}
+              {typeof e.exposure === "string" && " " + t("The file says exposure {value}, which is what pi's command line reads.", { value: e.exposure })}
+              {e.toolExposure && typeof e.toolExposure === "object" && " " + t("It also sets {n} tools by name in the file; edit the file directly to change those.", { n: Object.keys(e.toolExposure).length })}
+            </p>
+          )}
+        </Field>
+        <Field
+          label={t("Ask before these tools")}
+          hint={t("One pattern per line, of the server's own tool names, * for any characters: delete_* asks before every tool that starts with delete_. You are asked in the chat before the call runs; where nobody can be asked (a routine, a heartbeat), it is refused.")}
+        >
+          <textarea className={codeAreaCls} rows={2} spellCheck={false} aria-label={t("Ask before these tools")} value={approve} placeholder="delete_*" onChange={(ev) => setApprove(ev.target.value)} />
         </Field>
 
         <div className="space-y-2 rounded-xl border border-line bg-raised/40 p-3">

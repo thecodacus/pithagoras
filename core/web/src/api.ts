@@ -815,6 +815,20 @@ export const api = {
   allModels: () => json<{ models: AvailableModel[]; providers: Record<string, string> }>("/api/models"),
   mcp: () => json<McpConfigView>("/api/mcp"),
   mcpMigration: () => json<McpMigrationView>("/api/mcp/migration"),
+  /** What the portal says of each server beyond its file: the mark and what it comes to, the remembered tools, what asks first. */
+  mcpStatus: () => json<{ servers: Record<string, McpServerState>; limits: LazyLimits }>("/api/mcp/status"),
+  /** The mark on a server: lazy, direct, or auto (the threshold decides). */
+  setMcpMark: (name: string, mark: ToolMark | "auto") =>
+    json<{ marks: Record<string, ToolMark>; resolved: { lazy: string[]; over: boolean } }>(`/api/mcp/servers/${encodeURIComponent(name)}/mark`, { method: "PUT", body: JSON.stringify({ mark }) }),
+  /** The tools of a server that ask before each call, as patterns of the server's own tool names. */
+  setMcpApprove: (name: string, approve: string[]) =>
+    json<{ approve: string[] }>(`/api/mcp/servers/${encodeURIComponent(name)}/approve`, { method: "PUT", body: JSON.stringify({ approve }) }),
+  /** The servers of a folder's own file, which the report names, into the user's file, switched off. */
+  importMcpFolder: (folder: string, file: string) =>
+    json<{ ok: true; added: string[]; skipped: { name: string; reason: string }[]; commands: Record<string, string[]> }>("/api/mcp/import-folder", {
+      method: "POST",
+      body: JSON.stringify({ folder, file }),
+    }),
   dismissMcpMigration: () => json<{ ok: true }>("/api/mcp/migration/notice", { method: "DELETE" }),
   saveMcpServer: (name: string, entry: McpServerEntry, from?: string) =>
     json<{ ok: true; commands: string[] }>(`/api/mcp/servers/${encodeURIComponent(name)}`, {
@@ -1438,6 +1452,19 @@ export interface McpServerView {
   problem: string | null;
   /** The places in it whose value pi runs as a command (`env.TOKEN`): a value that starts with `!`. */
   commands: string[];
+}
+
+/** What the portal says of a configured MCP server beyond what its file says (core/server/src/db.ts, McpServerState). */
+export interface McpServerState {
+  /** The person's mark; none is auto. */
+  mark?: ToolMark;
+  /** Whether a chat that starts now has the server's tools behind `tool_search`, and by what. */
+  lazy: boolean;
+  by: "mark" | "threshold" | "unknown" | "size";
+  /** What was kept of the server's tools when it last connected; null where it never has. `stale`: its entry has changed since. */
+  tools: { count: number; tokens: number; at: number; stale: boolean } | null;
+  approve: string[];
+  trusted: boolean;
 }
 
 /** What the move from the old MCP adapter to pi's own MCP support did, as the server reports it (core/server/src/mcp-migration.ts). */

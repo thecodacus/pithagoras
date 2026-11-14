@@ -1,6 +1,7 @@
-import { LuPlug } from "react-icons/lu";
+import { useState } from "react";
+import { LuDownload, LuPlug, LuRefreshCw } from "react-icons/lu";
 import { useMcpMigration } from "../mcp-migration";
-import type { McpMigrationReport } from "../api";
+import { api, type McpMigrationReport } from "../api";
 import { t, tp } from "../i18n";
 import { ghostCls } from "./SettingsUi";
 
@@ -32,7 +33,47 @@ function Part({ title, children }: { title: string; children: React.ReactNode })
  * switched off and why, those that were renamed, the stored names it could not carry over, the texts and folders to look at.
  * Kept under Settings → MCP after the note at the top of the page is dismissed. Nothing where there is no report.
  */
-export function McpMigrationSection() {
+/** The files of a folder whose servers can be taken into the user's: pi's own project file and the two other tools' that share its shape. */
+const IMPORTABLE = [".pi/mcp.json", ".mcp.json", ".vscode/mcp.json"];
+
+/** One folder of the report, with a button to take the servers of each of its files into the user's configuration, switched off. */
+function ProjectLine({ project, onImported }: { project: McpMigrationReport["projects"][number]; onImported: () => void }) {
+  const files = [...(project.mcpJson ? [".pi/mcp.json"] : []), ...project.foreign].filter((file) => IMPORTABLE.includes(file));
+  const [busy, setBusy] = useState<string | null>(null);
+  const [said, setSaid] = useState<Record<string, { text: string; error?: boolean }>>({});
+  const run = async (file: string) => {
+    setBusy(file);
+    try {
+      const done = await api.importMcpFolder(project.folder, file);
+      const text = [
+        done.added.length ? t("Added {names}, switched off: look at what each one runs, then switch it on.", { names: done.added.join(", ") }) : "",
+        ...done.skipped.map((one) => t("Skipped {name}: {reason}", { name: one.name, reason: one.reason })),
+      ].filter(Boolean).join(" ");
+      setSaid((all) => ({ ...all, [file]: { text: text || t("Nothing to import.") } }));
+      if (done.added.length) onImported();
+    } catch (e) {
+      setSaid((all) => ({ ...all, [file]: { text: (e as Error).message, error: true } }));
+    } finally {
+      setBusy(null);
+    }
+  };
+  return (
+    <li className="break-words">
+      {[project.folder, project.adapterSettings ? t("lists the adapter") : "", project.mcpJson ? t("has .pi/mcp.json") : "", ...project.foreign].filter(Boolean).join(" — ")}
+      {files.map((file) => (
+        <span key={file} className="mt-1 block">
+          <button type="button" disabled={busy !== null} className={ghostCls} onClick={() => void run(file)} aria-label={t("Import {file} of {folder} into the user config", { file, folder: project.folder })}>
+            {busy === file ? <LuRefreshCw className="h-3.5 w-3.5 animate-spin" /> : <LuDownload className="h-3.5 w-3.5" />}
+            {t("Import {file} into the user config", { file })}
+          </button>
+          {said[file] && <span role={said[file].error ? "alert" : "status"} className={`ml-2 text-xs ${said[file].error ? "text-danger" : "text-fg-subtle"}`}>{said[file].text}</span>}
+        </span>
+      ))}
+    </li>
+  );
+}
+
+export function McpMigrationSection({ onImported }: { onImported?: () => void }) {
   const { view, dismiss } = useMcpMigration();
   const report = view?.report;
   if (!report) return null;
@@ -48,12 +89,12 @@ export function McpMigrationSection() {
           </button>
         )}
       </div>
-      <Report report={report} />
+      <Report report={report} onImported={onImported ?? (() => {})} />
     </section>
   );
 }
 
-function Report({ report }: { report: McpMigrationReport }) {
+function Report({ report, onImported }: { report: McpMigrationReport; onImported: () => void }) {
   const off = report.servers.filter((server) => server.state === "off" && server.why.length);
   const renamed = report.servers.filter((server) => server.renamedTo);
   const dropped = report.servers.flatMap((server) => server.notes.filter((note) => /dropped|no counterpart/.test(note)).map((note) => `${server.renamedTo ?? server.name}: ${note}`));
@@ -107,11 +148,11 @@ function Report({ report }: { report: McpMigrationReport }) {
       )}
       {report.projects.length > 0 && (
         <Part title={t("Folders that bring their own MCP configuration or the adapter (not changed)")}>
-          <Lines
-            items={report.projects.map((project) =>
-              [project.folder, project.adapterSettings ? t("lists the adapter") : "", project.mcpJson ? t("has .pi/mcp.json") : "", ...project.foreign].filter(Boolean).join(" — "),
-            )}
-          />
+          <ul className="mt-1 space-y-1.5 text-xs text-fg-muted">
+            {report.projects.map((project) => (
+              <ProjectLine key={project.folder} project={project} onImported={onImported} />
+            ))}
+          </ul>
         </Part>
       )}
     </>

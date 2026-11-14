@@ -4,7 +4,7 @@ import { api, ApiError, type LazyLimits, type ToolMark } from "../api";
 import { LoadFailed, Section, WarnBanner, ghostCls, inputSmCls } from "./SettingsUi";
 import { Select } from "./Select";
 import { ToolGroupList } from "./ToolGroupList";
-import { MARK_TITLE, displayName, markCls, markName, nextMark, nextOff, sourceName, sourceOf } from "../tool-groups";
+import { MARK_TITLE, displayName, markCls, markName, markNote, nextMark, nextOff, sourceName, sourceOf } from "../tool-groups";
 import { isEnter, isEscape } from "../shortcuts";
 import { formatNumber, t, tp } from "../i18n";
 
@@ -373,7 +373,7 @@ export function ToolDefaults({ onError }: { onError: (e: string) => void }) {
                       disabled={busy}
                       aria-pressed={lazyNow}
                       onClick={() => setMark(group.source, nextMark(own))}
-                      title={t(MARK_TITLE)}
+                      title={`${markNote(state)} ${t(MARK_TITLE)}`}
                       aria-label={t("Lazy or direct {name}", { name: displayName(group.source, names) })}
                       className={`shrink-0 rounded border px-1.5 py-0.5 text-[11px] transition disabled:cursor-not-allowed disabled:opacity-50 ${markCls(state)}`}
                     >

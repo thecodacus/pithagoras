@@ -57,7 +57,6 @@ import {
   toolDefaultsOff,
   lazyAllowed,
   lazyMarks,
-  lazyRefused,
   toolMarks,
   lazyLimits,
   setLazyLimits,
@@ -70,7 +69,6 @@ import {
   agentDirect,
   setAgentDirect,
   noticeMcpEdits,
-  setToolMarks,
   toolGroupNames,
   updateSession,
   type SessionRow,
@@ -91,7 +89,8 @@ import { EXECUTOR_KIND } from "./executor-kind.js";
 import { sessions, CodemodeHeld, CommandFailed, IMAGE_ROOT } from "./session-manager.js";
 import { ImageError, MAX_IMAGE_BYTES, MAX_IMAGES, imagePath, mimeOf, parseImages, saveImages } from "./prompt-images.js";
 import { defaultsFor, toolSource } from "./tool-policy.js";
-import { mcpRouter, mcpServerNames, onMcpWritten } from "./api/mcp.js";
+import { mcpRouter, onMcpWritten } from "./api/mcp.js";
+import { mcpPortalRouter, storeMarks } from "./api/mcp-portal.js";
 import { authMode, changePassword, checkPassword, isAuthed, issueCookie, passwordRefused, requireAuth, setUpPassword, shortPassword, signOut } from "./auth.js";
 import { activeSso, endSessionUrl, oidcRouter, providerFor, rememberProvider } from "./oidc-login.js";
 import { CALLBACK_PATH, OidcConfigError, discover, parseOidcConfig, shownForm } from "./oidc.js";
@@ -1380,21 +1379,9 @@ app.put("/api/tools/marks", (req, res) => {
   if (!given || typeof given !== "object" || Array.isArray(given) || !Object.values(given).every((mark) => mark === "lazy" || mark === "direct")) {
     return res.status(400).json({ error: 'marks must be an object of "lazy" or "direct" by tool set or `<tool>name`' });
   }
-  // Only what is new is checked: a mark kept from before must not stand in the way of an unrelated change.
-  const before = toolMarks();
-  const added = Object.fromEntries(Object.entries(given as Record<string, "lazy" | "direct">).filter(([entry, mark]) => before[entry] !== mark));
-  const refused = lazyRefused(added);
-  if (refused.length) {
-    return res.status(400).json({ error: `Cannot be lazy: ${refused.join(", ")}. pi's built-in tools are always offered.`, code: "lazy-refused" });
-  }
-  const stored = setToolMarks(given as Record<string, "lazy" | "direct">);
-  // A mark on an MCP server is said in mcp.json as well, for pi's own command line and a container's pi.
-  const servers = new Set(mcpServerNames());
-  for (const [entry, one] of Object.entries(stored)) {
-    if (!servers.has(entry) || before[entry] === one) continue;
-    import("./mcp-entry.js").then(({ sayMarkInFile }) => sayMarkInFile(entry, one)).catch((e) => console.error(`[portal] could not say the mark of ${entry} in mcp.json: ${(e as Error).message}`));
-  }
-  res.json({ marks: stored, resolved: resolvedLazy() });
+  const done = storeMarks(given as Record<string, "lazy" | "direct">);
+  if ("error" in done) return res.status(400).json(done);
+  res.json({ marks: done.marks, resolved: resolvedLazy() });
 });
 
 /** How big the model's list may get before `auto` groups are lazy: tokens of declarations, and number of tools; 0 turns a part off. */
@@ -1796,6 +1783,7 @@ app.delete("/api/mcp/migration/notice", (_req, res) => {
   dismissMcpMigrationNotice();
   res.json({ ok: true });
 });
+app.use("/api", mcpPortalRouter());
 app.use("/api", mcpRouter());
 app.use("/api", providersRouter());
 app.use("/api", peopleRouter());

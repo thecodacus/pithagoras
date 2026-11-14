@@ -132,6 +132,15 @@ export function displayName(source: string, names: Record<string, string> = {}):
  */
 export const MARK_TITLE = msg("Lazy: the model finds and calls this tool through tool_search and it is not in its list. Direct: it is always in the list. Auto: the threshold decides, by how long the list is. Click to change: auto, lazy, direct. It reaches the chats that start from now on.");
 
+/** What a mark comes to now, said in full: the set mark, or what the threshold made of a group that has none. */
+export function markNote(tool: Pick<PortalTool, "mark" | "lazy">): string {
+  if (tool.mark === "lazy") return t("Marked lazy: not in the model's list, found through tool_search.");
+  if (tool.mark === "direct") return t("Marked direct: always in the model's list.");
+  return tool.lazy
+    ? t("Auto: the threshold made it lazy, because the model's list was over the limits.")
+    : t("Auto: it stays in the model's list; the threshold has not needed to take it out.");
+}
+
 /** The words a mark is drawn as: what was set, else auto, with where the threshold put it. */
 export function markName(tool: Pick<PortalTool, "mark" | "lazy">): string {
   if (tool.mark === "lazy") return t("lazy");

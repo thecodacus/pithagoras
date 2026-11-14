@@ -7,7 +7,7 @@ import { BUILT_IN_SET, PI_BUILT_IN_TOOLS, defaultsFor, lazyToolEntry, toolEnable
 import { DEFAULT_LIMITS, guessTokens, isLazy, parseMarks, resolveThreshold, type LazyHead, type Limits, type Mark, type Marks, type Resolution, type SizedTool } from "./tool-lazy.js";
 import { projectOf } from "./workspaces.js";
 import { entryEnabled, mcpConfigPath, mcpWritten, onMcpWritten, readMcpFile, readableMcpConfig, serversAndBrowsers } from "./api/mcp.js";
-import { cachedServers, dropCachedServers, mcpToolCachePath } from "./mcp-tools.js";
+import { cachedServers, configHash, dropCachedServers, mcpToolCachePath } from "./mcp-tools.js";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, rmdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { isWithinText } from "./within.js";
@@ -3897,6 +3897,50 @@ export function mcpApprove(): Record<string, string[]> {
   } catch {
     return {};
   }
+}
+
+/**
+ * What the portal has to say of each configured server beyond what the file says: its mark, whether a chat that starts now
+ * has it lazy and why, what is remembered of its tools, which of them ask first, whether its answers count as the person's
+ * own. Settings → MCP shows it beside each server; the chats decide from the same places (buildLazyHead).
+ */
+export interface McpServerState {
+  /** The person's mark on the server; none is auto. */
+  mark?: "lazy" | "direct";
+  /** Whether a chat that starts now has its tools behind `tool_search`, and by what: the mark, the threshold, or nothing known of the server yet. */
+  lazy: boolean;
+  by: "mark" | "threshold" | "unknown" | "size";
+  /** What the portal kept of what the server offered when it last connected; null where it has never. `stale`: the entry has changed since. */
+  tools: { count: number; tokens: number; at: number; stale: boolean } | null;
+  approve: string[];
+  trusted: boolean;
+}
+
+export function mcpServerStates(): Record<string, McpServerState> {
+  const view = mcpView();
+  const config = readableMcpConfig()?.mcpServers ?? {};
+  const marks = toolMarks();
+  const resolved = new Set(resolvedLazy().lazy);
+  const approve = mcpApprove();
+  const trusted = trustedMcpServers();
+  const cache = cachedServers();
+  const seen = new Set(knownTools().flatMap((tool) => (tool.server ? [tool.server] : [])));
+  const out: Record<string, McpServerState> = {};
+  for (const name of view.servers) {
+    const mark = marks[name];
+    const cached = cache[name];
+    const known = Boolean(cached?.tools.length) || seen.has(name);
+    const by: McpServerState["by"] = mark ? "mark" : resolved.has(name) ? "threshold" : known ? "size" : "unknown";
+    out[name] = {
+      ...(mark ? { mark } : {}),
+      lazy: mark ? mark === "lazy" : by !== "size",
+      by,
+      tools: cached ? { count: cached.tools.length, tokens: cached.tools.reduce((sum, tool) => sum + tool.tokens, 0), at: cached.at, stale: cached.hash !== configHash(config[name]) } : null,
+      approve: approve[name] ?? [],
+      trusted: trusted.has(name),
+    };
+  }
+  return out;
 }
 
 /** Set which tools of a server need a confirmation; none takes the entry away. */
