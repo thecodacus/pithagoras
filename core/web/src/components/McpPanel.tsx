@@ -17,6 +17,7 @@ import {
 import { api, type McpConfigView, type McpServerEntry, type McpServerView } from "../api";
 import { Field, LoadFailed, Segments, btnCls, codeAreaCls, gridCls, inputCls, primaryCls } from "./SettingsUi";
 import { msg, t, tx } from "../i18n";
+import { McpMigrationSection } from "./McpMigrationReport";
 
 
 type Transport = "stdio" | "http";
@@ -130,6 +131,8 @@ export function McpPanel({ onError }: { onError: (e: string) => void }) {
           </div>
         </section>
       )}
+
+      <McpMigrationSection />
 
       <section className="mb-6 rounded-xl border border-line bg-raised/40 p-3">
         <div className="flex items-center gap-2">

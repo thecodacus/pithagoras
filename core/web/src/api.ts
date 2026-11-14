@@ -814,6 +814,8 @@ export const api = {
   /** Every model pi can use now, outside any chat — for the defaults. */
   allModels: () => json<{ models: AvailableModel[]; providers: Record<string, string> }>("/api/models"),
   mcp: () => json<McpConfigView>("/api/mcp"),
+  mcpMigration: () => json<McpMigrationView>("/api/mcp/migration"),
+  dismissMcpMigration: () => json<{ ok: true }>("/api/mcp/migration/notice", { method: "DELETE" }),
   saveMcpServer: (name: string, entry: McpServerEntry, from?: string) =>
     json<{ ok: true; commands: string[] }>(`/api/mcp/servers/${encodeURIComponent(name)}`, {
       method: "PUT",
@@ -1436,6 +1438,31 @@ export interface McpServerView {
   problem: string | null;
   /** The places in it whose value pi runs as a command (`env.TOKEN`): a value that starts with `!`. */
   commands: string[];
+}
+
+/** What the move from the old MCP adapter to pi's own MCP support did, as the server reports it (core/server/src/mcp-migration.ts). */
+export interface McpMigrationReport {
+  v: 1;
+  /** `pending`: mcp.json could not be read, nothing was changed, and the next start tries again. */
+  status: "done" | "pending";
+  at: string;
+  adapter: { was: "on" | "off" | "absent"; removed: boolean; spec?: string; note?: string };
+  file: { state: "converted" | "none" | "unreadable"; copy?: string; note?: string };
+  servers: { name: string; renamedTo?: string; state: "on" | "off" | "native"; why: string[]; notes: string[] }[];
+  names: { converted: number };
+  expanded: { where: string; wrapper: string; count: number }[];
+  unconverted: { where: string; name: string; why: string }[];
+  untrusted: string[];
+  texts: { where: string; names: string[] }[];
+  projects: { folder: string; adapterSettings: boolean; mcpJson: boolean; foreign: string[] }[];
+  gone: string[];
+  notes: string[];
+}
+
+/** The report, and whether the person has yet to read it. Nothing on a portal that had nothing to move. */
+export interface McpMigrationView {
+  report: McpMigrationReport | null;
+  notice: boolean;
 }
 
 export interface McpConfigView {

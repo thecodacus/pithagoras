@@ -941,6 +941,26 @@ const de: Locale = {
     "Take out single sign-on": "Single Sign-on entfernen",
     // components/Markdown.tsx
     "Picture from {host} not loaded": "Bild von {host} nicht geladen",
+    // components/McpMigrationNotice.tsx
+    "The MCP servers were not moved to pi's own MCP support yet: mcp.json cannot be read. Fix it, and the next start moves them.": "Die MCP-Server wurden noch nicht auf pis eigene MCP-Unterstützung umgestellt: mcp.json lässt sich nicht lesen. Korrigiere sie, dann stellt der nächste Start sie um.",
+    "The MCP servers now run on pi's own MCP support: {on} carried over, {off} switched off until you have looked at them.": "Die MCP-Server laufen jetzt auf pis eigener MCP-Unterstützung: {on} übernommen, {off} ausgeschaltet, bis du sie dir angesehen hast.",
+    "Review": "Ansehen",
+    // components/McpMigrationReport.tsx
+    "Moved to pi's own MCP support": "Auf pis eigene MCP-Unterstützung umgestellt",
+    "mcp.json cannot be read: {reason}. Nothing was changed, and the next start tries again once it is fixed.": "mcp.json lässt sich nicht lesen: {reason}. Es wurde nichts geändert, und der nächste Start versucht es erneut, sobald sie korrigiert ist.",
+    "{n} servers were carried over to pi's keys.": { one: "{n} Server wurde auf pis Schlüssel übertragen.", other: "{n} Server wurden auf pis Schlüssel übertragen." },
+    "The file as it was is kept beside it as {name}.": "Die Datei, wie sie war, liegt daneben als {name}.",
+    "The adapter is out of pi's package list; its files stay on disk.": "Der Adapter ist aus pis Paketliste entfernt; seine Dateien bleiben auf der Platte.",
+    "Switched off until you have looked at them": "Ausgeschaltet, bis du sie dir angesehen hast",
+    "Renamed: pi's server names have no dots, and - and _ are the same": "Umbenannt: pis Servernamen haben keine Punkte, und - und _ gelten als dasselbe",
+    "No longer trusted, as it was not certain which server they were": "Nicht mehr vertraut, da nicht sicher war, welcher Server gemeint ist",
+    "Stored switches that could not be carried over": "Gespeicherte Schalter, die nicht übertragen werden konnten",
+    "What the adapter had that pi has no counterpart for": "Was der Adapter konnte und wofür pi keine Entsprechung hat",
+    "Left out of the file": "Aus der Datei weggelassen",
+    "Texts that still name the old tools (not changed)": "Texte, die noch die alten Tools nennen (nicht geändert)",
+    "Folders that bring their own MCP configuration or the adapter (not changed)": "Ordner mit eigener MCP-Konfiguration oder dem Adapter (nicht geändert)",
+    "lists the adapter": "führt den Adapter auf",
+    "has .pi/mcp.json": "hat .pi/mcp.json",
     // components/McpPanel.tsx
     "Server JSON": "Server-JSON",
     "Its entry is deleted from the MCP file, with its environment, headers and anything added by hand. There is no undo.": "Sein Eintrag wird aus der MCP-Datei gelöscht, samt Umgebung, Headern und allem, was von Hand hinzugefügt wurde. Das lässt sich nicht rückgängig machen.",

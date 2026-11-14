@@ -17,6 +17,7 @@ import { ThemeSwitcher } from "./components/ThemeSwitcher";
 import { ConfirmHost } from "./components/ConfirmDialog";
 import { UpdateNotice } from "./components/UpdateNotice";
 import { ExtensionsLeftBehind } from "./components/ExtensionsLeftBehind";
+import { McpMigrationNotice } from "./components/McpMigrationNotice";
 import { ErrorBanner, ghostCls } from "./components/SettingsUi";
 import { pollWhileVisible, reconnectDelay } from "./poll";
 import { APP_NAME, finishedRuns, tabTitle } from "./attention";
@@ -660,6 +661,7 @@ function Shell({
   });
   const onOpenSettings = useStable(() => navigate(sessionId ? `/s/${sessionId}/settings/general` : "/settings/general"));
   const openUpdate = useStable(() => navigate(sessionId ? `/s/${sessionId}/settings/about` : "/settings/about"));
+  const openMcp = useStable(() => navigate(sessionId ? `/s/${sessionId}/settings/mcp` : "/settings/mcp"));
   // Back to the page that opened Settings where it said which (`state.from`), else to the chat.
   const closeSettings = useStable(() => navigate((state as { from?: string } | null)?.from ?? (active ? `/s/${active.id}` : "/")));
   const setUpModel = useStable(() => {
@@ -734,6 +736,7 @@ function Shell({
         </header>
         <UpdateNotice onDetails={openUpdate} />
         <ExtensionsLeftBehind />
+        <McpMigrationNotice onReview={openMcp} />
         {error && <ErrorBanner className="mx-4 mt-2" onClose={() => setError(null)}>{error}</ErrorBanner>}
         {/* Not for the first miss: a server restarting, or a wifi that blinked,
             is back before it can be read. Two in a row is an outage. */}
