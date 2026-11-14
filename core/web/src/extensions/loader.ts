@@ -104,15 +104,15 @@ const quietly = (fn: () => void): boolean => {
   }
 };
 
-/** The hook behind `portal.theme.use`. */
-/** An extension asks to switch the colours to a theme that is not its own: the person says whether it may. */
-const askToSwitch = ({ extension, theme }: { extension: string; theme: string | null }) =>
+/** An extension asks to switch the colours to a theme that is not its own: the person says whether it may, told whose theme it is. */
+const askToSwitch = ({ extension, theme, owner }: { extension: string; theme: string | null; owner: string | null }) =>
   confirmDialog({
     title: t("Change the colours?"),
-    message: theme === null ? t("{extension} wants to go back to the portal's own colours.", { extension }) : t("{extension} wants to change the colours to {theme}.", { extension, theme }),
+    message: theme === null ? t("{extension} wants to go back to the portal's own colours.", { extension }) : t("{extension} wants to change the colours to “{theme}”, a theme of {owner}.", { extension, theme, owner: owner ?? "" }),
     confirmLabel: t("Change colours"),
   });
 
+/** The hook behind `portal.theme.use`. */
 function useThemeNow(): { mode: "light" | "dark"; theme: string | null } {
   return { mode: useResolvedTheme(), theme: usePalette()?.id ?? null };
 }

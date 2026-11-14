@@ -255,7 +255,7 @@ export const Sidebar = memo(function Sidebar({
   const anyRunning = sessions.some((s) => s.status === "running");
 
   return (
-    <aside aria-label={t("Sidebar")} className={`relative flex shrink-0 flex-col overflow-hidden border-r border-line bg-surface transition-[width] duration-300 ease-in-out motion-reduce:transition-none ${collapsed ? "w-12" : "w-nav"}`}>
+    <aside aria-label={t("Sidebar")} className={`relative flex shrink-0 flex-col overflow-hidden border-r border-line bg-surface transition-[width] duration-base ease-in-out motion-reduce:transition-none ${collapsed ? "w-12" : "w-nav"}`}>
       {/* One that fails to answer is not listed: its page is at its address all the same. */}
       {entries.filter((page) => page.useShown).map((page) => (
         <ErrorBoundary key={page.key} resetKey={page.key} fallback={() => null} onError={failedIn(page.extension)}>

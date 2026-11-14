@@ -1,6 +1,6 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { local } from "./safe-storage";
-import { appearanceOf, tokenStyles, TOKEN_NAMES, tokensOf, type Appearance, type Tokens } from "./tokens";
+import { appearanceOf, PAINTED_NAMES, tokenStyles, tokensOf, type Appearance, type Tokens } from "./tokens";
 
 /**
  * Light, dark, or whatever the machine is set to.
@@ -41,9 +41,12 @@ export interface Palette {
 }
 
 const PALETTE_KEY = "pithagoras.palette";
-/** Who the theme in effect was chosen by: the person, or the interface in use as its default (extensions/themes.ts). */
+/**
+ * Who the theme in effect was chosen by: the person, the interface in use as its default, or an extension that switched to
+ * a theme of its own without asking (extensions/themes.ts).
+ */
 const SET_BY_KEY = "pithagoras.palette.by";
-export type SetBy = "person" | "ui";
+export type SetBy = "person" | "ui" | "extension";
 
 /**
  * Themes that came with the portal as packages of their own and now are in another. A browser that chose one of them
@@ -83,19 +86,29 @@ export function coloursOf(given: unknown): Colours | null {
   return out;
 }
 
-/** The theme chosen in this browser, with its colours: kept whole, so that it is painted before any extension is loaded. */
+/**
+ * The theme chosen in this browser, with its colours: kept whole, so that it is painted before any extension is loaded.
+ * A kept copy with anything in it that is not a theme's (written by hand, or by something else in the page) is taken
+ * out of the browser, so that the script before the app does not paint it again at every start either.
+ */
 export function storedPalette(): Palette | null {
+  const text = local.get(PALETTE_KEY);
+  if (text === null) return null;
+  let kept: { id?: unknown; name?: unknown; light?: unknown; dark?: unknown; tokens?: unknown } | null;
   try {
-    const kept = JSON.parse(local.get(PALETTE_KEY) ?? "null");
-    const light = coloursOf(kept?.light), dark = coloursOf(kept?.dark), tokens = tokensOf(kept?.tokens);
-    if (typeof kept?.id !== "string" || typeof kept.name !== "string" || !light || !dark || !tokens) return null;
-    const now: Palette = { id: themeIdNow(kept.id), name: kept.name, light, dark, ...(Object.keys(tokens).length ? { tokens } : {}) };
-    // Kept under the new id from now on, or the old one would be mapped at every start.
-    if (now.id !== kept.id) local.set(PALETTE_KEY, JSON.stringify(now));
-    return now;
+    kept = JSON.parse(text);
   } catch {
+    kept = null;
+  }
+  const light = coloursOf(kept?.light), dark = coloursOf(kept?.dark), tokens = tokensOf(kept?.tokens);
+  if (typeof kept?.id !== "string" || typeof kept.name !== "string" || !light || !dark || !tokens) {
+    local.remove(PALETTE_KEY);
     return null;
   }
+  const now: Palette = { id: themeIdNow(kept.id), name: kept.name, light, dark, ...(Object.keys(tokens).length ? { tokens } : {}) };
+  // Kept under the new id from now on, or the old one would be mapped at every start.
+  if (now.id !== kept.id) local.set(PALETTE_KEY, JSON.stringify(now));
+  return now;
 }
 
 const APPEARANCE_KEY = "pithagoras.appearance";
@@ -115,7 +128,7 @@ export function storedAppearance(): Appearance {
  */
 function storedSetBy(): SetBy | null {
   const by = local.get(SET_BY_KEY);
-  return by === "ui" ? "ui" : by === "person" || local.get(PALETTE_KEY) !== null ? "person" : null;
+  return by === "ui" || by === "extension" ? by : by === "person" || local.get(PALETTE_KEY) !== null ? "person" : null;
 }
 
 let palette: Palette | null = storedPalette();
@@ -135,7 +148,7 @@ function paint(root: HTMLElement) {
     else root.style.removeProperty(`--${token}`);
   }
   const looks = tokenStyles(palette?.tokens, appearance);
-  for (const name of TOKEN_NAMES) {
+  for (const name of PAINTED_NAMES) {
     if (looks[name]) root.style.setProperty(`--${name}`, looks[name]!);
     else root.style.removeProperty(`--${name}`);
   }
@@ -157,10 +170,10 @@ function apply(theme: Theme) {
 /** The theme in effect beyond light and dark: one an extension brought, or null for the portal's own. */
 export const chosenPalette = (): Palette | null => palette;
 
-/** Who chose the theme in effect: the person, the interface's default, or nobody yet. */
+/** Who chose the theme in effect: the person, the interface's default, an extension unasked, or nobody yet. */
 export const paletteSetBy = (): SetBy | null => setBy;
 
-/** Choose a theme's colours, or the portal's own with null. Kept in this browser, and painted at once. `by` the person unless the interface's default does it. */
+/** Choose a theme's colours, or the portal's own with null. Kept in this browser, and painted at once. `by` the person unless the interface's default or an extension does it. */
 export function choosePalette(next: Palette | null, by: SetBy = "person"): void {
   palette = next;
   setBy = by;

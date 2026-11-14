@@ -64,12 +64,15 @@
 
   /*
    * Beyond colour. What the Tailwind preset (packages/extension-api/tailwind.mjs) reads for type, shape, spacing,
-   * layout and layers, with the values Tailwind has always had, so that nothing looks different until a theme or
+   * elevation, motion, layout and layers, with the values Tailwind has always had, so that nothing looks different until a theme or
    * the person sets one. A theme or a choice sets them on <html> (theme-init.js and theme.tsx), over these.
    */
   :root {
     --font-sans: ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
     --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    /* The chat's technical rows (tool names, commands, outputs) have a shorter stack of their own. A theme's font-mono
+       sets this too (tokens.ts). */
+    --font-mono-chat: ui-monospace, SFMono-Regular, Menlo, monospace;
 
     /* The sizes of text are steps of one base, so that the person's text size is that one value and the rest follow
        it, the line heights with them. */
@@ -94,11 +97,22 @@
     --radius-lg: 0.5rem;
     --radius-xl: 0.75rem;
     --radius-2xl: 1rem;
+    /* The width of a line drawn with `border`, `border-t` and the like; `border-2` keeps its two pixels. */
+    --border-width: 1px;
 
     /* The unit of padding and of the gaps between things: p-4 is four of --pad. Density is these two and nothing
        else; widths, heights and icons keep their size. */
     --pad: 0.25rem;
     --gap: 0.25rem;
+
+    /* Elevation: a control that sits a little above its row, and what pops up over the page (menus, dialogs). */
+    --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+    --shadow-pop: 0 10px 30px -12px rgb(0 0 0 / 0.35), 0 2px 8px -4px rgb(0 0 0 / 0.2);
+
+    /* Motion: how long a quick change takes (every `transition` that names no duration), and a larger move such as
+       the sidebar opening. The two easings are with the colours above. */
+    --dur-fast: 150ms;
+    --dur-base: 300ms;
 
     /* The width of the conversation, and of the sidebar when it is open. */
     --chat-max: 48rem;

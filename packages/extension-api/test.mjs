@@ -22,6 +22,9 @@ const IDENTIFIER = /[\p{ID_Continue}$‌‍]/u;
  */
 const BEFORE_REGEX = new Set(["", "(", ",", "=", ":", "[", "!", "&", "|", "?", "{", ";", "+", "-", "*", "%", ">", "~", "^"]);
 
+/** The words after which a string can follow with no space: `return'x'`, `case'a':`. */
+const KEYWORDS_BEFORE_VALUE = new Set(["return", "typeof", "case", "in", "of", "void", "delete", "throw", "new", "yield", "await", "instanceof", "else", "do"]);
+
 const ESCAPES = { n: "\n", t: "\t", r: "\r", b: "\b", f: "\f", v: "\v", 0: "\0" };
 
 /**
@@ -58,6 +61,17 @@ export function textsOf(source, where = "source") {
     return null;
   };
 
+  /**
+   * Whether the `'` at `at` is a letter of the text of a page (`<p>don't {t("a")} isn't</p>`), not the start of a string: in
+   * code a string never follows a name or a number straight away, except after a word such as `return` or `case`.
+   */
+  const apostrophe = (at) => {
+    if (at === 0 || !IDENTIFIER.test(source[at - 1])) return false;
+    let start = at;
+    while (start > 0 && IDENTIFIER.test(source[start - 1])) start--;
+    return !KEYWORDS_BEFORE_VALUE.has(source.slice(start, at));
+  };
+
   const space = (i) => {
     for (;;) {
       while (i < source.length && /\s/.test(source[i])) i++;
@@ -92,7 +106,9 @@ export function textsOf(source, where = "source") {
       const c = source[i];
       if (c === "/" && source[i + 1] === "/") { i = lineEnd(i) - 1; continue; }
       if (c === "/" && source[i + 1] === "*") { i = blockEnd(i) - 1; continue; }
-      if (c === "'" || c === '"') {
+      if (c === "'" && apostrophe(i)) {
+        // Text of a page: `don't` in markup.
+      } else if (c === "'" || c === '"') {
         const made = literal(i);
         if (made) { i = made.end - 1; before = "x"; continue; }
       }

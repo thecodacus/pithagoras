@@ -569,7 +569,7 @@ test('a theme an extension brought is chosen in Settings or switched to by an ex
   // An extension switches the theme to another package's: the person is asked, and a no changes nothing.
   await header(page).getByRole('button', { name: 'Switch to Dusk' }).click();
   const ask = page.getByRole('alertdialog', { name: 'Change the colours?' });
-  await expect(ask).toContainText('probe wants to change the colours to Dusk.');
+  await expect(ask).toContainText('probe wants to change the colours to “Dusk”, a theme of pithagoras-themes.');
   await ask.getByRole('button', { name: 'Cancel' }).click();
   await expect(ask).toHaveCount(0);
   expect(await colour('--accent')).toBe('34 211 238');

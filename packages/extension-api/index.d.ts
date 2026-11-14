@@ -437,11 +437,17 @@ export interface PanelController {
  * `radius-lg`), as a length (`0.5rem`, `6px`) or, for the fonts, a stack of font names. A value outside what its
  * variable takes refuses the theme whole: a theme is data, and carries no CSS.
  *
- * - `font-sans`, `font-mono`: a font stack of names, such as `"Atkinson Hyperlegible", system-ui, sans-serif`. No `url(...)`:
- *   a font is a file the extension ships and an `@font-face` in its stylesheet, and the family is named here.
+ * - `font-sans`, `font-mono`: a font stack of names, such as `"Atkinson Hyperlegible", system-ui, sans-serif`: each name
+ *   quoted, or words of letters, digits, `_` and `-`, and none empty. No `url(...)`: a font is a file the extension ships
+ *   and an `@font-face` in its stylesheet, and the family is named here. `font-mono` is the chat's tool rows' font too.
  * - `text-base`: the size of the text, 0.75rem to 1.5rem (the portal's own is 1rem); every size is a multiple of it.
  * - `radius-sm`, `radius-md`, `radius-lg`, `radius-xl`, `radius-2xl`: the rounding, 0 to 2rem.
+ * - `border-width`: the width of a line (`border`, `border-t`, `divide-y`), 0 to 4px (1px).
  * - `pad`, `gap`: the unit of padding and of space between things, 0.1rem to 0.6rem (0.25rem is the portal's own).
+ * - `shadow-sm`, `shadow-pop`: a shadow (`shadow-sm`), and that of what pops up over the page (`shadow-pop`), as
+ *   `none` or up to four shadows of lengths and an `rgb(0 0 0 / 0.2)`, `#hex` or `transparent` colour.
+ * - `dur-fast`, `dur-base`: how long a quick change and a larger move take, up to 1000ms (150ms and 300ms).
+ * - `ease-out`, `ease-spring`: the two easing curves, as a keyword (`ease-in-out`) or `cubic-bezier(x1, y1, x2, y2)`.
  * - `chat-max`: the widest the chat's text column is, 24rem to 90rem (48rem).
  * - `nav-width`: the sidebar's width, 12rem to 24rem (16rem).
  */
@@ -454,8 +460,15 @@ export interface ThemeTokens {
   "radius-lg"?: string;
   "radius-xl"?: string;
   "radius-2xl"?: string;
+  "border-width"?: string;
   pad?: string;
   gap?: string;
+  "shadow-sm"?: string;
+  "shadow-pop"?: string;
+  "dur-fast"?: string;
+  "dur-base"?: string;
+  "ease-out"?: string;
+  "ease-spring"?: string;
   "chat-max"?: string;
   "nav-width"?: string;
 }

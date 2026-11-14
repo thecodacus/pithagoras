@@ -186,7 +186,7 @@ test("an extension switches to a theme of its own unasked, and to another's only
     assert.deepEqual(asked, []);
 
     assert.equal(await setThemeAs("mine-pkg", "other-pkg/o", ask), false, "another's, declined");
-    assert.deepEqual(asked, [{ extension: "mine-pkg", theme: "Other" }]);
+    assert.deepEqual(asked, [{ extension: "mine-pkg", theme: "Other", owner: "other-pkg" }], "the person is told whose theme it is");
     assert.equal(chosenPalette(), null, "nothing changed");
     answer = true;
     assert.equal(await setThemeAs("mine-pkg", "other-pkg/o", ask), true);
@@ -197,7 +197,7 @@ test("an extension switches to a theme of its own unasked, and to another's only
     answer = false;
     assert.equal(await setThemeAs("mine-pkg", null, ask), false);
     assert.equal(chosenPalette()?.id, "other-pkg/o");
-    assert.deepEqual(asked.at(-1), { extension: "mine-pkg", theme: null });
+    assert.deepEqual(asked.at(-1), { extension: "mine-pkg", theme: null, owner: null });
     answer = true;
     assert.equal(await setThemeAs("mine-pkg", null, ask), true);
     assert.equal(chosenPalette(), null);
@@ -216,6 +216,41 @@ test("an extension switches to a theme of its own unasked, and to another's only
     choose(null);
     chooseAppearance({ text: 100, density: 100 });
     assert.deepEqual(chosenAppearance(), { text: 100, density: 100 });
+    away();
+  }
+});
+
+test("a theme's name is a name: one that would make the question a wall of text is refused", () => {
+  page();
+  try {
+    assert.throws(() => registerTheme("long-pkg", { id: "l", name: "your current colours, which you chose a while ago and which stay as they are".repeat(2), dark: { accent: "#ffffff" } }), /name longer than 60 characters/);
+    assert.throws(() => registerTheme("long-pkg", { id: "b", name: "   ", dark: { accent: "#ffffff" } }), /needs an id and a name/);
+    assert.doesNotThrow(() => registerTheme("long-pkg", { id: "s", name: "A".repeat(60), dark: { accent: "#ffffff" } }));
+  } finally {
+    away();
+  }
+});
+
+test("a kept theme the app refuses is taken out of the browser, so that it is not painted again before the app at the next start", () => {
+  const { kept } = page();
+  try {
+    for (const bad of [
+      { id: "x/y", name: "Y", dark: { accent: "1 2 3", "z-confirm": "0 0 0" } },
+      { id: "x/y", name: "Y", dark: { accent: "1 2 3" }, tokens: { "font-sans": "Inter," } },
+      { id: "x/y", dark: { accent: "1 2 3" } },
+    ]) {
+      kept.set("pithagoras.palette", JSON.stringify(bad));
+      assert.equal(storedPalette(), null, JSON.stringify(bad));
+      assert.equal(kept.has("pithagoras.palette"), false, JSON.stringify(bad));
+    }
+    kept.set("pithagoras.palette", "{");
+    assert.equal(storedPalette(), null);
+    assert.equal(kept.has("pithagoras.palette"), false, "nor what is not JSON");
+    const fine = { id: "x/y", name: "Y", dark: { accent: "1 2 3" } };
+    kept.set("pithagoras.palette", JSON.stringify(fine));
+    assert.deepEqual(storedPalette(), { ...fine, light: {} });
+    assert.equal(kept.get("pithagoras.palette"), JSON.stringify(fine), "a theme that is one is kept as it is");
+  } finally {
     away();
   }
 });

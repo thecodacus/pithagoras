@@ -46,6 +46,14 @@ test('a text between calls in markup is found, and an apostrophe in the words of
   `), ['The title', 'First', '{n} items (count)', 'Inside a template', 'Yes', 'No', 'After a closing slash', 'After a closing tag', 'After a division', 'After a regex']);
 });
 
+test('two apostrophes on one line of markup are letters of the page, not a string between them', () => {
+  assert.deepEqual(keys(`
+    const A = () => <p>don't {t("a")} isn't</p>;
+    const B = () => <p>The users' {t("b")} list's end</p>;
+    function c(k) { switch (k) { case'x': return't'; } return t('c'); }
+  `), ['a', 'b', 'c']);
+});
+
 test('a tc or a tp with one text written out and one not is reported; a wrapper that hands both on, and a t of a variable, are not', () => {
   const { texts, dynamic } = textsOf('tc(a, "context"); tp(n, one, "{n} things"); tp(n, "{n} thing", "{n} things"); t(thing); tp(n, one, other, vars); tc(text, context);', 'x.ts');
   assert.deepEqual([...texts.keys()], ['{n} things']);

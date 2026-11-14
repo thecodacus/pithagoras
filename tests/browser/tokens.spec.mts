@@ -41,6 +41,42 @@ test('a theme can set the radius of every step, and the font', async ({ page }) 
   expect(await radius('rounded-2xl')).toBe('16px');
 });
 
+/** What `property` computes to on an element of `className` put into the page. */
+const probe = (page: Page, className: string, property: string) => page.evaluate(([name, prop]) => {
+  const el = document.createElement('i');
+  el.className = name;
+  el.style.borderStyle = 'solid';
+  document.body.append(el);
+  return getComputedStyle(el).getPropertyValue(prop);
+}, [className, property]);
+
+test("a theme sets the shadows, the width of a line and how long a change takes, and what it does not say stays the portal's", async ({ page }) => {
+  await portal(page, { tokens: { 'border-width': '3px', 'shadow-pop': '0 4px 12px rgb(255 0 0 / 0.5)', 'shadow-sm': 'none', 'dur-fast': '40ms', 'dur-base': '0.6s', 'ease-out': 'linear' } });
+  await expect(page.locator('.nav-item').first()).toBeVisible();
+  // The moment a theme is painted every element fades into it; what is asked is the page after that.
+  await expect(page.locator('html.theme-switching')).toHaveCount(0);
+  // `border`, `border-r` and the like are the theme's line; `border-2` keeps its two pixels.
+  expect(await css(page, 'aside[aria-label="Sidebar"]', 'border-right-width')).toBe('3px');
+  expect(await probe(page, 'border', 'border-top-width')).toBe('3px');
+  expect(await probe(page, 'border-2', 'border-top-width')).toBe('2px');
+  expect(await probe(page, 'shadow-pop', 'box-shadow')).toContain('rgba(255, 0, 0, 0.5) 0px 4px 12px 0px');
+  expect(await probe(page, 'shadow-sm', 'box-shadow')).not.toContain('rgba(0, 0, 0, 0.05)');
+  expect(await probe(page, 'transition', 'transition-duration')).toBe('0.04s');
+  expect(await probe(page, 'duration-base', 'transition-duration')).toBe('0.6s');
+  expect(await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--ease-out').trim())).toBe('linear');
+  // As the portal ships them where the theme says none.
+  expect(await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--ease-spring').trim())).toBe('cubic-bezier(.34, 1.56, .64, 1)');
+});
+
+test("a theme's code font is the font of the chat's technical rows too", async ({ page }) => {
+  await portal(page, { tokens: { 'font-mono': '"Fixture Mono", monospace' } }, '/s/a');
+  await expect(page.locator('.nav-item').first()).toBeVisible();
+  // The rows have a shorter stack of their own as the portal ships them (index.css), and the theme's in place of it.
+  for (const row of ['chat-tool-name', 'chat-tool-command', 'chat-status-model', 'running-chip-command', 'font-mono']) {
+    expect(await probe(page, row, 'font-family'), row).toBe('"Fixture Mono", monospace');
+  }
+});
+
 test('density is the unit of padding and gaps, and of nothing else', async ({ page }) => {
   await portal(page, { appearance: { text: 100, density: 140 } });
   await expect(page.locator('.nav-item').first()).toBeVisible();
@@ -97,12 +133,39 @@ test('the look is there before the app: painted by the script in the page, with 
   expect(style).toEqual(['10 20 30', '0.75rem', 'calc(0.2rem * 0.9)', 'calc(0.25rem * 0.9)', 'calc(1rem * 1.1)']);
 });
 
-test('a theme with a value that is not one is not painted, and the app says the same as the page did', async ({ page }) => {
-  await portal(page, { tokens: { 'radius-lg': '0px', 'font-sans': 'x; background: red' } });
+test('a theme with a value that is not one is not painted, nor offered, and the app says the same as the page did', async ({ page }) => {
+  const tokens = { 'radius-lg': '0px', 'font-sans': 'x; background: red' };
+  await mockPortal(page, ({ path: p }) => {
+    if (p === '/api/sessions') return { sessions: [session], executor: 'host' };
+    // The kept theme's package still lists it as it was kept; another package's theme is there to show the list was read.
+    if (p === '/api/extension-ui') return { extensions: [{ name: 'test', version: '1', themes: [{ id: 'look', name: 'Look', dark: { accent: '#0a141e' }, tokens }] }, { name: 'fine-pkg', version: '1', themes: [{ id: 'ok', name: 'Fine', dark: { accent: '#00ff00' } }] }] };
+  }, { settings: true });
+  await page.addInitScript((tokens) => {
+    localStorage.setItem('pithagoras.theme', 'dark');
+    localStorage.setItem('pithagoras.palette', JSON.stringify({ id: 'test/look', name: 'Look', dark: { accent: '10 20 30' }, tokens }));
+  }, tokens);
+  await page.goto('/settings/browser');
   await expect(page.locator('.nav-item').first()).toBeVisible();
   // Refused whole: the radius it also said is not painted, and the font is the portal's.
   expect(await css(page, '.nav-item', 'border-top-left-radius')).toBe('8px');
   expect(await css(page, 'body', 'font-family')).toContain('ui-sans-serif');
+  // Its colours are not painted either, it is nowhere among the themes, and the browser does not keep it to paint again.
+  expect(await page.evaluate(() => document.documentElement.style.getPropertyValue('--accent'))).toBe('');
+  const colours = page.getByRole('dialog', { name: 'Settings' }).getByRole('combobox', { name: 'Colours' });
+  await colours.click();
+  await expect(page.getByRole('option')).toHaveText([/^The portal's own/, /^Fine/]);
+  expect(await page.evaluate(() => localStorage.getItem('pithagoras.palette'))).toBeNull();
+});
+
+test("the script before the app paints a kept theme's colours only under the names of the portal's colours", async ({ page }) => {
+  await page.route('**/src/main.tsx*', (route) => route.abort());
+  await page.addInitScript(() => {
+    localStorage.setItem('pithagoras.theme', 'dark');
+    localStorage.setItem('pithagoras.palette', JSON.stringify({ id: 'test/look', name: 'Look', dark: { accent: '10 20 30', 'z-confirm': '0 0 0', pad: '1 2 3' } }));
+  });
+  await page.goto('/sessions');
+  // Under the name of a layer, the colour would put the confirmation under everything: the whole theme is not painted.
+  expect(await page.evaluate(() => document.documentElement.getAttribute('style'))).toBeNull();
 });
 
 /** A package that brings a theme with new tokens beside its colours, and one whose tokens are hostile, as the portal's server lists them. */

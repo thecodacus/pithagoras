@@ -5,8 +5,9 @@ import defaultTheme from "tailwindcss/defaultTheme.js";
  * (`bg-surface`, `text-fg-muted`, `border-line`, `bg-accent`, `text-danger`),
  * each the portal's own CSS variable, so a theme the person chose paints them
  * too; and beyond colour its type (`font-sans`, `font-mono`, the `text-*`
- * sizes), its rounding, the unit of its padding and gaps, the widths of its
- * layout and its layers (`z-dialog`), each a variable too. The portal's own
+ * sizes), its rounding and line width, the unit of its padding and gaps, its
+ * shadows (`shadow-sm`, `shadow-pop`), how long a transition takes, the widths
+ * of its layout and its layers (`z-dialog`), each a variable too. The portal's own
  * stylesheet is made with it, and an extension's can be: `buildExtension`
  * with `tailwind: true` makes the utilities the extension's code uses into
  * its own stylesheet.
@@ -81,8 +82,16 @@ export default {
         xl: v("radius-xl", "0.75rem"),
         "2xl": v("radius-2xl", "1rem"),
       },
+      borderWidth: { DEFAULT: v("border-width", "1px") },
       boxShadow: {
-        pop: "0 10px 30px -12px rgb(0 0 0 / 0.35), 0 2px 8px -4px rgb(0 0 0 / 0.2)",
+        sm: v("shadow-sm", "0 1px 2px 0 rgb(0 0 0 / 0.05)"),
+        pop: v("shadow-pop", "0 10px 30px -12px rgb(0 0 0 / 0.35), 0 2px 8px -4px rgb(0 0 0 / 0.2)"),
+      },
+      // A `transition` with no duration of its own takes the quick one; `duration-base` is the larger move.
+      transitionDuration: {
+        DEFAULT: v("dur-fast", "150ms"),
+        fast: v("dur-fast", "150ms"),
+        base: v("dur-base", "300ms"),
       },
       // Padding and gaps follow `--pad` and `--gap`. Widths, heights, offsets, margins and what `size-*` sets stay
       // as they are: a unit on all of them would grow the icons with the density, and that is zoom, not density.

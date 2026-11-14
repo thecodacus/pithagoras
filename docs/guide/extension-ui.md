@@ -331,8 +331,10 @@ with the portal's preset, `@pithagoras/extension-api/tailwind`, so
 `bg-surface`, `text-fg-muted`, `border-line`, `bg-accent`, `text-danger`,
 `rounded-xl` and `shadow-pop` are the portal's colours, rounding and shadow and
 follow the theme. So do its type and its room: `font-sans` and `font-mono`, the
-`text-*` sizes, the `rounded-*` steps, and the padding and gaps (`p-*`, `px-*`,
-`py-*`, `gap-*`, `space-*`) are each read from a variable of the page, and
+`text-*` sizes, the `rounded-*` steps, the width of a `border`, `shadow-sm` and
+`shadow-pop`, how long a `transition` takes (and `duration-base`), and the padding
+and gaps (`p-*`, `px-*`, `py-*`, `gap-*`, `space-*`) are each read from a variable
+of the page, and
 `z-dialog` and the other layers, `max-w-chat` and `w-nav` are the portal's
 layers and widths. As the portal ships them they are what Tailwind's own were,
 so nothing changes until the person's text size or density, or a theme, sets
@@ -2845,20 +2847,25 @@ better on every surface.
 
 ### The look beyond colour
 
-`tokens` set the portal's variables for type, shape, space and width, for light and
+`tokens` set the portal's variables for type, shape, space, elevation, motion and width, for light and
 dark alike. Each is a name (the variable without its dashes: `--radius-lg` is
 `radius-lg`) and a value:
 
 | Token | What it is | Allowed | The portal's own |
 | --- | --- | --- | --- |
-| `font-sans`, `font-mono` | The font of text, and of code | A list of font names, quoted where they have spaces | The system's UI font; the system's monospace |
+| `font-sans`, `font-mono` | The font of text, and of code (code blocks, and the chat's tool names, commands and outputs) | A list of font names, each quoted or a word or words of letters, digits, `_` and `-`; none empty, and none starting with a digit | The system's UI font; the system's monospace |
 | `text-base` | The size of text. Every size of the type scale is a multiple of it, line heights too | `0.75rem` to `1.5rem`, or the same in `px` | `1rem` |
 | `radius-sm`, `radius-md`, `radius-lg`, `radius-xl`, `radius-2xl` | How round things are, from small chips to the message box | `0` to `2rem` | `0.25rem`, `0.375rem`, `0.5rem`, `0.75rem`, `1rem` |
+| `border-width` | How wide a line is (`border`, `border-t`, `divide-y`; `border-2` stays two pixels) | `0` to `4px` | `1px` |
 | `pad`, `gap` | The unit of padding, and of the space between things: `p-4` is four of `pad` | `0.1rem` to `0.6rem` | `0.25rem` |
+| `shadow-sm`, `shadow-pop` | A small shadow under a control, and the shadow of what pops up over the page (menus, dialogs) | `none`, or up to four shadows: `inset` or not, two to four lengths (at most `4rem` each), and a colour as `rgb(0 0 0 / 0.2)`, `#hex` or `transparent` | `0 1px 2px 0 rgb(0 0 0 / 0.05)`; `0 10px 30px -12px rgb(0 0 0 / 0.35), 0 2px 8px -4px rgb(0 0 0 / 0.2)` |
+| `dur-fast`, `dur-base` | How long a quick change takes (every `transition` that names no duration), and a larger move such as the sidebar opening | `0ms` to `1000ms`, or the same in `s` | `150ms`; `300ms` |
+| `ease-out`, `ease-spring` | How a move settles, and how it overshoots into place | `linear`, `ease`, `ease-in`, `ease-out`, `ease-in-out`, or `cubic-bezier(x1, y1, x2, y2)` with each x from 0 to 1 | `cubic-bezier(.22, 1, .36, 1)`; `cubic-bezier(.34, 1.56, .64, 1)` |
 | `chat-max` | How wide the conversation's text column is | `24rem` to `90rem` | `48rem` |
 | `nav-width` | How wide the sidebar is | `12rem` to `24rem` | `16rem` |
 
-A length is a number and `rem` or `px`, nothing else: no `calc()`, no `var()`. What a theme does not say stays
+A length is a number and `rem` or `px`, nothing else: no `calc()`, no `var()`. The only bracket a token may have
+is a shadow's `rgb()` and an easing's `cubic-bezier()`, with numbers in it. What a theme does not say stays
 the portal's own, so a theme can be one radius.
 
 `pad` and `gap` are padding and the space between things, and nothing else: the sizes of icons, pictures,
@@ -2868,7 +2875,9 @@ layers (`z-index`) are not a theme's to set.
 A theme is data, and is checked as such before anything is painted. A value that is not what
 its variable takes, a token the portal has no variable for, a `url(...)`, a `;`, a `{`, a `\` or a `/*` is refused, and the theme with it:
 there is no half a theme, and a theme cannot carry a rule of CSS. The same checks run in the page before the app, for the
-copy the browser keeps. In code, `portal.theme.register` throws for such a theme and says which part.
+copy the browser keeps, and a copy that fails them is not painted, its colours included, and is taken out of the browser.
+In code, `portal.theme.register` throws for such a theme and says which part. A theme's `name` is at most 60
+characters: it is what the person reads when an extension asks to switch to it.
 
 ### Fonts
 
@@ -2918,8 +2927,10 @@ control of its own that switches the portal between themes.
 
 `set` switches to a theme of your own package at once. To switch to another
 package's, or to leave one of theirs for the portal's own colours, the portal asks the person
-("*Your extension* wants to change the colours to *Dusk*"), because a package that restyles the whole
-portal unasked is one that could make a prompt hard to read. `set` returns a promise that resolves
+("*Your extension* wants to change the colours to “Dusk”, a theme of *pithagoras-themes*"), because a package that restyles the whole
+portal unasked is one that could make a prompt hard to read. A switch to your own theme is not the person's choice:
+the person's own choice in Settings, and what they said yes to, stay over it, and where nobody has chosen it stays
+until the person changes the theme. `set` returns a promise that resolves
 `true` when the colours were switched and `false` when the person said no, and rejects for a theme there is none
 of. Do not write it as if it always worked.
 

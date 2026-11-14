@@ -79,14 +79,14 @@
 @keyframes chat-pop { from { transform: scale(.4); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 /* Capped by the screen, not by the row: the row is only as wide as what is in
    it, so a share of it cut a name short beside a detail as short as "{}". */
-.chat-tool-name { flex-shrink: 0; max-width: min(32ch, 45vw); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: calc(var(--text-base) * 0.75); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chat-tool-name { flex-shrink: 0; max-width: min(32ch, 45vw); font-family: var(--font-mono-chat); font-size: calc(var(--text-base) * 0.75); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* A long command gives way, not what is said about it: the badge, the time and the line count stay whole on one line. */
 .chat-tool-head > :is(.chat-tool-badge, .chat-faint) { flex-shrink: 0; white-space: nowrap; }
-.chat-tool-detail { min-width: 0; flex-shrink: 10; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: calc(var(--text-base) * 0.75); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: rgb(var(--fg-faint)); }
+.chat-tool-detail { min-width: 0; flex-shrink: 10; font-family: var(--font-mono-chat); font-size: calc(var(--text-base) * 0.75); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: rgb(var(--fg-faint)); }
 .tool-row + .tool-row::before { content: ""; position: absolute; left: 5px; top: -3px; width: 20px; height: 4px; background: linear-gradient(rgb(var(--line)), rgb(var(--line))) center / 1px 100% no-repeat; }
 .chat-tool-body { margin: 4px 0 8px 5px; padding: 10px 12px; border: 1px solid rgb(var(--line)); border-radius: 12px; background: rgb(var(--surface)); display: flex; flex-direction: column; gap: 10px; }
 .chat-tool-label { font-size: calc(var(--text-base) * 0.65625); letter-spacing: .04em; text-transform: uppercase; color: rgb(var(--fg-faint)); margin-bottom: 4px; }
-.chat-tool-command, .chat-tool-output, .chat-tool-value { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: calc(var(--text-base) * 0.75)/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.chat-tool-command, .chat-tool-output, .chat-tool-value { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: calc(var(--text-base) * 0.75)/1.6 var(--font-mono-chat); }
 .chat-tool-command { padding: 8px 10px; border-radius: 8px; background: rgb(var(--terminal)); color: rgb(var(--terminal-fg)); }
 .chat-tool-command > span { color: #3fe1c6; user-select: none; }
 .chat-tool-output { max-height: 16rem; overflow: auto; padding: 8px 10px; border-radius: 8px; background: rgb(var(--raised)); color: rgb(var(--fg-muted)); font-size: calc(var(--text-base) * 0.71875); }
@@ -122,7 +122,7 @@
 .chat-status-icon { display: grid; place-items: center; width: 18px; height: 18px; color: rgb(var(--accent)); }
 .chat-status-swap { display: inline-block; animation: chat-ticker .45s var(--ease-out) both; }
 .chat-status-percent { font-variant-numeric: tabular-nums; font-weight: 600; font-size: calc(var(--text-base) * 0.75); color: rgb(var(--fg)); min-width: 3ch; text-align: right; }
-.chat-status-model { max-width: 16rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: calc(var(--text-base) * 0.6875) ui-monospace, SFMono-Regular, Menlo, monospace; color: rgb(var(--fg-subtle)); }
+.chat-status-model { max-width: 16rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: calc(var(--text-base) * 0.6875) var(--font-mono-chat); color: rgb(var(--fg-subtle)); }
 
 /* Thinking: three dots orbiting. */
 .chat-orbit { position: relative; width: 14px; height: 14px; animation: chat-spin-plain 1.6s linear infinite; }
@@ -176,7 +176,7 @@ button.chat-compaction-pill:disabled { cursor: default; }
 }
 
 /* How a shell command ended, and what it is printing while it runs. */
-.chat-tool-badge { padding: 1px 7px; border-radius: 999px; font: 500 calc(var(--text-base) * 0.65625)/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; animation: chat-pop .4s var(--ease-spring) both; }
+.chat-tool-badge { padding: 1px 7px; border-radius: 999px; font: 500 calc(var(--text-base) * 0.65625)/1.5 var(--font-mono-chat); animation: chat-pop .4s var(--ease-spring) both; }
 .chat-tool-badge.is-ok { color: rgb(var(--ok)); background: rgb(var(--ok) / .1); }
 .chat-tool-badge.is-error { color: rgb(var(--danger)); background: rgb(var(--danger) / .1); }
 .chat-tool-badge.is-warn { color: rgb(var(--warn)); background: rgb(var(--warn) / .12); }
@@ -184,7 +184,7 @@ button.chat-compaction-pill:disabled { cursor: default; }
    stays that high, filled from the top so the first line sits right under the
    header, each line cut at the edge, nothing redrawn as output streams in. The
    oldest line fades out only once there are more than the window holds. */
-.chat-tool-stream { display: flex; flex-direction: column; justify-content: flex-start; height: 54px; overflow: hidden; margin: 0 0 2px 27px; font: calc(var(--text-base) * 0.6875)/18px ui-monospace, SFMono-Regular, Menlo, monospace; color: rgb(var(--fg-faint)); }
+.chat-tool-stream { display: flex; flex-direction: column; justify-content: flex-start; height: 54px; overflow: hidden; margin: 0 0 2px 27px; font: calc(var(--text-base) * 0.6875)/18px var(--font-mono-chat); color: rgb(var(--fg-faint)); }
 .chat-tool-stream.is-clipped { -webkit-mask-image: linear-gradient(to bottom, transparent, #000 65%); mask-image: linear-gradient(to bottom, transparent, #000 65%); }
 .chat-tool-stream > span { display: block; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; white-space: pre; }
 @media (prefers-reduced-motion: reduce) { .chat-tool-badge { animation: none; } }
@@ -199,13 +199,13 @@ button.running-chip:hover { background: rgb(var(--raised)); border-color: rgb(va
 .running-chip.is-status.is-action { border-style: solid; border-color: rgb(var(--accent) / .3); color: rgb(var(--fg-muted)); cursor: pointer; }
 button.running-chip.is-action:hover { border-color: rgb(var(--accent) / .6); background: rgb(var(--accent) / .08); }
 .running-chip.is-action:disabled { opacity: .7; cursor: default; }
-.running-chip-command { color: rgb(var(--accent)); font: 500 calc(var(--text-base) * 0.6875) ui-monospace, SFMono-Regular, Menlo, monospace; }
+.running-chip-command { color: rgb(var(--accent)); font: 500 calc(var(--text-base) * 0.6875) var(--font-mono-chat); }
 button.running-chip-command:hover { text-decoration: underline; }
 .running-chip-icon { display: grid; place-items: center; width: 14px; height: 14px; flex-shrink: 0; }
 .running-chip-icon .chat-ring { width: 12px; height: 12px; }
 .running-chip-kind { width: 12px; height: 12px; flex-shrink: 0; opacity: .7; }
 .running-chip-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
-.running-chip-label.is-mono { font: 500 calc(var(--text-base) * 0.6875) ui-monospace, SFMono-Regular, Menlo, monospace; }
+.running-chip-label.is-mono { font: 500 calc(var(--text-base) * 0.6875) var(--font-mono-chat); }
 .running-chip-detail { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: rgb(var(--fg-subtle)); }
 .running-chip-time { flex-shrink: 0; font-variant-numeric: tabular-nums; color: rgb(var(--fg-faint)); }
 .running-dot { display: block; width: 7px; height: 7px; border-radius: 50%; background: #3fe1c6; box-shadow: 0 0 0 0 rgb(63 225 198 / .5); animation: running-ping 1.6s ease-out infinite; }
@@ -268,7 +268,7 @@ button.running-chip-command:hover { text-decoration: underline; }
 /* A slash command that was sent: on the side of what you send, small, with how it went. */
 .command-line { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; }
 .command-line-pill { display: inline-flex; align-items: center; gap: 7px; max-width: 100%; padding: 4px 10px 4px 9px; border-radius: 999px; border: 1px solid rgb(var(--line)); background: rgb(var(--raised) / .6); color: rgb(var(--fg-muted)); animation: chat-pill-in .35s var(--ease-out) both; transition: border-color .3s, background .3s; }
-.command-line-pill code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 calc(var(--text-base) * 0.75) ui-monospace, SFMono-Regular, Menlo, monospace; color: rgb(var(--fg)); }
+.command-line-pill code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 calc(var(--text-base) * 0.75) var(--font-mono-chat); color: rgb(var(--fg)); }
 .command-line-kind { width: 13px; height: 13px; flex-shrink: 0; opacity: .6; }
 .command-line-state { width: 13px; height: 13px; flex-shrink: 0; }
 .command-line.is-running .command-line-state { color: rgb(var(--fg-faint)); }
