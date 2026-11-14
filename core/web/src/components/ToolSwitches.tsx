@@ -15,8 +15,8 @@ import { t, tp } from "../i18n";
  *
  * Grouped by what installed them, because that is how somebody thinks about
  * it — "turn the web search one off" means four tools that arrived together.
- * An MCP server is a group of its own rather than a share of the adapter, for
- * the same reason: nobody thinks "the adapter", they think "the browser one".
+ * An MCP server is a group of its own rather than a share of pi's MCP support, for
+ * the same reason: nobody thinks "MCP", they think "the browser one".
  * The browser is one of those servers and nothing more — having its tools is
  * having the browser, which is why the switch it used to have of its own is
  * gone. Nothing here knows what any of them are.

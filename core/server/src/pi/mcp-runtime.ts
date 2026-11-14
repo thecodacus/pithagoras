@@ -128,6 +128,8 @@ export class McpRuntime {
   private starting = new Map<string, Promise<void>>();
   /** The calls of tools of a server the portal started that have not ended, so that an idle check does not stop a server mid-call. */
   private running = new Map<string, string>();
+  /** The lazy servers that did not connect in this session, and why: a search does not wait for them again. */
+  private failed = new Map<string, string>();
   private timer?: ReturnType<typeof setInterval>;
   private readonly connectWait: number;
   private readonly idle: number;
@@ -315,8 +317,12 @@ export class McpRuntime {
           }
           await sleep(25, signal);
         }
+        this.failed.delete(server);
         this.snapshot();
-      })().finally(() => this.starting.delete(server));
+      })().then(undefined, (error: Error) => {
+        this.failed.set(server, error.message);
+        throw error;
+      }).finally(() => this.starting.delete(server));
       this.starting.set(server, start);
     }
     await start;
@@ -341,9 +347,11 @@ export class McpRuntime {
    * The lazy servers that have never connected: nothing is known of their tools, so a search could not find them. Connected,
    * with the wait, so that this search does.
    */
-  async learn(signal?: AbortSignal): Promise<void> {
+  async learn(signal?: AbortSignal): Promise<string[]> {
     const unknown = this.lazyServers().filter((server) => !cachedServer(server)?.tools.length);
-    await Promise.allSettled(unknown.map((server) => this.connect(server, signal)));
+    // One that did not connect is not waited for again by every search: it is said, and a call of its tool tries it again.
+    await Promise.allSettled(unknown.filter((server) => !this.failed.has(server)).map((server) => this.connect(server, signal)));
+    return unknown.filter((server) => this.failed.has(server)).map((server) => this.failed.get(server)!);
   }
 
   /** Stop the servers the portal started that nobody has used for a while. */
@@ -365,6 +373,7 @@ export class McpRuntime {
     this.pi = pi;
     pi.on("session_start", () => {
       // pi's runtime of the old session is gone with its servers: nothing is started that this knows of.
+      this.failed.clear();
       this.started.clear();
       this.starting.clear();
       this.running.clear();

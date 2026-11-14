@@ -394,3 +394,22 @@ test("the old MCP adapter is in no chat, whoever lists it", async () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("a lazy server that does not connect is said, once waited for, and a later search does not wait for it again", async () => {
+  reset();
+  writeServers({ dead: { command: "/nonexistent/mcp-server" }, beta: entry("beta") });
+  const { client, say } = await chat({ lazy: head(["dead", "beta"]), mcpTimings: { connectWaitMs: 700 } });
+  try {
+    const first = await say([search("search", { query: "one" })]);
+    // The one that runs is found; the one that did not is said, with what to try.
+    assert.match(textOf(first.results[0]), /mcp__beta__one/);
+    assert.match(textOf(first.results[0]), /The MCP server \\"dead\\" did not connect within 1 seconds/);
+    const from = Date.now();
+    const again = await say([search("search", { query: "two" })]);
+    assert.ok(Date.now() - from < 600, "not waited for again");
+    assert.match(textOf(again.results[0]), /\\"dead\\" did not connect/);
+    assert.equal(count("start dead"), 0);
+  } finally {
+    await close(client);
+  }
+});
