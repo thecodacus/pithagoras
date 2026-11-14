@@ -54,7 +54,7 @@ export const toolEntry = (name: string): string => `<tool>${name}`;
 export interface Resolution {
   /** The sets it made lazy. */
   lazy: string[];
-  /** The list is still over a limit with every group it may take out taken out: nothing more can be done, and the page says so. */
+  /** The list is over a limit even with every group it may take out taken out: nothing is made lazy by size then, and the page says so. */
   over: boolean;
 }
 
@@ -125,7 +125,10 @@ export function resolveThreshold(tools: readonly SizedTool[], marks: Marks, limi
     tokens -= next.tokens;
     count -= next.count;
   }
-  return { lazy: [...lazy.keys()].sort(), over: !within(tokens, count, 1) };
+  // With every group it may take out taken out, the list is still over: that is not for the threshold to fix, and a model that
+  // has to search for tools it could have had in its list is no gain. Nothing is made lazy by size, and the page says so.
+  if (!within(tokens, count, 1)) return { lazy: [], over: true };
+  return { lazy: [...lazy.keys()].sort(), over: false };
 }
 
 /** The tokens a tool's declaration costs, where it was not measured: its text and an average schema, at four characters to a token. */

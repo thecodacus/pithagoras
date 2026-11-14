@@ -62,6 +62,7 @@ import {
   lazyLimits,
   setLazyLimits,
   resolvedLazy,
+  lazyListed,
   lazyNotice,
   dismissLazyNotice,
   agentDirect,
@@ -1321,6 +1322,8 @@ app.get("/api/tools", (_req, res) => {
     marks: toolMarks(),
     // What the threshold decided, and the limits it decided by; the page says which sets are lazy "by size", and when it could not make the list fit.
     resolved: resolvedLazy(),
+    // What the model's list holds now, with what is lazy taken out of it.
+    listed: lazyListed(),
     limits: lazyLimits(),
     defaultLimits: DEFAULT_LIMITS,
     // The sets the threshold made lazy since the person last looked.

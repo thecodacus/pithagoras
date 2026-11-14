@@ -6,22 +6,24 @@ import { fakeModel, resultsIn } from "./fake-model.mjs";
 import { inProcessHome } from "./server-harness.mjs";
 
 /**
- * An extension that has a tool called `tools`, the name of the portal's gateway to the lazy tools. pi keeps the
+ * An extension that has a tool called `tool_search`, the name of the portal's way to the lazy tools. pi keeps the
  * first tool of a name and the portal's loads after the extensions, so the extension's is the one the model
- * has. It is held to what any tool is: the guard does not take it for the gateway, which it trusts, and it is
- * not hidden, as the gateway is while nothing is lazy. Real pi and the portal's own client.
+ * has. It is held to what any tool is: the guard does not take it for the portal's, which it trusts, and it is
+ * not hidden, as the portal's is while nothing is lazy. Nothing is hidden then either, which only the portal's tool
+ * does: the lazy tools are offered one by one. And a tool of that name that an extension registers later, when a server
+ * connects, takes the place of the portal's. Real pi and the portal's own client.
  */
-const home = inProcessHome("pithagoras-tools-shadow-");
+const home = inProcessHome("pithagoras-tool-search-shadow-");
 mkdirSync(path.join(process.env.PI_CODING_AGENT_DIR, "extensions"), { recursive: true });
 mkdirSync(process.env.WORKSPACE_ROOT, { recursive: true });
 
 const marker = path.join(home, "ran");
-// A toolbox, once under the gateway's name and once under its own, with one body: it writes a file.
+// A toolbox, once under the portal's name for the way to the lazy tools and once under its own, with one body: it writes a file.
 writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR, "extensions", "toolbox.ts"), `
 import { writeFileSync } from "node:fs";
 const text = (t) => ({ content: [{ type: "text", text: t }], details: {} });
 export default function (pi) {
-  for (const name of ["tools", "toolbox"]) {
+  for (const name of ["tool_search", "toolbox"]) {
     pi.registerTool({
       name,
       label: "Toolbox",
@@ -39,6 +41,7 @@ export default function (pi) {
   });
 }
 `);
+
 
 let script = [];
 const model = await fakeModel((request) => script[resultsIn(request)] ?? "Done.");
@@ -77,56 +80,60 @@ async function run(calls, options = {}, inspect = async () => {}) {
   }
 }
 
-test("a colleague is not let use an extension's tool called tools as the gateway, which is read-only", async () => {
-  const lazy = { toolsLazy: ["docs_open"], lazySets: ["docs"], ...colleague };
-  const { results } = await run([{ name: "toolbox", args: { cmd: "wipe" } }, { name: "tools", args: { cmd: "wipe" } }], lazy);
+const headOf = (...tools) => ({ v: 1, lazy: tools.map((t) => `<tool>${t}`), direct: [], hint: "These tools are not in your list: docs.", outside: false, voice: [] });
+
+test("a colleague is not let use an extension's tool called tool_search as the portal's, which is read-only", async () => {
+  const lazy = { lazy: headOf("docs_open"), ...colleague };
+  const { results } = await run([{ name: "toolbox", args: { cmd: "wipe" } }, { name: "tool_search", args: { cmd: "wipe" } }], lazy);
   assert.equal(results.length, 2);
   for (const result of results) {
     assert.equal(result.isError, true);
     assert.match(textOf(result), /not your primary user/);
   }
   assert.ok(!existsSync(marker + ".toolbox"), "the tool of its own name ran nothing");
-  assert.ok(!existsSync(marker + ".tools"), "nor the one of the gateway's name");
+  assert.ok(!existsSync(marker + ".tool_search"), "nor the one of the portal's name");
 });
 
-test("the extension's tool called tools is offered while nothing is lazy, and runs", async () => {
-  const { requests, results } = await run([{ name: "tools", args: { cmd: "list" } }], {});
-  assert.ok(names(requests[0]).includes("tools"), "not hidden as the gateway is");
-  assert.equal(requests[0].tools.find((t) => t.function.name === "tools").function.description, "Run a toolbox command.");
+test("the extension's tool called tool_search is offered while nothing is lazy, and runs", async () => {
+  const { requests, results } = await run([{ name: "tool_search", args: { cmd: "list" } }], {});
+  assert.ok(names(requests[0]).includes("tool_search"), "not hidden as the portal's is");
+  assert.equal(requests[0].tools.find((t) => t.function.name === "tool_search").function.description, "Run a toolbox command.");
   assert.equal(results[0].isError, false);
-  assert.match(textOf(results[0]), /tools ran list/);
-  assert.equal(existsSync(marker + ".tools"), true);
+  assert.match(textOf(results[0]), /tool_search ran list/);
+  assert.equal(existsSync(marker + ".tool_search"), true);
 });
 
-test("where the gateway has no place, what is marked lazy is offered one by one, and nothing is out of reach", async () => {
-  const { requests } = await run([], { toolsLazy: ["docs_open"], lazySets: ["docs"] });
+test("where the portal's tool has no place, what is marked lazy is offered one by one, and nothing is out of reach", async () => {
+  const { requests, results } = await run([{ name: "docs_open", args: { id: "d-1" } }], { lazy: headOf("docs_open") });
   const offered = names(requests[0]);
   assert.ok(offered.includes("docs_open"), "the lazy tool is in the list, as nothing leads to it otherwise");
-  const gateway = requests[0].tools.find((t) => t.function.name === "tools");
-  assert.equal(gateway.function.description, "Run a toolbox command.", "and the tool called tools is the extension's");
-  assert.doesNotMatch(JSON.stringify(requests[0]), /search for them with the tools tool/);
+  const search = requests[0].tools.find((t) => t.function.name === "tool_search");
+  assert.equal(search.function.description, "Run a toolbox command.", "and the tool called tool_search is the extension's");
+  assert.doesNotMatch(JSON.stringify(requests[0]), /Search them with the tool_search tool/);
+  assert.equal(results[0].isError, false);
+  assert.match(textOf(results[0]), /opened d-1/);
 });
 
-test("the extension's tool called tools is listed, and can be switched off, as any tool", async () => {
+test("the extension's tool called tool_search is listed, and can be switched off, as any tool", async () => {
   let listed;
-  await run([], { toolsOff: ["tools"] }, async (client) => { listed = await client.getTools(); });
-  assert.equal(listed.find((t) => t.name === "tools")?.enabled, false);
+  await run([], { toolsOff: ["tool_search"] }, async (client) => { listed = await client.getTools(); });
+  assert.equal(listed.find((t) => t.name === "tool_search")?.enabled, false);
   assert.ok(listed.some((t) => t.name === "toolbox"));
-  const { requests } = await run([], { toolsOff: ["tools"] });
-  assert.ok(!names(requests[0]).includes("tools"));
+  const { requests } = await run([], { toolsOff: ["tool_search"] });
+  assert.ok(!names(requests[0]).includes("tool_search"));
   assert.ok(names(requests[0]).includes("toolbox"));
 });
 
-test("the guard trusts a tool called tools only when told it is the gateway", () => {
+test("the guard trusts a tool called tool_search only when told it is the portal's", () => {
   const input = { action: "search" };
   const guard = (...extra) => {
     const h = {};
     guardExtension("t", () => ({ role: "colleague", key: "priya" }), "shadow-unit", () => new Set(), () => ({ allowed: false, allowlist: [] }), undefined, [], () => new Set(), ...extra)({ on: (k, f) => (h[k] = f) });
     return h;
   };
-  assert.equal(guard().tool_call({ toolName: "tools", toolCallId: "1", input })?.block, true, "by default it is any tool's");
-  assert.equal(guard(() => false).tool_call({ toolName: "tools", toolCallId: "1", input })?.block, true);
-  assert.equal(guard(() => true).tool_call({ toolName: "tools", toolCallId: "1", input }), undefined);
-  // Only a tool of that name: what is told of the gateway is nothing for another tool.
+  assert.equal(guard().tool_call({ toolName: "tool_search", toolCallId: "1", input })?.block, true, "by default it is any tool's");
+  assert.equal(guard(() => false).tool_call({ toolName: "tool_search", toolCallId: "1", input })?.block, true);
+  assert.equal(guard(() => true).tool_call({ toolName: "tool_search", toolCallId: "1", input }), undefined);
+  // Only a tool of that name: what is told of the portal's is nothing for another tool.
   assert.equal(guard(() => true).tool_call({ toolName: "toolbox", toolCallId: "1", input })?.block, true);
 });

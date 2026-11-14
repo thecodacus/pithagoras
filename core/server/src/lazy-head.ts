@@ -25,8 +25,9 @@ export function lazyHintOf(groups: readonly { label: string; tools: readonly str
 /**
  * What a chat is told about its lazy tools when it starts, from the marks, the threshold's resolution and what the
  * chat's mode and agent keep in the list (`pinned`: sets, and single tools as `<tool>name`). The chat keeps it (LazyHead).
+ * `off` are the tools it starts with switched off: where every lazy tool is, there is nothing to reach and nothing is lazy.
  */
-export function buildLazyHead(pinned: readonly string[] = []): LazyHead {
+export function buildLazyHead(pinned: readonly string[] = [], off: ReadonlySet<string> = new Set()): LazyHead {
   const marks = toolMarks();
   const tools = sizedTools();
   const kept = new Set(pinned);
@@ -34,7 +35,7 @@ export function buildLazyHead(pinned: readonly string[] = []): LazyHead {
   const lazy = new Set([...Object.entries(marks).filter(([, mark]) => mark === "lazy").map(([entry]) => entry), ...resolvedLazy().lazy].filter((entry) => !kept.has(entry)));
   const head = { lazy: [...lazy].sort(), direct: [...direct].sort() };
   // The tools that are lazy in it and may be: judged as the marks do (lazyAllowed), so that a mark on a set whose tools cannot be lazy names none.
-  const names = tools.filter((tool) => tool.allowed && headLazy(head, tool)).map((tool) => tool.name);
+  const names = tools.filter((tool) => tool.allowed && headLazy(head, tool) && !off.has(tool.name)).map((tool) => tool.name);
   if (!names.length) return { v: 1, lazy: [], direct: head.direct, hint: "", outside: false, voice: [] };
   return { v: 1, ...head, hint: lazyHintOf(lazySetLabels(names)), outside: false, voice: [] };
 }

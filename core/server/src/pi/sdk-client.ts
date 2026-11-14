@@ -712,23 +712,29 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       label: (tool) => client.setLabel(tool),
     });
     // What the tools that are on ask to be told in a spoken turn, the lazy ones among them (they are on, only not declared):
-    // a line that says how to use one is no less true for its being found through the search. A line the chat's head
-    // has is kept, so that a lazy tool that registers late does not add one to the prompt in the middle of the chat.
-    toolVoiceLines = () => {
-      const lines = new Set<string>(client.head.voice);
-      for (const name of new Set<string>(session.getActiveToolNames())) {
+    // a line that says how to use one is no less true for its being found through the search. The lines of lazy tools are
+    // kept in the chat's head, so that one that registers late does not add a line to the prompt in the middle of the chat.
+    const lazyTools = (): string[] => (session.getAllTools?.() ?? []).filter((tool: any) => client.lazyMember(tool)).map((tool: any) => String(tool.name));
+    const voiceOf = (names: Iterable<string>): string[] => {
+      const lines: string[] = [];
+      for (const name of names) {
         const asked = (session.getToolDefinition(name) as { voiceGuidelines?: unknown } | undefined)?.voiceGuidelines;
-        if (Array.isArray(asked)) for (const line of asked) if (typeof line === "string") lines.add(line);
+        if (Array.isArray(asked)) for (const line of asked) if (typeof line === "string" && !lines.includes(line)) lines.push(line);
       }
-      if (lines.size > client.head.voice.length) client.keepHead({ ...client.head, voice: [...lines] });
-      return [...lines];
+      return lines;
+    };
+    toolVoiceLines = () => {
+      const kept = [...new Set([...client.head.voice, ...voiceOf(lazyTools().filter((name) => session.getActiveToolNames().includes(name)))])];
+      if (kept.length > client.head.voice.length) client.keepHead({ ...client.head, voice: kept });
+      return [...new Set([...kept, ...voiceOf(session.getActiveToolNames())])];
     };
     // Said once, whichever of the tools that declare outside content are on, lazy ones too: what they return comes in the
-    // short envelope (see pageEnvelope in guard.ts), which leaves it out. A line the head has said stays said.
+    // short envelope (see pageEnvelope in guard.ts), which leaves it out. Once a lazy tool has declared it, the chat's head
+    // has it, and the line stays said though the tool is switched off.
     outsideLines = () => {
-      const now = (session.getActiveToolNames() as string[]).some((name) => guardOf(name)?.outside);
-      if (now && !client.head.outside) client.keepHead({ ...client.head, outside: true });
-      return now || client.head.outside ? [OUTSIDE_CONTENT_GUIDELINE] : [];
+      const active: string[] = session.getActiveToolNames();
+      if (!client.head.outside && lazyTools().some((name) => active.includes(name) && guardOf(name)?.outside)) client.keepHead({ ...client.head, outside: true });
+      return client.head.outside || active.some((name) => guardOf(name)?.outside) ? [OUTSIDE_CONTENT_GUIDELINE] : [];
     };
     client.portalSessionId = opts.sessionId;
     client.dialogs = opts.dialogs !== false;

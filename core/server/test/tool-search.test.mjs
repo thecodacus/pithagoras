@@ -148,6 +148,18 @@ export default function (pi) {
       async execute(_id, p) { return text("late " + p.id); },
     });
   });
+  // The tool of the portal's name, from an extension that connects late: at the first message, when the switches have been applied.
+  pi.on("before_agent_start", () => {
+    if (!globalThis.__lateSearch || globalThis.__lateSearchDone) return;
+    globalThis.__lateSearchDone = true;
+    pi.registerTool({
+      name: "tool_search",
+      label: "Toolbox",
+      description: "Run a toolbox command.",
+      parameters: { type: "object", properties: { cmd: { type: "string" } }, required: ["cmd"] },
+      async execute(_id, p) { return text("toolbox ran " + p.cmd); },
+    });
+  });
   // A tool for a plan mode that sets a fixed list of what is active, which does not name the gateway.
   pi.registerTool({
     name: "ask_q",
@@ -744,6 +756,25 @@ test("an extension's fixed list of active tools does not take the way to a lazy 
     assert.deepEqual(names(plain.requests[0]).sort(), ["ask_q", "bash", "read"]);
   } finally {
     globalThis.__fixedList = false;
+  }
+});
+
+test("a tool called tool_search that an extension registers later takes the place of the portal's: the lazy tools are offered one by one from then on", async () => {
+  globalThis.__lateSearch = true;
+  const { client, ask } = await chatOf({ lazy: headOf("docs_open"), toolsOff: ["codemode"] });
+  try {
+    const [first] = await ask();
+    // pi keeps what it had registered first or last: either way the model has one tool of the name, and the lazy tool is declared once it is not the portal's.
+    const [second] = await ask([{ name: "docs_open", args: { id: "d-9" } }]);
+    assert.equal(second.tools.find((t) => t.function.name === "tool_search")?.function.description, "Run a toolbox command.", "the extension's tool is the one called tool_search");
+    assert.ok(names(second).includes("docs_open"), "the lazy tool is offered by its own name, as nothing else leads to it");
+    assert.match(JSON.stringify(model.requests.at(-1).messages), /opened d-9/);
+    assert.ok(first.tools.length > 0);
+    // Taken away from the chat, as the marks are for a chat that starts: nothing is hidden by a tool that is not the portal's.
+    assert.equal(client.offers("docs_open"), "direct");
+  } finally {
+    globalThis.__lateSearch = false;
+    client.dispose();
   }
 });
 

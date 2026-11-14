@@ -2073,6 +2073,12 @@ export function guardExtension(
      * over, and not the model, which is given the script's result. What it read holds nothing back.
      */
     const running = new Set<string>();
+    /**
+     * The calls of the portal's `tool_search` that have not ended. What a call of it runs is run by pi as a call of its own,
+     * and its result is the result of `tool_search`: the model is given that one, so it is wrapped and flagged where it is, as
+     * a result the model asked for directly, and not once more on the way out, as a script's reads are.
+     */
+    const searching = new Set<string>();
     const isTainted = () => marked || [...flagged.keys()].some((id) => !trusted.has(id)) || [...readByCalls.values()].some((signals) => signals.length > 0);
     if (portalSessionId) {
       const taint = {
@@ -2108,7 +2114,10 @@ export function guardExtension(
     });
 
     pi.on("tool_result", (event: any) => {
-      if (typeof event.toolCallId === "string") running.delete(event.toolCallId);
+      if (typeof event.toolCallId === "string") {
+        running.delete(event.toolCallId);
+        searching.delete(event.toolCallId);
+      }
       const compact = !event.isError && isBrowserSnapshot(event.toolName, event.input ?? {});
       const formatted = compact ? (event.content ?? []).map((part: any) =>
         part?.type === 'text' && typeof part.text === 'string' ? { ...part, text: cleanBrowserSnapshot(part.text) } : part,
@@ -2130,7 +2139,9 @@ export function guardExtension(
           ? { ...part, text: deface(part.text) }
           : part,
       );
-      const parent = typeof event.parentToolCallId === "string" && event.parentToolCallId ? event.parentToolCallId : undefined;
+      const asked = typeof event.parentToolCallId === "string" && event.parentToolCallId ? event.parentToolCallId : undefined;
+      // A call made through tool_search is the model's own, as far as what it read is concerned.
+      const parent = asked !== undefined && searching.has(asked) ? undefined : asked;
       if (parent) {
         // Read by a call another tool made: wrapped all the same, for a script that hands it on as it is, and
         // held for the call that made it, which is flagged in its place. Not flagged here as well: that would be
@@ -2163,7 +2174,10 @@ export function guardExtension(
     });
 
     pi.on("tool_call", (event: any, ctx: any) => {
-      if (typeof event.toolCallId === "string") running.add(event.toolCallId);
+      if (typeof event.toolCallId === "string") {
+        running.add(event.toolCallId);
+        if (event.toolName === TOOL_SEARCH && searchNow()) searching.add(event.toolCallId);
+      }
       const { role, key } = whoNow();
       const files = filesOf(event.toolName);
       const declared = guardOf(event.toolName);

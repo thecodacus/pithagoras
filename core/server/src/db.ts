@@ -3346,12 +3346,19 @@ export function resolvedLazy(): Resolution {
   })();
   if (!same || storedOver !== now.over) {
     putSetting("lazy_resolved", JSON.stringify(now));
+    // A set that the threshold newly took out of the model's list: the person is told, and may keep it there.
     const added = now.lazy.filter((set) => !before.includes(set));
-    // Only a set that went lazy by size and was none before: not the first reading of an install with no tools known yet.
-    if (added.length && (before.length || getSetting("lazy_resolved_once"))) noteLazyAdded(added);
-    if (added.length) putSetting("lazy_resolved_once", "1");
+    if (added.length) noteLazyAdded(added);
   }
   return now;
+}
+
+/** What the model's list holds with the default switches, after what is lazy is taken out of it: the numbers the threshold holds to its limits. */
+export function lazyListed(): { tokens: number; tools: number } {
+  const marks = toolMarks();
+  const resolved = resolvedLazy().lazy;
+  const listed = sizedTools().filter((tool) => tool.counted && !isLazy(tool, marks, resolved));
+  return { tokens: listed.reduce((sum, tool) => sum + tool.tokens, 0), tools: listed.length };
 }
 
 /** What the threshold made lazy since the person last looked, for the notice on the tools page. */
@@ -4068,8 +4075,6 @@ export function rememberTools(reported: KnownTool[]): string[] {
   putSetting("tools_seen", JSON.stringify(sorted));
   const off = tools.filter((t) => t.offByDefault && fresh.includes(t.name)).map((t) => t.name);
   if (off.length) setToolDefaultsOff([...new Set([...toolDefaultsOff(), ...off])]);
-  // A tool that came makes the model's list longer: what the threshold takes out of it is settled now, not at the next chat.
-  resolvedLazy();
   return fresh.filter((name) => off.includes(name));
 }
 

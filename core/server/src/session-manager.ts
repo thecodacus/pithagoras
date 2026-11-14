@@ -11,9 +11,9 @@ import { agentAt } from "./agents.js";
 import { HEARTBEAT_ROLE } from "./pi/heartbeat-names.js";
 import path from "node:path";
 import type { Draft, LoadError, PiClient, PiTool, PromptTaken } from "./pi/types.js";
-import { effectiveOff, exceptionsFor, heldOffUnshown, toolEnabled, toolSource } from "./tool-policy.js";
+import { effectiveOff, exceptionsFor, heldOffUnshown, toolEnabled, toolSetOf, toolSource } from "./tool-policy.js";
 import { scriptedMark } from "./tool-layers.js";
-import { parseHead, type LazyHead } from "./tool-lazy.js";
+import { headLazy, parseHead, type LazyHead } from "./tool-lazy.js";
 import { buildLazyHead } from "./lazy-head.js";
 import { unlisted } from "./mcp-offer.js";
 import { projectOf } from "./workspaces.js";
@@ -98,6 +98,7 @@ import {
   anySessionRunning,
   onChannel,
   dialogHost,
+  lazyAllowed,
   lazyMarks,
   setLazyHead,
   agentDirect,
@@ -2809,10 +2810,13 @@ class SessionManager extends EventEmitter {
     return head;
   }
 
-  /** The head the chat would have if it started now: what a mode of the person's and the agent's it works with keep in the list stays there. */
-  private freshLazyHead(sessionId: string): LazyHead {
+  /**
+   * The head the chat would have if it started now: what a mode of the person's and the agent's it works with keep in the
+   * list stays there. Where every lazy tool starts switched off nothing is lazy (`off`), as nothing is to be reached.
+   */
+  private freshLazyHead(sessionId: string, off: ReadonlySet<string> = new Set(this.piOff(sessionId))): LazyHead {
     const session = getSession(sessionId);
-    return buildLazyHead([...modeDirect(session?.mode), ...agentDirect(agentIdOf(session?.workspace))]);
+    return buildLazyHead([...modeDirect(session?.mode), ...agentDirect(agentIdOf(session?.workspace))], off);
   }
 
   /** What pi is told about the tools when a conversation starts: the ones that are off, and what the chat froze about the lazy ones. */
@@ -2852,8 +2856,10 @@ class SessionManager extends EventEmitter {
   lazyHeadStale(sessionId: string): boolean {
     const was = parseHead(getSession(sessionId)?.lazy_head);
     if (!was) return false;
-    const head = this.freshLazyHead(sessionId);
-    return JSON.stringify(was.lazy) !== JSON.stringify(head.lazy) || JSON.stringify(was.direct) !== JSON.stringify(head.direct);
+    // As it would be with the tools the chat has on now and as with every tool on: a chat that has switched its lazy tools
+    // off since it started is no more out of date than one that started with them on, and one that started with them off is not.
+    const same = (head: LazyHead) => JSON.stringify(was.lazy) === JSON.stringify(head.lazy) && JSON.stringify(was.direct) === JSON.stringify(head.direct);
+    return !same(this.freshLazyHead(sessionId)) && !same(this.freshLazyHead(sessionId, new Set()));
   }
 
   /**
@@ -2909,6 +2915,13 @@ class SessionManager extends EventEmitter {
     const shown: { name: string; source: string; package?: string | null; description?: string; inline?: true; cached?: true }[] = listed.length
       ? listed
       : shownTools(workspace, view).filter((tool) => asks || !(tool.name === ASK_QUESTION_TOOL && tool.inline));
+    // What the chat froze about its lazy tools is what is lazy in it, not what the marks say now: a running chat's own pi says
+    // which, a chat that has started and is idle its stored head.
+    const frozen = parseHead(session?.lazy_head);
+    const lazyHere = (name: string, source: string, pkg: string | null | undefined, inline?: true): boolean =>
+      client?.offers
+        ? client.offers(name) === "lazy"
+        : frozen !== undefined && lazyAllowed({ name, source, package: pkg, inline: inline === true }, servers) && headLazy(frozen, { name, set: toolSetOf({ name, source }, servers) });
     return {
       tools: shown.map(({ name, source, package: pkg, description, inline, cached }) => {
         const mark = lazy({ name, source, package: pkg });
@@ -2924,7 +2937,7 @@ class SessionManager extends EventEmitter {
           defaultOn: !defaults.includes(name),
           // Not offered one by one but found through `tool_search`, or an MCP server's through `mcp`: the page says so beside the switch.
           // In a chat that is running it is what the chat froze that says so, which the marks may have left behind.
-          ...scriptedMark(client?.offers && mark.mcp === undefined ? { ...mark, lazy: client.offers(name) === "lazy" ? (true as const) : undefined } : mark, scripted),
+          ...scriptedMark(mark.mcp === undefined && (client?.offers || frozen) ? { ...mark, lazy: lazyHere(name, source, pkg, inline) ? (true as const) : undefined } : mark, scripted),
         };
       }),
       live: Boolean(listed.length),
