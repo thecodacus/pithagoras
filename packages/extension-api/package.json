@@ -22,13 +22,19 @@
       "types": "./server.d.ts"
     },
     "./build": "./build.mjs",
-    "./tailwind": "./tailwind.mjs"
+    "./tailwind": "./tailwind.mjs",
+    "./test": {
+      "types": "./test.d.ts",
+      "default": "./test.mjs"
+    }
   },
   "files": [
     "index.d.ts",
     "server.d.ts",
     "build.mjs",
     "tailwind.mjs",
+    "test.mjs",
+    "test.d.ts",
     "README.md",
     "NOTICE"
   ],

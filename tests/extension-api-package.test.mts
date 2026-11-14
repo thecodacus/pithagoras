@@ -16,7 +16,7 @@ test('the published extension API has the files its exports name, its readme, it
   const printed = JSON.parse(execFileSync('npm', ['pack', '--dry-run', '--json', '-w', 'packages/extension-api'], { cwd: root, encoding: 'utf8' }));
   const packed = Array.isArray(printed) ? printed[0] : printed['@pithagoras/extension-api'];
   const files: string[] = packed.files.map((file: { path: string }) => file.path).sort();
-  assert.deepEqual(files, ['LICENSE', 'NOTICE', 'README.md', 'build.mjs', 'index.d.ts', 'package.json', 'server.d.ts', 'tailwind.mjs']);
+  assert.deepEqual(files, ['LICENSE', 'NOTICE', 'README.md', 'build.mjs', 'index.d.ts', 'package.json', 'server.d.ts', 'tailwind.mjs', 'test.d.ts', 'test.mjs']);
 
   const manifest = JSON.parse(readFileSync(path.join(dir, 'package.json'), 'utf8'));
   const named = [manifest.types, ...Object.values(manifest.exports).flatMap((target) => (typeof target === 'string' ? [target] : Object.values(target as Record<string, string>)))];
