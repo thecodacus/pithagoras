@@ -35,7 +35,7 @@ envelope: the same random closing id, with the warning above said once in the
 agent's instructions instead of on every result. The [Browser](/guide/browser)
 extension's tools declare it, as they read a page after nearly every click. The portal says the warning while
 any such tool is on, whichever of the others are switched off, and while they are lazy
-(reached through the `tool_search` tool), which the chat keeps once it has said it.
+(reached through the `tool_search` tool), from the chat's first request: the chat keeps it once it has said it.
 
 What a tool declares is in `guard` on its definition, which a tool of the portal
 or of an [extension](/guide/extension-ui#what-the-guard-holds-a-tool-to) may
@@ -63,13 +63,18 @@ under their own names (`jira_get_issue`) where its tools are direct, and through
 the `tool_search` tool where they are lazy. A tool that pi's own MCP support registers
 (`mcp__<server>__<tool>`) belongs to the server pi recorded for it, never to the
 server its name looks like: a tool called `mcp_page` that an extension brought is that
-extension's. The resource tools
+extension's, and is trusted as it is. So an extension that hands back what a server or anyone
+else wrote, such as an MCP bridge of its own, declares `outside` on its tools; without it,
+its results are not wrapped. The resource tools
 (`list_mcp_resources`, `list_mcp_resource_templates`, `read_mcp_resource`) belong to
 the server they are asked for, and a listing of every server's counts as outside
 content. What `tool_search` shows when you search or describe is the tools' own
 descriptions and parameters, which the server wrote: such a result is wrapped when it
 shows a tool of a server you have not counted as your own, and left as it is when every
-tool it shows is the portal's, an extension's, or a trusted server's. An issue comment or a mail body a server
+tool it shows is the portal's, an extension's, or a trusted server's. The usage rules such a result
+carries start with a tag of the chat's that no page, file or server can know, and the tag is taken out of
+every tool's text the result quotes and of whatever a call returns, so a line written to look like a rule is
+not one ([Lazy tools](/guide/extensions#lazy-tools)). An issue comment or a mail body a server
 hands back is whoever wrote it, and so is what a server from a config other than
 the portal's hands back, or one whose tools are named without the server. A
 server you run yourself can be counted as your own, and its output is then

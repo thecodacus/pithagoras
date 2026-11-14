@@ -2439,6 +2439,13 @@ portal.chats.extend((pi, chat) => {
   `label`, `description` and `confirm`, where there is one, are texts. Anything
   else throws a `TypeError`, and so does a package called `custom`, whose modes
   would be taken for the person's own.
+- **`keepDirect`** (`{ sets?, tools? }`, lists of names) keeps groups and tools
+  in the model's list in the mode's chats, whatever the threshold of the
+  [lazy tools](/guide/extensions#the-threshold) says, as a mode the person makes
+  can: `sets` by the names Settings → Tools gives the groups (a package's name;
+  this extension's own tools are filed under its own), `tools` by a tool's name.
+  Without it, a long list puts its largest groups behind `tool_search`, and that
+  can be the group the mode is for. A chat takes it as it starts and keeps it.
 - **What the mode does is the extension's.** A mode has no tools of its own:
   the factory registers what the mode's chats have, and can add to their prompt
   as any pi extension can; it leaves the other chats as they are. It is called

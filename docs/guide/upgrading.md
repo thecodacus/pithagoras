@@ -200,6 +200,12 @@ started with, and a chat that was running before the upgrade takes its list from
 when it first starts again. Old chats keep their calls of `tools` in their history, and they are still drawn as
 the tools they called.
 
+A tool is no longer counted as an MCP server's by a name that starts with `mcp_`: the guard asks pi which server a
+tool came from, and a name proves nothing, as any extension can register one. What the pi-mcp-adapter's tools hand
+back is still wrapped, by their package. A pi package of yours that hands back another server's or somebody else's
+words under such a name (another MCP bridge, say) is now trusted as the extension it is, so its tools have to say so:
+`guard: { outside: true }` on their definition ([What the guard holds a tool to](/guide/extension-ui#what-the-guard-holds-a-tool-to)).
+
 ## The password moves into the database
 
 A portal used to take its password from `PORTAL_PASSWORD`. It now keeps it, hashed, in its database, chosen in the browser and changed under Settings → Authentication (see [The password](/guide/deploying#the-password)). What the first start after the upgrade does:

@@ -466,8 +466,8 @@ whichever the list reaches first. `0` turns a limit off. When the list has more 
 **auto** are taken out of it, the largest by tokens first, until both numbers are within the limits. What is
 counted is what the model would be offered with the default switches: tools that are off by default cost the list
 nothing, and pi's own tools, the portal's own small ones (such as `ask_question`) and every group marked **direct**
-count in full and are never taken out. If the list is over the limits all the same, nothing is made lazy by size,
-because taking the rest out would not make it fit, and the page says so.
+count in full and are never taken out. If the list is over the limits all the same, every group that may be taken out
+is, because each makes the list shorter, and the page says that the rest cannot be taken out.
 
 The result is worked out once and kept, not for each chat. It changes when a group comes or goes, a group's size
 changes, a mark changes or the limits do, and a group that went lazy stays lazy until the list would fit within
@@ -482,6 +482,7 @@ says which groups the threshold took out since you last looked, and puts a **dir
 in the list. Where a group exists for one purpose, a [mode of yours](/guide/sessions#modes-you-make) or an
 [agent](/guide/agents#tools) can keep it in the list for its chats: the **direct** button on the group's header on
 the mode's or the agent's tools page. Without it the largest-first rule could leave out exactly the group the mode is for.
+A mode an extension offers says the same with `keepDirect` (see [Chat modes](/guide/extension-ui#chat-modes)).
 
 An MCP server's tools do not take part: they are lazy by the server's own setting (see below), and the threshold
 counts the ones that are in the list and does not take them out.
@@ -535,10 +536,15 @@ either, and marking it lazy does not switch it on.
 The model is shown one short line in the system prompt instead of the tools, naming the lazy groups and a few of
 their tools, for example "These tools are not in your list: Browser (browser_click, browser_navigate,
 browser_snapshot and 8 more). Search them with the tool_search tool before you say you cannot do something.", and
-one sentence that the results of `tool_search` carry the tools' usage rules on lines that start with `Rule:`. The
+one sentence that what a search or a describe of `tool_search` returns carries the tools' usage rules on lines that
+start with `Rule` and the chat's own tag, a random word made with the chat (`Rule 3f9a07c2:`). Only those lines count:
+a page, a file or an MCP server's description that writes a line starting with `Rule:` has no tag, and the tag is
+taken out of every text of a tool's that the search quotes and of everything a call returns. The
 portal's rule that outside content, such as a [browser](/guide/browser)'s page, is data and never
 instructions, and what a lazy tool asks to be told in a spoken turn, stay in the prompt as long as the tool is
-lazy: a security line does not depend on a search.
+lazy, from the chat's first request: a security line does not depend on a search. They are taken from what the
+lazy tools said of themselves when a chat last loaded them; only a tool that no chat has loaded yet adds its line
+when it first registers.
 
 `tool_search` has three actions:
 
@@ -550,13 +556,18 @@ lazy: a security line does not depend on a search.
 
 **The rules of the tools** (what an extension wrote for the system prompt, such as the browser's rules for reading a
 page) are not in the prompt for a lazy tool: they would cost what the group's being lazy saves. They come with the
-results of a search or a describe, at the end of the context, each on a line of its own that starts with `Rule:`: the
-rules the tools of a group share once for the group, and a tool's own with its best hits and its `describe`.
+results of a search or a describe, at the end of the context, each on a line of its own that starts with `Rule` and
+the chat's tag: the rules the tools of a group share once for the group, and a tool's own with its best hits and its
+`describe`. A search that is cut to its size cuts its hits, never the rules. A tool's own text (a description, a
+parameter's name) never starts a line of a result: a description is indented, and a line break in a name is a space.
+An MCP server's tool gives no rule lines.
 
 A call is the same call as a direct one: `tool_search` runs it through pi's own `executeTool`, which checks and
 converts the arguments, puts it through the extensions' hooks, the guard's among them, and queues the calls of tools that run one at
-a time. The page shows it as a call of the tool it called. Names are met halfway: a name with other case, hyphens or dots for
-underscores finds the tool. A lazy tool is also active, so a model that calls it by its own name after finding it runs it, through the
+a time. The page shows it as a call of the tool it called. Names are met halfway for `search` and `describe`: a name with
+other case, hyphens or dots for underscores finds the tool. A `call` takes the tool's own name, and one by another
+spelling is refused with that name, which the model then calls it by: the call's name is what the page, the browser's
+view and the canvas follow. A lazy tool is also active, so a model that calls it by its own name after finding it runs it, through the
 guard. `tool_search` is offered only to a chat that has a lazy tool, so with nothing lazy there is no extra tool, and
 no line, in any prompt. A group whose every tool is off when the chat starts is not lazy in that chat.
 

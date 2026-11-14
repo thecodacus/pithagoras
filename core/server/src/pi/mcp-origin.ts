@@ -29,8 +29,15 @@ export function mcpNamespaceOf(definition: unknown): string | undefined {
 
 /**
  * The configured servers a namespace can be. One in the normal case; more than one where two names differ only by a hyphen
- * and an underscore, which pi refuses to connect together, and none where the server is not in the portal's file (one a
- * project's own configuration brought, or an extension registered): then it is nobody's the person has said is theirs.
+ * and an underscore, which pi refuses to connect together, and none where the server is not in the portal's file (one
+ * that only a project's own configuration brought, or an extension registered): then it is nobody's the person has said
+ * is theirs.
+ *
+ * A name is all a namespace says, so this holds only while every server pi connects under a name of the portal's file is
+ * the one that file defines. pi's own `loadConfig` lets a trusted project's `.pi/mcp.json` define a server of the same
+ * name anew, with another command, and its tools would then be taken for the portal's server's. The portal's native MCP
+ * runtime (issue 361, PR B) gives pi its own `loadConfig`, which must not let a project define again a server of the
+ * portal's file, or must tell the guard where each server came from.
  */
 export function serversOfNamespace(namespace: string, configured: Iterable<string>): string[] {
   return [...configured].filter((server) => mcpNamespace(server) === namespace);
