@@ -26,6 +26,8 @@ import { freeSlug } from "./slug.js";
 import { SCHEMA_VERSION, dbFile } from "./schema-version.js";
 import { debugLog } from "./logs.js";
 import { filesOnOldCalls } from "./old-call-files.js";
+import { MCP_MIGRATION_NOTICE, migrateMcp, migrationPending, migrationReport } from "./mcp-migration-run.js";
+import type { Report as McpMigrationReport } from "./mcp-migration.js";
 
 export type SessionStatus = "idle" | "running" | "error" | "interrupted";
 
@@ -1387,6 +1389,10 @@ function migrate(d: Database.Database): void {
   seedCodemodeOff(d);
   // Last, because it reads the tables and settings above.
   if ((d.pragma("user_version", { simple: true }) as number) < 8) browserGrantsToSwitches(d);
+  // The MCP servers move from pi-mcp-adapter to pi's own MCP support (schema 17): every switch stored by the adapter's tool
+  // names is written again by pi's, and what meant off stays off. Again at each start while the file it converts cannot
+  // be read, which it waits for. After everything above, as it reads those tables and settings.
+  if ((d.pragma("user_version", { simple: true }) as number) < 17 || migrationPending(d)) migrateMcp(d);
 }
 
 /**
@@ -3374,6 +3380,16 @@ function noteLazyAdded(sets: string[]): void {
 /** The person has read the notice. */
 export function dismissLazyNotice(): void {
   putSetting("lazy_notice", "");
+}
+
+/** What the move from the adapter to pi's own MCP support did (mcp-migration-run.ts), and whether the person has yet to read it. Nothing on a portal that had nothing to move. */
+export function mcpMigration(): { report: McpMigrationReport | null; notice: boolean } {
+  return { report: migrationReport(getDb()) ?? null, notice: getSetting(MCP_MIGRATION_NOTICE) === "1" };
+}
+
+/** The person has read the report: it stays under Settings → MCP, and the note at the top of the page goes. */
+export function dismissMcpMigrationNotice(): void {
+  putSetting(MCP_MIGRATION_NOTICE, "");
 }
 
 /** A mark on a tool or on its set that a mark of the other kind overrides: see markOf. */

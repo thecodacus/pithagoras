@@ -3,6 +3,7 @@ import path from "node:path";
 import express, { type Router } from "express";
 import { writeFileAtomic } from "../atomic-write.js";
 import { SERVER_NAME_RE, clashes, commandValues, entryProblem, mcpNamespace, withExposure } from "../mcp-config.js";
+import { adapterKeysOf } from "../mcp-migration.js";
 import { piAgentDir } from "../pi-settings.js";
 import { BROWSER_MCP } from "../tool-policy.js";
 
@@ -267,7 +268,15 @@ export function chatServers(cwd: string, projectTrusted: boolean): { servers: Ch
   const servers = new Map<string, ChatServer>();
   const user = readableMcpConfig()?.mcpServers ?? {};
   for (const [name, entry] of Object.entries(user)) {
-    if (entry && typeof entry === "object" && !Array.isArray(entry)) servers.set(name, { name, entry: { ...entry }, from: "user" });
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+    // pi ignores the adapter's keys, and a server that was held back by them (`includeTools`, `directTools`) would come in whole: it is not connected.
+    const old = adapterKeysOf(entry);
+    // One that is off connects nothing, whatever it says.
+    if (old.length && entryEnabled(entry as Record<string, unknown>)) {
+      errors.push(`mcp.json: server "${name}" is written for the old MCP adapter (${old.join(", ")}) and is not connected until it is changed to pi's keys; Settings → MCP shows how`);
+      continue;
+    }
+    servers.set(name, { name, entry: { ...entry }, from: "user" });
   }
   if (projectTrusted) {
     const file = path.join(cwd, ".pi", "mcp.json");
@@ -300,6 +309,11 @@ export function chatServers(cwd: string, projectTrusted: boolean): { servers: Ch
         }
         if ("auth" in entry) {
           errors.push(`${file}: server "${name}": auth is only allowed in the user's mcp.json`);
+          continue;
+        }
+        const old = adapterKeysOf(entry);
+        if (old.length) {
+          errors.push(`${file}: server "${name}" is written for the old MCP adapter (${old.join(", ")}) and is not connected until it is changed to pi's keys`);
           continue;
         }
         servers.set(name, { name, entry: { ...entry }, from: "project" });

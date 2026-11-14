@@ -65,6 +65,8 @@ import {
   lazyListed,
   lazyNotice,
   dismissLazyNotice,
+  mcpMigration,
+  dismissMcpMigrationNotice,
   agentDirect,
   setAgentDirect,
   noticeMcpEdits,
@@ -1788,6 +1790,12 @@ onMcpWritten(() => {
 });
 // An edit made to mcp.json while the portal was not running, taken in before anything lists the tools or starts a chat.
 noticeMcpEdits();
+// What the move to pi's own MCP support did, and the note about it that stays until it is read.
+app.get("/api/mcp/migration", (_req, res) => res.json(mcpMigration()));
+app.delete("/api/mcp/migration/notice", (_req, res) => {
+  dismissMcpMigrationNotice();
+  res.json({ ok: true });
+});
 app.use("/api", mcpRouter());
 app.use("/api", providersRouter());
 app.use("/api", peopleRouter());
