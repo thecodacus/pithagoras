@@ -1,5 +1,7 @@
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { type Page } from '@playwright/test';
-import { test, expect, mockPortal } from './portal-mock';
+import { test, expect, extensionOnDisk, mockPortal } from './portal-mock';
 
 /**
  * A theme and the person's own choices set the look beyond colour: the variables of index.css, which the preset's
@@ -188,4 +190,31 @@ test("the person's text size and spacing sliders change what is made of text and
   await expect(dialog.getByRole('slider', { name: 'Spacing' })).toHaveValue('100');
   await expect(dialog.getByRole('button', { name: 'Back to 100 %' })).toHaveCount(0);
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem('pithagoras.appearance') ?? '{}'))).toEqual({ text: 100, density: 100 });
+});
+
+test("a theme's font is a file its extension ships and its stylesheet declares: the theme names the family, and the portal serves the file", async ({ page }) => {
+  const font = readFileSync(new URL('../../node_modules/katex/dist/fonts/KaTeX_Main-Regular.woff2', import.meta.url));
+  const served: string[] = [];
+  await mockPortal(page, ({ path: p }) => {
+    if (p === '/api/sessions') return { sessions: [session], executor: 'host' };
+  }, { settings: true });
+  // The extension as it is on disk, listed as the portal lists it; its font is a file of its own that the test stands in for.
+  const ext = extensionOnDisk(path.resolve(import.meta.dirname, '../fixtures/extensions/typeface'));
+  await page.route('**/api/extension-ui**', async (route) => {
+    const { pathname } = new URL(route.request().url());
+    if (pathname === '/api/extension-ui') return route.fulfill({ json: { extensions: [ext.listing] } });
+    if (pathname.endsWith('/assets/face.woff2')) return served.push(pathname), route.fulfill({ body: font, contentType: 'font/woff2' });
+    if (await ext.serve(pathname, route)) return;
+    return route.fulfill({ status: 404, json: { error: 'Not found' } });
+  });
+  await page.addInitScript(() => localStorage.setItem('pithagoras.theme', 'dark'));
+  await page.goto('/settings/browser');
+  const dialog = page.getByRole('dialog', { name: 'Settings' });
+  await dialog.getByRole('combobox', { name: 'Colours' }).click();
+  await page.getByRole('option', { name: /Face/ }).click();
+  expect(await css(page, 'body', 'font-family')).toBe('"Shipped Face", sans-serif');
+  // The stylesheet came with the extension, and so did the file: the family is a face the page has loaded, from the portal itself.
+  await expect.poll(() => page.evaluate(async () => (await document.fonts.load('16px "Shipped Face"')).length)).toBe(1);
+  expect(served).toEqual(['/api/extension-ui/test-typeface/assets/face.woff2']);
+  expect(await page.evaluate(() => [...document.fonts].filter((face) => face.family.includes('Shipped Face')).map((face) => face.status))).toEqual(['loaded']);
 });

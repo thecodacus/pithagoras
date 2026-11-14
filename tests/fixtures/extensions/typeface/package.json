@@ -1,0 +1,14 @@
+{
+  "name": "test-typeface",
+  "version": "0.1.0",
+  "description": "The portal's tests' stand-in for an extension with a theme that brings its own font: the theme names the family, the extension's stylesheet has the @font-face and the file is the extension's own",
+  "type": "module",
+  "keywords": ["pi-package"],
+  "pi": {},
+  "pithagoras": {
+    "client": "./web/client.js",
+    "style": "./web/client.css",
+    "themes": [{ "id": "face", "name": "Face", "tokens": { "font-sans": "\"Shipped Face\", sans-serif" } }]
+  },
+  "license": "Apache-2.0"
+}

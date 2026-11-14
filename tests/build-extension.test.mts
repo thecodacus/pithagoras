@@ -65,3 +65,23 @@ test('an extension whose code imports no stylesheet is built again with the same
   await buildExtension({ dir, tailwind: true });
   assert.equal(readFileSync(path.join(dir, 'web', 'client.css'), 'utf8'), first);
 });
+
+/**
+ * A theme's font is a file the extension ships: the build puts the file beside the bundle and the stylesheet's
+ * `@font-face` points at it, relative, so the portal serves it with the extension. A font from another host is not
+ * possible (the portal's CSP allows fonts from itself only), and is not what the build makes.
+ */
+test("a font an extension's stylesheet declares is built into its assets and named by a path of the extension's own", async () => {
+  const dir = scratch('build-extension-');
+  mkdirSync(path.join(dir, 'src'));
+  writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'typeface', type: 'module' }));
+  writeFileSync(path.join(dir, 'src', 'face.woff2'), Buffer.from('wOF2 not really a font'));
+  writeFileSync(path.join(dir, 'src', 'client.css'), '@font-face { font-family: "Shipped Face"; src: url("./face.woff2") format("woff2"); }\n');
+  writeFileSync(path.join(dir, 'src', 'client.tsx'), 'import "./client.css";\nexport default function () {}\n');
+  await buildExtension({ dir, minify: false });
+  const css = readFileSync(path.join(dir, 'web', 'client.css'), 'utf8');
+  const named = /url\("?\.\/assets\/(face-[A-Z0-9]+\.woff2)"?\)/.exec(css);
+  assert.ok(named, css);
+  assert.equal(readFileSync(path.join(dir, 'web', 'assets', named![1]), 'utf8'), 'wOF2 not really a font');
+  assert.doesNotMatch(css, /https?:/);
+});
