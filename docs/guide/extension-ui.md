@@ -2776,11 +2776,34 @@ portal.tx("Press {key} to send", { key: h("kbd", null, "Enter") });
 `portal.format.number(n)`, `.date(d)`, `.dateTime(d)` and `.time(d)` write
 numbers and times as the page's language does.
 
+### Testing your languages
+
+A text you add a German for and then change in the code is a text that is English in German. The package has a
+helper for your tests that finds it, in its own entry so that nothing of it is in your bundle:
+
+```js
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { checkStrings } from "@pithagoras/extension-api/test";
+import { de } from "../src/de.js";
+
+test("every text has its German", () => {
+  assert.deepEqual(checkStrings({ dir: "src", locales: { de } }), []);
+});
+```
+
+It reads the code below `dir` for the texts passed to `t`, `tx`, `tc`, `tp` and `msg` (`portal.t(...)` or a `t` you took
+from the portal), and returns what is wrong, as sentences: a text a language has no entry for, an entry
+for a text that is gone, a count that has no `other` form, and a translation that fills in other `{words}` than the
+English does. A text built while the code runs cannot be found: write it out, or keep it out of the language files.
+`tc` and `tp` must have both their texts written out, or both handed on by name (a wrapper), not one of each.
+
 ## Themes
 
 A theme is a set of colours in place of the portal's own, for dark, for light,
-or for both. A package can be nothing else: name them in `package.json`, and
-there is no code to write.
+or for both, and, if it wants, the look beyond colour: the font, how round
+things are, how much room there is, how wide the conversation is. A package can
+be nothing else: name them in `package.json`, and there is no code to write.
 
 ```json
 {
@@ -2793,12 +2816,16 @@ there is no code to write.
         "id": "dusk",
         "name": "Dusk",
         "dark":  { "canvas": "#1b1626", "surface": "#241e33", "fg": "#f4f0fa", "accent": "#ff79c6", "terminal": "#15111e" },
-        "light": { "canvas": "#faf7ff", "accent": "#a83282" }
+        "light": { "canvas": "#faf7ff", "accent": "#a83282" },
+        "tokens": { "radius-lg": "1rem", "radius-xl": "1.5rem", "pad": "0.3rem" }
       }
     ]
   }
 }
 ```
+
+A theme needs colours or `tokens`, or both: one that is only `tokens` changes the
+shapes and keeps the portal's own colours.
 
 Each colour goes by the portal's name for what it is for, and is written as
 `"#rrggbb"` or as three numbers (`"27 22 38"`):
@@ -2816,23 +2843,92 @@ What a theme does not say stays the portal's, so a theme can be one colour.
 Keep text readable on what it sits on: the portal's own tones are each 4.5:1 or
 better on every surface.
 
+### The look beyond colour
+
+`tokens` set the portal's variables for type, shape, space and width, for light and
+dark alike. Each is a name (the variable without its dashes: `--radius-lg` is
+`radius-lg`) and a value:
+
+| Token | What it is | Allowed | The portal's own |
+| --- | --- | --- | --- |
+| `font-sans`, `font-mono` | The font of text, and of code | A list of font names, quoted where they have spaces | The system's UI font; the system's monospace |
+| `text-base` | The size of text. Every size of the type scale is a multiple of it, line heights too | `0.75rem` to `1.5rem`, or the same in `px` | `1rem` |
+| `radius-sm`, `radius-md`, `radius-lg`, `radius-xl`, `radius-2xl` | How round things are, from small chips to the message box | `0` to `2rem` | `0.25rem`, `0.375rem`, `0.5rem`, `0.75rem`, `1rem` |
+| `pad`, `gap` | The unit of padding, and of the space between things: `p-4` is four of `pad` | `0.1rem` to `0.6rem` | `0.25rem` |
+| `chat-max` | How wide the conversation's text column is | `24rem` to `90rem` | `48rem` |
+| `nav-width` | How wide the sidebar is | `12rem` to `24rem` | `16rem` |
+
+A length is a number and `rem` or `px`, nothing else: no `calc()`, no `var()`. What a theme does not say stays
+the portal's own, so a theme can be one radius.
+
+`pad` and `gap` are padding and the space between things, and nothing else: the sizes of icons, pictures,
+columns and offsets do not move with them, so a roomier theme does not grow the icons. The
+layers (`z-index`) are not a theme's to set.
+
+A theme is data, and is checked as such before anything is painted. A value that is not what
+its variable takes, a token the portal has no variable for, a `url(...)`, a `;`, a `{`, a `\` or a `/*` is refused, and the theme with it:
+there is no half a theme, and a theme cannot carry a rule of CSS. The same checks run in the page before the app, for the
+copy the browser keeps. In code, `portal.theme.register` throws for such a theme and says which part.
+
+### Fonts
+
+A font is a file your extension ships. A theme only names the family:
+
+```json
+"pithagoras": {
+  "client": "./web/client.js",
+  "style": "./web/client.css",
+  "themes": [{ "id": "reader", "name": "Reader", "tokens": { "font-sans": "\"Atkinson Hyperlegible\", system-ui, sans-serif" } }]
+}
+```
+
+```css
+/* src/client.css */
+@font-face { font-family: "Atkinson Hyperlegible"; src: url("./atkinson.woff2") format("woff2"); font-display: swap; }
+```
+
+`buildExtension` puts a font that your stylesheet names (`woff`, `woff2`, `ttf`) into the extension's
+`web/assets/`, and the portal serves it with the extension. A font from another host does not work, and is not
+meant to: the portal loads fonts from itself only, so that a page cannot be made to ask another host for one. Name
+the fallbacks after the family, as above: until the file is loaded, and where it is not, the next one is used.
+
+A package with a font needs a browser half (an empty one will do: `export default function () {}`), because the
+stylesheet is loaded with it. That also means the font loads after the page starts, and a theme's font can show
+for the first time a moment later than its colours, which are painted before the app. The next start has the file in
+the browser's cache.
+
+### Who sets what
+
+The portal's own values, then the theme's, then the person's own **Text size** and **Spacing**
+(Settings → This browser → Appearance): the person's are a percent of what the theme has, so a theme's
+`pad` of `0.3rem` at a spacing of 90 % is `0.27rem`. A person who sets a larger text size gets larger text
+from the theme's font too.
+
+### Choosing
+
 Installed, the theme is offered in **Settings → This browser → Appearance →
 Colours**, beside Light, Dark and Match the system. The choice is kept in the
 browser with its colours, so on the next load it is painted before the app and
 long before any extension is loaded: there is no flash of the portal's own
 colours first. When the package is removed or switched off, the portal's own
-are back.
+are back. A package updated with other tokens is painted with them at once.
 
 The browser half can do the same in code, and can be a theme changer: a
-control of its own that switches the portal between themes, its own or any
-other package's.
+control of its own that switches the portal between themes.
+
+`set` switches to a theme of your own package at once. To switch to another
+package's, or to leave one of theirs for the portal's own colours, the portal asks the person
+("*Your extension* wants to change the colours to *Dusk*"), because a package that restyles the whole
+portal unasked is one that could make a prompt hard to read. `set` returns a promise that resolves
+`true` when the colours were switched and `false` when the person said no, and rejects for a theme there is none
+of. Do not write it as if it always worked.
 
 | `portal.theme.` | |
 | --- | --- |
-| `register({ id, name, dark?, light? })` | Adds a theme, like one named in `package.json` |
+| `register({ id, name, dark?, light?, tokens? })` | Adds a theme, like one named in `package.json` |
 | `list()` | The themes there are: `{ id, name, extension }`, with `id` as `<package>/<id>` |
 | `current()` | The theme in effect, or `null` for the portal's own colours |
-| `set(id)` | Switches to a theme, or to the portal's own with `null` |
+| `set(id)` | Switches to a theme, or to the portal's own with `null`. Resolves to whether it did |
 | `use()` | A hook: `{ mode, theme }`, light or dark and the theme in effect |
 
 ```js
