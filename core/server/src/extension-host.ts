@@ -28,7 +28,7 @@ import { chatOwner, folderAllowed, folderLabel, listFolders } from "./agent-fold
 import { handoffDone, takeHandoff } from "./handoff.js";
 import { modelEndpoint, modelOf, modelProviders, type LiveModel } from "./models.js";
 import { mcpServer } from "./api/mcp.js";
-import { commandValues } from "./mcp-config.js";
+import { commandValues, mcpToolName } from "./mcp-config.js";
 import { holdMemory } from "./memory-holder.js";
 import { provideMode } from "./chat-modes.js";
 import { logFileLine, onLogLine, scrubSecrets, type LogLine } from "./logs.js";
@@ -715,7 +715,11 @@ function portalFor(ext: Running): ServerPortal {
             // What the extension says of how the model is offered the server's tools is where the person's own mark starts, and no further:
             // a mark the person set is theirs.
             const marks = toolMarks();
-            if (!marks[server] && (written.said === "direct" || written.said === "deferred")) setToolMarks({ ...marks, [server]: written.said === "direct" ? "direct" : "lazy" });
+            const next = { ...marks };
+            if (!marks[server] && (written.said === "direct" || written.said === "deferred")) next[server] = written.said === "direct" ? "direct" : "lazy";
+            // The tools an old `directTools` list named stay in the model's list: the chats go by the marks, not by the file's toolExposure.
+            for (const tool of written.direct) if (!marks[`<tool>${mcpToolName(server, tool)}`]) next[`<tool>${mcpToolName(server, tool)}`] = "direct";
+            if (JSON.stringify(next) !== JSON.stringify(marks)) setToolMarks(next);
           }
           return reloadChats();
         }),

@@ -1,8 +1,8 @@
 import path from "node:path";
 import { chatServers, entryEnabled, mcpConfigPath, type ChatServer } from "../api/mcp.js";
-import { configHash, declarationTokens, cachedServer, cachedServers, rememberServerTools, type CachedTool } from "../mcp-tools.js";
+import { configHash, declarationTokens, cachedServer, rememberServerTools, type CachedServer, type CachedTool } from "../mcp-tools.js";
 import { mcpNamespace, resolvedEntry } from "../mcp-config.js";
-import { isResourceTool, mcpNamespaceOf, serversOfNamespace } from "./mcp-origin.js";
+import { MCP_RESOURCE_TOOLS, isResourceTool, mcpNamespaceOf, serversOfNamespace } from "./mcp-origin.js";
 import { headLazy, toolEntry, type LazyHead } from "../tool-lazy.js";
 
 /**
@@ -43,11 +43,22 @@ interface Planned {
   config: Record<string, unknown>;
 }
 
-/** The exposure of `toolExposure` entries the chat keeps: hidden tools stay hidden; the chat decides everything else. */
-function hiddenOnly(toolExposure: unknown): Record<string, string> | undefined {
+/**
+ * The file's `toolExposure` as the chat gives it to pi: every entry kept, in its order, hidden tools hidden and every other
+ * one at the chat's exposure. pi takes an exact name before a pattern and the first pattern that matches, so an allow-list
+ * (`{ search: "deferred", "*": "hidden" }`) only means what it says with all of its entries: `"*": "hidden"` alone would hide
+ * every tool of the server.
+ */
+function chatToolExposure(toolExposure: unknown, exposure: string): Record<string, string> | undefined {
   if (!toolExposure || typeof toolExposure !== "object" || Array.isArray(toolExposure)) return undefined;
-  const hidden = Object.entries(toolExposure as Record<string, unknown>).filter(([, one]) => one === "hidden");
-  return hidden.length ? Object.fromEntries(hidden.map(([tool]) => [tool, "hidden"])) : undefined;
+  const entries = Object.entries(toolExposure as Record<string, unknown>);
+  return entries.length ? Object.fromEntries(entries.map(([tool, one]) => [tool, one === "hidden" ? "hidden" : exposure])) : undefined;
+}
+
+/** What is remembered of a server's tools, where it was read from the configuration it has now: an entry changed since, or another server of that name, is not served as this one. */
+function cachedFor(name: string, entry: Record<string, unknown>): CachedServer | undefined {
+  const cached = cachedServer(name);
+  return cached && cached.hash === configHash(entry) ? cached : undefined;
 }
 
 /**
@@ -55,9 +66,10 @@ function hiddenOnly(toolExposure: unknown): Record<string, string> | undefined {
  * not at all (`off`: the file says it is off, or hides it, or every tool the portal knows of it is switched off in this
  * chat). Decided from the chat's frozen head and the tools it has off, never from what is connected now.
  */
-export function planOf(entry: Record<string, unknown>, name: string, head: Pick<LazyHead, "lazy" | "direct">, codemodeOnly: boolean, off: ReadonlySet<string>): Plan {
+export function planOf(entry: Record<string, unknown>, name: string, head: Pick<LazyHead, "lazy" | "direct">, codemodeOnly: boolean, off: ReadonlySet<string>, from: ChatServer["from"] = "user"): Plan {
   if (!entryEnabled(entry) || resolvedEntry(entry).exposure === "hidden") return "off";
-  const known = cachedServer(name)?.tools ?? [];
+  // A project's server is not remembered (see snapshot): what is kept under its name is another server's.
+  const known = from === "user" ? (cachedFor(name, entry)?.tools ?? []) : [];
   if (known.length && known.every((tool) => off.has(tool.name))) return "off";
   if (codemodeOnly) return "start";
   const prefix = toolEntry(`${mcpNamespace(name)}__`);
@@ -70,12 +82,13 @@ export function planOf(entry: Record<string, unknown>, name: string, head: Pick<
 function configFor(entry: Record<string, unknown>, plan: Plan, head: Pick<LazyHead, "direct">, name: string, codemodeOnly: boolean): Record<string, unknown> {
   const config: Record<string, unknown> = { ...resolvedEntry(entry) };
   delete config.disabled;
-  const kept = hiddenOnly(config.toolExposure);
-  delete config.toolExposure;
-  if (kept) config.toolExposure = kept;
   // Where everything is reached through the code tool, the servers the chat would have found are scripts' to call.
   const pinned = head.direct.includes(name) || head.direct.some((one) => one.startsWith(toolEntry(`${mcpNamespace(name)}__`)));
-  config.exposure = codemodeOnly && plan === "start" && !pinned ? "codemode" : "direct";
+  const exposure = codemodeOnly && plan === "start" && !pinned ? "codemode" : "direct";
+  const kept = chatToolExposure(config.toolExposure, exposure);
+  delete config.toolExposure;
+  if (kept) config.toolExposure = kept;
+  config.exposure = exposure;
   config.enabled = true;
   return config;
 }
@@ -88,6 +101,17 @@ export interface OfflineTool {
   /** The server's name, as the person knows the group. */
   server: string;
 }
+
+/**
+ * The resource tools as the search offers them while no server that has resources is running in the chat: pi registers them
+ * when the first one connects. A call names its server, which is started for it (see ensure).
+ */
+const RESOURCE_STAND_INS: { name: string; description: string; parameters: unknown }[] = [
+  { name: "list_mcp_resources", description: "Lists resources provided by MCP servers.", parameters: { type: "object", properties: { server: { type: "string", description: "MCP server name." }, cursor: { type: "string" } } } },
+  { name: "list_mcp_resource_templates", description: "Lists resource templates provided by MCP servers.", parameters: { type: "object", properties: { server: { type: "string", description: "MCP server name." }, cursor: { type: "string" } } } },
+  { name: "read_mcp_resource", description: "Read a specific resource from an MCP server given the server name and resource URI.", parameters: { type: "object", properties: { server: { type: "string", description: "MCP server name exactly as configured." }, uri: { type: "string" } }, required: ["server", "uri"] } },
+];
+if (RESOURCE_STAND_INS.some((tool) => !MCP_RESOURCE_TOOLS.includes(tool.name))) throw new Error("the resource tools' stand-ins are pi's resource tools");
 
 /** The names the adapter gave the tools of a server: `<server>_<tool>`, hyphens as underscores and the tool's dots too. For old chats' history, which names them so. */
 export const adapterName = (server: string, original: string): string => `${server.replace(/-/g, "_")}_${original.replace(/\./g, "_")}`;
@@ -174,7 +198,7 @@ export class McpRuntime {
     const connect: { name: string; config: any; source: string; scope: "global" | "project" }[] = [];
     const project = path.join(String(ctx.cwd ?? ""), ".pi", "mcp.json");
     for (const server of read.servers) {
-      const plan = planOf(server.entry, server.name, head, only, off);
+      const plan = planOf(server.entry, server.name, head, only, off, server.from);
       const config = configFor(server.entry, plan, head, server.name, only);
       this.planned.set(server.name, { server, plan, config });
       if (plan === "start") connect.push({ name: server.name, config, source: server.from === "project" ? project : mcpConfigPath(), scope: server.from === "project" ? "project" : "global" });
@@ -222,6 +246,35 @@ export class McpRuntime {
   }
 
   /**
+   * Whether pi's resource tools reach this server now: it is connected and offers resources. pi says which servers those are
+   * nowhere but in the tool itself, which refuses a server it does not reach before it asks anything; asked with a signal
+   * that is already aborted, it asks the server nothing either way.
+   */
+  private async servesResources(server: string): Promise<boolean> {
+    const tool = this.options.session()?.getToolDefinition?.("list_mcp_resources");
+    if (typeof tool?.execute !== "function") return false;
+    const stop = new AbortController();
+    stop.abort();
+    try {
+      await tool.execute("portal-mcp-probe", { server }, stop.signal);
+      return true;
+    } catch (e) {
+      return !/has no resources/.test(String((e as Error)?.message ?? e));
+    }
+  }
+
+  /** Whether the server is connected: a tool of it is registered, or, for one that offers only resources, the resource tools reach it. */
+  private async reached(server: string): Promise<boolean> {
+    return this.up(server) || (await this.servesResources(server));
+  }
+
+  /** What is remembered of a server of this chat, where it is the user's and the entry is the one it was read from. */
+  private known(server: string): CachedServer | undefined {
+    const planned = this.planned.get(server);
+    return planned && planned.server.from === "user" ? cachedFor(server, planned.server.entry) : undefined;
+  }
+
+  /**
    * What each server of the chat offered, as pi has registered it, kept in the cache. Called when something may have
    * changed: a server connected, a prompt starts.
    */
@@ -245,7 +298,9 @@ export class McpRuntime {
     }
     for (const [server, found] of by) {
       const planned = this.planned.get(server);
-      if (!planned) continue;
+      // Only the user's servers are remembered: a project's is somebody else's, and a server of that name in another chat
+      // would be shown its tools and descriptions as its own.
+      if (!planned || planned.server.from !== "user") continue;
       const sorted = found.sort((a, b) => a.name.localeCompare(b.name));
       try {
         rememberServerTools(server, configHash(planned.server.entry), sorted);
@@ -258,14 +313,22 @@ export class McpRuntime {
   /** The tools of the chat's lazy servers that are not running, as the cache has them: found and described like the others, started when called. */
   offline(): OfflineTool[] {
     const out: OfflineTool[] = [];
-    const registered = new Set(this.tools().map((tool) => String(tool.name)));
+    const all = this.tools();
+    const registered = new Set(all.map((tool) => String(tool.name)));
+    // pi leaves the resource tools registered, hidden, while no server that has resources is connected.
+    const reachable = new Set(all.filter((tool) => tool.exposure !== "hidden").map((tool) => String(tool.name)));
+    let resources: string | undefined;
     for (const [server, one] of this.planned) {
       if (one.plan !== "lazy") continue;
-      for (const tool of cachedServer(server)?.tools ?? []) {
+      const known = this.known(server);
+      for (const tool of known?.tools ?? []) {
         if (registered.has(tool.name) && this.up(server)) continue;
         out.push({ name: tool.name, description: tool.description, parameters: tool.parameters, server });
       }
+      if (known?.resources) resources ??= server;
     }
+    // A lazy server known to offer resources: the resource tools are found before any server that has them runs.
+    if (resources !== undefined) for (const tool of RESOURCE_STAND_INS) if (!reachable.has(tool.name)) out.push({ ...tool, server: resources });
     return out;
   }
 
@@ -274,15 +337,15 @@ export class McpRuntime {
    * words a search quotes by it, and a tool of a server that is not running is not in pi's registry to ask.
    */
   namespaceOfCached(name: string): string | undefined {
-    for (const [server, entry] of Object.entries(cachedServers())) if (entry.tools.some((tool) => tool.name === name)) return mcpNamespace(server);
+    for (const server of this.planned.keys()) if (this.known(server)?.tools.some((tool) => tool.name === name)) return mcpNamespace(server);
     return undefined;
   }
 
   /** The tool the adapter called this name, where a lazy server's cache has one: a chat from before has it in its history. */
   alias(name: string): string | undefined {
     const wanted = name.toLowerCase();
-    for (const [server, entry] of Object.entries(cachedServers())) {
-      for (const tool of entry.tools) if (adapterName(server, tool.original).toLowerCase() === wanted) return tool.name;
+    for (const server of this.planned.keys()) {
+      for (const tool of this.known(server)?.tools ?? []) if (adapterName(server, tool.original).toLowerCase() === wanted) return tool.name;
     }
     return undefined;
   }
@@ -290,7 +353,7 @@ export class McpRuntime {
   /** The server whose cache has a tool of this name, among the chat's lazy ones. */
   private lazyServerOf(name: string): string | undefined {
     for (const [server, one] of this.planned) {
-      if (one.plan === "lazy" && cachedServer(server)?.tools.some((tool) => tool.name === name)) return server;
+      if (one.plan === "lazy" && this.known(server)?.tools.some((tool) => tool.name === name)) return server;
     }
     return undefined;
   }
@@ -303,14 +366,14 @@ export class McpRuntime {
     const planned = this.planned.get(server);
     if (!planned || planned.plan !== "lazy") return;
     this.started.set(server, Date.now());
-    if (this.up(server)) return;
+    if (await this.reached(server)) return;
     let start = this.starting.get(server);
     if (!start) {
       start = (async () => {
         if (!this.pi) throw new Error("MCP is not available in this chat");
         this.pi.registerMcpServer(server, planned.config);
         const from = Date.now();
-        while (!this.up(server)) {
+        while (!(await this.reached(server))) {
           if (signal?.aborted) throw new Error(`Stopped while the MCP server "${server}" was starting.`);
           if (Date.now() - from > this.connectWait) {
             throw new Error(`The MCP server "${server}" did not connect within ${Math.round(this.connectWait / 1000)} seconds. It may need a sign-in (\`pi mcp login ${server}\` in a terminal), or it may be down.`);
@@ -319,6 +382,16 @@ export class McpRuntime {
         }
         this.failed.delete(server);
         this.snapshot();
+        // A server that offers no tool (only resources) is remembered too, so that a search does not wait for it again, and
+        // whether it offers resources, so that the search finds the resource tools before it runs.
+        if (planned.server.from === "user") {
+          try {
+            const hash = configHash(planned.server.entry);
+            rememberServerTools(server, hash, this.known(server)?.tools ?? [], await this.servesResources(server));
+          } catch (e) {
+            console.error(`[portal] could not keep what ${server} offers: ${(e as Error).message}`);
+          }
+        }
       })().then(undefined, (error: Error) => {
         this.failed.set(server, error.message);
         throw error;
@@ -328,8 +401,16 @@ export class McpRuntime {
     await start;
   }
 
-  /** Wait for the server of a tool that is not registered to be up: the call of a tool a search found in the cache. */
-  async ensure(name: string, signal?: AbortSignal): Promise<void> {
+  /**
+   * Wait for the server of a tool that is not registered to be up: the call of a tool a search found in the cache. For a
+   * resource tool, the lazy server its call names.
+   */
+  async ensure(name: string, signal?: AbortSignal, args?: unknown): Promise<void> {
+    if (isResourceTool(name)) {
+      const wanted = args && typeof args === "object" ? (args as { server?: unknown }).server : undefined;
+      if (typeof wanted === "string" && this.isLazy(wanted)) await this.connect(wanted, signal);
+      return;
+    }
     const server = this.lazyServerOf(name);
     if (!server) return;
     await this.connect(server, signal);
@@ -348,7 +429,7 @@ export class McpRuntime {
    * with the wait, so that this search does.
    */
   async learn(signal?: AbortSignal): Promise<string[]> {
-    const unknown = this.lazyServers().filter((server) => !cachedServer(server)?.tools.length);
+    const unknown = this.lazyServers().filter((server) => !this.known(server));
     // One that did not connect is not waited for again by every search: it is said, and a call of its tool tries it again.
     await Promise.allSettled(unknown.filter((server) => !this.failed.has(server)).map((server) => this.connect(server, signal)));
     return unknown.filter((server) => this.failed.has(server)).map((server) => this.failed.get(server)!);

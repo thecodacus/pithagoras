@@ -127,7 +127,9 @@ export function mcpPortalRouter(): Router {
         prepare: (name, entry) => {
           if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new TypeError("Server must be an object");
           // The adapter's own keys (a project's `.pi/mcp.json` written for it) are carried over as portal.mcp.set does, or refused.
-          const translated = fromAdapterEntry(entry as Record<string, unknown>);
+          const translated = fromAdapterEntry(entry as Record<string, unknown>, name);
+          // pi refuses `auth` in a project's file, so that a repository cannot pick where the sign-in goes: not by way of the user's either.
+          if (translated.entry.auth !== undefined) throw new TypeError("It signs in with a provider's credentials (auth), which a folder's file cannot bring; add the server yourself if it is yours");
           if (translated.approve.length) approve.set(name, translated.approve);
           return translated.entry;
         },

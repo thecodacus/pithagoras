@@ -1001,6 +1001,7 @@ const de: Locale = {
     "Accepts a whole config, a bare {key} map, or a single server object.": "Nimmt eine ganze Konfiguration, eine bloße {key}-Map oder ein einzelnes Server-Objekt.",
     "Added {names}": "Hinzugefügt: {names}",
     "Skipped {name}: {reason}": "Übersprungen: {name}: {reason}",
+    "{name} sends {variables} from the portal's environment to its address.": "{name} sendet {variables} aus der Umgebung des Portals an seine Adresse.",
     "Import": "Importieren",
     "Give the server a name": "Gib dem Server einen Namen",
     "A server called {name} already exists": "Einen Server namens {name} gibt es schon",

@@ -1,8 +1,9 @@
 import type Database from "better-sqlite3";
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { writeFileAtomic } from "./atomic-write.js";
-import { mcpConfigPath, readMcpFile } from "./api/mcp.js";
+import { mcpConfigPath, parseMcpText, readMcpFile, type McpFile } from "./api/mcp.js";
 import { DATA_DIR } from "./data-dir.js";
 import { sourceOf } from "./extension-switch.js";
 import { McpMigration, parseAdapterCache, type AdapterState, type Report } from "./mcp-migration.js";
@@ -63,9 +64,11 @@ function adapterIn(packages: unknown): { entry: unknown; source: string; on: boo
   for (const entry of Array.isArray(packages) ? packages : []) {
     const source = sourceOf(entry);
     if (source && ADAPTER.test(source)) {
-      // Switched off as `pi config` writes it: every kind of resource emptied (extension-switch.ts isSwitchedOff, written out here).
-      const off = isRecord(entry) && entry.autoload !== false && ["extensions", "skills", "prompts", "themes"].every((kind) => Array.isArray(entry[kind]) && (entry[kind] as unknown[]).length === 0);
-      return { entry, source, on: !off };
+      // On where it loads an extension, as the MCP support is one: not switched off (every kind emptied, as `pi config`
+      // writes it), and not narrowed to its skills (`extensions: []`, or `autoload: false` with no list of extensions).
+      // extension-switch.ts loadsExtensions, written out here.
+      const loads = !isRecord(entry) ? true : entry.autoload === false ? Array.isArray(entry.extensions) && entry.extensions.length > 0 : !(Array.isArray(entry.extensions) && entry.extensions.length === 0);
+      return { entry, source, on: loads };
     }
   }
   return undefined;
@@ -141,6 +144,10 @@ function textsNaming(d: Database.Database, names: readonly string[]): Report["te
   for (const row of d.prepare("SELECT slug, instructions FROM routines").all() as { slug: string; instructions: string }[]) scan(`routine ${row.slug}`, row.instructions);
   for (const row of d.prepare("SELECT id, instructions FROM chat_modes").all() as { id: string; instructions: string }[]) scan(`mode ${row.id}`, row.instructions);
   for (const row of d.prepare("SELECT key, value FROM settings WHERE key LIKE '%prompt%' OR key LIKE '%instruction%' OR key LIKE '%rule%' OR key LIKE '%soul%'").all() as { key: string; value: string }[]) scan(`setting ${row.key}`, row.value);
+  // A channel's instructions are added to the agent's system prompt for what arrives through it.
+  if ((d.prepare("PRAGMA table_info(channels)").all() as { name: string }[]).some((one) => one.name === "instructions")) {
+    for (const row of d.prepare("SELECT slug, name, instructions FROM channels").all() as { slug: string; name: string; instructions: string }[]) scan(`channel ${row.slug || row.name}`, row.instructions);
+  }
   for (const row of d.prepare("SELECT id, home FROM agents").all() as { id: string; home: string }[]) {
     for (const file of ["SOUL.md", "PrimaryUser.md", "MEMORY.md", "AGENTS.md"]) {
       try {
@@ -171,11 +178,53 @@ function literalOf(pattern: string): string | undefined {
 
 const literalPattern = (text: string): string => text.replace(/[\\*]/g, "\\$&");
 
+const sha = (text: string): string => createHash("sha256").update(text).digest("hex");
+const reportFile = (): string => path.join(path.resolve(DATA_DIR), "mcp-migration.json");
+
+/**
+ * What the report file says the last run wrote as mcp.json, and what it found of the adapter (which it may have taken out of
+ * pi's settings since): kept outside the database, which a run that stopped rolls back.
+ */
+function lastWritten(): { written: string; adapter?: AdapterState["adapter"] } | undefined {
+  try {
+    const raw = JSON.parse(readFileSync(reportFile(), "utf8"));
+    if (!isRecord(raw) || !isRecord(raw.file) || typeof raw.file.written !== "string") return undefined;
+    const was = isRecord(raw.adapter) ? raw.adapter.was : undefined;
+    return { written: raw.file.written, ...(was === "on" || was === "off" || was === "absent" ? { adapter: was } : {}) };
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The file to convert. Where a run wrote the new mcp.json and stopped before the database took it (the files are written in
+ * its transaction, but are not part of it), the file is the converted one, which has lost the adapter's names (`docs.v2`,
+ * `toolPrefix`) the stored switches still use: the source is then the copy that run kept. Told by the file being the very
+ * text that run wrote; a file the person put back, or changed since, is the source as it is.
+ */
+function sourceFile(): { config: McpFile; raw: string; current: string; error?: string; adapter?: AdapterState["adapter"] } {
+  const read = readMcpFile();
+  const copy = `${mcpConfigPath()}.adapter`;
+  const last = lastWritten();
+  if (!read.error && last !== undefined && read.raw && sha(read.raw) === last.written && existsSync(copy)) {
+    try {
+      const raw = readFileSync(copy, "utf8");
+      const parsed = parseMcpText(raw);
+      const config: McpFile = isRecord(parsed) ? (parsed as McpFile) : { mcpServers: {} };
+      if (!isRecord(config.mcpServers)) config.mcpServers = {};
+      return { config, raw, current: read.raw, ...(last.adapter ? { adapter: last.adapter } : {}) };
+    } catch {
+      // A copy that cannot be read: the file as it is.
+    }
+  }
+  return { ...read, current: read.raw };
+}
+
 /** Run the migration on the open database: the work of getDb()'s transaction, the files it touches, and the report. */
 export function migrateMcp(d: Database.Database): void {
   const now = new Date().toISOString();
-  const read = readMcpFile();
-  const { config, raw } = read;
+  const read = sourceFile();
+  const { config, raw, current } = read;
   // An empty file is not a broken one: pi reads it as no servers, as the adapter did.
   const error = raw.trim() === "" ? undefined : read.error;
   const settings = readPiSettings();
@@ -208,7 +257,8 @@ export function migrateMcp(d: Database.Database): void {
     extra,
     imports,
     cache,
-    adapter: adapter ? (adapter.on ? "on" : "off") : "absent",
+    // Where the source is the copy a run that stopped kept, what that run found: it may have taken the adapter out of pi's settings already.
+    adapter: read.adapter ?? (adapter ? (adapter.on ? "on" : "off") : "absent"),
   };
 
   // What the portal has seen of tools, to tell the adapter's from the rest.
@@ -281,7 +331,10 @@ export function migrateMcp(d: Database.Database): void {
     const [mapped] = migration.entries("the marks", [key]);
     if (mapped !== undefined) nextMarks[mapped] = mark;
   }
-  for (const plan of migration.servers) if (plan.mark && !(plan.newName in nextMarks)) nextMarks[plan.newName] = plan.mark;
+  for (const plan of migration.servers) {
+    if (plan.mark && !(plan.newName in nextMarks)) nextMarks[plan.newName] = plan.mark;
+    for (const tool of plan.directTools) if (!(`<tool>${tool}` in nextMarks)) nextMarks[`<tool>${tool}`] = "direct";
+  }
   if (JSON.stringify(nextMarks) !== JSON.stringify(marks)) putIn(d, "tool_marks", Object.keys(nextMarks).length ? JSON.stringify(nextMarks) : "");
 
   // Sets that carry a name given by the person, and what the threshold took out of the list.
@@ -372,12 +425,18 @@ export function migrateMcp(d: Database.Database): void {
       }
       const target = reached && migration.verdict(reached.tool);
       const name = target?.kind === "map" ? target.to : target?.kind === "keep" ? reached!.tool : undefined;
-      if (reached && name) {
+      // The rule allowed that one call, all of its arguments: a subject of the path alone would allow any other argument with it.
+      const whole = reached && Object.keys(reached.args).every((key) => key !== "path" && key !== "file_path") ? true : reached ? Object.keys(reached.args).length === 1 : false;
+      if (reached && name && whole) {
         updateRule.run(name, literalPattern(subjectOfArgs(name, reached.args)), rule.id);
         migration.counted();
       } else {
         deleteRule.run(rule.id);
-        droppedRules.push({ id: rule.id, tool: rule.tool, why: "a permission given to a way to other tools, which cannot be told from here which tool it was for" });
+        droppedRules.push({
+          id: rule.id,
+          tool: rule.tool,
+          why: reached && name ? `a permission for one call of ${name}, whose other arguments a permission by its path would no longer hold` : "a permission given to a way to other tools, which cannot be told from here which tool it was for",
+        });
       }
     }
   }
@@ -396,9 +455,13 @@ export function migrateMcp(d: Database.Database): void {
   let fileState: Report["file"]["state"] = "none";
   let copyNote: string | undefined;
   const hadFile = existsSync(file);
-  if (hadFile && text !== raw) {
+  let written: string | undefined;
+  if (hadFile && text !== current) {
     // The file as it was, once: a try after one that stopped halfway keeps the first copy, not a converted one.
     if (!existsSync(copy)) writeFileAtomic(copy, raw, 0o600);
+    // Said before the file is written: a run that stops after it, before the database takes it, is known by it at the next start (sourceFile).
+    written = sha(text);
+    writeFileAtomic(reportFile(), JSON.stringify({ v: 1, status: "writing", at: now, adapter: { was: state.adapter }, file: { state: "converted", written } }, null, 2) + "\n", 0o600);
     writeFileAtomic(file, text, 0o600);
     fileState = "converted";
   } else if (hadFile) fileState = "converted";
@@ -456,7 +519,7 @@ export function migrateMcp(d: Database.Database): void {
     ...base,
     status: "done",
     adapter: { was: state.adapter, removed, ...(adapter ? { spec: adapter.source } : {}), ...(adapterNote ? { note: adapterNote } : {}) },
-    file: { state: fileState, ...(copyNote ? { copy: copyNote } : {}) },
+    file: { state: fileState, ...(copyNote ? { copy: copyNote } : {}), ...(written ? { written } : {}) },
     servers: out.servers,
     names: out.names,
     expanded: out.expanded,
@@ -470,7 +533,7 @@ export function migrateMcp(d: Database.Database): void {
   putIn(d, MCP_MIGRATION, JSON.stringify(report));
   putIn(d, MCP_MIGRATION_NOTICE, "1");
   try {
-    writeFileAtomic(path.join(path.resolve(DATA_DIR), "mcp-migration.json"), JSON.stringify(report, null, 2) + "\n", 0o600);
+    writeFileAtomic(reportFile(), JSON.stringify(report, null, 2) + "\n", 0o600);
   } catch (e) {
     console.warn(`[portal] the report of the MCP migration could not be written to its file: ${(e as Error).message}`);
   }

@@ -1969,8 +1969,11 @@ await portal.mcp.set("notes", undefined);
 - For this release the keys of the old MCP adapter (`directTools`, `lifecycle`,
   `includeTools`, `excludeTools`, `approveTools`, `auth: "bearer"` with
   `bearerToken` or `bearerTokenEnv`, `disabled`) are still read: translated into
-  pi's own keys, with a line in the log. An extension that still writes them
-  should move to pi's.
+  pi's own keys, with a line in the log. The patterns are carried to the
+  server's own tool names as the adapter matched them: its prefixes
+  (`<server>_`) taken off, and `-` and `_` alike, so a pattern can come out as
+  several. The tools a `directTools` list names get the mark `direct` where the
+  person has none. An extension that still writes them should move to pi's.
 
 Understory (`extensions/understory`) writes its server so, trusted, when it is
 switched on from its page in Settings.

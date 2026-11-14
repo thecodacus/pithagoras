@@ -756,8 +756,8 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       // The names the adapter gave the tools, which a chat from before has in its history.
       alias: (name) => mcp.alias(name),
       // The tools of lazy servers that are not running, and what it takes to start one.
-      offline: () => mcp.offline().map((tool) => ({ name: tool.name, description: tool.description, parameters: tool.parameters, label: toolGroupNames()[tool.server] ?? tool.server })),
-      ensure: (name, signal) => mcp.ensure(name, signal),
+      offline: () => mcp.offline().map((tool) => ({ name: tool.name, description: tool.description, parameters: tool.parameters, label: isResourceTool(tool.name) ? RESOURCE_SET : (toolGroupNames()[tool.server] ?? tool.server) })),
+      ensure: (name, signal, args) => mcp.ensure(name, signal, args),
       warm: (names) => mcp.warm(names),
       learn: (signal) => mcp.learn(signal),
     });

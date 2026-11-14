@@ -47,6 +47,7 @@ function ProjectLine({ project, onImported }: { project: McpMigrationReport["pro
       const done = await api.importMcpFolder(project.folder, file);
       const text = [
         done.added.length ? t("Added {names}, switched off: look at what each one runs, then switch it on.", { names: done.added.join(", ") }) : "",
+        ...Object.entries(done.variables ?? {}).map(([name, names]) => t("{name} sends {variables} from the portal's environment to its address.", { name, variables: names.join(", ") })),
         ...done.skipped.map((one) => t("Skipped {name}: {reason}", { name: one.name, reason: one.reason })),
       ].filter(Boolean).join(" ");
       setSaid((all) => ({ ...all, [file]: { text: text || t("Nothing to import.") } }));

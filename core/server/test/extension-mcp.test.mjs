@@ -79,8 +79,9 @@ test("its tools are the chats' while the server is there and not switched off, b
 test("the old adapter's keys are translated for one release, and the tools to be confirmed are kept with the server", async () => {
   const mcp = await start();
   await mcp.set("legacy", { url: "http://127.0.0.1:3/mcp", lifecycle: "lazy", directTools: true, auth: "bearer", bearerTokenEnv: "LEGACY_TOKEN", approveTools: ["delete_*"], excludeTools: ["drop_*"] });
-  assert.deepEqual(servers().legacy, { url: "http://127.0.0.1:3/mcp", exposure: "direct", headers: { Authorization: "Bearer ${LEGACY_TOKEN}" }, toolExposure: { "drop_*": "hidden" } });
-  assert.deepEqual(db.mcpApprove(), { legacy: ["delete_*"] });
+  // The adapter matched `-` and `_` alike: pi does not, so the pattern is written in both forms.
+  assert.deepEqual(servers().legacy, { url: "http://127.0.0.1:3/mcp", exposure: "direct", headers: { Authorization: "Bearer ${LEGACY_TOKEN}" }, toolExposure: { "drop_*": "hidden", "drop-*": "hidden" } });
+  assert.deepEqual(db.mcpApprove(), { legacy: ["delete_*", "delete-*"] });
   assert.deepEqual(db.toolMarks().legacy, "direct", "the old key said direct, and the person has no mark");
   // `approve` of the call, with those of the old key.
   await mcp.set("legacy", { url: "http://127.0.0.1:3/mcp" }, { approve: ["create_*"] });
@@ -89,6 +90,14 @@ test("the old adapter's keys are translated for one release, and the tools to be
   await mcp.set("legacy", undefined);
   assert.deepEqual(db.mcpApprove(), {});
   assert.equal(db.toolMarks().legacy, undefined);
+  // A `directTools` list: the tools it names stay in the model's list by a mark of their own, as the chats go by the marks
+  // and not by the file's toolExposure (correctness review 1 of PR B, finding 4). A mark the person set is theirs.
+  db.setToolMarks({ ...db.toolMarks(), "<tool>mcp__listed__b": "lazy" });
+  await mcp.set("listed", { url: "http://127.0.0.1:3/mcp", directTools: ["a", "b"] });
+  assert.equal(db.toolMarks()["<tool>mcp__listed__a"], "direct");
+  assert.equal(db.toolMarks()["<tool>mcp__listed__b"], "lazy");
+  assert.equal(db.toolMarks().listed, "lazy", "the rest of it is found");
+  await mcp.set("listed", undefined);
 });
 
 test("removed, it is gone from the file, from what the chats have and from the servers trusted", async () => {

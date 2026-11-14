@@ -38,11 +38,15 @@ keeps the servers it connected with until then.
 
 A **project** can bring servers of its own in `.pi/mcp.json`, which pi reads only
 in a project it trusts (and never while the [sandbox](/guide/sandbox) is on). An
-entry in it with no `command` and no `url` only changes `enabled`, `exposure` or
-`toolExposure` of the server of that name here, and keeps the rest of it. A
-project cannot define a server again that this file has, or send a credential
-somewhere with `auth`. No other tool's configuration — `.mcp.json`,
-`.vscode/mcp.json`, `opencode.json` — is read.
+entry in it with no `command` and no `url` changes the server of that name here, and
+in the portal's chats it can only take away: `enabled: false`, `exposure: "hidden"`,
+and tools set `hidden` in `toolExposure`. It cannot switch on a server you switched
+off, or show a tool this file hides (pi's own command line lets it; the portal
+does not). A project cannot define a server again that this file names, whether
+that server connects or not, or send a credential somewhere with `auth`. An entry
+pi would skip, such as `auth` on an address that is not `https`, is skipped in
+the chats too. No other tool's configuration — `.mcp.json`, `.vscode/mcp.json`,
+`opencode.json` — is read.
 
 ## Adding a server
 
@@ -127,7 +131,8 @@ server connected, and a script calls the tools like any other.
 
 pi's three resource tools (`list_mcp_resources`, `list_mcp_resource_templates`,
 `read_mcp_resource`) reach every server with resources, and are lazy with the lazy
-servers.
+servers. A lazy server that offers only resources is found that way too: once it has
+run, the search lists the resource tools, and a call that names the server starts it.
 
 ## What the tool lists show
 

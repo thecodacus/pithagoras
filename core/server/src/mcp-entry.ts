@@ -11,20 +11,22 @@ import { SERVER_NAME_RE, fromAdapterEntry, withExposure } from "./mcp-config.js"
  *
  * The chats are not reloaded here: the caller says when.
  */
-export async function setMcpServer(name: string, entry: Record<string, unknown> | undefined): Promise<{ entry?: Record<string, unknown>; approve: string[]; said?: unknown }> {
+export async function setMcpServer(name: string, entry: Record<string, unknown> | undefined): Promise<{ entry?: Record<string, unknown>; approve: string[]; direct: string[]; said?: unknown }> {
   if (!SERVER_NAME_RE.test(name)) throw new TypeError("An MCP server's name is letters, digits, dash or underscore");
   // A file that cannot be read is refused before anything is changed.
   const before = readable();
   let written = entry;
   let approve: string[] = [];
+  let direct: string[] = [];
   // The exposure the caller said, before one is given where none was: that is what starts the person's mark.
   let said: unknown;
   if (entry) {
     if (typeof entry !== "object" || Array.isArray(entry)) throw new TypeError("Server must be an object");
-    const translated = fromAdapterEntry(entry);
+    const translated = fromAdapterEntry(entry, name);
     said = translated.entry.exposure;
     written = withExposure(translated.entry);
     approve = translated.approve;
+    direct = translated.direct;
     if (translated.notes.length) console.warn(`[portal] the MCP server "${name}" was written in the old adapter's keys (${translated.notes.join("; ")}): write pi's own, the old ones are read for this release only`);
     const problem = validateEntry(name, written, Object.keys(before.mcpServers));
     if (problem) throw new TypeError(problem);
@@ -34,7 +36,7 @@ export async function setMcpServer(name: string, entry: Record<string, unknown> 
   if (written) config.mcpServers[name] = written;
   else delete config.mcpServers[name];
   writeMcpFile(config);
-  return { ...(written ? { entry: written } : {}), approve, said };
+  return { ...(written ? { entry: written } : {}), approve, direct, said };
 }
 
 /** mcp.json as it is now, or a refusal while it cannot be parsed: that is the person's to fix, and nothing is written over it. */

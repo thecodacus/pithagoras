@@ -163,6 +163,8 @@ export function getDb(): Database.Database {
 }
 
 function schema(db: Database.Database): void {
+  // A database made now has no portal from before whose MCP servers it would carry over (see migrate).
+  const fresh = !db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'sessions'").get();
   db.exec(`
     CREATE TABLE IF NOT EXISTS sessions (
       id TEXT PRIMARY KEY,
@@ -499,7 +501,7 @@ function schema(db: Database.Database): void {
     );
     CREATE INDEX IF NOT EXISTS idx_activity_agent ON activity(agent_id, at DESC);
   `);
-  migrate(db);
+  migrate(db, fresh);
   if ((db.pragma("user_version", { simple: true }) as number) < SCHEMA_VERSION) db.pragma(`user_version = ${SCHEMA_VERSION}`);
 }
 
@@ -1137,7 +1139,7 @@ function setMoved(d: Database.Database, from: string, to: string): void {
  * Migrations run in place rather than recreating the table, so existing
  * sessions and their event history survive an upgrade.
  */
-function migrate(d: Database.Database): void {
+function migrate(d: Database.Database, fresh = false): void {
   const names = (d.prepare("PRAGMA table_info(sessions)").all() as { name: string }[]).map(
     (c) => c.name
   );
@@ -1391,8 +1393,9 @@ function migrate(d: Database.Database): void {
   if ((d.pragma("user_version", { simple: true }) as number) < 8) browserGrantsToSwitches(d);
   // The MCP servers move from pi-mcp-adapter to pi's own MCP support (schema 17): every switch stored by the adapter's tool
   // names is written again by pi's, and what meant off stays off. Again at each start while the file it converts cannot
-  // be read, which it waits for. After everything above, as it reads those tables and settings.
-  if ((d.pragma("user_version", { simple: true }) as number) < 17 || migrationPending(d)) migrateMcp(d);
+  // be read, which it waits for. After everything above, as it reads those tables and settings. Not for a new database: no
+  // portal reached a server through the adapter with it, and an mcp.json already there is pi's (its command line wrote it).
+  if ((!fresh && (d.pragma("user_version", { simple: true }) as number) < 17) || migrationPending(d)) migrateMcp(d);
 }
 
 /**

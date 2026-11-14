@@ -159,6 +159,8 @@ test("every row of the table: the file, the package list, the marks and every pl
     "<tool>mcp__github__get_file": "lazy",
     canvas: "lazy",
     github: "lazy",
+    // Its `directTools` list: the tool stays in the model's list by its own mark, as the chats go by the marks.
+    "<tool>mcp__github__search_code": "direct",
     understory: "direct",
     notes: "lazy",
     secrets: "lazy",
@@ -238,7 +240,8 @@ test("every row of the table: the file, the package list, the marks and every pl
 test("the converted entries are what the chats read, and the file is one pi's own CLI can read", () => {
   const { servers, errors } = chatServers("/nowhere", false);
   assert.deepEqual(errors, []);
-  assert.deepEqual(servers.map((s) => s.name).sort(), ["docs_v2", "filtered", "github", "mux", "notes", "paused", "secrets", "understory"]);
+  // `mux` is off and kept for the person to see, and pi would skip it (a socket, no command or address): the chats skip it too.
+  assert.deepEqual(servers.map((s) => s.name).sort(), ["docs_v2", "filtered", "github", "notes", "paused", "secrets", "understory"]);
   // JSON.parse, as pi has it: no comments.
   assert.doesNotThrow(() => JSON.parse(readFileSync(mcpPath, "utf8")));
   assert.equal(statModeOf(mcpPath), 0o600);
@@ -353,4 +356,69 @@ test("an entry in the adapter's keys that is written later is not connected eith
   assert.deepEqual(read.servers.map((s) => s.name).sort(), ["fine", "paused"]);
   assert.match(read.errors.join("\n"), /server "late" is written for the old MCP adapter \(includeTools\)/);
   assert.equal(read.errors.length, 1, "one that is off says nothing");
+});
+
+test("an adapter that loads no extension ran no MCP: its servers are off as with one switched off", () => {
+  // Correctness review 1 of PR B, finding 7.
+  for (const entry of [{ source: ADAPTER, extensions: [] }, { source: ADAPTER, autoload: false }, { source: ADAPTER, autoload: false, extensions: [], skills: ["x"] }]) {
+    seed();
+    writeFileSync(settingsPath, JSON.stringify({ packages: [entry, "npm:pi-web-access"] }));
+    const r = run();
+    assert.equal(r.adapter.was, "off", JSON.stringify(entry));
+    assert.equal(file().mcpServers.notes.enabled, false, JSON.stringify(entry));
+  }
+  // Narrowed to some of its extensions is still on.
+  seed();
+  writeFileSync(settingsPath, JSON.stringify({ packages: [{ source: ADAPTER, extensions: ["index.ts"] }] }));
+  assert.equal(run().adapter.was, "on");
+});
+
+test("a run that wrote the new mcp.json and stopped before the database took it is done again from the copy it kept", () => {
+  // Correctness review 1 of PR B, finding 10: the converted file has lost `docs.v2` and the adapter is out of pi's settings already.
+  seed();
+  const before = setting("tools_off_default");
+  assert.throws(() => d.transaction(() => {
+    migrateMcp(d);
+    throw new Error("killed before the commit");
+  })(), /killed/);
+  assert.equal(setting("tools_off_default"), before, "the database is as it was");
+  assert.ok(file().mcpServers.docs_v2, "and the file is the converted one");
+  assert.equal(JSON.parse(readFileSync(settingsPath, "utf8")).packages.includes(ADAPTER), false);
+  const r = run();
+  assert.equal(r.status, "done");
+  assert.equal(r.adapter.was, "on", "what that run found of the adapter");
+  assert.deepEqual(lines(d.prepare("SELECT tools_off FROM sessions WHERE id = 's2'").get().tools_off), ["mcp__docs_v2__search"]);
+  assert.equal(file().mcpServers.docs_v2.enabled, undefined);
+  assert.equal(file().mcpServers.github.enabled, undefined);
+  assert.equal(readFileSync(`${mcpPath}.adapter`, "utf8"), ADAPTER_FILE);
+  // A file the person put back (going back), and changed, is the source as it is: not the copy.
+  writeFileSync(mcpPath, ADAPTER_FILE.replace(`"notes": { "command": "notes-mcp" }`, `"notes": { "command": "notes-mcp" },\n    "added": { "command": "later" }`));
+  writeFileSync(settingsPath, JSON.stringify({ packages: [ADAPTER] }));
+  run();
+  assert.ok(file().mcpServers.added);
+});
+
+test("a channel's instructions are scanned for the old names, as a routine's are", () => {
+  // Correctness review 1 of PR B, finding 11.
+  seed();
+  d.prepare("DELETE FROM channels").run();
+  d.prepare("INSERT INTO channels (id, slug, kind, name, instructions) VALUES ('c1', 'team', 'telegram', 'Team', 'File bugs with github_create_issue, or mcp({ tool: \"x\" }).')").run();
+  const r = run();
+  const found = r.texts.find((t) => t.where === "channel team");
+  assert.ok(found, JSON.stringify(r.texts));
+  assert.deepEqual(found.names.sort(), ["github_create_issue", "mcp({…})"]);
+  d.prepare("DELETE FROM channels").run();
+});
+
+test("a permission for one call of the adapter's mcp tool becomes one on the tool only where it keeps all of what it allowed", () => {
+  // Security review 1 of PR B, finding 7: a subject of the path alone would allow any other argument with it.
+  seed();
+  const rule = d.prepare("INSERT INTO tool_rules (id, role, tool, pattern, person_key, note) VALUES (?, 'colleague', 'mcp', ?, NULL, '')");
+  rule.run("r-path-and-more", literal(JSON.stringify({ tool: "notes_note_add", args: { path: "/notes/a.md", content: "anything" } })));
+  rule.run("r-path-only", literal(JSON.stringify({ tool: "notes_note_add", args: { path: "/notes/a.md" } })));
+  const r = run();
+  const rules = Object.fromEntries(d.prepare("SELECT id, tool, pattern FROM tool_rules").all().map((one) => [one.id, one]));
+  assert.equal(rules["r-path-and-more"], undefined, "deleted: an allow rule that goes is closed");
+  assert.deepEqual(rules["r-path-only"], { id: "r-path-only", tool: "mcp__notes__note_add", pattern: "/notes/a.md" });
+  assert.ok(r.unconverted.some((item) => item.where === "standing permissions" && /other arguments/.test(item.why)));
 });

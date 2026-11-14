@@ -37,6 +37,8 @@ export interface CachedServer {
   /** When it was read, in milliseconds. */
   at: number;
   tools: CachedTool[];
+  /** The server offered resources when it last connected: pi's resource tools reach it. A server may offer only those. */
+  resources?: boolean;
 }
 
 interface CacheFile {
@@ -91,7 +93,7 @@ function parse(raw: unknown): CacheFile {
         ...(tool.annotations && typeof tool.annotations === "object" ? { annotations: tool.annotations } : {}),
       });
     }
-    out.servers[name] = { hash: typeof entry.hash === "string" ? entry.hash : "", at: typeof entry.at === "number" ? entry.at : 0, tools };
+    out.servers[name] = { hash: typeof entry.hash === "string" ? entry.hash : "", at: typeof entry.at === "number" ? entry.at : 0, tools, ...(entry.resources === true ? { resources: true } : {}) };
   }
   return out;
 }
@@ -130,13 +132,17 @@ export function cachedServers(): Record<string, CachedServer> {
   return load().servers;
 }
 
-/** Keep what a server offered, as it has just connected. Written only when it differs from what is kept. */
-export function rememberServerTools(server: string, hash: string, tools: CachedTool[]): void {
+/**
+ * Keep what a server offered, as it has just connected: its tools, none for a server that offers only resources, and whether
+ * it offered resources (undefined keeps what is known of that for the same configuration). Written only when it differs.
+ */
+export function rememberServerTools(server: string, hash: string, tools: CachedTool[], resources?: boolean): void {
   const now = load();
-  const was = now.servers[server];
-  const same = was && was.hash === hash && JSON.stringify(was.tools) === JSON.stringify(tools);
+  const was = Object.hasOwn(now.servers, server) ? now.servers[server] : undefined;
+  const has = resources ?? (was?.hash === hash ? was.resources === true : false);
+  const same = was && was.hash === hash && JSON.stringify(was.tools) === JSON.stringify(tools) && (was.resources === true) === has;
   if (same) return;
-  save({ v: 1, servers: { ...now.servers, [server]: { hash, at: Date.now(), tools } } });
+  save({ v: 1, servers: { ...now.servers, [server]: { hash, at: Date.now(), tools, ...(has ? { resources: true } : {}) } } });
 }
 
 /** Take servers out of the cache, as they leave the configuration. */

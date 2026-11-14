@@ -825,7 +825,7 @@ export const api = {
     json<{ approve: string[] }>(`/api/mcp/servers/${encodeURIComponent(name)}/approve`, { method: "PUT", body: JSON.stringify({ approve }) }),
   /** The servers of a folder's own file, which the report names, into the user's file, switched off. */
   importMcpFolder: (folder: string, file: string) =>
-    json<{ ok: true; added: string[]; skipped: { name: string; reason: string }[]; commands: Record<string, string[]> }>("/api/mcp/import-folder", {
+    json<{ ok: true; added: string[]; skipped: { name: string; reason: string }[]; commands: Record<string, string[]>; variables?: Record<string, string[]> }>("/api/mcp/import-folder", {
       method: "POST",
       body: JSON.stringify({ folder, file }),
     }),

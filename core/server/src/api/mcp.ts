@@ -255,20 +255,54 @@ export interface ChatServer {
 }
 
 /**
+ * A project's override of a server of the user's, as the portal applies it: it can only take away. pi lets a project's
+ * entry set `enabled`, `exposure` and `toolExposure` of the user's server; here a repository can switch the server off for
+ * itself, hide it, or hide some of its tools, and nothing else. Switching on a server the person (or the move from the old
+ * adapter) switched off, or showing tools the person's file hides, is the person's to do in their own file.
+ */
+function narrowed(base: Record<string, unknown>, override: Record<string, unknown>): { entry: Record<string, unknown>; ignored: string[] } {
+  const entry: Record<string, unknown> = { ...base };
+  const ignored: string[] = [];
+  if (override.enabled === false) entry.enabled = false;
+  else if (override.enabled !== undefined) ignored.push("enabled");
+  if (override.exposure === "hidden") entry.exposure = "hidden";
+  else if (override.exposure !== undefined) ignored.push("exposure");
+  const tools = override.toolExposure;
+  if (tools !== undefined) {
+    const given = tools && typeof tools === "object" && !Array.isArray(tools) ? Object.entries(tools as Record<string, unknown>) : [];
+    const hidden = given.filter(([, one]) => one === "hidden");
+    if (hidden.length !== given.length || !given.length) ignored.push("toolExposure entries that are not hidden");
+    // First, so that a pattern of the project's comes before the user's patterns, which pi tries in order.
+    const own = base.toolExposure && typeof base.toolExposure === "object" && !Array.isArray(base.toolExposure) ? (base.toolExposure as Record<string, unknown>) : {};
+    if (hidden.length) entry.toolExposure = { ...Object.fromEntries(hidden), ...Object.fromEntries(Object.entries(own).filter(([tool]) => !hidden.some(([name]) => name === tool))) };
+  }
+  return { entry, ignored };
+}
+
+/**
  * The servers a chat reads, as pi's own `loadMcpConfig` would: the user's file, and in a trusted project its
  * `.pi/mcp.json`, which pi reads only then. Not other tools' configs (`.mcp.json`, `.vscode/mcp.json`, `opencode.json`):
- * pi reads none of them. A project's entry with no `command`, `url` or `type` overrides `enabled`, `exposure` and
- * `toolExposure` of the user's server of that name and keeps the rest of it, credentials included; a project's `auth` is
- * refused; and a project's entry that is a whole server cannot take a name that is the user's, or one pi would fold into
- * it: a server of the portal's file is defined there and nowhere else, whatever a repository says (the guard attributes a
- * tool to a server by name, and trusts the ones the person named).
+ * pi reads none of them. An entry pi would skip is skipped (entryProblem). A project's entry with no `command`, `url` or
+ * `type` overrides the user's server of that name, and only to take away (narrowed); a project's `auth` is refused; and a
+ * project's entry that is a whole server cannot take a name that is the user's, or one pi would fold into it, whether the
+ * user's entry connects or not: a server of the portal's file is defined there and nowhere else, whatever a repository says
+ * (the guard attributes a tool to a server by name, and trusts the ones the person named).
  */
 export function chatServers(cwd: string, projectTrusted: boolean): { servers: ChatServer[]; errors: string[] } {
   const errors: string[] = [];
   const servers = new Map<string, ChatServer>();
   const user = readableMcpConfig()?.mcpServers ?? {};
+  // Every name of the user's file, those that are not connected included: the guard reads the file's names, and trusts by them.
+  const reserved = Object.keys(user);
   for (const [name, entry] of Object.entries(user)) {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+    // pi skips it, so does the portal: its `loadConfig` hands pi entries it does not check again (an `auth` token over plain
+    // http, for one). One that is off is skipped without a word, as it connects nothing anyway.
+    const problem = entryProblem(name, entry);
+    if (problem) {
+      if (entryEnabled(entry as Record<string, unknown>)) errors.push(`mcp.json: ${problem}`);
+      continue;
+    }
     // pi ignores the adapter's keys, and a server that was held back by them (`includeTools`, `directTools`) would come in whole: it is not connected.
     const old = adapterKeysOf(entry);
     // One that is off connects nothing, whatever it says.
@@ -299,10 +333,14 @@ export function chatServers(cwd: string, projectTrusted: boolean): { servers: Ch
           const extra = Object.keys(entry).filter((key) => !OVERRIDE_KEYS.includes(key));
           if (!base) errors.push(`${file}: server "${name}" needs "command" or "url", or a server of the user's to override`);
           else if (extra.length) errors.push(`${file}: server "${name}": an override can only set ${OVERRIDE_KEYS.join(", ")}`);
-          else servers.set(name, { ...base, entry: { ...base.entry, ...entry } });
+          else {
+            const { entry: merged, ignored } = narrowed(base.entry, entry);
+            if (ignored.length) errors.push(`${file}: server "${name}": a project can only switch a server of the user's off or hide its tools; ${ignored.join(", ")} ignored`);
+            servers.set(name, { ...base, entry: merged });
+          }
           continue;
         }
-        const clash = [...servers.keys()].find((other) => mcpNamespace(other) === mcpNamespace(name));
+        const clash = [...reserved, ...servers.keys()].find((other) => mcpNamespace(other) === mcpNamespace(name));
         if (clash) {
           errors.push(`${file}: server "${name}" is the user's "${clash}", which the project cannot define again`);
           continue;
@@ -314,6 +352,11 @@ export function chatServers(cwd: string, projectTrusted: boolean): { servers: Ch
         const old = adapterKeysOf(entry);
         if (old.length) {
           errors.push(`${file}: server "${name}" is written for the old MCP adapter (${old.join(", ")}) and is not connected until it is changed to pi's keys`);
+          continue;
+        }
+        const problem = entryProblem(name, entry);
+        if (problem) {
+          errors.push(`${file}: ${problem}`);
           continue;
         }
         servers.set(name, { name, entry: { ...entry }, from: "project" });
@@ -328,6 +371,17 @@ export interface ImportResult {
   skipped: { name: string; reason: string }[];
   /** The places in each added server whose value pi runs as a command. */
   commands: Record<string, string[]>;
+  /** The variables of the portal's environment each added server sends to its address, in its headers (`${NAME}`). */
+  variables: Record<string, string[]>;
+}
+
+/** The variables of the portal's environment an entry sends to its address: `${NAME}` in its headers, which pi fills in. */
+export function sentVariables(entry: unknown): string[] {
+  const headers = entry && typeof entry === "object" ? (entry as { headers?: unknown }).headers : undefined;
+  if (!headers || typeof headers !== "object" || Array.isArray(headers)) return [];
+  const names = new Set<string>();
+  for (const value of Object.values(headers as Record<string, unknown>)) if (typeof value === "string") for (const [, name] of value.matchAll(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g)) names.add(name);
+  return [...names].sort();
 }
 
 /**
@@ -342,6 +396,7 @@ export function importServers(incoming: Record<string, unknown>, options: { off?
   const added: string[] = [];
   const skipped: ImportResult["skipped"] = [];
   const commands: Record<string, string[]> = {};
+  const variables: Record<string, string[]> = {};
   for (const [name, given] of Object.entries(incoming)) {
     if (name === "settings" || name === "imports" || name === "autoEnableCodemode") continue;
     if (!SERVER_NAME_RE.test(name)) {
@@ -369,9 +424,11 @@ export function importServers(incoming: Record<string, unknown>, options: { off?
     added.push(name);
     const run = commandValues(entry);
     if (run.length) commands[name] = run;
+    const sent = sentVariables(entry);
+    if (sent.length) variables[name] = sent;
   }
   if (added.length) writeMcpFile(config);
-  return { added, skipped, commands };
+  return { added, skipped, commands, variables };
 }
 
 /** What a file of servers says, comments and all: the portal has always read them, and so do other tools' files. */

@@ -1,4 +1,4 @@
-import { commandValues, entryProblem, mcpNamespace, mcpToolNames } from "./mcp-config.js";
+import { commandValues, entryProblem, mcpNamespace, mcpToolName, mcpToolNames } from "./mcp-config.js";
 
 /**
  * The migration from `pi-mcp-adapter` to pi's own MCP support (issue 361, PR 4): what the adapter's files and the
@@ -122,6 +122,12 @@ function allowed(tool: string, server: string, naming: Naming, include: unknown,
 
 // --- the entries ---
 
+/** The tools a `directTools` list names: the server's own, else the adapter-wide one. */
+function listedDirect(raw: Record<string, unknown>, settings: Record<string, unknown>): string[] {
+  const flag = raw.directTools !== undefined ? raw.directTools : settings.directTools;
+  return Array.isArray(flag) ? flag.filter((one): one is string => typeof one === "string") : [];
+}
+
 /** The keys of an entry that are the adapter's and that pi's MCP support has no word for (`disabled` is kept apart: it is read as off). */
 const ADAPTER_KEYS = ["directTools", "includeTools", "excludeTools", "lifecycle", "idleTimeout", "requestTimeoutMs", "exposeResources", "toolPrefix", "approveTools", "debug", "trace", "socket", "bearerToken", "bearerTokenEnv"] as const;
 
@@ -161,6 +167,8 @@ export interface ServerPlan {
   off: string[];
   /** The mark the server gets: the adapter's default was lazy. */
   mark?: "lazy" | "direct";
+  /** pi's names of the tools a `directTools` list named, which get the mark `direct` each: the chats go by the marks, not by the file's `toolExposure`. */
+  directTools: string[];
   /** What the entry or the adapter's settings asked to be confirmed, as patterns of the server's own tool names. */
   approve: string[];
   /** What was converted and what was dropped, for the report. */
@@ -323,7 +331,7 @@ function convertEntry(name: string, raw: Record<string, unknown>, state: Adapter
   // Exposure: the adapter's default was lazy. directTools: true, or the adapter-wide one, is direct; a list names the tools that are.
   take.add("directTools");
   const directFlag = raw.directTools !== undefined ? raw.directTools : settings.directTools;
-  const directList = Array.isArray(directFlag) ? directFlag.filter((one): one is string => typeof one === "string") : [];
+  const directList = listedDirect(raw, settings);
   const all = directFlag === true;
   let base = exposureOf(raw);
   if (!base) {
@@ -406,6 +414,8 @@ export class Names {
   private readonly nativeOf = new Map<string, Map<string, string>>();
   private readonly nativeNames = new Set<string>();
   private readonly prefixed: { server: string; prefix: string }[] = [];
+  /** The servers whose tools the adapter named with no prefix at all (`toolPrefix: "none"`): any name may be one of theirs. */
+  private readonly bare: string[] = [];
   /** Native names more than one tool of any server would get: carried over for none. */
   private readonly shared = new Set<string>();
 
@@ -428,9 +438,9 @@ export class Names {
         this.nativeNames.add(native);
       }
       if (server.exposeResources) for (const resource of server.cache?.resources ?? []) this.add(adapterToolName(adapterResourceTool(resource), server.name, server.naming), { server: server.name, resource: true });
-      // A name that starts as the server's tools do, whichever tool it is the end of.
-      const prefix = adapterPrefix(server.name, "server");
-      if (prefix) this.prefixed.push({ server: server.name, prefix });
+      // A name that starts as the server's tools do, whichever tool it is the end of: in the naming it had, and in the default one.
+      for (const prefix of new Set([adapterPrefix(server.name, server.naming), adapterPrefix(server.name, "server")])) if (prefix) this.prefixed.push({ server: server.name, prefix });
+      if (server.naming === "none") this.bare.push(server.name);
     }
   }
 
@@ -479,9 +489,12 @@ export class Names {
       return { kind: "unknown", servers, why: "the adapter's name is the name of tools of more than one server" };
     }
     if (found && normal) return { kind: "unknown", servers: [...new Set(found.map((one) => one.server))], why: "a tool of another package has the same name" };
-    if (name.startsWith("mcp__") || normal) return { kind: "keep" };
-    const claimed = this.prefixed.filter((one) => name.startsWith(`${one.prefix}_`)).map((one) => one.server);
+    if (normal) return { kind: "keep" };
+    // Before pi's own `mcp__` names: the adapter's `toolPrefix: "mcp"` named tools `mcp__<server>_<tool>`.
+    const claimed = [...new Set(this.prefixed.filter((one) => name.startsWith(`${one.prefix}_`)).map((one) => one.server))];
     if (claimed.length) return { kind: "unknown", servers: claimed, why: "no cache of the adapter lists a tool of that name" };
+    if (name.startsWith("mcp__")) return { kind: "keep" };
+    if (this.bare.length) return { kind: "unknown", servers: [...this.bare], why: "no cache of the adapter lists a tool of that name, and the adapter named these servers' tools with no prefix" };
     return { kind: "keep" };
   }
 }
@@ -500,7 +513,8 @@ export interface Report {
   status: "done" | "pending";
   at: string;
   adapter: { was: AdapterState["adapter"]; removed: boolean; spec?: string; note?: string };
-  file: { state: "converted" | "none" | "unreadable"; copy?: string; note?: string };
+  /** `written`: a hash of the mcp.json this run wrote, which tells a run that stopped after writing it from a file the person put back. */
+  file: { state: "converted" | "none" | "unreadable"; copy?: string; note?: string; written?: string };
   servers: { name: string; renamedTo?: string; state: "on" | "off" | "native"; why: string[]; notes: string[] }[];
   /** Names carried over, and where each kind of place held them. */
   names: { converted: number };
@@ -545,7 +559,11 @@ export class McpMigration {
     this.state = options.state;
     this.lazyOnly = options.lazyOnly;
     const { state } = options;
+    // The namespaces of the entries that are pi's already, first: they keep their names, so a folded name of the adapter's
+    // that meets one is the one renamed, wherever it stands in the file. And every namespace the file has, which a `_N` name must not take either.
     const taken = new Map<string, string>();
+    for (const [name, raw] of Object.entries(state.servers)) if (isNativeEntry(raw) && !taken.has(mcpNamespace(name))) taken.set(mcpNamespace(name), name);
+    const inFile = new Set(Object.keys(state.servers).flatMap((name) => [mcpNamespace(name), mcpNamespace(foldedName(name))]));
     const used = new Set<string>();
     const known: { name: string; newName: string; naming: Naming; cache?: CacheServer; exposeResources: boolean }[] = [];
     for (const [name, raw] of Object.entries(state.servers)) {
@@ -557,21 +575,23 @@ export class McpMigration {
       const found = cacheKey === undefined ? undefined : state.cache[cacheKey];
       const cache = found?.tools.length ? found : undefined;
       // An entry that is pi's already is left under the name it has: what pi takes or refuses of it is pi's to say. It still holds its namespace.
-      let newName = isNativeEntry(raw) ? name : foldedName(name);
+      const native = isNativeEntry(raw);
+      let newName = native ? name : foldedName(name);
       let clash: string | undefined;
       const space = mcpNamespace(newName);
-      if (taken.has(space) && !isNativeEntry(raw)) {
-        clash = taken.get(space);
+      const holder = taken.get(space);
+      if (!native && holder !== undefined && holder !== name) {
+        clash = holder;
         for (let n = 2; ; n++) {
           const next = `${newName}_${n}`;
-          if (!taken.has(mcpNamespace(next)) && !Object.hasOwn(state.servers, next)) {
+          if (!taken.has(mcpNamespace(next)) && !inFile.has(mcpNamespace(next))) {
             newName = next;
             break;
           }
         }
       }
-      taken.set(mcpNamespace(newName), name);
-      const plan: ServerPlan = { name, newName, native: false, off: [], approve: [], notes: [], naming, tools: cachedToolNames(cache), ...(cache ? { cache } : {}), ...(clash ? { clash } : {}) };
+      if (!taken.has(mcpNamespace(newName))) taken.set(mcpNamespace(newName), name);
+      const plan: ServerPlan = { name, newName, native: false, off: [], approve: [], notes: [], naming, tools: cachedToolNames(cache), directTools: [], ...(cache ? { cache } : {}), ...(clash ? { clash } : {}) };
       if (newName !== name) {
         this.renames.set(name, newName);
         plan.notes.push(clash ? `renamed to ${newName}: pi takes - and _ for the same, and ${clash} has the name` : `renamed to ${newName}: pi's server names have no dots`);
@@ -593,15 +613,29 @@ export class McpMigration {
         plan.notes.push("not an entry: left out of the file");
         continue;
       }
+      // The portal reached no server but through the adapter, whatever keys its entry has: with the adapter off or absent, none was reachable.
+      const unreachable = state.adapter === "off" ? "the adapter was switched off, and with it every server of the file" : state.adapter === "absent" ? "the adapter was not installed, so none of the servers was reachable" : undefined;
       if (isNativeEntry(raw)) {
         plan.native = true;
         plan.entry = { ...raw };
+        if (unreachable) plan.off.push(unreachable);
+        // The adapter ran no `!` value: pi would run it at the first start, as the portal's user.
+        for (const place of commandValues(plan.entry)) plan.off.push(`${place} starts with !, which pi runs as a command, and the adapter never ran it`);
         const problem = entryProblem(plan.newName, plan.entry);
         if (problem) plan.off.push(`pi would skip it: ${problem}`);
         continue;
       }
-      if (state.adapter !== "on") plan.off.push(state.adapter === "off" ? "the adapter was switched off, and with it every server of the file" : "the adapter was not installed, so none of the servers was reachable");
+      if (unreachable) plan.off.push(unreachable);
       plan.entry = convertEntry(plan.name, raw, state, plan, plan.newName);
+      // The tools a `directTools` list named stay in the model's list: by their own mark, as the chats go by the marks.
+      const exposure = isRecord(plan.entry.toolExposure) ? plan.entry.toolExposure : {};
+      if (plan.mark !== "direct") {
+        for (const tool of listedDirect(raw, state.settings)) {
+          if (exposure[tool] !== "direct") continue;
+          const native = this.names.nativeName(plan.name, tool) ?? (plan.tools.includes(tool) ? undefined : mcpToolName(plan.newName, tool));
+          if (native) plan.directTools.push(native);
+        }
+      }
     }
   }
 

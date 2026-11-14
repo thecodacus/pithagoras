@@ -217,14 +217,23 @@ test("an adapter that was switched off, or never installed, leaves every server 
   assert.equal(written(migrate({ one: { command: "a" } }), "one").enabled, undefined);
 });
 
-test("an entry that is pi's already is left as it is, and is not switched off with the adapter", () => {
+test("an entry that is pi's already keeps its keys and its name; the portal reached it only through the adapter, so it is off with the adapter", () => {
   const native = { command: "x", exposure: "direct", toolExposure: { a: "hidden" } };
   assert.equal(isNativeEntry(native), true);
   assert.equal(isNativeEntry({ command: "x" }), false, "no exposure, enabled or toolExposure: the adapter's");
   assert.equal(isNativeEntry({ command: "x", exposure: "direct", directTools: true }), false);
-  const m = migrate({ ours: native }, { adapter: "absent" });
+  const m = migrate({ ours: native });
   assert.deepEqual(written(m, "ours"), native);
   assert.equal(m.finish().servers[0].state, "native");
+  // Security review 1 of PR B, finding 2: the old portal never ran pi's own MCP support, so with the adapter off or absent no
+  // server of the file was reachable, whatever keys it has; an `enabled: true` must not connect it at the first start.
+  for (const adapter of ["off", "absent"] as const) {
+    const off = migrate({ ours: native, on: { command: "y", enabled: true } }, { adapter });
+    assert.deepEqual(written(off, "ours"), { ...native, enabled: false }, adapter);
+    assert.equal(written(off, "on").enabled, false, adapter);
+    assert.equal(off.finish().servers[0].state, "off");
+    assert.match(off.finish().servers[1].why.join(" "), adapter === "off" ? /switched off/ : /not installed/);
+  }
   // What pi takes or refuses of an entry that is pi's is pi's to say: it keeps its name, whatever it looks like, and still holds its namespace.
   const kept = migrate({ "a.b": native, "c-d": native, c_d: native, "e-f": native, e_f: { command: "x" } });
   assert.deepEqual(Object.keys(kept.finish().mcpServers), ["a.b", "c-d", "c_d", "e-f", "e_f_2"]);
@@ -334,4 +343,61 @@ test("every entry that is written is one pi's own validation takes, or is off", 
   for (const [name, entry] of Object.entries(out)) assert.ok(entry.enabled === false || entryProblem(name, entry) === null, `${name}: ${entryProblem(name, entry)}`);
   assert.equal(out.c.enabled, false);
   assert.equal(out.e.enabled, false);
+});
+
+test("a value of a native entry that starts with ! is a command the adapter never ran: the server is off until the person looks at it", () => {
+  const m = migrate({ y: { command: "x", exposure: "direct", env: { T: "!cat /etc/hostname" } }, z: { url: "https://x.example/mcp", enabled: true, headers: { A: "!pass show a" } } });
+  assert.equal(written(m, "y").enabled, false);
+  assert.equal(written(m, "z").enabled, false);
+  assert.match(m.finish().servers[0].why.join(" "), /env\.T starts with !/);
+  assert.equal((written(m, "y").env as Record<string, string>).T, "!cat /etc/hostname", "kept, for the person to see");
+});
+
+test("a folded name that meets a native entry's is the one renamed and off, wherever the native one stands, and its trust does not follow", () => {
+  // Security review 1 of PR B, finding 1: the native entry after the dotted one.
+  const m = migrate({ "docs.v2": { command: "trusted-docs" }, docs_v2: { command: "other-server", exposure: "deferred" } }, { cache: { "docs.v2": offered(["search"]) } });
+  const out = m.finish();
+  assert.deepEqual(Object.keys(out.mcpServers).sort(), ["docs_v2", "docs_v2_2"]);
+  assert.equal((out.mcpServers.docs_v2 as Record<string, unknown>).command, "other-server");
+  assert.equal((out.mcpServers.docs_v2_2 as Record<string, unknown>).command, "trusted-docs");
+  assert.equal((out.mcpServers.docs_v2_2 as Record<string, unknown>).enabled, false);
+  assert.equal((out.mcpServers.docs_v2 as Record<string, unknown>).enabled, undefined);
+  assert.deepEqual(m.trusted(["docs.v2", "docs_v2"]), { names: ["docs_v2"], untrusted: ["docs.v2"] });
+  assert.equal(m.setName("docs.v2"), "docs_v2_2");
+  assert.deepEqual(m.verdict("docs.v2_search"), { kind: "map", to: "mcp__docs_v2_2__search", server: "docs.v2" });
+  // A native entry named like the `_N` the clash would pick.
+  const n = migrate({ a_b: { command: "1" }, "a.b": { command: "2" }, a_b_2: { command: "3", exposure: "direct" } });
+  const names = n.finish().mcpServers as Record<string, Record<string, unknown>>;
+  assert.deepEqual(Object.keys(names).sort(), ["a_b", "a_b_2", "a_b_3"]);
+  assert.equal(names.a_b_2.command, "3");
+  assert.equal(names.a_b_3.command, "2");
+  assert.equal(names.a_b_3.enabled, false);
+});
+
+test("a switched-off name of a server that named its tools another way than the default, with no cache, switches the server off", () => {
+  // Correctness review 1 of PR B, finding 2: toolPrefix mcp, short and none.
+  const cases: [string, string][] = [["mcp", "mcp__gh_mcp_delete_repo"], ["short", "gh_delete_repo"], ["none", "delete_repo"], ["server", "gh_mcp_delete_repo"]];
+  for (const [naming, name] of cases) {
+    const m = migrate({ "gh-mcp": { command: "gh", toolPrefix: naming } });
+    assert.deepEqual(m.list("the default", "off", [name, "bash"]), [name, "bash"], naming);
+    assert.equal(written(m, "gh-mcp").enabled, false, naming);
+    assert.match(m.finish().servers[0].why.join(" "), new RegExp(`${name}, switched off in the default`), naming);
+  }
+  // The adapter-wide naming counts as the server's own.
+  const wide = migrate({ "gh-mcp": { command: "gh" } }, { settings: { toolPrefix: "mcp" } });
+  wide.list("a chat", "off", ["mcp__gh_mcp_x"]);
+  assert.equal(written(wide, "gh-mcp").enabled, false);
+  // A pi built-in or a tool the portal has seen is still nobody's.
+  const none = migrate({ g: { command: "g", toolPrefix: "none" } }, { normal: ["web_search"] });
+  none.list("a chat", "off", ["web_search"]);
+  assert.equal(written(none, "g").enabled, undefined);
+});
+
+test("the tools a directTools list named are marked direct each, as the chats go by the marks", () => {
+  // Correctness review 1 of PR B, finding 4.
+  const m = migrate({ gh: { command: "gh", directTools: ["search_code", "get_file"], excludeTools: ["get_*"] }, plain: { command: "p", directTools: ["one"] }, all: { command: "a", directTools: true } }, { cache: { gh: offered(["search_code", "get_file", "delete_repo"]) } });
+  assert.deepEqual(m.server("gh")!.directTools, ["mcp__gh__search_code"], "not one an exclusion holds back");
+  assert.deepEqual(m.server("plain")!.directTools, ["mcp__plain__one"], "named by pi's rule where no cache lists it");
+  assert.deepEqual(m.server("all")!.directTools, [], "the server is direct as a whole");
+  assert.equal(m.server("gh")!.mark, "lazy");
 });

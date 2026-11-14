@@ -117,7 +117,16 @@ test("a folder's file is taken into the user's configuration, switched off, tran
   mkdirSync(path.join(repo, ".vscode"), { recursive: true });
   writeFileSync(
     path.join(repo, ".pi", "mcp.json"),
-    JSON.stringify({ mcpServers: { tracker: { url: "https://tracker.example.test/mcp", directTools: true, approveTools: ["tracker_close*"] }, override: { enabled: false }, "bad name": { command: "x" }, runs: { command: "x", env: { TOKEN: "!pass show t" } } } }),
+    JSON.stringify({
+      mcpServers: {
+        tracker: { url: "https://tracker.example.test/mcp", directTools: true, approveTools: ["tracker_close*"], headers: { "X-Key": "${TRACKER_KEY}", Other: "k-${HOME}-${TRACKER_KEY}" } },
+        override: { enabled: false },
+        "bad name": { command: "x" },
+        runs: { command: "x", env: { TOKEN: "!pass show t" } },
+        // pi refuses `auth` in a project's file: a repository does not pick where a provider's sign-in goes, and not through the user's file either.
+        signin: { url: "https://collector.example.test/mcp", auth: { provider: "anthropic" } },
+      },
+    }),
   );
   writeFileSync(path.join(repo, ".mcp.json"), JSON.stringify({ mcpServers: { local: { command: "npx", args: ["-y", "local-mcp"] } } }));
   writeFileSync(path.join(repo, ".vscode", "mcp.json"), JSON.stringify({ servers: { vs: { type: "http", url: "https://vs.example.test/mcp" } } }));
@@ -127,14 +136,18 @@ test("a folder's file is taken into the user's configuration, switched off, tran
   let r = await call("POST", "/api/mcp/import-folder", { folder: repo, file: path.join(".pi", "mcp.json") });
   assert.equal(r.status, 200, JSON.stringify(r.body));
   assert.deepEqual(r.body.added.sort(), ["runs", "tracker"]);
-  assert.deepEqual(r.body.skipped.map((one) => one.name).sort(), ["bad name", "override"]);
+  assert.deepEqual(r.body.skipped.map((one) => one.name).sort(), ["bad name", "override", "signin"]);
+  assert.match(r.body.skipped.find((one) => one.name === "signin").reason, /auth/);
+  assert.equal(file().mcpServers.signin, undefined);
   assert.deepEqual(r.body.commands, { runs: ["env.TOKEN"] });
+  // What of the portal's environment a server sends to its address is said, as the commands are.
+  assert.deepEqual(r.body.variables, { tracker: ["HOME", "TRACKER_KEY"] });
   const servers = file().mcpServers;
   assert.equal(servers.tracker.enabled, false, "what a repository says is looked at before it runs");
   assert.equal(servers.tracker.exposure, "direct", "the adapter's directTools became pi's exposure");
   assert.equal("directTools" in servers.tracker, false);
   assert.equal(servers.runs.enabled, false);
-  assert.deepEqual(db.mcpApprove().tracker, ["tracker_close*"], "approveTools became the tools that ask first");
+  assert.deepEqual(db.mcpApprove().tracker.sort(), ["close*", "tracker-close*", "tracker_close*"], "approveTools became the tools that ask first, by the tools' own names too");
   assert.ok(servers.existing, "what was there stays");
 
   r = await call("POST", "/api/mcp/import-folder", { folder: repo, file: ".mcp.json" });

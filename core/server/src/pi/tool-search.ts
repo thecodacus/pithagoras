@@ -44,8 +44,8 @@ export interface SearchHost {
    * as the registered ones are, and started when one is called. pi has no tool of such a server until it has connected.
    */
   offline?: () => { name: string; description: string; parameters: unknown; label: string }[];
-  /** Waits for the server of a tool that is not registered to be up, and throws what the model is told where it is not. */
-  ensure?: (name: string, signal?: AbortSignal) => Promise<void>;
+  /** Waits for the server of a tool that is not registered to be up (for a resource tool, the server its arguments name), and throws what the model is told where it is not. */
+  ensure?: (name: string, signal?: AbortSignal, args?: Record<string, unknown>) => Promise<void>;
   /** Starts, in the background, the servers of the tools a search found: the call that follows finds them up. */
   warm?: (names: readonly string[]) => void;
   /**
@@ -430,8 +430,8 @@ export class ToolSearch {
     const tool = this.find(name, true);
     if (typeof ctx?.executeTool !== "function") return fail(`"${tool.name}" cannot be called from here.`);
     // A tool of a server that is not running: the server is started, and the call waits for it.
-    await this.host?.ensure?.(tool.name, signal);
     const args = argsOf(rawArgs);
+    await this.host?.ensure?.(tool.name, signal, args);
     // Through pi's own pipeline: it validates and coerces the arguments, runs the hooks before and after, and queues the
     // calls of tools that run one at a time. What it hands back is the outcome; the result is what the tool's own was.
     const done = await ctx.executeTool(tool.name, args, { signal, ...(typeof onUpdate === "function" ? { onUpdate } : {}) });

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { adapterPrefix } from "./mcp-migration.js";
 import { mcpNamespace } from "./pi/mcp-origin.js";
 
 /**
@@ -225,13 +226,62 @@ export interface Translated {
   entry: Record<string, unknown>;
   /** The tools that ask for a confirmation: the adapter's `approveTools`, as tool-name patterns. The portal keeps them (see `approve` of `portal.mcp.set`). */
   approve: string[];
+  /** The server's own names of the tools a `directTools` list keeps in the model's list: the chats go by marks, and these get one each. */
+  direct: string[];
   /** What was changed, for the log. */
   notes: string[];
 }
 
 const ADAPTER_DROPPED = ["lifecycle", "idleTimeout", "debug", "scriptMode", "toolPrefix", "exposeResources", "autoAuth"] as const;
 
-export function fromAdapterEntry(raw: Record<string, unknown>): Translated {
+/**
+ * What is left of a pattern once it has matched this text from its start: the patterns the rest of a name must match.
+ * Each is the end of the pattern (a `*` may take in all of the text, or part of it), so each is a pattern pi can say.
+ */
+function residuals(pattern: string, text: string): string[] {
+  const closure = (states: Set<number>) => {
+    for (const at of [...states]) for (let i = at; pattern[i] === "*"; i++) states.add(i + 1);
+    return states;
+  };
+  let states = closure(new Set([0]));
+  for (const c of text) {
+    const next = new Set<number>();
+    for (const at of states) {
+      if (pattern[at] === "*") next.add(at);
+      else if (at < pattern.length && pattern[at] === c) next.add(at + 1);
+    }
+    states = closure(next);
+    if (!states.size) return [];
+  }
+  return [...states].map((at) => pattern.slice(at)).filter(Boolean);
+}
+
+/**
+ * The patterns of the server's own tool names that say what an adapter pattern said. The adapter tried a pattern against the
+ * tool's own name and against the names it registered it under in every naming (`<server>_<tool>`, the short and the
+ * `mcp__<server>_` one), with `-` and `_` alike; pi matches `toolExposure` against the own name alone, as it is. So the
+ * prefixes are taken off (what the pattern says of the rest of the name), and each `-` or `_` is written in both forms:
+ * every combination where there are a few, else `*` (`wide`, which hides more, never less) or the two forms where every
+ * one is the same (`!wide`, which shows less, never more).
+ */
+function ownPatterns(pattern: string, server: string, wide: boolean): string[] {
+  const p = pattern.replace(/-/g, "_");
+  const rests = new Set([p]);
+  for (const naming of ["server", "short", "mcp"] as const) for (const rest of residuals(p, `${adapterPrefix(server, naming)}_`)) rests.add(rest);
+  const out = new Set<string>();
+  for (const rest of rests) {
+    const parts = rest.split("_");
+    if (parts.length - 1 <= 3) {
+      let forms = [parts[0]];
+      for (const part of parts.slice(1)) forms = forms.flatMap((form) => [`${form}_${part}`, `${form}-${part}`]);
+      for (const form of forms) out.add(form);
+    } else if (wide) out.add(rest.replace(/_/g, "*").replace(/\*+/g, "*"));
+    else for (const form of [rest, rest.replace(/_/g, "-")]) out.add(form);
+  }
+  return [...out];
+}
+
+export function fromAdapterEntry(raw: Record<string, unknown>, server: string): Translated {
   const entry: Record<string, unknown> = { ...raw };
   const notes: string[] = [];
   const approve: string[] = [];
@@ -247,8 +297,20 @@ export function fromAdapterEntry(raw: Record<string, unknown>): Translated {
     entry.enabled = false;
     notes.push("disabled became enabled: false");
   }
-  // directTools: true is a server whose tools are declared; a list names the tools that are, the rest are found.
   const direct = take("directTools");
+  const include = take("includeTools");
+  const exclude = take("excludeTools");
+  const list = (value: unknown, key: string, wide: boolean): string[] => {
+    if (value === undefined) return [];
+    if (!Array.isArray(value) || !value.every((one) => typeof one === "string")) throw new TypeError(`${key} must be a list of tool names`);
+    if (value.some((one) => one.includes("?"))) throw new TypeError(`${key} has a pattern with ? that toolExposure cannot say; name the tools, or use *`);
+    return [...new Set((value as string[]).flatMap((one) => ownPatterns(one, server, wide)))];
+  };
+  const out = list(exclude, "excludeTools", true);
+  const inn = list(include, "includeTools", false);
+  // directTools: true is a server whose tools are declared; a list names the tools that are, the rest are found. Not a tool
+  // the include and exclude lists hold back, which the adapter did not register: an exact name would win over their patterns.
+  const kept: string[] = [];
   if (direct === true) {
     if (entry.exposure === undefined) entry.exposure = "direct";
     notes.push("directTools became exposure: direct");
@@ -256,19 +318,11 @@ export function fromAdapterEntry(raw: Record<string, unknown>): Translated {
     const names = direct.filter((name): name is string => typeof name === "string");
     if (names.length !== direct.length) throw new TypeError("directTools must name tools");
     if (entry.exposure === undefined) entry.exposure = "deferred";
-    entry.toolExposure = { ...names.reduce<Record<string, string>>((all, name) => ({ ...all, [name]: "direct" }), {}), ...(isRecord(entry.toolExposure) ? entry.toolExposure : {}) };
+    kept.push(...names.filter((name) => !matchesTool(out, name) && (!inn.length || matchesTool(inn, name))));
+    if (kept.length !== names.length) notes.push("directTools named tools that includeTools or excludeTools hold back: left out");
+    entry.toolExposure = { ...kept.reduce<Record<string, string>>((all, name) => ({ ...all, [name]: "direct" }), {}), ...(isRecord(entry.toolExposure) ? entry.toolExposure : {}) };
     notes.push("directTools named tools became toolExposure: direct");
   }
-  const include = take("includeTools");
-  const exclude = take("excludeTools");
-  const list = (value: unknown, key: string): string[] => {
-    if (value === undefined) return [];
-    if (!Array.isArray(value) || !value.every((one) => typeof one === "string")) throw new TypeError(`${key} must be a list of tool names`);
-    if (value.some((one) => one.includes("?"))) throw new TypeError(`${key} has a pattern with ? that toolExposure cannot say; name the tools, or use *`);
-    return value as string[];
-  };
-  const out = list(exclude, "excludeTools");
-  const inn = list(include, "includeTools");
   if (out.length || inn.length) {
     const base = (typeof entry.exposure === "string" ? (resolved(entry.exposure) as string) : "codemode") as Exposure;
     const mine: Record<string, string> = {};
@@ -285,7 +339,8 @@ export function fromAdapterEntry(raw: Record<string, unknown>): Translated {
   const approveTools = take("approveTools");
   if (approveTools !== undefined) {
     if (!Array.isArray(approveTools) || !approveTools.every((one) => typeof one === "string")) throw new TypeError("approveTools must be a list of tool names");
-    approve.push(...(approveTools as string[]));
+    // Wider, never narrower: a `?` is a `*` here, as is a `-` or `_` where there are many.
+    approve.push(...new Set((approveTools as string[]).flatMap((one) => ownPatterns(one.replace(/\?/g, "*"), server, true))));
     notes.push("approveTools became approve");
   }
   const auth = take("auth");
@@ -303,5 +358,5 @@ export function fromAdapterEntry(raw: Record<string, unknown>): Translated {
   } else if (auth !== undefined && auth !== "oauth") {
     notes.push(`auth ${JSON.stringify(auth)} dropped`);
   }
-  return { entry, approve, notes };
+  return { entry, approve, direct: kept, notes };
 }

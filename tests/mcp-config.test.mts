@@ -164,19 +164,47 @@ test("a value that starts with ! is a command pi runs, even for an HTTP server, 
 });
 
 test("the old adapter's keys are translated for one release, and what cannot be said exactly is refused", () => {
-  const one = fromAdapterEntry({ url: "https://x/mcp", lifecycle: "lazy", directTools: true, disabled: true, auth: "bearer", bearerTokenEnv: "TOKEN", approveTools: ["delete_*"], idleTimeout: 5, debug: true });
+  const one = fromAdapterEntry({ url: "https://x/mcp", lifecycle: "lazy", directTools: true, disabled: true, auth: "bearer", bearerTokenEnv: "TOKEN", approveTools: ["delete_*"], idleTimeout: 5, debug: true }, "x");
   assert.deepEqual(one.entry, { url: "https://x/mcp", enabled: false, exposure: "direct", headers: { Authorization: "Bearer ${TOKEN}" } });
-  assert.deepEqual(one.approve, ["delete_*"]);
-  const list = fromAdapterEntry({ command: "x", directTools: ["a", "b"] });
+  assert.deepEqual(one.approve.sort(), ["delete-*", "delete_*"]);
+  const list = fromAdapterEntry({ command: "x", directTools: ["a", "b"] }, "x");
   assert.deepEqual(list.entry, { command: "x", exposure: "deferred", toolExposure: { a: "direct", b: "direct" } });
+  assert.deepEqual(list.direct, ["a", "b"]);
   // Include then exclude, as the adapter did: what is excluded stays hidden, whatever the include says, and the rest is hidden.
-  const filtered = fromAdapterEntry({ command: "x", includeTools: ["get_*", "delete_all"], excludeTools: ["delete_*"] }).entry;
-  assert.deepEqual(filtered.toolExposure, { "delete_*": "hidden", "get_*": "codemode", "*": "hidden" });
-  for (const [tool, shown] of [["get_issue", true], ["delete_all", false], ["delete_one", false], ["other", false]] as const) {
+  const filtered = fromAdapterEntry({ command: "x", includeTools: ["get_*", "delete_all"], excludeTools: ["delete_*"] }, "x").entry;
+  for (const [tool, shown] of [["get_issue", true], ["get-issue", true], ["delete_all", false], ["delete_one", false], ["delete-one", false], ["other", false]] as const) {
     assert.equal(toolExposureOf(filtered as never, tool) !== "hidden", shown, tool);
   }
-  assert.throws(() => fromAdapterEntry({ socket: "/tmp/mux.sock" }), /socket/);
-  assert.throws(() => fromAdapterEntry({ command: "x", includeTools: ["get_?"] }), /\?/);
-  assert.deepEqual(fromAdapterEntry({ url: "https://x/mcp", auth: "oauth" }).entry, { url: "https://x/mcp" });
-  assert.deepEqual(fromAdapterEntry({ url: "https://x/mcp", headers: { A: "b" }, description: "d", timeout: 9 }).entry, { url: "https://x/mcp", headers: { A: "b" }, description: "d", timeout: 9 });
+  assert.throws(() => fromAdapterEntry({ socket: "/tmp/mux.sock" }, "x"), /socket/);
+  assert.throws(() => fromAdapterEntry({ command: "x", includeTools: ["get_?"] }, "x"), /\?/);
+  assert.deepEqual(fromAdapterEntry({ url: "https://x/mcp", auth: "oauth" }, "x").entry, { url: "https://x/mcp" });
+  assert.deepEqual(fromAdapterEntry({ url: "https://x/mcp", headers: { A: "b" }, description: "d", timeout: 9 }, "x").entry, { url: "https://x/mcp", headers: { A: "b" }, description: "d", timeout: 9 });
+});
+
+test("the adapter's patterns are carried to the server's own tool names: its prefixes taken off, and - and _ alike, as it matched them", () => {
+  // Correctness review 1 of PR B, finding 3, and security review 1, finding 4: what the adapter held back stays held back.
+  const tools = ["delete_repo", "delete-branch", "create_issue", "get_file", "list_pulls", "search_code_in_the_repository_now"];
+  const shown = (entry: Record<string, unknown>) => tools.filter((tool) => toolExposureOf(entry as never, tool) !== "hidden");
+  for (const exclude of [["gh_delete_*"], ["gh-delete-*"], ["mcp__gh_mcp_delete_*"], ["delete_*"], ["delete-*"], ["gh*delete*"]]) {
+    const { entry } = fromAdapterEntry({ command: "gh-mcp", excludeTools: exclude }, "gh-mcp");
+    assert.deepEqual(shown(entry), ["create_issue", "get_file", "list_pulls", "search_code_in_the_repository_now"], exclude.join());
+  }
+  // The short naming of gh-mcp is gh; a name that is excluded exactly, in the other separator.
+  assert.deepEqual(shown(fromAdapterEntry({ command: "gh-mcp", excludeTools: ["delete_branch", "gh_mcp_get_file"] }, "gh-mcp").entry), ["delete_repo", "create_issue", "list_pulls", "search_code_in_the_repository_now"]);
+  // A long name is hidden by a wider pattern, never shown.
+  assert.equal(shown(fromAdapterEntry({ command: "g", excludeTools: ["search-code-in-the-repository-now"] }, "g").entry).includes("search_code_in_the_repository_now"), false);
+  // An include in the prefixed form lets the tool through, and nothing else.
+  assert.deepEqual(shown(fromAdapterEntry({ command: "gh", includeTools: ["gh_get_file", "gh_list-pulls"] }, "gh").entry), ["get_file", "list_pulls"]);
+  // A directTools name that an exclusion covers, or an include leaves out, is no exact entry that would win over them.
+  const covered = fromAdapterEntry({ command: "gh", directTools: ["delete_repo", "get_file"], excludeTools: ["delete_*"] }, "gh");
+  assert.equal(toolExposureOf(covered.entry as never, "delete_repo"), "hidden");
+  assert.equal(toolExposureOf(covered.entry as never, "get_file"), "direct");
+  assert.deepEqual(covered.direct, ["get_file"]);
+  const outside = fromAdapterEntry({ command: "gh", directTools: ["b"], includeTools: ["a"] }, "gh");
+  assert.equal(toolExposureOf(outside.entry as never, "b"), "hidden");
+  assert.deepEqual(outside.direct, []);
+  // Confirmations: wider, never narrower; a prefixed one asks for the tool by its own name.
+  const approve = fromAdapterEntry({ command: "gh", approveTools: ["gh_create_*", "gh?delete-repo"] }, "gh").approve;
+  for (const tool of ["create_issue", "create-issue", "delete_repo", "delete-repo"]) assert.ok(matchesTool(approve, tool), `${tool}: ${approve}`);
+  assert.equal(matchesTool(approve, "get_file"), false);
 });
