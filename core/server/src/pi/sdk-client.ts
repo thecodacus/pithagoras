@@ -1492,13 +1492,15 @@ export class SdkPiClient extends EventEmitter implements PiClient {
   }
 
   /**
-   * The head of the chat read again, by the person's say-so: the one deliberate change of what the model is sent first
-   * (see SessionManager.readToolsAgain). The tool is registered afresh by the reload that follows.
+   * The head of the chat to read again, by the person's say-so: the one deliberate change of what the model is sent first
+   * (see SessionManager.readToolsAgain). It is taken up by the reload that follows, which registers the tool afresh.
    */
   useHead(head: LazyHead): void {
-    this.head = head;
-    this.search?.setHead(head);
+    this.nextHead = head;
   }
+
+  /** The head the next load takes up: asked for, and not applied while a run goes on, which a changed prompt would cut into. */
+  private nextHead?: LazyHead;
 
   /** Its chat works through the code tool alone, in pi's `only` presentation: set as it is created, as pi fixes that then. */
   codemodeOnly = false;
@@ -1919,6 +1921,12 @@ export class SdkPiClient extends EventEmitter implements PiClient {
 
   private async loadAgain(): Promise<void> {
     this.loading = true;
+    if (this.nextHead) {
+      // Before the extensions load again: the portal's tool registers itself with what it is given.
+      this.head = this.nextHead;
+      this.search?.setHead(this.nextHead, false);
+      this.nextHead = undefined;
+    }
     await this.session.reload();
     // Reloading has extensions register their providers again, which puts the
     // registry's model, with its own window, back on the session.

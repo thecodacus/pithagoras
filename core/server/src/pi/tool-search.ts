@@ -124,10 +124,16 @@ export class ToolSearch {
 
   constructor(private head: LazyHead) {}
 
-  /** What the chat froze about its lazy tools, replaced only when the person asks for the tools to be read again. */
-  setHead(head: LazyHead): void {
+  /**
+   * What the chat froze about its lazy tools, replaced only when the person asks for the tools to be read again, and added
+   * to by what its lazy tools say later (outside content, a line for a spoken turn). The tool is registered again only when
+   * what it says of itself has changed, which is the line that names the groups, and not unless `now`: a reload registers it
+   * with the new head anyway, and registering it in the middle of a run would change the system prompt under it.
+   */
+  setHead(head: LazyHead, now = true): void {
+    const changed = head.hint !== this.head.hint;
     this.head = head;
-    if (!this.api) return;
+    if (!now || !changed || !this.api) return;
     try {
       this.register(this.api);
     } catch (e) {

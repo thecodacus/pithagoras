@@ -161,7 +161,7 @@ test("only a tool that declares its files is approved on them: a command, a tool
   assert.equal(declaredFiles({ name: "merge_pdfs", approvalFiles: ["nowhere"], parameters: params({ inputs: list }) }), undefined, "none of its own");
   assert.equal(declaredFiles({ name: "merge_pdfs", approvalFiles: [], parameters: params({ inputs: list }) }), undefined);
   assert.equal(declaredFiles({ name: "merge_pdfs", parameters: params({ paths: list }) }), undefined, "a list is no declaration");
-  for (const name of ["bash", "mcp", "mcp_script", "mcpScript", "codemode", "tools"]) {
+  for (const name of ["bash", "mcp", "mcp_script", "mcpScript", "codemode", "tool_search"]) {
     assert.equal(declaredFiles({ name, approvalFiles: ["paths"], parameters: params({ paths: list }) }), undefined, name);
   }
   // Undeclared, a call is matched and shown whole: an extra list is part of its arguments, and the command is the command.
