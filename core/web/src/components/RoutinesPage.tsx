@@ -119,8 +119,8 @@ function Timing({
             aria-label={t("Run at")}
             className={`${inputCls} mt-1 text-xs`}
           />
-          {!runAt && <p role="alert" className="mt-1 text-[11px] text-warn">{t("Pick a time to run it at.")}</p>}
-          <p className="mt-1 text-[11px] text-fg-faint">
+          {!runAt && <p role="alert" className="mt-1 text-2xs text-warn">{t("Pick a time to run it at.")}</p>}
+          <p className="mt-1 text-2xs text-fg-faint">
             {t("Your local time. It runs once and then switches itself off, keeping the result. A time that passed while the portal was down still runs when it comes back.")}
           </p>
         </div>
@@ -281,7 +281,7 @@ export function RoutinesPage({ onOpenSession }: { onOpenSession: (id: string) =>
                   />
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm text-fg">{r.name}</p>
-                    <p className="truncate text-[11px] text-fg-faint">
+                    <p className="truncate text-2xs text-fg-faint">
                       <span className="font-mono">
                         {r.mode === "once"
                           ? `${t("once")} · ${r.runAt ? formatDateTime(r.runAt) : t("no time set")}`
@@ -314,7 +314,7 @@ export function RoutinesPage({ onOpenSession }: { onOpenSession: (id: string) =>
           </ul>
         )}
 
-        <p className="mt-6 text-[11px] leading-relaxed text-fg-faint">
+        <p className="mt-6 text-2xs leading-relaxed text-fg-faint">
           {tx("Repeating schedules use the server's clock and five-field cron, or a shorthand like {example}; a one-off uses the time you pick in your own timezone. A routine still running when its next slot comes round is skipped rather than stacked.", { example: <code>@daily</code> })}
         </p>
       </div>
@@ -420,12 +420,12 @@ function WorkspacePicker({
             : []),
         ]}
       />
-      <p className="mt-1 text-[11px] text-fg-faint">
+      <p className="mt-1 text-2xs text-fg-faint">
         {t("Its runs work in this directory. Each place keeps its own session, so moving it back picks up where it left off.")}
         {error && ` ${t("The projects could not be listed ({error}), so only Home is offered.", { error })}`}
       </p>
       {problem && value && (
-        <p role="alert" className="mt-1 text-[11px] text-danger">
+        <p role="alert" className="mt-1 text-2xs text-danger">
           {t("{place} is not there any more ({problem}). Its runs fail until another place is chosen.", { place: value, problem })}
         </p>
       )}
@@ -473,15 +473,15 @@ function SchedulePicker({
             key={p.cron}
             type="button"
             onClick={() => onChange(p.cron)}
-            className="rounded-lg bg-fg/5 px-2 py-0.5 text-[11px] text-fg-muted transition hover:bg-fg/10 hover:text-fg"
+            className="rounded-lg bg-fg/5 px-2 py-0.5 text-2xs text-fg-muted transition hover:bg-fg/10 hover:text-fg"
           >
             {t(p.label)}
           </button>
         ))}
       </div>
-      {preview.error && <p role="alert" className="mt-1.5 text-[11px] text-danger">{preview.error}</p>}
+      {preview.error && <p role="alert" className="mt-1.5 text-2xs text-danger">{preview.error}</p>}
       {preview.runs && preview.runs.length > 0 && (
-        <p className="mt-1.5 text-[11px] text-fg-subtle">
+        <p className="mt-1.5 text-2xs text-fg-subtle">
           {t("Next: {when}", { when: preview.runs.map((r) => formatDateTime(r)).join(" · ") })}
         </p>
       )}
@@ -731,7 +731,7 @@ function RoutineDetail({
             rows={8}
             className={`${inputCls} mt-1 resize-y text-xs leading-relaxed`}
           />
-          <p className="mt-1 text-[11px] text-fg-faint">
+          <p className="mt-1 text-2xs text-fg-faint">
             {t("Given to the agent verbatim, with a note that it was woken by a schedule and that nobody is waiting on a reply.")}
           </p>
         </label>
@@ -752,7 +752,7 @@ function RoutineDetail({
         >
           <div className="min-w-0 flex-1">
             <p className="text-sm text-fg">{t("Fresh session each run")}</p>
-            <p className="text-[11px] text-fg-subtle">
+            <p className="text-2xs text-fg-subtle">
               {t("Off: one session it keeps, so a run can see what the last one did. On: a clean start every time.")}
             </p>
           </div>
@@ -763,7 +763,7 @@ function RoutineDetail({
         <div className="flex w-full items-center gap-3 px-1 py-1.5">
           <div className="min-w-0 flex-1">
             <p className="text-sm text-fg">{t("Injection guard")}</p>
-            <p className="text-[11px] text-fg-subtle">
+            <p className="text-2xs text-fg-subtle">
               {r.exempt.length === 0
                 ? t("Every rule holds after a run reads something that looks like a prompt injection.")
                 : t("Off for this routine: {rules}. What they would have stopped is recorded in Audit.", { rules: r.exempt.join(", ") })}
@@ -806,7 +806,7 @@ function RoutineDetail({
               ...targets.map((x) => ({ value: `${x.channel}\u0000${x.target}`, label: `${x.channel} — ${x.label}` })),
             ]}
           />
-          <p className="mt-1 text-[11px] text-fg-faint">
+          <p className="mt-1 text-2xs text-fg-faint">
             {t("The agent decides whether a run is worth reporting and writes the message itself. It only has somewhere to send it if this points at a conversation.")}
             {targets.length === 0 &&
               ` ${t("Nothing to pick yet — message a channel that can start a conversation, and it appears here.")}`}
@@ -818,7 +818,7 @@ function RoutineDetail({
           routine moves, since the layers under it are those of where it runs. */}
       <section className="mb-6">
         <h3 className="text-xs font-semibold uppercase tracking-wider text-fg-subtle">{t("Tools")}</h3>
-        <p className="mt-1 text-[11px] text-fg-faint">
+        <p className="mt-1 text-2xs text-fg-faint">
           {t("What every run starts with, against what its agent and project leave. Every page a run opens is recorded in Audit. Saved as each switch is flipped.")}
         </p>
         <div className="mt-2 rounded-xl border border-line bg-raised/40">
@@ -846,7 +846,7 @@ function RoutineDetail({
               )}
             </p>
             {r.lastOutput && (
-              <pre className="mt-2 max-h-56 overflow-auto whitespace-pre-wrap text-[11px] leading-relaxed text-fg-muted">
+              <pre className="mt-2 max-h-56 overflow-auto whitespace-pre-wrap text-2xs leading-relaxed text-fg-muted">
                 {r.lastOutput}
               </pre>
             )}

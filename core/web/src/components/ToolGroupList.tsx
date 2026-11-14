@@ -63,10 +63,10 @@ export function ToolGroupList({
                     ) : (
                       <LuChevronRight className="h-3 w-3 shrink-0 text-fg-faint" />
                     )}
-                    <span title={sourceName(group.source)} className={`min-w-0 flex-1 truncate font-medium text-fg-muted ${roomy ? "text-xs" : "text-[11px]"}`}>
+                    <span title={sourceName(group.source)} className={`min-w-0 flex-1 truncate font-medium text-fg-muted ${roomy ? "text-xs" : "text-2xs"}`}>
                       {displayName(group.source, names)}
                     </span>
-                    <span className={`shrink-0 text-fg-faint ${roomy ? "text-[11px]" : "text-[10px]"}`}>{groupSummary(group)}</span>
+                    <span className={`shrink-0 text-fg-faint ${roomy ? "text-2xs" : "text-3xs"}`}>{groupSummary(group)}</span>
                   </button>
                   {beside?.(group)}
                   {free.length > 0 && (
@@ -74,7 +74,7 @@ export function ToolGroupList({
                       type="button"
                       disabled={busy}
                       onClick={() => onFlip(free.map((tool) => tool.name), freeOff)}
-                      className="shrink-0 rounded px-1.5 py-0.5 text-[11px] text-fg-subtle transition hover:bg-fg/5 hover:text-fg disabled:opacity-50"
+                      className="shrink-0 rounded px-1.5 py-0.5 text-2xs text-fg-subtle transition hover:bg-fg/5 hover:text-fg disabled:opacity-50"
                     >
                       {freeOff ? t("all on") : t("all off")}
                     </button>
@@ -98,7 +98,7 @@ export function ToolGroupList({
                     {tool.cached && (
                       <span
                         title={t("Listed from the MCP adapter's cache: the server starts when one of its tools is first used.")}
-                        className="shrink-0 rounded border border-line px-1 text-[10px] text-fg-faint"
+                        className="shrink-0 rounded border border-line px-1 text-3xs text-fg-faint"
                       >
                         {t("cached")}
                       </span>
@@ -118,7 +118,7 @@ export function ToolGroupList({
                           }}
                           // A fixed mark is not the tool's to change, switched on or not: its own title says where it is set.
                           title={!tool.enabled && !lazyFixed?.(tool) ? t("This tool is off by default, so it is not offered to the model, lazy or not, except where an agent, project, routine or chat switches it on. Switch it on here to change its lazy mark.") : tool.mcp ? t("Set for the whole server, with the lazy button of its group: it is the server's \"Register tools directly\", turned off. A lazy tool is not in the model's list one by one; the model finds and calls it through the `mcp` tool.") : t("Not in the model's list one by one: it finds and calls this tool through the `tools` tool.")}
-                          className={`shrink-0 rounded border px-1 text-[10px] disabled:cursor-not-allowed ${tool.enabled ? "disabled:opacity-60" : "disabled:opacity-40"} ${
+                          className={`shrink-0 rounded border px-1 text-3xs disabled:cursor-not-allowed ${tool.enabled ? "disabled:opacity-60" : "disabled:opacity-40"} ${
                             tool.lazy ? "border-accent/40 bg-accent/15 text-accent" : "border-transparent text-fg-faint hover:text-fg"
                           }`}
                         >
@@ -129,7 +129,7 @@ export function ToolGroupList({
                       tool.lazy && (
                         <span
                           title={tool.mcp ? t("Not in the model's list one by one: it finds and calls this tool through the `mcp` tool.") : t("Not in the model's list one by one: it finds and calls this tool through the `tools` tool.")}
-                          className="shrink-0 rounded border border-line px-1 text-[10px] text-fg-faint"
+                          className="shrink-0 rounded border border-line px-1 text-3xs text-fg-faint"
                         >
                           {t("lazy")}
                         </span>
@@ -138,10 +138,10 @@ export function ToolGroupList({
                     {/* Only where this chat disagrees with the default, so the
                         setting is findable from the place it is being overruled. */}
                     {tool.defaultOn !== undefined && tool.defaultOn !== tool.enabled && (
-                      <span className="shrink-0 text-[10px] text-fg-faint">{tool.defaultOn ? t("default on") : t("default off")}</span>
+                      <span className="shrink-0 text-3xs text-fg-faint">{tool.defaultOn ? t("default on") : t("default off")}</span>
                     )}
                   </label>
-                  {tool.byMode && <p className="px-3 pb-1 pl-8 text-[10px] text-fg-faint">{t(CODEMODE_HELD)}</p>}
+                  {tool.byMode && <p className="px-3 pb-1 pl-8 text-3xs text-fg-faint">{t(CODEMODE_HELD)}</p>}
                 </li>
               ))}
             </ul>

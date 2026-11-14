@@ -255,7 +255,7 @@ export const Sidebar = memo(function Sidebar({
   const anyRunning = sessions.some((s) => s.status === "running");
 
   return (
-    <aside aria-label={t("Sidebar")} className={`relative flex shrink-0 flex-col overflow-hidden border-r border-line bg-surface transition-[width] duration-300 ease-in-out motion-reduce:transition-none ${collapsed ? "w-12" : "w-64"}`}>
+    <aside aria-label={t("Sidebar")} className={`relative flex shrink-0 flex-col overflow-hidden border-r border-line bg-surface transition-[width] duration-300 ease-in-out motion-reduce:transition-none ${collapsed ? "w-12" : "w-nav"}`}>
       {/* One that fails to answer is not listed: its page is at its address all the same. */}
       {entries.filter((page) => page.useShown).map((page) => (
         <ErrorBoundary key={page.key} resetKey={page.key} fallback={() => null} onError={failedIn(page.extension)}>
@@ -264,7 +264,7 @@ export const Sidebar = memo(function Sidebar({
       ))}
       <button type="button" onClick={toggleSidebar} aria-label={collapsed ? t("Expand sidebar") : t("Collapse sidebar")}
         title={collapsed ? t("Expand sidebar") : t("Collapse sidebar")} aria-expanded={!collapsed} aria-controls="sidebar-content"
-        className="hidden md:grid absolute right-2 top-3 z-10 grid h-8 w-8 place-items-center rounded-lg text-fg-subtle transition-colors hover:bg-canvas hover:text-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent">
+        className="hidden md:grid absolute right-2 top-3 z-raised grid h-8 w-8 place-items-center rounded-lg text-fg-subtle transition-colors hover:bg-canvas hover:text-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent">
         {collapsed ? <LuPanelLeftOpen size={18} /> : <LuPanelLeftClose size={18} />}
       </button>
       {/* Folded, the places are still one click away: a rail of their icons. */}
@@ -283,7 +283,7 @@ export const Sidebar = memo(function Sidebar({
           <RailButton icon={<LuSettings />} label={t("Settings")} onClick={onOpenSettings} />
         </nav>
       )}
-      <div id="sidebar-content" className={`sidebar-content min-h-0 w-64 flex-1 flex-col ${collapsed ? "hidden" : "flex"}`}>
+      <div id="sidebar-content" className={`sidebar-content min-h-0 w-nav flex-1 flex-col ${collapsed ? "hidden" : "flex"}`}>
 
       <div className="flex items-center gap-2 pl-3 pr-12 pb-3 pt-4">
         <img
@@ -294,7 +294,7 @@ export const Sidebar = memo(function Sidebar({
         />
         <h1 className="text-sm font-semibold tracking-tight text-fg">Pithagoras</h1>
         <span
-          className="ml-auto text-[10px] uppercase tracking-wider text-fg-faint"
+          className="ml-auto text-3xs uppercase tracking-wider text-fg-faint"
           title={t("How sessions are executed")}
         >
           {executor}
@@ -422,7 +422,7 @@ export const Sidebar = memo(function Sidebar({
 const Divider = () => <div className="my-2 h-px bg-line" />;
 
 const GroupLabel = ({ children }: { children: ReactNode }) => (
-  <p className="px-2.5 pb-1 pt-1 text-[10px] font-semibold uppercase tracking-wider text-fg-faint">
+  <p className="px-2.5 pb-1 pt-1 text-3xs font-semibold uppercase tracking-wider text-fg-faint">
     {children}
   </p>
 );

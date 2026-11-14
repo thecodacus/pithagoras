@@ -143,9 +143,9 @@ export function ModePicker({
           role="menu"
           aria-label={t("Modes")}
           onKeyDown={onMenuKey}
-          className="composer-menu float-in absolute bottom-full left-0 z-20 mb-2 w-80 max-w-full rounded-xl border border-line bg-surface py-1 shadow-pop"
+          className="composer-menu float-in absolute bottom-full left-0 z-panel mb-2 w-80 max-w-full rounded-xl border border-line bg-surface py-1 shadow-pop"
         >
-          <p className="px-3 py-1 text-[11px] text-fg-subtle">{t("How this chat works. It is fixed once the chat has started.")}</p>
+          <p className="px-3 py-1 text-2xs text-fg-subtle">{t("How this chat works. It is fixed once the chat has started.")}</p>
           {modes.map((mode) => (
             <button
               key={mode.id}
@@ -159,7 +159,7 @@ export function ModePicker({
               <span className="min-w-0 flex-1">
                 <span className={`block text-sm ${mode.confirm ? "text-warn" : "text-fg"}`}>{modeLabel(mode)}</span>
                 <span className="block text-xs text-fg-subtle">{modeDescription(mode)}</span>
-                {mode.params && <span className="block text-[11px] text-fg-faint">{paramsLine(mode.params)}</span>}
+                {mode.params && <span className="block text-2xs text-fg-faint">{paramsLine(mode.params)}</span>}
               </span>
               {mode.id === current && <LuCheck aria-hidden className="mt-0.5 h-3.5 w-3.5 shrink-0 text-accent" />}
             </button>
@@ -194,7 +194,7 @@ export function ModePill({ stored, modes }: { stored: string; modes: ChatMode[] 
   return (
     <span
       title={mode ? describe(mode) : gone!.title}
-      className={`max-w-[12rem] truncate rounded-md px-2 py-0.5 text-[11px] max-md:max-w-[6rem] ${mode?.confirm ? "bg-warn/10 text-warn" : "bg-fg/5 text-fg-subtle"}`}
+      className={`max-w-[12rem] truncate rounded-md px-2 py-0.5 text-2xs max-md:max-w-[6rem] ${mode?.confirm ? "bg-warn/10 text-warn" : "bg-fg/5 text-fg-subtle"}`}
     >
       {mode ? modeLabel(mode) : gone!.label}
     </span>

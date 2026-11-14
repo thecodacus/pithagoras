@@ -1,5 +1,6 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { local } from "./safe-storage";
+import { appearanceOf, tokenStyles, TOKEN_NAMES, tokensOf, type Appearance, type Tokens } from "./tokens";
 
 /**
  * Light, dark, or whatever the machine is set to.
@@ -27,7 +28,8 @@ export type Colours = Partial<Record<Token, string>>;
 /**
  * Colours in place of the portal's own, for light, for dark, or for both: a
  * theme an extension brought (see extensions/themes.ts). What a mode does not
- * say stays the portal's.
+ * say stays the portal's. It may also set the look beyond colour (tokens.ts),
+ * for both modes at once.
  */
 export interface Palette {
   /** Which theme it is: "<package>/<id>". */
@@ -35,6 +37,7 @@ export interface Palette {
   name: string;
   light?: Colours;
   dark?: Colours;
+  tokens?: Tokens;
 }
 
 const PALETTE_KEY = "pithagoras.palette";
@@ -81,9 +84,9 @@ export function coloursOf(given: unknown): Colours | null {
 export function storedPalette(): Palette | null {
   try {
     const kept = JSON.parse(local.get(PALETTE_KEY) ?? "null");
-    const light = coloursOf(kept?.light), dark = coloursOf(kept?.dark);
-    if (typeof kept?.id !== "string" || typeof kept.name !== "string" || !light || !dark) return null;
-    const now = { id: themeIdNow(kept.id), name: kept.name, light, dark };
+    const light = coloursOf(kept?.light), dark = coloursOf(kept?.dark), tokens = tokensOf(kept?.tokens);
+    if (typeof kept?.id !== "string" || typeof kept.name !== "string" || !light || !dark || !tokens) return null;
+    const now: Palette = { id: themeIdNow(kept.id), name: kept.name, light, dark, ...(Object.keys(tokens).length ? { tokens } : {}) };
     // Kept under the new id from now on, or the old one would be mapped at every start.
     if (now.id !== kept.id) local.set(PALETTE_KEY, JSON.stringify(now));
     return now;
@@ -92,15 +95,35 @@ export function storedPalette(): Palette | null {
   }
 }
 
+const APPEARANCE_KEY = "pithagoras.appearance";
+
+/** The person's own text size and density in this browser, as percent of the theme's (tokens.ts). */
+export function storedAppearance(): Appearance {
+  try {
+    return appearanceOf(JSON.parse(local.get(APPEARANCE_KEY) ?? "null"));
+  } catch {
+    return appearanceOf(null);
+  }
+}
+
 let palette: Palette | null = storedPalette();
+let appearance: Appearance = storedAppearance();
 const paletteWatchers = new Set<() => void>();
 
-/** The chosen theme's colours for the mode in effect, set over the portal's own; the portal's own given back where it says none. */
+/**
+ * The chosen theme's colours for the mode in effect, and its look beyond colour with the person's own text size and
+ * density over it, set over the portal's own; the portal's own given back where a theme says none.
+ */
 function paint(root: HTMLElement) {
   const colours = palette?.[root.dataset.theme === "light" ? "light" : "dark"] ?? {};
   for (const token of TOKENS) {
     if (colours[token]) root.style.setProperty(`--${token}`, colours[token]!);
     else root.style.removeProperty(`--${token}`);
+  }
+  const looks = tokenStyles(palette?.tokens, appearance);
+  for (const name of TOKEN_NAMES) {
+    if (looks[name]) root.style.setProperty(`--${name}`, looks[name]!);
+    else root.style.removeProperty(`--${name}`);
   }
 }
 
@@ -127,6 +150,16 @@ export function choosePalette(next: Palette | null): void {
   else local.remove(PALETTE_KEY);
   apply(stored());
   for (const watcher of [...paletteWatchers]) watcher();
+}
+
+/** The person's text size and density, as they are kept in this browser. */
+export const chosenAppearance = (): Appearance => appearance;
+
+/** Choose the text size and the density, each in percent of the theme's. Kept in this browser, and painted at once. */
+export function chooseAppearance(next: Appearance): void {
+  appearance = appearanceOf(next);
+  local.set(APPEARANCE_KEY, JSON.stringify(appearance));
+  apply(stored());
 }
 
 /** The chosen theme, drawn again when another is chosen. */

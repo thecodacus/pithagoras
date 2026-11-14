@@ -270,7 +270,7 @@ export function ToolDefaults({ onError }: { onError: (e: string) => void }) {
                           : t("Lazy: its tools are not in the model's list one by one; the model finds and calls them through the `tools` tool, so nothing in the set is lost to it. They stay on or off as they are; an off tool is not reachable that way. Tools that turn up later start lazy too.")
                       }
                       aria-label={t("Lazy {name}", { name: displayName(group.source, names) })}
-                      className={`shrink-0 rounded px-1.5 py-0.5 text-[11px] transition hover:bg-fg/5 disabled:cursor-not-allowed disabled:opacity-50 ${
+                      className={`shrink-0 rounded px-1.5 py-0.5 text-2xs transition hover:bg-fg/5 disabled:cursor-not-allowed disabled:opacity-50 ${
                         pressed ? "bg-accent/15 text-accent" : "text-fg-subtle hover:text-fg"
                       }`}
                     >

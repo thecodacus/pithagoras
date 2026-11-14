@@ -79,7 +79,7 @@ export function SandboxSettings({ onError }: { onError: (message: string) => voi
                   value={rule.path}
                   onChange={(e) => update({ rules: draft.rules.map((r, j) => (j === i ? { ...r, path: e.target.value } : r)) })}
                 />
-                {rule.note && <p className="mt-0.5 text-[11px] text-fg-faint">{rule.note}</p>}
+                {rule.note && <p className="mt-0.5 text-2xs text-fg-faint">{rule.note}</p>}
               </div>
               <select
                 aria-label={t("Access")}
@@ -144,7 +144,7 @@ export function SandboxSettings({ onError }: { onError: (message: string) => voi
           )}
           <details className="text-xs text-fg-muted">
             <summary className="cursor-pointer">{t("What was done")} ({report.done.length})</summary>
-            <ul className="mt-1 space-y-0.5 font-mono text-[11px]">{report.done.map((d, i) => <li key={i}>{d}</li>)}</ul>
+            <ul className="mt-1 space-y-0.5 font-mono text-2xs">{report.done.map((d, i) => <li key={i}>{d}</li>)}</ul>
           </details>
         </Section>
       )}

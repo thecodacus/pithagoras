@@ -108,7 +108,7 @@ function ContextWindow({
     <div className="rounded-lg bg-raised/40 px-2 py-2">
       <div className="flex items-baseline justify-between gap-2">
         <p className="text-sm text-fg">{t("Context window")}</p>
-        <p className="text-[11px] text-fg-subtle">{source}</p>
+        <p className="text-2xs text-fg-subtle">{source}</p>
       </div>
       <div className="mt-1.5 flex items-center gap-1.5">
         <input
@@ -149,7 +149,7 @@ function ContextWindow({
           </button>
         ) : null}
       </div>
-      <p className="mt-1.5 text-[11px] text-fg-faint">
+      <p className="mt-1.5 text-2xs text-fg-faint">
         {t("What the server holds for one chat. Applies to every chat on this model.")}
       </p>
     </div>
@@ -282,7 +282,7 @@ export function ContextPill({
       </button>
 
       {open && (
-        <div ref={card} role="group" aria-label={t("Context")} style={{ left: anchorLeft(pill.current, MENU_WIDTH) }} className="composer-menu float-in absolute bottom-full left-0 z-20 mb-2 w-72 max-w-full rounded-xl border border-line bg-surface p-3 shadow-pop">
+        <div ref={card} role="group" aria-label={t("Context")} style={{ left: anchorLeft(pill.current, MENU_WIDTH) }} className="composer-menu float-in absolute bottom-full left-0 z-panel mb-2 w-72 max-w-full rounded-xl border border-line bg-surface p-3 shadow-pop">
           <div className="flex items-baseline justify-between">
             <p className="text-sm text-fg-muted">{t("Context")}</p>
             <p className={`text-sm tabular-nums ${known ? look.text : "text-fg-subtle"}`}>{known ? t("{n}% full", { n: formatNumber(pct, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) }) : t("just compacted")}</p>
@@ -294,7 +294,7 @@ export function ContextPill({
               style={{ width: `${Math.min(100, pct)}%` }}
             />
           </div>
-          <p className="mt-1.5 text-[11px] tabular-nums text-fg-subtle">
+          <p className="mt-1.5 text-2xs tabular-nums text-fg-subtle">
             {usage.tokens !== null ? (
               <>
                 {t("{used} of {all} tokens · {left} left", { used: formatNumber(usage.tokens), all: formatNumber(usage.contextWindow), left: formatNumber(Math.max(0, usage.contextWindow - usage.tokens)) })}
@@ -307,7 +307,7 @@ export function ContextPill({
           <div className="my-3 border-t border-line" />
 
           {cfg.contextLimitSupported === false ? (
-            <p className="rounded-lg bg-raised/40 px-2 py-2 text-[11px] text-fg-faint">
+            <p className="rounded-lg bg-raised/40 px-2 py-2 text-2xs text-fg-faint">
               {cfg.contextLimitNote ?? t("The context window cannot be changed here.")}
             </p>
           ) : (
@@ -326,7 +326,7 @@ export function ContextPill({
           >
             <div className="min-w-0 flex-1">
               <p className="text-sm text-fg">{t("Auto-compact")}</p>
-              <p className="text-[11px] text-fg-subtle">{t("Summarise automatically before it fills")}</p>
+              <p className="text-2xs text-fg-subtle">{t("Summarise automatically before it fills")}</p>
             </div>
             <SwitchTrack on={auto} />
           </button>
@@ -340,7 +340,7 @@ export function ContextPill({
                 onCommit={saveKeepRecent}
                 disabled={busy !== null}
               />
-              <p className="mt-1.5 text-[11px] text-fg-faint">
+              <p className="mt-1.5 text-2xs text-fg-faint">
                 {t("Kept word for word; only what is older is summarised. This is where a compaction lands, before the summary is added.")}
               </p>
             </div>
@@ -354,7 +354,7 @@ export function ContextPill({
           >
             <div className="min-w-0 flex-1">
               <p className="text-sm text-fg">{t("Compact now")}</p>
-              <p className="text-[11px] text-fg-subtle">{t("Summarise the conversation so far")}</p>
+              <p className="text-2xs text-fg-subtle">{t("Summarise the conversation so far")}</p>
             </div>
             {busy === "compact" ? (
               <LuRefreshCw className="h-4 w-4 shrink-0 animate-spin text-fg-muted" />
@@ -364,7 +364,7 @@ export function ContextPill({
           </button>
 
           {note && (
-            <p className={`mt-2 text-[11px] ${note.error ? "text-danger" : "text-ok"}`}>
+            <p className={`mt-2 text-2xs ${note.error ? "text-danger" : "text-ok"}`}>
               {note.text}
             </p>
           )}
@@ -373,7 +373,7 @@ export function ContextPill({
 
           <dl className="space-y-1">
             {rows.map(([label, value]) => (
-              <div key={label} className="flex justify-between text-[11px]">
+              <div key={label} className="flex justify-between text-2xs">
                 <dt className="text-fg-subtle">{label}</dt>
                 <dd className="tabular-nums text-fg-muted">{value}</dd>
               </div>

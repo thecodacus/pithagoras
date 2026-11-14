@@ -144,7 +144,7 @@ export function ChannelsPanel({ onError }: { onError: (e: string) => void }) {
           <h3 className="text-xs font-semibold uppercase tracking-wider text-fg-subtle">
             {t("Channels")}{channels.length ? ` (${channels.length})` : ""}
           </h3>
-          <button onClick={load} className="text-[11px] text-fg-subtle hover:text-fg-muted">
+          <button onClick={load} className="text-2xs text-fg-subtle hover:text-fg-muted">
             {t("Refresh")}
           </button>
         </div>
@@ -238,7 +238,7 @@ export function ChannelsPanel({ onError }: { onError: (e: string) => void }) {
             {installing ? t("Installing…") : t("Install")}
           </button>
         </div>
-        <p className="mt-1 text-[11px] text-fg-faint">
+        <p className="mt-1 text-2xs text-fg-faint">
           {tx("Anything npm understands: {short}, {long}, a git URL, or an npm package name.", { short: <code>user/repo</code>, long: <code>github:user/repo#v2</code> })}
         </p>
 
@@ -252,17 +252,17 @@ export function ChannelsPanel({ onError }: { onError: (e: string) => void }) {
               <div className="min-w-0 flex-1">
                 <p className="truncate text-xs text-fg-muted">
                   {k.label}{" "}
-                  <span className="font-mono text-[10px] text-fg-faint">{k.packageName}</span>
+                  <span className="font-mono text-3xs text-fg-faint">{k.packageName}</span>
                 </p>
                 {!k.runnable && (
-                  <p className="text-[10px] text-warn/90">{t("no start() — cannot run")}</p>
+                  <p className="text-3xs text-warn/90">{t("no start() — cannot run")}</p>
                 )}
               </div>
               {k.version && (
-                <span className="shrink-0 font-mono text-[10px] text-fg-faint">v{k.version}</span>
+                <span className="shrink-0 font-mono text-3xs text-fg-faint">v{k.version}</span>
               )}
               {k.builtin ? (
-                <span className="shrink-0 rounded bg-fg/5 px-1.5 py-0.5 text-[10px] text-fg-subtle">
+                <span className="shrink-0 rounded bg-fg/5 px-1.5 py-0.5 text-3xs text-fg-subtle">
                   {t("builtin")}
                 </span>
               ) : (
@@ -301,8 +301,8 @@ export function ChannelsPanel({ onError }: { onError: (e: string) => void }) {
               >
                 <LuCircleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                 <div className="min-w-0">
-                  <p className="truncate font-mono text-[11px]">{b.packageName}</p>
-                  <p className="text-[11px] text-danger/80">{b.error}</p>
+                  <p className="truncate font-mono text-2xs">{b.packageName}</p>
+                  <p className="text-2xs text-danger/80">{b.error}</p>
                 </div>
               </li>
             ))}
@@ -341,7 +341,7 @@ function Toggle({
     >
       <div className="min-w-0 flex-1">
         <p className="text-sm text-fg">{label}</p>
-        <p className="text-[11px] text-fg-subtle">{hint}</p>
+        <p className="text-2xs text-fg-subtle">{hint}</p>
       </div>
       <SwitchTrack on={on} />
     </button>
@@ -375,7 +375,7 @@ function ChannelRow({
         />
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm text-fg">{ch.name}</p>
-          <p className="truncate text-[11px] text-fg-faint">
+          <p className="truncate text-2xs text-fg-faint">
             <span className={STATE_STYLE[ch.state] ?? ""}>{stateLabel(ch.state)}</span> ·{" "}
             {kind?.label ?? ch.kind} · {ch.slug}
             {ch.sessionCount ? ` · ${tp(ch.sessionCount, "{n} chat", "{n} chats")}` : ""}
@@ -383,7 +383,7 @@ function ChannelRow({
           </p>
         </div>
         {!ch.enabled && (
-          <span className="shrink-0 rounded bg-fg/5 px-1.5 py-0.5 text-[10px] text-fg-subtle">
+          <span className="shrink-0 rounded bg-fg/5 px-1.5 py-0.5 text-3xs text-fg-subtle">
             {t("disabled")}
           </span>
         )}
@@ -558,7 +558,7 @@ function ChannelDetail({
           {/* The package's own words: it knows which app, and which menu in it. */}
           {ch.pairing.hint && <p className="mt-0.5 text-xs text-fg-subtle">{ch.pairing.hint}</p>}
           <QrCode text={ch.pairing.code} label={t("Code to scan")} className="mt-2 aspect-square w-56 max-w-full" />
-          <p className="mt-2 break-all font-mono text-[11px] text-fg-faint">{ch.pairing.code}</p>
+          <p className="mt-2 break-all font-mono text-2xs text-fg-faint">{ch.pairing.code}</p>
         </section>
       )}
 
@@ -573,7 +573,7 @@ function ChannelDetail({
           aria-label={t("Slug")}
           className={`${inputCls} mt-2 font-mono text-xs`}
         />
-        <p className="mt-1 text-[11px] text-fg-faint">
+        <p className="mt-1 text-2xs text-fg-faint">
           {ch.sessionCount > 0
             ? tp(ch.sessionCount, "{n} conversation keyed to \"{slug}\".", "{n} conversations keyed to \"{slug}\".", { slug: ch.slug })
             : t("No conversations yet.")}
@@ -635,7 +635,7 @@ function ChannelDetail({
           placeholder={t("You are answering over {channel}. Keep replies short — they are read on a phone. Never paste secrets or full file contents.", { channel: kind?.label ?? t("this channel") })}
           className={`${inputCls} mt-2 resize-y text-xs leading-relaxed`}
         />
-        <p className="mt-1 text-[11px] text-fg-faint">
+        <p className="mt-1 text-2xs text-fg-faint">
           {t("Leave empty for none. The agent's own memory is shared across channels; this is not.")}
         </p>
       </section>
@@ -652,9 +652,9 @@ function ChannelDetail({
                   <label className="font-mono text-xs text-fg-muted">{f.label}</label>
                   {f.secret &&
                     (ch.secretsSet.includes(f.key) ? (
-                      <span className="text-[10px] text-ok/80">{t("stored")}</span>
+                      <span className="text-3xs text-ok/80">{t("stored")}</span>
                     ) : (
-                      <span className="text-[10px] text-fg-faint">{t("not set")}</span>
+                      <span className="text-3xs text-fg-faint">{t("not set")}</span>
                     ))}
                 </div>
                 <input
@@ -669,7 +669,7 @@ function ChannelDetail({
                   }
                   className={`${inputCls} mt-1 font-mono text-xs`}
                 />
-                {f.hint && <p className="mt-1 text-[11px] text-fg-faint">{f.hint}</p>}
+                {f.hint && <p className="mt-1 text-2xs text-fg-faint">{f.hint}</p>}
               </div>
             ))}
           </div>
@@ -690,7 +690,7 @@ function ChannelDetail({
           <h3 className="text-xs font-semibold uppercase tracking-wider text-fg-subtle">{t("Activity")}</h3>
           <ul className="mt-2 max-h-40 space-y-0.5 overflow-y-auto rounded-xl border border-line bg-raised/60 p-2">
             {[...ch.log].reverse().map((entry, i) => (
-              <li key={i} className="flex gap-2 font-mono text-[11px]">
+              <li key={i} className="flex gap-2 font-mono text-2xs">
                 <span className="shrink-0 text-fg-faint">
                   {formatTime(entry.at)}
                 </span>
@@ -797,7 +797,7 @@ function NewChannelForm({
         <div key={f.key}>
           <div className="flex items-baseline gap-2">
             <label className="font-mono text-xs text-fg-muted">{f.label}</label>
-            {f.required && <span className="text-[10px] text-fg-faint">{t("required")}</span>}
+            {f.required && <span className="text-3xs text-fg-faint">{t("required")}</span>}
           </div>
           <input
             type={f.secret ? "password" : "text"}
@@ -807,7 +807,7 @@ function NewChannelForm({
             placeholder={f.placeholder}
             className={`${inputCls} mt-1 font-mono text-xs`}
           />
-          {f.hint && <p className="mt-1 text-[11px] text-fg-faint">{f.hint}</p>}
+          {f.hint && <p className="mt-1 text-2xs text-fg-faint">{f.hint}</p>}
         </div>
       ))}
 

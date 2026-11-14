@@ -49,7 +49,7 @@ export function Clamped({ children, className = "" }: { children: string; classN
     <div className={className}>
       <p ref={ref} className={`break-words text-xs text-fg-subtle ${open ? "" : "line-clamp-2"}`}>{children}</p>
       {(cut || open) && (
-        <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} className="mt-0.5 text-[11px] text-accent hover:underline">
+        <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} className="mt-0.5 text-2xs text-accent hover:underline">
           {open ? t("Less") : t("More")}
         </button>
       )}
@@ -252,7 +252,7 @@ export function Field({ label, hint, children, className = "" }: { label: string
       <div className={`block ${className}`}>
         <span className="text-xs text-fg-muted">{label}</span>
         <div className="mt-1">{Children.map(children, (c) => (isSelect(c) && !c.props["aria-label"] ? cloneElement(c, { "aria-label": label }) : c))}</div>
-        {hint && <span className="mt-1 block text-[11px] text-fg-faint">{hint}</span>}
+        {hint && <span className="mt-1 block text-2xs text-fg-faint">{hint}</span>}
       </div>
     );
   }
@@ -260,7 +260,7 @@ export function Field({ label, hint, children, className = "" }: { label: string
     <label className={`block ${className}`}>
       <span className="text-xs text-fg-muted">{label}</span>
       <div className="mt-1">{children}</div>
-      {hint && <span className="mt-1 block text-[11px] text-fg-faint">{hint}</span>}
+      {hint && <span className="mt-1 block text-2xs text-fg-faint">{hint}</span>}
     </label>
   );
 }
@@ -373,7 +373,7 @@ export function Segments<T extends string>({
 }) {
   return (
     <div role="radiogroup" aria-label={label} className={className}>
-      {showLabel && <span className="mr-1 text-[11px] text-fg-subtle">{label}</span>}
+      {showLabel && <span className="mr-1 text-2xs text-fg-subtle">{label}</span>}
       {options.map((o) => (
         <button key={o.id} type="button" role="radio" aria-checked={value === o.id} onClick={() => onChange(o.id)} className={choiceCls(value === o.id, size)}>
           {t(o.label)}

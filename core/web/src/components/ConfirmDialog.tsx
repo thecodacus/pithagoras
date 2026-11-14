@@ -125,7 +125,7 @@ export function ConfirmHost() {
   return (
     <div
       ref={leaving}
-      className="ui-backdrop fixed inset-0 z-[60] flex items-center justify-center bg-canvas/80 p-4 backdrop-blur-sm"
+      className="ui-backdrop fixed inset-0 z-confirm flex items-center justify-center bg-canvas/80 p-4 backdrop-blur-sm"
       onMouseDown={(e) => {
         if (e.target !== e.currentTarget) return;
         // The press would otherwise clear the focus that the answer has just given back to the button.

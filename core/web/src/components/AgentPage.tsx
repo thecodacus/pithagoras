@@ -175,12 +175,12 @@ function AgentCards({ agents, onOpen, onNew }: { agents: Agent[]; onOpen: (id: s
                   </div>
                 </div>
                 {a.unread > 0 && (
-                  <span className="absolute right-2.5 top-2.5 rounded-full bg-accent/15 px-1.5 text-[11px] text-accent" title={tp(a.unread, "{n} new note", "{n} new notes")}>
+                  <span className="absolute right-2.5 top-2.5 rounded-full bg-accent/15 px-1.5 text-2xs text-accent" title={tp(a.unread, "{n} new note", "{n} new notes")}>
                     {a.unread}
                   </span>
                 )}
                 <p className="mt-3 w-full truncate text-sm font-medium text-fg">{a.name}</p>
-                <p className="mt-0.5 text-[11px] text-fg-faint">
+                <p className="mt-0.5 text-2xs text-fg-faint">
                   {a.initialised ? tp(a.chats, "{n} chat", "{n} chats") : t("Not set up yet")}
                   {a.channels.length > 0 && ` · ${tp(a.channels.length, "{n} channel", "{n} channels")}`}
                 </p>
@@ -461,14 +461,14 @@ function AgentView({
               <Stat value={all.top.filter((s) => familyRunning(s, all.under.get(s.id))).length} label={t("running")} tone="text-accent" />
               <div className="flex min-w-0 items-center gap-1.5 rounded-lg bg-raised/60 px-2.5 py-1">
                 <LuFolder className="h-3 w-3 shrink-0 text-fg-faint" />
-                <span className="truncate font-mono text-[11px] text-fg-subtle">{agent.home}</span>
+                <span className="truncate font-mono text-2xs text-fg-subtle">{agent.home}</span>
               </div>
               <div className="flex min-w-0 items-center gap-1.5 rounded-lg bg-raised/60 px-2.5 py-1" title={t("The user it runs as when the sandbox is on")}>
                 <LuUser className="h-3 w-3 shrink-0 text-fg-faint" />
-                <span className="truncate font-mono text-[11px] text-fg-subtle">{agent.sandboxUser}</span>
+                <span className="truncate font-mono text-2xs text-fg-subtle">{agent.sandboxUser}</span>
               </div>
               <div className="flex min-w-0 items-center gap-2 rounded-lg bg-raised/60 px-2.5 py-1" title={t("The New button starts its chats with this agent")}>
-                <span className="truncate text-[11px] text-fg-subtle">{t("New chats start here")}</span>
+                <span className="truncate text-2xs text-fg-subtle">{t("New chats start here")}</span>
                 <Switch
                   on={agent.newChats}
                   // The first agent takes new chats back when no other has them: it is turned on from another's page, not off.
@@ -560,19 +560,19 @@ function AgentView({
                     )}
                     <h3 className="truncate text-xs font-medium text-fg-muted">{id === BROWSER ? t("Here, in the portal") : group.name || t("No channel")}</h3>
                     {group.kind && id !== BROWSER && (
-                      <span className="shrink-0 rounded bg-fg/5 px-1.5 py-0.5 text-[10px] text-fg-subtle">
+                      <span className="shrink-0 rounded bg-fg/5 px-1.5 py-0.5 text-3xs text-fg-subtle">
                         {group.kind}
                       </span>
                     )}
                     {!group.present && (
                       <span
-                        className="shrink-0 rounded bg-warn/10 px-1.5 py-0.5 text-[10px] text-warn/90"
+                        className="shrink-0 rounded bg-warn/10 px-1.5 py-0.5 text-3xs text-warn/90"
                         title={t("Recreate a channel with the slug \"{slug}\" to reconnect these", { slug: id })}
                       >
                         {t("no channel")}
                       </span>
                     )}
-                    <span className="ml-auto shrink-0 text-[11px] text-fg-faint">
+                    <span className="ml-auto shrink-0 text-2xs text-fg-faint">
                       {group.items.length}
                     </span>
                   </div>
@@ -684,7 +684,7 @@ function AgentTabs({ tab, onTab, unread }: { tab: AgentTab; onTab: (id: AgentTab
           }`}
         >
           {t(label)}
-          {id === "activity" && unread > 0 && <span className="rounded-full bg-accent/15 px-1.5 text-[11px] text-accent">{unread}</span>}
+          {id === "activity" && unread > 0 && <span className="rounded-full bg-accent/15 px-1.5 text-2xs text-accent">{unread}</span>}
         </button>
       ))}
     </div>
@@ -777,10 +777,10 @@ function RowBody({ s, status, title }: { s: AgentSession; status: ShownStatus; t
       <StatusDot status={status} />
       <div className="min-w-0 flex-1">
         {title}
-        <p className="truncate font-mono text-[10px] text-fg-faint">{s.channel_key}</p>
+        <p className="truncate font-mono text-3xs text-fg-faint">{s.channel_key}</p>
       </div>
       <LuMessageSquare className="h-3.5 w-3.5 shrink-0 text-fg-faint" />
-      <span className="shrink-0 text-[11px] text-fg-faint group-hover:invisible group-focus-within:invisible [@media(hover:none)]:hidden">
+      <span className="shrink-0 text-2xs text-fg-faint group-hover:invisible group-focus-within:invisible [@media(hover:none)]:hidden">
         {when(s.updated_at)}
       </span>
     </>
@@ -872,7 +872,7 @@ function AgentFiles({ agent, setup, onSaved }: { agent: string; setup: Setup; on
             <span className={unread(f.name) ? "line-through decoration-fg-faint" : ""}>{f.name}</span>
           </button>
         ))}
-        <span className="ml-auto text-[11px] text-fg-faint">
+        <span className="ml-auto text-2xs text-fg-faint">
           {t("loaded as context when a conversation starts")}
         </span>
       </div>

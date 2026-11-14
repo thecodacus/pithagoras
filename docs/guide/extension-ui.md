@@ -330,8 +330,16 @@ utilities they are to `web/client.css`, after your own rules. They are made
 with the portal's preset, `@pithagoras/extension-api/tailwind`, so
 `bg-surface`, `text-fg-muted`, `border-line`, `bg-accent`, `text-danger`,
 `rounded-xl` and `shadow-pop` are the portal's colours, rounding and shadow and
-follow the theme. Tailwind's reset of the page is left out: the page has the
-portal's. The utilities reach only your own parts: the portal draws each part
+follow the theme. So do its type and its room: `font-sans` and `font-mono`, the
+`text-*` sizes, the `rounded-*` steps, and the padding and gaps (`p-*`, `px-*`,
+`py-*`, `gap-*`, `space-*`) are each read from a variable of the page, and
+`z-dialog` and the other layers, `max-w-chat` and `w-nav` are the portal's
+layers and widths. As the portal ships them they are what Tailwind's own were,
+so nothing changes until the person's text size or density, or a theme, sets
+them; widths, heights, margins and offsets stay fixed, so icons do not grow
+with the density. A stylesheet built before these variables existed carries the
+old values until it is built again with this version of the package.
+Tailwind's reset of the page is left out: the page has the portal's. The utilities reach only your own parts: the portal draws each part
 you register inside an element marked with your package's name
 (`data-extension`, laid out as if it were not there), and the build scopes each
 utility to it. The portal's utilities go by the same names, and yours, coming

@@ -184,7 +184,7 @@ export function FolderTree<S extends { status: SessionStatus }>({
                 aria-keyshortcuts={onMove ? "Alt+ArrowUp Alt+ArrowDown" : undefined}
                 onClick={() => onToggle(f.key)}
                 onKeyDown={(e) => nudge(f, e)}
-                className={`flex min-w-0 flex-1 items-center gap-1.5 text-left ${md ? "text-sm" : "text-[13px]"} text-fg-muted hover:text-fg`}
+                className={`flex min-w-0 flex-1 items-center gap-1.5 text-left ${md ? "text-sm" : "text-xs-plus"} text-fg-muted hover:text-fg`}
               >
                 <LuChevronRight aria-hidden className={`h-3 w-3 shrink-0 text-fg-faint transition-transform motion-reduce:transition-none ${open ? "rotate-90" : ""}`} />
                 <Icon aria-hidden data-icon={Icon === LuHouse ? "house" : undefined} className="h-3.5 w-3.5 shrink-0 text-fg-faint" />
@@ -193,14 +193,14 @@ export function FolderTree<S extends { status: SessionStatus }>({
               {/* Beside the toggle, not in it: its name is the folder's, which a chat list and a test look it up by. */}
               {f.with && (
                 <span
-                  className="min-w-0 max-w-[40%] shrink-0 truncate text-[11px] text-fg-faint"
+                  className="min-w-0 max-w-[40%] shrink-0 truncate text-2xs text-fg-faint"
                   title={t("Chats here start with the SOUL.md, PrimaryUser.md and memory of {agent}", { agent: f.with })}
                 >
                   {t("with {agent}", { agent: f.with })}
                 </span>
               )}
               {running && <StatusDot status="running" bare />}
-              <span className="shrink-0 px-1 text-[11px] tabular-nums text-fg-faint">
+              <span className="shrink-0 px-1 text-2xs tabular-nums text-fg-faint">
                 <span aria-hidden>{f.sessions.length}</span>
                 <span className="sr-only">{tp(f.sessions.length, "{n} chat", "{n} chats")}</span>
               </span>
@@ -258,7 +258,7 @@ function FolderControls({
           value={sort}
           onChange={onSort}
           options={SORTS.map((s) => ({ ...s, label: t(s.label) }))}
-          className="folder-sort !gap-1 !border-transparent !bg-transparent !py-0.5 !pl-1.5 !pr-1 !text-[11px] text-fg-subtle"
+          className="folder-sort !gap-1 !border-transparent !bg-transparent !py-0.5 !pl-1.5 !pr-1 !text-2xs text-fg-subtle"
         />
       )}
       <button
@@ -294,7 +294,7 @@ export function ChatsHeading({
 }) {
   return (
     <div className={`flex items-center gap-1 ${size === "md" ? "" : "pr-1"}`}>
-      <p className={`mr-auto font-semibold uppercase tracking-wider text-fg-faint ${size === "md" ? "text-[11px]" : "px-2.5 pb-1 pt-1 text-[10px]"}`}>
+      <p className={`mr-auto font-semibold uppercase tracking-wider text-fg-faint ${size === "md" ? "text-2xs" : "px-2.5 pb-1 pt-1 text-3xs"}`}>
         {label}
       </p>
       {controls && <FolderControls {...props} />}

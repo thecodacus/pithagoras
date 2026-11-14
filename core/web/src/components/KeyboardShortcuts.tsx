@@ -80,7 +80,7 @@ export function KeyboardShortcuts() {
             <span className="min-w-0 flex-1 text-sm text-fg">
               {actionLabel(action)}
               {/* Whose it is, for a shortcut an extension brought. */}
-              {action.extension && <span className="ml-2 text-[11px] text-fg-faint">{action.extension}</span>}
+              {action.extension && <span className="ml-2 text-2xs text-fg-faint">{action.extension}</span>}
             </span>
             {listening
               ? <span className="text-xs text-accent" role="status">{t("Press the new keys…")}</span>

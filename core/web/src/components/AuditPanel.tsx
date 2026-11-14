@@ -76,7 +76,7 @@ function Subject({ text }: { text: string }) {
       aria-expanded={open}
       title={text}
       // `block` only when open: the clamp is a display of its own, and the later of the two rules would win.
-      className={`mt-1 w-full break-all text-left font-mono text-[11px] text-fg-muted ${open ? "block whitespace-pre-wrap" : "line-clamp-2"}`}
+      className={`mt-1 w-full break-all text-left font-mono text-2xs text-fg-muted ${open ? "block whitespace-pre-wrap" : "line-clamp-2"}`}
     >
       {text}
     </button>
@@ -239,16 +239,16 @@ function AuditPanel({ onError }: { onError: (e: string | null) => void }) {
                   {e.person_name && (
                     <span className="truncate text-xs text-fg-muted">{e.person_name}</span>
                   )}
-                  <span className="ml-auto shrink-0 text-[11px] text-fg-faint">{when(e.at)}</span>
+                  <span className="ml-auto shrink-0 text-2xs text-fg-faint">{when(e.at)}</span>
                 </div>
                 {e.subject && <Subject text={`${e.tool ? `${e.tool}: ` : ""}${e.subject}`} />}
                 {e.kind === "cleared" && Number.isFinite(Number(e.reason)) ? (
-                  <p className="mt-0.5 text-[11px] text-fg-faint">
+                  <p className="mt-0.5 text-2xs text-fg-faint">
                     {tp(Number(e.reason), "One entry was deleted.", "{n} entries were deleted.")}
                   </p>
                 ) : (
                   // An extension's reason is its own English text, shown in its own words in the page's language.
-                  e.reason && <p className="mt-0.5 text-[11px] text-fg-faint">{e.kind === "extension" ? translate(e.tool, e.reason) : e.reason}</p>
+                  e.reason && <p className="mt-0.5 text-2xs text-fg-faint">{e.kind === "extension" ? translate(e.tool, e.reason) : e.reason}</p>
                 )}
               </li>
             );

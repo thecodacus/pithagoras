@@ -154,7 +154,7 @@ function OriginTag({ provider }: { provider: string }) {
   return (
     <span
       title={provider}
-      className={`ml-auto shrink-0 rounded px-1.5 py-0.5 text-[10px] ${
+      className={`ml-auto shrink-0 rounded px-1.5 py-0.5 text-3xs ${
         o.local ? "bg-ok/10 text-ok" : "bg-fg/5 text-fg-subtle"
       }`}
     >
@@ -590,17 +590,17 @@ export function ComposerBar({
 
       {/* Tools */}
       {open === "tools" && (
-        <div ref={menuRef} role="group" aria-label={t("Tools in this chat")} style={{ left: menuLeft }} className="composer-menu float-in absolute bottom-full left-0 z-20 mb-2 w-72 max-w-full overflow-hidden rounded-xl border border-line bg-surface py-1 shadow-pop">
-          <p className="px-3 py-1 text-[11px] text-fg-subtle">{t("Tools in this chat")}</p>
+        <div ref={menuRef} role="group" aria-label={t("Tools in this chat")} style={{ left: menuLeft }} className="composer-menu float-in absolute bottom-full left-0 z-panel mb-2 w-72 max-w-full overflow-hidden rounded-xl border border-line bg-surface py-1 shadow-pop">
+          <p className="px-3 py-1 text-2xs text-fg-subtle">{t("Tools in this chat")}</p>
           <ToolSwitches sessionId={sessionId} />
         </div>
       )}
 
       {/* Models */}
       {open === "model" && (
-        <div ref={menuRef} role="group" aria-label={t("Models")} style={{ left: menuLeft }} className="composer-menu float-in absolute bottom-full left-0 z-20 mb-2 w-72 max-w-full overflow-hidden rounded-xl border border-line bg-surface py-1 shadow-pop">
+        <div ref={menuRef} role="group" aria-label={t("Models")} style={{ left: menuLeft }} className="composer-menu float-in absolute bottom-full left-0 z-panel mb-2 w-72 max-w-full overflow-hidden rounded-xl border border-line bg-surface py-1 shadow-pop">
           <div className="flex items-center gap-2 px-3 py-1">
-            <p className="text-[11px] text-fg-subtle">{t("Models")}</p>
+            <p className="text-2xs text-fg-subtle">{t("Models")}</p>
             {/* The cached copy goes first: a fetch that fails leaves nothing old behind for the next menu. */}
             <button
               type="button"
@@ -689,7 +689,7 @@ export function ComposerBar({
 
       {/* Effort */}
       {open === "effort" && levels.length > 1 && (
-        <div ref={menuRef} role="group" aria-label={t("Effort")} style={{ left: menuLeft }} className="composer-menu float-in absolute bottom-full left-0 z-20 mb-2 w-72 max-w-full rounded-xl border border-line bg-surface p-3 shadow-pop">
+        <div ref={menuRef} role="group" aria-label={t("Effort")} style={{ left: menuLeft }} className="composer-menu float-in absolute bottom-full left-0 z-panel mb-2 w-72 max-w-full rounded-xl border border-line bg-surface p-3 shadow-pop">
           {onOff ? (
             // Reached through /effort; the pill flips the same switch directly.
             <button
@@ -708,7 +708,7 @@ export function ComposerBar({
               <p className="text-sm text-fg-muted">
                 {t("Effort")} <span className="inline-block text-fg first-letter:uppercase">{effortLabel(levels[effortIndex] ?? cfg.state.thinkingLevel)}</span>
               </p>
-              <div className="mt-3 flex justify-between text-[11px] text-fg-subtle">
+              <div className="mt-3 flex justify-between text-2xs text-fg-subtle">
                 <span>{t("Faster")}</span>
                 <span>{t("Smarter")}</span>
               </div>

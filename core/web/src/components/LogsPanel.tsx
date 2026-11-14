@@ -149,7 +149,7 @@ export function LogsPanel({ onError }: { onError: (message: string | null) => vo
           />
         </label>
       </div>
-      <p className="mb-2 text-[11px] text-fg-faint" role="status">
+      <p className="mb-2 text-2xs text-fg-faint" role="status">
         {tp(shown.length, "{n} line", "{n} lines")}
         {errors > 0 && <span className="text-danger"> · {tp(errors, "one error", "{n} errors")}</span>}
       </p>
@@ -162,7 +162,7 @@ export function LogsPanel({ onError }: { onError: (message: string | null) => vo
         tabIndex={0}
         role="log"
         aria-label={t("Server logs")}
-        className="scroll-steady [--ground:color-mix(in_srgb,rgb(var(--raised))_40%,rgb(var(--surface)))] h-[60vh] min-h-64 overflow-auto rounded-xl border border-line p-2 font-mono text-[11px] leading-relaxed"
+        className="scroll-steady [--ground:color-mix(in_srgb,rgb(var(--raised))_40%,rgb(var(--surface)))] h-[60vh] min-h-64 overflow-auto rounded-xl border border-line p-2 font-mono text-2xs leading-relaxed"
       >
         {loading ? (
           <p className="px-1 text-fg-subtle">{t("Loading…")}</p>

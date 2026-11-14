@@ -10,7 +10,7 @@ one written in TypeScript and JSX.
   beside the chat.
 - `@pithagoras/extension-api/build`: `buildExtension({ dir })` bundles `src/client.tsx` into `web/client.js` and
   `web/client.css`, with React taken from the portal, and with `server` the server half into `server.js`.
-- `@pithagoras/extension-api/tailwind`: the portal's colours, rounding and shadow as a Tailwind preset.
+- `@pithagoras/extension-api/tailwind`: the portal's colours, type, rounding, spacing, widths and layers as a Tailwind preset, each read from a CSS variable of the page.
 
 The portal implements exactly these types and is checked against them when it is built. The guide is
 [Building an extension](https://thecodacus.github.io/pithagoras/guide/extension-ui).

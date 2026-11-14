@@ -169,7 +169,7 @@ export function OrbStudio({ agent, name: agentName, orb, voice, onSaved }: { age
           value={draft[key]}
           onChange={(e) => change({ [key]: Number(e.target.value) } as Partial<OrbStyle>)}
         />
-        <span className="mt-0.5 block text-[11px] text-fg-faint">{t(help)}</span>
+        <span className="mt-0.5 block text-2xs text-fg-faint">{t(help)}</span>
       </label>
     ));
 
@@ -184,7 +184,7 @@ export function OrbStudio({ agent, name: agentName, orb, voice, onSaved }: { age
             type="button"
             aria-pressed={draft[key] === value}
             onClick={() => change({ [key]: value } as Partial<OrbStyle>)}
-            className={`rounded-lg border px-2.5 py-1 text-[11px] transition ${
+            className={`rounded-lg border px-2.5 py-1 text-2xs transition ${
               draft[key] === value ? "border-accent/50 bg-accent/10 text-fg" : "border-line text-fg-muted hover:bg-fg/5"
             }`}
           >
@@ -192,7 +192,7 @@ export function OrbStudio({ agent, name: agentName, orb, voice, onSaved }: { age
           </button>
         ))}
         {draft[key] !== "none" && (
-          <label className="ml-1 flex items-center gap-1.5 text-[11px] text-fg-muted">
+          <label className="ml-1 flex items-center gap-1.5 text-2xs text-fg-muted">
             <input
               type="color"
               aria-label={t("Colour")}
@@ -202,7 +202,7 @@ export function OrbStudio({ agent, name: agentName, orb, voice, onSaved }: { age
               className="h-6 w-8 cursor-pointer rounded border border-line bg-transparent"
             />
             {key !== "eyes" && draft[colorKey] !== "auto" && (
-              <button type="button" onClick={() => change({ [colorKey]: "auto" } as Partial<OrbStyle>)} className="rounded px-1.5 py-0.5 text-[11px] text-fg-muted hover:bg-fg/5">
+              <button type="button" onClick={() => change({ [colorKey]: "auto" } as Partial<OrbStyle>)} className="rounded px-1.5 py-0.5 text-2xs text-fg-muted hover:bg-fg/5">
                 {t("Auto")}
               </button>
             )}
@@ -273,7 +273,7 @@ export function OrbStudio({ agent, name: agentName, orb, voice, onSaved }: { age
                 type="button"
                 aria-pressed={state === value}
                 onClick={() => setState(value)}
-                className={`rounded-md px-1 py-1 text-[11px] transition ${state === value ? "bg-accent/12 text-accent" : "text-fg-muted hover:bg-fg/5"}`}
+                className={`rounded-md px-1 py-1 text-2xs transition ${state === value ? "bg-accent/12 text-accent" : "text-fg-muted hover:bg-fg/5"}`}
               >
                 {t(label)}
               </button>
@@ -302,7 +302,7 @@ export function OrbStudio({ agent, name: agentName, orb, voice, onSaved }: { age
                     }`}
                   >
                     <span className="block text-xs font-medium text-fg">{label}</span>
-                    {hint && <span className="mt-0.5 block text-[11px] text-fg-faint">{hint}</span>}
+                    {hint && <span className="mt-0.5 block text-2xs text-fg-faint">{hint}</span>}
                   </button>
                 ))}
                 {missing && (
@@ -313,7 +313,7 @@ export function OrbStudio({ agent, name: agentName, orb, voice, onSaved }: { age
               </div>
               {/* Not before the extensions have been gone through: one that is still loading would be said to be missing. */}
               {missing && settled && (
-                <p className="mt-2 text-[11px] text-fg-faint">
+                <p className="mt-2 text-2xs text-fg-faint">
                   {t("This avatar is not available: its extension is not installed or is switched off, could not be loaded, or no longer offers it. Voice mode shows the orb.")}
                 </p>
               )}
@@ -362,7 +362,7 @@ export function OrbStudio({ agent, name: agentName, orb, voice, onSaved }: { age
                   }`}
                 >
                   <span className="block text-xs font-medium text-fg">{t(label)}</span>
-                  <span className="mt-0.5 block text-[11px] text-fg-faint">{t(hint)}</span>
+                  <span className="mt-0.5 block text-2xs text-fg-faint">{t(hint)}</span>
                 </button>
               ))}
             </div>
@@ -381,7 +381,7 @@ export function OrbStudio({ agent, name: agentName, orb, voice, onSaved }: { age
                   type="button"
                   aria-pressed={draft.palette === name}
                   onClick={() => change({ palette: name, colors: { ...colors } })}
-                  className={`inline-flex items-center gap-1.5 rounded-lg border px-2 py-1 text-[11px] transition ${
+                  className={`inline-flex items-center gap-1.5 rounded-lg border px-2 py-1 text-2xs transition ${
                     draft.palette === name ? "border-accent/50 bg-accent/10 text-fg" : "border-line text-fg-muted hover:bg-fg/5"
                   }`}
                 >
@@ -394,12 +394,12 @@ export function OrbStudio({ agent, name: agentName, orb, voice, onSaved }: { age
                 </button>
               ))}
               {draft.palette === "custom" && (
-                <span className="inline-flex items-center rounded-lg border border-accent/50 bg-accent/10 px-2 py-1 text-[11px] text-fg">{t("Custom")}</span>
+                <span className="inline-flex items-center rounded-lg border border-accent/50 bg-accent/10 px-2 py-1 text-2xs text-fg">{t("Custom")}</span>
               )}
             </div>
             <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
               {ORB_STATES.map(([s, label]) => (
-                <label key={s} className="flex items-center gap-2 text-[11px] text-fg-muted">
+                <label key={s} className="flex items-center gap-2 text-2xs text-fg-muted">
                   <input
                     type="color"
                     value={draft.colors[s]}
@@ -424,7 +424,7 @@ export function OrbStudio({ agent, name: agentName, orb, voice, onSaved }: { age
                   aria-pressed={draft.finish === value}
                   onClick={() => change({ finish: value })}
                   title={t(hint)}
-                  className={`rounded-lg border px-2.5 py-1 text-[11px] transition ${
+                  className={`rounded-lg border px-2.5 py-1 text-2xs transition ${
                     draft.finish === value ? "border-accent/50 bg-accent/10 text-fg" : "border-line text-fg-muted hover:bg-fg/5"
                   }`}
                 >
@@ -443,7 +443,7 @@ export function OrbStudio({ agent, name: agentName, orb, voice, onSaved }: { age
                   aria-pressed={draft.pattern === value}
                   onClick={() => change({ pattern: value })}
                   
-                  className={`rounded-lg border px-2.5 py-1 text-[11px] transition ${
+                  className={`rounded-lg border px-2.5 py-1 text-2xs transition ${
                     draft.pattern === value ? "border-accent/50 bg-accent/10 text-fg" : "border-line text-fg-muted hover:bg-fg/5"
                   }`}
                 >
