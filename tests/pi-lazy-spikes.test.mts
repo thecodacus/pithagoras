@@ -239,3 +239,28 @@ test("a chat that is opened again from its session file has the head it had: the
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("a group can be the tools of one extension: the hook reads where each tool comes from through the public getAllTools(), also for a tool that registers later", async () => {
+  const from = (name: string, keep?: (p: any) => void) => (p: any) => {
+    p.registerTool(tool(name));
+    keep?.(p);
+  };
+  let groupApi: any;
+  const search = (p: any) =>
+    p.registerTool(tool("tool_search", {
+      exposure: "model-only",
+      // Everything the extension named wire-1 registers, by its source: the package of the portal's own grouping.
+      prepareLoadout: () => ({ hiddenDeclarations: p.getAllTools().filter((t: any) => String(t.sourceInfo?.path).includes("wire-1")).map((t: any) => t.name) }),
+    }));
+  // Three extensions, in the order wire-0, wire-1, wire-2: the first is declared, the second is the group, the third is the search.
+  const { session, requests, close } = await wireSession(await modelOf("anthropic", "claude-opus-4-5"), [from("from_zero"), from("from_one", (p) => void (groupApi = p)), search], () => "ok");
+  try {
+    await session.prompt("one");
+    assert.deepEqual(JSON.parse(requests[0].tools).map((t: any) => t.name), ["read", "bash", "edit", "write", "from_zero", "tool_search"]);
+    groupApi.registerTool(tool("late_one"));
+    await session.prompt("two");
+    assert.equal(requests.at(-1)!.tools, requests[0].tools, "the late tool of the group is not declared");
+  } finally {
+    await close();
+  }
+});
