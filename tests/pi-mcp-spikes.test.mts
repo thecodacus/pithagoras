@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pi, wireSession } from "./pi-wire.mts";
@@ -15,6 +15,8 @@ import { Type } from "typebox";
 const FIXTURE = path.resolve("tests/fixtures/mcp-server.mjs");
 const dir = mkdtempSync(path.join(process.env.TMPDIR || tmpdir(), "pitha-mcp-"));
 const log = path.join(dir, "servers.log");
+// What this file made, and no more.
+process.on("exit", () => rmSync(dir, { recursive: true, force: true }));
 const lines = () => (existsSync(log) ? readFileSync(log, "utf8").split("\n").filter(Boolean).map((line) => line.split(" ").slice(2).join(" ")) : []);
 
 type Server = { name: string; exposure?: string; delay?: number; resources?: boolean; tools?: string };

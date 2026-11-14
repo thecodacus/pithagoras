@@ -40,7 +40,7 @@ export interface SearchHost {
 }
 
 /** How many tools one search lists: enough to choose from, few enough not to be the prompt it replaced. */
-const HITS = 10;
+const HITS = 15;
 /** Of those, how many carry their parameters, and the rules of their own. */
 const DETAILED = 3;
 /** The most a hit's parameters may say before they are shortened to a list of names. */

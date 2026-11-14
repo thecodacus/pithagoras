@@ -131,14 +131,14 @@ test("a tool that is not lazy is told to be called by its name", async () => {
 });
 
 test("a search finds by words, names the parameters, shows the best few's schema, and says how many more there are", async () => {
-  const many = Array.from({ length: 14 }, (_, i): Fake => ({ name: `page_${i}`, description: `Reads page number ${i}.`, parameters: { type: "object", properties: { url: { type: "string" }, n: { type: "number" } }, required: ["url"] } }));
+  const many = Array.from({ length: 20 }, (_, i): Fake => ({ name: `page_${i}`, description: `Reads page number ${i}.`, parameters: { type: "object", properties: { url: { type: "string" }, n: { type: "number" } }, required: ["url"] } }));
   const { run, text } = make(many);
   const found = text(await run({ action: "search", query: "page" }));
-  assert.match(found, /^14 lazy tools matching "page":/);
-  assert.equal(found.match(/^- page_/gm)?.length, 10, "ten hits");
+  assert.match(found, /^20 lazy tools matching "page":/);
+  assert.equal(found.match(/^- page_/gm)?.length, 15, "fifteen hits");
   assert.match(found, /- page_\d+\(url, n\?\): Reads page number/);
   assert.equal(found.match(/^  parameters: /gm)?.length, 3, "the best three carry their schema");
-  assert.match(found, /4 more match: narrow the search\./);
+  assert.match(found, /5 more match: narrow the search\./);
 });
 
 test("a schema that is too long to show is given as the names of its parameters", async () => {

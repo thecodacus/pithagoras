@@ -31,12 +31,13 @@ const model = async (row: (typeof ROWS)[number]) => (await pi.ModelRuntime.creat
 
 /** What one chat asked of the model, from its first request to its last: the head of each, as text. */
 async function heads(row: (typeof ROWS)[number], extension: (pi: any) => void, script: (n: number) => any, attach?: (session: any) => void): Promise<Captured[]> {
-  const { session, requests } = await wireSession(await model(row), [extension], script);
+  const { session, requests, close } = await wireSession(await model(row), [extension], script);
   attach?.(session);
   try {
     await session.prompt("Open the thing.");
   } finally {
-    session.dispose();
+    // As the portal lets a session go, which also removes the folder the session worked in.
+    await close();
   }
   return requests;
 }
