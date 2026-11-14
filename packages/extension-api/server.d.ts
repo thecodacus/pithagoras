@@ -906,7 +906,7 @@ export interface ServerPortal {
      */
     extend(factory: (pi: any, chat: Chat) => void): void;
     /**
-     * How a chat's model is offered a tool now: by its own name ("direct"), through the `tools` tool where the
+     * How a chat's model is offered a tool now: by its own name ("direct"), through the `tool_search` tool where the
      * tool is lazy ("lazy"), or not at all: switched off, out of reach, or the chat's pi is not running here. A
      * call of a tool by a name it is not offered under is refused and never runs. In a chat whose mode works through
      * the code tool (Code mode), "direct" means that a script calls the tool by its name, with no streamed arguments

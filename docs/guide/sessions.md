@@ -104,7 +104,7 @@ checked. Choose before the first message: from then on the chat keeps it.
   presentation): the code tool's description lists them, and a script calls
   them. Every tool that is on in the chat is in a script's reach. Lazy marks do
   not apply here, since nothing is offered one by one anyway: a script finds the
-  tools that do not fit in the description with `searchTools`, and the `tools`
+  tools that do not fit in the description with `searchTools`, and the `tool_search`
   tool is not offered. An MCP server whose tools are not registered one by one
   stays behind the adapter's `mcp` tool, which a script calls like any other.
   A script has no time limit; **Stop** ends it. The
@@ -178,7 +178,11 @@ A mode of yours has:
   as Settings → Tools has it is still decided by them: a mode cannot switch on,
   over a project, a tool that Settings → Tools has on. A chat's own switches are
   still the last word, but where the mode switches the code tool on, they cannot
-  switch it off, as in Code mode.
+  switch it off, as in Code mode. A **direct** button on the header of each group
+  keeps that group in the model's list for the mode's chats, whatever the marks and
+  the [threshold](/guide/extensions#the-threshold) say: a mode that exists for one group, a
+  browsing mode, should not have it left out for being the largest. It is read when a chat
+  starts.
 
 These are saved as they are changed, except the texts. The temperature is
 saved when you leave its field, or press Enter.

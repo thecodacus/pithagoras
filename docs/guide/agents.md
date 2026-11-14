@@ -130,7 +130,10 @@ every run it does on its own: its heartbeat, and the routines that run in its ho
 It is saved as each switch is flipped. The switches are exceptions to Settings →
 Tools, both ways, so a tool the agent never mentioned still follows the default: an
 agent that should never run shell commands switches `bash` off here, without
-touching any other agent.
+touching any other agent. A **direct** button on the header of each group keeps that group in the
+model's list for the agent's chats, whatever the marks in Settings → Tools and the
+[threshold](/guide/extensions#the-threshold) say, so that the group an agent exists for is not left out of the list
+for being the largest; a chat reads it when it starts.
 
 A project and a routine come after the agent and can switch a tool again for their
 own, and so does a chat's [mode](/guide/sessions#modes); a chat's own switch has the last word, except that it cannot turn the code tool off where the mode switches it on. Chats in a project are not in any agent's

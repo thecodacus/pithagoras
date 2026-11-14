@@ -187,6 +187,19 @@ default of Settings → Tools as off, beside what you had switched off there, so
 no chat has it until it is switched on for a chat, a project, an agent or every
 chat. A later start does not undo what you choose.
 
+## Lazy tools have three values and a threshold
+
+A tool or a group of tools is **auto**, **lazy** or **direct** now, and a limit decides what is **auto**
+([Lazy tools](/guide/extensions#lazy-tools)). The tool that reaches the lazy tools is called `tool_search`
+and no longer `tools`. On the first start with it, what you had marked lazy stays **lazy**, and everything else is
+**auto**: the model's list is measured, and when it holds more than 3,000 tokens or 20 tools, the largest groups
+that nobody marked are taken out of it, as a lazy group would be. A portal with the browser and the subagent tool
+is over the limit. Settings → Tools says which groups that is, once, and a **direct** mark keeps a group in the
+list; **Lazy above** there changes the limits, and `0` turns them off. A chat that has started keeps the tools it
+started with, and a chat that was running before the upgrade takes its list from what is marked and measured
+when it first starts again. Old chats keep their calls of `tools` in their history, and they are still drawn as
+the tools they called.
+
 ## The password moves into the database
 
 A portal used to take its password from `PORTAL_PASSWORD`. It now keeps it, hashed, in its database, chosen in the browser and changed under Settings → Authentication (see [The password](/guide/deploying#the-password)). What the first start after the upgrade does:

@@ -847,7 +847,7 @@ come to, read again a few times a second rather than with each token, so that a
 long one costs no more as it grows. It has not run yet, and may never (a call
 the chat refuses ends at once). Once the model has written it, it is `"running"`
 with all of its arguments, and it leaves `calls` when it ends, with what it
-answered in `call(callId)`. A call through the lazy tools' gateway is the call of
+answered in `call(callId)`. A call through `tool_search`, which reaches the lazy tools, is the call of
 the tool it calls.
 
 That is all it takes to show what the agent is writing before the tool runs, as
@@ -997,7 +997,7 @@ restart the portal.
 | `chats.extend(factory)` | [Tools that share this module's state](#tools-that-share-the-server-half-s-state) |
 | `tools.offer(fn)`, `chats.reload()` | [Tools that follow the settings](#tools-that-follow-the-settings): which of them it offers now, and the open chats given the change |
 | `tools.exceptions(names)` | [Who has its tools](#who-has-its-tools): the chats and routines where those tools are not what the default says |
-| `chats.offers(chatId, tool)` | How the chat's model is offered a tool now: `"direct"`, `"lazy"` (through the `tools` tool) or nothing (switched off, out of reach, or the chat's pi not running here). In a chat whose mode works through the code tool ([Code mode](/guide/sessions#modes)), `"direct"` means that a script calls the tool by its name, with no streamed arguments of its own |
+| `chats.offers(chatId, tool)` | How the chat's model is offered a tool now: `"direct"`, `"lazy"` (through the `tool_search` tool) or nothing (switched off, out of reach, or the chat's pi not running here). In a chat whose mode works through the code tool ([Code mode](/guide/sessions#modes)), `"direct"` means that a script calls the tool by its name, with no streamed arguments of its own |
 | `chats.hold(chatId)` | Keeps the chat's pi from being let go for being idle, or reloaded, while work goes on; returns what lets it go |
 | `chats.create(options)`, `chats.children(parent)`, `chats.start(options)`, `chats.prompt(chatId, message, options?)`, `chats.lastAnswer(chatId)`, `chats.abort(chatId)`, `chats.remove(chatId)` | [Child chats](#child-chats): a chat of a chat, to give part of its work to, or a chat of an agent's or a project's folder; run until it answers, stopped and deleted |
 | `sandbox.run(chatId, argv, options?)`, `sandbox.spawnAs(chatId)`, `sandbox.on()` | [Running things as the chat's agent](#running-things-as-the-chat-s-agent) |
@@ -1654,7 +1654,7 @@ To follow a call of your tool as the model writes its arguments (Canvases
 shows a document being written), ask `portal.chats.offers(chatId, tool)` how
 the tool is offered first: a call by a name it is not offered under is refused
 and never runs, so its text is nobody's. A call of a lazy tool comes as a call
-of the `tools` tool, with yours in its arguments. In a chat in
+of the `tool_search` tool, with yours in its arguments. In a chat in
 [Code mode](/guide/sessions#modes) a call of your tool comes inside the code
 tool's: a script makes it, and nothing of its arguments is streamed.
 
@@ -1700,7 +1700,7 @@ anything (see below).
   like it tries to instruct the agent is flagged and holds the conversation to
   the rules after a suspected prompt injection. The paragraph saying that such
   content is data and never instructions is the portal's, said once in the
-  prompt while any tool that declares `outside` is on or lazy, so the tool does
+  prompt while any tool that declares `outside` is on, lazy or not, so the tool does
   not carry it.
 - `reaches`: the names of its parameters that hold an address the agent chose,
   a URL or a host. Each value a call has in them, text or each text of a list,
@@ -1724,7 +1724,7 @@ anything (see below).
   allows the call when it allows every file, and the action asked for is each
   file's path, one to a line. Every other tool is approved on its command, its
   path or its arguments whole, and a command, a tool server's tools and the
-  `tools` tool never are on files. `approvalFiles` beside `guard` is the older
+  `tool_search` tool never are on files. `approvalFiles` beside `guard` is the older
   spelling, and is still read.
 
 ```js
@@ -2253,7 +2253,7 @@ await portal.extensions.remove("moon");
   so is one that a package installed from another folder has. Of two packages of
   one name, the portal loads the first: the second would be installed and never
   run. A name the portal gives one of its own extensions in a chat's pi
-  (`sandbox`, `guard`, `voice-first`, `cross-model-thinking`, `tools-gateway`,
+  (`sandbox`, `guard`, `voice-first`, `cross-model-thinking`, `tool-search`,
   `routines`, `ask-question`, `ask-primary`, `report`, `codemode`,
   `heartbeat`) is refused too: pi files what a server half adds to a chat under
   its package's name, as it files those, and the package would pass for the

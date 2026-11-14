@@ -34,8 +34,8 @@ A tool that declares that what it returns is outside content carries a shorter
 envelope: the same random closing id, with the warning above said once in the
 agent's instructions instead of on every result. The [Browser](/guide/browser)
 extension's tools declare it, as they read a page after nearly every click. The portal says the warning while
-any such tool is on, whichever of the others are switched off, and through the
-`tools` tool while they are lazy.
+any such tool is on, whichever of the others are switched off, and while they are lazy
+(reached through the `tool_search` tool), which the chat keeps once it has said it.
 
 What a tool declares is in `guard` on its definition, which a tool of the portal
 or of an [extension](/guide/extension-ui#what-the-guard-holds-a-tool-to) may
@@ -60,7 +60,7 @@ What is wrapped: mail and the web read through a command (`curl`, `wget`, `ssh`,
 that declares outside content. A
 server's tools count however they are called: through the adapter's `mcp` tool,
 under their own names (`jira_get_issue`) where its tools are direct, and through
-the `tools` tool where they are lazy. An issue comment or a mail body a server
+the `tool_search` tool where they are lazy. An issue comment or a mail body a server
 hands back is whoever wrote it, and so is what a server from a config other than
 the portal's hands back, or one whose tools are named without the server. A
 server you run yourself can be counted as your own, and its output is then
@@ -81,8 +81,7 @@ model's own would be, and a tool switched off in the chat is refused to a script
 too. What a script's calls read goes to the script, not to the model. So the
 script's own result is wrapped whenever one of its calls read something from
 outside, and flagged with the signs those calls carried, even when the script
-keeps what it read to itself, and also when the call reached a lazy tool through
-the `tools` tool. Until the script ends, what its calls read holds the
+keeps what it read to itself, and also when the call reached a lazy tool, which a script calls by its name. Until the script ends, what its calls read holds the
 conversation back as a flagged result would. A call that is still running when
 the script ends is read by nobody, and holds nothing back.
 
