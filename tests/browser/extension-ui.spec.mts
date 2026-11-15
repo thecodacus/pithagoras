@@ -570,6 +570,13 @@ test('a theme an extension brought is chosen in Settings or switched to by an ex
   await header(page).getByRole('button', { name: 'Switch to Dusk' }).click();
   const ask = page.getByRole('alertdialog', { name: 'Change the colours?' });
   await expect(ask).toContainText('probe wants to change the colours to a theme of pithagoras-themes: “Dusk”.');
+  // A key the person was typing when it opened does not answer it: focus is on Cancel, not on the yes.
+  await expect(ask.getByRole('button', { name: 'Cancel' })).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(ask).toHaveCount(0);
+  expect(await colour('--accent')).toBe('34 211 238');
+  await header(page).getByRole('button', { name: 'Switch to Dusk' }).click();
+  await expect(ask).toBeVisible();
   await ask.getByRole('button', { name: 'Cancel' }).click();
   await expect(ask).toHaveCount(0);
   expect(await colour('--accent')).toBe('34 211 238');

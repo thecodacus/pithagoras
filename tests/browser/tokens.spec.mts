@@ -339,6 +339,20 @@ test("a theme's easing does not slow the rows of a question: its answer buttons 
   await portal(page, { tokens: { 'ease-out': 'cubic-bezier(1, 0, 1, 0)' } });
   await expect(page.locator('.nav-item').first()).toBeVisible();
   await expect(page.locator('html.theme-switching')).toHaveCount(0);
+  // Not fancy: the dialog's own entrance (shell.css) must not take the theme's curve either.
+  const plain = await page.evaluate(() => {
+    const make = (cls: string) => {
+      const card = document.createElement('div');
+      card.className = cls;
+      document.body.append(card);
+      const curve = getComputedStyle(card).animationTimingFunction;
+      card.remove();
+      return curve;
+    };
+    return { dialog: make('ui-dialog'), alert: make('ui-dialog is-alert') };
+  });
+  expect(plain.dialog).toBe('cubic-bezier(0.22, 1, 0.36, 1)');
+  expect(plain.alert).toBe('cubic-bezier(0.34, 1.56, 0.64, 1)');
   await page.evaluate(() => document.documentElement.setAttribute('data-motion', 'fancy'));
   const curves = await page.evaluate(() => {
     const card = document.createElement('div');

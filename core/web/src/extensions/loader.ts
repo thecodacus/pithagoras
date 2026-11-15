@@ -110,6 +110,7 @@ const askToSwitch = ({ extension, theme, owner }: { extension: string; theme: st
     title: t("Change the colours?"),
     message: theme === null ? t("{extension} wants to go back to the portal's own colours.", { extension }) : t("{extension} wants to change the colours to a theme of {owner}: “{theme}”.", { extension, theme, owner: owner ?? "" }),
     confirmLabel: t("Change colours"),
+    unasked: true,
   });
 
 /** The hook behind `portal.theme.use`. */
