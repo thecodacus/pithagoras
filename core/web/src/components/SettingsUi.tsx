@@ -19,7 +19,8 @@ export function Section({ title, hint, action, children }: { title: string; hint
           <h3 className="text-xs font-semibold uppercase tracking-wider text-fg-subtle">{title}</h3>
           {hint && <p className="mt-0.5 text-xs text-fg-subtle">{hint}</p>}
         </div>
-        {action && <div className="shrink-0">{action}</div>}
+        {/* Never wider than the section: at a large text size and spacing a phone has no room for a row of buttons. */}
+        {action && <div className="max-w-full shrink-0">{action}</div>}
       </div>
       <div className="mt-2.5">{children}</div>
     </section>

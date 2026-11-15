@@ -258,6 +258,15 @@ test("the person's text size and spacing sliders change what is made of text and
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem('pithagoras.appearance') ?? '{}'))).toEqual({ text: 100, density: 100 });
 });
 
+test("at the largest text size and spacing, a phone's Settings keep their buttons inside the window", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await portal(page, { appearance: { text: 140, density: 140 } }, '/settings/models');
+  const add = page.getByRole('button', { name: 'Add a provider' });
+  await expect(add).toBeVisible();
+  const box = (await add.boundingBox())!;
+  expect(box.x + box.width).toBeLessThanOrEqual(390);
+});
+
 test("a theme's font is a file its extension ships and its stylesheet declares: the theme names the family, and the portal serves the file", async ({ page }) => {
   const font = readFileSync(new URL('../../node_modules/katex/dist/fonts/KaTeX_Main-Regular.woff2', import.meta.url));
   const served: string[] = [];
