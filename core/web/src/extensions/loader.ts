@@ -110,8 +110,9 @@ const quietly = (fn: () => void): boolean => {
 const askToSwitch = ({ extension, theme, owner }: { extension: string; theme: string | null; owner: string | null }) =>
   confirmDialog({
     title: t("Change the colours?"),
-    message: theme === null ? t("{extension} wants to go back to the portal's own colours.", { extension }) : t("{extension} wants to change the colours to “{theme}”, a theme of {owner}.", { extension, theme, owner: owner ?? "" }),
+    message: theme === null ? t("{extension} wants to go back to the portal's own colours.", { extension }) : t("{extension} wants to change the colours to a theme of {owner}: “{theme}”.", { extension, theme, owner: owner ?? "" }),
     confirmLabel: t("Change colours"),
+    unasked: true,
   });
 
 /** The hook behind `portal.theme.use`. */

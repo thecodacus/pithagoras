@@ -17,7 +17,7 @@ export default {
   theme: {
     extend: {
       // The layer of the portal's questions and approvals, over every other. Not in the preset an extension is built
-      // with, so that no extension's overlay can be drawn over the question that waits for an answer.
+      // with, so that an extension is not offered a layer at the question's (nothing here stops one that writes the class by hand: the guarantee is the browser's top layer, planned for the approvals).
       zIndex: { confirm: "var(--z-confirm, 60)" },
       colors: {
         // Streamdown is written against shadcn's colour names, which this

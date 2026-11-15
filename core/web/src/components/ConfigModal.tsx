@@ -781,6 +781,7 @@ function Scale({ name, hint, label, value, onChange }: { name: keyof Scales; hin
         step={5}
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
+        aria-valuetext={`${value} %`}
         aria-describedby={`scale-${name}-hint`}
         className="mt-1.5 h-1 w-full cursor-pointer appearance-none rounded-full bg-raised accent-accent sm:w-72 sm:block"
       />

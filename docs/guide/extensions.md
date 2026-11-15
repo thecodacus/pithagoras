@@ -138,7 +138,7 @@ card says the same in small:
 | --- | --- |
 | **pi** | Something for the agent: tools, commands, skills, prompts. What its `pi` key names, or without one the `extensions`, `skills`, `prompts` and `themes` folders pi looks in |
 | **Pithagoras** | Something for the portal: a browser half that draws in it, or a server half that runs beside the chats. See [Building an extension](/guide/extension-ui) |
-| **Themes** | Colours for the portal, picked in Settings → This browser → Appearance |
+| **Themes** | Colours for the portal, and if the theme wants it fonts, rounding and spacing, picked in Settings → This browser → Appearance |
 
 A package can be more than one: one with tools for the agent and a panel in
 the portal is both **pi** and **Pithagoras**.

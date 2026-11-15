@@ -80,7 +80,7 @@
 [data-motion="fancy"] .ui-dialog.is-alert { animation: fx-alert-in .5s var(--spring-loose) both; }
 @keyframes fx-alert-in { from { transform: scale(.78) translateY(16px); clip-path: inset(40% -60px 40% -60px round 16px); } 40% { clip-path: inset(-60px round 16px); } to { transform: none; clip-path: inset(-60px round 16px); } }
 /* What is in it comes after it: the title bar, then the page, one after another. */
-[data-motion="fancy"] .ui-dialog > * { animation: fx-row-in .5s var(--ease-out) .08s backwards; }
+[data-motion="fancy"] .ui-dialog > * { animation: fx-row-in .5s cubic-bezier(.22, 1, .36, 1) .08s backwards; }
 [data-motion="fancy"] .ui-dialog > :nth-child(2) { animation-delay: .13s; }
 [data-motion="fancy"] .ui-dialog > :nth-child(3) { animation-delay: .18s; }
 /* Asked to delete: the red button breathes once the question has landed. */

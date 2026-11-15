@@ -1383,8 +1383,9 @@ For the authors of extensions:
   extension's own is switched to at once; another package's, or leaving another's for the portal's own, is asked of the
   person first. It rejects for a theme there is none of, where it used to throw: code that wrapped it in `try` needs
   `await` or a `.catch`.
-- **A theme's name is at most 60 characters, on one line, with no control character and no quote in it.** A package
-  with a longer one, or one with a line break or a quote, fails to load its themes, as one with a bad colour does.
+- **A theme's name is at most 60 characters, on one line, with no control character and no double quote in it.** A package
+  with a longer one, or one with a line break, a control character or a quote, fails to load its themes, as one with a bad colour does.
+  Spaces of any kind (a no-break or ideographic space) are made one plain space.
 - **Build again with this version of `@pithagoras/extension-api`** for your utilities to follow a theme's tokens and
   the person's text size and spacing. A stylesheet built before keeps the sizes it was built with.
 

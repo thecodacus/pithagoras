@@ -14,13 +14,13 @@
 @keyframes ui-backdrop-in { from { background-color: transparent; } }
 /* It opens out from its middle as it rises. The clip reaches past the box,
    so the shadow is whole once it is open. */
-.ui-dialog { animation: ui-dialog-in .32s var(--ease-out) both; }
+.ui-dialog { animation: ui-dialog-in .32s cubic-bezier(.22, 1, .36, 1) both; }
 @keyframes ui-dialog-in {
   from { translate: 0 10px; clip-path: inset(40% -60px 40% -60px round 16px); }
   to { translate: 0 0; clip-path: inset(-60px round 16px); }
 }
 /* An alert asks something now: it arrives a little quicker and with a small overshoot. */
-.ui-dialog.is-alert { animation: ui-alert-in .3s var(--ease-spring) both; }
+.ui-dialog.is-alert { animation: ui-alert-in .3s cubic-bezier(.34, 1.56, .64, 1) both; }
 @keyframes ui-alert-in {
   from { scale: .94; clip-path: inset(35% -60px 35% -60px round 16px); }
   to { scale: 1; clip-path: inset(-60px round 16px); }

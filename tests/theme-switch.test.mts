@@ -36,26 +36,31 @@ test("an extension's switch to its own theme is not the person's choice: the int
     themesSettled();
     assert.equal(chosenPalette()?.id, "ext-pkg/own");
 
-    // An interface with a default of its own is put in use: its default is in effect, not the extension's.
+    // The interface speaks after that (the extensions load beside the manifest): the switch stands over the default it
+    // is declared with (tests/theme-set-first.test.mts for the details).
     setUiDefaultTheme("ui-a/look");
-    assert.equal(chosenPalette()?.id, "ui-a/look");
+    assert.equal(chosenPalette()?.id, "ext-pkg/own");
+    assert.equal(paletteSetBy(), "extension");
+    // Another interface is put in use: its default is in effect, not the extension's.
+    setUiDefaultTheme("ui-b/look");
+    assert.equal(chosenPalette()?.id, "ui-b/look");
     assert.equal(paletteSetBy(), "ui");
 
     // Under that interface the extension switches again: its switch stands over the same interface's default, at the
     // next start as well (the default is declared again there).
     assert.equal(await setThemeAs("ext-pkg", "ext-pkg/own", unasked), true);
-    setUiDefaultTheme("ui-a/look");
+    setUiDefaultTheme("ui-b/look");
     themesSettled();
     assert.equal(chosenPalette()?.id, "ext-pkg/own");
     // Another interface: its default.
-    setUiDefaultTheme("ui-b/look");
-    assert.equal(chosenPalette()?.id, "ui-b/look");
+    setUiDefaultTheme("ui-a/look");
+    assert.equal(chosenPalette()?.id, "ui-a/look");
 
     // What the person said yes to is theirs, and stays over any interface's default.
-    assert.equal(await setThemeAs("ext-pkg", "ui-a/look", async () => true), true);
+    assert.equal(await setThemeAs("ext-pkg", "ui-b/look", async () => true), true);
     assert.equal(paletteSetBy(), "person");
-    setUiDefaultTheme("ui-b/look");
-    assert.equal(chosenPalette()?.id, "ui-a/look");
+    setUiDefaultTheme("ui-a/look");
+    assert.equal(chosenPalette()?.id, "ui-b/look");
     // And an extension that switches to its own over the person's choice does not make it nobody's.
     assert.equal(await setThemeAs("ext-pkg", "ext-pkg/own", unasked), true);
     assert.equal(paletteSetBy(), "person");

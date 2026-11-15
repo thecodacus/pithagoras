@@ -344,7 +344,7 @@ and gaps (`p-*`, `px-*`, `py-*`, `gap-*`, `space-*`) are each read from a variab
 of the page, and
 `z-raised` up to `z-viewer` (the full-screen viewers), `max-w-chat` and `w-nav` are the portal's
 layers and widths. The layer above them, `z-confirm`, is the portal's own, for its questions and the approvals
-(what the guard asks before a command runs): it is not in the preset, and nothing of an extension is drawn at or over it. As the portal ships them they are what Tailwind's own were,
+(what the guard asks before a command runs): it is not in the preset, and an extension is not to use it (the class exists in the portal's own stylesheet, so one written by hand would work: do not). As the portal ships them they are what Tailwind's own were,
 so nothing changes until the person's text size or density, or a theme, sets
 them; widths, heights, margins and offsets stay fixed, so icons do not grow
 with the density. A stylesheet built before these variables existed carries the
@@ -2941,12 +2941,13 @@ control of its own that switches the portal between themes.
 
 `set` switches to a theme of your own package at once. To switch to another
 package's, or to leave one of theirs for the portal's own colours, the portal asks the person
-("*Your extension* wants to change the colours to “Dusk”, a theme of *pithagoras-themes*"), because a package that restyles the whole
+("*Your extension* wants to change the colours to a theme of *pithagoras-themes*: “Dusk”."), because a package that restyles the whole
 portal unasked is one that could make a prompt hard to read. A switch to your own theme is not the person's choice:
 the person's own choice in Settings, and what they said yes to, stay over it, and where nobody has chosen it stays
 until the person changes the theme. `set` returns a promise that resolves
 `true` when the colours were switched and `false` when the person said no, and rejects for a theme there is none
-of. Do not write it as if it always worked.
+of. Asking for the theme that is in effect already resolves `true` at once without a question, and an extension has
+one question open at a time: a call while its question is open resolves `false`. Do not write it as if it always worked.
 
 | `portal.theme.` | |
 | --- | --- |
