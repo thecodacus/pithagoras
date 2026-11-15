@@ -220,6 +220,8 @@ test('a mode\'s temperature is saved as the field is left, cleared when emptied,
   await field.press('Enter');
   await expect.poll(() => writes(state).at(-1)).toBe('PUT /api/chat-modes/research {"temperature":0.2}');
   expect(state.modes[0].temperature).toBe(0.2);
+  // The write is recorded before the page has the answer: typing the next text before it does would be overwritten by it.
+  await expect(field).toHaveValue('0.2');
 
   // A number typed without the digit before or after the point is still a number, and the field shows it as the server keeps it.
   await field.fill('.9');
@@ -234,6 +236,7 @@ test('a mode\'s temperature is saved as the field is left, cleared when emptied,
   await field.fill('0.2');
   await field.blur();
   await expect.poll(() => writes(state).at(-1)).toBe('PUT /api/chat-modes/research {"temperature":0.2}');
+  await expect(field).toHaveValue('0.2');
 
   // The same text again is no write.
   const count = state.writes.length;

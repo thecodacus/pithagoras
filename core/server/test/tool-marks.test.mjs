@@ -263,6 +263,23 @@ test("a chat's head says from its start what its lazy tools said of themselves w
   assert.deepEqual(quiet.voice, []);
 });
 
+test("a lazy tool that the chat starts with switched off still says its outside-content line and its voice lines in the head: switching it on later adds nothing", async () => {
+  db.rememberTools([
+    db.remembered({ name: "heavy_open", source: "pi-heavy", outside: true, voice: ["Say the heavy result in one sentence."] }),
+    db.remembered({ name: "heavy_read", source: "pi-heavy" }),
+  ]);
+  await mark({ "pi-heavy": "lazy" });
+  // heavy_open is off by default, so the chat starts without it; heavy_read keeps the group in the head.
+  db.setToolDefaultsOff(["heavy_open"]);
+  const chat = await json("/api/sessions", "POST", {});
+  const head = headOf(chat.id);
+  assert.deepEqual(head.lazy, ["pi-heavy"]);
+  assert.equal(head.outside, true, "the line is frozen with the head, not added when the tool is switched on");
+  assert.deepEqual(head.voice, ["Say the heavy result in one sentence."]);
+  assert.match(head.hint, /heavy_read/);
+  assert.doesNotMatch(head.hint, /heavy_open/, "the hint names only what the chat starts with");
+});
+
 test("a head stored before heads had a tag is given one once, and keeps it", async () => {
   await mark({ "pi-heavy": "lazy" });
   const chat = await json("/api/sessions", "POST", {});

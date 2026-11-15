@@ -35,14 +35,17 @@ export function buildLazyHead(pinned: readonly string[] = [], off: ReadonlySet<s
   const lazy = new Set([...Object.entries(marks).filter(([, mark]) => mark === "lazy").map(([entry]) => entry), ...resolvedLazy().lazy].filter((entry) => !kept.has(entry)));
   const head = { lazy: [...lazy].sort(), direct: [...direct].sort() };
   // The tools that are lazy in it and may be: judged as the marks do (lazyAllowed), so that a mark on a set whose tools cannot be lazy names none.
-  const names = tools.filter((tool) => tool.allowed && headLazy(head, tool) && !off.has(tool.name)).map((tool) => tool.name);
+  const inHead = tools.filter((tool) => tool.allowed && headLazy(head, tool));
+  const names = inHead.filter((tool) => !off.has(tool.name)).map((tool) => tool.name);
   if (!names.length) return { v: 1, lazy: [], direct: head.direct, hint: "", outside: false, voice: [], tag: ruleTag() };
   // What the lazy tools say of themselves that stays in the head (decision 13): the line that outside content is data, and
   // their lines for a spoken turn. From what they said when a chat last registered them, so that it is said from the first
   // request and a lazy tool that registers late adds nothing to the prompt. One no chat has registered yet adds its own
   // when it does (see keepHead in pi/sdk-client.ts): the one change of the head left, and only for a tool new to the portal.
   const said = new Map(knownTools().map((tool) => [tool.name, tool]));
-  const lazyTools = names.map((name) => said.get(name));
+  // Every tool that is lazy in the head, switched off now or not: one that is off at the start and switched on later says
+  // its line then, and the head must not change under the chat for a tool the model is not even shown.
+  const lazyTools = inHead.map((tool) => said.get(tool.name));
   const voice = [...new Set(lazyTools.flatMap((tool) => tool?.voice ?? []))];
   return { v: 1, ...head, hint: lazyHintOf(lazySetLabels(names)), outside: lazyTools.some((tool) => tool?.outside === true), voice, tag: ruleTag() };
 }
