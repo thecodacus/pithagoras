@@ -134,7 +134,7 @@ export function McpPanel({ onError }: { onError: (e: string) => void }) {
         taken={view.servers.filter((s) => s.name !== existing?.name).map((s) => s.name)}
         onBack={() => setEditing(null)}
         onSave={async (name, entry, settings) => {
-          await api.saveMcpServer(name, entry, existing?.name);
+          await api.saveMcpServer(name, entry, existing?.name, settings.approve);
           // What the portal keeps by the server's name follows a rename only by being said again under the new one.
           const moved = existing !== undefined && existing.name !== name;
           if (settings.exposure !== (states[existing?.name ?? ""]?.mark ?? "auto") || (moved && settings.exposure !== "auto")) await api.setMcpMark(name, settings.exposure);
@@ -439,7 +439,8 @@ function ServerForm({
     // Start from the stored entry so fields this form does not show — oauth
     // blocks, how the tools are exposed, what is hidden — survive an edit here.
     const next: McpServerEntry = { ...e };
-    for (const k of ["command", "args", "env", "cwd", "url", "headers", "description", "timeout", "enabled", "disabled"]) {
+    // `type` too: it names the transport, which the fields below say again (a stdio server moved to an address is no longer `stdio`).
+    for (const k of ["type", "command", "args", "env", "cwd", "url", "headers", "description", "timeout", "enabled", "disabled"]) {
       delete next[k];
     }
 

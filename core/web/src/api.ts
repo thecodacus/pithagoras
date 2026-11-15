@@ -830,10 +830,11 @@ export const api = {
       body: JSON.stringify({ folder, file }),
     }),
   dismissMcpMigration: () => json<{ ok: true }>("/api/mcp/migration/notice", { method: "DELETE" }),
-  saveMcpServer: (name: string, entry: McpServerEntry, from?: string) =>
+  /** `approve`, the tools that ask first, is only checked here, before the server is written; setMcpApprove keeps it. */
+  saveMcpServer: (name: string, entry: McpServerEntry, from?: string, approve?: string[]) =>
     json<{ ok: true; commands: string[] }>(`/api/mcp/servers/${encodeURIComponent(name)}`, {
       method: "PUT",
-      body: JSON.stringify({ entry, from }),
+      body: JSON.stringify({ entry, from, ...(approve ? { approve } : {}) }),
     }),
   deleteMcpServer: (name: string) =>
     json<{ ok: true }>(`/api/mcp/servers/${encodeURIComponent(name)}`, { method: "DELETE" }),

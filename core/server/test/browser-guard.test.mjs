@@ -65,7 +65,13 @@ mock.method(console, "warn", () => {});
  * pi's registry as the guard sees it: the namespace a tool of an MCP server was registered under, which attributes it
  * (a name alone does not). Other tools, whatever they are called, have none.
  */
-const NAMESPACES = { mcp__github__get_issue_comments: "mcp__github", mcp__pages__page: "mcp__pages" };
+const NAMESPACES = {
+  mcp__github__get_issue_comments: "mcp__github",
+  mcp__pages__page: "mcp__pages",
+  mcp__playwright__browser_navigate: "mcp__playwright",
+  mcp__playwright__browser_click: "mcp__playwright",
+  mcp__files__read_file: "mcp__files",
+};
 const namespaceOf = (name) => NAMESPACES[name];
 
 /** A guard as a session of this role has it, its handlers by name. `guardOf`: what the tools declare, the stand-in browser tools' unless told. */

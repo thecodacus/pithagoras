@@ -1,9 +1,10 @@
 // A small MCP server over stdio, for the tests of what pi's MCP support does with one: newline-delimited JSON-RPC, the
 // calls a client makes (initialize, tools/list, tools/call, ping) and nothing else.
 //
-//   node mcp-server.mjs <name> [--tools a,b] [--delay ms] [--gate file] [--resources] [--log file]
+//   node mcp-server.mjs <name> [--tools a,b] [--delay ms] [--slow-read ms] [--gate file] [--resources] [--log file]
 //
-// `--delay` holds the answer to `initialize` back, as a server that starts slowly does; `--gate` holds it back until the
+// `--delay` holds the answer to `initialize` back, as a server that starts slowly does, and `--slow-read` the answer to a
+// resource's read, as a long call does; `--gate` holds it back until the
 // file exists, which a test makes once it has what it needed before the server connects. `--log` appends a line for each
 // start and each call, so a test can tell how many times the server ran and what it was asked.
 import { appendFileSync, existsSync } from "node:fs";
@@ -16,6 +17,7 @@ const flag = (key, fallback) => {
 };
 const tools = String(flag("--tools", "ping")).split(",").filter(Boolean);
 const delay = Number(flag("--delay", 0));
+const slowRead = Number(flag("--slow-read", 0));
 const gate = flag("--gate", undefined);
 const log = flag("--log", undefined);
 const note = (line) => log && appendFileSync(log, `${Date.now()} ${process.pid} ${line}\n`);
@@ -54,6 +56,7 @@ createInterface({ input: process.stdin }).on("line", async (line) => {
   if (message.id === undefined) return; // a notification: initialized, cancelled
   note(`${message.method} ${message.method === "tools/call" ? message.params?.name : ""}`.trim());
   if (message.method === "initialize" && delay) await new Promise((resolve) => setTimeout(resolve, delay));
+  if (message.method === "resources/read" && slowRead) await new Promise((resolve) => setTimeout(resolve, slowRead));
   if (message.method === "initialize" && gate) while (!existsSync(gate)) await new Promise((resolve) => setTimeout(resolve, 10));
   const reply = answer[message.method];
   if (!reply) return send({ id: message.id, error: { code: -32601, message: `no ${message.method}` } });

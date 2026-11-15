@@ -93,6 +93,37 @@ test("a mark is set, said in the file for pi alone, and taken away again", async
   assert.equal((await call("PUT", "/api/mcp/servers/nobody/mark", { mark: "lazy" })).status, 404);
 });
 
+test("a mark the file cannot be told of is not kept either, so that the next try says it in the file", { skip: process.getuid?.() === 0 && "root writes where it likes" }, async () => {
+  // From the CodeRabbit review of #371: the mark was kept and the failure swallowed, and a retry found nothing changed.
+  put({ notes: { command: "n", exposure: "deferred" } });
+  db.setToolMarks({});
+  // A file that can be read and not replaced: its folder is not writable.
+  const { chmodSync } = await import("node:fs");
+  chmodSync(agent, 0o555);
+  try {
+    const r = await call("PUT", "/api/mcp/servers/notes/mark", { mark: "direct" });
+    assert.equal(r.status, 500, JSON.stringify(r.body));
+    assert.equal(r.body.code, "mcp-file");
+    assert.deepEqual(db.toolMarks(), {}, "not kept");
+  } finally {
+    chmodSync(agent, 0o755);
+  }
+  assert.equal((await call("PUT", "/api/mcp/servers/notes/mark", { mark: "direct" })).status, 200);
+  assert.equal(file().mcpServers.notes.exposure, "direct");
+});
+
+test("what was kept of a server is told apart by all of its entry, nested values too, and by which tools the entry hides", () => {
+  // From the CodeRabbit review of #371: the hash kept only the top keys of env and headers, so another tenant's tools passed as these.
+  const hash = toolCache.configHash;
+  assert.notEqual(hash({ command: "x", env: { TENANT: "a" } }), hash({ command: "x", env: { TENANT: "b" } }));
+  assert.notEqual(hash({ url: "https://x", headers: { "X-Org": "a" } }), hash({ url: "https://x", headers: { "X-Org": "b" } }));
+  assert.equal(hash({ command: "x", env: { A: "1", B: "2" } }), hash({ env: { B: "2", A: "1" }, command: "x" }), "the order of keys is no other configuration");
+  // pi registers no hidden tool, so what was kept under one set of hidden tools is not all of the server under another.
+  assert.notEqual(hash({ command: "x", toolExposure: { a: "hidden" } }), hash({ command: "x" }));
+  assert.equal(hash({ command: "x", toolExposure: { a: "direct" } }), hash({ command: "x", toolExposure: { a: "deferred" } }), "how the shown ones are shown is not");
+  assert.equal(hash({ command: "x", exposure: "direct", description: "d" }), hash({ command: "x" }));
+});
+
 test("the tools that ask first are kept by the server's name, and refused when they are not patterns", async () => {
   put({ notes: { command: "n" } });
   let r = await call("PUT", "/api/mcp/servers/notes/approve", { approve: [" delete_* ", "drop", "drop", ""] });

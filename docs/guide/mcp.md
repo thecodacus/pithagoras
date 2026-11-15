@@ -129,6 +129,11 @@ mark of your own.
 A chat that works through the [code tool](/guide/sessions#modes) alone has every
 server connected, and a script calls the tools like any other.
 
+A server whose tools are all switched off in a chat is not started with it, unless
+pi's resource tools still reach it. Switching one of its tools on starts it then,
+without reloading the chat. When a chat stops, every server started for it is
+stopped with it.
+
 pi's three resource tools (`list_mcp_resources`, `list_mcp_resource_templates`,
 `read_mcp_resource`) reach every server with resources, and are lazy with the lazy
 servers. A lazy server that offers only resources is found that way too: once it has

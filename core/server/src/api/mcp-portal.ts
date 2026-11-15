@@ -2,7 +2,7 @@ import { readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import express, { type Router } from "express";
 import { lazyLimits, lazyRefused, mcpMigration, mcpServerStates, resolvedLazy, setMcpApprove, setToolMarks, toolMarks } from "../db.js";
-import { fromAdapterEntry } from "../mcp-config.js";
+import { approvePatterns, fromAdapterEntry } from "../mcp-config.js";
 import { sayMarkInFile } from "../mcp-entry.js";
 import { isWithinText, realPath } from "../within.js";
 import { importServers, mcpServerNames, parseMcpText } from "./mcp.js";
@@ -15,10 +15,8 @@ import { importServers, mcpServerNames, parseMcpText } from "./mcp.js";
 
 /** A file of servers is read whole; one that is longer than this is not a configuration. */
 const MAX_FILE_BYTES = 1_000_000;
-const MAX_APPROVE = 100;
-const MAX_PATTERN = 200;
 
-export type StoredMarks = { error: string; code?: string } | { marks: Record<string, "lazy" | "direct"> };
+export type StoredMarks = { error: string; code?: string; status: number } | { marks: Record<string, "lazy" | "direct"> };
 
 /**
  * Make exactly these the marks (`PUT /api/tools/marks` and the mark of a server). Only what is new is checked, so that a
@@ -29,18 +27,19 @@ export function storeMarks(given: Record<string, "lazy" | "direct">): StoredMark
   const before = toolMarks();
   const added = Object.fromEntries(Object.entries(given).filter(([entry, mark]) => before[entry] !== mark));
   const refused = lazyRefused(added);
-  if (refused.length) return { error: `Cannot be lazy: ${refused.join(", ")}. pi's built-in tools are always offered.`, code: "lazy-refused" };
-  const stored = setToolMarks(given);
+  if (refused.length) return { error: `Cannot be lazy: ${refused.join(", ")}. pi's built-in tools are always offered.`, code: "lazy-refused", status: 400 };
+  // Said in the file before the database keeps it: a mark the database has and the file does not would not be said again,
+  // as a second try finds it unchanged.
   const servers = new Set(mcpServerNames());
-  for (const [entry, one] of Object.entries(stored)) {
-    if (!servers.has(entry) || before[entry] === one) continue;
+  for (const [entry, one] of Object.entries(added)) {
+    if (!servers.has(entry)) continue;
     try {
       sayMarkInFile(entry, one);
     } catch (e) {
-      console.error(`[portal] could not say the mark of ${entry} in mcp.json: ${(e as Error).message}`);
+      return { error: `The mark of ${entry} could not be said in mcp.json: ${(e as Error).message}`, code: "mcp-file", status: 500 };
     }
   }
-  return { marks: stored };
+  return { marks: setToolMarks(given) };
 }
 
 /** The files of a folder that hold servers in a shape that can be read here, and the key the servers are under. */
@@ -68,19 +67,16 @@ export function mcpPortalRouter(): Router {
     if (mark === "auto") delete wanted[name];
     else wanted[name] = mark;
     const done = storeMarks(wanted);
-    if ("error" in done) return res.status(400).json(done);
+    if ("error" in done) return res.status(done.status).json({ error: done.error, code: done.code });
     res.json({ marks: done.marks, resolved: resolvedLazy() });
   });
 
   /** The tools of a server that ask before each call: patterns of the server's own tool names, `*` for any characters. */
   router.put("/mcp/servers/:name/approve", (req, res) => {
     const name = req.params.name;
-    const given = req.body?.approve;
-    if (!Array.isArray(given) || !given.every((one) => typeof one === "string")) return res.status(400).json({ error: "approve must be a list of tool names" });
-    const patterns = [...new Set((given as string[]).map((one) => one.trim()).filter(Boolean))];
-    if (patterns.length > MAX_APPROVE || patterns.some((one) => one.length > MAX_PATTERN || /[\r\n]/.test(one))) {
-      return res.status(400).json({ error: `At most ${MAX_APPROVE} patterns of ${MAX_PATTERN} characters, one per line` });
-    }
+    const checked = approvePatterns(req.body?.approve);
+    if ("error" in checked) return res.status(400).json({ error: checked.error });
+    const { patterns } = checked;
     if (!mcpServerNames().includes(name)) return res.status(404).json({ error: `No server called ${name}` });
     setMcpApprove(name, patterns);
     res.json({ approve: patterns });

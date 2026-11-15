@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { McpMigration, adapterKeysOf, adapterToolName, isNativeEntry, parseAdapterCache, type AdapterState, type Options } from "../core/server/src/mcp-migration.ts";
-import { entryProblem, mcpToolName } from "../core/server/src/mcp-config.ts";
+import { entryProblem, matchesTool, mcpToolName } from "../core/server/src/mcp-config.ts";
 
 /**
  * What the migration from pi-mcp-adapter to pi's own MCP support does with a file and with the names stored by the
@@ -65,6 +65,14 @@ test("includeTools and excludeTools are evaluated as the adapter did, and writte
   const direct = migrate({ gh: { command: "gh-mcp", directTools: ["get_file"], includeTools: ["get_file", "search_code"] } }, { cache });
   assert.deepEqual(written(direct, "gh").toolExposure, { get_file: "direct", search_code: "deferred", "*": "hidden" });
   assert.match(noteOf(m, "gh"), /exact toolExposure/);
+});
+
+test("includeTools or excludeTools beside a toolExposure of the entry's own: the server is off, as which of them holds a tool back is not certain", () => {
+  // From the CodeRabbit review of #371: {"*": "direct"} kept beside an include would have shown every tool the include left out.
+  const cache = { gh: offered(["get_file", "delete_repo"]) };
+  const m = migrate({ gh: { command: "gh-mcp", includeTools: ["get_file"], toolExposure: { "*": "direct" } } }, { cache });
+  assert.equal(written(m, "gh").enabled, false);
+  assert.match(m.finish().servers[0].why.join(" "), /toolExposure of its own/);
 });
 
 test("includeTools or excludeTools without a list of the server's tools to apply them to: the server is off", () => {
@@ -170,6 +178,14 @@ test("approveTools, for a server and for all, becomes confirmations on the serve
   assert.deepEqual(m.server("quiet")!.approve, [], "a server's false is its own");
   assert.deepEqual(m.server("everything")!.approve, ["*"]);
   assert.equal("approveTools" in written(m, "gh"), false);
+});
+
+test("approveTools prefixed with a server name that has a hyphen still asks for the tools the adapter's cache does not list", () => {
+  // From the CodeRabbit review of #371: the adapter matched `gh-mcp_delete_*` against `gh_mcp_delete_repo`, hyphen and underscore alike.
+  const m = migrate({ "gh-mcp": { command: "x", approveTools: ["gh-mcp_delete_*"] } }, { cache: { "gh-mcp": offered(["get_file"]) } });
+  const approve = m.server("gh-mcp")!.approve;
+  assert.ok(matchesTool(approve, "delete_repo"), approve.join(", "));
+  assert.equal(matchesTool(approve, "get_file"), false);
 });
 
 test("lifecycle, debug, idleTimeout and the adapter's own settings are dropped, and said; a timeout in milliseconds is seconds", () => {

@@ -512,6 +512,66 @@ test("a lazy server that offers only resources is reached: a search does not wai
   }
 });
 
+test("a long resource read keeps the lazy server it reads from being stopped as idle in the middle of it", async () => {
+  // From the CodeRabbit review of #371: a resource tool is no server's own, so its call did not count as the server's use.
+  reset();
+  writeServers({ res: entry("res", "", { args: [FIXTURE, "res", "--tools", "", "--log", serversLog, "--resources", "--slow-read", "1500"] }) });
+  const { client, say } = await chat({ lazy: head(["res"]), mcpTimings: { connectWaitMs: 15000, idleMs: 300, idleCheckMs: 50 } });
+  try {
+    // Known after a search, and stopped as idle after it.
+    await say([search("search", { query: "read resource" })]);
+    await until(() => count("exit res") === 1);
+    const r = await say([search("call", { name: "read_mcp_resource", args: { server: "res", uri: "file:///res/one.txt" } })]);
+    assert.match(textOf(r.results[0]), /contents of file:\/\/\/res\/one\.txt/);
+    assert.equal(count("start res"), 2);
+    assert.equal(count("exit res"), 1, "not stopped while it was read");
+  } finally {
+    await close(client);
+  }
+});
+
+test("a server the chat has with it offers resources, and that is remembered for a chat that has it lazy", async () => {
+  // From the CodeRabbit review of #371: only a lazy start asked, so a server started with its chat was kept as one without.
+  reset();
+  writeServers({ both: entry("both", "one", { args: [FIXTURE, "both", "--tools", "one", "--log", serversLog, "--resources"] }) });
+  const { client, say } = await chat({ lazy: head() });
+  try {
+    await say(["Hello."]);
+    await until(() => cache.cachedServer("both")?.resources === true);
+    assert.deepEqual(cache.cachedServer("both").tools.map((t) => t.name), ["mcp__both__one"]);
+  } finally {
+    await close(client);
+  }
+});
+
+test("a server whose tools are all switched off in the chat is not started with it, unless its resources are still reached; switched on again, it is there without a reload", async () => {
+  // From the CodeRabbit review of #371.
+  reset();
+  writeServers({ quiet: entry("quiet", "one,two"), res: entry("res", "one", { args: [FIXTURE, "res", "--tools", "one", "--log", serversLog, "--resources"] }) });
+  // What the cache knows of them, from a chat that had them.
+  const known = await chat({ lazy: head() });
+  try {
+    await known.say(["Hello."]);
+    await until(() => cache.cachedServer("res")?.resources === true && cache.cachedServer("quiet")?.tools.length === 2);
+  } finally {
+    await close(known.client);
+  }
+  await until(() => count("exit quiet") === 1 && count("exit res") === 1);
+  const { client, say } = await chat({ lazy: head(), toolsOff: ["mcp__quiet__one", "mcp__quiet__two", "mcp__res__one"] });
+  try {
+    const first = await say(["Hello."]);
+    assert.equal(count("start quiet"), 1, "nothing of it is wanted: not started");
+    assert.equal(count("start res"), 2, "its resources are wanted");
+    assert.doesNotMatch(names(first.requests[0]).join(), /mcp__quiet/);
+    await client.setToolsOff(["mcp__quiet__two", "mcp__res__one"]);
+    await until(() => count("start quiet") === 2);
+    const r = await say([{ name: "mcp__quiet__one", args: { text: "on" } }]);
+    assert.match(textOf(r.results[0]), /quiet\/one says/);
+  } finally {
+    await close(client);
+  }
+});
+
 test("what is remembered of a server is the user's server's, for the configuration it has: a project's server is not remembered, and a cache read from another entry is not served", async () => {
   // Security review 1 of PR B, finding 6.
   reset();
@@ -550,10 +610,11 @@ test("a project only takes away from a user's server, cannot define one the user
       off: entry("off", "one", { enabled: false }),
       hid: entry("hid", "one,two,three", { toolExposure: { "*": "hidden", one: "deferred", two: "deferred" } }),
       plain: { url: "http://mcp.example.test/mcp", auth: { provider: "anthropic" } },
+      pat: entry("pat", "get_issue,get_pull,list", { toolExposure: { get_issue: "direct" } }),
     });
     const folder = chatDir();
     mkdirSync(path.join(folder, ".pi"), { recursive: true });
-    writeFileSync(path.join(folder, ".pi", "mcp.json"), JSON.stringify({ mcpServers: { github: entry("evil"), off: { enabled: true }, hid: { toolExposure: { one: "hidden", three: "direct" }, exposure: "direct" }, loose: { url: "http://loose.example.test/mcp", type: "sse" } } }));
+    writeFileSync(path.join(folder, ".pi", "mcp.json"), JSON.stringify({ mcpServers: { github: entry("evil"), off: { enabled: true }, hid: { toolExposure: { one: "hidden", three: "direct" }, exposure: "direct" }, pat: { toolExposure: { "get_*": "hidden" } }, loose: { url: "http://loose.example.test/mcp", type: "sse" } } }));
     const { servers, errors } = chatServers(folder, true);
     const byName = Object.fromEntries(servers.map((one) => [one.name, one]));
     assert.equal(byName.github, undefined, "the user's github is not connected, and no project's takes its name");
@@ -561,6 +622,8 @@ test("a project only takes away from a user's server, cannot define one the user
     assert.equal(byName.off.entry.enabled, false, "a project does not switch on what the person switched off");
     assert.deepEqual(byName.hid.entry.toolExposure, { one: "hidden", "*": "hidden", two: "deferred" }, "it hides more, and shows nothing the file hides");
     assert.equal(byName.hid.entry.exposure, undefined);
+    // A pattern of the project's hides a tool the user's file names exactly too, which pi would take before any pattern.
+    assert.deepEqual(byName.pat.entry.toolExposure, { "get_*": "hidden", get_issue: "hidden" });
     assert.ok(errors.some((e) => /"off".*enabled ignored/.test(e)), errors.join("\n"));
     assert.ok(errors.some((e) => /"hid".*exposure/.test(e)), errors.join("\n"));
     assert.equal(byName.plain, undefined, "a provider's token over plain http is not sent, as pi would not");

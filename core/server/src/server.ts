@@ -1380,7 +1380,7 @@ app.put("/api/tools/marks", (req, res) => {
     return res.status(400).json({ error: 'marks must be an object of "lazy" or "direct" by tool set or `<tool>name`' });
   }
   const done = storeMarks(given as Record<string, "lazy" | "direct">);
-  if ("error" in done) return res.status(400).json(done);
+  if ("error" in done) return res.status(done.status).json({ error: done.error, code: done.code });
   res.json({ marks: done.marks, resolved: resolvedLazy() });
 });
 

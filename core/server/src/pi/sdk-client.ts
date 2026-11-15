@@ -1878,6 +1878,8 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     // The portal's switches name a tool that is off until switched on only once it has seen it: until then it stays off.
     this.switchedOff = new Set([...names, ...this.unseenOff()]);
     this.applyToolsOff();
+    // A server left off because all of its tools were is wanted again once one is on.
+    this.mcp?.switched();
     // What the rule says of a tool that is switched off or on is for the next message, as for a reload.
     this.sayAudioRuleAgain();
   }

@@ -11,7 +11,7 @@ async function portal(page: Page) {
   const mcp = {
     path: '/a/mcp.json', exists: true, clashes: [], raw: '{}', parseError: null,
     servers: [
-      { name: 'github', entry: { url: 'https://mcp.example.test', auth: 'oauth', headers: { 'X-Org': 'a' } }, transport: 'http', disabled: false, problem: null, commands: [] },
+      { name: 'github', entry: { url: 'https://mcp.example.test', oauth: { clientId: 'portal-test' }, headers: { 'X-Org': 'a' } }, transport: 'http', disabled: false, problem: null, commands: [] },
       { name: 'notes', entry: { command: 'notes-mcp' }, transport: 'stdio', disabled: false, problem: null, commands: [] },
     ],
   };

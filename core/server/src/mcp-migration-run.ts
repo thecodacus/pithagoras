@@ -1,10 +1,11 @@
 import type Database from "better-sqlite3";
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, statSync } from "node:fs";
 import path from "node:path";
 import { writeFileAtomic } from "./atomic-write.js";
 import { mcpConfigPath, parseMcpText, readMcpFile, type McpFile } from "./api/mcp.js";
 import { DATA_DIR } from "./data-dir.js";
+import { toolExposureOf } from "./mcp-config.js";
 import { sourceOf } from "./extension-switch.js";
 import { McpMigration, parseAdapterCache, type AdapterState, type Report } from "./mcp-migration.js";
 import { configHash, declarationTokens, rememberServerTools, type CachedTool } from "./mcp-tools.js";
@@ -196,28 +197,44 @@ function lastWritten(): { written: string; adapter?: AdapterState["adapter"] } |
   }
 }
 
+/** The source of the run that is converting now, kept until the database has taken its work (see sourceFile). */
+const attemptFile = (): string => `${mcpConfigPath()}.migrating`;
+
 /**
  * The file to convert. Where a run wrote the new mcp.json and stopped before the database took it (the files are written in
  * its transaction, but are not part of it), the file is the converted one, which has lost the adapter's names (`docs.v2`,
- * `toolPrefix`) the stored switches still use: the source is then the copy that run kept. Told by the file being the very
- * text that run wrote; a file the person put back, or changed since, is the source as it is.
+ * `toolPrefix`) the stored switches still use: the source is then what that run converted. Told by the file being the very
+ * text that run wrote; a file the person put back, or changed since, is the source as it is. What that run converted is
+ * its own copy (`mcp.json.migrating`), or, after the database took a run, the first copy (`mcp.json.adapter`), which a
+ * second move after going back does not overwrite.
  */
-function sourceFile(): { config: McpFile; raw: string; current: string; error?: string; adapter?: AdapterState["adapter"] } {
+function sourceFile(): { config: McpFile; raw: string; current: string; error?: string; unreadable?: true; adapter?: AdapterState["adapter"]; recovered?: true } {
   const read = readMcpFile();
-  const copy = `${mcpConfigPath()}.adapter`;
   const last = lastWritten();
-  if (!read.error && last !== undefined && read.raw && sha(read.raw) === last.written && existsSync(copy)) {
-    try {
-      const raw = readFileSync(copy, "utf8");
-      const parsed = parseMcpText(raw);
-      const config: McpFile = isRecord(parsed) ? (parsed as McpFile) : { mcpServers: {} };
-      if (!isRecord(config.mcpServers)) config.mcpServers = {};
-      return { config, raw, current: read.raw, ...(last.adapter ? { adapter: last.adapter } : {}) };
-    } catch {
-      // A copy that cannot be read: the file as it is.
+  if (!read.error && last !== undefined && read.raw && sha(read.raw) === last.written) {
+    for (const copy of [attemptFile(), `${mcpConfigPath()}.adapter`]) {
+      if (!existsSync(copy)) continue;
+      try {
+        const raw = readFileSync(copy, "utf8");
+        const parsed = parseMcpText(raw);
+        const config: McpFile = isRecord(parsed) ? (parsed as McpFile) : { mcpServers: {} };
+        if (!isRecord(config.mcpServers)) config.mcpServers = {};
+        return { config, raw, current: read.raw, recovered: true, ...(last.adapter ? { adapter: last.adapter } : {}) };
+      } catch {
+        // A copy that cannot be read: the next one, or the file as it is.
+      }
     }
   }
   return { ...read, current: read.raw };
+}
+
+/** The database has taken the move: the source a run kept for a retry is not wanted any more. */
+export function mcpMigrationSettled(): void {
+  try {
+    rmSync(attemptFile(), { force: true });
+  } catch (e) {
+    console.warn(`[portal] ${attemptFile()} could not be removed: ${(e as Error).message}`);
+  }
 }
 
 /** Run the migration on the open database: the work of getDb()'s transaction, the files it touches, and the report. */
@@ -225,14 +242,18 @@ export function migrateMcp(d: Database.Database): void {
   const now = new Date().toISOString();
   const read = sourceFile();
   const { config, raw, current } = read;
-  // An empty file is not a broken one: pi reads it as no servers, as the adapter did.
-  const error = raw.trim() === "" ? undefined : read.error;
+  // An empty file is not a broken one: pi reads it as no servers, as the adapter did. One that cannot be read at all is.
+  const error = raw.trim() === "" && !read.unreadable ? undefined : read.error;
   const settings = readPiSettings();
   const adapter = adapterIn(settings.packages);
   const cache = readAdapterCache();
   const had = !error && Object.keys(config.mcpServers).length > 0;
-  // A portal that never had the adapter or a server: nothing to carry over, and nothing to say.
-  if (!error && !adapter && !had && !Object.keys(cache).length) return;
+  // A portal that never had the adapter or a server: nothing to carry over, and nothing to say. One that waited for its file
+  // to be fixed, and finds it empty now, waits no longer: the next start would take a backup to try again.
+  if (!error && !adapter && !had && !Object.keys(cache).length) {
+    if (migrationPending(d)) d.prepare("DELETE FROM settings WHERE key IN (?, ?)").run(MCP_MIGRATION, MCP_MIGRATION_NOTICE);
+    return;
+  }
 
   const base = { v: 1 as const, at: now };
   if (error) {
@@ -425,8 +446,9 @@ export function migrateMcp(d: Database.Database): void {
       }
       const target = reached && migration.verdict(reached.tool);
       const name = target?.kind === "map" ? target.to : target?.kind === "keep" ? reached!.tool : undefined;
-      // The rule allowed that one call, all of its arguments: a subject of the path alone would allow any other argument with it.
-      const whole = reached && Object.keys(reached.args).every((key) => key !== "path" && key !== "file_path") ? true : reached ? Object.keys(reached.args).length === 1 : false;
+      // The rule allowed that one call, all of its arguments and no other: only where the guard matches the tool's rules
+      // against all of them too. A subject of the path (or a command) alone would allow any other argument beside it.
+      const whole = reached !== undefined && name !== undefined && subjectOfArgs(name, reached.args) === JSON.stringify(reached.args);
       if (reached && name && whole) {
         updateRule.run(name, literalPattern(subjectOfArgs(name, reached.args)), rule.id);
         migration.counted();
@@ -459,12 +481,18 @@ export function migrateMcp(d: Database.Database): void {
   if (hadFile && text !== current) {
     // The file as it was, once: a try after one that stopped halfway keeps the first copy, not a converted one.
     if (!existsSync(copy)) writeFileAtomic(copy, raw, 0o600);
+    // And what this run converts, for a retry of this run: the first copy may be of a file from before an earlier move.
+    writeFileAtomic(attemptFile(), raw, 0o600);
     // Said before the file is written: a run that stops after it, before the database takes it, is known by it at the next start (sourceFile).
     written = sha(text);
     writeFileAtomic(reportFile(), JSON.stringify({ v: 1, status: "writing", at: now, adapter: { was: state.adapter }, file: { state: "converted", written } }, null, 2) + "\n", 0o600);
     writeFileAtomic(file, text, 0o600);
     fileState = "converted";
-  } else if (hadFile) fileState = "converted";
+  } else if (hadFile) {
+    fileState = "converted";
+    // A retry that comes to the very file the stopped run wrote has nothing to write, and still needs its source if it stops too.
+    if (read.recovered) written = sha(text);
+  }
   // Where the file was kept as it was, whichever try made the copy.
   if (existsSync(copy)) copyNote = path.basename(copy);
 
@@ -475,7 +503,8 @@ export function migrateMcp(d: Database.Database): void {
     if (!entry || !offered?.tools.length) continue;
     const tools: CachedTool[] = [];
     for (const tool of offered.tools) {
-      if (tool.appOnly) continue;
+      // pi registers no tool the entry hides, and a search must not find one either.
+      if (tool.appOnly || toolExposureOf(entry, tool.name) === "hidden") continue;
       const name = migration.nativeName(plan.name, tool.name);
       if (!name) continue;
       const parameters = tool.inputSchema ?? { type: "object", properties: {} };

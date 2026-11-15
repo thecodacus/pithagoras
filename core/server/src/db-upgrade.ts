@@ -44,8 +44,8 @@ function mcpWaiting(d: Database.Database): boolean {
   } catch {
     return false;
   }
-  const { raw, error } = readMcpFile();
-  return !error || raw.trim() === "";
+  const { raw, error, unreadable } = readMcpFile();
+  return !error || (raw.trim() === "" && !unreadable);
 }
 
 /** Whether the database needs upgrading. A new install has nothing to keep and is not checked. */

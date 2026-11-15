@@ -228,7 +228,9 @@ was off becomes on. Nothing is asked: a server whose conversion is not certain i
 report.
 
 1. **The file.** `mcp.json` is written again in pi's keys, as plain JSON. The file as it was, comments and all, is
-   kept beside it as `mcp.json.adapter`, readable by the account the portal runs as and no other.
+   kept beside it as `mcp.json.adapter`, readable by the account the portal runs as and no other. While the move
+   runs, the file it converts is also kept as `mcp.json.migrating`, so that a start that stops halfway does it again
+   from that file; it is removed once the move is done.
 2. **pi's package list.** The adapter's entry goes. Its files stay on disk. A project that lists the adapter in its
    own `.pi/settings.json` is not edited; the adapter is left out of its chats all the same.
 3. **Every place that names a tool.** The tools switched off or on in the default, an agent, a project, a routine, a

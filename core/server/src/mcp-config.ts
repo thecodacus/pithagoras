@@ -281,6 +281,23 @@ function ownPatterns(pattern: string, server: string, wide: boolean): string[] {
   return [...out];
 }
 
+const MAX_APPROVE = 100;
+const MAX_PATTERN = 200;
+
+/**
+ * The tools of a server that ask before each call, as given (`approve`): patterns of the server's own tool names, trimmed and
+ * once each, or what is wrong with them. One check for the route that keeps them and the save of the entry they go with, so
+ * that the form does not write a server whose questions are then refused.
+ */
+export function approvePatterns(given: unknown): { patterns: string[] } | { error: string } {
+  if (!Array.isArray(given) || !given.every((one) => typeof one === "string")) return { error: "approve must be a list of tool names" };
+  const patterns = [...new Set((given as string[]).map((one) => one.trim()).filter(Boolean))];
+  if (patterns.length > MAX_APPROVE || patterns.some((one) => one.length > MAX_PATTERN || /[\r\n]/.test(one))) {
+    return { error: `At most ${MAX_APPROVE} patterns of ${MAX_PATTERN} characters, one per line` };
+  }
+  return { patterns };
+}
+
 export function fromAdapterEntry(raw: Record<string, unknown>, server: string): Translated {
   const entry: Record<string, unknown> = { ...raw };
   const notes: string[] = [];
@@ -329,9 +346,11 @@ export function fromAdapterEntry(raw: Record<string, unknown>, server: string): 
     // Excluded first, as an exact name wins over a pattern and among patterns the first does: what is excluded stays hidden.
     for (const one of out) mine[one] = "hidden";
     if (inn.length) {
-      // A name that an exclusion already covers stays hidden: an exact entry would win over the exclusion's pattern.
-      for (const one of inn) if (one.includes("*") || !matchesTool(out, one)) mine[one] = base === "hidden" ? "codemode" : base;
-      mine["*"] = "hidden";
+      // A name that an exclusion already covers stays hidden: an exact entry would win over the exclusion's pattern, and the
+      // same pattern in both lists is the exclusion's.
+      for (const one of inn) if (mine[one] !== "hidden" && (one.includes("*") || !matchesTool(out, one))) mine[one] = base === "hidden" ? "codemode" : base;
+      // What no include names is hidden, unless an include names everything.
+      mine["*"] ??= "hidden";
     }
     entry.toolExposure = { ...mine, ...(isRecord(entry.toolExposure) ? entry.toolExposure : {}) };
     notes.push("includeTools and excludeTools became toolExposure");

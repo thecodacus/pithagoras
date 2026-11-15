@@ -51,11 +51,28 @@ export const mcpToolCachePath = (): string => path.resolve(DATA_DIR, "mcp-tools.
 /** The keys of an entry that decide what a server offers: how it is reached, not how the chats see it. */
 const DEFINING = ["type", "command", "args", "cwd", "env", "url", "headers", "oauth", "auth"] as const;
 
-/** A hash of what defines the server in an entry, so a cache entry can tell the configuration it was read from. */
+/** A value as JSON with the keys of every object in it sorted, at every depth: the same configuration is the same text. */
+const sortedJson = (value: unknown): string =>
+  Array.isArray(value)
+    ? `[${value.map(sortedJson).join(",")}]`
+    : value && typeof value === "object"
+      ? `{${Object.keys(value as Record<string, unknown>).sort().filter((key) => (value as Record<string, unknown>)[key] !== undefined).map((key) => `${JSON.stringify(key)}:${sortedJson((value as Record<string, unknown>)[key])}`).join(",")}}`
+      : (JSON.stringify(value) ?? "null");
+
+/**
+ * A hash of what defines the server in an entry, so a cache entry can tell the configuration it was read from. And which
+ * tools the entry hides (`toolExposure`, in its order, as pi reads it): pi does not register a hidden tool, so what was kept
+ * of the server under one set of hidden tools is not all of it under another. How the others are shown is not in it.
+ */
 export function configHash(entry: unknown): string {
   const source = (entry ?? {}) as Record<string, unknown>;
-  const defined = Object.fromEntries(DEFINING.filter((key) => source[key] !== undefined).map((key) => [key, source[key]]));
-  return createHash("sha256").update(JSON.stringify(defined, Object.keys(defined).sort())).digest("hex").slice(0, 16);
+  const defined: Record<string, unknown> = Object.fromEntries(DEFINING.filter((key) => source[key] !== undefined).map((key) => [key, source[key]]));
+  const exposure = source.toolExposure;
+  if (exposure && typeof exposure === "object" && !Array.isArray(exposure)) {
+    const hides = Object.entries(exposure as Record<string, unknown>).map(([tool, one]) => [tool, one === "hidden"]);
+    if (hides.some(([, hidden]) => hidden)) defined.hides = hides;
+  }
+  return createHash("sha256").update(sortedJson(defined)).digest("hex").slice(0, 16);
 }
 
 /** What a tool's declaration costs the model's list, as the tool texts test measures it. */

@@ -75,6 +75,8 @@ function seed({ adapter = true, files = ADAPTER_FILE } = {}) {
   rmSync(path.join(home, "mcp-migration.json"), { force: true });
   rmSync(toolCache.mcpToolCachePath(), { force: true });
   rmSync(`${mcpPath}.adapter`, { force: true });
+  rmSync(`${mcpPath}.migrating`, { force: true });
+  rmSync(mcpPath, { recursive: true, force: true });
   mkdirSync(agent, { recursive: true });
   writeFileSync(mcpPath, files);
   writeFileSync(cachePath, cacheJson(CACHED));
@@ -109,6 +111,14 @@ const run = () => {
   d.transaction(() => migrateMcp(d))();
   return report();
 };
+/** A run that may leave no report: one that found nothing to move. */
+run.quiet = () => d.transaction(() => migrateMcp(d))();
+/** A run that writes its files and stops before the database takes its work. */
+const killed = () =>
+  assert.throws(() => d.transaction(() => {
+    migrateMcp(d);
+    throw new Error("killed before the commit");
+  })(), /killed/);
 
 test("a portal with nothing of the adapter, and no server, has nothing to carry over and says nothing", () => {
   rmSync(mcpPath, { force: true });
@@ -216,7 +226,8 @@ test("every row of the table: the file, the package list, the marks and every pl
 
   // What each server offered, for the tool lists before it runs.
   assert.deepEqual(Object.keys(toolCache.cachedServers()).sort(), ["docs_v2", "github", "notes", "understory"]);
-  assert.deepEqual(toolCache.cachedServer("github").tools.map((t) => [t.name, t.original]).sort(), [["mcp__github__create_issue", "create_issue"], ["mcp__github__delete_repo", "delete_repo"], ["mcp__github__get_file", "get_file"], ["mcp__github__search_code", "search_code"]]);
+  // Not the tools its excludeTools hid: pi registers none of them, and a search is not to find them in the cache either.
+  assert.deepEqual(toolCache.cachedServer("github").tools.map((t) => [t.name, t.original]).sort(), [["mcp__github__create_issue", "create_issue"], ["mcp__github__get_file", "get_file"], ["mcp__github__search_code", "search_code"]]);
   assert.equal(toolCache.cachedServer("docs_v2").hash, toolCache.configHash(servers.docs_v2));
 
   // The report, the notice, and the copy that survives going back to the database from before.
@@ -330,6 +341,25 @@ test("a file that cannot be read is changed in no way, and waits: the next start
   assert.notEqual(run().status, "pending");
 });
 
+test("an mcp.json that is there and cannot be read at all waits as a broken one does, and one that waited and is empty now waits no more", () => {
+  // From the CodeRabbit review of #371: the read threw out of the upgrade, and the portal said its database was damaged.
+  seed();
+  rmSync(mcpPath);
+  mkdirSync(mcpPath);
+  const r = run();
+  assert.equal(r.status, "pending");
+  assert.equal(r.file.state, "unreadable");
+  assert.ok(JSON.parse(readFileSync(settingsPath, "utf8")).packages.includes(ADAPTER), "nothing changed");
+  // Fixed to nothing at all, with nothing of the adapter left: nothing to move, and no report that waits (and takes a backup at every start).
+  rmSync(mcpPath, { recursive: true });
+  writeFileSync(mcpPath, "{}");
+  rmSync(cachePath, { force: true });
+  writeFileSync(settingsPath, JSON.stringify({ packages: [] }));
+  run.quiet();
+  assert.equal(migrationPending(d), false);
+  assert.equal(setting(MCP_MIGRATION), undefined);
+});
+
 test("what folders bring is listed, and left as it is", () => {
   seed();
   const withAdapter = path.join(home, "ws", "brings-adapter");
@@ -398,6 +428,23 @@ test("a run that wrote the new mcp.json and stopped before the database took it 
   assert.ok(file().mcpServers.added);
 });
 
+test("a second move that stops halfway is done again from what it converted, not from the first move's copy; and a retry that writes nothing keeps that source for one more", () => {
+  // From the CodeRabbit review of #371: mcp.json.adapter is the file of the first move, and a later one converts another.
+  seed();
+  writeFileSync(`${mcpPath}.adapter`, ADAPTER_FILE);
+  const later = ADAPTER_FILE.replace(`"notes": { "command": "notes-mcp" }`, `"notes": { "command": "notes-mcp" },\n    "added": { "command": "later" }`);
+  writeFileSync(mcpPath, later);
+  killed();
+  assert.ok(file().mcpServers.added, "the converted file has it");
+  // The retry comes to the very file that was written, writes nothing, and stops as well.
+  killed();
+  const r = run();
+  assert.equal(r.status, "done");
+  assert.ok(file().mcpServers.added, "converted from the second move's source, every time");
+  assert.equal(readFileSync(`${mcpPath}.adapter`, "utf8"), ADAPTER_FILE, "the first copy is the first file still");
+  assert.equal(lines(d.prepare("SELECT tools_off FROM sessions WHERE id = 's2'").get().tools_off).join(), "mcp__docs_v2__search", "the stored names were carried from the source");
+});
+
 test("a channel's instructions are scanned for the old names, as a routine's are", () => {
   // Correctness review 1 of PR B, finding 11.
   seed();
@@ -419,6 +466,7 @@ test("a permission for one call of the adapter's mcp tool becomes one on the too
   const r = run();
   const rules = Object.fromEntries(d.prepare("SELECT id, tool, pattern FROM tool_rules").all().map((one) => [one.id, one]));
   assert.equal(rules["r-path-and-more"], undefined, "deleted: an allow rule that goes is closed");
-  assert.deepEqual(rules["r-path-only"], { id: "r-path-only", tool: "mcp__notes__note_add", pattern: "/notes/a.md" });
+  // From the CodeRabbit review of #371: one of the path alone allowed only that path, and a rule on the path would allow it with any other argument.
+  assert.equal(rules["r-path-only"], undefined);
   assert.ok(r.unconverted.some((item) => item.where === "standing permissions" && /other arguments/.test(item.why)));
 });

@@ -41,6 +41,8 @@ interface Planned {
   plan: Plan;
   /** The entry as pi is given it, with the exposure the chat wants. */
   config: Record<string, unknown>;
+  /** Off only because every tool of it is switched off in the chat: a switch that turns one on brings it back (see switched). */
+  byOff?: boolean;
 }
 
 /**
@@ -63,19 +65,24 @@ function cachedFor(name: string, entry: Record<string, unknown>): CachedServer |
 
 /**
  * How a chat treats a server: connected with the chat (`start`), connected when a tool of it is first wanted (`lazy`), or
- * not at all (`off`: the file says it is off, or hides it, or every tool the portal knows of it is switched off in this
- * chat). Decided from the chat's frozen head and the tools it has off, never from what is connected now.
+ * not at all (`off`: the file says it is off, or hides it, or the chat would connect it with it and wants nothing of it:
+ * every tool the portal knows of it is switched off in this chat, and its resources are not reached either). Decided
+ * from the chat's frozen head and the tools it has off, never from what is connected now.
  */
 export function planOf(entry: Record<string, unknown>, name: string, head: Pick<LazyHead, "lazy" | "direct">, codemodeOnly: boolean, off: ReadonlySet<string>, from: ChatServer["from"] = "user"): Plan {
   if (!entryEnabled(entry) || resolvedEntry(entry).exposure === "hidden") return "off";
   // A project's server is not remembered (see snapshot): what is kept under its name is another server's.
-  const known = from === "user" ? (cachedFor(name, entry)?.tools ?? []) : [];
-  if (known.length && known.every((tool) => off.has(tool.name))) return "off";
-  if (codemodeOnly) return "start";
+  const cached = from === "user" ? cachedFor(name, entry) : undefined;
+  const known = cached?.tools ?? [];
+  // pi's resource tools reach every server that has resources, whatever its own tools are switched to.
+  const resources = cached?.resources === true && MCP_RESOURCE_TOOLS.some((tool) => !off.has(tool));
+  const unwanted = known.length > 0 && known.every((tool) => off.has(tool.name)) && !resources;
+  if (codemodeOnly) return unwanted ? "off" : "start";
   const prefix = toolEntry(`${mcpNamespace(name)}__`);
   // A tool of it that is kept in the list by its own entry needs the server with the chat.
-  if (head.direct.some((entry) => entry.startsWith(prefix))) return "start";
-  return headLazy(head, { name: "", set: name }) ? "lazy" : "start";
+  if (head.direct.some((entry) => entry.startsWith(prefix))) return unwanted ? "off" : "start";
+  // A lazy server costs nothing until a tool of it is wanted, and one switched on in the middle of the chat is wanted then.
+  return headLazy(head, { name: "", set: name }) ? "lazy" : unwanted ? "off" : "start";
 }
 
 /** The config pi is given for a server: the chat's exposure, and the tools the file hides. */
@@ -154,6 +161,8 @@ export class McpRuntime {
   private running = new Map<string, string>();
   /** The lazy servers that did not connect in this session, and why: a search does not wait for them again. */
   private failed = new Map<string, string>();
+  /** The servers started with the chat that were asked in this session whether they offer resources (see noteResources). */
+  private probed = new Set<string>();
   private timer?: ReturnType<typeof setInterval>;
   /** pi's own handlers for the end of a session, as its MCP extension registers them: what closes the servers pi started (see close). */
   private closers: ((event: unknown, ctx?: unknown) => unknown)[] = [];
@@ -227,12 +236,37 @@ export class McpRuntime {
     for (const server of read.servers) {
       const plan = planOf(server.entry, server.name, head, only, off, server.from);
       const config = configFor(server.entry, plan, head, server.name, only);
-      this.planned.set(server.name, { server, plan, config });
+      const byOff = plan === "off" && planOf(server.entry, server.name, head, only, new Set(), server.from) !== "off";
+      this.planned.set(server.name, { server, plan, config, ...(byOff ? { byOff } : {}) });
       if (plan === "start") connect.push({ name: server.name, config, source: server.from === "project" ? project : mcpConfigPath(), scope: server.from === "project" ? "project" : "global" });
     }
     // What is wrong with the file shows on the settings page; a notice in every chat that starts says nothing new.
     for (const error of read.errors) console.warn(`[portal] MCP configuration: ${error}`);
     return { servers: connect, errors: [], autoEnableCodemode: false };
+  }
+
+  /**
+   * The chat's switches changed. A server that was left off because every tool of it was switched off is reached as the
+   * chat's head says once one of them is on, without a reload: one the head has with the chat is connected now, as it would
+   * have been at the start. (A lazy one is never off by its switches: see planOf.)
+   */
+  switched(): void {
+    const head = this.options.head();
+    const only = this.options.codemodeOnly();
+    const off = this.options.off();
+    for (const [name, one] of this.planned) {
+      if (one.plan !== "off" || !one.byOff) continue;
+      const plan = planOf(one.server.entry, name, head, only, off, one.server.from);
+      if (plan === "off") continue;
+      const config = configFor(one.server.entry, plan, head, name, only);
+      this.planned.set(name, { server: one.server, plan, config });
+      if (plan !== "start") continue;
+      try {
+        this.pi?.registerMcpServer(name, config);
+      } catch (e) {
+        console.warn(`[portal] could not start the MCP server ${name}: ${(e as Error).message}`);
+      }
+    }
   }
 
   /** The names of the servers this chat's configuration has, enabled or not: what a tool's namespace is told apart by. */
@@ -334,6 +368,26 @@ export class McpRuntime {
       } catch (e) {
         console.error(`[portal] could not keep the tools of ${server}: ${(e as Error).message}`);
       }
+    }
+    for (const [server, one] of this.planned) if (one.plan === "start" && one.server.from === "user" && !this.probed.has(server)) void this.noteResources(server, one);
+  }
+
+  /**
+   * Whether a server the chat started with it offers resources, kept with its tools: connect() asks it of a lazy server it
+   * starts, and a later chat that has this one lazy finds the resource tools from the cache before it runs. Asked once a
+   * session, or again while it has not connected.
+   */
+  private async noteResources(server: string, one: Planned): Promise<void> {
+    this.probed.add(server);
+    const has = await this.servesResources(server);
+    if (!has) {
+      if (!this.up(server)) this.probed.delete(server);
+      return;
+    }
+    try {
+      rememberServerTools(server, configHash(one.server.entry), this.known(server)?.tools ?? [], true);
+    } catch (e) {
+      console.error(`[portal] could not keep what ${server} offers: ${(e as Error).message}`);
     }
   }
 
@@ -482,6 +536,7 @@ export class McpRuntime {
     pi.on("session_start", () => {
       // pi's runtime of the old session is gone with its servers: nothing is started that this knows of.
       this.failed.clear();
+      this.probed.clear();
       this.started.clear();
       this.starting.clear();
       this.running.clear();
@@ -505,16 +560,18 @@ export class McpRuntime {
       this.snapshot();
     });
     pi.on("agent_end", () => this.snapshot());
-    // What is used is not idle.
+    // What is used is not idle. A resource tool is no server's own: its call names the server it reads.
     pi.on("tool_call", (event: any) => {
-      const server = this.serverOf(this.options.session()?.getToolDefinition?.(event.toolName));
+      const named = isResourceTool(String(event.toolName)) ? event.input?.server : undefined;
+      const server = typeof named === "string" ? named : this.serverOf(this.options.session()?.getToolDefinition?.(event.toolName));
       if (!server || !this.started.has(server)) return;
       this.started.set(server, Date.now());
       if (typeof event.toolCallId === "string") this.running.set(event.toolCallId, server);
     });
     const ended = (event: any) => {
-      if (typeof event.toolCallId !== "string" || !this.running.delete(event.toolCallId)) return;
-      const server = this.serverOf(this.options.session()?.getToolDefinition?.(event.toolName));
+      if (typeof event.toolCallId !== "string") return;
+      const server = this.running.get(event.toolCallId);
+      if (!this.running.delete(event.toolCallId)) return;
       if (server && this.started.has(server)) this.started.set(server, Date.now());
     };
     pi.on("tool_result", ended);

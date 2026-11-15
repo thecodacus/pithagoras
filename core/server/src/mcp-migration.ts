@@ -342,7 +342,8 @@ function convertEntry(name: string, raw: Record<string, unknown>, state: Adapter
   } else notes.push("exposure was there already: kept");
   const exposure: Record<string, string> = isRecord(raw.toolExposure) ? { ...(raw.toolExposure as Record<string, string>) } : {};
   if (filtered) {
-    if (!tools.length) fail("it has includeTools or excludeTools and the adapter's cache has no list of its tools to apply them to");
+    if (Object.keys(exposure).length) fail("it has includeTools or excludeTools and a toolExposure of its own, and which of them holds a tool back is not certain");
+    else if (!tools.length) fail("it has includeTools or excludeTools and the adapter's cache has no list of its tools to apply them to");
     else if (tools.some((tool) => tool.includes("*"))) fail("a tool of it has a * in its name, which toolExposure cannot say exactly");
     else {
       for (const tool of tools) if (allowed(tool, name, plan.naming, include, exclude)) exposure[tool] ??= directList.includes(tool) ? "direct" : base;
@@ -380,7 +381,9 @@ function approvePatterns(value: unknown, server: string, naming: Naming, tools: 
     // The pattern as the adapter matched it (the tool's own name, or the one it registered): by the names the cache knows, exactly.
     for (const tool of tools) if (matchesPatterns(candidates(tool, server, naming), [pattern])) found.add(tool);
     // And for the tools it does not know yet, as a pattern: with the adapter's prefix taken off, `?` as `*`, and hyphen and underscore, which the adapter matched alike, as `*`.
-    const stripped = prefixes.map((prefix) => (pattern.startsWith(`${prefix}_`) ? pattern.slice(prefix.length + 1) : undefined)).filter((one): one is string => one !== undefined);
+    // The prefix as the adapter matched it, hyphen and underscore alike: `gh-mcp_delete_*` is a pattern of `gh_mcp`'s tools.
+    const alike = pattern.replace(/-/g, "_");
+    const stripped = prefixes.map((prefix) => (alike.startsWith(`${prefix.replace(/-/g, "_")}_`) ? pattern.slice(prefix.length + 1) : undefined)).filter((one): one is string => one !== undefined);
     for (const form of [pattern, ...stripped]) found.add(form.replace(/\?/g, "*").replace(/[-_]/g, "*").replace(/\*+/g, "*"));
   }
   return [...found].filter((one) => one && one !== "").sort();

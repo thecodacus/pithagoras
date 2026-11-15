@@ -208,3 +208,13 @@ test("the adapter's patterns are carried to the server's own tool names: its pre
   for (const tool of ["create_issue", "create-issue", "delete_repo", "delete-repo"]) assert.ok(matchesTool(approve, tool), `${tool}: ${approve}`);
   assert.equal(matchesTool(approve, "get_file"), false);
 });
+
+test("an include and an exclude of the same pattern hide what it names, and an include of everything shows what no exclusion holds back", () => {
+  // From the CodeRabbit review of #371.
+  const tools = ["delete_repo", "delete-branch", "get_file"];
+  const shown = (entry: Record<string, unknown>) => tools.filter((tool) => toolExposureOf(entry as never, tool) !== "hidden");
+  assert.deepEqual(shown(fromAdapterEntry({ command: "x", includeTools: ["delete_*"], excludeTools: ["delete_*"] }, "x").entry), []);
+  assert.deepEqual(shown(fromAdapterEntry({ command: "x", includeTools: ["*"] }, "x").entry), tools);
+  assert.deepEqual(shown(fromAdapterEntry({ command: "x", includeTools: ["*"], excludeTools: ["delete_*"] }, "x").entry), ["get_file"]);
+  assert.deepEqual(shown(fromAdapterEntry({ command: "x", includeTools: ["*"], excludeTools: ["*"] }, "x").entry), []);
+});

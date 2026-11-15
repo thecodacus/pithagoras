@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { inProcessHome } from "./server-harness.mjs";
 
@@ -37,4 +37,18 @@ test("a move that waited for an unreadable mcp.json is an upgrade with a backup 
   assert.deepEqual(upgradeCheck(), { needed: true, from: SCHEMA_VERSION, mcp: true });
   db.putSetting("mcp_migration", JSON.stringify({ v: 1, status: "done", at: "2026-11-01T00:00:00.000Z" }));
   assert.equal(upgradeCheck().needed, false);
+});
+
+test("an mcp.json that is there and cannot be read at all keeps a waiting move waiting, and is no damaged database", () => {
+  // From the CodeRabbit review of #371: the read threw out of the upgrade check, and the portal showed the repair steps.
+  db.putSetting("mcp_migration", JSON.stringify({ v: 1, status: "pending", at: "2026-11-01T00:00:00.000Z" }));
+  rmSync(mcpPath);
+  mkdirSync(mcpPath);
+  try {
+    assert.deepEqual(upgradeCheck(), { needed: false, from: SCHEMA_VERSION });
+  } finally {
+    rmSync(mcpPath, { recursive: true });
+    writeFileSync(mcpPath, NATIVE);
+    db.putSetting("mcp_migration", JSON.stringify({ v: 1, status: "done", at: "2026-11-01T00:00:00.000Z" }));
+  }
 });

@@ -57,6 +57,18 @@ const json = async (method, url, body) => {
   return { status: res.status, body: await res.json() };
 };
 
+test("a server sent with tools that ask first that cannot be kept is not written at all", async () => {
+  // From the CodeRabbit review of #371: the entry was saved, then its questions refused, and the server ran without them.
+  const many = Array.from({ length: 101 }, (_, i) => `tool_${i}`);
+  const res = await fetch(`${base}/api/mcp/servers/asking`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ entry: { command: "x" }, approve: many }) });
+  assert.equal(res.status, 400);
+  assert.match((await res.json()).error, /At most 100 patterns/);
+  assert.equal(servers().asking, undefined);
+  const fine = await fetch(`${base}/api/mcp/servers/asking`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ entry: { command: "x" }, approve: ["drop_*"] }) });
+  assert.equal(fine.status, 200);
+  assert.ok(servers().asking);
+});
+
 test("the status, the mark and the questions are the running portal's, and a rename leaves them behind", async () => {
   const marked = await json("PUT", "/api/mcp/servers/pasted/mark", { mark: "direct" });
   assert.equal(marked.status, 200, JSON.stringify(marked.body));

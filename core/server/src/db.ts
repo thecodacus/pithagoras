@@ -26,7 +26,7 @@ import { freeSlug } from "./slug.js";
 import { SCHEMA_VERSION, dbFile } from "./schema-version.js";
 import { debugLog } from "./logs.js";
 import { filesOnOldCalls } from "./old-call-files.js";
-import { MCP_MIGRATION_NOTICE, migrateMcp, migrationPending, migrationReport } from "./mcp-migration-run.js";
+import { MCP_MIGRATION_NOTICE, mcpMigrationSettled, migrateMcp, migrationPending, migrationReport } from "./mcp-migration-run.js";
 import type { Report as McpMigrationReport } from "./mcp-migration.js";
 
 export type SessionStatus = "idle" | "running" | "error" | "interrupted";
@@ -159,6 +159,7 @@ export function getDb(): Database.Database {
   // All of it or none: a failure part way leaves the database as it was, at
   // its old version, rather than half changed and marked done.
   db.transaction(() => schema(db!))();
+  mcpMigrationSettled();
   return db;
 }
 

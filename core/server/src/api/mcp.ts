@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import express, { type Router } from "express";
 import { writeFileAtomic } from "../atomic-write.js";
-import { SERVER_NAME_RE, clashes, commandValues, entryProblem, mcpNamespace, withExposure } from "../mcp-config.js";
+import { SERVER_NAME_RE, approvePatterns, clashes, commandValues, entryProblem, matchesTool, mcpNamespace, withExposure } from "../mcp-config.js";
 import { adapterKeysOf } from "../mcp-migration.js";
 import { piAgentDir } from "../pi-settings.js";
 import { BROWSER_MCP } from "../tool-policy.js";
@@ -81,10 +81,17 @@ export function readableMcpConfig(): McpFile | undefined {
   return lastReadable;
 }
 
-export function readMcpFile(): { config: McpFile; raw: string; error?: string } {
+export function readMcpFile(): { config: McpFile; raw: string; error?: string; unreadable?: true } {
   const file = mcpConfigPath();
   if (!existsSync(file)) return { config: { mcpServers: {} }, raw: "" };
-  const raw = readFileSync(file, "utf8");
+  let raw: string;
+  try {
+    raw = readFileSync(file, "utf8");
+  } catch (e) {
+    // There, and not to be read (its permissions, a folder of that name): no servers, and no empty file either, which a
+    // write would take for one and the migration for nothing to move.
+    return { config: { mcpServers: {} }, raw: "", error: (e as Error).message, unreadable: true };
+  }
   try {
     const parsed = JSON.parse(stripComments(raw));
     const config: McpFile = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as McpFile) : { mcpServers: {} };
@@ -274,7 +281,12 @@ function narrowed(base: Record<string, unknown>, override: Record<string, unknow
     if (hidden.length !== given.length || !given.length) ignored.push("toolExposure entries that are not hidden");
     // First, so that a pattern of the project's comes before the user's patterns, which pi tries in order.
     const own = base.toolExposure && typeof base.toolExposure === "object" && !Array.isArray(base.toolExposure) ? (base.toolExposure as Record<string, unknown>) : {};
-    if (hidden.length) entry.toolExposure = { ...Object.fromEntries(hidden), ...Object.fromEntries(Object.entries(own).filter(([tool]) => !hidden.some(([name]) => name === tool))) };
+    // A tool the user's file names exactly is taken before any pattern: one the project's patterns hide is hidden there too.
+    const hides = hidden.map(([name]) => name);
+    const kept = Object.entries(own)
+      .filter(([tool]) => !hides.includes(tool))
+      .map(([tool, one]): [string, unknown] => [tool, !tool.includes("*") && matchesTool(hides, tool) ? "hidden" : one]);
+    if (hidden.length) entry.toolExposure = { ...Object.fromEntries(hidden), ...Object.fromEntries(kept) };
   }
   return { entry, ignored };
 }
@@ -475,6 +487,12 @@ export function mcpRouter(): Router {
     const others = Object.keys(config.mcpServers).filter((other) => other !== from);
     const problem = validateEntry(name, req.body?.entry, others);
     if (problem) return res.status(400).json({ error: problem });
+    // The tools that ask first, where the form sends them with the entry: checked before the server is written, so that it is
+    // not there without them (they are kept by their own route, which needs the portal's database).
+    if (req.body?.approve !== undefined) {
+      const checked = approvePatterns(req.body.approve);
+      if ("error" in checked) return res.status(400).json({ error: checked.error });
+    }
     // An entry of that name already there is somebody's setup — environment, headers, an oauth block the form does not show — and a new or renamed server would replace it unseen.
     if (name !== from && Object.prototype.hasOwnProperty.call(config.mcpServers, name)) {
       return res.status(409).json({ error: `A server called ${name} already exists`, code: "exists" });
