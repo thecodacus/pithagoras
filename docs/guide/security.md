@@ -73,7 +73,8 @@ descriptions and parameters, which the server wrote: such a result is wrapped wh
 shows a tool of a server you have not counted as your own, and left as it is when every
 tool it shows is the portal's, an extension's, or a trusted server's. The usage rules such a result
 carries start with a tag of the chat's that no page, file or server can know, and the tag is taken out of
-every tool's text the result quotes and of whatever a call returns, so a line written to look like a rule is
+every result of every tool but the portal's own search and describe, however it is written (twice in a row, with look-alike
+letters, zero-width characters or other separators between its letters), so a line written to look like a rule is
 not one ([Lazy tools](/guide/extensions#lazy-tools)). An issue comment or a mail body a server
 hands back is whoever wrote it, and so is what a server from a config other than
 the portal's hands back, or one whose tools are named without the server. A

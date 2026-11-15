@@ -72,12 +72,60 @@ export const ruleLinesNote = (tag: string): string =>
 const rulePrefix = (tag: string): string => `Rule ${tag}:`;
 
 /**
+ * What a model reads as the same letter or digit as a hex one, or as no character at all: the look-alikes that NFKC leaves
+ * alone (Cyrillic and Greek letters), and the characters between the letters of a word (spaces, zero-width and format
+ * characters, marks, punctuation and symbols). Only for finding the tag in a text, never for what the text says.
+ */
+const LOOK_ALIKE: Record<string, string> = { "\u0430": "a", "\u0441": "c", "\u0435": "e", "\u0501": "d", "\u043e": "0", "\u03bf": "0", o: "0", l: "1", i: "1" };
+const BETWEEN = /[\p{Z}\p{C}\p{M}\p{P}\p{S}]/u;
+
+/** A text's letters and digits, as the tag would be read from it, each with where it stands in the text. */
+function lettersOf(text: string): { chars: string; at: number[] } {
+  let chars = "";
+  const at: number[] = [];
+  for (let i = 0; i < text.length; ) {
+    const point = text.codePointAt(i)!;
+    const width = point > 0xffff ? 2 : 1;
+    const letter = text.slice(i, i + width);
+    for (const part of letter.normalize("NFKC").toLowerCase()) {
+      if (BETWEEN.test(part)) continue;
+      chars += LOOK_ALIKE[part] ?? part;
+      at.push(i);
+    }
+    i += width;
+  }
+  return { chars, at };
+}
+
+/**
  * A text a tool wrote (its description, its parameters, what a call of it returned), with the chat's tag taken out of it:
  * a line of it cannot pass for one of the rule lines. A tag is random, so only a text that has read this chat's own (its
- * session file, say) could hold it.
+ * session file, say, or the prompt through a model that repeats it) could hold it, and it can write it in any way a model
+ * still reads as the tag: with letters of other alphabets, zero-width characters or spaces between its letters, twice in
+ * a row. So it is looked for in the text's letters and digits alone, and every place found is cut out of the text, again
+ * until none is left (what is cut out can join what was around it into the tag).
  */
 function defuse(text: string, tag: string): string {
-  return tag ? text.replace(new RegExp(`rule\\W{0,3}${tag}`, "gi"), "Rule") : text;
+  if (!tag) return text;
+  let out = text;
+  for (let round = 0; round < 8; round++) {
+    const { chars, at } = lettersOf(out);
+    const spans: [number, number][] = [];
+    for (let hit = chars.indexOf(tag); hit >= 0; hit = chars.indexOf(tag, hit + tag.length)) {
+      const last = at[hit + tag.length - 1];
+      spans.push([at[hit], last + (out.codePointAt(last)! > 0xffff ? 2 : 1)]);
+    }
+    if (!spans.length) return out;
+    let next = "";
+    let from = 0;
+    for (const [start, end] of spans) {
+      next += out.slice(from, start);
+      from = end;
+    }
+    out = next + out.slice(from);
+  }
+  // Still joining after eight rounds is a text built for it: nothing of it is kept.
+  return "";
 }
 
 /** A tool's text on one line: what it holds that would start a new one (a line break, any control character) as a space. */
@@ -370,7 +418,7 @@ export class ToolSearch {
       let list = head;
       const named: string[] = [];
       for (const [i, [label, members]] of sorted.entries()) {
-        const line = `\n- ${label} (${members.length}): ${members.map((m) => m.name).slice(0, 12).join(", ")}${members.length > 12 ? ", …" : ""}`;
+        const line = `\n- ${oneLine(label)} (${members.length}): ${members.map((m) => oneLine(m.name)).slice(0, 12).join(", ")}${members.length > 12 ? ", …" : ""}`;
         // The last group needs no room for the count of those after it.
         if (list.length + line.length > (i === sorted.length - 1 ? RESULT_CHARS - tail.length : room)) {
           list += more(sorted.length - i);
@@ -379,7 +427,7 @@ export class ToolSearch {
         list += line;
         named.push(...members.slice(0, 12).map((m) => m.name));
       }
-      return listing(list + tail, named);
+      return listing(defuse(list + tail, this.tag), named);
     }
     const found = rank(tools, text);
     if (!found.length) return listing(`No lazy tool matches "${text}". Search with other words, or with none to list the groups.`, []);
@@ -434,6 +482,23 @@ export class ToolSearch {
     // The model has been given the rules again: the context is new.
     pi.on("session_start", () => this.forget());
     pi.on("session_compact", () => this.forget());
+    // The tag is the chat's own, so no result may hold it but this tool's own search and describe, which write it into the
+    // rule lines: a lazy tool called by its name, or any other tool, reads a page that can carry what this tool's call
+    // result has taken out of it.
+    pi.on("tool_result", (event: any) => {
+      const tag = this.tag;
+      if (!Array.isArray(event?.content)) return undefined;
+      if (event.toolName === TOOL_SEARCH && !event.isError && (event.input?.action === "search" || event.input?.action === "describe") && this.owns()) return undefined;
+      let changed = false;
+      const content = event.content.map((part: any) => {
+        if (part?.type !== "text" || typeof part.text !== "string") return part;
+        const text = defuse(part.text, tag);
+        if (text === part.text) return part;
+        changed = true;
+        return { ...part, text };
+      });
+      return changed ? { content } : undefined;
+    });
   };
 
   private register(pi: any): void {
