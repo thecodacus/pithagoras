@@ -1,5 +1,5 @@
 import type { Router } from "express";
-import { UNDERSTORY, UNDERSTORY_TOKEN_ENV, understoryDefaultUrl, understoryEntry, understoryTokenOf } from "./entry";
+import { UNDERSTORY, UNDERSTORY_TOKEN_ENV, authorizationKey, understoryDefaultUrl, understoryEntry, understoryTokenOf } from "./entry";
 import { portal } from "./host";
 import { modelServer } from "./llm";
 import * as service from "./service";
@@ -90,12 +90,16 @@ async function switchUnderstory(enabled: boolean, url?: string): Promise<{ reloa
   // Kept: whatever else somebody put in the entry by hand, except how it signs in (the Authorization header), which is said anew.
   // The keys of the old adapter are not kept either: the entry is pi's now, and the sign-in is said in a header.
   const { disabled: _old, enabled: _on, headers: hadHeaders, auth: _a, bearerToken: _t, bearerTokenEnv: _e, lifecycle: _l, directTools: _d, ...had } = mcp.get(UNDERSTORY)?.entry ?? {};
-  const { Authorization: _auth, ...otherHeaders } = (hadHeaders && typeof hadHeaders === "object" ? hadHeaders : {}) as Record<string, string>;
-  const entry = (made: Record<string, unknown>) => ({
-    ...had,
-    ...made,
-    ...(Object.keys(otherHeaders).length || made.headers ? { headers: { ...otherHeaders, ...(made.headers as Record<string, string> | undefined) } } : {}),
-  });
+  const headers = (hadHeaders && typeof hadHeaders === "object" ? hadHeaders : {}) as Record<string, string>;
+  const authKey = authorizationKey(headers);
+  const otherHeaders = Object.fromEntries(Object.entries(headers).filter(([key]) => key !== authKey));
+  const entry = (made: Record<string, unknown>) => {
+    // A sign-in that was there stays for the same address when nothing new is given (switched off and on again with no
+    // token in the environment), and never goes to another address.
+    const kept = authKey && !made.headers && made.url === had.url ? { [authKey]: headers[authKey] } : {};
+    const all = { ...otherHeaders, ...kept, ...(made.headers as Record<string, string> | undefined) };
+    return { ...had, ...made, ...(Object.keys(all).length ? { headers: all } : {}) };
+  };
   // An address given is the one meant; without one, the portal's own Understory where it runs one.
   return mcp.set(
     UNDERSTORY,

@@ -30,7 +30,8 @@ let lastAsked: string | undefined;
 // A count, not a clock: two calls in the same millisecond are still one after the other.
 let order = 0;
 
-const isMemoryTool = (name: unknown) => typeof name === "string" && name.startsWith(`${UNDERSTORY}_`);
+/** Understory's tools, as pi's own MCP support names them: `mcp__understory__memory_*`. */
+const isMemoryTool = (name: unknown) => typeof name === "string" && name.startsWith(`mcp__${UNDERSTORY}__`);
 
 /**
  * A tool call in a chat, starting or ending — its subagents' included, which

@@ -77,6 +77,22 @@ test("switched on, Understory elsewhere is the agent's memory, trusted by the gu
   putServers({});
 });
 
+test("switched on again at the address it had, with no token given, its entry keeps the sign-in it had (in any case); at another address that sign-in does not go along", async () => {
+  delete process.env.MEMORY_UNDERSTORY_AUTH_TOKEN;
+  const before = { url: "http://kept.test:3800/mcp", enabled: false, headers: { "X-Mine": "1", authorization: "Bearer saved" } };
+  try {
+    putServers({ understory: before });
+    assert.equal((await call("PUT", "/use", { enabled: true, url: "http://kept.test:3800/mcp" })).status, 200);
+    assert.deepEqual(servers().understory.headers, { "X-Mine": "1", authorization: "Bearer saved" });
+    assert.equal((await state()).tokenSet, true, "the token is read whatever case its header has");
+    putServers({ understory: before });
+    assert.equal((await call("PUT", "/use", { enabled: true, url: "http://elsewhere.test:3800/mcp" })).status, 200);
+    assert.deepEqual(servers().understory.headers, { "X-Mine": "1" });
+  } finally {
+    await call("PUT", "/use", { enabled: false });
+  }
+});
+
 test("installed, it runs here with the image downloaded, on the portal's loopback, and is the agent's memory with its own token", async () => {
   machine.reset();
   docker.images.clear();

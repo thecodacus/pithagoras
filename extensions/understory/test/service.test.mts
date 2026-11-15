@@ -95,6 +95,7 @@ test("its MCP entry puts its tools in front of the agent: its own token written 
   assert.deepEqual(understoryEntry("http://u/mcp", { tokenEnv: "MEMORY_UNDERSTORY_AUTH_TOKEN" }), { url: "http://u/mcp", exposure: "direct", headers: { Authorization: "Bearer ${MEMORY_UNDERSTORY_AUTH_TOKEN}" } });
   assert.deepEqual(understoryEntry("http://127.0.0.1:3800/mcp", { token: "t0k" }), { url: "http://127.0.0.1:3800/mcp", exposure: "direct", headers: { Authorization: "Bearer t0k" } });
   assert.equal(understoryTokenOf({ headers: { Authorization: "Bearer t0k" } }), "t0k");
+  assert.equal(understoryTokenOf({ headers: { authorization: "Bearer low" } }), "low", "a header's name in any case");
   process.env.SOME_TOKEN = "from-env";
   assert.equal(understoryTokenOf({ headers: { Authorization: "Bearer ${SOME_TOKEN}" } }), "from-env");
   assert.equal(understoryTokenOf({ url: "x" }), undefined);

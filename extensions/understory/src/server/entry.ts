@@ -23,10 +23,16 @@ export function understoryEntry(url: string, auth: { tokenEnv?: string; token?: 
   };
 }
 
+/** The name an entry's headers give the Authorization header, in whatever case it was written: HTTP takes them alike. */
+export function authorizationKey(headers: unknown): string | undefined {
+  return headers && typeof headers === "object" ? Object.keys(headers).find((key) => key.toLowerCase() === "authorization") : undefined;
+}
+
 /** The token an entry calls Understory with: written in it (the Understory the portal runs), or named from the environment. */
 export function understoryTokenOf(entry: Record<string, unknown> | undefined): string | undefined {
   const headers = entry?.headers;
-  const header = headers && typeof headers === "object" ? (headers as Record<string, unknown>).Authorization : undefined;
+  const key = authorizationKey(headers);
+  const header = key ? (headers as Record<string, unknown>)[key] : undefined;
   const bearer = typeof header === "string" ? /^Bearer\s+(.+)$/.exec(header)?.[1]?.trim() : undefined;
   if (!bearer) return undefined;
   // `${NAME}` is pi's way of naming an environment variable.
