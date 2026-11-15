@@ -22,6 +22,7 @@ import { HEARTBEAT_ROLE, NOTE_TOOL } from "./heartbeat-names.js";
 import { LISTED_TOOLS_KEY, TOOL_SEARCH } from "./tool-search-names.js";
 import { MCP_RESOURCE_TOOLS, isResourceTool, serverOfArgument, serversOfNamespace } from "./mcp-origin.js";
 import { BROWSER_MCP } from "../tool-policy.js";
+import { CODEMODE_TOOL } from "./codemode.js";
 import { runsAsPrimary } from "./runs-as-primary.js";
 
 /**
@@ -70,12 +71,42 @@ interface Origin {
  * A server that is not configured, and a namespace two configured servers could be, is no trusted one's, and the browser's
  * never is, whoever runs it.
  */
-function serverWords(origin: Origin, mcp: Pick<McpView, "servers">): boolean {
+function serverWords(origin: Origin, mcp: Pick<McpView, "servers">, projectOwned: (server: string) => boolean = () => false): boolean {
   if (origin.namespace === undefined) return false;
   const trusted = trustedMcpServers();
   const servers = serversOfNamespace(origin.namespace, mcp.servers);
-  return !servers.length || servers.some((server) => server === BROWSER_MCP || !trusted.has(server));
+  return !servers.length || servers.some((server) => server === BROWSER_MCP || !trusted.has(server) || projectOwned(server));
 }
+
+/**
+ * What a conversation's MCP servers are, for the guard: the runtime of the chat knows it, the guard only asks.
+ */
+export interface GuardMcp {
+  /** The servers of this conversation that are not switched off, by the names they are configured under: what a script's discovery functions describe. */
+  live: () => readonly string[];
+  /**
+   * Whether this conversation's server of that name is a project's (its `.pi/mcp.json`) and not the user's file's. The
+   * person trusts a server of their own file by its name; a project's server of that name is no one they trusted, even if
+   * the file has since got one of its name (a chat keeps the servers it started with until it is reloaded).
+   */
+  projectOwned: (server: string) => boolean;
+}
+
+/** The most of a call's arguments a confirmation shows. */
+const SHOWN_CHARS = 3000;
+
+/**
+ * What a call's arguments say, for the person who is asked to allow it: all of them, not the one path the guard files the
+ * call under (an MCP tool declares no files, so its subject is its `path` argument when it has one, whatever else it
+ * writes, sends or acts on). As JSON, with what does not show made visible, and cut with a note where it is long.
+ */
+function argumentsShown(input: unknown): string {
+  const text = (JSON.stringify(input ?? {}) ?? "{}").replace(/[\u007f-\u009f\u200b-\u200f\u2028-\u202f\u2060-\u206f\ufeff]/g, (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`);
+  return text.length > SHOWN_CHARS ? `${text.slice(0, SHOWN_CHARS)}\n[cut: ${text.length - SHOWN_CHARS} more characters]` : text;
+}
+
+/** The functions of pi's code mode that hand a script what MCP servers say of themselves: descriptions, and the `instructions` a server gives when it connects. */
+const SCRIPT_DISCOVERY = /\b(?:searchTools|describeTool|describeNamespace)\b/;
 
 /**
  * Does what this call returned carry somebody else's words? Mail and the web
@@ -108,16 +139,17 @@ function untrustedResult(
   /** The tools whose words a result of the portal's own search or describe holds: "unknown" where it does not say. */
   listed?: readonly string[] | "unknown",
   originOf: (name: string) => Origin = () => ({ outside: false }),
+  projectOwned: (server: string) => boolean = () => false,
 ): boolean {
   if (toolName === "bash") return UNTRUSTED_COMMAND.test(cmd(input));
   if (origin.outside || browserCall(toolName, input).isBrowser) return true;
   const mcp = mcpView();
-  if (listed !== undefined) return listed === "unknown" || listed.some((name) => serverWords(originOf(name), mcp));
+  if (listed !== undefined) return listed === "unknown" || listed.some((name) => serverWords(originOf(name), mcp, projectOwned));
   if (isResourceTool(toolName)) {
     const server = serverOfArgument(input.server, mcp.servers);
-    return server === undefined || server === BROWSER_MCP || !trustedMcpServers().has(server);
+    return server === undefined || server === BROWSER_MCP || !trustedMcpServers().has(server) || projectOwned(server);
   }
-  return serverWords(origin, mcp);
+  return serverWords(origin, mcp, projectOwned);
 }
 
 /**
@@ -1947,7 +1979,7 @@ export function guardExtension(
    * Whether a call of this tool is to be confirmed each time, by whoever is speaking: the portal's rule for the tools an MCP
    * server's `approve` names (see mcpApprove), read at each call. Nobody to ask is a refusal, as for a call held after a suspected injection.
    */
-  needsApproval: (toolName: string) => boolean = () => false,
+  needsApproval: (toolName: string, input: Record<string, unknown>) => boolean = () => false,
   /** What a tool declares the guard is to hold it to (see declaredGuard), read from its definition at each call. */
   guardOf: (toolName: string) => DeclaredGuard | undefined = () => undefined,
   /**
@@ -1957,6 +1989,8 @@ export function guardExtension(
   dialogs = false,
   /** pi's MCP namespace of a tool its MCP support registered in this session (`mcp__<server>`), from its definition: see mcp-origin.ts. */
   namespaceOf: (toolName: string) => string | undefined = () => undefined,
+  /** This conversation's MCP servers: see GuardMcp. */
+  chatMcp: GuardMcp = { live: () => [], projectOwned: () => false },
 ) {
   /** Where a tool came from, as the session knows it now. */
   const originOf = (name: string, outside = guardOf(name)?.outside === true): Origin => ({ namespace: namespaceOf(name), outside });
@@ -2042,7 +2076,12 @@ export function guardExtension(
       const quoting = toolName === TOOL_SEARCH && searchNow() && !event.isError && (event.input?.action === "search" || event.input?.action === "describe");
       const quoted = quoting ? event.details?.[LISTED_TOOLS_KEY] : undefined;
       const listed = quoting ? (Array.isArray(quoted) ? quoted.filter((name): name is string => typeof name === "string") : "unknown") : undefined;
-      const untrusted = untrustedResult(toolName, event.input ?? {}, origin, listed, originOf) || carried !== undefined;
+      // A script's discovery functions are not tool calls, so nothing above sees them: what they return is what the servers say of
+      // themselves, which is the same as what the portal's own search quotes. Where the script asks for it and one of the
+      // servers it could ask about is not the person's own, the result is outside content.
+      const scriptReadsServers = toolName === CODEMODE_TOOL && typeof event.input?.code === "string" && SCRIPT_DISCOVERY.test(event.input.code)
+        && chatMcp.live().some((server) => server === BROWSER_MCP || !trustedMcpServers().has(server) || chatMcp.projectOwned(server));
+      const untrusted = untrustedResult(toolName, event.input ?? {}, origin, listed, originOf, chatMcp.projectOwned) || carried !== undefined || scriptReadsServers;
       if (!untrusted) return compact ? { content: formatted } : undefined;
 
       // Wrapped as data whatever it says; it taints the conversation only when it looks like it tries to instruct the agent.
@@ -2301,7 +2340,7 @@ export function guardExtension(
     // the nested call is a call of the tool). After everything that would refuse the call, so that nobody is asked about one
     // that is refused after all.
     const confirmCall = (event: any, ctx: any) => {
-      if (!needsApproval(event.toolName)) return undefined;
+      if (!needsApproval(event.toolName, event.input ?? {})) return undefined;
       const { role, key } = whoNow();
       const subject = callSubject(event.toolName, event.input ?? {}, filesOf(event.toolName));
       const refuse = (why: string) => {
@@ -2313,7 +2352,7 @@ export function guardExtension(
       };
       if (role !== "primary" || !dialogs) return refuse("there is nobody here to confirm it");
       const title = `Let ${event.toolName} run?`;
-      const message = ["This tool is set to ask each time it is called.", "Yes lets this one call run; No refuses it.", "The call, as the agent wrote it:", subject].join("\n");
+      const message = ["This tool is set to ask each time it is called.", "Yes lets this one call run; No refuses it.", "The call's arguments, as the agent wrote them:", argumentsShown(event.input)].join("\n");
       return new Promise<unknown>((resolve) => resolve(ctx.ui.confirm(title, message))).then(
         (yes) => {
           if (yes !== true) return refuse("it was not confirmed");

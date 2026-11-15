@@ -18,7 +18,7 @@ import type { DraftStore, LoadError, PiClient, PiCommand, PiState, PiStats, PiTo
 import type { ImageContent } from "../prompt-images.js";
 import { routineTools } from "./routine-tools.js";
 import { reportTool, reportToFor } from "./report-tool.js";
-import { OUTSIDE_CONTENT_GUIDELINE, declaredFiles, declaredGuard, guardExtension, type DeclaredGuard } from "./guard.js";
+import { OUTSIDE_CONTENT_GUIDELINE, declaredFiles, declaredGuard, guardExtension, ruleAllows, type DeclaredGuard } from "./guard.js";
 import { CODEMODE_TOOL, CODEMODE_TOOLS, codemodeExtension } from "./codemode.js";
 import { findSessionFile } from "./session-file.js";
 import { withModeParams } from "./request-params.js";
@@ -27,7 +27,7 @@ import { CONTEXT_FILES, SHARED_FILES } from "./context-files.js";
 import { heartbeatTool } from "./heartbeat-tool.js";
 import { ToolSearch } from "./tool-search.js";
 import { CALLED_TOOL_KEY, TOOL_SEARCH, calledThrough } from "./tool-search-names.js";
-import { isResourceTool, mcpNamespace, mcpNamespaceOf } from "./mcp-origin.js";
+import { isResourceTool, mcpNamespace, mcpNamespaceOf, serverOfArgument, serversOfNamespace } from "./mcp-origin.js";
 import { McpRuntime } from "./mcp-runtime.js";
 import { NO_LAZY, headLazy, type LazyHead } from "../tool-lazy.js";
 import { askPrimaryTool } from "./ask-primary.js";
@@ -37,7 +37,7 @@ import { proxyBaseUrl } from "../llama-progress.js";
 import { bridgeSubagents, SUBAGENT_INPUT, SUBAGENT_STOP, type Bridge } from "../subagent-protocol.js";
 import { bridgeExtensionUi, UI_RECEIVE } from "../extension-ui.js";
 import { hostExtensions } from "../extension-host.js";
-import { contextWindowFor, getSkipThinkingProviders, getVoiceInstructions, getVoiceModel, lazyAllowed, mcpApprove, questionWaitMs, toolGroupNames, voiceSpeaks } from "../db.js";
+import { contextWindowFor, getSkipThinkingProviders, getVoiceInstructions, getVoiceModel, lazyAllowed, listToolRules, mcpApprove, questionWaitMs, toolGroupNames, voiceSpeaks } from "../db.js";
 import { configStamp, isLlamaProvider } from "../providers.js";
 import { rereadConfig } from "./model-runtime.js";
 import { browserServers } from "../api/mcp.js";
@@ -389,13 +389,25 @@ const RESOURCE_SET = "MCP resources";
  * names, as `portal.mcp.set` was given them) names it. By the name the server gave the tool, which pi keeps in the tool's
  * label (`server/tool`), and by pi's name for it.
  */
-function mcpApproval(mcp: McpRuntime, definition: any, name: string): boolean {
-  const server = mcp.serverOf(definition);
-  const globs = server === undefined ? undefined : mcpApprove()[server];
-  if (server === undefined || !globs?.length) return false;
+function mcpApproval(mcp: McpRuntime, definition: any, name: string, input: Record<string, unknown> = {}): boolean {
+  const approve = mcpApprove();
+  // pi's resource tools are no server's own, and a read names the one it reaches: it asks as that server's tools do (`*` covers them).
+  if (isResourceTool(name)) {
+    const server = serverOfArgument(input.server, mcp.names());
+    const globs = server === undefined ? undefined : approve[server];
+    return globs?.length ? matchesTool(globs, name) : false;
+  }
+  const space = mcpNamespaceOf(definition);
+  if (space === undefined) return false;
   const label = String(definition?.label ?? "");
-  const original = label.startsWith(`${server}/`) ? label.slice(server.length + 1) : name;
-  return matchesTool(globs, original) || matchesTool(globs, name);
+  // Every configured server a namespace can be: two names that differ by a hyphen and an underscore are one namespace, pi
+  // connects one of them, and the one that asks first is not necessarily the one that comes first in the file.
+  return serversOfNamespace(space, mcp.names()).some((server) => {
+    const globs = approve[server];
+    if (!globs?.length) return false;
+    const original = label.startsWith(`${server}/`) ? label.slice(server.length + 1) : name;
+    return matchesTool(globs, original) || matchesTool(globs, name);
+  });
 }
 
 /**
@@ -558,7 +570,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     // The files a tool declares it is approved for, from its definition once the session has it: see declaredFiles.
     let filesOf: (name: string) => readonly string[] | undefined = () => undefined;
     // Whether the portal asks for a confirmation of a call of this tool each time (an MCP server's `approve`), once the session is there: see mcpApproval.
-    let needsApproval: (name: string) => boolean = () => false;
+    let needsApproval: (name: string, input: Record<string, unknown>) => boolean = () => false;
     // The namespace pi's MCP support registered a tool under, from its definition once the session has it: see mcp-origin.ts.
     let namespaceOf: (name: string) => string | undefined = () => undefined;
     // The chat's client and pi's session, for the MCP servers of the chat (see McpRuntime), which are asked before either exists.
@@ -569,6 +581,11 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       codemodeOnly: () => opts.codemode === "only",
       off: () => chat?.switchedOff ?? new Set(opts.toolsOff ?? []),
       session: () => piSession,
+      // Only the primary user's chat starts a server of its own accord, or on a call a standing rule allows: see McpRuntimeOptions.
+      mayStart: (_server, call) => {
+        const who: { role: string; key?: string } = (opts.whoNow ?? (() => ({ role: "primary" })))();
+        return who.role === "primary" || (call !== undefined && ruleAllows(listToolRules(), who.role, call.tool, call.args, who.key, opts.cwd, filesOf(call.tool)));
+      },
       ...opts.mcpTimings,
     });
     // What a tool declares the guard is to hold it to, from its definition once the session has it: see declaredGuard.
@@ -605,10 +622,11 @@ export class SdkPiClient extends EventEmitter implements PiClient {
             () => switchedOff(),
             () => search.owns(),
             (name) => filesOf(name),
-            (name) => needsApproval(name),
+            (name, input) => needsApproval(name, input),
             (name) => guardOf(name),
             opts.dialogs !== false,
             (name) => namespaceOf(name),
+            { live: () => mcp.live(), projectOwned: (server) => mcp.projectOwned(server) },
           ) },
         // Offered only while the conversation has a lazy tool: see applyToolsOff.
         { name: "tool-search", factory: search.extension },
@@ -740,7 +758,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     guardOf = (name) => declaredGuard(session.getToolDefinition(name));
     // By the registry, and for a tool of a server that is not running (found in the search from what the portal remembers of it) by that.
     namespaceOf = (name) => mcpNamespaceOf(session.getToolDefinition(name)) ?? mcp.namespaceOfCached(name);
-    needsApproval = (name) => mcpApproval(mcp, session.getToolDefinition(name), name);
+    needsApproval = (name, input) => mcpApproval(mcp, session.getToolDefinition(name), name, input);
 
     const client = new SdkPiClient(session, modelRuntime, () => {});
     chat = client;

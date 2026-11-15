@@ -1,7 +1,7 @@
 // A small MCP server over stdio, for the tests of what pi's MCP support does with one: newline-delimited JSON-RPC, the
 // calls a client makes (initialize, tools/list, tools/call, ping) and nothing else.
 //
-//   node mcp-server.mjs <name> [--tools a,b] [--delay ms] [--slow-read ms] [--gate file] [--resources] [--log file]
+//   node mcp-server.mjs <name> [--tools a,b] [--delay ms] [--slow-read ms] [--gate file] [--resources] [--instructions text] [--log file]
 //
 // `--delay` holds the answer to `initialize` back, as a server that starts slowly does, and `--slow-read` the answer to a
 // resource's read, as a long call does; `--gate` holds it back until the
@@ -30,7 +30,7 @@ const answer = {
     protocolVersion: params?.protocolVersion ?? "2025-06-18",
     capabilities: { tools: {}, ...(rest.includes("--resources") ? { resources: {} } : {}) },
     serverInfo: { name, version: "1.0.0" },
-    instructions: `The ${name} fixture server.`,
+    instructions: flag("--instructions", `The ${name} fixture server.`),
   }),
   "tools/list": () => ({
     tools: tools.map((tool) => ({

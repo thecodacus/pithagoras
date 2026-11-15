@@ -3735,7 +3735,20 @@ export function mcpServersRemoved(before: string[], after: string[]): void {
   const kept = all.filter((t) => t.server === undefined || !removed.includes(t.server));
   if (kept.length !== all.length) putSetting("tools_seen", JSON.stringify(kept));
   dropCachedServers(removed);
-  for (const name of removed) setMcpApprove(name, undefined);
+  // What the person said of a server by its name is not said of the next one that is given the name (a rename, an import of a
+  // folder's own file): its tools asked first, whether its words are trusted, how it is marked. Settings → Guard lists only
+  // the servers there are, so a name left trusted could not be seen or taken out.
+  const marks = toolMarks();
+  let marked = false;
+  for (const name of removed) {
+    setMcpApprove(name, undefined);
+    untrustMcpServer(name);
+    if (marks[name]) {
+      delete marks[name];
+      marked = true;
+    }
+  }
+  if (marked) setToolMarks(marks);
 }
 
 /** The servers the portal has removed and that are not configured again, by name as they were configured. */

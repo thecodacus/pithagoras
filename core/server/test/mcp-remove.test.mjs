@@ -102,6 +102,21 @@ test("what is set to confirm a removed server's tools goes with it", async () =>
   assert.deepEqual(db.mcpApprove(), { notes: ["write*"] });
 });
 
+test("the trust and the mark of a removed server go with it, so that a server given its name later is not trusted or marked unasked", async () => {
+  // Round 2 of PR B, security finding 4.
+  seed();
+  db.setTrustedMcpServers(["jira", "notes"]);
+  db.setToolMarks({ jira: "direct", notes: "lazy" });
+  // A rename removes the old name.
+  assert.equal((await put("jira2", { command: "jira-mcp" }, "jira")).status, 200);
+  assert.deepEqual([...db.trustedMcpServers()], ["notes"]);
+  assert.deepEqual(db.toolMarks(), { notes: "lazy" });
+  // So does taking it out by hand, and the server of that name that comes next starts with nothing.
+  assert.equal((await del("notes")).status, 200);
+  assert.deepEqual([...db.trustedMcpServers()], []);
+  assert.deepEqual(db.toolMarks(), {});
+});
+
 test("a chat that still has the removed server loaded does not bring its tools back", async () => {
   seed();
   assert.equal((await del("jira")).status, 200);

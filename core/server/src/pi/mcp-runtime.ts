@@ -151,6 +151,13 @@ export interface McpRuntimeOptions {
   off: () => ReadonlySet<string>;
   /** pi's session once there is one. */
   session: () => any;
+  /**
+   * Whether this conversation may have a lazy server started now, for what it asks. A search is read-only, so anybody who
+   * can talk to the chat can run it; starting a server runs its command and the `!` values of its entry, and sends its
+   * credentials, which is the primary user's to have done. `call` is the tool a call is about, where it is one: somebody
+   * else's call that a standing rule allows starts the server it needs.
+   */
+  mayStart?: (server: string, call?: { tool: string; args: Record<string, unknown> }) => boolean;
   /** Waits and timings, for tests. */
   connectWaitMs?: number;
   idleMs?: number;
@@ -298,6 +305,16 @@ export class McpRuntime {
     const space = mcpNamespaceOf(tool);
     if (!space) return undefined;
     return serversOfNamespace(space, this.names())[0] ?? space.slice("mcp__".length);
+  }
+
+  /** The servers of the chat that are not switched off, by name: what a script's discovery functions may describe. */
+  live(): string[] {
+    return [...this.planned].filter(([, one]) => one.plan !== "off").map(([name]) => name);
+  }
+
+  /** Whether the chat's server of this name came from a project's own file: the person trusted a server of that name in their file, not this one. */
+  projectOwned(server: string): boolean {
+    return this.planned.get(server)?.server.from === "project";
   }
 
   /** Whether the chat has any server it keeps lazy: the tool to reach them is wanted even when none is registered yet. */
@@ -514,13 +531,18 @@ export class McpRuntime {
    * resource tool, the lazy server its call names.
    */
   async ensure(name: string, signal?: AbortSignal, args?: unknown): Promise<void> {
+    const given = args && typeof args === "object" && !Array.isArray(args) ? (args as Record<string, unknown>) : {};
     if (isResourceTool(name)) {
-      const wanted = args && typeof args === "object" ? (args as { server?: unknown }).server : undefined;
-      if (typeof wanted === "string" && this.isLazy(wanted)) await this.connect(wanted, signal);
+      const wanted = given.server;
+      if (typeof wanted === "string" && this.isLazy(wanted)) {
+        if (!this.may(wanted, { tool: name, args: given })) throw new Error(`The MCP server "${wanted}" is not running, and this conversation may not start it.`);
+        await this.connect(wanted, signal);
+      }
       return;
     }
     const server = this.lazyServerOf(name);
     if (!server) return;
+    if (!this.up(server) && !this.may(server, { tool: name, args: given })) throw new Error(`The MCP server "${server}" is not running, and this conversation may not start it.`);
     await this.connect(server, signal);
     // Up, but this tool is not there: the server no longer offers it.
     if (!this.tools().some((tool) => String(tool.name) === name)) throw new Error(`The MCP server "${server}" no longer has a tool "${name}": search again.`);
@@ -528,7 +550,7 @@ export class McpRuntime {
 
   /** Start, in the background, the servers of these tools: a search found them, and the call that follows then finds them up. */
   warm(names: readonly string[]): void {
-    const servers = new Set(names.map((name) => this.lazyServerOf(name)).filter((server): server is string => server !== undefined));
+    const servers = new Set(names.map((name) => this.lazyServerOf(name)).filter((server): server is string => server !== undefined && this.may(server)));
     for (const server of servers) this.connect(server).catch((e) => !this.life.signal.aborted && console.warn(`[portal] ${(e as Error).message}`));
   }
 
@@ -537,10 +559,14 @@ export class McpRuntime {
    * with the wait, so that this search does.
    */
   async learn(signal?: AbortSignal): Promise<string[]> {
-    const unknown = this.lazyServers().filter((server) => !this.known(server));
+    const unknown = this.lazyServers().filter((server) => !this.known(server) && this.may(server));
     // One that did not connect is not waited for again by every search: it is said, and a call of its tool tries it again.
     await Promise.allSettled(unknown.filter((server) => !this.failed.has(server)).map((server) => this.connect(server, signal)));
     return unknown.filter((server) => this.failed.has(server)).map((server) => this.failed.get(server)!);
+  }
+
+  private may(server: string, call?: { tool: string; args: Record<string, unknown> }): boolean {
+    return this.options.mayStart ? this.options.mayStart(server, call) : true;
   }
 
   /** Stop the servers the portal started that nobody has used for a while. */
