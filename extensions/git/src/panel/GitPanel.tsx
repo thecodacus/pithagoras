@@ -382,17 +382,17 @@ function BranchBar({ onBranches, onRefresh }: { onBranches: () => void; onRefres
         className="flex min-w-0 max-w-[60%] items-center gap-1 rounded px-1.5 py-0.5 text-fg transition hover:bg-fg/5"
       >
         <LuGitBranch aria-hidden className="h-3.5 w-3.5 shrink-0 text-fg-subtle" />
-        <span className="truncate font-mono text-[11.5px]">{repo.branch ?? t("detached at {commit}", { commit: repo.head?.slice(0, 7) ?? t("nothing") })}</span>
+        <span className="truncate font-mono text-[length:calc(var(--text-base,1rem)*0.71875)]">{repo.branch ?? t("detached at {commit}", { commit: repo.head?.slice(0, 7) ?? t("nothing") })}</span>
       </button>
       {repo.upstream ? (
-        <span className="shrink-0 font-mono text-[10.5px] text-fg-faint" title={t("Following {upstream}: {ahead} to push, {behind} to pull", { upstream: repo.upstream, ahead: repo.ahead, behind: repo.behind })}>
+        <span className="shrink-0 font-mono text-[length:calc(var(--text-base,1rem)*0.65625)] text-fg-faint" title={t("Following {upstream}: {ahead} to push, {behind} to pull", { upstream: repo.upstream, ahead: repo.ahead, behind: repo.behind })}>
           {repo.ahead > 0 && <span className="text-accent">↑{repo.ahead} </span>}
           {repo.behind > 0 && <span className="text-warn">↓{repo.behind} </span>}
           {!repo.ahead && !repo.behind && "✓ "}
           {repo.upstream}
         </span>
       ) : (
-        repo.branch && hasRemote && <span className="shrink-0 text-[10.5px] text-fg-faint">{t("not on the remote yet")}</span>
+        repo.branch && hasRemote && <span className="shrink-0 text-[length:calc(var(--text-base,1rem)*0.65625)] text-fg-faint">{t("not on the remote yet")}</span>
       )}
       <div className="ml-auto flex items-center gap-0.5">
         {hasRemote && (

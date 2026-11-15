@@ -40,3 +40,16 @@ test("the extension API's version is the portal's, in package.json and in the lo
   assert.equal(lock.packages[''].version, portal, "the lock's root entry has the root package.json's version");
   assert.equal(lock.packages['packages/extension-api'].version, portal, "the lock's packages/extension-api entry has the root package.json's version");
 });
+
+/**
+ * The layers an extension's stylesheet is built with stop below the portal's questions and approvals: `z-confirm` is the
+ * portal's own (its Tailwind config), so no overlay of an extension's is drawn over a question that waits for an answer.
+ */
+test("the preset an extension is built with has no z-confirm layer; the portal's own build has", async () => {
+  const preset = (await import(path.join(dir, 'tailwind.mjs'))).default;
+  const layers = preset.theme.extend.zIndex;
+  assert.ok(layers.viewer && layers.dialog, 'the layers up to the viewers are in the preset');
+  assert.equal(layers.confirm, undefined, 'the layer of the portal\'s questions is not');
+  const portal = (await import(path.join(root, 'core/web/tailwind.config.js'))).default;
+  assert.equal(portal.theme.extend.zIndex.confirm, 'var(--z-confirm, 60)', 'the portal\'s own build has it');
+});

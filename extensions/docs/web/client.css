@@ -1,6 +1,6 @@
 /* In the portal's own colours: its theme is a set of variables on the page, each the three numbers of a colour. */
 /* A container: what is laid out by the room it has (the list of comments beside the sheet or over it), on the page or in the panel beside a chat. */
-.pd-page { margin: 0 auto; max-width: 52rem; padding: 24px 16px; color: rgb(var(--fg)); font-size: 14px; container-type: inline-size; }
+.pd-page { margin: 0 auto; max-width: 52rem; padding: 24px 16px; color: rgb(var(--fg)); font-size: calc(var(--text-base, 1rem) * 0.875); container-type: inline-size; }
 /* Beside a chat: all the panel's width (no auto margins, which would keep a contained box from stretching), scrolled in it. */
 .pd-page.pd-panel { flex: 1; min-height: 0; margin: 0; max-width: none; padding: 12px; overflow-y: auto; background: rgb(var(--surface)); }
 /* A document open fills the panel to its bottom, so that what is under a short one is the desk and not a strip of the panel's own colour. */
@@ -8,8 +8,8 @@
 .pd-new { display: flex; gap: 6px; margin-bottom: 12px; }
 .pd-new input { flex: 1; min-width: 0; }
 .pd-folder { margin-top: 24px; }
-.pd-folder h2 { margin: 0; font-size: 15px; font-weight: 600; }
-.pd-path { margin: 2px 0 8px; color: rgb(var(--fg-subtle)); font-size: 12px; overflow-wrap: anywhere; }
+.pd-folder h2 { margin: 0; font-size: calc(var(--text-base, 1rem) * 0.9375); font-weight: 600; }
+.pd-path { margin: 2px 0 8px; color: rgb(var(--fg-subtle)); font-size: calc(var(--text-base, 1rem) * 0.75); overflow-wrap: anywhere; }
 .pd-list { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
 .pd-open { display: flex; width: 100%; flex-direction: column; gap: 2px; border: 1px solid rgb(var(--line)); border-radius: 10px; background: rgb(var(--raised)); padding: 8px 12px; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .pd-open:hover { border-color: rgb(var(--accent) / .5); }
@@ -31,23 +31,23 @@
 .pd-rename-row { border: 1px solid rgb(var(--accent) / .5); border-radius: 10px; background: rgb(var(--raised)); padding: 8px 12px; }
 .pd-rename-field { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .pd-rename-input { min-width: 8rem; flex: 1 1 10rem; }
-.pd-rename-hint { font-size: 12px; }
-.pd-rename-problem { margin: 0; color: rgb(var(--danger)); font-size: 12px; overflow-wrap: anywhere; }
+.pd-rename-hint { font-size: calc(var(--text-base, 1rem) * 0.75); }
+.pd-rename-problem { margin: 0; color: rgb(var(--danger)); font-size: calc(var(--text-base, 1rem) * 0.75); overflow-wrap: anywhere; }
 .pd-doc > form.pd-rename { margin: 8px 16px 0; }
 .pd-title { font-weight: 600; overflow-wrap: anywhere; }
-.pd-meta { margin: 0; color: rgb(var(--fg-subtle)); font-size: 12px; overflow-wrap: anywhere; }
+.pd-meta { margin: 0; color: rgb(var(--fg-subtle)); font-size: calc(var(--text-base, 1rem) * 0.75); overflow-wrap: anywhere; }
 .pd-document { display: flex; flex-direction: column; gap: 10px; margin-top: 20px; }
-.pd-back { align-self: flex-start; border: 0; border-radius: 6px; background: none; padding: 2px 6px; margin-left: -6px; color: rgb(var(--accent)); font: inherit; font-size: 13px; cursor: pointer; }
+.pd-back { align-self: flex-start; border: 0; border-radius: 6px; background: none; padding: 2px 6px; margin-left: -6px; color: rgb(var(--accent)); font: inherit; font-size: calc(var(--text-base, 1rem) * 0.8125); cursor: pointer; }
 .pd-back:hover { background: rgb(var(--accent) / .1); }
 .pd-document > .pd-meta { margin: 0; }
 .pd-body { border: 1px solid rgb(var(--line)); border-radius: 12px; background: rgb(var(--surface)); padding: 16px 20px; overflow-wrap: anywhere; }
-.pd-call { display: flex; align-items: flex-start; gap: 10px; border: 1px solid rgb(var(--line)); border-radius: 10px; background: rgb(var(--raised) / .5); padding: 8px 10px; color: rgb(var(--fg)); font-size: 13px; }
+.pd-call { display: flex; align-items: flex-start; gap: 10px; border: 1px solid rgb(var(--line)); border-radius: 10px; background: rgb(var(--raised) / .5); padding: 8px 10px; color: rgb(var(--fg)); font-size: calc(var(--text-base, 1rem) * 0.8125); }
 .pd-call > svg { flex: none; width: 14px; height: 14px; margin-top: 3px; color: rgb(var(--accent)); }
 .pd-call > div { min-width: 0; flex: 1; }
 .pd-call p { margin: 2px 0 0; overflow-wrap: anywhere; }
 .pd-call .pd-call-title { font-weight: 600; }
-.pd-by { color: rgb(var(--fg-faint)); font-size: 10px; letter-spacing: .06em; text-transform: uppercase; }
-.pd-call button { flex: none; border: 0; border-radius: 6px; background: none; padding: 2px 6px; color: rgb(var(--accent)); font: inherit; font-size: 11px; cursor: pointer; }
+.pd-by { color: rgb(var(--fg-faint)); font-size: calc(var(--text-base, 1rem) * 0.625); letter-spacing: .06em; text-transform: uppercase; }
+.pd-call button { flex: none; border: 0; border-radius: 6px; background: none; padding: 2px 6px; color: rgb(var(--accent)); font: inherit; font-size: calc(var(--text-base, 1rem) * 0.6875); cursor: pointer; }
 .pd-call button:hover { background: rgb(var(--accent) / .1); }
 .pd-call button:focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 1px; }
 
@@ -78,10 +78,10 @@
 .pd-docname { display: flex; min-width: min(100%, 16rem); flex: 1 1 16rem; align-items: center; gap: 8px; }
 .pd-docname > .pd-icon { color: rgb(var(--accent)); }
 .pd-docname > div { display: flex; min-width: 0; flex-direction: column; }
-.pd-doctitle { overflow: hidden; font-size: 15px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.pd-doctitle { overflow: hidden; font-size: calc(var(--text-base, 1rem) * 0.9375); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .pd-docname .pd-meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pd-bar-end { display: flex; align-items: center; gap: 2px; }
-.pd-barbutton { display: inline-flex; align-items: center; gap: 6px; border: 0; border-radius: 8px; background: none; padding: 6px 8px; color: rgb(var(--fg-muted)); font: inherit; font-size: 13px; cursor: pointer; }
+.pd-barbutton { display: inline-flex; align-items: center; gap: 6px; border: 0; border-radius: 8px; background: none; padding: 6px 8px; color: rgb(var(--fg-muted)); font: inherit; font-size: calc(var(--text-base, 1rem) * 0.8125); cursor: pointer; }
 .pd-barbutton:hover:not(:disabled), .pd-barbutton[aria-pressed="true"], .pd-barbutton[aria-expanded="true"] { background: rgb(var(--raised)); color: rgb(var(--fg)); }
 .pd-barbutton[aria-expanded="true"] { box-shadow: inset 0 -2px 0 rgb(var(--accent)); }
 .pd-barbutton:disabled { opacity: .5; cursor: default; }
@@ -90,16 +90,16 @@
 @container (max-width: 480px) { .pd-barlabel { display: none; } }
 .pd-menu { position: relative; }
 .pd-menu-list { position: absolute; top: calc(100% + 4px); right: 0; z-index: 30; display: flex; min-width: 13rem; flex-direction: column; border: 1px solid rgb(var(--line)); border-radius: 10px; background: rgb(var(--surface)); padding: 4px; box-shadow: 0 10px 30px rgb(0 0 0 / .18); }
-.pd-menu-item { display: flex; align-items: center; gap: 8px; border: 0; border-radius: 6px; background: none; padding: 7px 10px; color: rgb(var(--fg)); font: inherit; font-size: 13px; text-align: left; text-decoration: none; cursor: pointer; }
+.pd-menu-item { display: flex; align-items: center; gap: 8px; border: 0; border-radius: 6px; background: none; padding: 7px 10px; color: rgb(var(--fg)); font: inherit; font-size: calc(var(--text-base, 1rem) * 0.8125); text-align: left; text-decoration: none; cursor: pointer; }
 .pd-menu-item:hover { background: rgb(var(--raised)); }
-.pd-state { min-width: 0; max-width: calc(100% - 8rem); flex: none; margin-left: auto; overflow: hidden; color: rgb(var(--fg-subtle)); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.pd-state { min-width: 0; max-width: calc(100% - 8rem); flex: none; margin-left: auto; overflow: hidden; color: rgb(var(--fg-subtle)); font-size: calc(var(--text-base, 1rem) * 0.75); text-overflow: ellipsis; white-space: nowrap; }
 .pd-state[data-status="conflict"], .pd-state[data-status="error"] { color: rgb(var(--warn)); }
 .pd-conflict { border: 1px solid rgb(var(--warn) / .35); border-radius: 12px; background: rgb(var(--warn) / .1); padding: 10px 12px; }
 .pd-conflict p { margin: 0; }
 .pd-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
-.pd-conflict summary { cursor: pointer; color: rgb(var(--fg-muted)); font-size: 13px; }
+.pd-conflict summary { cursor: pointer; color: rgb(var(--fg-muted)); font-size: calc(var(--text-base, 1rem) * 0.8125); }
 .pd-conflict .pd-body { margin-top: 8px; max-height: 20rem; overflow: auto; }
-.pd-note { display: flex; align-items: center; justify-content: space-between; gap: 8px; border: 1px solid rgb(var(--line)); border-radius: 12px; background: rgb(var(--raised) / .5); padding: 6px 12px; font-size: 13px; }
+.pd-note { display: flex; align-items: center; justify-content: space-between; gap: 8px; border: 1px solid rgb(var(--line)); border-radius: 12px; background: rgb(var(--raised) / .5); padding: 6px 12px; font-size: calc(var(--text-base, 1rem) * 0.8125); }
 /* What the agent is writing, as it comes: the note says so, and the draft is drawn in the editor's place until the call is done. */
 .pd-writing { border-color: rgb(var(--accent) / .4); }
 .pd-writing.is-failed { border-color: rgb(var(--warn) / .5); }
@@ -107,12 +107,12 @@
 .pd-revisions button { display: flex; width: 100%; flex-direction: column; gap: 2px; border: 1px solid rgb(var(--line)); border-radius: 10px; background: rgb(var(--raised)); padding: 6px 12px; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .pd-revisions button:hover, .pd-revisions button[aria-pressed="true"] { border-color: rgb(var(--accent) / .5); }
 .pd-revisions button:focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 1px; }
-.pd-current { margin-left: 8px; color: rgb(var(--accent)); font-size: 11px; font-weight: 500; }
+.pd-current { margin-left: 8px; color: rgb(var(--accent)); font-size: calc(var(--text-base, 1rem) * 0.6875); font-weight: 500; }
 .pd-preview { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid rgb(var(--line)); padding-top: 10px; }
 .pd-preview-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 /* An earlier revision on the page in the text's place: the note under the bar says so, and the sheet is drawn as a copy, not as the text to type in. */
 .pd-old-note { border-color: rgb(var(--warn) / .6); background: rgb(var(--warn) / .1); }
-.pd-old { opacity: .92; font-size: 16px; line-height: 1.7; }
+.pd-old { opacity: .92; font-size: calc(var(--text-base, 1rem) * 1); line-height: 1.7; }
 .pd-old h1 { font-size: 2.3em; font-weight: 600; line-height: 1.2; letter-spacing: -.01em; }
 .pd-old h2 { font-size: 1.6em; font-weight: 600; line-height: 1.25; }
 .pd-old h3 { font-size: 1.25em; font-weight: 600; line-height: 1.3; }
@@ -122,7 +122,7 @@
 
 /* The toolbar: stays at the top while the text scrolls under it (the page below it scrolls, not this). */
 .pd-toolbar { z-index: 10; display: flex; flex-wrap: wrap; align-items: center; gap: 2px; border-bottom: 1px solid rgb(var(--line)); background: rgb(var(--surface)); padding: 4px 12px; }
-.pd-tool { display: inline-flex; height: 30px; min-width: 30px; align-items: center; justify-content: center; gap: 6px; border: 0; border-radius: 6px; background: none; padding: 0 6px; color: rgb(var(--fg-muted)); font: inherit; font-size: 13px; cursor: pointer; }
+.pd-tool { display: inline-flex; height: 30px; min-width: 30px; align-items: center; justify-content: center; gap: 6px; border: 0; border-radius: 6px; background: none; padding: 0 6px; color: rgb(var(--fg-muted)); font: inherit; font-size: calc(var(--text-base, 1rem) * 0.8125); cursor: pointer; }
 .pd-tool:hover:not(:disabled) { background: rgb(var(--raised)); color: rgb(var(--fg)); }
 .pd-tool[aria-pressed="true"] { background: rgb(var(--accent) / .15); color: rgb(var(--accent)); }
 .pd-tool:disabled { opacity: .4; cursor: default; }
@@ -143,7 +143,7 @@
 .pd-doc[data-layout="narrow"] .pd-sheet { padding: 20px 16px 40px; }
 .pd-sheet .pd-editor { min-height: 0; border: 0; border-radius: 0; background: none; padding: 0; cursor: auto; }
 .pd-sheet .pd-editor:focus-within { border-color: transparent; }
-.pd-sheet .pd-editor .ProseMirror { min-height: 4rem; font-size: 16px; line-height: 1.7; }
+.pd-sheet .pd-editor .ProseMirror { min-height: 4rem; font-size: calc(var(--text-base, 1rem) * 1); line-height: 1.7; }
 .pd-sheet .pd-editor .ProseMirror h1 { margin-bottom: .6em; font-size: 2.3em; font-weight: 600; line-height: 1.2; letter-spacing: -.01em; }
 /* Paragraphs apart as on a page: the space after a block, more before a heading. */
 .pd-sheet .pd-editor .ProseMirror > * + *, .pd-sheet .pd-draft > * + * { margin-top: .8em; }
@@ -196,21 +196,21 @@
 .pd-doc[data-layout="wide"] .pd-desk > .pd-side { flex: 0 0 19rem; }
 .pd-doc[data-layout="narrow"] .pd-desk > .pd-side { position: absolute; top: 0; right: 0; bottom: 0; z-index: 15; width: min(320px, 85%); box-shadow: -8px 0 28px rgb(0 0 0 / .22); }
 .pd-list-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.pd-item { display: flex; flex-direction: column; gap: 2px; border: 1px solid rgb(var(--line)); border-radius: 10px; background: rgb(var(--raised) / .5); padding: 6px 10px; color: inherit; font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+.pd-item { display: flex; flex-direction: column; gap: 2px; border: 1px solid rgb(var(--line)); border-radius: 10px; background: rgb(var(--raised) / .5); padding: 6px 10px; color: inherit; font: inherit; font-size: calc(var(--text-base, 1rem) * 0.8125); text-align: left; cursor: pointer; }
 .pd-item:hover, .pd-item[aria-current="true"] { border-color: rgb(var(--accent) / .6); }
 .pd-item:focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 1px; }
 .pd-said { overflow-wrap: anywhere; }
-.pd-side h2 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 15px; font-weight: 600; }
-.pd-count { border-radius: 999px; background: rgb(var(--accent) / .15); padding: 0 8px; color: rgb(var(--accent)); font-size: 11px; font-weight: 600; }
-.pd-hint { margin: 0; color: rgb(var(--fg-subtle)); font-size: 12px; }
+.pd-side h2 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: calc(var(--text-base, 1rem) * 0.9375); font-weight: 600; }
+.pd-count { border-radius: 999px; background: rgb(var(--accent) / .15); padding: 0 8px; color: rgb(var(--accent)); font-size: calc(var(--text-base, 1rem) * 0.6875); font-weight: 600; }
+.pd-hint { margin: 0; color: rgb(var(--fg-subtle)); font-size: calc(var(--text-base, 1rem) * 0.75); }
 .pd-thread-list { display: flex; flex-direction: column; gap: 8px; }
-.pd-thread-card { display: flex; flex-direction: column; gap: 6px; border: 1px solid rgb(var(--line)); border-radius: 12px; background: rgb(var(--raised) / .5); padding: 8px 10px; font-size: 13px; }
+.pd-thread-card { display: flex; flex-direction: column; gap: 6px; border: 1px solid rgb(var(--line)); border-radius: 12px; background: rgb(var(--raised) / .5); padding: 8px 10px; font-size: calc(var(--text-base, 1rem) * 0.8125); }
 .pd-thread-card[aria-current="true"] { border-color: rgb(var(--accent) / .6); }
 .pd-thread-card[data-status="resolved"] { opacity: .75; }
 .pd-asked { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
 .pd-asked[data-asked="answered"] { color: rgb(var(--accent)); font-weight: 600; }
-.pd-seen { padding: 0 8px; font-size: 12px; font-weight: 400; }
-.pd-quote { margin: 0; border: 0; border-left: 2px solid rgb(var(--warn) / .7); background: none; padding: 0 0 0 8px; color: rgb(var(--fg-muted)); font: inherit; font-size: 12px; text-align: left; overflow-wrap: anywhere; white-space: pre-wrap; }
+.pd-seen { padding: 0 8px; font-size: calc(var(--text-base, 1rem) * 0.75); font-weight: 400; }
+.pd-quote { margin: 0; border: 0; border-left: 2px solid rgb(var(--warn) / .7); background: none; padding: 0 0 0 8px; color: rgb(var(--fg-muted)); font: inherit; font-size: calc(var(--text-base, 1rem) * 0.75); text-align: left; overflow-wrap: anywhere; white-space: pre-wrap; }
 button.pd-quote { cursor: pointer; }
 button.pd-quote:hover { color: rgb(var(--fg)); }
 button.pd-quote:focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 1px; }
@@ -218,7 +218,7 @@ button.pd-quote:focus-visible { outline: 2px solid rgb(var(--accent)); outline-o
 .pd-comments { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 0; list-style: none; }
 .pd-comment-head { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; }
 .pd-comment-actions { display: flex; gap: 2px; margin-left: auto; }
-.pd-act { padding: 0 8px; font-size: 12px; font-weight: 400; }
+.pd-act { padding: 0 8px; font-size: calc(var(--text-base, 1rem) * 0.75); font-weight: 400; }
 .pd-comments li[data-author="agent"] .pd-comment-head strong { color: rgb(var(--accent)); }
 .pd-comment-body { overflow-wrap: anywhere; }
 .pd-comment-body > :first-child { margin-top: 0; }
@@ -234,10 +234,10 @@ button.pd-quote:focus-visible { outline: 2px solid rgb(var(--accent)); outline-o
 .pd-iconbtn:hover:not(:disabled) { background: rgb(var(--surface)); color: rgb(var(--accent)); }
 .pd-iconbtn:focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 1px; }
 .pd-iconbtn:disabled { opacity: .5; cursor: default; }
-.pd-fold { align-self: flex-start; padding: 0 8px; font-size: 12px; font-weight: 400; color: rgb(var(--fg-muted)); }
+.pd-fold { align-self: flex-start; padding: 0 8px; font-size: calc(var(--text-base, 1rem) * 0.75); font-weight: 400; color: rgb(var(--fg-muted)); }
 /* The way the text is written, in the bar: the editor, or Markdown. */
 .pd-modes { display: inline-flex; gap: 2px; margin-right: 6px; border: 1px solid rgb(var(--line)); border-radius: 8px; background: rgb(var(--raised) / .5); padding: 2px; }
-.pd-modes button { display: inline-flex; align-items: center; gap: 6px; border: 0; border-radius: 6px; background: none; padding: 3px 10px; color: rgb(var(--fg-muted)); font: inherit; font-size: 13px; cursor: pointer; }
+.pd-modes button { display: inline-flex; align-items: center; gap: 6px; border: 0; border-radius: 6px; background: none; padding: 3px 10px; color: rgb(var(--fg-muted)); font: inherit; font-size: calc(var(--text-base, 1rem) * 0.8125); cursor: pointer; }
 .pd-modes button:hover:not(:disabled) { color: rgb(var(--fg)); }
 .pd-modes button[aria-pressed="true"] { background: rgb(var(--surface)); color: rgb(var(--fg)); box-shadow: 0 1px 2px rgb(0 0 0 / .18); }
 .pd-modes button:focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 1px; }
@@ -247,11 +247,11 @@ button.pd-quote:focus-visible { outline: 2px solid rgb(var(--accent)); outline-o
    its height is the same in every state and language, and the buttons do not move between the press and the release of a click on one of them. */
 @container (max-width: 1150px) { .pd-modelabel { display: none; } .pd-modes button { padding: 4px 7px; } }
 /* The text as Markdown, in the editor's place: the same column, plain, in a monospace face; the page scrolls, not the box (source.js keeps it as high as its text). */
-.pd-source { display: block; width: 100%; min-height: 16rem; margin: 0; border: 0; border-radius: 0; background: none; padding: 0; resize: none; overflow: hidden; outline: none; color: inherit; font: 14.5px/1.7 ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; overflow-wrap: anywhere; tab-size: 2; white-space: pre-wrap; cursor: text; }
+.pd-source { display: block; width: 100%; min-height: 16rem; margin: 0; border: 0; border-radius: 0; background: none; padding: 0; resize: none; overflow: hidden; outline: none; color: inherit; font: calc(var(--text-base, 1rem) * 0.90625)/1.7 ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; overflow-wrap: anywhere; tab-size: 2; white-space: pre-wrap; cursor: text; }
 .pd-source[hidden] { display: none; }
 /* The markers in the right margin, level with the lines that are commented on: a bubble and how many comments there are. */
 .pd-markers { position: absolute; inset: 0; z-index: 1; pointer-events: none; }
-.pd-marker { position: absolute; display: inline-flex; height: 22px; align-items: center; gap: 4px; border: 0; border-radius: 6px; background: none; padding: 0 6px; color: rgb(var(--fg-subtle)); font: inherit; font-size: 12px; cursor: pointer; pointer-events: auto; }
+.pd-marker { position: absolute; display: inline-flex; height: 22px; align-items: center; gap: 4px; border: 0; border-radius: 6px; background: none; padding: 0 6px; color: rgb(var(--fg-subtle)); font: inherit; font-size: calc(var(--text-base, 1rem) * 0.75); cursor: pointer; pointer-events: auto; }
 .pd-marker .pd-icon { width: 14px; height: 14px; }
 .pd-marker:hover, .pd-marker:focus-visible { background: rgb(var(--raised)); color: rgb(var(--fg)); }
 .pd-marker:focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 1px; }

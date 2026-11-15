@@ -151,7 +151,7 @@ function BranchRow({ branch: b, onSwitch, onDelete }: { branch: Branch; onSwitch
             </span>
           )}
         </span>
-        <span className="flex min-w-0 items-center gap-1.5 pl-4 text-[10.5px] text-fg-faint">
+        <span className="flex min-w-0 items-center gap-1.5 pl-4 text-[length:calc(var(--text-base,1rem)*0.65625)] text-fg-faint">
           <span className="min-w-0 flex-1 truncate">{b.subject}</span>
           <span className="shrink-0">{ago(b.date)}</span>
         </span>
