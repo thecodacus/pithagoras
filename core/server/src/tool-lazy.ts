@@ -12,7 +12,7 @@ import { randomBytes } from "node:crypto";
  *
  * The threshold is a budget for the model's list: how many tokens its declarations cost, and how many tools there are.
  * Groups are taken out of the list, the largest first, until both are within the limits. The result is stored and
- * kept: a group that went lazy stays lazy until the list would fit within 80 % of the limits without it, so that it does
+ * kept: a group that went lazy stays lazy until the list would fit within 80 % of the limits with that group in it, so that it does
  * not flip when another group grows or shrinks a little.
  */
 
@@ -177,8 +177,11 @@ export interface LazyHead {
   tag: string;
 }
 
-/** A tag for a new head: see LazyHead.tag. */
-export const ruleTag = (): string => randomBytes(4).toString("hex");
+/**
+ * A tag for a new head: see LazyHead.tag. 16 hex characters: the tag is cut out of every tool's result, and one of 8 is
+ * met in ordinary hex text (a UUID, a hash) about once in a thousand chats that read a few MB of it.
+ */
+export const ruleTag = (): string => randomBytes(8).toString("hex");
 
 /** A stored head, or nothing where there is none or it is not one this version wrote. */
 export function parseHead(raw: unknown): LazyHead | undefined {
@@ -187,7 +190,7 @@ export function parseHead(raw: unknown): LazyHead | undefined {
     const head = JSON.parse(raw);
     const strings = (v: unknown): v is string[] => Array.isArray(v) && v.every((s) => typeof s === "string");
     if (head?.v !== 1 || !strings(head.lazy) || !strings(head.direct) || typeof head.hint !== "string" || typeof head.outside !== "boolean" || !strings(head.voice)) return undefined;
-    return { v: 1, lazy: head.lazy, direct: head.direct, hint: head.hint, outside: head.outside, voice: head.voice, tag: typeof head.tag === "string" && /^[0-9a-f]{8}$/.test(head.tag) ? head.tag : "" };
+    return { v: 1, lazy: head.lazy, direct: head.direct, hint: head.hint, outside: head.outside, voice: head.voice, tag: typeof head.tag === "string" && /^[0-9a-f]{16}$/.test(head.tag) ? head.tag : "" };
   } catch {
     return undefined;
   }

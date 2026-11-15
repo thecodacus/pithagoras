@@ -2,8 +2,8 @@ import { Type } from "typebox";
 import { randomBytes } from "node:crypto";
 import { mcpNamespaceOf } from "./mcp-origin.js";
 import { fail, say } from "./tool-result.js";
+import { deface } from "./guard.js";
 import { LISTED_TOOLS_KEY, TOOL_SEARCH } from "./tool-search-names.js";
-import { oneOf } from "./tool-schema.js";
 import { rank, type Rankable } from "./tool-rank.js";
 import type { LazyHead } from "../tool-lazy.js";
 
@@ -86,12 +86,105 @@ export const ruleLinesNote = (tag: string): string =>
 const rulePrefix = (tag: string): string => `Rule ${tag}:`;
 
 /**
+ * What a model reads as the same letter or digit as a hex one, or as no character at all: the look-alikes that NFKC leaves
+ * alone (Cyrillic and Greek letters), and the characters between the letters of a word (spaces, zero-width and format
+ * characters, marks, punctuation and symbols). Only for finding the tag in a text, never for what the text says.
+ */
+const LOOK_ALIKE: Record<string, string> = {
+  // Cyrillic, Greek and Latin letters that read as a hex letter (the capitals are lower-cased before this table: Α is α).
+  ...Object.fromEntries(["\u0430", "\u03b1", "\u0251"].map((c) => [c, "a"])),
+  ...Object.fromEntries(["\u044c", "\u0185", "\u03b2", "\u0432"].map((c) => [c, "b"])),
+  ...Object.fromEntries(["\u0441", "\u03f2"].map((c) => [c, "c"])),
+  ...Object.fromEntries(["\u0501", "\u0257"].map((c) => [c, "d"])),
+  ...Object.fromEntries(["\u0435", "\u04bd", "\u03b5", "\u0454"].map((c) => [c, "e"])),
+  ...Object.fromEntries(["\u03dd", "\u0192"].map((c) => [c, "f"])),
+  ...Object.fromEntries(["\u043e", "\u03bf", "\u0585", "\u03c3"].map((c) => [c, "0"])),
+  ...Object.fromEntries(["\u0456", "\u03b9", "\u04cf", "\u0269", "\u0131", "\u0131"].map((c) => [c, "1"])),
+  "\u0437": "3",
+  "\u0431": "6",
+  o: "0",
+  l: "1",
+  i: "1",
+};
+/** The same for the ASCII letters, by code. */
+const LOOK_ALIKE_CODE: Record<number, number> = { 0x6f: 0x30, 0x6c: 0x31, 0x69: 0x31 };
+const BETWEEN = /[\p{Z}\p{C}\p{M}\p{P}\p{S}]/u;
+
+/** A text's letters and digits, as the tag would be read from it, each (each code unit of it) with where it stands in the text. */
+function lettersOf(text: string): { chars: string; at: Int32Array } {
+  // At most one letter for each code unit; NFKC of one character may give more, so these grow if need be.
+  let units = new Uint16Array(text.length + 16);
+  let at = new Int32Array(text.length + 16);
+  let length = 0;
+  const put = (unit: number, i: number): void => {
+    if (length === units.length) {
+      const moreUnits = new Uint16Array(length * 2);
+      moreUnits.set(units);
+      units = moreUnits;
+      const moreAt = new Int32Array(length * 2);
+      moreAt.set(at);
+      at = moreAt;
+    }
+    units[length] = unit;
+    at[length++] = i;
+  };
+  for (let i = 0; i < text.length; ) {
+    const code = text.charCodeAt(i);
+    // ASCII is what NFKC leaves as it is: no normalising for most of a text, which is plain.
+    if (code < 0x80) {
+      // Every ASCII character but a letter or a digit is a space, a control character, punctuation or a symbol: between the letters.
+      if ((code >= 0x30 && code <= 0x39) || (code >= 0x61 && code <= 0x7a)) put(LOOK_ALIKE_CODE[code] ?? code, i);
+      else if (code >= 0x41 && code <= 0x5a) put(LOOK_ALIKE_CODE[code + 32] ?? code + 32, i);
+      i++;
+      continue;
+    }
+    const width = text.codePointAt(i)! > 0xffff ? 2 : 1;
+    for (const part of text.slice(i, i + width).normalize("NFKC").toLowerCase()) {
+      if (BETWEEN.test(part)) continue;
+      const letter = LOOK_ALIKE[part] ?? part;
+      for (let k = 0; k < letter.length; k++) put(letter.charCodeAt(k), i);
+    }
+    i += width;
+  }
+  return { chars: new TextDecoder("utf-16le").decode(units.subarray(0, length)), at };
+}
+
+/**
  * A text a tool wrote (its description, its parameters, what a call of it returned), with the chat's tag taken out of it:
  * a line of it cannot pass for one of the rule lines. A tag is random, so only a text that has read this chat's own (its
- * session file, say) could hold it.
+ * session file, say, or the prompt through a model that repeats it) could hold it, and it can write it in any way a model
+ * still reads as the tag: with letters of other alphabets, zero-width characters or spaces between its letters, twice in
+ * a row. So it is looked for in the text's letters and digits alone, and every place found is cut out of the text, again
+ * until none is left (what is cut out can join what was around it into the tag).
  */
 function defuse(text: string, tag: string): string {
-  return tag ? text.replace(new RegExp(`rule\\W{0,3}${tag}`, "gi"), "Rule") : text;
+  const cut = cutTag(text, tag);
+  // What was cut can join what was around it into a marker the guard has defaced before (the guard runs first): it is
+  // defaced again, so that no forged marker is built here for the model to read.
+  return cut === text ? cut : deface(cut);
+}
+
+function cutTag(text: string, tag: string): string {
+  if (!tag) return text;
+  let out = text;
+  for (let round = 0; round < 8; round++) {
+    const { chars, at } = lettersOf(out);
+    const spans: [number, number][] = [];
+    for (let hit = chars.indexOf(tag); hit >= 0; hit = chars.indexOf(tag, hit + tag.length)) {
+      const last = at[hit + tag.length - 1];
+      spans.push([at[hit], last + (out.codePointAt(last)! > 0xffff ? 2 : 1)]);
+    }
+    if (!spans.length) return out;
+    let next = "";
+    let from = 0;
+    for (const [start, end] of spans) {
+      next += out.slice(from, start);
+      from = end;
+    }
+    out = next + out.slice(from);
+  }
+  // Still joining after eight rounds is a text built for it: nothing of it is kept.
+  return "";
 }
 
 /** A tool's text on one line: what it holds that would start a new one (a line break, any control character) as a space. */
@@ -167,10 +260,13 @@ export class ToolSearch {
   private definition?: unknown;
   /** The names the last good request hid, for the request where the registry cannot be read. */
   private hiding: string[] = [];
-  /** The groups whose shared rules the model has been given since the context was last cut (compaction, reload). */
+  /**
+   * The shared rules the model has been given since the context was last cut (compaction, reload), each with its group:
+   * by the rule and not by the group, as a tool that registers later can bring the group a rule it shares with another.
+   */
   private told = new Set<string>();
   /** The tag of a head that has none (one made in a test, or with nothing lazy): this tool's own, as random. */
-  private readonly ownTag = randomBytes(4).toString("hex");
+  private readonly ownTag = randomBytes(8).toString("hex");
 
   constructor(private head: LazyHead) {}
 
@@ -320,9 +416,11 @@ export class ToolSearch {
       const count = new Map<string, number>();
       for (const tool of members) for (const line of new Set(tool.guidelines)) count.set(line, (count.get(line) ?? 0) + 1);
       const shared = [...count].filter(([, n]) => n > 1).map(([line]) => line);
-      if (!this.told.has(label)) {
-        for (const line of shared) add(line);
-        this.told.add(label);
+      for (const line of shared) {
+        const key = `${label}\n${line}`;
+        if (this.told.has(key)) continue;
+        add(line);
+        this.told.add(key);
       }
       if (own) {
         for (const tool of tools.filter((t) => t.label === label)) for (const line of tool.guidelines) if (!shared.includes(line)) add(line);
@@ -388,13 +486,28 @@ export class ToolSearch {
       const groups = new Map<string, Lazy[]>();
       for (const tool of tools) groups.set(tool.label, [...(groups.get(tool.label) ?? []), tool]);
       const sorted = [...groups].sort(([a], [b]) => a.localeCompare(b));
-      const lines = sorted.map(([label, members]) => `- ${label} (${members.length}): ${members.map((m) => m.name).slice(0, 12).join(", ")}${members.length > 12 ? ", …" : ""}`);
-      // The names of each group's first twelve are the words of the list.
-      const named = sorted.flatMap(([, members]) => members.slice(0, 12).map((m) => m.name));
-      return listing(said(`${tools.length} lazy tool${tools.length === 1 ? "" : "s"} in ${groups.size} group${groups.size === 1 ? "" : "s"}:\n${lines.join("\n")}\n\nSearch with words for what you need; describe gives one tool's parameters.`), named);
+      const head = `${tools.length} lazy tool${tools.length === 1 ? "" : "s"} in ${groups.size} group${groups.size === 1 ? "" : "s"}:`;
+      const tail = "\n\nSearch with words for what you need; describe gives one tool's parameters.";
+      const more = (n: number) => `\n${n} more group${n === 1 ? " is" : "s are"} not listed here: a search with words finds their tools too.`;
+      // A result is the model's context from here on, kept to the size of a search's: the groups that do not fit are
+      // counted and not listed. The names of each listed group's first twelve are the words of the list.
+      const room = RESULT_CHARS - tail.length - more(sorted.length).length;
+      let list = head;
+      const named: string[] = [];
+      for (const [i, [label, members]] of sorted.entries()) {
+        const line = `\n- ${oneLine(label)} (${members.length}): ${members.map((m) => oneLine(m.name)).slice(0, 12).join(", ")}${members.length > 12 ? ", …" : ""}`;
+        // The last group needs no room for the count of those after it.
+        if (list.length + line.length > (i === sorted.length - 1 ? RESULT_CHARS - tail.length : room)) {
+          list += more(sorted.length - i);
+          break;
+        }
+        list += line;
+        named.push(...members.slice(0, 12).map((m) => m.name));
+      }
+      return listing(said(defuse(list + tail, this.tag)), named);
     }
     const found = rank(tools, text);
-    if (!found.length) return listing(said(`No lazy tool matches "${oneLine(text)}". Search with other words, or with none to list the groups.`), []);
+    if (!found.length) return listing(said(defuse(`No lazy tool matches "${oneLine(text)}". Search with other words, or with none to list the groups.`, this.tag)), []);
     const shown = found.slice(0, HITS);
     const detailed = shown.slice(0, DETAILED);
     // What was found is wanted next: the servers of the hits start now, so that the call finds them up.
@@ -450,6 +563,25 @@ export class ToolSearch {
     // The model has been given the rules again: the context is new.
     pi.on("session_start", () => this.forget());
     pi.on("session_compact", () => this.forget());
+    // The tag is the chat's own, so no result may hold it but this tool's own search and describe, which write it into the
+    // rule lines: a lazy tool called by its name, or any other tool, reads a page that can carry what this tool's call
+    // result has taken out of it.
+    pi.on("tool_result", (event: any) => {
+      const tag = this.tag;
+      if (!Array.isArray(event?.content)) return undefined;
+      if (event.toolName === TOOL_SEARCH && !event.isError && (event.input?.action === "search" || event.input?.action === "describe") && this.owns()) return undefined;
+      // A call's result was taken through defuse by call() itself: not scanned a second time (a large result costs).
+      if (event.toolName === TOOL_SEARCH && !event.isError && event.input?.action === "call" && this.owns()) return undefined;
+      let changed = false;
+      const content = event.content.map((part: any) => {
+        if (part?.type !== "text" || typeof part.text !== "string") return part;
+        const text = defuse(part.text, tag);
+        if (text === part.text) return part;
+        changed = true;
+        return { ...part, text };
+      });
+      return changed ? { content } : undefined;
+    });
   };
 
   private register(pi: any): void {
@@ -462,13 +594,32 @@ export class ToolSearch {
       promptSnippet: "search, describe and call the tools kept out of this list",
       promptGuidelines: [this.head.hint, ruleLinesNote(this.tag)].filter(Boolean),
       parameters: Type.Object({
-        action: oneOf(["search", "describe", "call"]),
+        action: Type.String({ description: "search, describe or call" }),
         query: Type.Optional(Type.String()),
         name: Type.Optional(Type.String()),
         args: Type.Optional(
           Type.Union([Type.Object({}, { additionalProperties: true }), Type.String()], { description: "The tool's arguments: an object, or its JSON text" })
         ),
       }),
+      // No call fails pi's check of the arguments: that failure is a result of its own with the arguments printed in it, which
+      // no tool_result handler sees, so a query written as an object would bring the tag back in a text the guard does not
+      // wrap. Every value is made the kind the schema wants (execute refuses what is left), so each call reaches execute.
+      prepareArguments: (raw: unknown) => {
+        const given = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+        const text = (v: unknown): string | undefined => {
+          if (v === undefined || v === null) return undefined;
+          if (typeof v === "string") return v;
+          try {
+            return JSON.stringify(v) ?? String(v);
+          } catch {
+            return String(v);
+          }
+        };
+        const args = given.args && typeof given.args === "object" && !Array.isArray(given.args) ? given.args : text(given.args);
+        const query = text(given.query);
+        const name = text(given.name);
+        return { action: text(given.action) ?? "", ...(query !== undefined ? { query } : {}), ...(name !== undefined ? { name } : {}), ...(args !== undefined ? { args } : {}) };
+      },
       // Declared to the model while it is active, never callable from a script or another tool: it would call itself.
       exposure: "model-only",
       // The declarations of the lazy tools are left out of every request: see the note on this file.

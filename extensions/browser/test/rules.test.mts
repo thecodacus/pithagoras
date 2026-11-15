@@ -26,6 +26,7 @@ const browser = await serveBrowser();
 assert.equal((await fetch(`${browser.at}/connect`, { method: "POST" })).status, 200);
 const { SdkPiClient } = await import("../../../core/server/dist/pi/sdk-client.js");
 const { OUTSIDE_CONTENT_GUIDELINE } = await import("../../../core/server/dist/pi/guard.js");
+const { lazyHintOf } = await import("../../../core/server/dist/lazy-head.js");
 const { BROWSER_READING_RULE, BROWSER_SCREENSHOT_RULE } = await import("../../../core/server/dist/pi/browser-mcp-rules.js");
 const { ACTIONS_RULE, REFS_RULE, browserTools } = await import("../src/server/tools.ts");
 
@@ -101,7 +102,7 @@ test("for every set of browser tools that is on, the rules of their own pi print
 test("a conversation is told what the browser tools that are on need, whichever of the others are off", async () => {
   /** A new conversation, with the tools in `off` switched off and `lazy` kept out of its list: the rules are those of what is on. */
   const check = async (label: string, { off = [] as string[], lazy = [] as string[] } = {}) => {
-    const request = await ask({ toolsOff: off, ...(lazy.length ? { lazy: { v: 1, lazy: lazy.map((name) => `<tool>${name}`), direct: [], hint: "", outside: false, voice: [] } } : {}) });
+    const request = await ask({ toolsOff: off, ...(lazy.length ? { lazy: { v: 1, lazy: lazy.map((name) => `<tool>${name}`), direct: [], hint: lazyHintOf([{ label: "browser", tools: lazy }]), outside: false, voice: [] } } : {}) });
     const on = NAMES.filter((name) => !off.includes(name));
     assert.deepEqual(names(request).filter((name) => name.startsWith("browser_")), on.filter((name) => !lazy.includes(name)), `${label}: the tools offered`);
     const system = systemOf(request);

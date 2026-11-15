@@ -247,7 +247,7 @@ test("a chat's head says from its start what its lazy tools said of themselves w
   assert.deepEqual(head.lazy, ["pi-heavy"]);
   assert.equal(head.outside, true, "a lazy tool returns outside content: said from the first request, not when it registers");
   assert.deepEqual(head.voice, ["Say the heavy result in one sentence.", "Spell the ids."]);
-  assert.match(head.tag, /^[0-9a-f]{8}$/);
+  assert.match(head.tag, /^[0-9a-f]{16}$/);
   assert.notEqual(headOf((await json("/api/sessions", "POST", {})).id).tag, head.tag, "each chat its own");
   // Read again, the tag stays: it says nothing of the tools.
   await mark({ "pi-heavy": "lazy", "<tool>heavy_read": "direct" });
@@ -263,13 +263,30 @@ test("a chat's head says from its start what its lazy tools said of themselves w
   assert.deepEqual(quiet.voice, []);
 });
 
+test("a lazy tool that the chat starts with switched off still says its outside-content line and its voice lines in the head: switching it on later adds nothing", async () => {
+  db.rememberTools([
+    db.remembered({ name: "heavy_open", source: "pi-heavy", outside: true, voice: ["Say the heavy result in one sentence."] }),
+    db.remembered({ name: "heavy_read", source: "pi-heavy" }),
+  ]);
+  await mark({ "pi-heavy": "lazy" });
+  // heavy_open is off by default, so the chat starts without it; heavy_read keeps the group in the head.
+  db.setToolDefaultsOff(["heavy_open"]);
+  const chat = await json("/api/sessions", "POST", {});
+  const head = headOf(chat.id);
+  assert.deepEqual(head.lazy, ["pi-heavy"]);
+  assert.equal(head.outside, true, "the line is frozen with the head, not added when the tool is switched on");
+  assert.deepEqual(head.voice, ["Say the heavy result in one sentence."]);
+  assert.match(head.hint, /heavy_read/);
+  assert.doesNotMatch(head.hint, /heavy_open/, "the hint names only what the chat starts with");
+});
+
 test("a head stored before heads had a tag is given one once, and keeps it", async () => {
   await mark({ "pi-heavy": "lazy" });
   const chat = await json("/api/sessions", "POST", {});
   const { tag, ...untagged } = headOf(chat.id);
   db.getDb().prepare("UPDATE sessions SET lazy_head = ? WHERE id = ?").run(JSON.stringify(untagged), chat.id);
   const given = headOf(chat.id);
-  assert.match(given.tag, /^[0-9a-f]{8}$/);
+  assert.match(given.tag, /^[0-9a-f]{16}$/);
   assert.notEqual(given.tag, tag);
   assert.deepEqual({ ...given, tag: undefined }, { ...untagged, tag: undefined }, "nothing else of it changes");
   assert.equal(headOf(chat.id).tag, given.tag, "and it is kept");
@@ -547,6 +564,7 @@ test("a list over 3,000 tokens or 20 tools takes the largest group out of it, wh
   assert.deepEqual(headOf(chat.id).lazy, ["pi-browser"]);
   await mark({ "pi-browser": "direct" });
   assert.deepEqual([...db.lazyToolNames()].sort(), big("small", "pi-small", 10, 100).map((t) => t.name).sort(), "the person's word is before the threshold's: another group goes instead");
+  assert.deepEqual(db.lazyNotice(), ["pi-small"], "the notice names what is lazy now, not the group the person kept in the list");
   const kept = await json("/api/sessions", "POST", {});
   assert.deepEqual(headOf(kept.id).lazy, ["pi-small"]);
   assert.deepEqual(headOf(kept.id).direct, ["pi-browser"]);
@@ -633,6 +651,117 @@ test("what a mode of the person's and an agent keep in the model's list stays th
   const other = await json("/api/sessions", "POST", {});
   assert.deepEqual(headOf(other.id).lazy, ["pi-browser"]);
   assert.equal((await send(`/api/agents/${agent.id}/direct`, "PUT", { entries: "x" })).status, 400);
+});
+
+test("a chat that has said nothing and is put in another mode starts with what that mode keeps in the list, not with the head it was given before", async () => {
+  db.rememberTools(big("browser", "pi-browser", 11, 400));
+  const mode = await json("/api/chat-modes", "POST", { label: "Pinned browser", description: "" });
+  await json(`/api/chat-modes/${mode.id}/direct`, "PUT", { entries: ["pi-browser"] });
+  const chat = await json("/api/sessions", "POST", {});
+  assert.deepEqual(headOf(chat.id).lazy, ["pi-browser"], "made as the chat was first asked for it, in the standard mode");
+  assert.deepEqual((await json(`/api/sessions/${chat.id}/modes`, "PUT", { mode: `custom/${mode.id}` })).mode, `custom/${mode.id}`);
+  assert.deepEqual(headOf(chat.id).lazy, [], "the mode's own");
+  assert.ok(headOf(chat.id).direct.includes("pi-browser"));
+});
+
+test("a read again while the chat's pi is still starting is taken up by that pi, which does not go on with the head it started with", async () => {
+  await mark({ "pi-heavy": "lazy" });
+  const chat = await json("/api/sessions", "POST", {});
+  assert.deepEqual(headOf(chat.id).lazy, ["pi-heavy"]);
+  // Held at the moment the start has read the chat's head, while pi is still being made.
+  let read;
+  const headRead = new Promise((resolve) => (read = resolve));
+  const toolsFor = sessions.toolsFor;
+  sessions.toolsFor = function (id) {
+    const tools = toolsFor.call(this, id);
+    if (id === chat.id) read();
+    return tools;
+  };
+  try {
+    const started = sessions.ensureClient(chat.id);
+    await headRead;
+    await mark({});
+    assert.equal(await sessions.readToolsAgain(chat.id), true);
+    assert.deepEqual(headOf(chat.id).lazy, []);
+    const client = await started;
+    assert.deepEqual(client.head.lazy, [], "the pi that was starting has the head that was read again");
+  } finally {
+    delete sessions.toolsFor;
+    await sessions.stop(chat.id);
+  }
+});
+
+test("a read again of a busy chat is due after the run: the next step does not reload the pi between two steps", async () => {
+  await mark({ "pi-heavy": "lazy" });
+  const chat = await json("/api/sessions", "POST", {});
+  await sessions.ensureClient(chat.id);
+  const client = sessions.live.get(chat.id).client;
+  let reloads = 0;
+  const reload = client.reload.bind(client);
+  client.reload = async (...args) => {
+    reloads++;
+    return reload(...args);
+  };
+  client.canReloadNow = () => true;
+  const busy = sessions.isBusy;
+  sessions.isBusy = (id) => id === chat.id || busy.call(sessions, id);
+  try {
+    await mark({});
+    assert.equal(await sessions.readToolsAgain(chat.id), true);
+    assert.equal(client.reloadDue, true, "due, for the end of the run");
+    // What pi calls before each step of a run: with a head to read again alone, it reloads nothing.
+    await client.session.agent.prepareNextTurnWithContext?.({}, undefined);
+    assert.equal(reloads, 0, "no reload between two steps");
+  } finally {
+    sessions.isBusy = busy;
+    delete client.reload;
+    await sessions.stop(chat.id);
+  }
+});
+
+test("a read again of an idle chat is held like an edit: another read again waits for it instead of reloading the same pi at once", async () => {
+  await mark({ "pi-heavy": "lazy" });
+  const chat = await json("/api/sessions", "POST", {});
+  await sessions.ensureClient(chat.id);
+  const client = sessions.live.get(chat.id).client;
+  const reload = client.reload.bind(client);
+  let running = 0;
+  let most = 0;
+  let release;
+  const held = new Promise((resolve) => (release = resolve));
+  let entered;
+  const inside = new Promise((resolve) => (entered = resolve));
+  client.reload = async (...args) => {
+    running++;
+    most = Math.max(most, running);
+    // Only the first is held; one that comes while it is, on old code, is let through to show itself.
+    if (running === 1) {
+      entered();
+      await held;
+    }
+    try {
+      return await reload(...args);
+    } finally {
+      running--;
+    }
+  };
+  try {
+    await mark({});
+    const first = sessions.readToolsAgain(chat.id);
+    await inside;
+    // The head is read again once more, as another tab would, while the first reload is under way.
+    await mark({ "pi-heavy": "lazy" });
+    assert.equal(await sessions.readToolsAgain(chat.id), true);
+    assert.equal(running, 1, "it did not reload the pi that is reloading: it is due instead");
+    assert.equal(client.reloadDue, true);
+    release();
+    assert.equal(await first, true);
+    assert.equal(most, 1, "one reload at a time on the pi");
+  } finally {
+    release();
+    delete client.reload;
+    await sessions.stop(chat.id);
+  }
 });
 
 test("the model of a real chat is sent no lazy tool and no tool_search until a tool is lazy for a chat that starts, and the hint only then", async () => {

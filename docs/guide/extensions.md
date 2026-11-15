@@ -472,7 +472,7 @@ is, because each makes the list shorter, and the page says that the rest cannot 
 
 The result is worked out once and kept, not for each chat. It changes when a group comes or goes, a group's size
 changes, a mark changes or the limits do, and a group that went lazy stays lazy until the list would fit within
-80 % of the limits without it, so that a group does not flip when another one grows a little. The page shows one
+80 % of the limits with the group back in the list, so that a group does not flip when another one grows a little. The page shows one
 state for a group in every chat: **auto, lazy** is a group the threshold took out, **auto** one it left in. The
 tokens are what a tool's name, description, parameters and the line the prompt lists it by cost, as measured
 the last time a chat registered it; a tool no chat has registered yet is guessed from its description.
@@ -493,7 +493,9 @@ them, and the threshold takes a large server out of the list whole.
 **Settings → Tools** has a button on the header of each group and one beside each tool that shows the mark: **auto**,
 **lazy** or **direct**. Clicking it goes from auto to lazy to direct and back. A group on **auto** shows what the threshold made of it,
 *auto* or *auto, lazy*, and the tip of the button says why in words (the model's list was over the limits, or it stays in the list). Marking a group makes every tool of
-it lazy or direct, including tools that turn up in it later. A mark is no switch: the tools stay on or off as
+it lazy or direct, including tools that turn up in it later. A tool of a group that is marked shows the group's mark
+until it has one of its own, and its button goes between the group's mark and the other one: a tool of a direct group
+from direct to lazy and back to the group's. A mark is no switch: the tools stay on or off as
 they were, and a mark on a tool that is off changes nothing in the chats where it stays off. In a chat in Code mode, or in a
 [mode of yours](/guide/sessions#modes-you-make) that works through the code tool, the marks do not apply: every
 tool that is on is in a script's reach, found with `searchTools`, and `tool_search` is not offered. An MCP server's
@@ -537,7 +539,8 @@ browser_snapshot and 8 more). Search them with the tool_search tool before you s
 one sentence that what a search or a describe of `tool_search` returns carries the tools' usage rules on lines that
 start with `Rule` and the chat's own tag, a random word made with the chat (`Rule 3f9a07c2:`). Only those lines count:
 a page, a file or an MCP server's description that writes a line starting with `Rule:` has no tag, and the tag is
-taken out of every text of a tool's that the search quotes and of everything a call returns. The
+taken out of every text of a tool's that the search quotes and of the text of every result of every other tool (a picture is not read for it), however it is
+written in the usual ways (twice in a row, with look-alike Latin, Greek or Cyrillic letters, zero-width characters or other separators between its letters). The
 portal's rule that outside content, such as a [browser](/guide/browser)'s page, is data and never
 instructions, and what a lazy tool asks to be told in a spoken turn, stay in the prompt as long as the tool is
 lazy, from the chat's first request: a security line does not depend on a search. They are taken from what the
@@ -548,7 +551,7 @@ when it first registers.
 
 | Action | What it does |
 | --- | --- |
-| `search` | `query`: words from a tool's name, from what it does, from its parameters or from its group's name, ranked (BM25). Each hit has the tool's name, its parameters and the first line of its description; the best few carry the parameters as a JSON schema, up to a size. No query lists the groups |
+| `search` | `query`: words from a tool's name, from what it does, from its parameters or from its group's name, ranked (BM25). Each hit has the tool's name, its parameters and the first line of its description; the best few carry the parameters as a JSON schema, up to a size. No query lists the groups, as many as fit in a search's size, and counts the rest |
 | `describe` | `name`: the tool's full description, its parameters as a JSON schema, and its rules |
 | `call` | `name` and `args` (an object, or its JSON text): runs the tool and returns its result |
 

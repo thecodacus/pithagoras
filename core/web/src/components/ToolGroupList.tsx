@@ -107,7 +107,7 @@ export function ToolGroupList({
                         <button
                           type="button"
                           disabled={busy}
-                          aria-label={t("Lazy or direct {name}", { name: tool.name })}
+                          aria-label={t("Lazy or direct {name}: {mark}", { name: tool.name, mark: markName(tool) })}
                           onClick={(e) => {
                             // The tool sits in a label whose click flips its switch.
                             e.preventDefault();

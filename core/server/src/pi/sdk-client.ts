@@ -1273,11 +1273,12 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     const prepare = agent?.prepareNextTurnWithContext;
     if (!rule || !loader || typeof prepare !== "function") return;
     agent.prepareNextTurnWithContext = async (turn: unknown, signal: unknown) => {
-      // Not for a head the person asked to read again: that changes what the model is sent first, which a run that goes on
-      // keeps (see useHead); the reload waits for the run to be over.
-      if (this.reloadDue && !this.nextHead && this.canReloadNow?.()) {
+      // Not with a head the person asked to read again: that changes what the model is sent first, which a run that goes on
+      // keeps (see useHead). The reload that a sandbox or a package asks for is made all the same, with the head left for
+      // the reload once the run is over.
+      if (this.dueNow && this.canReloadNow?.()) {
         try {
-          await this.reload();
+          await this.reload(true);
         } catch (e) {
           // The run goes on with what it had, as a chat that could not be reloaded while idle does, and the next step tries again.
           console.error(`[portal] could not reload ${this.portalSessionId ?? "a chat"} between two steps: ${(e as Error).message}`);
@@ -1557,6 +1558,8 @@ export class SdkPiClient extends EventEmitter implements PiClient {
    */
   useHead(head: LazyHead): void {
     this.nextHead = head;
+    // Due once the run is over, and not between two steps (reload(true) would keep the head and reload for nothing).
+    this.dueAfterRun = true;
   }
 
   /** The head the next load takes up: asked for, and not applied while a run goes on, which a changed prompt would cut into. */
@@ -1624,20 +1627,16 @@ export class SdkPiClient extends EventEmitter implements PiClient {
   }
 
   /**
-   * Whether the model is offered `tool_search`: the chat froze something lazy, a tool of it is registered (on or off now: a
-   * switch edited in the middle of the chat does not take the tool away), and no extension has a tool of that name of
-   * its own, which pi keeps in its place, and the lazy tools are then offered one by one, as if nothing were lazy: they are
-   * only hidden by this tool's hook, which is not there.
+   * Whether the model is offered `tool_search`: the chat froze something lazy (its head has the line that names the
+   * groups), and no extension has a tool of that name of its own, which pi keeps in its place, and the lazy tools are then
+   * offered one by one, as if nothing were lazy: they are only hidden by this tool's hook, which is not there. Not
+   * whether a lazy tool is registered yet: one that registers after the first request (a factory that awaits something)
+   * would bring the tool, its line and its rule into the chat mid-way, which is the change of the head a lazy group is not
+   * to cause. Where the chat works through the code tool alone nothing is lazy (lazyMember).
    */
   private searchOffered(): boolean {
-    if (!this.search || this.search.taken() || !this.head.lazy.length) return false;
-    // A lazy MCP server has no tool registered until it is started: the way to it is wanted from the first request.
-    if (this.mcp?.hasLazy()) return true;
-    try {
-      return (this.session.getAllTools?.() ?? []).some((tool: any) => String(tool?.name) !== TOOL_SEARCH && this.lazyMember(tool));
-    } catch {
-      return false;
-    }
+    if (!this.search || this.search.taken() || !this.head.hint) return false;
+    return !(this.codemodeOnly && !this.switchedOff.has(CODEMODE_TOOL));
   }
 
   /**
@@ -1811,24 +1810,28 @@ export class SdkPiClient extends EventEmitter implements PiClient {
    * be no way to switch it off.
    */
   async getTools(): Promise<PiTool[]> {
+    const countedFor = (all: Map<string, Set<string>>, set: string): Set<string> => all.get(set) ?? all.set(set, new Set()).get(set)!;
     const all: any[] = this.session.getAllTools?.() ?? [];
     const forScripts = (tool: any) => tool.exposure === "codemode" || tool.exposure === "deferred";
     // Not `tool_search`: it is the portal's way to the lazy tools and no tool to switch.
     const offered = (this.wanted.size ? all.filter((tool) => this.wanted.has(String(tool.name)) || forScripts(tool)) : all).filter((tool) => !this.isSearch(String(tool.name)));
+    // A rule the tools of a set share is printed once by pi, so it is counted once, with the first tool that has it.
+    const counted = new Map<string, Set<string>>();
     return offered.map((tool) => {
       const server = this.mcp?.serverOf(tool);
       // A server's tools are its own set and no package's or inline extension's; the resource tools are a set of their own.
       const own = server !== undefined || this.setOf(tool) === RESOURCE_SET;
+      const source = own ? this.setOf(tool) : sourceLabel(tool.sourceInfo);
       return {
         name: String(tool.name),
         description: typeof tool.description === "string" ? tool.description : undefined,
-        source: own ? this.setOf(tool) : sourceLabel(tool.sourceInfo),
+        source,
         ...(server !== undefined ? { server } : {}),
         package: own ? undefined : packageOf(tool.sourceInfo),
         ...(!own && isInline(tool.sourceInfo) ? { inline: true as const } : {}),
         ...(forScripts(tool) ? { scriptsOnly: true as const } : {}),
         ...(this.offByDefault(String(tool.name)) ? { offByDefault: true as const } : {}),
-        tokens: this.declarationTokens(String(tool.name), tool),
+        tokens: this.declarationTokens(String(tool.name), tool, countedFor(counted, source)),
         ...((files) => (files ? { approvalFiles: [...files] } : {}))(declaredFiles(this.session.getToolDefinition(String(tool.name)))),
         ...this.saysOfItself(String(tool.name)),
         enabled: !this.switchedOff.has(String(tool.name)),
@@ -1852,10 +1855,15 @@ export class SdkPiClient extends EventEmitter implements PiClient {
    * parameters, and the line the system prompt lists it by) divided by four, the measure of the tool texts test. What the
    * threshold of the lazy tools adds up (see tool-lazy.ts).
    */
-  private declarationTokens(name: string, tool: any): number {
-    const definition = this.session.getToolDefinition(name) as { promptSnippet?: unknown } | undefined;
+  private declarationTokens(name: string, tool: any, counted: Set<string> = new Set()): number {
+    const definition = this.session.getToolDefinition(name) as { promptSnippet?: unknown; promptGuidelines?: unknown } | undefined;
     const snippet = typeof definition?.promptSnippet === "string" ? `- ${name}: ${definition.promptSnippet}` : "";
-    const text = `${name}${typeof tool?.description === "string" ? tool.description : ""}${JSON.stringify(tool?.parameters ?? {})}${snippet}`;
+    // The rules pi prints for an active tool in the system prompt count too (a lazy tool's come with its search hit instead).
+    const rules = (Array.isArray(definition?.promptGuidelines) ? definition.promptGuidelines : [])
+      .filter((line: unknown): line is string => typeof line === "string" && line.trim() !== "" && !counted.has(line))
+      .map((line: string) => (counted.add(line), `- ${line}`))
+      .join("");
+    const text = `${name}${typeof tool?.description === "string" ? tool.description : ""}${JSON.stringify(tool?.parameters ?? {})}${snippet}${rules}`;
     return Math.ceil(text.length / 4);
   }
 
@@ -1990,8 +1998,19 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     await this.session.compact();
   }
 
+  /** A reload is due that may be made between two steps of a run. */
+  private dueNow = false;
+  /** A head to read again waits for the run to be over: a reload is due then, and not between two steps. */
+  private dueAfterRun = false;
+
   /** See PiClient.reloadDue. */
-  reloadDue = false;
+  get reloadDue(): boolean {
+    return this.dueNow || this.dueAfterRun;
+  }
+  set reloadDue(due: boolean) {
+    this.dueNow = due;
+    if (!due && !this.nextHead) this.dueAfterRun = false;
+  }
 
   /** Set by create(): whether a reload that is due may happen between two requests of a run. See prepareEachTurn. */
   canReloadNow?: () => boolean;
@@ -2003,9 +2022,10 @@ export class SdkPiClient extends EventEmitter implements PiClient {
    */
   private reloading?: Promise<void>;
 
-  async reload(): Promise<void> {
+  /** `keepHead`: between two steps of a run, which keeps the head it has (a head to read again waits for the run's end). */
+  async reload(keepHead = false): Promise<void> {
     this.reloadDue = false;
-    const reloading = this.loadAgain();
+    const reloading = this.loadAgain(keepHead);
     this.reloading = reloading;
     try {
       await reloading;
@@ -2018,13 +2038,15 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     }
   }
 
-  private async loadAgain(): Promise<void> {
+  private async loadAgain(keepHead: boolean): Promise<void> {
     this.loading = true;
-    if (this.nextHead) {
+    if (this.nextHead && keepHead) this.dueAfterRun = true;
+    else if (this.nextHead) {
       // Before the extensions load again: the portal's tool registers itself with what it is given.
       this.head = this.nextHead;
       this.search?.setHead(this.nextHead, false);
       this.nextHead = undefined;
+      this.dueAfterRun = false;
     }
     await this.session.reload();
     // Reloading has extensions register their providers again, which puts the

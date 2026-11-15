@@ -121,7 +121,8 @@ test("a value outside the list of an enum is refused before the tool runs, as it
   const refused = (name: string, args: Record<string, unknown>) => assert.throws(() => check(name, args), /Validation failed/, `${name} ${JSON.stringify(args)}`);
 
   assert.equal(check("tool_search", { action: "describe", name: "x" }).action, "describe");
-  refused("tool_search", { action: "destroy" });
+  // Not refused by pi's check: its failure text prints every argument, which no result hook sees. execute refuses it instead.
+  assert.equal(check("tool_search", { action: "destroy", query: "x" }).action, "destroy");
   assert.equal(check("ask_question", { questions: [{ question: "Q?", kind: "ranking", options: ["a", "b"] }] }).questions[0].kind, "ranking");
   refused("ask_question", { questions: [{ question: "Q?", kind: "sorting" }] });
 });

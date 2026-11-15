@@ -71,6 +71,9 @@ export function modesRouter(): Router {
         else if (before?.model && session.provider === (before.provider ?? null) && session.model === before.model) Object.assign(fields, { provider: null, model: null });
         if (entry.thinkingLevel) fields.thinking_level = entry.thinkingLevel;
         else if (before?.thinkingLevel && session.thinking_level === before.thinkingLevel) fields.thinking_level = null;
+        // What the chat froze about its lazy tools was made for the mode it had, and nothing was said under it: the next
+        // start makes it afresh, with what the new mode keeps in the model's list.
+        fields.lazy_head = null;
         updateSession(session.id, fields);
       });
       if (!done) return res.status(409).json({ error: STARTED });

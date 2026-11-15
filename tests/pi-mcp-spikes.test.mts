@@ -19,14 +19,20 @@ const log = path.join(dir, "servers.log");
 process.on("exit", () => rmSync(dir, { recursive: true, force: true }));
 const lines = () => (existsSync(log) ? readFileSync(log, "utf8").split("\n").filter(Boolean).map((line) => line.split(" ").slice(2).join(" ")) : []);
 
-type Server = { name: string; exposure?: string; delay?: number; resources?: boolean; tools?: string };
-const entry = ({ name, exposure, delay, resources, tools }: Server) => ({
+type Server = { name: string; exposure?: string; delay?: number; gate?: string; resources?: boolean; tools?: string };
+const entry = ({ name, exposure, delay, gate, resources, tools }: Server) => ({
   name,
   source: "test",
   scope: "global" as const,
-  config: { command: process.execPath, args: [FIXTURE, name, "--tools", tools ?? "one,two", "--log", log, ...(delay ? ["--delay", String(delay)] : []), ...(resources ? ["--resources"] : [])], ...(exposure ? { exposure } : {}) },
+  config: { command: process.execPath, args: [FIXTURE, name, "--tools", tools ?? "one,two", "--log", log, ...(delay ? ["--delay", String(delay)] : []), ...(gate ? ["--gate", gate] : []), ...(resources ? ["--resources"] : [])], ...(exposure ? { exposure } : {}) },
 });
 const text = (t: string) => ({ content: [{ type: "text" as const, text: t }], details: {} });
+/** A file the fixture waits for before it answers `initialize`: the server connects once the test opens it. */
+let gates = 0;
+const gated = () => {
+  const file = path.join(dir, `gate-${gates++}`);
+  return { file, open: () => writeFileSync(file, "") };
+};
 const until = async (done: () => boolean, ms = 8000) => {
   const from = Date.now();
   while (!done()) {
@@ -108,13 +114,16 @@ test("a server that is direct and hidden by its namespace: its tools are in no r
 
 test("a direct server that connects after the first request does not change the head when its tools are hidden by namespace, and does when they are not", async () => {
   for (const hidden of [true, false]) {
-    const { extension } = mcpWith(() => [{ name: "slow", exposure: "direct", delay: 600 }]);
+    const gate = gated();
+    const { extension } = mcpWith(() => [{ name: "slow", exposure: "direct", gate: gate.file }]);
     const script = [call("tool_search", { action: "search" }), "ok", "Done."];
     const first = await wireSession(await anthropic(), [extension, toolSearch(hidden ? inMcp("slow") : () => false)], (n) => script[n]);
     try {
-      // The first prompt goes out before the server has answered (startupWaitMs is 0): its tools register in the middle of the chat.
+      // The first prompt goes out before the server has answered (startupWaitMs is 0, and it answers once the gate is
+      // opened): its tools register in the middle of the chat.
       await first.session.prompt("one");
       assert.equal(first.session.getAllTools().some((t: any) => t.name.startsWith("mcp__slow")), false, "not connected yet at the first request");
+      gate.open();
       await until(() => first.session.getAllTools().some((t: any) => t.name.startsWith("mcp__slow")));
       await first.session.prompt("two");
       const [before, after] = [first.requests[0], first.requests.at(-1)!];
@@ -232,12 +241,15 @@ test("a call through executeTool of a deferred MCP tool goes through the hooks, 
 test("the resource tools of a direct server are declared in the middle of a chat, unless they are hidden by name; of a deferred one they are not", async () => {
   const names = ["list_mcp_resources", "list_mcp_resource_templates", "read_mcp_resource"];
   for (const [exposure, hidden] of [["direct", false], ["direct", true], ["deferred", false]] as const) {
-    const { extension } = mcpWith(() => [{ name: "res", exposure, resources: true, delay: 500 }]);
+    const gate = gated();
+    const { extension } = mcpWith(() => [{ name: "res", exposure, resources: true, gate: gate.file }]);
     const search = toolSearch((name, namespace) => namespace === "mcp__res" || (hidden && names.includes(name)));
     const script = ["ok", "Done."];
     const { session, requests, close } = await wireSession(await anthropic(), [extension, search], (n) => script[n]);
     try {
       await session.prompt("one");
+      assert.equal(session.getAllTools().some((t: any) => names.includes(t.name)), false, "not connected yet at the first request");
+      gate.open();
       await until(() => session.getAllTools().some((t: any) => names.includes(t.name)));
       await session.prompt("two");
       const declared = names.filter((name) => requests.at(-1)!.tools.includes(`"name":"${name}"`));

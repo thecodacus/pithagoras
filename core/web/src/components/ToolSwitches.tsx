@@ -142,12 +142,16 @@ export function ToolSwitches(
     const wanted = keepDirect.includes(source) ? keepDirect.filter((entry) => entry !== source) : [...keepDirect, source];
     const before = keepDirect;
     setKeepDirect(wanted);
+    // One save at a time: each sends the whole list, and one that came in after the next would have the last word.
+    setBusy(true);
     try {
       const r = await (mode !== undefined ? api.setModeDirect(mode, wanted) : api.setAgentDirect(agent!, wanted));
       setKeepDirect(r.entries);
     } catch (e) {
       setKeepDirect(before);
       setFlipError((e as Error).message);
+    } finally {
+      setBusy(false);
     }
   };
 

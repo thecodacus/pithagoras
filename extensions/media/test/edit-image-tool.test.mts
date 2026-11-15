@@ -55,6 +55,7 @@ after(() => endpoint.close());
 writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR, "models.json"), JSON.stringify(model.models()));
 
 const { SdkPiClient } = await import("../../../core/server/dist/pi/sdk-client.js");
+const { lazyHintOf } = await import("../../../core/server/dist/lazy-head.js");
 const { withFiles } = await import("../../../core/server/dist/output-files.js");
 
 /** The start of every call the runs saw, as the chat is told of it. */
@@ -120,7 +121,7 @@ test("an edit_image that is lazy is reached through tool_search, and its end say
   named = "tool_search";
   try {
     call = { action: "call", name: "edit_image", args: { path: "photo.png", prompt: "make it red", title: "Red" } };
-    const [result, ...more] = await run(folder, { lazy: { v: 1, lazy: ["<tool>edit_image"], direct: [], hint: "", outside: false, voice: [] } });
+    const [result, ...more] = await run(folder, { lazy: { v: 1, lazy: ["<tool>edit_image"], direct: [], hint: lazyHintOf([{ label: "images", tools: ["edit_image"] }]), outside: false, voice: [] } });
     assert.equal(more.length, 0);
     assert.ok(!offered.at(-1).includes("edit_image") && offered.at(-1).includes("tool_search"), "it is reached through tool_search");
     assert.equal(result.isError, false);

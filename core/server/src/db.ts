@@ -1588,6 +1588,7 @@ export function updateSession(
       | "mode"
       | "role"
       | "last_person_key"
+      | "lazy_head"
     >
   >
 ): void {
@@ -3354,6 +3355,10 @@ export function resolvedLazy(): Resolution {
     // A set that the threshold newly took out of the model's list: the person is told, and may keep it there.
     const added = now.lazy.filter((set) => !before.includes(set));
     if (added.length) noteLazyAdded(added);
+    // And one that is back in the list is no news any more.
+    const noted = notedLazy();
+    const kept = noted.filter((set) => now.lazy.includes(set));
+    if (kept.length !== noted.length) putSetting("lazy_notice", kept.length ? JSON.stringify(kept) : "");
   }
   return now;
 }
@@ -3366,8 +3371,8 @@ export function lazyListed(): { tokens: number; tools: number } {
   return { tokens: listed.reduce((sum, tool) => sum + tool.tokens, 0), tools: listed.length };
 }
 
-/** What the threshold made lazy since the person last looked, for the notice on the tools page. */
-export function lazyNotice(): string[] {
+/** The sets noted since the person last looked, whether they are still lazy or not. */
+function notedLazy(): string[] {
   try {
     const raw = JSON.parse(getSetting("lazy_notice") || "[]");
     return Array.isArray(raw) ? raw.filter((s: unknown): s is string => typeof s === "string") : [];
@@ -3376,8 +3381,17 @@ export function lazyNotice(): string[] {
   }
 }
 
+/**
+ * What the threshold made lazy since the person last looked, for the notice on the tools page: only the sets that are
+ * lazy still. One that was released since, or marked direct, is back in the list, and the notice would say it is not.
+ */
+export function lazyNotice(): string[] {
+  const lazy = new Set(resolvedLazy().lazy);
+  return notedLazy().filter((set) => lazy.has(set));
+}
+
 function noteLazyAdded(sets: string[]): void {
-  putSetting("lazy_notice", JSON.stringify([...new Set([...lazyNotice(), ...sets])].sort()));
+  putSetting("lazy_notice", JSON.stringify([...new Set([...notedLazy(), ...sets])].sort()));
 }
 
 /** The person has read the notice. */

@@ -6,6 +6,9 @@
  * one, and any extension can register a tool called `mcp_page` or `mcp__x__y`. The three resource tools are shared by every
  * server and name theirs in an argument.
  *
+ * Not in use until the portal runs pi's native MCP support (issue 361, PR B): the adapter's tools are attributed by their
+ * package and by name (onlyServerOf), and no tool of the portal's carries such a namespace before that.
+ *
  * Pure, in a module of its own: the guard and the tests read it, and none of them may wait on the database.
  */
 

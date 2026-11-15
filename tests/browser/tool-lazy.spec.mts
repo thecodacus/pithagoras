@@ -1,5 +1,5 @@
 import { type Page } from '@playwright/test';
-import { test, expect, mockPortal } from './portal-mock';
+import { test, expect, mockPortal, reply, type Answer } from './portal-mock';
 
 /**
  * Lazy tools in Settings → Tools: a set or a single tool marked lazy is not in the model's list one by
@@ -23,7 +23,8 @@ const servers: typeof tools = [
 
 type Mark = 'lazy' | 'direct';
 
-async function portal(page: Page, { marks: start = {} as Record<string, Mark>, resolved: byThreshold = [] as string[], notice = [] as string[], off = [] as string[], more = [] as typeof tools } = {}) {
+/** `limitAnswer`: what a save of the limits is answered, by its body and how many came before it; undefined saves it. */
+async function portal(page: Page, { marks: start = {} as Record<string, Mark>, resolved: byThreshold = [] as string[], notice = [] as string[], off = [] as string[], more = [] as typeof tools, limitAnswer = undefined as ((body: { tokens: number; tools: number }, before: number) => Promise<Answer> | Answer) | undefined } = {}) {
   /** The marks as the page sent them, one list for each change. */
   const puts: Record<string, Mark>[] = [];
   const limitPuts: { tokens: number; tools: number }[] = [];
@@ -60,8 +61,10 @@ async function portal(page: Page, { marks: start = {} as Record<string, Mark>, r
       return { marks, resolved: { lazy: byThreshold, over: false } };
     }
     if (p === '/api/tools/lazy-limits' && method === 'PUT') {
+      limitPuts.push(json());
+      const answer = await limitAnswer?.(json(), limitPuts.length - 1);
+      if (answer !== undefined) return answer;
       limits = json();
-      limitPuts.push(limits);
       return { limits, resolved: { lazy: byThreshold, over: false } };
     }
     if (p === '/api/tools/lazy-notice' && method === 'DELETE') {
@@ -91,7 +94,9 @@ test('a set goes from auto to lazy to direct and back from its header, and its t
   await mark.click();
   await expect.poll(() => puts).toEqual([{ 'pi-heavy': 'lazy' }]);
   await expect(mark).toHaveText('lazy');
-  await expect(mark).toHaveAttribute('aria-pressed', 'true');
+  // A screen reader hears the mark in the name; aria-pressed has two values and the mark three.
+  await expect(mark).toHaveAccessibleName('Lazy or direct pi-heavy: lazy');
+  await expect(mark).not.toHaveAttribute('aria-pressed');
   // The mark is no switch: the tools are on as they were.
   await expect(heavy).toContainText('2 on');
   await expect(mark).toHaveAttribute('title', /through tool_search/);
@@ -105,7 +110,7 @@ test('a set goes from auto to lazy to direct and back from its header, and its t
   await mark.click();
   await expect.poll(() => puts.at(-1)).toEqual({ 'pi-heavy': 'direct' });
   await expect(mark).toHaveText('direct');
-  await expect(mark).toHaveAttribute('aria-pressed', 'false');
+  await expect(mark).toHaveAccessibleName('Lazy or direct pi-heavy: direct');
   await mark.click();
   await expect.poll(() => puts.at(-1)).toEqual({});
   await expect(mark).toHaveText('auto');
@@ -133,7 +138,7 @@ test('what the threshold made lazy is shown as auto, lazy, and a mark of the per
   const { puts } = await portal(page, { resolved: ['pi-heavy'] });
   const mark = page.getByRole('button', { name: 'Lazy or direct pi-heavy' });
   await expect(mark).toHaveText('auto, lazy');
-  await expect(mark).toHaveAttribute('aria-pressed', 'true');
+  await expect(mark).toHaveAccessibleName('Lazy or direct pi-heavy: auto, lazy');
   await expect(page.getByRole('button', { name: 'Lazy or direct pi-web-access' })).toHaveText('auto');
   await page.getByRole('button', { name: /^pi-heavy/ }).click();
   await expect(page.getByRole('button', { name: 'Lazy or direct heavy_read' })).toHaveText('auto, lazy');
@@ -167,6 +172,55 @@ test('the limits of the threshold are saved when a field is left, and can be put
   await expect.poll(() => limitPuts.at(-1)).toEqual({ tokens: 3000, tools: 20 });
   await expect(tokens).toHaveValue('3000');
   await expect(page.getByRole('button', { name: /Back to/ })).toHaveCount(0);
+});
+
+test('a save of the limits that fails after a later one went through puts nothing back over it', async ({ page }) => {
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  // The first save is held, and fails once the second has been saved.
+  const { limitPuts } = await portal(page, { limitAnswer: async (_body, before) => (before === 0 ? (await held, reply(500, { error: 'The disk is full.' })) : undefined) });
+  const tokens = page.getByRole('textbox', { name: 'Tokens of tool declarations' });
+  const count = page.getByRole('textbox', { name: 'Number of tools' });
+  await tokens.fill('4000');
+  await tokens.press('Enter');
+  await count.fill('30');
+  await count.blur();
+  await expect.poll(() => limitPuts).toEqual([{ tokens: 4000, tools: 20 }, { tokens: 4000, tools: 30 }]);
+  await expect(page.getByRole('button', { name: /Back to 3,000 tokens or 20 tools/ })).toBeVisible();
+  const failed = page.waitForResponse((response) => response.url().endsWith('/api/tools/lazy-limits') && response.status() === 500);
+  release();
+  await failed;
+  // What the page does with the answer is done within a frame or two.
+  await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 200)));
+  await expect(tokens).toHaveValue('4000');
+  await expect(count).toHaveValue('30');
+});
+
+test('a tool switched off reads the list again: what the threshold makes lazy may change with it', async ({ page }) => {
+  const resolved = ['pi-heavy'];
+  await portal(page, { resolved });
+  const mark = page.getByRole('button', { name: 'Lazy or direct pi-heavy' });
+  await expect(mark).toHaveText('auto, lazy');
+  // With one of its tools off the list is short enough, as the server works it out.
+  resolved.splice(0);
+  await page.getByRole('button', { name: /^pi-heavy/ }).click();
+  await page.getByRole('checkbox', { name: /heavy_open/ }).click();
+  await expect(page.getByRole('checkbox', { name: /heavy_open/ })).not.toBeChecked();
+  await expect(mark).toHaveText('auto');
+});
+
+test('a tool of a set marked direct can be made lazy on its own, and given back to its set', async ({ page }) => {
+  const { puts } = await portal(page, { marks: { 'pi-heavy': 'direct' } });
+  await page.getByRole('button', { name: /^pi-heavy/ }).click();
+  const mark = page.getByRole('button', { name: 'Lazy or direct heavy_open' });
+  await expect(mark).toHaveText('direct');
+  await mark.click();
+  await expect.poll(() => puts.at(-1)).toEqual({ 'pi-heavy': 'direct', '<tool>heavy_open': 'lazy' });
+  await expect(mark).toHaveText('lazy');
+  // Its own direct would look the same as the set's: the round goes back to no mark of its own.
+  await mark.click();
+  await expect.poll(() => puts.at(-1)).toEqual({ 'pi-heavy': 'direct' });
+  await expect(mark).toHaveText('direct');
 });
 
 test('what the threshold made lazy is said once, and can be put away', async ({ page }) => {

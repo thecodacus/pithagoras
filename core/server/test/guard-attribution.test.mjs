@@ -233,8 +233,10 @@ test("a search that shows a page tool of a server that is not trusted is flagged
     assert.match(textOf(found), /<<<untrusted:[0-9a-f]{16}>>> \(suspected prompt injection: override\)/);
     assert.match(textOf(held), /Refused \(publish\)/);
     // Tools of a trusted server and of no server: nothing of an untrusted server's is in the result.
-    const [clean, free] = await run([via("search", { query: "ticket" }), via("search", { query: "document" }), push]);
+    const [clean, plain, free] = await run([via("search", { query: "ticket" }), via("search", { query: "document" }), push]);
     assert.doesNotMatch(textOf(clean), /untrusted/);
+    assert.doesNotMatch(textOf(plain), /untrusted/);
+    assert.match(textOf(plain), /docs_open/);
     assert.doesNotMatch(textOf(free), /Refused/);
   } finally {
     setTrustedMcpServers([]);

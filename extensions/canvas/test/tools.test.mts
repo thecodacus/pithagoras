@@ -380,9 +380,15 @@ test('a write through the tool_search tool is saved as it streams in, and surviv
  assert.match(readCanvas('s1',row.id).content,/^First line\nSecond Third "quoted"/);
  assert.equal(readCanvas('s1',row.id).status,'writing');
  for(const piece of raw.match(/.{1,6}/g)!.slice(-2))through(controller,'text',piece);
- // The call runs under the id of the call of `tool_search`, and the streamed text is one revision, not two.
- assert.equal(value(await tools.canvas_write.execute('text',JSON.parse(inner))).revision,again.revision+1);
- assert.equal(readCanvas('s1',row.id).content,'First line\nSecond Third "quoted"\nfourth');
+ // pi runs it as a call of its own, `<id of the tool_search call>/1`: it ends the write that streamed under the outer id,
+ // and the streamed text is one revision, not two.
+ assert.equal(value(await tools.canvas_write.execute('text/1',JSON.parse(inner))).revision,again.revision+1);
+ const done=readCanvas('s1',row.id);
+ assert.equal(done.content,'First line\nSecond Third "quoted"\nfourth');
+ assert.equal(done.status,'saved');assert.equal(done.active_call,null);
+ // One through the search that nothing streamed for is a write of its own.
+ const plain=value(await tools.canvas_write.execute('plain/1',{canvas_id:row.id,revision:done.revision,operation:'append',content:'!'}));
+ assert.equal(plain.revision,done.revision+1);assert.equal(readCanvas('s1',row.id).content,'First line\nSecond Third "quoted"\nfourth!');
 });
 test('a call through the tool_search tool is no write to follow unless canvas_write is reached that way, or is not a write at all',async()=>{
  const {controller,tools}=setup();

@@ -261,6 +261,17 @@ export class CanvasTools {
     }
     if (event.type === "agent_end" || event.type === "agent_settled" || (event.type === "message_end" && ["aborted", "error"].includes(event.message?.stopReason))) this.interrupt();
   }
+  /**
+   * The call a run of canvas_write finishes. Through the `tool_search` tool pi runs it as a call of its own, with the id
+   * `<id of the tool_search call>/<n>` (pi's nested calls), while its text streamed under the outer call's id: that
+   * write is the one it ends. A call by its own name, and one through the search that nothing was streamed for, are their own.
+   */
+  private callOf(id: string): string {
+    const cut = id.lastIndexOf("/");
+    if (cut <= 0 || this.writes.has(id) || this.errors.has(id)) return id;
+    const outer = id.slice(0, cut);
+    return this.writes.has(outer) || this.errors.has(outer) ? outer : id;
+  }
   /** A write that turned out to be no canvas_write: the document is as it was before it, and nothing is left open. */
   private discard(call: string) {
     const w = this.writes.get(call);
@@ -316,7 +327,8 @@ export class CanvasTools {
       "canvas_write",
       "Write a canvas live: text is saved as it streams, so an interrupted write keeps what came. Arguments in this order, content last: canvas_id, revision, operation, content. revision: from your last canvas result; read first only for an unread canvas or after the person edited it. operation: replace the document or append to it. Markdown, with pictures from the chat's folder: ![caption](relative/path.png).",
       object({ canvas_id: string(), revision: integer, operation: { type: "string", enum: ["replace", "append"] }, content: string() }),
-      (id, p) => {
+      (ran, p) => {
+        const id = this.callOf(ran);
         try {
           this.apply(id, p);
           const row = store.read(session, p.canvas_id);
