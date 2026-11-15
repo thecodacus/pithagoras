@@ -1259,10 +1259,7 @@ export function Chat({
   };
 
   /** A message that did not go, back where it was typed — in that chat, if you have left it. */
-  const putBack = (id: string, msg: string, images: readonly Attachment[] = []) => {
-    if (currentSession.current === id) caret.current = null;
-    composer.putBack(id, msg, images);
-  };
+  const putBack = (id: string, msg: string, images: readonly Attachment[] = []) => composer.putBack(id, msg, images);
 
   /** A message from the conversation, with its pictures, sent as a new one. */
   const sendAgain = async (item: { images?: SentImage[] }, text: string) => {
