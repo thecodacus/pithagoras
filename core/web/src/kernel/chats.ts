@@ -1,8 +1,11 @@
 import { ApiError, type ChatMode, type PortalEvent, type PromptOptions, type SessionStatus, type api as realApi } from "../api";
 import type { UiRequest } from "../components/ExtensionDialog";
+import { t } from "../i18n";
 import { appendLiveEvents, resetLiveEvents } from "../live-events";
 import { modeConfirm, modeLabel } from "../mode-names";
-import { reconnectDelay } from "../poll";
+import { reconnectDelay, type Visibility } from "../poll";
+import { toolNameOf } from "../tool-payload";
+import { flaggedOf, toolOutputText } from "../transcript";
 import * as questions from "./confirms";
 import type { Ask } from "./confirms";
 import type { Sessions } from "./sessions";
@@ -103,11 +106,18 @@ export interface ChatsDeps {
   poll: (tick: () => void, ms: number) => () => void;
   /** Calls `run` at the next frame, or a little later where frames are not drawn (a tab nobody sees). Returns the cancel. */
   frame: (run: () => void) => () => void;
-  /** What the list needs of a chat's stream: its status, at once, and a fresh list. */
-  sessions: Pick<Sessions, "patchStatus" | "refresh">;
+  /** What the list needs of a chat's stream: its status, at once, and a fresh list; and a chat's title, to name it in a question. */
+  sessions: Pick<Sessions, "patchStatus" | "refresh"> & Partial<Pick<Sessions, "find">>;
   fanOut: FanOut;
   /** Live streams at once; `MOST_LIVE` unless a test says otherwise. */
   most?: number;
+  /**
+   * Whether the page is on screen (`document`). While it is not, only the chat on screen keeps its stream: the browser's
+   * connections are shared by every tab of the portal, and a tab nobody looks at should not hold them.
+   */
+  visibility?: Visibility;
+  /** Where an action reads the chat it is bound to (to name it in a question, to find what it answers): this store, unless a harness holds the chats. */
+  read?: (id: string) => ChatState;
 }
 
 /** What `deleteMessage`, `trustFlagged` and `setMode` take: the question comes first, and `accepted` once it was said yes to. */
@@ -139,7 +149,11 @@ export interface ChatController {
   switchVersion(seq: number, to: number): Promise<void>;
   /** Folds the conversation so far into a summary, to make room in the model's window. */
   compact(): Promise<void>;
-  /** Answers a question the agent asked in the chat (`ask_user` and what an extension's dialog asks), or cancels it. */
+  /**
+   * Answers a question the agent asked in the chat (its `ask_question` tool: a `portal_question` event of the chat), or
+   * cancels any question. What an extension of the agent asks in a dialog (the guard's question before a call it held,
+   * among them) is answered in the portal's own dialog, and only cancelled here: `ok: false` for any other answer.
+   */
   respond(requestId: string, answer: { value?: unknown; cancelled?: boolean }): Promise<{ ok: boolean; note?: string }>;
   /** Reads what is above the oldest event held. */
   loadEarlier(): Promise<void>;
@@ -167,6 +181,8 @@ interface Entry {
   stop: () => void;
   /** Reads on from where the stream is, over a new connection. */
   reconnect?: () => void;
+  /** The live stream's connection is open: what the server says as a stream opens may have been heard already. */
+  opened: boolean;
   /** How often the chat was loaded again from the start: what was asked for before is the old list's. */
   loadedAgain: number;
 }
@@ -188,6 +204,9 @@ export function createChats(deps: ChatsDeps) {
   let counter = 0;
   /** The chat on screen: the one whose stream is passed on. */
   const screen = createStore<string | undefined>(undefined);
+  const hidden = () => deps.visibility?.hidden ?? false;
+  // For the page's lifetime, as the stores are.
+  deps.visibility?.addEventListener("visibilitychange", () => rebalance());
 
   const set = (e: Entry, change: Partial<ChatState> | ((s: ChatState) => Partial<ChatState>)) =>
     e.state.update((s) => ({ ...s, ...(typeof change === "function" ? change(s) : change) }));
@@ -204,6 +223,8 @@ export function createChats(deps: ChatsDeps) {
     let reloads: number | undefined;
     let retry: ReturnType<typeof setTimeout> | undefined;
     let source: StreamSource | undefined;
+    // Whether the connection now open has sent all of its replay: one cut off before that has to be read again from the start.
+    let caughtUp = false;
     // Once caught up, what arrives is applied a frame at a time, not an event at a time: a reply is a token every few
     // milliseconds, and each was a draw of the chat.
     let pending: PortalEvent[] = [];
@@ -223,8 +244,11 @@ export function createChats(deps: ChatsDeps) {
     const connect = () => {
       if (cancelled) return;
       e.fanning = fan();
+      e.opened = false;
+      caughtUp = false;
       const fresh = seq === 0;
-      const es = deps.open(`/api/sessions/${id}/events?since=${seq}`);
+      // The id may be an extension's (`chats.useEvents`): it is one part of the address, whatever it holds.
+      const es = deps.open(`/api/sessions/${encodeURIComponent(id)}/events?since=${seq}`);
       source = es;
       /** Reads the chat again from the start, keeping what is shown until it has all come. */
       const reload = () => {
@@ -234,6 +258,7 @@ export function createChats(deps: ChatsDeps) {
         connect();
       };
       es.onopen = () => {
+        e.opened = true;
         failed = 0;
         set(e, { failures: 0 });
       };
@@ -346,6 +371,7 @@ export function createChats(deps: ChatsDeps) {
         if (fan()) fanOut.fill(id, ev);
       };
       es.addEventListener("caught-up", () => {
+        caughtUp = true;
         flush();
         set(e, { loaded: true });
         // Only now do we know where the replayed window starts, and therefore whether the conversation continues above it.
@@ -389,6 +415,12 @@ export function createChats(deps: ChatsDeps) {
       if (cancelled) return;
       source?.close();
       clearTimeout(retry);
+      // Its replay was not all in: what it held went with the connection, and the cursor is past it. As when a stream
+      // breaks there, the chat is read again from the start, whatever is shown staying until all of it has come.
+      if (!caughtUp) {
+        seq = 0;
+        replacing = true;
+      }
       connect();
     };
     connect();
@@ -421,7 +453,8 @@ export function createChats(deps: ChatsDeps) {
           else set(e, (s) => ({ failures: s.failures + 1 }));
         },
       );
-    void tick();
+    // Not while the page is hidden: nothing is drawn, and it is streamed again as the page comes back.
+    if (!hidden()) void tick();
     const stop = deps.poll(() => void tick(), SNAPSHOT_MS);
     e.stop = () => {
       live = false;
@@ -429,11 +462,15 @@ export function createChats(deps: ChatsDeps) {
     };
   }
 
-  /** The chat on screen first, then in the order they were first read: the first `most` are streamed, the rest polled. */
+  /**
+   * The chat on screen first, then in the order they were first read: the first `most` are streamed, the rest polled.
+   * While the page is hidden only the chat on screen is streamed; the others wait, polled, until it is shown again.
+   */
   function rebalance(): void {
     const order = [...entries.values()].sort((a, b) => Number(b.id === screen.get()) - Number(a.id === screen.get()) || a.order - b.order);
+    const away = hidden();
     order.forEach((e, i) => {
-      const mode = i < most ? "live" : "polled";
+      const mode = i < most && (!away || e.id === screen.get()) ? "live" : "polled";
       if (e.mode === mode) return;
       const had = e.mode;
       e.stop();
@@ -454,7 +491,7 @@ export function createChats(deps: ChatsDeps) {
   function acquire(id: string, onScreen = false): () => void {
     let e = entries.get(id);
     if (!e) {
-      e = { id, state: createStore<ChatState>(LOADING), count: 0, order: ++counter, mode: null, fanning: false, stop: () => {}, loadedAgain: 0 };
+      e = { id, state: createStore<ChatState>(LOADING), count: 0, order: ++counter, mode: null, fanning: false, opened: false, stop: () => {}, loadedAgain: 0 };
       entries.set(id, e);
     }
     e.count++;
@@ -479,8 +516,13 @@ export function createChats(deps: ChatsDeps) {
     const release = acquire(id, true);
     const e = entries.get(id)!;
     // It was streamed already, for a panel, before it was on screen: opened again, so that what the server says to a
-    // page as a stream opens is said to this one too.
-    if (e.mode === "live" && !e.fanning) e.reconnect?.();
+    // page as a stream opens is said to this one too. Not where its connection has not opened yet (a chat view that
+    // reads it is drawn, and so subscribes, before the frame that opens it): it has heard nothing, and passes on what
+    // it hears from now on.
+    if (e.mode === "live" && !e.fanning) {
+      if (e.opened) e.reconnect?.();
+      else e.fanning = true;
+    }
     return () => {
       if (screen.get() === id) {
         screen.set(undefined);
@@ -509,8 +551,11 @@ export function createChats(deps: ChatsDeps) {
     let c = controllers.get(id);
     if (c) return c;
     const refreshed = () => sessions.refresh().then(() => undefined, () => undefined);
+    const events = () => (deps.read ?? peek)(id).events;
+    /** The chat's title where it is not the one on screen: a question about another chat says which. */
+    const elsewhere = () => (screen.get() === id ? undefined : sessions.find?.(id)?.title || id);
     const removeMessage = async (seq: number, asked?: Asked) => {
-      if (!(await deps.ask(questions.deleteMessage()))) return false;
+      if (!(await deps.ask(questions.deleteMessage({ chat: elsewhere(), text: messageText(events(), seq) })))) return false;
       asked?.accepted?.();
       await api.deleteMessage(id, seq);
       return true;
@@ -532,7 +577,7 @@ export function createChats(deps: ChatsDeps) {
       deleteMessage: removeMessage,
       removeTurn: removeMessage,
       async trustFlagged(result, asked) {
-        if (!(await deps.ask(questions.trustFlagged()))) return false;
+        if (!(await deps.ask(questions.trustFlagged({ chat: elsewhere(), tool: flaggedTool(events(), result) })))) return false;
         asked?.accepted?.();
         await api.trustFlagged(id, result);
         const e = entries.get(id);
@@ -555,7 +600,14 @@ export function createChats(deps: ChatsDeps) {
         await api.compact(id);
         void refreshed();
       },
-      respond: (requestId, answer) => api.respondUi(id, requestId, answer),
+      async respond(requestId, answer) {
+        // An answer other than "no" to anything but the agent's own question would say yes to a dialog the portal draws
+        // itself, with what it warns of, without the person having seen it: the guard's question before a held call is one.
+        if (!answer.cancelled && !events().some((ev) => ev.type === "portal_question" && (ev.payload as { id?: unknown } | undefined)?.id === requestId)) {
+          return { ok: false, note: t("This is not a question the agent asked in this chat, so it was not answered here.") };
+        }
+        return api.respondUi(id, requestId, answer);
+      },
       async loadEarlier() {
         const e = entries.get(id);
         if (!e) return;
@@ -598,6 +650,9 @@ export function createChats(deps: ChatsDeps) {
         return true;
       },
     };
+    // What every part of the page calls: one that replaced a method would replace it for the others too, the question with it.
+    Object.freeze(c.queued);
+    Object.freeze(c);
     controllers.set(id, c);
     return c;
   }
@@ -606,3 +661,27 @@ export function createChats(deps: ChatsDeps) {
 }
 
 export type Chats = ReturnType<typeof createChats>;
+
+/** How long the part of a message or a result that a question quotes is. */
+const QUOTED = 80;
+const quote = (text: string): string => {
+  const flat = text.replace(/\s+/g, " ").trim();
+  return flat.length > QUOTED ? `${flat.slice(0, QUOTED - 1)}…` : flat;
+};
+
+/** The start of the message sent at `seq`, where the chat's events hold it, to name it in the question. */
+function messageText(events: readonly PortalEvent[], seq: number): string | undefined {
+  const sent = events.find((ev) => ev.seq === seq && ev.type === "portal_prompt");
+  const text = String((sent?.payload as { message?: unknown } | undefined)?.message ?? "").replace(/^\[Audio mode\]\n/, "");
+  return text.trim() ? quote(text) : undefined;
+}
+
+/** The tool whose result the guard flagged with `result`, where the chat's events hold it. */
+function flaggedTool(events: readonly PortalEvent[], result: string): string | undefined {
+  for (const ev of events) {
+    if (ev.type !== "tool_execution_end") continue;
+    const text = toolOutputText((ev.payload as { result?: unknown } | undefined)?.result);
+    if (typeof text === "string" && flaggedOf(text)?.id === result) return toolNameOf(ev.payload, "") || undefined;
+  }
+  return undefined;
+}

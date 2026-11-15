@@ -553,10 +553,10 @@ export const api = {
    * number rather than replacing anything; the answer says what it is called.
    */
   uploadFile: (sessionId: string, dir: string, file: File, name = file.name): Promise<{ path: string; size: number }> =>
-    uploadBytes(`/api/sessions/${sessionId}/upload?path=${encodeURIComponent(dir)}&name=${encodeURIComponent(name)}`, file, name),
+    uploadBytes(`/api/sessions/${encodeURIComponent(sessionId)}/upload?path=${encodeURIComponent(dir)}&name=${encodeURIComponent(name)}`, file, name),
   /** What was said in `samples` (16 kHz mono), in words, and how long the speech server says it took. Dictation may be set to use another model than voice mode. */
   transcribe: async (sessionId: string, samples: Float32Array, signal?: AbortSignal, purpose?: "dictation"): Promise<{ text: string; serverTiming: string }> => {
-    const res = await send(`/api/sessions/${sessionId}/voice/transcribe${purpose ? `?purpose=${purpose}` : ""}`, { method: "POST", headers: { "Content-Type": "audio/wav" }, body: samplesWav(samples), signal });
+    const res = await send(`/api/sessions/${encodeURIComponent(sessionId)}/voice/transcribe${purpose ? `?purpose=${purpose}` : ""}`, { method: "POST", headers: { "Content-Type": "audio/wav" }, body: samplesWav(samples), signal });
     const body = await res.json().catch(() => ({}));
     if (!res.ok) throw new ApiError(body.error || t("Transcription failed"), res.status, body);
     return { text: String(body.text ?? ""), serverTiming: res.headers.get("server-timing") ?? "" };
@@ -659,12 +659,12 @@ export const api = {
       method: "DELETE",
     }),
   renameSession: (id: string, title: string) =>
-    json<Session>(`/api/sessions/${id}`, { method: "PATCH", body: JSON.stringify({ title }) }),
+    json<Session>(`/api/sessions/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ title }) }),
   /** The modes the chat may be put in: none where it may not choose one. */
-  chatModes: (id: string) => json<{ modes: ChatMode[] }>(`/api/sessions/${id}/modes`),
+  chatModes: (id: string) => json<{ modes: ChatMode[] }>(`/api/sessions/${encodeURIComponent(id)}/modes`),
   /** Puts a chat that has said nothing yet in a mode; `confirmed`, for one that asks first, once the person said yes. */
   setMode: (id: string, mode: string, confirmed?: boolean) =>
-    json<{ mode: string }>(`/api/sessions/${id}/modes`, { method: "PUT", body: JSON.stringify({ mode, ...(confirmed ? { confirmed: true } : {}) }) }),
+    json<{ mode: string }>(`/api/sessions/${encodeURIComponent(id)}/modes`, { method: "PUT", body: JSON.stringify({ mode, ...(confirmed ? { confirmed: true } : {}) }) }),
   /** The modes the person made, by their names. */
   customModes: () => json<{ modes: CustomMode[] }>("/api/chat-modes"),
   createMode: (fields: { label: string; description: string }) =>
@@ -678,9 +678,9 @@ export const api = {
     json<{ tools: PortalTool[]; live: boolean; off: string[]; names: Record<string, string> }>(`/api/chat-modes/${encodeURIComponent(id)}/tools`),
   setModeTools: (id: string, off: string[]) =>
     changesModes(json<{ off: string[]; applied: number }>(`/api/chat-modes/${encodeURIComponent(id)}/tools`, { method: "PUT", body: JSON.stringify({ off }) })),
-  deleteSession: (id: string) => json<{ ok: true }>(`/api/sessions/${id}`, { method: "DELETE" }),
+  deleteSession: (id: string) => json<{ ok: true }>(`/api/sessions/${encodeURIComponent(id)}`, { method: "DELETE" }),
   prompt: (id: string, message: string, options?: PromptOptions) =>
-    json<{ ok: true }>(`/api/sessions/${id}/prompt`, {
+    json<{ ok: true }>(`/api/sessions/${encodeURIComponent(id)}/prompt`, {
       method: "POST",
       body: JSON.stringify({
         message,
@@ -690,40 +690,40 @@ export const api = {
       }),
     }),
   /** A picture sent with a message, as the transcript shows it. */
-  imageUrl: (id: string, name: string) => `/api/sessions/${id}/images/${encodeURIComponent(name)}`,
+  imageUrl: (id: string, name: string) => `/api/sessions/${encodeURIComponent(id)}/images/${encodeURIComponent(name)}`,
   /** A clip in the chat's folder, by its path there, as pictureUrl is for a picture: the player asks for the parts it needs. */
   videoUrl: (id: string, path: string, version?: string | number) =>
-    `/api/sessions/${id}/video?path=${encodeURIComponent(path)}${version === undefined ? "" : `&v=${encodeURIComponent(String(version))}`}`,
+    `/api/sessions/${encodeURIComponent(id)}/video?path=${encodeURIComponent(path)}${version === undefined ? "" : `&v=${encodeURIComponent(String(version))}`}`,
   /** Any file in the chat's folder, by its path there, to be saved: a file a call gave that is neither a picture nor a clip. */
   fileUrl: (id: string, path: string, version?: string | number) =>
-    `/api/sessions/${id}/file?path=${encodeURIComponent(path)}${version === undefined ? "" : `&v=${encodeURIComponent(String(version))}`}`,
+    `/api/sessions/${encodeURIComponent(id)}/file?path=${encodeURIComponent(path)}${version === undefined ? "" : `&v=${encodeURIComponent(String(version))}`}`,
   /**
    * A picture in the chat's folder, by its path there. `version` is anything
    * that changes when the file does — the agent rewrites pictures in place.
    */
   pictureUrl: (id: string, path: string, version?: string | number) =>
-    `/api/sessions/${id}/picture?path=${encodeURIComponent(path)}${version === undefined ? "" : `&v=${encodeURIComponent(String(version))}`}`,
+    `/api/sessions/${encodeURIComponent(id)}/picture?path=${encodeURIComponent(path)}${version === undefined ? "" : `&v=${encodeURIComponent(String(version))}`}`,
   /** Removes a message and the agent's answer to it — from the agent's memory too. */
   /** Trusts a result flagged as a suspected prompt injection: it no longer holds the chat back. */
   trustFlagged: (id: string, result: string) =>
-    json<{ ok: true }>(`/api/sessions/${id}/flagged/${result}/trust`, { method: "POST" }),
+    json<{ ok: true }>(`/api/sessions/${encodeURIComponent(id)}/flagged/${encodeURIComponent(result)}/trust`, { method: "POST" }),
   deleteMessage: (id: string, seq: number) =>
-    json<{ ok: true }>(`/api/sessions/${id}/messages/${seq}`, { method: "DELETE" }),
+    json<{ ok: true }>(`/api/sessions/${encodeURIComponent(id)}/messages/${seq}`, { method: "DELETE" }),
   /** Replaces a message: it and everything after it are dropped, and the new text is sent. */
   editMessage: (id: string, seq: number, message: string) =>
-    json<{ ok: true }>(`/api/sessions/${id}/messages/${seq}/edit`, {
+    json<{ ok: true }>(`/api/sessions/${encodeURIComponent(id)}/messages/${seq}/edit`, {
       method: "POST",
       body: JSON.stringify({ message }),
     }),
   /** Takes back a message sent mid-run that the agent has not read yet (409 once it has). */
   takeBackQueued: (id: string, seq: number) =>
-    json<{ ok: true }>(`/api/sessions/${id}/queued/${seq}`, { method: "DELETE" }),
+    json<{ ok: true }>(`/api/sessions/${encodeURIComponent(id)}/queued/${seq}`, { method: "DELETE" }),
   /** Stops the run and sends a queued message first, the others behind it in their order. */
   sendQueuedNow: (id: string, seq: number) =>
-    json<{ ok: true }>(`/api/sessions/${id}/queued/${seq}/send`, { method: "POST" }),
+    json<{ ok: true }>(`/api/sessions/${encodeURIComponent(id)}/queued/${seq}/send`, { method: "POST" }),
   /** Shows another version of a message, and what followed it then. */
   switchVersion: (id: string, seq: number, to: number) =>
-    json<{ ok: true }>(`/api/sessions/${id}/messages/${seq}/version`, {
+    json<{ ok: true }>(`/api/sessions/${encodeURIComponent(id)}/messages/${seq}/version`, {
       method: "POST",
       body: JSON.stringify({ to }),
     }),
@@ -750,7 +750,7 @@ export const api = {
   /** What this conversation could use. `live` is false when pi is not running to ask. */
   tools: (sessionId: string) =>
     json<{ tools: PortalTool[]; live: boolean; off: string[]; names: Record<string, string> }>(
-      `/api/sessions/${sessionId}/tools`
+      `/api/sessions/${encodeURIComponent(sessionId)}/tools`
     ),
   /** What each package is called here; everything unnamed keeps its own name. */
   toolNames: () => json<{ names: Record<string, string> }>("/api/tool-names"),
@@ -761,12 +761,12 @@ export const api = {
     }),
   /** Switch tools off by name; everything not named is on. */
   setTools: (sessionId: string, off: string[]) =>
-    json<{ off: string[] }>(`/api/sessions/${sessionId}/tools`, {
+    json<{ off: string[] }>(`/api/sessions/${encodeURIComponent(sessionId)}/tools`, {
       method: "PUT",
       body: JSON.stringify({ off }),
     }),
   respondUi: (sessionId: string, id: string, payload: { value?: unknown; cancelled?: boolean }) =>
-    json<{ ok: boolean; note?: string }>(`/api/sessions/${sessionId}/ui-response`, {
+    json<{ ok: boolean; note?: string }>(`/api/sessions/${encodeURIComponent(sessionId)}/ui-response`, {
       method: "POST",
       body: JSON.stringify({ id, ...payload }),
     }),
@@ -990,9 +990,9 @@ export const api = {
   /** Any session by id, including agent and routine ones the task list omits. */
   olderEvents: (id: string, before: number, limit = 1200) =>
     json<{ events: PortalEvent[]; more: boolean }>(
-      `/api/sessions/${id}/events/before?before=${before}&limit=${limit}`
+      `/api/sessions/${encodeURIComponent(id)}/events/before?before=${before}&limit=${limit}`
     ),
-  session: (id: string) => json<Session>(`/api/sessions/${id}`),
+  session: (id: string) => json<Session>(`/api/sessions/${encodeURIComponent(id)}`),
 
   setHeartbeat: (agent: string, heartbeat: { minutes: number; quietStart: string; quietEnd: string }) =>
     json<Agent>(`/api/agents/${encodeURIComponent(agent)}/heartbeat`, { method: "PUT", body: JSON.stringify(heartbeat) }),
@@ -1009,24 +1009,24 @@ export const api = {
     json<{ sessions: AgentSession[]; agentHome: string }>(`/api/agent/sessions?agent=${encodeURIComponent(agent)}`),
 
   pinSession: (id: string, pinned: boolean) =>
-    json<Session>(`/api/sessions/${id}`, {
+    json<Session>(`/api/sessions/${encodeURIComponent(id)}`, {
       method: "PATCH",
       body: JSON.stringify({ pinned }),
     }),
 
-  abort: (id: string) => json<{ ok: true }>(`/api/sessions/${id}/abort`, { method: "POST" }),
+  abort: (id: string) => json<{ ok: true }>(`/api/sessions/${encodeURIComponent(id)}/abort`, { method: "POST" }),
 
   /** Jobs the agent left running in the chat's folder, and what extensions show about themselves. */
-  background: (id: string) => json<BackgroundState>(`/api/sessions/${id}/background`),
+  background: (id: string) => json<BackgroundState>(`/api/sessions/${encodeURIComponent(id)}/background`),
 
   /** Cheap: never starts pi. Stats are null when the session is not live. */
-  config: (id: string) => json<PiConfig>(`/api/sessions/${id}/config`),
+  config: (id: string) => json<PiConfig>(`/api/sessions/${encodeURIComponent(id)}/config`),
   /** Only the token and context figures, which is all a run needs refreshed; does not start pi. */
-  stats: (id: string) => json<{ live: boolean; stats: PiConfig["stats"] }>(`/api/sessions/${id}/stats`),
+  stats: (id: string) => json<{ live: boolean; stats: PiConfig["stats"] }>(`/api/sessions/${encodeURIComponent(id)}/stats`),
   /** Starts pi if needed — only called when the model picker is opened. */
-  models: (id: string) => json<PiConfig>(`/api/sessions/${id}/models`),
+  models: (id: string) => json<PiConfig>(`/api/sessions/${encodeURIComponent(id)}/models`),
   setConfig: (id: string, patch: ConfigPatch) =>
-    json<{ ok: true; applied: string[]; state: PiState }>(`/api/sessions/${id}/config`, {
+    json<{ ok: true; applied: string[]; state: PiState }>(`/api/sessions/${encodeURIComponent(id)}/config`, {
       method: "POST",
       body: JSON.stringify(patch),
     }),
@@ -1043,14 +1043,14 @@ export const api = {
       body: JSON.stringify({ tokens }),
     }),
   compact: (id: string) =>
-    json<{ ok: true }>(`/api/sessions/${id}/compact`, { method: "POST" }),
+    json<{ ok: true }>(`/api/sessions/${encodeURIComponent(id)}/compact`, { method: "POST" }),
 
   /** `ifRunning`: only from a pi that is up, rather than starting one; `notRunning` when none was. */
   commands: (id: string, opts?: { ifRunning?: boolean }) =>
-    json<{ commands: PiCommand[]; notRunning?: boolean }>(`/api/sessions/${id}/commands${opts?.ifRunning ? "?ifRunning=1" : ""}`),
+    json<{ commands: PiCommand[]; notRunning?: boolean }>(`/api/sessions/${encodeURIComponent(id)}/commands${opts?.ifRunning ? "?ifRunning=1" : ""}`),
   /** What is in the chat box, for an extension that asks. */
   draft: (id: string, text: string, caret?: { start: number; end: number }) =>
-    json<{ ok: true }>(`/api/sessions/${id}/draft`, { method: "PUT", body: JSON.stringify({ text, caret }) }),
+    json<{ ok: true }>(`/api/sessions/${encodeURIComponent(id)}/draft`, { method: "PUT", body: JSON.stringify({ text, caret }) }),
   piSettings: () => json<{ path: string; content: string }>("/api/pi-settings"),
   savePiSettings: (content: string) =>
     json<{ ok: true; path: string }>("/api/pi-settings", {
@@ -1170,10 +1170,10 @@ export const api = {
   extensionFailed: (name: string, rev: string, error: string, stack?: string) =>
     json<{ ok: true }>("/api/extension-ui/failures", { method: "POST", body: JSON.stringify({ name, rev, error, stack }) }),
   /** What an extension's server half would tell a page that opens the chat now: for a browser half that came into the page later. */
-  extensionOpening: (id: string, extension: string) => json<{ pushes: unknown[] }>(`/api/sessions/${id}/extension-ui?extension=${encodeURIComponent(extension)}`),
+  extensionOpening: (id: string, extension: string) => json<{ pushes: unknown[] }>(`/api/sessions/${encodeURIComponent(id)}/extension-ui?extension=${encodeURIComponent(extension)}`),
   /** What an extension's browser half says to its own half in a chat: see extensions/channel.ts. */
   tellExtension: (id: string, extension: string, data: unknown) =>
-    json<{ ok: true }>(`/api/sessions/${id}/extension-ui`, { method: "POST", body: JSON.stringify({ extension, data }) }),
+    json<{ ok: true }>(`/api/sessions/${encodeURIComponent(id)}/extension-ui`, { method: "POST", body: JSON.stringify({ extension, data }) }),
 };
 
 export interface PiModel {

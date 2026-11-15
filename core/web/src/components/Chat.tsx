@@ -34,7 +34,7 @@ import { useCommandTrigger } from "../command-trigger";
 import { TitleInput } from "./TitleInput";
 import { caretFrom } from "../drafts";
 import { onFill } from "../editor-fills";
-import { local } from "../safe-storage";
+import type { Prefs } from "../kernel/prefs";
 import { across as laidAcross, fancy, glide, launch, leaveRef, mark, settle, slideOver, useLeaveRef, type Mark } from "../motion";
 import { CLIENT_COMMANDS, isClientCommand, isCommand } from "../client-commands";
 import { isComposing, isEnter, opensComposer, stopsRun } from "../shortcuts";
@@ -136,8 +136,8 @@ function panelBoxes(park: { readonly current: HTMLElement | null }, pressed: { r
 }
 
 /** A size kept in storage, or `fallback` for one that is missing or smaller than may be drawn. */
-const storedSize = (key: string, fallback: number, least: number) => {
-  const n = Number(local.get(key));
+const storedSize = (prefs: Prefs, key: string, fallback: number, least: number) => {
+  const n = Number(prefs.get(key, ""));
   return Number.isFinite(n) && n >= least ? n : fallback;
 };
 
@@ -145,13 +145,13 @@ const COMPOSER_HEIGHT_KEY = "pithagoras.composerHeight";
 const DEFAULT_COMPOSER_HEIGHT = 72;
 const MIN_COMPOSER_HEIGHT = 56;
 
-function storedComposerHeight(): number {
-  const stored = Number.parseInt(local.get(COMPOSER_HEIGHT_KEY) ?? "", 10);
+function storedComposerHeight(prefs: Prefs): number {
+  const stored = Number.parseInt(prefs.get(COMPOSER_HEIGHT_KEY, ""), 10);
   return Number.isFinite(stored) && stored >= MIN_COMPOSER_HEIGHT ? stored : DEFAULT_COMPOSER_HEIGHT;
 }
 
-function persistComposerHeight(height: number) {
-  local.set(COMPOSER_HEIGHT_KEY, String(Math.round(height)));
+function persistComposerHeight(prefs: Prefs, height: number) {
+  prefs.set(COMPOSER_HEIGHT_KEY, String(Math.round(height)));
 }
 
 /** The chat's events while its first replay has not come: drawing none, the conversation is not shown half-built. */
@@ -177,7 +177,8 @@ export function Chat({
   /** For a sub-chat (see sub-chats.ts): its chat's title, where the list has that chat. */
   parentTitle?: string;
 }) {
-  const { chats, composer, media } = useKernel();
+  // The page's preferences (the panels' places and sizes, the box's height), under the keys the portal has always kept.
+  const { chats, composer, media, prefs } = useKernel();
   /** What is done in this chat: the kernel asks what must be asked first. */
   const controller = chats.controller(session.id);
   // The chat as the kernel has it: its stream is shared with whatever else reads it (the frame, a panel).
@@ -227,7 +228,7 @@ export function Chat({
   currentSession.current = session.id;
   const [panelRequest, setPanelRequest] = useState<"model" | "effort" | null>(null);
   const resizeCleanupRef = useRef<(() => void) | null>(null);
-  const [composerHeight, setComposerHeight] = useState(storedComposerHeight);
+  const [composerHeight, setComposerHeight] = useState(() => storedComposerHeight(prefs));
   // A job in the running tray is shown where an extension says jobs are shown (`jobs.show`); while none does, a job
   // there is only listed.
   const jobsShown = useHasCommand("jobs.show");
@@ -370,24 +371,24 @@ export function Chat({
   // one — where they went, how wide or tall, and their one window — is what a
   // panel not placed yet, or a place not sized yet, has.
   const [before] = useState(() => {
-    const stored = local.get("panelDock");
+    const stored = prefs.get("panelDock", "");
     return {
       dock: isDock(stored) ? stored : ("right" as Dock),
-      width: storedSize("panelWidth", 560, DOCKED_MIN.w),
-      height: storedSize("panelHeight", 320, DOCKED_MIN.h),
-      frame: readFrame(local.get("panelFloat")),
+      width: storedSize(prefs, "panelWidth", 560, DOCKED_MIN.w),
+      height: storedSize(prefs, "panelHeight", 320, DOCKED_MIN.h),
+      frame: readFrame(prefs.get("panelFloat", "") || null),
     };
   });
-  const [places, setPlaces] = useState<Places>(() => readPlaces(local.get("panelPlaces")));
-  const [sizes, setSizes] = useState<PlaceSizes>(() => readPlaceSizes(local.get("panelSizes")));
+  const [places, setPlaces] = useState<Places>(() => readPlaces(prefs.get("panelPlaces", "") || null));
+  const [sizes, setSizes] = useState<PlaceSizes>(() => readPlaceSizes(prefs.get("panelSizes", "") || null));
   // Between the two panels in one place. One for all places: no more than two
   // panels are open (useWorkPanels), so only one place ever holds two.
-  const [split, setSplit] = useState(() => Number(local.get("panelSplit")) || SPLIT);
-  const [frames, setFrames] = useState<Frames>(() => readFrames(local.get("panelFloats")));
-  useEffect(() => local.set("panelPlaces", JSON.stringify(places)), [places]);
-  useEffect(() => local.set("panelSizes", JSON.stringify(sizes)), [sizes]);
-  useEffect(() => local.set("panelSplit", String(split)), [split]);
-  useEffect(() => local.set("panelFloats", JSON.stringify(frames)), [frames]);
+  const [split, setSplit] = useState(() => Number(prefs.get("panelSplit", "")) || SPLIT);
+  const [frames, setFrames] = useState<Frames>(() => readFrames(prefs.get("panelFloats", "") || null));
+  useEffect(() => prefs.set("panelPlaces", JSON.stringify(places)), [places]);
+  useEffect(() => prefs.set("panelSizes", JSON.stringify(sizes)), [sizes]);
+  useEffect(() => prefs.set("panelSplit", String(split)), [split]);
+  useEffect(() => prefs.set("panelFloats", JSON.stringify(frames)), [frames]);
   // On a phone the panels cover the conversation, wherever they are docked.
   // Wide enough for the panels to sit beside the conversation: below it they cover it.
   const beside = useViewport() === "desk";
@@ -1164,7 +1165,7 @@ export function Chat({
     // Kept however it ends — let go, cancelled, or the capture lost with no pointerup at all.
     resizeCleanupRef.current = followPointer(event, move, () => {
       resizeCleanupRef.current = null;
-      persistComposerHeight(box.current?.getBoundingClientRect().height ?? composerHeight);
+      persistComposerHeight(prefs, box.current?.getBoundingClientRect().height ?? composerHeight);
     });
   };
 
@@ -1944,7 +1945,7 @@ export function Chat({
             const direction = event.key === "ArrowUp" ? 16 : -16;
             const nextHeight = Math.max(MIN_COMPOSER_HEIGHT, Math.min(maxHeight, composerHeight + direction));
             setComposerHeight(nextHeight);
-            persistComposerHeight(nextHeight);
+            persistComposerHeight(prefs, nextHeight);
           }}
           aria-label={t("Resize message composer vertically")}
           aria-valuemin={MIN_COMPOSER_HEIGHT}

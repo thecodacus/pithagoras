@@ -1,6 +1,5 @@
 import { ApiError, type Session, type SessionStatus, type api as realApi } from "../api";
 import { reconcile } from "../reconcile";
-import { splitSubChats } from "../sub-chats";
 import * as questions from "./confirms";
 import type { Ask } from "./confirms";
 import { createStore, type Store } from "./store";
@@ -161,13 +160,16 @@ export function createSessions(deps: SessionsDeps) {
     /**
      * Deletes a chat, and its sub-chats with it, once the person says yes to the kernel's question, which names them.
      * False where they said no, and nothing was done. A failure rejects.
+     *
+     * `gone` is called as soon as the chat is out of the list, before the list is asked for again: a page that showed
+     * the chat goes to the next one in the same draw, not through a moment with no chat while the list is on its way.
      */
-    async remove(id: string): Promise<boolean> {
+    async remove(id: string, gone?: (list: readonly Session[]) => void): Promise<boolean> {
       const chat = find(id);
-      const subs = splitSubChats(store.get().list).under.get(id) ?? [];
-      if (!(await deps.ask(questions.deleteChat(chat?.title ?? id, false, subs)))) return false;
+      if (!(await deps.ask(questions.deleteChat(chat?.title ?? id, false, subChatsOf(id))))) return false;
       await api.deleteSession(id);
       goneFromList([id]);
+      gone?.(store.get().list);
       await refreshQuietly();
       return true;
     },
@@ -176,14 +178,15 @@ export function createSessions(deps: SessionsDeps) {
      * ones the portal kept, each with what it said, one after the other so that it need not do many at once.
      */
     async removeMany(ids: readonly string[]): Promise<{ id: string; error: string }[] | null> {
-      const all = splitSubChats(store.get().list);
-      const chosen = ids.map((id) => store.get().list.find((s) => s.id === id)).filter((s): s is Session => !!s);
-      const subs = chosen.reduce((n, s) => n + (all.under.get(s.id)?.length ?? 0), 0);
-      const busy = (s: Session) => [s, ...(all.under.get(s.id) ?? [])].some((c) => c.status === "running" || c.asking);
-      if (!(await deps.ask(questions.deleteChats(chosen.map((s) => ({ title: s.title, busy: busy(s) })), subs)))) return null;
+      // Every one is named and counted, listed or not (an agent's chat, a sub-chat kept out of the list): a part that
+      // keeps its own selection deletes nothing the question did not name. One not known here is named by its id.
+      const chosen = [...new Set(ids)];
+      const subs = chosen.reduce((n, id) => n + subChatsOf(id).length, 0);
+      const busy = (id: string) => [find(id), ...subChatsOf(id)].some((c) => c?.status === "running" || c?.asking);
+      if (!(await deps.ask(questions.deleteChats(chosen.map((id) => ({ title: find(id)?.title ?? id, busy: busy(id) })), subs)))) return null;
       const failed: { id: string; error: string }[] = [];
       const done: string[] = [];
-      for (const id of ids) {
+      for (const id of chosen) {
         try {
           await api.deleteSession(id);
           done.push(id);
@@ -200,6 +203,9 @@ export function createSessions(deps: SessionsDeps) {
       store.update((s) => (s.error ? { ...s, error: null } : s));
     },
   };
+
+  /** A chat's sub-chats the list has, whether or not the chat itself is in it. */
+  const subChatsOf = (id: string): Session[] => store.get().list.filter((c) => c.parent === id);
 
   /** Deleted by now, and shown so, whether or not the list then loads: the chats and their sub-chats are out of it. */
   function goneFromList(ids: readonly string[]): void {

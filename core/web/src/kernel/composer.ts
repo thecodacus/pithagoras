@@ -38,13 +38,13 @@ const EMPTY: ComposerState = { draft: "", attachments: [], adding: 0, commands: 
 
 export function createComposer(deps: ComposerDeps) {
   const { api, drafts, pending } = deps;
-  /** What is held per chat beyond the draft and the pictures, which `drafts` and `pending` keep. */
-  const extra = new Map<string, { adding: number; commands: readonly PiCommand[]; sending: boolean }>();
+  /** What is held per chat beyond the draft and the pictures, which `drafts` and `pending` keep. `sending` counts: a command's send may go while a message from the box still is. */
+  const extra = new Map<string, { adding: number; commands: readonly PiCommand[]; sending: number }>();
   const store = createStore<Readonly<Record<string, ComposerState>>>({});
 
   const stateOf = (id: string): ComposerState => {
     const more = extra.get(id);
-    return { draft: drafts.get(id), attachments: pending.get(id), adding: more?.adding ?? 0, commands: more?.commands ?? [], sending: more?.sending ?? false };
+    return { draft: drafts.get(id), attachments: pending.get(id), adding: more?.adding ?? 0, commands: more?.commands ?? [], sending: (more?.sending ?? 0) > 0 };
   };
   /** Puts the chat's state, as `drafts`, `pending` and what is held here have it, where readers see it. */
   const publish = (id: string) =>
@@ -54,10 +54,12 @@ export function createComposer(deps: ComposerDeps) {
       if (was && was.draft === now.draft && was.attachments === now.attachments && was.adding === now.adding && was.commands === now.commands && was.sending === now.sending) return all;
       return { ...all, [id]: now };
     });
-  const hold = (id: string, change: Partial<{ adding: number; commands: readonly PiCommand[]; sending: boolean }>) => {
-    extra.set(id, { adding: 0, commands: [], sending: false, ...extra.get(id), ...change });
+  const hold = (id: string, change: Partial<{ adding: number; commands: readonly PiCommand[]; sending: number }>) => {
+    extra.set(id, { adding: 0, commands: [], sending: 0, ...extra.get(id), ...change });
     publish(id);
   };
+  /** One more message on its way, or one fewer: the chat is shown as sending until the last is. */
+  const sendingBy = (id: string, step: 1 | -1) => hold(id, { sending: Math.max(0, (extra.get(id)?.sending ?? 0) + step) });
   // Voice mode adds to and takes from the same pictures: what it does is seen here.
   pending.subscribe((id) => publish(id));
 
@@ -144,11 +146,11 @@ export function createComposer(deps: ComposerDeps) {
     },
     /** Runs `work` (a message on its way) with the chat shown as sending, so that a second is not started over it. */
     async whileSending<T>(id: string, work: () => Promise<T>): Promise<T> {
-      hold(id, { sending: true });
+      sendingBy(id, 1);
       try {
         return await work();
       } finally {
-        hold(id, { sending: false });
+        sendingBy(id, -1);
       }
     },
     /** Takes a picture out of the box. */
@@ -189,7 +191,7 @@ export function createComposer(deps: ComposerDeps) {
       const images = pending.get(id);
       drafts.set(id, "");
       pending.set(id, []);
-      hold(id, { sending: true });
+      sendingBy(id, 1);
       try {
         await deps.chat(id).send(message, {
           ...(options?.voice ? { voice: true } : {}),
@@ -201,7 +203,7 @@ export function createComposer(deps: ComposerDeps) {
         putBack(id, message, images);
         throw e;
       } finally {
-        hold(id, { sending: false });
+        sendingBy(id, -1);
       }
     },
   };

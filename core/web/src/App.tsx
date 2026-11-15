@@ -8,7 +8,7 @@ import { Chat } from "./components/Chat";
 import { Login, Setup } from "./components/Login";
 import { isTab, type Tab } from "./settings-tabs";
 import { setupDismissed } from "./setup-state";
-import { load as loadCached, prefetchSettings } from "./settings-cache";
+import { prefetchSettings } from "./settings-cache";
 import { ExtensionDialog } from "./components/ExtensionDialog";
 import { lazyComponent } from "./lazy";
 import { ThemeSwitcher } from "./components/ThemeSwitcher";
@@ -162,7 +162,7 @@ function Shell({
   const { sessionId, tab, "*": extensionPart = "" } = useParams<{ sessionId?: string; tab?: string; "*"?: string }>();
   const navigate = useNavigate();
   const { pathname, search, state } = useLocation();
-  const { chats, sessions } = useKernel();
+  const { chats, sessions, models } = useKernel();
   // What the installed extensions draw in the portal: see extensions/loader.ts.
   useEffect(() => {
     setNavigate(navigate);
@@ -193,7 +193,11 @@ function Shell({
       // The dialog itself too, so that opening it is not a wait for its file.
       void import("./components/ConfigModal");
       if (setupDismissed()) return;
-      loadCached("models", api.allModels, 30_000).then((r) => r.models.length === 0 && setSetup(true), () => {});
+      // The kernel's models (over the same cache Settings opens on): none to talk to is a list that came empty, not one that did not come.
+      void models.load().then(() => {
+        const { status, models: there } = models.store.get();
+        if (status === "ready" && there.length === 0) setSetup(true);
+      });
     }, 1200);
     return () => clearTimeout(t);
   }, []);
@@ -297,12 +301,12 @@ function Shell({
     // It need not be listed: a sub-chat an extension keeps out of the list is fetched by its id (`active`).
     const open = sessionId === id || active?.parent === id;
     const parent = sessions.find(id)?.parent;
-    if (!(await sessions.actions.remove(id))) return false;
-    // A sub-chat gone takes its page back to its chat, if that is listed; a chat gone, to the latest chat of its own.
-    const list = sessions.store.get().list;
-    const next = parent && list.some((s) => s.id === parent) ? parent : splitSubChats(list).top[0]?.id;
-    if (open) navigate(next ? `/s/${next}` : "/", { replace: true });
-    return true;
+    // As soon as it is out of the list, in the same draw: waiting for the list to come again showed no chat for a moment.
+    return sessions.actions.remove(id, (list) => {
+      // A sub-chat gone takes its page back to its chat, if that is listed; a chat gone, to the latest chat of its own.
+      const next = parent && list.some((s) => s.id === parent) ? parent : splitSubChats(list).top[0]?.id;
+      if (open) navigate(next ? `/s/${next}` : "/", { replace: true });
+    });
   });
   const onRenameChat = useStable((id: string, title: string) => sessions.actions.rename(id, title));
   const onPin = useStable((id: string, pinned: boolean) => sessions.actions.pin(id, pinned));

@@ -6,7 +6,22 @@
 export default function (portal) {
   const members = ["sessions", "composer", "models", "settings", "me", "status", "prefs", "env", "media"];
   window.contractPortal = portal;
+  // What every extension is handed is shared with the others and the page: changing it is refused, not taken.
+  const tries = (change) => {
+    try {
+      change();
+      return "changed";
+    } catch {
+      return "refused";
+    }
+  };
+  const changes = {
+    features: tries(() => portal.api.features.push("parts.wrap")),
+    api: tries(() => (portal.api.version = "9.9.9")),
+    controller: tries(() => (portal.chats.controller("c1").deleteMessage = async () => true)),
+  };
   window.contractSeen = {
+    changes,
     version: portal.version,
     api: portal.api.version,
     features: [...portal.api.features],

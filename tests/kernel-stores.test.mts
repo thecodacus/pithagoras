@@ -105,12 +105,22 @@ test("preferences keep the stock keys as they were, and an interface's under its
   stock.set("folderSort", "manual");
   other.set("folderSort", "name");
   assert.equal(map.get("folderSort"), "manual");
-  assert.equal(map.get("ui.board.folderSort"), "name");
+  assert.equal(map.get("ui.board:folderSort"), "name");
   // Said again, it is no change.
   stock.set("folderSort", "manual");
   stock.remove("folderSort");
   assert.equal(stock.get("folderSort", "x"), "x");
   assert.equal(heard, 2);
+});
+
+test("one package's preferences are not another's, whatever dots their names and keys have", () => {
+  const { map, safe } = mapStorage();
+  // npm names may have dots: package `foo` with key `bar.x` and package `foo.bar` with key `x` were one key.
+  createPrefs(safe, "foo").set("bar.x", "of foo");
+  createPrefs(safe, "foo.bar").set("x", "of foo.bar");
+  assert.equal(createPrefs(safe, "foo").get("bar.x", ""), "of foo");
+  assert.equal(createPrefs(safe, "foo.bar").get("x", ""), "of foo.bar");
+  assert.equal(map.size, 2);
 });
 
 test("preferences of a browser that will not store them are the fallbacks", () => {
@@ -331,6 +341,24 @@ test("a message put back, a box emptied and a send on its way are each shown to 
   assert.equal(composer.store.get().a.attachments.length, 0);
   assert.equal(drafts.get("a"), "");
   assert.deepEqual(pending.get("a"), []);
+});
+
+test("two messages on their way in one chat keep it sending until the last has gone", async () => {
+  const { composer } = composerOf();
+  composer.setDraft("a", "from the box");
+  let releaseBox!: () => void;
+  let releaseCommand!: () => void;
+  // A message from the box, and a status line's command sent while it is still on its way.
+  const box = composer.whileSending("a", () => new Promise<void>((r) => (releaseBox = r)));
+  const command = composer.whileSending("a", () => new Promise<void>((r) => (releaseCommand = r)));
+  releaseCommand();
+  await command;
+  assert.equal(composer.store.get().a.sending, true);
+  assert.equal(composer.canSubmit("a"), false);
+  releaseBox();
+  await box;
+  assert.equal(composer.store.get().a.sending, false);
+  assert.equal(composer.canSubmit("a"), true);
 });
 
 test("commands are asked of a pi that is up without starting one, and a list that came that way is the list for its key", async () => {

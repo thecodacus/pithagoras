@@ -80,7 +80,14 @@ export function createFakeKernel(options: FakeKernelOptions = {}) {
     },
     sessions: { patchStatus: () => {}, refresh: async () => [] },
     fanOut: { serverPush: () => {}, extensionMessage: () => {}, fill: () => {}, onScreen: () => {} },
+    // What an action reads of its chat (to name it in a question, to find the question it answers) is the fixture's.
+    read: (id) => chats.peek(id),
   });
+  /** The fixture's chat is the one on screen, as the frame would have opened it: a question about it does not name it as another. */
+  const shown = (id: string) => {
+    real.screen.set(id);
+    return () => {};
+  };
   const controllers = new Map<string, ChatController>();
   const controller = (id: string): ChatController => {
     let c = controllers.get(id);
@@ -90,8 +97,8 @@ export function createFakeKernel(options: FakeKernelOptions = {}) {
   // A chat the fixture put events in is the fixture's. Any other (a child chat's run in a panel, which the fixture's own
   // page serves a stream for) is read from the page's own store, as in the app.
   const chats: Kernel['chats'] = {
-    acquire: (id) => (states.has(id) ? () => {} : pageKernel.chats.acquire(id)),
-    open: (id) => (states.has(id) ? () => {} : pageKernel.chats.open(id)),
+    acquire: (id) => (states.has(id) ? shown(id) : pageKernel.chats.acquire(id)),
+    open: (id) => (states.has(id) ? shown(id) : pageKernel.chats.open(id)),
     peek: (id) => (states.has(id) ? states.get(id)!.get() : pageKernel.chats.peek(id)),
     stateOf: (id) => states.get(id) ?? pageKernel.chats.stateOf(id),
     dismissDialog: (id, requestId) => store(id).update((s) => ({ ...s, dialogs: s.dialogs.filter((d) => d.id !== requestId) })),

@@ -20,7 +20,8 @@ import {
   LuShield,
 } from "react-icons/lu";
 import type { Session } from "../api";
-import { local } from "../safe-storage";
+import { useKernel } from "../kernel/context";
+import { usePref } from "../kernel/use";
 import { filterSessions } from "../session-filter";
 import { isEscape } from "../shortcuts";
 import { pick, useFlip, useLeaveRef } from "../motion";
@@ -94,14 +95,11 @@ export const Sidebar = memo(function Sidebar({
   // The pages that ask whether they are listed, by their entry's key: those that said yes last.
   const [shownPages, setShownPages] = useState<readonly string[]>([]);
   const pages = entries.filter((page) => !page.useShown || shownPages.includes(page.key));
-  const [storedCollapsed, setCollapsed] = useState(() => local.get("sidebarCollapsed") === "true");
+  // A preference of the page, kept through the kernel under the key it has always had.
+  const { prefs } = useKernel();
+  const storedCollapsed = usePref("sidebarCollapsed", "false") === "true";
   const collapsed = forceExpanded ? false : storedCollapsed;
-  const toggleSidebar = () => {
-    setCollapsed(value => {
-      local.set("sidebarCollapsed", String(!value));
-      return !value;
-    });
-  };
+  const toggleSidebar = () => prefs.set("sidebarCollapsed", String(!storedCollapsed));
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
   const newChat = async (workspace?: string) => {
@@ -504,7 +502,8 @@ function NavItem({
  */
 function ExtensionsGroup({ pages, view, onNavigate }: { pages: { to: Destination; icon: ReactNode; label: string }[]; view: string; onNavigate: (to: Destination) => void }) {
   // Open until it is shut by hand: a portal with one extension does not hide its page behind a fold nobody has met.
-  const [chosen, setChosen] = useState(() => local.get("sidebarExtensionsOpen") !== "false");
+  const { prefs } = useKernel();
+  const chosen = usePref("sidebarExtensionsOpen", "true") !== "false";
   const held = pages.some((d) => d.to === view);
   const open = chosen || held;
   const body = useId();
@@ -518,8 +517,7 @@ function ExtensionsGroup({ pages, view, onNavigate }: { pages: { to: Destination
         onClick={() => {
           // A click that shut nothing, with its page in view, would still be remembered as shut.
           if (held) return;
-          local.set("sidebarExtensionsOpen", String(!chosen));
-          setChosen(!chosen);
+          prefs.set("sidebarExtensionsOpen", String(!chosen));
         }}
       />
       <div id={body} role="group" aria-label={t("Extensions")} hidden={!open} className="pl-3">

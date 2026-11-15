@@ -67,22 +67,33 @@ export function deleteChats(chats: readonly { title: string; busy: boolean }[], 
   };
 }
 
-/** A sent message removed, with the agent's answer to it: also what "Remove the turn" under a flagged result does. */
-export function deleteMessage(): Question {
+/** What a question about something in a chat names: the chat, where it is not the one on screen. */
+const where = (chat: string | undefined) => (chat ? t("In the chat \"{name}\", not the one on screen.", { name: chat }) : "");
+
+/**
+ * A sent message removed, with the agent's answer to it: also what "Remove the turn" under a flagged result does. The
+ * question quotes the start of the message, and names the chat where it is not the one on screen: a part may ask it for
+ * any chat, and the person checks it against what they meant.
+ */
+export function deleteMessage(about: { text?: string; chat?: string } = {}): Question {
   return {
     title: t("Delete this message?"),
-    message: t("The agent's reply to it goes too, and the agent forgets both."),
+    message: [about.text ? `"${about.text}"` : "", where(about.chat), t("The agent's reply to it goes too, and the agent forgets both.")].filter(Boolean).join("\n\n"),
     confirmLabel: t("Delete"),
     danger: true,
     deletes: true,
   };
 }
 
-/** A result the guard flagged as a suspected prompt injection, trusted: the chat is no longer held back for it. */
-export function trustFlagged(): Question {
+/** A result the guard flagged as a suspected prompt injection, trusted: the chat is no longer held back for it. Names the tool it came from, and the chat where it is not the one on screen. */
+export function trustFlagged(about: { tool?: string; chat?: string } = {}): Question {
   return {
     title: t("Trust this result?"),
-    message: t("The chat is no longer held back for it: the agent may push, upload, read keys, start subagents and set up what runs later without asking. Trust it only if you read it and it is fine."),
+    message: [
+      about.tool ? t("What {tool} returned.", { tool: about.tool }) : "",
+      where(about.chat),
+      t("The chat is no longer held back for it: the agent may push, upload, read keys, start subagents and set up what runs later without asking. Trust it only if you read it and it is fine."),
+    ].filter(Boolean).join("\n\n"),
     confirmLabel: t("Trust it"),
     danger: true,
   };

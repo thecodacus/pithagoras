@@ -8,7 +8,8 @@ import { createStore } from "./store";
  * person to another browser.
  */
 export function createPrefs(storage: SafeStorage, scope?: string) {
-  const prefix = scope ? `ui.${scope}.` : "";
+  // A colon, which no package name has: with a dot, package `a` with key `b.c` and package `a.b` with key `c` were one key.
+  const prefix = scope ? `ui.${scope}:` : "";
   /** Counts the changes, so that a hook has something to compare: a key's value is read from storage when asked. */
   const changes = createStore(0);
   const read = (key: string, fallback: string): string => storage.get(prefix + key) ?? fallback;

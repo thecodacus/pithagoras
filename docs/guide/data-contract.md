@@ -47,7 +47,7 @@ which contract it was written for, and how it finds out whether the portal has w
 | `portal.me.use()` | `{ name, role }`; the role is always `"owner"` for now |
 | `portal.status.use()` | `{ connection, update, executor }` as codes |
 | `portal.prefs.use(key, fallback)` | A preference of this browser, kept apart from other packages' |
-| `portal.env.useViewport()` | `"phone"` or `"desk"`, by one width for the whole page |
+| `portal.env.useViewport()` | `"phone"` or `"desk"`, by the width the frame and the chat use (voice mode lays itself out by its own) |
 
 `pick` is what `portal.chats.use` has: say what of the value the component uses, and it is drawn again only when
 that changes.
@@ -68,7 +68,7 @@ link. Nothing is asked.
 | `….trustFlagged(result)` | Trusts a result flagged as a suspected prompt injection, after the portal's question |
 | `….queued.takeBack(seq)`, `….queued.sendNow(seq)` | A message that waits for the agent to read it |
 | `….switchVersion(seq, to)`, `….compact()`, `….loadEarlier()`, `….rename(title)` | As the chat's own controls |
-| `….respond(requestId, answer)` | Answers a question the agent asked in the chat |
+| `….respond(requestId, answer)` | Answers a question the agent asked in the chat (its `ask_question` tool), or cancels any question. A question an extension of the agent asks in the portal's own dialog (the guard's, before a call it held) is answered there: here it can only be cancelled, and any other answer resolves `{ ok: false }` |
 | `….modes()`, `….setMode(mode)` | The modes a chat may be put in; puts it in one |
 | `portal.composer.actions.setDraft`, `attach`, `detach`, `loadCommands`, `canSubmit`, `submit` | What the box does |
 | `portal.models.set(id, choice)` | Another model or effort for a chat |
@@ -82,10 +82,13 @@ An action that destroys something or raises what the agent may do asks the perso
 and calls the portal only after a yes. It resolves `false` where they said no. A part cannot leave the question out,
 and cannot make it easy to answer without reading it:
 
-- `sessions.actions.remove` and `removeMany` (a chat, and its sub-chats, named in the question)
-- `chats.controller(id).deleteMessage` and `removeTurn`
-- `chats.controller(id).trustFlagged`
+- `sessions.actions.remove` and `removeMany` (every chat, listed or not, and its sub-chats, named in the question)
+- `chats.controller(id).deleteMessage` and `removeTurn` (the question quotes the start of the message)
+- `chats.controller(id).trustFlagged` (the question names the tool the result came from)
 - `chats.controller(id).setMode` to a mode that asks (an extension's mode with a `confirm`)
+
+A question about something in a chat that is not the one on screen names that chat too, so that the person can check it
+against what they meant.
 
 This protects a person from a careless part. It does not protect them from a hostile one: an extension's browser half
 runs with the person's login and can call any route through `fetch`.
@@ -99,12 +102,15 @@ the fourth is read as a snapshot (`live: false`) of its latest events, asked for
 over a stream as soon as one is free. Design a dashboard of chats for that: the fifth and later update every five
 seconds, not as they type.
 
+While the tab is hidden, only the chat on screen keeps its stream: the others are not asked for at all, and are read
+again from the start as the tab comes back. A hidden tab so holds at most one of the six connections.
+
 The chat list is asked for every five seconds while the page is on screen, so a change made in another tab shows
 within five seconds.
 
 ## Preferences
 
-`portal.prefs` keeps strings in the browser under `ui.<package name>.<key>`, which no other package reads. Nothing in it
+`portal.prefs` keeps strings in the browser under `ui.<package name>:<key>`, which no other package reads. Nothing in it
 follows the person to another browser. The portal's own interface keeps its keys as they have always been, so nobody
 loses a layout.
 
@@ -130,7 +136,9 @@ follow either.
 
 The page reads it before it loads the module. A portal whose contract is not one of them does not load the browser
 half, and says why in Settings → Extensions: "Needs interface API ^1.2; this portal has 1.0.0". A range the page
-cannot read is said the same way. An extension that declares nothing is taken as `^1.0` and loads as it always did.
+cannot read is said the same way, and so is an `api` that is not text (`"api": 2` is read as the range `2`, a list is
+refused) or one longer than 100 characters. An extension that declares nothing is taken as `^1.0` and loads as it
+always did.
 
 **Ask for a feature.** `portal.has("data.sessions")` says whether this portal has a part of the contract, for an
 extension that can do without it. The names are `data.sessions`, `data.chats`, `data.composer`, `data.models`,

@@ -20,10 +20,11 @@ const code = (file: string) => read(file).replace(/\/\*[\s\S]*?\*\//g, "").repla
 
 test("the shell asks the kernel for the chat list, a chat and what is done to them, and not the portal", () => {
   const shell = code("src/App.tsx");
-  // What the shell may still ask itself: who is signed in, and whether there is a model to talk to.
+  // What the shell may still ask itself: who is signed in. Whether there is a model to talk to is the kernel's models.
   const own = /\bapi\.(\w+)/g;
   const asked = [...shell.matchAll(own)].map((m) => m[1]);
-  assert.deepEqual([...new Set(asked)].sort(), ["allModels", "authStatus"]);
+  assert.deepEqual([...new Set(asked)].sort(), ["authStatus"]);
+  assert.ok(/\bmodels\.load\(/.test(shell));
   assert.ok(!/new EventSource/.test(shell));
   assert.ok(!/\bsetEvents\b|\bsetSessions\b|\bsetUiQueue\b/.test(shell));
 });
@@ -53,6 +54,14 @@ test("the chat view takes its chat's row and two things only the frame knows, an
   // The draft, the pictures and the commands are the composer's, not the view's.
   assert.ok(!/import \{[^}]*\b(drafts|pending|api)\b[^}]*\} from/.test(chat), "the chat view imports the portal or the box's stores itself");
   assert.ok(!/\b(drafts|pending|api)\./.test(chat));
+  // Where its panels and its box were left is a preference of the page, read and kept through the kernel's prefs.
+  assert.ok(!/from "\.\.\/safe-storage"/.test(chat), "the chat view reads the browser's storage itself");
+  assert.match(chat, /\bprefs\.get\("panelPlaces"/);
+  // And the sidebar's: whether it is folded, and its extensions' group.
+  const sidebar = code("src/components/Sidebar.tsx");
+  assert.ok(!/from "\.\.\/safe-storage"/.test(sidebar), "the sidebar reads the browser's storage itself");
+  assert.match(sidebar, /usePref\("sidebarCollapsed"/);
+  assert.match(sidebar, /usePref\("sidebarExtensionsOpen"/);
 });
 
 test("the parts of the chat that need a picture's address, an answer to the agent or a setting go through the kernel, not the portal's API", () => {

@@ -7,8 +7,8 @@ import type { ContractVersion, Feature } from "@pithagoras/extension-api";
  */
 export const CONTRACT_VERSION: ContractVersion = "1.0.0";
 
-/** What `portal.has` knows: the parts of the contract an older portal may not have. */
-export const FEATURES: readonly Feature[] = [
+/** What `portal.has` knows: the parts of the contract an older portal may not have. Frozen: every extension is handed this list. */
+export const FEATURES: readonly Feature[] = Object.freeze([
   "data.sessions",
   "data.chats",
   "data.composer",
@@ -19,7 +19,7 @@ export const FEATURES: readonly Feature[] = [
   "data.prefs",
   "data.env",
   "data.media",
-];
+]);
 
 export const has = (feature: string): boolean => (FEATURES as readonly string[]).includes(feature);
 

@@ -10,6 +10,7 @@ import { onLanguageChange } from "../i18n";
 import { notifyIfAway, notifyState } from "../notify";
 import { pollWhileVisible } from "../poll";
 import { local } from "../safe-storage";
+import { load as loadCached } from "../settings-cache";
 import { onUpdate, updateSnapshot } from "../update";
 import { createAlerts } from "./alerts";
 import { createChats, type StreamSource } from "./chats";
@@ -59,6 +60,7 @@ export const chats = createChats({
   poll: pollWhileVisible,
   frame,
   sessions,
+  visibility: typeof document === "undefined" ? undefined : document,
   // Lambdas: the extensions' side of the page imports this module, so these are read when called, not when it loads.
   fanOut: {
     serverPush: (chat, extension, data) => serverPush(chat, extension, data),
@@ -85,7 +87,8 @@ export const alerts = createAlerts({
 });
 
 export const composer = createComposer({ api, drafts, pending, chat: (id) => chats.controller(id) });
-export const models = createModels(api);
+// Over the cache Settings opens on: the frame's check for a model to talk to warms it, as it did before the kernel had it.
+export const models = createModels({ ...api, allModels: () => loadCached("models", api.allModels, 30_000) });
 export const media = createMedia(api);
 export const settings = createSettings(api);
 export const me = createMe(api);

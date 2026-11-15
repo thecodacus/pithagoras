@@ -147,6 +147,53 @@ test("a chat deleted is gone from the list even when the list cannot be loaded a
   assert.deepEqual(sessions.store.get().list.map((s) => s.id), ["b"]);
 });
 
+test("a chat deleted is out of the list for the page to go on from, before the list is asked for again", async () => {
+  const { sessions, api } = make([session("a"), session("b")]);
+  await sessions.refresh();
+  // The list that follows the delete does not come until the test says so.
+  let answer!: () => void;
+  const later = new Promise<void>((r) => (answer = r));
+  const asked = api.sessions;
+  api.sessions = async () => (await later, asked());
+  let wentOn: string[] | undefined;
+  let refreshedBefore = false;
+  const done = sessions.actions.remove("a", (list) => {
+    wentOn = list.map((s) => s.id);
+    refreshedBefore = sessions.store.get().list !== list;
+  });
+  await settle();
+  // Told while the list is still on its way, with the list that is shown.
+  assert.deepEqual(wentOn, ["b"]);
+  assert.equal(refreshedBefore, false);
+  answer();
+  assert.equal(await done, true);
+});
+
+test("deleting several names every one in the question, those outside the list too, and counts their sub-chats", async () => {
+  const { sessions, asked, state } = make([session("a", { title: "Shopping list" }), session("s1", { parent: "agent", title: "Helper" })], [true]);
+  state.single.set("agent", session("agent", { title: "Nightly agent" }));
+  await sessions.refresh();
+  // An agent's chat that something looked at, and one the page knows nothing of.
+  const release = sessions.watch("agent");
+  await settle();
+  await sessions.actions.removeMany(["a", "agent", "unknown-chat"]);
+  release();
+  assert.match(asked[0].title, /3 chats/);
+  const said = asked[0].message ?? "";
+  assert.match(said, /"Shopping list"/);
+  assert.match(said, /"Nightly agent"/);
+  assert.match(said, /"unknown-chat"/);
+  assert.match(said, /One sub-chat is deleted with them/);
+  assert.deepEqual(state.calls.filter((c) => c.startsWith("delete")), ["delete a", "delete agent", "delete unknown-chat"]);
+});
+
+test("deleting a chat outside the list names the sub-chats the list has of it", async () => {
+  const { sessions, asked } = make([session("s1", { parent: "agent", title: "Helper" })], [false]);
+  await sessions.refresh();
+  await sessions.actions.remove("agent");
+  assert.match(asked[0].message ?? "", /"Helper"/);
+});
+
 test("a delete the portal refuses is thrown, and the chat stays", async () => {
   const { sessions } = make([session("stuck")]);
   await sessions.refresh();

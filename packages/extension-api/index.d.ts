@@ -916,7 +916,7 @@ export interface ChatController {
   abort(): Promise<void>;
   /** Replaces a sent message: it and everything after it are dropped, and the new text is sent. */
   edit(seq: number, message: string): Promise<void>;
-  /** Removes a sent message and the agent's answer to it, once the person says yes. False where they said no. */
+  /** Removes a sent message and the agent's answer to it, once the person says yes to a question that quotes it (and names the chat where it is not the one on screen). False where they said no. */
   deleteMessage(seq: number, asked?: Asked): Promise<boolean>;
   /** Removes the turn a flagged result came in: the same as `deleteMessage`, and asks the same. */
   removeTurn(seq: number, asked?: Asked): Promise<boolean>;
@@ -932,7 +932,11 @@ export interface ChatController {
   switchVersion(seq: number, to: number): Promise<void>;
   /** Folds the conversation so far into a summary, to make room in the model's window. */
   compact(): Promise<void>;
-  /** Answers a question the agent asked in the chat, or cancels it. */
+  /**
+   * Answers a question the agent asked in the chat (its `ask_question` tool), or cancels any question. What an extension
+   * of the agent asks in a dialog the portal draws (the guard's question before a call it held, among them) is only
+   * cancelled here: any other answer to it resolves `{ ok: false }` and is not sent.
+   */
   respond(requestId: string, answer: { value?: unknown; cancelled?: boolean }): Promise<{ ok: boolean; note?: string }>;
   /** Reads what is above the oldest event held. */
   loadEarlier(): Promise<void>;
@@ -1166,7 +1170,7 @@ export interface Portal {
   status: {
     use(): StatusView;
   };
-  /** What a person chose for how the page looks and behaves, kept in this browser and apart from other packages'. @experimental */
+  /** What a person chose for how the page looks and behaves, kept in this browser under `ui.<package name>:<key>`, apart from other packages'. @experimental */
   prefs: {
     /** A hook: the value of `key`, or `fallback`. */
     use(key: string, fallback: string): string;
@@ -1175,7 +1179,7 @@ export interface Portal {
   };
   /** The window. @experimental */
   env: {
-    /** A hook: a phone's window or a desk's, by one width for the whole page, drawn again when it becomes the other. */
+    /** A hook: a phone's window or a desk's, by the width the frame and the chat use, drawn again when it becomes the other. */
     useViewport(): "phone" | "desk";
   };
   /** Where a chat's files are fetched from. Addresses only, nothing is asked. @experimental */

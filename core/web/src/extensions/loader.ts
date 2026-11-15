@@ -198,16 +198,17 @@ async function activate(ext: ExtensionUi, told: Promise<void>[]): Promise<void> 
       navigate: (path, options) => go(path, options),
       useLocation: useHere,
       ui,
-      api: {
+      // Frozen, as the list of features in it: an extension that changed it would change what `has` says for the others.
+      api: Object.freeze({
         version: CONTRACT_VERSION,
         features: FEATURES,
         json,
-        url: (path) => {
+        url: (path: string) => {
           if (!ext.server) throw new Error(`${ext.name} has no server half running`);
           return `${ext.server}${path.startsWith("/") ? "" : "/"}${path}`;
         },
         ApiError,
-      },
+      }),
       t: (text, vars) => translate(ext.name, text, vars),
       tp: (n, one, other, vars) => translateCount(ext.name, n, one, other, vars),
       tc: (text, context, vars) => translateInContext(ext.name, text, context, vars),

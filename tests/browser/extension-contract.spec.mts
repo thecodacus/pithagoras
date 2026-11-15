@@ -32,6 +32,8 @@ test('an extension is handed the contract: its version and features, every membe
   expect(seen.has).toEqual({ sessions: true, media: true, unknown: false });
   expect(seen.members).toEqual({ sessions: 'object', composer: 'object', models: 'object', settings: 'object', me: 'object', status: 'object', prefs: 'object', env: 'object', media: 'object' });
   expect(seen.controller).toBe('function');
+  // Shared with every other extension and the page: one cannot change what `has` says, or the question before a delete.
+  expect(seen.changes).toEqual({ features: 'refused', api: 'refused', controller: 'refused' });
   expect(seen.image).toBe('/api/sessions/c1/images/a%20b.png');
   expect(seen.picture).toBe('/api/sessions/c1/picture?path=x%2Fy.png&v=3');
 });
@@ -42,10 +44,10 @@ test("its hooks read the portal's data, and what it keeps in this browser is und
   await expect(page.getByTestId('reader')).toContainText('Ada · roomy · desk · 0 chats');
   await page.getByRole('button', { name: 'Tighten' }).click();
   await expect(page.getByTestId('reader')).toContainText('tight');
-  expect(await page.evaluate(() => localStorage.getItem('ui.test-contract.density'))).toBe('tight');
+  expect(await page.evaluate(() => localStorage.getItem('ui.test-contract:density'))).toBe('tight');
   await page.getByRole('button', { name: 'Forget' }).click();
   await expect(page.getByTestId('reader')).toContainText('roomy');
-  expect(await page.evaluate(() => localStorage.getItem('ui.test-contract.density'))).toBeNull();
+  expect(await page.evaluate(() => localStorage.getItem('ui.test-contract:density'))).toBeNull();
   await page.setViewportSize({ width: 500, height: 800 });
   await expect(page.getByTestId('reader')).toContainText('phone');
 });

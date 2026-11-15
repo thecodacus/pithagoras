@@ -178,6 +178,24 @@ function fileIn(dir: string, file: string): string | undefined {
   }
 }
 
+/** How long a `pithagoras.api` range is carried into every list: past it, the range is not one the page reads. */
+const RANGE_LONGEST = 100;
+
+/**
+ * What `pithagoras.api` says, as the page is to read it: a range is passed on as it is written, and anything else that
+ * is there (a number, a list, a range too long to carry) as text that the page will not read as a range, so that it
+ * refuses the extension and says why, rather than loading it as if it needed nothing. Absent, null or empty: nothing
+ * declared, as semver takes an empty range.
+ */
+function apiRange(declared: unknown): { api?: string } {
+  if (declared === undefined || declared === null) return {};
+  let text = typeof declared === "string" ? declared.trim() : typeof declared === "number" ? String(declared) : JSON.stringify(declared) ?? String(declared);
+  if (!text) return {};
+  // Cut, it could read as another range: the mark after it makes it no range at all.
+  if (text.length > RANGE_LONGEST) text = `${text.slice(0, RANGE_LONGEST)}…`;
+  return { api: text };
+}
+
 /**
  * The browser half the package in `packageDir` declares, or nothing: it
  * declares none, or what it names is not a file inside it.
@@ -207,7 +225,7 @@ export function clientHalf(packageDir: string): ClientHalf | undefined {
     dir,
     entry: path.basename(client),
     ...(style ? { style } : {}),
-    ...(typeof declared.api === "string" && declared.api.trim() ? { api: declared.api.trim().slice(0, 100) } : {}),
+    ...apiRange(declared.api),
     // Read as it is first asked for: a file a page fetches is found by the folder alone, and every fetch would otherwise
     // look at every file of every half. The stylesheet too, however many files there are: the page tells one revision
     // from another by the module's address alone.
