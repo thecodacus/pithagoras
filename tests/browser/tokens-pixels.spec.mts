@@ -202,6 +202,8 @@ for (const scene of SCENES) {
   for (const viewport of ['desktop', 'phone'] as const) {
     for (const theme of THEMES) {
       test(`${scene.name}, ${viewport}, ${theme}: the picture is the one from before the tokens`, async ({ page }) => {
+        // Light has no style list, only its picture, so in CI there is nothing it could check: it says so instead of passing.
+        test.skip(!!process.env.CI && theme === 'light', 'pictures are compared on the machine that took them; only dark has a style list');
         await page.setViewportSize(VIEWPORTS[viewport]);
         await page.addInitScript((value) => localStorage.setItem('pithagoras.theme', value), theme);
         await scene.open(page, theme);
@@ -227,7 +229,10 @@ for (const scene of SCENES) {
         // The pictures are compared where they were taken, not in CI: its Chromium smooths text and edges a shade
         // differently (up to some hundred pixels of a picture), with the same fonts. The style lists above do not depend
         // on the machine and are the proof that runs everywhere.
-        if (process.env.CI) return;
+        if (process.env.CI) {
+          test.info().annotations.push({ type: 'pictures not compared', description: 'only on the machine that took them; the style lists above were' });
+          return;
+        }
         await steady(page);
         await expect(page).toHaveScreenshot(`${scene.name}-${viewport}-${theme}.png`, { maxDiffPixels: 0, threshold: 0.2, animations: 'disabled', caret: 'hide' });
       });

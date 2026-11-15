@@ -334,3 +334,21 @@ test("on a narrow window with a mouse, what is typed in the composer follows the
   // At the stock size it is the 16px it always was.
   expect(await typed(16)).toBe('16px');
 });
+
+test("a theme's easing does not slow the rows of a question: its answer buttons are drawn as soon as they take clicks", async ({ page }) => {
+  await portal(page, { tokens: { 'ease-out': 'cubic-bezier(1, 0, 1, 0)' } });
+  await expect(page.locator('.nav-item').first()).toBeVisible();
+  await expect(page.locator('html.theme-switching')).toHaveCount(0);
+  await page.evaluate(() => document.documentElement.setAttribute('data-motion', 'fancy'));
+  const curves = await page.evaluate(() => {
+    const card = document.createElement('div');
+    card.className = 'ui-dialog';
+    card.innerHTML = '<div></div><div></div>';
+    document.body.append(card);
+    const get = (el: Element) => getComputedStyle(el).animationTimingFunction;
+    const out = { row: get(card.children[1]) };
+    card.remove();
+    return out;
+  });
+  expect(curves.row).toBe('cubic-bezier(0.22, 1, 0.36, 1)');
+});

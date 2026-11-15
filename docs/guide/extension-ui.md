@@ -2934,12 +2934,13 @@ control of its own that switches the portal between themes.
 
 `set` switches to a theme of your own package at once. To switch to another
 package's, or to leave one of theirs for the portal's own colours, the portal asks the person
-("*Your extension* wants to change the colours to “Dusk”, a theme of *pithagoras-themes*"), because a package that restyles the whole
+("*Your extension* wants to change the colours to a theme of *pithagoras-themes*: “Dusk”."), because a package that restyles the whole
 portal unasked is one that could make a prompt hard to read. A switch to your own theme is not the person's choice:
 the person's own choice in Settings, and what they said yes to, stay over it, and where nobody has chosen it stays
 until the person changes the theme. `set` returns a promise that resolves
 `true` when the colours were switched and `false` when the person said no, and rejects for a theme there is none
-of. Do not write it as if it always worked.
+of. Asking for the theme that is in effect already resolves `true` at once without a question, and an extension has
+one question open at a time: a call while its question is open resolves `false`. Do not write it as if it always worked.
 
 | `portal.theme.` | |
 | --- | --- |

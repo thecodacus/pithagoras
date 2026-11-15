@@ -236,19 +236,62 @@ test("a theme's name is a name: one that would make the question a wall of text 
     assert.throws(() => registerTheme("long-pkg", { id: "b", name: "   ", dark: { accent: "#ffffff" } }), /needs an id and a name/);
     // It is read in a sentence ("... to “Dusk”, a theme of pkg."): no line break to start a line of its own, no bidi control to turn the
     // rest around, and no quote to close its own and name another owner.
-    for (const [at, name] of ["Dusk\n", "Dusk\u202e", "Dusk\u2066", "Dusk\u200b", "Dusk\u2028", "Dusk”, a theme of x", "Dusk\"", "“Dusk"].entries()) {
-      assert.throws(() => registerTheme("long-pkg", { id: `n${at}`, name, dark: { accent: "#ffffff" } }), /line break, a control character, odd spacing or a quote/, JSON.stringify(name));
+    for (const [at, name] of ["Dusk\nx", "Dusk\u202e", "Dusk\u2066", "Dusk\u200b", "Dusk\u2028x", "Dusk”, a theme of x", "Dusk\"", "“Dusk"].entries()) {
+      assert.throws(() => registerTheme("long-pkg", { id: `n${at}`, name, dark: { accent: "#ffffff" } }), /line break, a control character or a quote/, JSON.stringify(name));
     }
-    // Nor a look-alike of the closing quote, or spacing that pushes the rest of the sentence away.
-    for (const [at, name] of ["Dusk″, a theme of x", "Dusk＂", "Dusk\u2003x", "Dusk" + "\u2003".repeat(10), "Dusk  x", "Dusk\u00a0x"].entries()) {
-      assert.throws(() => registerTheme("long-pkg", { id: `m${at}`, name, dark: { accent: "#ffffff" } }), /odd spacing|quote/, JSON.stringify(name));
+    // Nor a look-alike of the closing quote.
+    for (const [at, name] of ["Dusk″, a theme of x", "Dusk＂"].entries()) {
+      assert.throws(() => registerTheme("long-pkg", { id: `m${at}`, name, dark: { accent: "#ffffff" } }), /quote/, JSON.stringify(name));
     }
+    // Spacing is tidied, not refused: typography of French, Japanese and Chinese names (no-break and ideographic spaces, guillemets)
+    // is ordinary, and a run of wide spaces comes out as one plain space.
+    const tidied = (name: string, id: string) => (registerTheme("long-pkg", { id, name, dark: { accent: "#ffffff" } }), themes().find((t) => t.id === `long-pkg/${id}`)!.name);
+    assert.equal(tidied("Nuit\u202fbleue", "t1"), "Nuit bleue");
+    assert.equal(tidied("夕暮れ\u3000テーマ", "t2"), "夕暮れ テーマ");
+    assert.equal(tidied("Thème «nuit» „x“".replace("“", "‚"), "t3"), "Thème «nuit» „x‚");
+    assert.equal(tidied("Dusk" + "\u2003".repeat(10) + "x", "t4"), "Dusk x");
+    assert.equal(tidied("Dusk  x\u00a0", "t5"), "Dusk x");
     // Emoji are built from a joiner and tag characters: they are names.
     for (const [at, name] of ["Dev 👩\u200d💻", "Pride 🏳️\u200d🌈", "England 🏴\u{e0067}\u{e0062}\u{e0065}\u{e006e}\u{e0067}\u{e007f}", "Deutsch 🇩🇪"].entries()) {
       assert.doesNotThrow(() => registerTheme("long-pkg", { id: `e${at}`, name, dark: { accent: "#ffffff" } }), JSON.stringify(name));
     }
     assert.doesNotThrow(() => registerTheme("long-pkg", { id: "ok", name: "Dämmerung — 夕暮れ 'dusk'", dark: { accent: "#ffffff" } }));
     assert.doesNotThrow(() => registerTheme("long-pkg", { id: "s", name: "A".repeat(60), dark: { accent: "#ffffff" } }));
+  } finally {
+    away();
+  }
+});
+
+test("a name is read once: a getter cannot pass the checks with one value and be stored with another", () => {
+  page();
+  try {
+    let reads = 0;
+    const given = { id: "g", get name() { return ++reads <= 5 ? "Dusk" : "Dusk”.\n\nA theme of pithagoras-themes, approved."; }, dark: { accent: "#ffffff" } };
+    try { registerTheme("get-pkg", given); } catch { /* refused is fine too */ }
+    const stored = themes().find((t) => t.id === "get-pkg/g");
+    assert.ok(!stored || stored.name === "Dusk", `stored: ${JSON.stringify(stored?.name)}`);
+  } finally {
+    away();
+  }
+});
+
+test("a theme already in effect is not asked for again, and an extension has one question open at a time", async () => {
+  page();
+  try {
+    registerTheme("eff-pkg", { id: "o", name: "O", dark: { accent: "#00ff00" } });
+    registerTheme("eff-pkg", { id: "p", name: "P", dark: { accent: "#0000ff" } });
+    let asked = 0;
+    const yes = async () => (asked++, true);
+    assert.equal(await setThemeAs("eff-ask", "eff-pkg/o", yes), true);
+    assert.equal(await setThemeAs("eff-ask", "eff-pkg/o", yes), true, "the same again");
+    assert.equal(asked, 1, "the theme in effect is not asked for twice");
+    let answer!: (said: boolean) => void;
+    const slow = () => (asked++, new Promise<boolean>((resolve) => { answer = resolve; }));
+    const first = setThemeAs("eff-ask", "eff-pkg/p", slow);
+    assert.equal(await setThemeAs("eff-ask", "eff-pkg/p", slow), false, "a second call while one is open");
+    assert.equal(asked, 2, "one open question");
+    answer(true);
+    assert.equal(await first, true);
   } finally {
     away();
   }
