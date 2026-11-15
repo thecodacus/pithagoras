@@ -1509,6 +1509,8 @@ export class SdkPiClient extends EventEmitter implements PiClient {
    */
   useHead(head: LazyHead): void {
     this.nextHead = head;
+    // Due once the run is over, and not between two steps (reload(true) would keep the head and reload for nothing).
+    this.dueAfterRun = true;
   }
 
   /** The head the next load takes up: asked for, and not applied while a run goes on, which a changed prompt would cut into. */
@@ -1740,10 +1742,13 @@ export class SdkPiClient extends EventEmitter implements PiClient {
    * be no way to switch it off.
    */
   async getTools(): Promise<PiTool[]> {
+    const countedFor = (all: Map<string, Set<string>>, set: string): Set<string> => all.get(set) ?? all.set(set, new Set()).get(set)!;
     const all: any[] = this.session.getAllTools?.() ?? [];
     const forScripts = (tool: any) => tool.exposure === "codemode" || tool.exposure === "deferred";
     // Not `tool_search`: it is the portal's way to the lazy tools and no tool to switch.
     const offered = (this.wanted.size ? all.filter((tool) => this.wanted.has(String(tool.name)) || forScripts(tool)) : all).filter((tool) => !this.isSearch(String(tool.name)));
+    // A rule the tools of a set share is printed once by pi, so it is counted once, with the first tool that has it.
+    const counted = new Map<string, Set<string>>();
     return offered.map((tool) => ({
       name: String(tool.name),
       description: typeof tool.description === "string" ? tool.description : undefined,
@@ -1752,7 +1757,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       ...(isInline(tool.sourceInfo) ? { inline: true as const } : {}),
       ...(forScripts(tool) ? { scriptsOnly: true as const } : {}),
       ...(this.offByDefault(String(tool.name)) ? { offByDefault: true as const } : {}),
-      tokens: this.declarationTokens(String(tool.name), tool),
+      tokens: this.declarationTokens(String(tool.name), tool, countedFor(counted, sourceLabel(tool.sourceInfo))),
       ...((files) => (files ? { approvalFiles: [...files] } : {}))(declaredFiles(this.session.getToolDefinition(String(tool.name)))),
       ...this.saysOfItself(String(tool.name)),
       enabled: !this.switchedOff.has(String(tool.name)),
@@ -1775,10 +1780,15 @@ export class SdkPiClient extends EventEmitter implements PiClient {
    * parameters, and the line the system prompt lists it by) divided by four, the measure of the tool texts test. What the
    * threshold of the lazy tools adds up (see tool-lazy.ts).
    */
-  private declarationTokens(name: string, tool: any): number {
-    const definition = this.session.getToolDefinition(name) as { promptSnippet?: unknown } | undefined;
+  private declarationTokens(name: string, tool: any, counted: Set<string> = new Set()): number {
+    const definition = this.session.getToolDefinition(name) as { promptSnippet?: unknown; promptGuidelines?: unknown } | undefined;
     const snippet = typeof definition?.promptSnippet === "string" ? `- ${name}: ${definition.promptSnippet}` : "";
-    const text = `${name}${typeof tool?.description === "string" ? tool.description : ""}${JSON.stringify(tool?.parameters ?? {})}${snippet}`;
+    // The rules pi prints for an active tool in the system prompt count too (a lazy tool's come with its search hit instead).
+    const rules = (Array.isArray(definition?.promptGuidelines) ? definition.promptGuidelines : [])
+      .filter((line: unknown): line is string => typeof line === "string" && line.trim() !== "" && !counted.has(line))
+      .map((line: string) => (counted.add(line), `- ${line}`))
+      .join("");
+    const text = `${name}${typeof tool?.description === "string" ? tool.description : ""}${JSON.stringify(tool?.parameters ?? {})}${snippet}${rules}`;
     return Math.ceil(text.length / 4);
   }
 

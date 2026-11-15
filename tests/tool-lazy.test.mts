@@ -106,7 +106,7 @@ test("a chat's head says which tools are lazy in it: the tool's own entry first,
 });
 
 test("a stored head is read back, and one of another shape is not", () => {
-  const head = { v: 1, lazy: ["docs"], direct: [], hint: "line", outside: true, voice: ["say little"], tag: "0a1b2c3d" };
+  const head = { v: 1, lazy: ["docs"], direct: [], hint: "line", outside: true, voice: ["say little"], tag: "0a1b2c3d4e5f6a7b" };
   assert.deepEqual(parseHead(JSON.stringify(head)), head);
   // One stored before heads had a tag, or with a tag that is not one, is read with none: lazyHeadFor gives it one.
   const { tag: _tag, ...untagged } = head;

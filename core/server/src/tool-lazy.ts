@@ -177,8 +177,11 @@ export interface LazyHead {
   tag: string;
 }
 
-/** A tag for a new head: see LazyHead.tag. */
-export const ruleTag = (): string => randomBytes(4).toString("hex");
+/**
+ * A tag for a new head: see LazyHead.tag. 16 hex characters: the tag is cut out of every tool's result, and one of 8 is
+ * met in ordinary hex text (a UUID, a hash) about once in a thousand chats that read a few MB of it.
+ */
+export const ruleTag = (): string => randomBytes(8).toString("hex");
 
 /** A stored head, or nothing where there is none or it is not one this version wrote. */
 export function parseHead(raw: unknown): LazyHead | undefined {
@@ -187,7 +190,7 @@ export function parseHead(raw: unknown): LazyHead | undefined {
     const head = JSON.parse(raw);
     const strings = (v: unknown): v is string[] => Array.isArray(v) && v.every((s) => typeof s === "string");
     if (head?.v !== 1 || !strings(head.lazy) || !strings(head.direct) || typeof head.hint !== "string" || typeof head.outside !== "boolean" || !strings(head.voice)) return undefined;
-    return { v: 1, lazy: head.lazy, direct: head.direct, hint: head.hint, outside: head.outside, voice: head.voice, tag: typeof head.tag === "string" && /^[0-9a-f]{8}$/.test(head.tag) ? head.tag : "" };
+    return { v: 1, lazy: head.lazy, direct: head.direct, hint: head.hint, outside: head.outside, voice: head.voice, tag: typeof head.tag === "string" && /^[0-9a-f]{16}$/.test(head.tag) ? head.tag : "" };
   } catch {
     return undefined;
   }

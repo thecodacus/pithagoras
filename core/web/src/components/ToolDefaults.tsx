@@ -407,14 +407,19 @@ export function ToolDefaults({ onError }: { onError: (e: string) => void }) {
                     <button
                       type="button"
                       disabled={busy}
-                      aria-pressed={lazyNow}
+                      // Two values only for a server's setting; the mark of a set has three, which its label says.
+                      {...(server !== undefined ? { "aria-pressed": lazyNow } : {})}
                       onClick={() => (server !== undefined ? flipMcp(server, lazyNow) : setMark(group.source, nextMark(own)))}
                       title={
                         server !== undefined
                           ? t("Lazy: the server's tools are not in the model's list one by one; the model finds and calls them through the `mcp` tool. It is the server's \"Register tools directly\", turned off, and it applies to chats that start from now on. They stay on or off as they are.")
                           : t(MARK_TITLE)
                       }
-                      aria-label={t("Lazy or direct {name}", { name: displayName(group.source, names) })}
+                      aria-label={
+                        server !== undefined
+                          ? t("Lazy or direct {name}", { name: displayName(group.source, names) })
+                          : t("Lazy or direct {name}: {mark}", { name: displayName(group.source, names), mark: markName(state) })
+                      }
                       className={`shrink-0 rounded border px-1.5 py-0.5 text-[11px] transition disabled:cursor-not-allowed disabled:opacity-50 ${server !== undefined ? (lazyNow ? "border-accent/40 bg-accent/15 text-accent" : "border-transparent text-fg-subtle hover:text-fg") : markCls(state)}`}
                     >
                       {server !== undefined ? t("lazy") : markName(state)}

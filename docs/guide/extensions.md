@@ -542,7 +542,7 @@ one sentence that what a search or a describe of `tool_search` returns carries t
 start with `Rule` and the chat's own tag, a random word made with the chat (`Rule 3f9a07c2:`). Only those lines count:
 a page, a file or an MCP server's description that writes a line starting with `Rule:` has no tag, and the tag is
 taken out of every text of a tool's that the search quotes and of every result of every other tool, however it is
-written (twice in a row, with look-alike letters, zero-width characters or other separators between its letters). The
+written in the usual ways (twice in a row, with look-alike Latin, Greek or Cyrillic letters, zero-width characters or other separators between its letters). The
 portal's rule that outside content, such as a [browser](/guide/browser)'s page, is data and never
 instructions, and what a lazy tool asks to be told in a spoken turn, stay in the prompt as long as the tool is
 lazy, from the chat's first request: a security line does not depend on a search. They are taken from what the

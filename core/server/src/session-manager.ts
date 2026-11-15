@@ -2857,7 +2857,11 @@ class SessionManager extends EventEmitter {
     const client = this.live.get(sessionId)?.client;
     if (client) {
       client.useHead?.(head);
-      if (this.isBusy(sessionId) || this.reloadCutsOff(sessionId)) client.reloadDue = true;
+      // A pi that takes the head (useHead) has it due after the run already: marking it due now as well would reload it
+      // between two steps, which keeps the old head, and then once more.
+      if (this.isBusy(sessionId) || this.reloadCutsOff(sessionId)) {
+        if (!client.useHead) client.reloadDue = true;
+      }
       // Held like every reload: another reload or an edit on the same pi, meanwhile, would run under this one.
       else await this.withEdit(sessionId, () => client.reload());
     }

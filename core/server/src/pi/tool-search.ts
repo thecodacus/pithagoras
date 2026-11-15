@@ -3,7 +3,6 @@ import { randomBytes } from "node:crypto";
 import { mcpNamespaceOf } from "./mcp-origin.js";
 import { fail, say } from "./tool-result.js";
 import { LISTED_TOOLS_KEY, TOOL_SEARCH } from "./tool-search-names.js";
-import { oneOf } from "./tool-schema.js";
 import { rank, type Rankable } from "./tool-rank.js";
 import type { LazyHead } from "../tool-lazy.js";
 
@@ -76,7 +75,22 @@ const rulePrefix = (tag: string): string => `Rule ${tag}:`;
  * alone (Cyrillic and Greek letters), and the characters between the letters of a word (spaces, zero-width and format
  * characters, marks, punctuation and symbols). Only for finding the tag in a text, never for what the text says.
  */
-const LOOK_ALIKE: Record<string, string> = { "\u0430": "a", "\u0441": "c", "\u0435": "e", "\u0501": "d", "\u043e": "0", "\u03bf": "0", o: "0", l: "1", i: "1" };
+const LOOK_ALIKE: Record<string, string> = {
+  // Cyrillic, Greek and Latin letters that read as a hex letter (the capitals are lower-cased before this table: Α is α).
+  ...Object.fromEntries(["\u0430", "\u03b1", "\u0251"].map((c) => [c, "a"])),
+  ...Object.fromEntries(["\u044c", "\u0185", "\u03b2", "\u0432"].map((c) => [c, "b"])),
+  ...Object.fromEntries(["\u0441", "\u03f2"].map((c) => [c, "c"])),
+  ...Object.fromEntries(["\u0501", "\u0257"].map((c) => [c, "d"])),
+  ...Object.fromEntries(["\u0435", "\u04bd", "\u03b5", "\u0454"].map((c) => [c, "e"])),
+  ...Object.fromEntries(["\u03dd", "\u0192"].map((c) => [c, "f"])),
+  ...Object.fromEntries(["\u043e", "\u03bf", "\u0585", "\u03c3"].map((c) => [c, "0"])),
+  ...Object.fromEntries(["\u0456", "\u03b9", "\u04cf", "\u0269", "\u0131", "\u0131"].map((c) => [c, "1"])),
+  "\u0437": "3",
+  "\u0431": "6",
+  o: "0",
+  l: "1",
+  i: "1",
+};
 /** The same for the ASCII letters, by code. */
 const LOOK_ALIKE_CODE: Record<number, number> = { 0x6f: 0x30, 0x6c: 0x31, 0x69: 0x31 };
 const BETWEEN = /[\p{Z}\p{C}\p{M}\p{P}\p{S}]/u;
@@ -230,7 +244,7 @@ export class ToolSearch {
    */
   private told = new Set<string>();
   /** The tag of a head that has none (one made in a test, or with nothing lazy): this tool's own, as random. */
-  private readonly ownTag = randomBytes(4).toString("hex");
+  private readonly ownTag = randomBytes(8).toString("hex");
 
   constructor(private head: LazyHead) {}
 
@@ -536,13 +550,32 @@ export class ToolSearch {
       promptSnippet: "search, describe and call the tools kept out of this list",
       promptGuidelines: [this.head.hint, ruleLinesNote(this.tag)].filter(Boolean),
       parameters: Type.Object({
-        action: oneOf(["search", "describe", "call"]),
+        action: Type.String({ description: "search, describe or call" }),
         query: Type.Optional(Type.String()),
         name: Type.Optional(Type.String()),
         args: Type.Optional(
           Type.Union([Type.Object({}, { additionalProperties: true }), Type.String()], { description: "The tool's arguments: an object, or its JSON text" })
         ),
       }),
+      // No call fails pi's check of the arguments: that failure is a result of its own with the arguments printed in it, which
+      // no tool_result handler sees, so a query written as an object would bring the tag back in a text the guard does not
+      // wrap. Every value is made the kind the schema wants (execute refuses what is left), so each call reaches execute.
+      prepareArguments: (raw: unknown) => {
+        const given = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+        const text = (v: unknown): string | undefined => {
+          if (v === undefined || v === null) return undefined;
+          if (typeof v === "string") return v;
+          try {
+            return JSON.stringify(v) ?? String(v);
+          } catch {
+            return String(v);
+          }
+        };
+        const args = given.args && typeof given.args === "object" && !Array.isArray(given.args) ? given.args : text(given.args);
+        const query = text(given.query);
+        const name = text(given.name);
+        return { action: text(given.action) ?? "", ...(query !== undefined ? { query } : {}), ...(name !== undefined ? { name } : {}), ...(args !== undefined ? { args } : {}) };
+      },
       // Declared to the model while it is active, never callable from a script or another tool: it would call itself.
       exposure: "model-only",
       // The declarations of the lazy tools are left out of every request: see the note on this file.

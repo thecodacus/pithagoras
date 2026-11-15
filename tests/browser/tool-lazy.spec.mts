@@ -101,7 +101,9 @@ test('a set goes from auto to lazy to direct and back from its header, and its t
   await mark.click();
   await expect.poll(() => puts).toEqual([{ 'pi-heavy': 'lazy' }]);
   await expect(mark).toHaveText('lazy');
-  await expect(mark).toHaveAttribute('aria-pressed', 'true');
+  // A screen reader hears the mark in the name; aria-pressed has two values and the mark three.
+  await expect(mark).toHaveAccessibleName('Lazy or direct pi-heavy: lazy');
+  await expect(mark).not.toHaveAttribute('aria-pressed');
   // The mark is no switch: the tools are on as they were.
   await expect(heavy).toContainText('2 on');
   await expect(mark).toHaveAttribute('title', /through tool_search/);
@@ -115,7 +117,7 @@ test('a set goes from auto to lazy to direct and back from its header, and its t
   await mark.click();
   await expect.poll(() => puts.at(-1)).toEqual({ 'pi-heavy': 'direct' });
   await expect(mark).toHaveText('direct');
-  await expect(mark).toHaveAttribute('aria-pressed', 'false');
+  await expect(mark).toHaveAccessibleName('Lazy or direct pi-heavy: direct');
   await mark.click();
   await expect.poll(() => puts.at(-1)).toEqual({});
   await expect(mark).toHaveText('auto');
@@ -143,7 +145,7 @@ test('what the threshold made lazy is shown as auto, lazy, and a mark of the per
   const { puts } = await portal(page, { resolved: ['pi-heavy'] });
   const mark = page.getByRole('button', { name: 'Lazy or direct pi-heavy' });
   await expect(mark).toHaveText('auto, lazy');
-  await expect(mark).toHaveAttribute('aria-pressed', 'true');
+  await expect(mark).toHaveAccessibleName('Lazy or direct pi-heavy: auto, lazy');
   await expect(page.getByRole('button', { name: 'Lazy or direct pi-web-access' })).toHaveText('auto');
   await page.getByRole('button', { name: /^pi-heavy/ }).click();
   await expect(page.getByRole('button', { name: 'Lazy or direct heavy_read' })).toHaveText('auto, lazy');

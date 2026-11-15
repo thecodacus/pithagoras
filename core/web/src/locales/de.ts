@@ -1504,6 +1504,7 @@ const de: Locale = {
     "direct": "direkt",
     "Lazy: the model finds and calls this tool through tool_search and it is not in its list. Direct: it is always in the list. Auto: the threshold decides, by how long the list is. Click to change: auto, lazy, direct. It reaches the chats that start from now on.": "Lazy: Das Modell findet und ruft dieses Tool über tool_search auf, es steht nicht in seiner Liste. Direkt: Es steht immer in der Liste. Automatisch: Die Schwelle entscheidet, je nachdem, wie lang die Liste ist. Klicken zum Wechseln: automatisch, lazy, direkt. Gilt für Chats, die ab jetzt starten.",
     "Lazy or direct {name}": "{name} lazy oder direkt",
+    "Lazy or direct {name}: {mark}": "{name} lazy oder direkt: {mark}",
     "Not in the model's list one by one: it finds and calls this tool through the `tool_search` tool.": "Steht nicht einzeln in der Liste des Modells: es findet und ruft dieses Tool über das Tool `tool_search` auf.",
     "Through the mcp tool, a script or tool_search as well as by its name.": "Über das mcp-Werkzeug, ein Skript oder tool_search ebenso wie unter seinem Namen.",
     "Lazy above": "Lazy ab",

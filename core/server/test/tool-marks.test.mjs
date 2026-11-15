@@ -247,7 +247,7 @@ test("a chat's head says from its start what its lazy tools said of themselves w
   assert.deepEqual(head.lazy, ["pi-heavy"]);
   assert.equal(head.outside, true, "a lazy tool returns outside content: said from the first request, not when it registers");
   assert.deepEqual(head.voice, ["Say the heavy result in one sentence.", "Spell the ids."]);
-  assert.match(head.tag, /^[0-9a-f]{8}$/);
+  assert.match(head.tag, /^[0-9a-f]{16}$/);
   assert.notEqual(headOf((await json("/api/sessions", "POST", {})).id).tag, head.tag, "each chat its own");
   // Read again, the tag stays: it says nothing of the tools.
   await mark({ "pi-heavy": "lazy", "<tool>heavy_read": "direct" });
@@ -286,7 +286,7 @@ test("a head stored before heads had a tag is given one once, and keeps it", asy
   const { tag, ...untagged } = headOf(chat.id);
   db.getDb().prepare("UPDATE sessions SET lazy_head = ? WHERE id = ?").run(JSON.stringify(untagged), chat.id);
   const given = headOf(chat.id);
-  assert.match(given.tag, /^[0-9a-f]{8}$/);
+  assert.match(given.tag, /^[0-9a-f]{16}$/);
   assert.notEqual(given.tag, tag);
   assert.deepEqual({ ...given, tag: undefined }, { ...untagged, tag: undefined }, "nothing else of it changes");
   assert.equal(headOf(chat.id).tag, given.tag, "and it is kept");
@@ -566,6 +566,7 @@ test("a list over 3,000 tokens or 20 tools takes the largest group out of it, wh
   assert.deepEqual(headOf(chat.id).lazy, ["pi-browser"]);
   await mark({ "pi-browser": "direct" });
   assert.deepEqual([...db.lazyToolNames()].sort(), big("small", "pi-small", 10, 100).map((t) => t.name).sort(), "the person's word is before the threshold's: another group goes instead");
+  assert.deepEqual(db.lazyNotice(), ["pi-small"], "the notice names what is lazy now, not the group the person kept in the list");
   const kept = await json("/api/sessions", "POST", {});
   assert.deepEqual(headOf(kept.id).lazy, ["pi-small"]);
   assert.deepEqual(headOf(kept.id).direct, ["pi-browser"]);
