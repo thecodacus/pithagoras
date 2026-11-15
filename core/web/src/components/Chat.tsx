@@ -14,7 +14,7 @@ import { DictationButton, DictationStrip } from "./Dictation";
 import { insertAtCaret } from "../dictation";
 import { useDictation } from "../use-dictation";
 import { createPortal } from "react-dom";
-import { Fragment, memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { Fragment, memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { DiagramPlugin } from "streamdown";
 import { followPointer } from "../pointer-drag";
 import { LuGripVertical, LuMenu, LuArrowDown, LuSquare, LuArrowUp, LuPaperclip, LuPuzzle, LuX, LuCornerLeftUp } from "react-icons/lu";
@@ -28,7 +28,6 @@ import { ComposerBar } from "./ComposerBar";
 import { ModePicker, ModePill } from "./ModePicker";
 import { QuestionCard } from "./QuestionCard";
 import { useChatPictures } from "./ChatPictures";
-import { confirmDialog } from "./ConfirmDialog";
 import { ErrorBoundary, PartFailed } from "./ErrorBoundary";
 import { moveHighlight, paletteMatches, slashToken, typedCommand } from "../slash-palette";
 import { useCommandTrigger } from "../command-trigger";
@@ -44,25 +43,17 @@ import { labelOf, msg, t } from "../i18n";
 import { titleOf, useSlot, type ChatProps, type PanelHandle, type Panels, type Registered } from "../extensions/slots";
 import { channelFor } from "../extensions/channel";
 import { forgetChatFeed, publishChat } from "../extensions/chat-feed";
+import { useViewport } from "../kernel/use";
+import type { Asked } from "../kernel/chats";
 import { forgetOpenCalls, openCalls } from "../open-calls";
 import { setPanelController, type ChatPanels } from "../extensions/panels";
 import { runCommand, useHasCommand } from "../extensions/commands";
 import { failedIn } from "../extensions/loader";
 import { STEP, arrowSteps } from "../resize-keys";
+import { brand } from "../brand";
 
 /** How many messages are drawn at first, and added each time you scroll up to the edge. */
 const PAGE = 40;
-
-/** Wide enough for the panels to sit beside the conversation: below it they cover it. */
-const BESIDE = "(min-width: 768px)";
-let besideQuery: MediaQueryList | undefined;
-/** One query for every chat and every render, made when first asked. */
-const besideNow = () => (besideQuery ??= matchMedia(BESIDE));
-const watchBeside = (changed: () => void) => {
-  const query = besideNow();
-  query.addEventListener("change", changed);
-  return () => query.removeEventListener("change", changed);
-};
 
 /** The panels' edge towards the conversation, or a window's frame when they float. */
 const ASIDE: Record<Dock, string> = {
@@ -181,6 +172,8 @@ export function Chat({
   onClientCommand,
   onRename,
   onSetMode,
+  onTrustFlagged,
+  onSwitchVersion,
   onOpenNavigation,
   parentTitle,
   versions = {},
@@ -199,8 +192,8 @@ export function Chat({
   onSend: (message: string, options?: PromptOptions) => Promise<void>;
   /** Replace a sent message: it and everything after it are dropped, and the new text is sent. */
   onEditMessage: (seq: number, message: string) => Promise<void>;
-  /** Remove a sent message and the agent's answer to it. */
-  onDeleteMessage: (seq: number) => Promise<void>;
+  /** Remove a sent message and the agent's answer to it, once the portal has asked and been told yes: false where it was told no. */
+  onDeleteMessage: (seq: number, asked?: Asked) => Promise<boolean | void>;
   /** Take back a message that waits for the agent to read it. */
   onTakeBackQueued: (seq: number) => Promise<void>;
   /** Stop the run and send a waiting message now, the others still waiting behind it. */
@@ -210,8 +203,12 @@ export function Chat({
   onClientCommand: (name: string, args: string) => void | Promise<void>;
   /** Give the chat another name, from its header. */
   onRename: (title: string) => Promise<void>;
-  /** Put the chat, which has said nothing yet, in a mode (see ModePicker); `confirmed` for one that asks first. */
-  onSetMode: (mode: string, confirmed?: boolean) => Promise<void>;
+  /** Put the chat, which has said nothing yet, in a mode (see ModePicker). One that asks first is asked about by the portal: false where it was told no. */
+  onSetMode: (mode: string, asked?: Asked) => Promise<boolean | void>;
+  /** Trust a result flagged as a suspected prompt injection, once the portal has asked and been told yes: false where it was told no. */
+  onTrustFlagged?: (result: string, asked?: Asked) => Promise<boolean>;
+  /** Show another version of a message, and what followed it then. */
+  onSwitchVersion?: (seq: number, to: number) => Promise<void>;
   /** On a phone, where the sidebar is a drawer: opens it. */
   onOpenNavigation?: () => void;
   /** For a sub-chat (see sub-chats.ts): its chat's title, where the list has that chat. */
@@ -431,7 +428,8 @@ export function Chat({
   useEffect(() => local.set("panelSplit", String(split)), [split]);
   useEffect(() => local.set("panelFloats", JSON.stringify(frames)), [frames]);
   // On a phone the panels cover the conversation, wherever they are docked.
-  const beside = useSyncExternalStore(watchBeside, () => besideNow().matches);
+  // Wide enough for the panels to sit beside the conversation: below it they cover it.
+  const beside = useViewport() === "desk";
   const placeOf = (kind: AsidePanel): Dock => (beside ? places[kind] ?? before.dock : "right");
   const widthAt = (side: "left" | "right") => sizes[side] ?? before.width;
   const heightAt = () => sizes.bottom ?? before.height;
@@ -1378,10 +1376,10 @@ export function Chat({
     }
   };
 
-  /** Puts the chat in `mode`: shown at once, and back as it was if it is not saved. */
-  const chooseMode = (mode: string, confirmed?: boolean) => {
+  /** Puts the chat in `mode`: shown at once, and back as it was if it is not saved. A mode that asks first is shown once the person says yes. */
+  const chooseMode = (mode: string) => {
     const chat = session.id;
-    setChosenHere({ chat, mode });
+    if (!modeList.find((m) => m.id === mode)?.confirm) setChosenHere({ chat, mode });
     // One save at a time in a chat: a choice made while the last one is on its way is sent after it, so that the
     // server is not asked to change the mode while it is still changing it, and the choice made last is the one kept.
     const before = modeSave.current?.chat === chat ? modeSave.current.saved : undefined;
@@ -1390,13 +1388,12 @@ export function Chat({
       let done = false;
       await attempt(async () => {
         try {
-          await onSetMode(mode, confirmed);
+          done = (await onSetMode(mode, { accepted: () => setChosenHere({ chat, mode }) })) !== false;
         } catch (e) {
           // Shown back as it was, unless another choice was made since: that one is shown.
           if (modeSave.current === saving) setChosenHere(null);
           throw e;
         }
-        done = true;
       });
       return done;
     })();
@@ -1432,26 +1429,17 @@ export function Chat({
     again: (item, text) => attempt(() => sendAgain(item, text)),
     dropQueued: (seq) => attempt(() => onTakeBackQueued(seq)),
     sendQueued: (seq) => attempt(() => onSendQueuedNow(seq)),
+    // The portal asks first (see kernel/chats.ts), and the row is taken out once the answer is yes.
     remove: async (seq) => {
-      if (
-        await confirmDialog({
-          title: t("Delete this message?"),
-          message: t("The agent's reply to it goes too, and the agent forgets both."),
-          confirmLabel: t("Delete"),
-          danger: true,
-          deletes: true,
-        })
-      ) {
-        takeOut();
-        void attempt(() => onDeleteMessage(seq));
-      }
+      await attempt(async () => {
+        await onDeleteMessage(seq, { accepted: takeOut });
+      });
     },
     trustFlagged: async (id) => {
       let done = false;
       await attempt(async () => {
-        await api.trustFlagged(session.id, id);
-        trustedHere.current.add(id);
-        done = true;
+        done = (await onTrustFlagged?.(id)) ?? false;
+        if (done) trustedHere.current.add(id);
       });
       return done;
     },
@@ -1460,7 +1448,7 @@ export function Chat({
       setSwitching(seq);
       void attempt(async () => {
         try {
-          await api.switchVersion(session.id, seq, to);
+          await onSwitchVersion?.(seq, to);
         } catch (e) {
           setSwitching(null);
           throw e;
@@ -1921,7 +1909,7 @@ export function Chat({
 
         {!loading && items.length === 0 && (
           <div className="chat-empty pt-16 text-center">
-            <img src="/icon-192.png" alt="" draggable={false} className="chat-empty-mark mx-auto mb-4 h-11 w-11 object-contain" />
+            <img src={brand.icon} alt="" draggable={false} className="chat-empty-mark mx-auto mb-4 h-11 w-11 object-contain" />
             <p className="text-sm text-fg-muted">{t("Give pi a task.")}</p>
             <p className="mt-1 text-xs text-fg-faint">{t("You can close this tab — it keeps working.")}</p>
           </div>

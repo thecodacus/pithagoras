@@ -33,6 +33,7 @@ import { failedIn } from "../extensions/loader";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { SubChats } from "./SubChats";
 import { familiesFound, familyRunning, searchFolderOf, shownStatus, splitSubChats, topOf, type ShownStatus } from "../sub-chats";
+import { brand } from "../brand";
 
 /** How many unpinned sessions the sidebar shows before deferring to Sessions. A chat's sub-chats come with it, uncounted. */
 const RECENTS_LIMIT = 12;
@@ -79,7 +80,7 @@ export const Sidebar = memo(function Sidebar({
   onSelect: (id: string) => void;
   /** A chat in `workspace`, or where New starts without one, opened. */
   onNewChat: (workspace?: string) => Promise<void>;
-  onDelete: (id: string) => Promise<void>;
+  onDelete: (id: string) => Promise<boolean>;
   onRename: (id: string, title: string) => Promise<void>;
   onPin: (id: string, pinned: boolean) => Promise<void>;
   onOpenSettings: () => void;
@@ -287,12 +288,12 @@ export const Sidebar = memo(function Sidebar({
 
       <div className="flex items-center gap-2 pl-3 pr-12 pb-3 pt-4">
         <img
-          src="/icon-192.png"
+          src={brand.icon}
           alt=""
           className="h-6 w-6 shrink-0 object-contain p-[5px]"
           draggable={false}
         />
-        <h1 className="text-sm font-semibold tracking-tight text-fg">Pithagoras</h1>
+        <h1 className="text-sm font-semibold tracking-tight text-fg">{brand.name}</h1>
         <span
           className="ml-auto text-3xs uppercase tracking-wider text-fg-faint"
           title={t("How sessions are executed")}
@@ -691,7 +692,7 @@ function SessionItem({
   active: boolean;
   onSelect: () => void;
   onRename: (id: string, title: string) => Promise<void>;
-  onDelete: (id: string) => Promise<void>;
+  onDelete: (id: string) => Promise<boolean>;
   onPin: (id: string, pinned: boolean) => Promise<void>;
   onError: (message: string | null) => void;
 }) {
@@ -743,7 +744,7 @@ function SessionItem({
 
         {/* Without a mouse there is no hover: the open chat's row keeps them. */}
         <div className={`ml-auto hidden shrink-0 items-center gap-0.5 group-focus-within:flex group-hover:flex ${active ? "[@media(hover:none)]:flex" : ""}`}>
-          <SessionActions session={s} subChats={subChats} nested={nested} small onPin={onPin} onStartRename={() => setRenaming(true)} onDelete={onDelete} onError={onError} />
+          <SessionActions session={s} nested={nested} small onPin={onPin} onStartRename={() => setRenaming(true)} onDelete={onDelete} onError={onError} />
         </div>
       </div>
     </div>

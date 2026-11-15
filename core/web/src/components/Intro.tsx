@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { fancy } from "../motion";
+import { brand } from "../brand";
 
 /** How long it is on the page: the doors are open by a second, and it is gone a beat after. */
 const LENGTH = 1150;
@@ -36,7 +37,7 @@ export function Intro() {
       <div className="app-intro-mark">
         <i className="app-intro-ring" />
         <i className="app-intro-ring is-late" />
-        <img src="/icon-192.png" alt="" draggable={false} />
+        <img src={brand.icon} alt="" draggable={false} />
       </div>
     </div>
   );

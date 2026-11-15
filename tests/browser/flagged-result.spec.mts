@@ -15,7 +15,9 @@ for (const phase of ['flagged', 'flagged-lazy']) test(`a result flagged as a sus
   // The message of the turn the result came in: the question just before it.
   expect(await page.evaluate(() => (window as any).deleted[0])).toBeGreaterThan(0);
   // Trusting it tells the portal which result, and the notice says it was trusted.
+  // Trusting it asks first, in the portal's own dialog: one step more than the button.
   await notice.getByRole('button', { name: 'Trust it' }).click();
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Trust it' }).click();
   await expect.poll(() => trusted.length).toBe(1);
   expect(trusted[0]).toContain('/flagged/0123456789abcdef/trust');
   await expect(page.getByText('You trusted this result.')).toBeVisible();

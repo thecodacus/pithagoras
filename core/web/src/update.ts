@@ -227,3 +227,8 @@ export async function updatePortal(): Promise<UpdateOutcome> {
   await updateNow();
   return { kind: "started" };
 }
+
+/** The update as it is now, outside a component: what the kernel's status reads. */
+export const updateSnapshot = (): Snapshot => snap;
+/** Told when it changes, outside a component. Asking for the update starts with the first and stops with the last. Returns the unsubscribe. */
+export const onUpdate = subscribe;

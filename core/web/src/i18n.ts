@@ -195,10 +195,12 @@ export function apply(): void {
   if (current !== was || formatLocale !== wasFormats) listeners.forEach((l) => l());
 }
 
-const subscribe = (listener: () => void) => {
+/** Called when the language, how it writes numbers and dates, or its texts change. Returns the unsubscribe. */
+export const onLanguageChange = (listener: () => void): (() => void) => {
   listeners.add(listener);
-  return () => listeners.delete(listener);
+  return () => void listeners.delete(listener);
 };
+const subscribe = onLanguageChange;
 
 /** How many times texts were added to the language in effect from outside this file: an extension's (see addStrings). */
 let added = 0;

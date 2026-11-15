@@ -1,56 +1,17 @@
 import { LuPencil, LuPin, LuPinOff, LuTrash2 } from "react-icons/lu";
 import type { Session } from "../api";
 import { keep } from "../motion";
-import { t, tp } from "../i18n";
+import { t } from "../i18n";
+import * as questions from "../kernel/confirms";
 import { confirmDialog } from "./ConfirmDialog";
 
-/** How many sub-chats a delete names before it stops naming them. */
-const NAMED_SUB_CHATS = 5;
-
 /**
- * What a person is asked before a chat is deleted. One that arrived through a
- * channel does not block the chat: the next message in it simply starts a new
- * conversation, which is the reason to say so first. Its sub-chats (see
- * sub-chats.ts) go with it, and are named, since they are not on screen while
- * they are shut.
+ * The question before a chat is deleted, and before several are, for a page that deletes without going through the
+ * chat list (the Agent page: its chats come from the agent's own list). The list's own deletes ask in the kernel
+ * (kernel/sessions.ts), with the same words.
  */
 export function confirmDeleteSession(title: string, channel = false, subChats: readonly { title: string }[] = []): Promise<boolean> {
-  const named = subChats.slice(0, NAMED_SUB_CHATS).map((c) => `"${c.title}"`);
-  const names = subChats.length > named.length ? [...named, "…"].join(", ") : named.join(", ");
-  return confirmDialog({
-    title: t("Delete \"{name}\"?", { name: title }),
-    message: channel
-      ? t("The agent forgets this conversation, and the next message in that chat starts a new one.")
-      : [
-          t("It is stopped if it is running, and its transcript is removed."),
-          subChats.length ? tp(subChats.length, "Its sub-chat {names} is deleted with it.", "Its {n} sub-chats are deleted with it: {names}.", { names }) : "",
-        ].filter(Boolean).join("\n\n"),
-    confirmLabel: t("Delete"),
-    danger: true,
-    deletes: true,
-  });
-}
-
-/**
- * What a person is asked before several chats are deleted at once: the first few by name, how many sub-chats go
- * with them, and that those at work are stopped. One question for all, never one each.
- */
-export function confirmDeleteSessions(chats: readonly { title: string; busy: boolean }[], subChats: number): Promise<boolean> {
-  const named = chats.slice(0, NAMED_SUB_CHATS).map((c) => `"${c.title}"`);
-  const names = chats.length > named.length ? [...named, "…"].join(", ") : named.join(", ");
-  const busy = chats.filter((c) => c.busy).length;
-  return confirmDialog({
-    title: tp(chats.length, "Delete {n} chat?", "Delete {n} chats?"),
-    message: [
-      names,
-      t("They are stopped if they are running, and their transcripts are removed."),
-      subChats ? tp(subChats, "One sub-chat is deleted with them.", "Their {n} sub-chats are deleted with them.") : "",
-      busy ? tp(busy, "{n} of them is running or waiting for you.", "{n} of them are running or waiting for you.") : "",
-    ].filter(Boolean).join("\n\n"),
-    confirmLabel: t("Delete"),
-    danger: true,
-    deletes: true,
-  });
+  return confirmDialog(questions.deleteChat(title, channel, subChats));
 }
 
 /** What was said when pinning, renaming or deleting a chat failed, by the sidebar and the Sessions page alike. */
@@ -73,7 +34,6 @@ export function sessionError(what: "pin" | "unpin" | "rename" | "delete", name: 
  */
 export function SessionActions({
   session: s,
-  subChats,
   nested = false,
   small = false,
   onPin,
@@ -82,15 +42,14 @@ export function SessionActions({
   onError,
 }: {
   session: Session;
-  /** Its sub-chats, which a delete takes with it, and names. */
-  subChats?: readonly Session[];
   /** It is shown under its chat, which is where it is pinned. */
   nested?: boolean;
   /** The sidebar's size; the Sessions page has room for more. */
   small?: boolean;
   onPin: (id: string, pinned: boolean) => Promise<void>;
   onStartRename: () => void;
-  onDelete: (id: string) => Promise<void>;
+  /** Asks first, in the kernel; false where the person said no. */
+  onDelete: (id: string) => Promise<boolean>;
   onError: (message: string | null) => void;
 }) {
   const pad = small ? "p-1" : "p-1.5";
@@ -126,14 +85,14 @@ export function SessionActions({
       </button>
       <button
         type="button"
-        onClick={async (e) => {
+        onClick={(e) => {
           e.stopPropagation();
           const row = e.currentTarget.closest<HTMLElement>("[data-flip]");
-          if (!(await confirmDeleteSession(s.title, false, subChats))) return;
           onError(null);
-          // A picture of the row, to break apart where it was once it is gone (see motion.ts).
+          // A picture of the row, to break apart where it was once it is gone (see motion.ts): taken before the question,
+          // which is the kernel's, and played only if the person says yes.
           const gone = keep(row, row?.closest<HTMLElement>(".sidebar-list, .sessions-list"));
-          onDelete(s.id).then(() => gone("row"), (err) => onError(sessionError("delete", s.title, err)));
+          onDelete(s.id).then((deleted) => deleted && gone("row"), (err) => onError(sessionError("delete", s.title, err)));
         }}
         className={`rounded ${pad} text-fg-subtle hover:text-danger`}
         title={t("Delete session")}

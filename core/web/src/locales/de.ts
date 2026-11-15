@@ -461,6 +461,8 @@ const de: Locale = {
     "This result looks like a prompt injection": "Dieses Ergebnis sieht nach einer Prompt-Injection aus",
     "It {signs}. Until you trust it or remove the turn it came in, this chat does not push, upload, read keys, start subagents or set up anything that runs later unless you say yes when it asks.": "Es {signs}. Bis du ihm vertraust oder die Runde entfernst, in der es kam, pusht dieser Chat nichts, lädt nichts hoch, liest keine Schlüssel, startet keine Subagenten und richtet nichts ein, das später läuft, außer du sagst Ja, wenn er fragt.",
     "Trust it": "Vertrauen",
+    "Trust this result?": "Diesem Ergebnis vertrauen?",
+    "The chat is no longer held back for it: the agent may push, upload, read keys, start subagents and set up what runs later without asking. Trust it only if you read it and it is fine.": "Der Chat wird seinetwegen nicht mehr gebremst: Der Agent darf pushen, hochladen, Schlüssel lesen, Subagenten starten und einrichten, was später läuft, ohne zu fragen. Vertraue ihm nur, wenn du es gelesen hast und es in Ordnung ist.",
     "Remove the turn": "Runde entfernen",
     "Delete this message?": "Diese Nachricht löschen?",
     "The agent's reply to it goes too, and the agent forgets both.": "Die Antwort des Agenten darauf verschwindet auch, und der Agent vergisst beides.",
