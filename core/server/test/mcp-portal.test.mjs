@@ -162,7 +162,7 @@ test("a folder's file is taken into the user's configuration, switched off, tran
     path.join(repo, ".pi", "mcp.json"),
     JSON.stringify({
       mcpServers: {
-        tracker: { url: "https://tracker.example.test/mcp", directTools: true, approveTools: ["tracker_close*"], headers: { "X-Key": "${TRACKER_KEY}", Other: "k-${HOME}-${TRACKER_KEY}" } },
+        tracker: { url: "https://tracker.example.test/mcp", directTools: true, approveTools: ["tracker_close*"], headers: { "X-Key": "${TRACKER_KEY}", Other: "k-${HOME}-${TRACKER_KEY}", Authorization: "Bearer $SECRET_KEY", Escaped: "cost $$PRICE and $!BANG" }, oauth: { clientId: "x", clientSecret: "${CLIENT_SECRET}" } },
         override: { enabled: false },
         "bad name": { command: "x" },
         runs: { command: "x", env: { TOKEN: "!pass show t" } },
@@ -184,7 +184,7 @@ test("a folder's file is taken into the user's configuration, switched off, tran
   assert.equal(file().mcpServers.signin, undefined);
   assert.deepEqual(r.body.commands, { runs: ["env.TOKEN"] });
   // What of the portal's environment a server sends to its address is said, as the commands are.
-  assert.deepEqual(r.body.variables, { tracker: ["HOME", "TRACKER_KEY"] });
+  assert.deepEqual(r.body.variables, { tracker: ["CLIENT_SECRET", "HOME", "SECRET_KEY", "TRACKER_KEY"] });
   const servers = file().mcpServers;
   assert.equal(servers.tracker.enabled, false, "what a repository says is looked at before it runs");
   assert.equal(servers.tracker.exposure, "direct", "the adapter's directTools became pi's exposure");

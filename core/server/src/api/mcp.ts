@@ -228,6 +228,13 @@ export function mcpServer(name: string): { entry: Record<string, unknown>; on: b
   return { entry: structuredClone(entry), on: entryEnabled(entry) };
 }
 
+/** What is wrong with an enabled entry that is written in the old adapter's keys, or null: the portal connects none (see chatServers), and nothing converts it. */
+function adapterProblem(entry: unknown): string | null {
+  if (!entry || typeof entry !== "object" || Array.isArray(entry) || !entryEnabled(entry as Record<string, unknown>)) return null;
+  const old = adapterKeysOf(entry);
+  return old.length ? `It is written for the old MCP adapter (${old.join(", ")}) and is not connected until it is changed to pi's keys: see the docs for what each became.` : null;
+}
+
 /** stdio and http are mutually exclusive in pi. */
 function transportOf(entry: Record<string, unknown>): "stdio" | "http" | "unknown" {
   if (typeof entry.command === "string" && entry.command) return "stdio";
@@ -385,17 +392,49 @@ export interface ImportResult {
   skipped: { name: string; reason: string }[];
   /** The places in each added server whose value pi runs as a command. */
   commands: Record<string, string[]>;
-  /** The variables of the portal's environment each added server sends to its address, in its headers (`${NAME}`). */
+  /** The variables of the portal's environment each added server sends to its address, in its headers and its sign-in's client secret (`${NAME}` or `$NAME`). */
   variables: Record<string, string[]>;
 }
 
-/** The variables of the portal's environment an entry sends to its address: `${NAME}` in its headers, which pi fills in. */
+/**
+ * The names of the environment variables a value as pi reads them fills in: `${NAME}` and a bare `$NAME`, and not the `$$` and
+ * `$!` that stand for a `$` and a `!` (pi's `parseConfigValueTemplate`). A value that starts with `!` is a command, not a template.
+ */
+function variablesIn(value: string): string[] {
+  if (value.startsWith("!")) return [];
+  const names: string[] = [];
+  for (let at = value.indexOf("$"); at >= 0; at = value.indexOf("$", at)) {
+    const next = value[at + 1];
+    if (next === "$" || next === "!") {
+      at += 2;
+      continue;
+    }
+    if (next === "{") {
+      const end = value.indexOf("}", at + 2);
+      if (end < 0) {
+        at += 1;
+        continue;
+      }
+      const name = value.slice(at + 2, end);
+      if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) names.push(name);
+      at = end + 1;
+      continue;
+    }
+    const bare = /^[A-Za-z_][A-Za-z0-9_]*/.exec(value.slice(at + 1));
+    if (bare) names.push(bare[0]);
+    at += 1 + (bare?.[0].length ?? 0);
+  }
+  return names;
+}
+
+/** The variables of the portal's environment an entry sends to its address: the ones pi fills in, in its headers and in its sign-in's client secret. */
 export function sentVariables(entry: unknown): string[] {
-  const headers = entry && typeof entry === "object" ? (entry as { headers?: unknown }).headers : undefined;
-  if (!headers || typeof headers !== "object" || Array.isArray(headers)) return [];
-  const names = new Set<string>();
-  for (const value of Object.values(headers as Record<string, unknown>)) if (typeof value === "string") for (const [, name] of value.matchAll(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g)) names.add(name);
-  return [...names].sort();
+  if (!entry || typeof entry !== "object") return [];
+  const { headers, oauth } = entry as { headers?: unknown; oauth?: unknown };
+  const values: unknown[] = [];
+  if (headers && typeof headers === "object" && !Array.isArray(headers)) values.push(...Object.values(headers as Record<string, unknown>));
+  if (oauth && typeof oauth === "object" && !Array.isArray(oauth)) values.push((oauth as { clientSecret?: unknown }).clientSecret);
+  return [...new Set(values.flatMap((value) => (typeof value === "string" ? variablesIn(value) : [])))].sort();
 }
 
 /**
@@ -460,8 +499,9 @@ export function mcpRouter(): Router {
         entry,
         transport: transportOf(entry as Record<string, unknown>),
         disabled: !entryEnabled((entry ?? {}) as Record<string, unknown>),
-        // What pi would skip it for, which the page shows beside the server.
-        problem: validateEntry(name, entry, names),
+        // What pi would skip it for, which the page shows beside the server; and an entry in the old adapter's keys, which the
+        // portal does not connect (an entry restored from `mcp.json.adapter` or pasted from an old README is one).
+        problem: validateEntry(name, entry, names) ?? adapterProblem(entry),
         commands: commandValues(entry),
       }));
       res.json({

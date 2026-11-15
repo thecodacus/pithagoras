@@ -32,6 +32,13 @@ An extension can write a server of its own into the file as well, when you
 switch it on from the extension's page. The server is listed and switched here
 like any other.
 
+The file is not converted when you edit it. A server written in the old adapter's keys
+(`directTools`, `includeTools`, `excludeTools`, `approveTools`, `lifecycle`, `idleTimeout` and the like), whether
+pasted from an old README or put back from `mcp.json.adapter`, is not connected, and its row in
+Settings → MCP says so. The move at the first start is the only conversion; after it, write the entry in pi's
+keys: `exposure` and `toolExposure` say what a model sees, `approve` is set in the server's form, and the rest has
+no key in pi.
+
 Open chats are loaded again when the file changes, as soon as they can be: at
 once where a chat is idle, and between two steps of a run where it works. A chat
 keeps the servers it connected with until then.
@@ -177,10 +184,15 @@ form says how many; they are changed in the file.
 **Ask before these tools** in the form takes patterns of the server's own tool
 names, one per line, with `*` for any characters: `delete_*` asks before every tool
 of the server that starts with `delete_`. The person is asked in the chat before the
-call runs, and where nobody can be asked (a routine, a heartbeat, a channel chat)
+call runs, with all of the call's arguments, and where nobody can be asked (a routine, a heartbeat, a channel chat)
 the call is refused. An extension that writes a server can name the same tools with
-`approve`, and a server moved from the old adapter has its `approveTools` here. The
+`approve`, and a server moved from the old adapter has its `approveTools` here. A pattern
+`*` covers the resource tools (`read_mcp_resource` and the like) for that server too. The
 patterns are kept by the server's name in the portal, not in the file.
+
+A server that is not running is started by a search or a call only in the primary user's chat, or for a call that
+a standing rule allows for the person who speaks: somebody else asking the agent to search its tools does not set a
+server's command, its `!` values or its sign-in going.
 
 ## Disabling
 

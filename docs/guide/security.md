@@ -71,7 +71,12 @@ the server they are asked for, and a listing of every server's counts as outside
 content. What `tool_search` shows when you search or describe is the tools' own
 descriptions and parameters, which the server wrote: such a result is wrapped when it
 shows a tool of a server you have not counted as your own, and left as it is when every
-tool it shows is the portal's, an extension's, or a trusted server's. The usage rules such a result
+tool it shows is the portal's, an extension's, or a trusted server's. The same goes for what a code mode script asks of
+the servers about themselves (`searchTools`, `describeTool`, `describeNamespace`: their descriptions and the instructions
+a server gives when it connects): where the chat has a server you have not counted as your own, the script's result is
+wrapped. Trust is by the server's name in your own file: a server a project brings is never trusted, even if a server
+of your own is given its name later, and taking a server out of the file takes its trust, its mark and its confirmations
+with it. The usage rules such a result
 carries start with a random tag of the chat's that a page, a file or a server has no way to know, and the tag is taken out of
 the text of every result of every tool but the portal's own search and describe, in the usual ways to write it (twice in a row, with the
 look-alike Latin, Greek and Cyrillic letters, zero-width characters or other separators between its letters), so a line

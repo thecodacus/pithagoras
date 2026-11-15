@@ -85,3 +85,15 @@ test("the status, the mark and the questions are the running portal's, and a ren
   assert.deepEqual(state.approve, []);
   assert.equal((await json("PUT", "/api/mcp/servers/pasted/approve", { approve: ["x"] })).status, 404);
 });
+
+test("a server written in the old adapter's keys is said not to connect, beside the server, and one that is switched off is not", async () => {
+  // Round 2 of PR B, spec finding 1: an entry put back from mcp.json.adapter is not converted, and was listed as if it worked.
+  const before = JSON.parse(readFileSync(file, "utf8"));
+  writeFileSync(file, JSON.stringify({ mcpServers: { ...before.mcpServers, restored: { command: "old-mcp", excludeTools: ["delete_all"], directTools: true }, restoredOff: { command: "old-mcp", directTools: true, enabled: false } } }));
+  const listed = await (await fetch(`${base}/api/mcp`)).json();
+  const one = (name) => listed.servers.find((server) => server.name === name);
+  assert.match(one("restored").problem, /old MCP adapter \(directTools, excludeTools\)/);
+  assert.equal(one("restoredOff").problem, null);
+  assert.equal(one("fresh").problem, null);
+  writeFileSync(file, JSON.stringify({ mcpServers: before.mcpServers }));
+});
