@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { fakeModel, resultsIn } from "./fake-model.mjs";
@@ -79,6 +79,20 @@ async function chat(options = {}) {
   return { client, say };
 }
 
+/** The processes running now that were started for the fixture server of this name (a wrapper's too, which names it). */
+const running = (name) =>
+  readdirSync("/proc")
+    .filter((pid) => /^\d+$/.test(pid))
+    .filter((pid) => {
+      try {
+        const argv = readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0");
+        return argv.includes(FIXTURE) && argv.includes(name);
+      } catch {
+        return false;
+      }
+    })
+    .map(Number);
+
 /** What the portal does before it lets a chat go: the servers it started are stopped. */
 async function close(client) {
   await client.shutdown();
@@ -154,6 +168,34 @@ test("a lazy server is not started with the chat: its tools are found, called an
     assert.deepEqual(cache.cachedServer("beta").tools.map((t) => t.name).sort(), ["mcp__beta__one", "mcp__beta__two"]);
   } finally {
     await close(client);
+  }
+});
+
+test("a chat let go without being told that it ends stops its servers: the one it started with, and the one a search started through a wrapper", { skip: !existsSync("/proc/self/cmdline") && "no /proc here" }, async () => {
+  // CI's run of browser-mcp-rules: each chat disposed without a shutdown left its `npx` server running, and the
+  // test's process never ended. pi stops its servers only when it is told the session ends; a dispose must too.
+  reset();
+  // `sh` stays the server's parent, as `npx` and `uvx` do: the server is a process under it.
+  const wrapped = { command: "/bin/sh", args: ["-c", '"$0" "$@"; exit 0', process.execPath, FIXTURE, "later", "--tools", "one,two", "--log", serversLog] };
+  writeServers({ held: entry("held"), later: wrapped });
+  const { client, say } = await chat({ lazy: head(["later"]) });
+  try {
+    await say([search("search", { query: "one" }), search("call", { name: "mcp__later__one", args: { text: "x" } })]);
+    assert.ok(running("held").length > 0, "the server the chat has direct runs");
+    assert.ok(running("later").length > 1, "the lazy one runs, under its wrapper, once a search started it");
+    client.dispose();
+    await until(() => running("held").length + running("later").length === 0, 10000).catch(() => {});
+    assert.deepEqual([...running("held"), ...running("later")], [], "no process of either outlives the chat");
+  } finally {
+    client.dispose();
+    // What a failure left is not to keep the test's process from ending.
+    for (const pid of [...running("held"), ...running("later")]) {
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {
+        // gone already
+      }
+    }
   }
 });
 

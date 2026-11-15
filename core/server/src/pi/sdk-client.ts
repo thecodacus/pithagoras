@@ -1417,6 +1417,8 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     } catch {
       // best effort
     }
+    // The MCP servers of the chat go with it, told of the shutdown or not: see McpRuntime.close.
+    this.mcp?.close().catch((e) => console.warn(`[portal] could not stop the chat's MCP servers: ${(e as Error).message}`));
     try {
       this.session.dispose?.();
     } catch {

@@ -155,6 +155,8 @@ export class McpRuntime {
   /** The lazy servers that did not connect in this session, and why: a search does not wait for them again. */
   private failed = new Map<string, string>();
   private timer?: ReturnType<typeof setInterval>;
+  /** pi's own handlers for the end of a session, as its MCP extension registers them: what closes the servers pi started (see close). */
+  private closers: ((event: unknown, ctx?: unknown) => unknown)[] = [];
   private readonly connectWait: number;
   private readonly idle: number;
 
@@ -174,9 +176,34 @@ export class McpRuntime {
       openUrl: () => undefined,
     });
     return [
-      { name: "mcp", factory: mcp },
+      { name: "mcp", factory: (pi) => mcp(this.watched(pi)) },
       { name: "mcp-gate", factory: (pi) => this.extension(pi) },
     ];
+  }
+
+  /** pi's API as its MCP extension is given it: the same, but its handlers for the end of a session are kept (see close). */
+  private watched(pi: any): any {
+    const on = (event: string, handler: (event: unknown, ctx?: unknown) => unknown) => {
+      if (event === "session_shutdown") this.closers.push(handler);
+      return pi.on(event, handler);
+    };
+    return Object.create(pi, { on: { value: on } });
+  }
+
+  /**
+   * Stop every server of the chat, the ones pi connected with it and the ones the portal registered later: the chat is let
+   * go. pi stops them when it is told that the session ends, which a runtime says (SdkPiClient.shutdown) and
+   * AgentSession.dispose() does not: a client disposed without it left each stdio server running, and their pipes kept the
+   * portal's process from ending. So pi's own handler is called here, which closes what it opened as at a shutdown (stdin,
+   * then the server's process group); after a shutdown it finds nothing left to close.
+   */
+  async close(): Promise<void> {
+    clearInterval(this.timer);
+    this.timer = undefined;
+    this.started.clear();
+    this.starting.clear();
+    this.running.clear();
+    await Promise.allSettled(this.closers.map(async (close) => close({ type: "session_shutdown", reason: "quit" })));
   }
 
   /**
