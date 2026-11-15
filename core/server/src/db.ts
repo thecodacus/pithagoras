@@ -3927,9 +3927,9 @@ export interface McpServerState {
   mark?: "lazy" | "direct";
   /** Whether a chat that starts now has its tools behind `tool_search`, and by what: the mark, the threshold, or nothing known of the server yet. */
   lazy: boolean;
-  by: "mark" | "threshold" | "unknown" | "size";
-  /** What the portal kept of what the server offered when it last connected; null where it has never. `stale`: the entry has changed since. */
-  tools: { count: number; tokens: number; at: number; stale: boolean } | null;
+  by: "mark" | "threshold" | "unknown" | "resources" | "size";
+  /** What the portal kept of what the server offered when it last connected; null where it has never. `stale`: the entry has changed since. `resources`: pi's resource tools reach it. */
+  tools: { count: number; tokens: number; at: number; stale: boolean; resources: boolean } | null;
   approve: string[];
   trusted: boolean;
 }
@@ -3947,13 +3947,16 @@ export function mcpServerStates(): Record<string, McpServerState> {
   for (const name of view.servers) {
     const mark = marks[name];
     const cached = cache[name];
+    // A server that connected and offered no tool, only resources, is remembered as that: it has run, and a chat keeps it lazy
+    // (buildLazyHead counts it as one nothing is known of), so it is not one the threshold's size can say anything about.
+    const resourcesOnly = cached !== undefined && cached.tools.length === 0 && cached.resources === true;
     const known = Boolean(cached?.tools.length) || seen.has(name);
-    const by: McpServerState["by"] = mark ? "mark" : resolved.has(name) ? "threshold" : known ? "size" : "unknown";
+    const by: McpServerState["by"] = mark ? "mark" : resolved.has(name) ? "threshold" : resourcesOnly ? "resources" : known ? "size" : "unknown";
     out[name] = {
       ...(mark ? { mark } : {}),
       lazy: mark ? mark === "lazy" : by !== "size",
       by,
-      tools: cached ? { count: cached.tools.length, tokens: cached.tools.reduce((sum, tool) => sum + tool.tokens, 0), at: cached.at, stale: cached.hash !== configHash(config[name]) } : null,
+      tools: cached ? { count: cached.tools.length, tokens: cached.tools.reduce((sum, tool) => sum + tool.tokens, 0), at: cached.at, stale: cached.hash !== configHash(config[name]), resources: cached.resources === true } : null,
       approve: approve[name] ?? [],
       trusted: trusted.has(name),
     };

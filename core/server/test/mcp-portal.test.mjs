@@ -77,6 +77,18 @@ test("what was remembered of a server's tools is stale once its entry is changed
   assert.equal((await status()).small.tools.stale, true);
 });
 
+test("a server that offers only resources has run: it is not said to be unknown, and is lazy in the chats", async () => {
+  // Round 2 of PR B, correctness finding 4.
+  put({ docs: { command: "d" }, fresh: { command: "f" } });
+  toolCache.rememberServerTools("docs", toolCache.configHash(file().mcpServers.docs), [], true);
+  const states = await status();
+  assert.equal(states.docs.by, "resources");
+  assert.equal(states.docs.lazy, true);
+  assert.equal(states.docs.tools.count, 0);
+  assert.equal(states.docs.tools.resources, true);
+  assert.equal(states.fresh.by, "unknown");
+});
+
 test("a mark is set, said in the file for pi alone, and taken away again", async () => {
   put({ notes: { command: "n", exposure: "deferred" } });
   db.setToolMarks({});

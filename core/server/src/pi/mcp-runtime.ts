@@ -174,6 +174,8 @@ export class McpRuntime {
   private timer?: ReturnType<typeof setInterval>;
   /** pi's own handlers for the end of a session, as its MCP extension registers them: what closes the servers pi started (see close). */
   private closers: ((event: unknown, ctx?: unknown) => unknown)[] = [];
+  /** Ends with the session (a reload, the chat being let go): a connect that is under way stops waiting then. */
+  private life = new AbortController();
   private readonly connectWait: number;
   private readonly idle: number;
 
@@ -193,7 +195,15 @@ export class McpRuntime {
       openUrl: () => undefined,
     });
     return [
-      { name: "mcp", factory: (pi) => mcp(this.watched(pi)) },
+      {
+        name: "mcp",
+        factory: (pi) => {
+          // Each load makes a new instance of pi's extension, and pi has told the one before it that it ends: its handler is
+          // of no use any more, and would keep that load's whole runtime alive for as long as the chat lives.
+          this.closers = [];
+          mcp(this.watched(pi));
+        },
+      },
       { name: "mcp-gate", factory: (pi) => this.extension(pi) },
     ];
   }
@@ -215,6 +225,7 @@ export class McpRuntime {
    * then the server's process group); after a shutdown it finds nothing left to close.
    */
   async close(): Promise<void> {
+    this.life.abort();
     clearInterval(this.timer);
     this.timer = undefined;
     this.started.clear();
@@ -458,8 +469,11 @@ export class McpRuntime {
   async connect(server: string, signal?: AbortSignal): Promise<void> {
     const planned = this.planned.get(server);
     if (!planned || planned.plan !== "lazy") return;
+    if (this.life.signal.aborted) return;
     this.started.set(server, Date.now());
     if (await this.reached(server)) return;
+    // The caller's signal, and the end of the session: a connect does not poll for a chat that has gone.
+    const stop = signal ? AbortSignal.any([signal, this.life.signal]) : this.life.signal;
     let start = this.starting.get(server);
     if (!start) {
       start = (async () => {
@@ -467,11 +481,11 @@ export class McpRuntime {
         this.pi.registerMcpServer(server, planned.config);
         const from = Date.now();
         while (!(await this.reached(server))) {
-          if (signal?.aborted) throw new Error(`Stopped while the MCP server "${server}" was starting.`);
+          if (stop.aborted) throw new Error(`Stopped while the MCP server "${server}" was starting.`);
           if (Date.now() - from > this.connectWait) {
             throw new Error(`The MCP server "${server}" did not connect within ${Math.round(this.connectWait / 1000)} seconds. It may need a sign-in (\`pi mcp login ${server}\` in a terminal), or it may be down.`);
           }
-          await sleep(25, signal);
+          await sleep(25, stop);
         }
         this.failed.delete(server);
         this.snapshot();
@@ -515,7 +529,7 @@ export class McpRuntime {
   /** Start, in the background, the servers of these tools: a search found them, and the call that follows then finds them up. */
   warm(names: readonly string[]): void {
     const servers = new Set(names.map((name) => this.lazyServerOf(name)).filter((server): server is string => server !== undefined));
-    for (const server of servers) this.connect(server).catch((e) => console.warn(`[portal] ${(e as Error).message}`));
+    for (const server of servers) this.connect(server).catch((e) => !this.life.signal.aborted && console.warn(`[portal] ${(e as Error).message}`));
   }
 
   /**
@@ -547,6 +561,7 @@ export class McpRuntime {
   private extension(pi: any): void {
     this.pi = pi;
     pi.on("session_start", () => {
+      this.life = new AbortController();
       // pi's runtime of the old session is gone with its servers: nothing is started that this knows of.
       this.failed.clear();
       this.probed.clear();
@@ -558,6 +573,7 @@ export class McpRuntime {
       this.timer.unref?.();
     });
     pi.on("session_shutdown", () => {
+      this.life.abort();
       clearInterval(this.timer);
       this.timer = undefined;
       this.started.clear();

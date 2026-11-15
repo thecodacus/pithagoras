@@ -64,14 +64,16 @@ function exposureText(state: McpServerState): string {
   if (state.by === "mark") return state.lazy ? t("lazy: found through tool_search") : t("direct: always in the model's list");
   if (state.by === "threshold") return t("auto, lazy now: the model's list is over the limits");
   if (state.by === "unknown") return t("auto, lazy until it has run once: its size is not known yet");
+  if (state.by === "resources") return t("auto, lazy: it offers only resources, no tools");
   return t("auto, in the model's list: small enough to stay there");
 }
 
 /** What is remembered of a server's tools: how many and how much of the model's list they take. */
 function toolsText(state: McpServerState): string {
   if (!state.tools) return t("never connected, so its tools are not known yet");
+  if (state.tools.count === 0 && state.tools.resources) return t("no tools of its own, only resources");
   const known = tp(state.tools.count, "{n} tool, about {tokens} tokens", "{n} tools, about {tokens} tokens", { tokens: formatNumber(state.tools.tokens) });
-  return state.tools.stale ? `${known} ${t("(as of before its entry was changed)")}` : known;
+  return state.tools.stale ? t("{tools} (as of before its entry was changed)", { tools: known }) : known;
 }
 
 /** MCP servers, as pi's own MCP support reads them: the file is pi's, and the panel edits it. */

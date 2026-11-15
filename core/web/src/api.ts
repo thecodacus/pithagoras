@@ -1461,9 +1461,9 @@ export interface McpServerState {
   mark?: ToolMark;
   /** Whether a chat that starts now has the server's tools behind `tool_search`, and by what. */
   lazy: boolean;
-  by: "mark" | "threshold" | "unknown" | "size";
-  /** What was kept of the server's tools when it last connected; null where it never has. `stale`: its entry has changed since. */
-  tools: { count: number; tokens: number; at: number; stale: boolean } | null;
+  by: "mark" | "threshold" | "unknown" | "resources" | "size";
+  /** What was kept of the server's tools when it last connected; null where it never has. `stale`: its entry has changed since. `resources`: pi's resource tools reach it. */
+  tools: { count: number; tokens: number; at: number; stale: boolean; resources: boolean } | null;
   approve: string[];
   trusted: boolean;
 }

@@ -199,6 +199,46 @@ test("a chat let go without being told that it ends stops its servers: the one i
   }
 });
 
+test("a reload does not keep the shutdown handler of the extension it replaced", async () => {
+  // Round 2 of PR B, correctness finding 2: each load's closure, with its runtime, stayed in the chat for as long as it lived.
+  const { McpRuntime } = await import("../dist/pi/mcp-runtime.js");
+  const runtime = new McpRuntime({ head: () => head(), codemodeOnly: () => false, off: () => new Set(), session: () => undefined });
+  let loads = 0;
+  const closed = [];
+  const piModule = { createMcpExtension: () => (pi) => {
+    const mine = ++loads;
+    pi.on("session_shutdown", () => closed.push(mine));
+  } };
+  const mcp = runtime.factories(piModule).find((one) => one.name === "mcp");
+  const api = { on: () => undefined };
+  mcp.factory(api);
+  mcp.factory(api);
+  mcp.factory(api);
+  await runtime.close();
+  assert.deepEqual(closed, [3], "only the instance that is loaded is told that the chat ends");
+});
+
+test("a server that is still being waited for when its chat is let go is not waited for any more, and nothing is said of it", async () => {
+  // Round 2 of PR B, correctness finding 3: the wait of a start under way ran its 30 seconds out for a chat that was gone.
+  reset();
+  const dead = { command: "/nonexistent/mcp-server" };
+  writeServers({ dead });
+  cache.rememberServerTools("dead", cache.configHash(dead), [{ name: "mcp__dead__one", original: "one", description: "Say one.", parameters: { type: "object", properties: {} }, tokens: 9 }]);
+  const warned = [];
+  const warn = console.warn;
+  console.warn = (...args) => warned.push(args.join(" "));
+  try {
+    const { client, say } = await chat({ lazy: head(["dead"]), mcpTimings: { connectWaitMs: 1500 } });
+    // A hit in the cache starts its server in the background.
+    await say([search("search", { query: "one" })]);
+    await close(client);
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    assert.deepEqual(warned.filter((line) => /did not connect/.test(line)), []);
+  } finally {
+    console.warn = warn;
+  }
+});
+
 test("a lazy server that has run before is found in the cache, and started when its tool is called; a hit starts it in the background", async () => {
   reset();
   writeServers({ beta: entry("beta") });
