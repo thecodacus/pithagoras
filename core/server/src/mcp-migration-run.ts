@@ -9,6 +9,7 @@ import { toolExposureOf } from "./mcp-config.js";
 import { sourceOf } from "./extension-switch.js";
 import { McpMigration, parseAdapterCache, type AdapterState, type Report } from "./mcp-migration.js";
 import { configHash, declarationTokens, rememberServerTools, type CachedTool } from "./mcp-tools.js";
+import { MAX_CONFIG_BYTES, readFileIn } from "./safe-read.js";
 import { piAgentDir, readPiSettings, readProjectPiSettings, updatePiSettingsNow } from "./pi-settings.js";
 import { PI_BUILT_IN_TOOLS } from "./tool-policy.js";
 
@@ -128,11 +129,10 @@ function projectsOf(d: Database.Database): Report["projects"] {
     // What the report found is what its import offers: somebody who may write in the folder can change the file before the person clicks.
     const hashes: Record<string, string> = {};
     for (const file of [...(mcpJson ? [path.join(".pi", "mcp.json")] : []), ...foreign]) {
-      try {
-        hashes[file] = sha(readFileSync(path.join(folder, file), "utf8"));
-      } catch {
-        // Not readable: nothing can be imported from it.
-      }
+      // A folder is somebody else's to write in: a FIFO, a link to a device or to a file elsewhere is no file to read here.
+      const text = readFileIn(folder, file, MAX_CONFIG_BYTES);
+      // Not readable: nothing can be imported from it.
+      if (text !== undefined) hashes[file] = sha(text);
     }
     if (adapterSettings || mcpJson || foreign.length) out.push({ folder, adapterSettings, mcpJson, foreign, hashes });
   }

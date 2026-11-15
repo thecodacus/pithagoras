@@ -748,16 +748,88 @@ test("a lazy server that is only slow is not restarted by the next call: the con
 test("a lazy server that the file has switched off or changed since the chat loaded is not started from the old entry", async () => {
   // Round 5 of PR B, security finding 3: a busy chat takes the change at its next step, and a search started the server in between.
   reset();
-  writeServers({ gone: entry("gone", "one"), moved: entry("moved", "one") });
-  const { client, say } = await chat({ lazy: head(["gone", "moved"]) });
+  writeServers({ gone: entry("gone", "one"), moved: entry("moved", "one"), hid: entry("hid", "one") });
+  const { client, say } = await chat({ lazy: head(["gone", "moved", "hid"]) });
   try {
-    writeServers({ gone: entry("gone", "one", { enabled: false }), moved: entry("moved", "one", { env: { CHANGED: "1" } }) });
+    // `exposure: "hidden"` is the file's other way to say a server is off (round 6, correctness finding 3).
+    writeServers({ gone: entry("gone", "one", { enabled: false }), moved: entry("moved", "one", { env: { CHANGED: "1" } }), hid: entry("hid", "one", { exposure: "hidden" }) });
     const r = await say([search("search", { query: "one" })]);
     assert.match(textOf(r.results[0]), /was changed in the settings/);
     assert.equal(count("start gone"), 0);
     assert.equal(count("start moved"), 0);
+    assert.equal(count("start hid"), 0);
   } finally {
     await close(client);
+  }
+});
+
+test("a lazy server that was refused before it was registered connects at the next call within one wait", async () => {
+  // Round 6 of PR B, correctness finding 4: nothing was connecting, so the extra wait of a retry only ran out.
+  reset();
+  const notes = entry("notes", "one");
+  writeServers({ notes });
+  cache.rememberServerTools("notes", cache.configHash(notes), [{ name: "mcp__notes__one", original: "one", description: "Say one.", parameters: { type: "object", properties: {} }, tokens: 9 }]);
+  const { client, say } = await chat({ lazy: head(["notes"]), mcpTimings: { connectWaitMs: 6000 } });
+  try {
+    writeServers({ notes: entry("notes", "one", { env: { EDITING: "1" } }) });
+    const refused = await say([search("call", { name: "mcp__notes__one", args: { text: "hi" } })]);
+    assert.match(textOf(refused.results[0]), /was changed in the settings/);
+    assert.equal(count("start notes"), 0);
+    writeServers({ notes });
+    const from = Date.now();
+    const r = await say([search("call", { name: "mcp__notes__one", args: { text: "hi" } })]);
+    assert.match(textOf(r.results[0]), /notes\/one says/);
+    assert.ok(Date.now() - from < 5000, `the call waited ${Date.now() - from} ms for a connection that was not under way`);
+  } finally {
+    await close(client);
+  }
+});
+
+test("a resource read of a lazy server that is running is not refused for a colleague, and a name with blanks around it names the server as pi does", async () => {
+  // Round 6 of PR B, correctness finding 1.
+  reset();
+  const resources = { args: [FIXTURE, "res", "--tools", "", "--log", serversLog, "--resources"] };
+  const res = entry("res", "", resources);
+  writeServers({ res });
+  // Known to offer resources, so that the search finds the resource tools without starting the server.
+  cache.rememberServerTools("res", cache.configHash(res), [], true);
+  let who = { role: "primary" };
+  const { client, say } = await chat({ lazy: head(["res"]), whoNow: () => who });
+  try {
+    const first = await say([search("search", { query: "read resource" }), search("call", { name: "read_mcp_resource", args: { server: " res ", uri: "file:///res/one.txt" } })]);
+    assert.equal(count("start res"), 1, "started for the call that names it with blanks around it");
+    assert.match(textOf(first.results[1]), /contents of file:\/\/\/res\/one\.txt/);
+    who = { role: "colleague", key: "priya" };
+    const second = await say([search("call", { name: "read_mcp_resource", args: { server: "res", uri: "file:///res/one.txt" } })]);
+    assert.doesNotMatch(textOf(second.results[0]), /may not start it/, "the server is up: the guard decides, and not the start");
+    assert.equal(count("start res"), 1);
+  } finally {
+    await close(client);
+  }
+});
+
+test("a chat that works through the code tool alone, with the code tool switched off, offers a server's tools to the model; switching it reloads the chat", async () => {
+  // Round 6 of PR B, correctness finding 2.
+  reset();
+  writeServers({ alpha: entry("alpha") });
+  const off = await chat({ lazy: head(), codemode: "only", toolsOff: ["codemode"] });
+  try {
+    const r = await off.say([{ name: "mcp__alpha__one", args: { text: "hi" } }]);
+    assert.match(names(r.requests[0]).join(), /mcp__alpha__one/, "declared, as in a plain chat");
+    assert.match(textOf(r.results[0]), /alpha\/one says/);
+  } finally {
+    await close(off.client);
+  }
+  const on = await chat({ lazy: head(), codemode: "only" });
+  try {
+    assert.equal(on.client.reloadDue, false);
+    await on.client.setToolsOff(["codemode"]);
+    assert.equal(on.client.reloadDue, true, "the servers are given to pi again for a chat whose code tool is off");
+    on.client.reloadDue = false;
+    await on.client.setToolsOff([]);
+    assert.equal(on.client.reloadDue, true, "and again when it is switched on");
+  } finally {
+    await close(on.client);
   }
 });
 

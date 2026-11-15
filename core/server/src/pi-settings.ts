@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { writeFileAtomic } from "./atomic-write.js";
+import { MAX_CONFIG_BYTES, readRegularText } from "./safe-read.js";
 
 /**
  * pi's own settings file — the one the CLI writes and extensions read.
@@ -28,7 +29,9 @@ export function readPiSettings(): Record<string, unknown> {
 /** A project's own pi settings, in `.pi` in its folder; empty when it has none. */
 export function readProjectPiSettings(folder: string): Record<string, unknown> {
   try {
-    const parsed = JSON.parse(readFileSync(path.join(folder, ".pi", "settings.json"), "utf8"));
+    // The folder is somebody else's to write in: a FIFO or a link to a device named like the file must not hang or exhaust the reader.
+    const text = readRegularText(path.join(folder, ".pi", "settings.json"), MAX_CONFIG_BYTES);
+    const parsed = text === undefined ? undefined : JSON.parse(text);
     return parsed && typeof parsed === "object" ? parsed : {};
   } catch {
     return {};

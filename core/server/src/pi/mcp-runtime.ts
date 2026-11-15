@@ -2,7 +2,7 @@ import path from "node:path";
 import { chatServers, entryEnabled, mcpConfigPath, mcpServer, type ChatServer } from "../api/mcp.js";
 import { configHash, declarationTokens, cachedServer, rememberServerTools, type CachedServer, type CachedTool } from "../mcp-tools.js";
 import { mcpNamespace, resolvedEntry, toolExposureOf } from "../mcp-config.js";
-import { MCP_RESOURCE_TOOLS, isResourceTool, mcpNamespaceOf, serversOfNamespace } from "./mcp-origin.js";
+import { MCP_RESOURCE_TOOLS, isResourceTool, mcpNamespaceOf, serverOfArgument, serversOfNamespace } from "./mcp-origin.js";
 import { headLazy, toolEntry, type LazyHead } from "../tool-lazy.js";
 
 /**
@@ -185,6 +185,8 @@ export class McpRuntime {
   private planned = new Map<string, Planned>();
   /** The servers the portal registered with pi (the lazy ones that were used), by when they were last used. */
   private started = new Map<string, number>();
+  /** The servers this runtime has registered with pi and not taken away since: only for those has a connection been made that a wait can be for. */
+  private registered = new Set<string>();
   /** The starts that are under way, so that two calls for one server start it once. */
   private starting = new Map<string, Promise<void>>();
   /** The calls of tools of a server the portal started that have not ended, so that an idle check does not stop a server mid-call. */
@@ -251,6 +253,7 @@ export class McpRuntime {
     clearInterval(this.timer);
     this.timer = undefined;
     this.started.clear();
+    this.registered.clear();
     this.starting.clear();
     this.running.clear();
     await Promise.allSettled(this.closers.map(async (close) => close({ type: "session_shutdown", reason: "quit" })));
@@ -321,7 +324,8 @@ export class McpRuntime {
     const one = this.planned.get(server);
     if (!one || one.server.from !== "user") return false;
     const now = mcpServer(server);
-    return !now || !now.on || configHash(now.entry) !== configHash(one.server.file ?? one.server.entry);
+    // `exposure: "hidden"` is the file's other way to say a server is off (see planOf).
+    return !now || !now.on || resolvedEntry(now.entry).exposure === "hidden" || configHash(now.entry) !== configHash(one.server.file ?? one.server.entry);
   }
 
   /** The names of the servers this chat's configuration has, enabled or not: what a tool's namespace is told apart by. */
@@ -527,7 +531,8 @@ export class McpRuntime {
       // The wait ends with the session, not with the caller: the start is shared, and one caller who stops its turn must not
       // leave the others, or a later search, with its abort as the server's failure.
       const stop = this.life.signal;
-      const retry = this.failed.has(server);
+      // A failure from before the server was registered (a refused entry, a registration that threw) has no connection under way to wait for.
+      const retry = this.failed.has(server) && this.registered.has(server);
       start = (async () => {
         if (!this.pi) throw new Error("MCP is not available in this chat");
         if (this.changed(server)) throw new Error(`The MCP server "${server}" was changed in the settings; this chat takes the change at its next step.`);
@@ -547,13 +552,17 @@ export class McpRuntime {
         // short for a slow start, and taking the server away would kill it before it is up: the connection under way gets
         // one more wait first, and only a server that is still not there after it is started anew.
         if (retry && !(await waitUp())) {
+          this.registered.delete(server);
           try {
             this.pi.unregisterMcpServer(server);
           } catch (e) {
             console.warn(`[portal] could not reset the MCP server ${server}: ${(e as Error).message}`);
           }
         }
-        if (!(await this.reached(server))) this.pi.registerMcpServer(server, planned.config);
+        if (!(await this.reached(server))) {
+          this.pi.registerMcpServer(server, planned.config);
+          this.registered.add(server);
+        }
         if (!(await waitUp())) {
           throw new Error(`The MCP server "${server}" did not connect within ${Math.round(this.connectWait / 1000)} seconds. It may need a sign-in (\`pi mcp login ${server}\` in a terminal), or it may be down.`);
         }
@@ -587,9 +596,11 @@ export class McpRuntime {
   async ensure(name: string, signal?: AbortSignal, args?: unknown): Promise<void> {
     const given = args && typeof args === "object" && !Array.isArray(args) ? (args as Record<string, unknown>) : {};
     if (isResourceTool(name)) {
-      const wanted = given.server;
-      if (typeof wanted === "string" && this.isLazy(wanted)) {
-        if (!this.may(wanted, { tool: name, args: given })) throw new Error(`The MCP server "${wanted}" is not running, and this conversation may not start it.`);
+      // As pi names it, with the blanks around it trimmed (see serverOfArgument).
+      const wanted = serverOfArgument(given.server, this.names());
+      if (wanted !== undefined && this.isLazy(wanted)) {
+        // Not for a server that is running already: the guard asks for the call, as for a tool of the server's own.
+        if (!(await this.reached(wanted)) && !this.may(wanted, { tool: name, args: given })) throw new Error(`The MCP server "${wanted}" is not running, and this conversation may not start it.`);
         await this.connect(wanted, signal);
       }
       return;
@@ -629,6 +640,7 @@ export class McpRuntime {
     for (const [server, last] of this.started) {
       if (now - last < this.idle || [...this.running.values()].includes(server)) continue;
       this.started.delete(server);
+      this.registered.delete(server);
       try {
         this.pi?.unregisterMcpServer(server);
       } catch (e) {
@@ -646,6 +658,7 @@ export class McpRuntime {
       this.failed.clear();
       this.probed.clear();
       this.started.clear();
+      this.registered.clear();
       this.starting.clear();
       this.running.clear();
       clearInterval(this.timer);
@@ -657,6 +670,7 @@ export class McpRuntime {
       clearInterval(this.timer);
       this.timer = undefined;
       this.started.clear();
+      this.registered.clear();
       this.starting.clear();
       this.running.clear();
     });
@@ -671,8 +685,8 @@ export class McpRuntime {
     pi.on("agent_end", () => this.snapshot());
     // What is used is not idle. A resource tool is no server's own: its call names the server it reads.
     pi.on("tool_call", (event: any) => {
-      const named = isResourceTool(String(event.toolName)) ? event.input?.server : undefined;
-      const server = typeof named === "string" ? named : this.serverOf(this.options.session()?.getToolDefinition?.(event.toolName));
+      const named = isResourceTool(String(event.toolName)) ? serverOfArgument(event.input?.server, this.names()) : undefined;
+      const server = named ?? this.serverOf(this.options.session()?.getToolDefinition?.(event.toolName));
       if (!server || !this.started.has(server)) return;
       this.started.set(server, Date.now());
       if (typeof event.toolCallId === "string") this.running.set(event.toolCallId, server);

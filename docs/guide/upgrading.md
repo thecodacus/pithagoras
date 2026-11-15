@@ -308,7 +308,9 @@ you have looked at them (Settings → MCP → On), and change what it lists:
   have is not replaced). It says which command or address each one has, which commands it runs and which of the portal's environment variables it
   sends to its address in a header. Only the file as the move found it is imported: one that was changed since is
   refused, and you paste its servers instead after reading them. A server that signs in with a provider's credentials (`auth`) is not imported: a
-  repository does not choose where those go. `opencode.json` has another shape: paste its servers into Settings → MCP.
+  repository does not choose where those go. Nor is one that sets the folder its command runs in (`cwd`) or an
+  environment variable that decides what the command runs or loads (`PATH`, `NODE_OPTIONS`, `LD_PRELOAD`, `PYTHON…`
+  and the like): add such a server yourself, once you have read it. `opencode.json` has another shape: paste its servers into Settings → MCP.
 - **Servers that signed in with OAuth** sign in again with `pi mcp login <name>`; signing in from the portal is not
   built yet.
 - **An extension that writes a server with the adapter's keys** (`portal.mcp.set`) keeps working for one release: the

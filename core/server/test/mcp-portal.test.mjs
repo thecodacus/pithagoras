@@ -223,6 +223,31 @@ test("a file that was changed after the move is not imported, and what each adde
   put({});
 });
 
+test("a folder's server that sets the folder it runs in, or a variable that decides what its command runs, is not imported", async () => {
+  // Round 6 of PR B, security finding 3: the import names the command line, and a cwd or a PATH decides what that runs.
+  put({});
+  writeFileSync(
+    path.join(repo, ".mcp.json"),
+    JSON.stringify({
+      mcpServers: {
+        viaPath: { command: "npx", args: ["-y", "server-github"], env: { PATH: `${repo}/bin:/usr/bin` } },
+        viaCwd: { command: "npx", args: ["-y", "server-github"], cwd: `${repo}/work` },
+        viaPreload: { command: "node", args: ["s.js"], env: { NODE_OPTIONS: "--require ./x.js" } },
+        plain: { command: "npx", args: ["-y", "server-github"], env: { GITHUB_TOKEN: "${GITHUB_TOKEN}", LOG_LEVEL: "debug" } },
+      },
+    }),
+  );
+  listFolder();
+  const r = await call("POST", "/api/mcp/import-folder", { folder: repo, file: ".mcp.json" });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.deepEqual(r.body.added, ["plain"], "an ordinary variable is no reason to refuse");
+  assert.deepEqual(r.body.skipped.map((one) => one.name).sort(), ["viaCwd", "viaPath", "viaPreload"]);
+  assert.match(r.body.skipped.find((one) => one.name === "viaPath").reason, /PATH/);
+  assert.match(r.body.skipped.find((one) => one.name === "viaCwd").reason, /cwd/);
+  assert.deepEqual(Object.keys(file().mcpServers), ["plain"]);
+  put({});
+});
+
 test("only a folder and a file the report names can be read", async () => {
   listFolder();
   put({});

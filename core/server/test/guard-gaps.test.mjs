@@ -327,5 +327,12 @@ test("pi's MCP sign-ins and the file with the servers' bearer headers are places
     assert.match(result.reason, /\(read-credentials\)/, where);
   }
   assert.equal(refused(call(tainted(), "bash", { command: `cat ${path.join(agent, "mcp.json")}` })), true, "by a command too");
+  // Round 6 of PR B, security finding 2: the copies the move keeps have the same tokens, as the old file wrote them.
+  for (const where of [path.join(agent, "mcp.json.adapter"), path.join(agent, "mcp.json.migrating"), "~/.pi/agent/mcp.json.adapter", "/root/.pi/agent/mcp.json.migrating"]) {
+    const result = call(tainted(), "read", { path: where });
+    assert.equal(refused(result), true, where);
+    assert.match(result.reason, /\(read-credentials\)/, where);
+  }
+  assert.equal(refused(call(tainted(), "bash", { command: `cat ${path.join(agent, "mcp.json.adapter")}` })), true, "the copy by a command too");
   for (const where of [path.join(workspace, ".mcp.json"), path.join(workspace, "mcp.json"), ".pi/mcp.json"]) assert.equal(call(tainted(), "read", { path: where }), undefined, where);
 });

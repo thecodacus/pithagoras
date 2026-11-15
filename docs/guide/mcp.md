@@ -127,7 +127,7 @@ search finds before the server is up is what the portal kept of what it offered
 when it last ran, which is what the lists in Settings → Tools show for a server
 that has not run in a chat. A server nothing is known of yet counts as lazy; its
 first search starts it and waits for it. A server that did not connect in time gets one more wait on its next call, as a slow start may only be
-about to finish, and is started afresh if it is still not there; a server whose entry you switched off or changed while a chat was
+about to finish, and is started afresh if it is still not there; a server whose entry you switched off, hid or changed while a chat was
 busy is not started from the old entry, and the chat takes the change at its next step.
 
 A server that is direct (marked so, or small enough) is started with the chat, and
@@ -136,7 +136,10 @@ writes a server with `exposure: "direct"` starts it that way, until you set a
 mark of your own.
 
 A chat that works through the [code tool](/guide/sessions#modes) alone has every
-server connected, and a script calls the tools like any other.
+server connected, and a script calls the tools like any other. Where you switch the
+code tool off in such a chat, the chat is reloaded (before your next message, or
+between two steps of a run) and the servers' tools are offered to the model like in
+any other chat.
 
 A server whose tools are all switched off in a chat is not started with it, unless
 pi's resource tools still reach it. Switching one of its tools on starts it then,

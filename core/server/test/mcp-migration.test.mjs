@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { inProcessHome } from "./server-harness.mjs";
 
@@ -392,6 +393,27 @@ test("what folders bring is listed, and left as it is", () => {
   const { servers, errors } = chatServers(withConfig, true);
   assert.equal(servers.some((s) => s.name === "local"), false);
   assert.match(errors.join("\n"), /server "local" is written for the old MCP adapter \(directTools\)/);
+});
+
+test("a folder whose MCP files are a FIFO, a link to a device, or a link out of it does not stop the move, and is listed without a hash", () => {
+  // Round 6 of PR B, security finding 1: a plain read of a FIFO waits for a writer for good, and of /dev/zero until memory is gone.
+  seed();
+  const folder = path.join(home, "ws", "hostile");
+  mkdirSync(path.join(folder, ".pi"), { recursive: true });
+  mkdirSync(path.join(folder, ".vscode"), { recursive: true });
+  const outside = path.join(home, "elsewhere.json");
+  writeFileSync(outside, JSON.stringify({ mcpServers: {} }));
+  execFileSync("mkfifo", [path.join(folder, ".mcp.json")]);
+  execFileSync("mkfifo", [path.join(folder, ".pi", "settings.json")]);
+  symlinkSync("/dev/zero", path.join(folder, "opencode.json"));
+  symlinkSync(outside, path.join(folder, ".vscode", "mcp.json"));
+  writeFileSync(path.join(folder, ".pi", "mcp.json"), JSON.stringify({ mcpServers: { local: { command: "x" } } }));
+  d.prepare("INSERT INTO sessions (id, title, workspace) VALUES ('h1', 'a', ?)").run(folder);
+  const r = run();
+  const one = r.projects.find((p) => p.folder === folder);
+  assert.deepEqual(one.foreign.sort(), [".mcp.json", path.join(".vscode", "mcp.json"), "opencode.json"].sort(), "listed, so that the report shows them");
+  assert.deepEqual(Object.keys(one.hashes), [path.join(".pi", "mcp.json")], "only the regular file in the folder has a hash: the import refuses the others as changed");
+  assert.equal(one.adapterSettings, false);
 });
 
 test("an entry in the adapter's keys that is written later is not connected either, unless it is off anyway", () => {

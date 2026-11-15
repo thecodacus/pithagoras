@@ -1,10 +1,10 @@
 import { createHash } from "node:crypto";
-import { readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import express, { type Router } from "express";
 import { lazyLimits, lazyRefused, mcpMigration, mcpServerStates, resolvedLazy, setMcpApprove, setToolMarks, toolMarks } from "../db.js";
 import { approvePatterns, fromAdapterEntry } from "../mcp-config.js";
 import { sayMarkInFile } from "../mcp-entry.js";
+import { MAX_CONFIG_BYTES, readRegularText } from "../safe-read.js";
 import { isWithinText, realPath } from "../within.js";
 import { importServers, mcpServerNames, parseMcpText } from "./mcp.js";
 
@@ -14,8 +14,12 @@ import { importServers, mcpServerNames, parseMcpText } from "./mcp.js";
  * database, which `mcp.ts` is read by and so cannot import.
  */
 
-/** A file of servers is read whole; one that is longer than this is not a configuration. */
-const MAX_FILE_BYTES = 1_000_000;
+/**
+ * The variables of a server's `env` that decide which program its command runs and what that program loads: the path the
+ * command is found by, a start-up option, a library to load first. A repository's file that sets one brings code the person
+ * has not seen in the command line the import names.
+ */
+const RUN_DECIDING_ENV = /^(?:PATH|HOME|SHELL|ENV|BASH_ENV|IFS|CDPATH|CLASSPATH|GOFLAGS|GOPATH|GOROOT|GOPROXY|GOTOOLCHAIN|(?:LD|DYLD|NODE|NPM|PYTHON|PERL|RUBY|JAVA|JDK|GEM|BUNDLE|GIT|XDG|UV|PIP|CARGO|RUSTUP|DENO|BUN)_.*|.*_(?:HOME|PATH|OPTIONS|OPTS|PRELOAD))$/i;
 
 export type StoredMarks = { error: string; code?: string; status: number } | { marks: Record<string, "lazy" | "direct"> };
 
@@ -102,13 +106,9 @@ export function mcpPortalRouter(): Router {
     const real = realPath(where);
     const home = realPath(project.folder);
     if (!real || !home || !isWithinText(home, real)) return res.status(400).json({ error: "That file is not in the folder, or leads out of it" });
-    let text: string;
-    try {
-      if (!statSync(where).isFile() || statSync(where).size > MAX_FILE_BYTES) return res.status(400).json({ error: "That is not a configuration file" });
-      text = readFileSync(where, "utf8");
-    } catch (e) {
-      return res.status(404).json({ error: `Cannot read ${file}: ${(e as Error).message}` });
-    }
+    // Judged by the open file, as the move did: a FIFO swapped in for it would hold this request for good.
+    const text = readRegularText(real, MAX_CONFIG_BYTES);
+    if (text === undefined) return res.status(400).json({ error: "That is not a configuration file" });
     // The file the move found, not one that was written since: a colleague's write, or an agent's after it read something untrusted, could have changed what runs.
     if (project.hashes?.[file] !== createHash("sha256").update(text).digest("hex")) {
       return res.status(409).json({ error: `${file} has changed since the move to pi's MCP support: look at it, and add its servers in the form or by pasting them` });
@@ -131,6 +131,12 @@ export function mcpPortalRouter(): Router {
           const translated = fromAdapterEntry(entry as Record<string, unknown>, name);
           // pi refuses `auth` in a project's file, so that a repository cannot pick where the sign-in goes: not by way of the user's either.
           if (translated.entry.auth !== undefined) throw new TypeError("It signs in with a provider's credentials (auth), which a folder's file cannot bring; add the server yourself if it is yours");
+          // What the import names of a server is its command line; a `cwd` or an `env` that decides what that runs is not in it, and the switch on the page does not open the form.
+          const shown = translated.entry as Record<string, unknown>;
+          if (typeof shown.cwd === "string") throw new TypeError("It sets the folder its command runs in (cwd), which decides what it runs; add the server yourself if it is yours");
+          const env = shown.env && typeof shown.env === "object" && !Array.isArray(shown.env) ? Object.keys(shown.env) : [];
+          const deciding = env.find((key) => RUN_DECIDING_ENV.test(key));
+          if (deciding !== undefined) throw new TypeError(`It sets ${deciding}, which decides what its command runs or loads; add the server yourself if it is yours`);
           if (translated.approve.length) approve.set(name, translated.approve);
           return translated.entry;
         },

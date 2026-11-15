@@ -584,7 +584,9 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     let piSession: any;
     const mcp = new McpRuntime({
       head: () => chat?.head ?? opts.lazy ?? NO_LAZY,
-      codemodeOnly: () => opts.codemode === "only",
+      // As the client sees it (lazyMember): with the code tool switched off, the chat is a plain one, and a server's tools
+      // are offered to the model, not to scripts that cannot run.
+      codemodeOnly: () => opts.codemode === "only" && !(chat?.switchedOff ?? new Set(opts.toolsOff ?? [])).has(CODEMODE_TOOL),
       off: () => chat?.switchedOff ?? new Set(opts.toolsOff ?? []),
       session: () => piSession,
       // Only the primary user's chat starts a server of its own accord, or on a call a standing rule allows: see McpRuntimeOptions.
@@ -1899,8 +1901,12 @@ export class SdkPiClient extends EventEmitter implements PiClient {
    * active set is computed from what pi wants right now, every time.
    */
   async setToolsOff(names: string[]): Promise<void> {
+    const codeWasOff = this.switchedOff.has(CODEMODE_TOOL);
     // The portal's switches name a tool that is off until switched on only once it has seen it: until then it stays off.
     this.switchedOff = new Set([...names, ...this.unseenOff()]);
+    // Where the chat works through the code tool alone, the code tool decides how pi is given the servers (their tools go to
+    // scripts, or to the model): pi takes that from its config, so a switch of it is a reload, when the chat can have one.
+    if (this.codemodeOnly && codeWasOff !== this.switchedOff.has(CODEMODE_TOOL) && this.mcp?.names().length) this.reloadDue = true;
     this.applyToolsOff();
     // A server left off because all of its tools were is wanted again once one is on.
     this.mcp?.switched();
