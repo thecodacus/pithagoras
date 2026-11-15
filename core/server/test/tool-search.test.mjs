@@ -800,6 +800,30 @@ test("calls of sequential tools in one message run one after another, in order; 
   assert.deepEqual(log.slice(0, 2).sort(), ["start par_a", "start par_b"]);
 });
 
+test("a call that waits for its turn is not run after the turn was stopped", async () => {
+  const log = (globalThis.__gatewayLog ??= []);
+  log.length = 0;
+  script = [[via("call", { name: "seq_a", args: {} }), via("call", { name: "seq_b", args: {} })]];
+  model.requests.length = 0;
+  const client = await SdkPiClient.create({
+    cwd: chat(), sessionDir: mkdtempSync(path.join(home, "chat-")), provider: "fake", modelId: "m", sessionId: `search-${n++}`, lazy: headOf("seq_a", "seq_b"),
+  });
+  try {
+    const settled = new Promise((resolve) => client.on("event", (e) => {
+      // The turn is stopped while the first call runs, and the second waits for it.
+      if (e?.type === "tool_execution_start" && !log.length) setTimeout(() => client.abort(), 50);
+      if (e?.type === "agent_settled") resolve();
+    }));
+    await client.prompt("Go on");
+    await settled;
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    assert.ok(log.includes("start seq_a"), `the premise: the first call ran: ${JSON.stringify(log)}`);
+    assert.ok(!log.includes("start seq_b"), `the second call did not start: ${JSON.stringify(log)}`);
+  } finally {
+    client.dispose();
+  }
+});
+
 test("a tool its extension keeps inactive is not reached through tool_search, and marking it lazy does not switch it on", async () => {
   // The premise: not lazy, it is not offered, and a direct call fails.
   const plain = await run([{ name: "hid_secret", args: {} }], {});

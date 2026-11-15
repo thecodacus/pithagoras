@@ -61,7 +61,9 @@ export default function (pi) {
 `);
 
 let script = [];
-const model = await fakeModel((request) => script[resultsIn(request)] ?? "Done.");
+/** The tool results since the person last spoke: a chat of several messages has the script of the one it is at. */
+const resultsOfTurn = (request) => resultsIn({ messages: request.messages.slice(request.messages.findLastIndex((m) => m.role === "user") + 1) });
+const model = await fakeModel((request) => script[resultsOfTurn(request)] ?? "Done.");
 writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR, "models.json"), JSON.stringify(model.models()));
 
 const { SdkPiClient } = await import("../dist/pi/sdk-client.js");
@@ -140,26 +142,33 @@ test("a tool of the group that is switched off is gone for the guard and for the
 });
 
 test("switching a tool of the group off and on again in the middle of a chat, and reloading the chat, leave the tools array as it was", async () => {
-  script = [search("find")];
   model.requests.length = 0;
   const client = await SdkPiClient.create({ cwd: chat(), sessionDir: mkdtempSync(path.join(home, "chat-")), provider: "fake", modelId: "m", sessionId: `lazy-hidden-mid-${n++}`, dialogs: false });
-  const say = async (text, calls) => {
-    script = calls;
+  /** One message, whose model calls the note through the search: what the outer call of the search returned. */
+  const say = async (text) => {
+    script = [search("call", { name: "lz_note", args: { note: text } })];
+    const ended = [];
+    const listener = (e) => e?.type === "tool_execution_end" && !e.parentToolCallId && ended.push(e);
+    client.on("event", listener);
     const settled = settle(client);
     await client.prompt(text);
     await settled;
+    client.off("event", listener);
+    assert.equal(ended.length, 1, `the search ran in "${text}"`);
+    return textOf(ended[0]);
   };
   try {
-    await say("one", [search("find")]);
+    assert.match(await say("one"), /noted one/);
     await client.setToolsOff(["lz_note"]);
     assert.ok(!client.session.getActiveToolNames().includes("lz_note"));
-    await say("two", [search("find")]);
+    assert.match(await say("two"), /Tool lz_note not found/, "switched off, the search reaches it no more");
     await client.setToolsOff([]);
     assert.ok(client.session.getActiveToolNames().includes("lz_note"), "back on, and active again");
-    await say("three", [search("find")]);
+    assert.match(await say("three"), /noted three/);
     await client.reload();
     assert.ok(client.session.getActiveToolNames().includes("lz_note"));
-    await say("four", [search("find")]);
+    assert.match(await say("four"), /noted four/);
+    assert.equal(model.requests.length, 8, "each message a call and an answer");
     assert.equal(new Set(model.requests.map(declared)).size, 1, `the same tools array in all ${model.requests.length} requests`);
     const last = model.requests.at(-1);
     assert.doesNotMatch(JSON.stringify([last.tools, last.messages.filter((m) => m.role === "system")]), /lz_page|lz_note/);
