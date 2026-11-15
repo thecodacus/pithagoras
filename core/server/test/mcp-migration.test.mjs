@@ -273,6 +273,18 @@ test("a second run changes nothing: what is pi's already is left, and the first 
   assert.equal(r.status, "done");
 });
 
+test("trust and confirmations given to a name that is no server of the file are not carried over, and the report says so", () => {
+  // Round 5 of PR B, security finding 1: they would attach to the next server given that name (a folder's own file imported).
+  seed();
+  put("guard_trusted_mcp_servers", JSON.stringify(["github", "old"]));
+  put("mcp_approve", JSON.stringify({ github: ["create*"], old: ["*"] }));
+  const r = run();
+  assert.deepEqual(json("guard_trusted_mcp_servers"), ["github"]);
+  assert.equal("old" in json("mcp_approve"), false);
+  assert.ok(json("mcp_approve").github);
+  assert.ok(r.untrusted.includes("old"), "named in the report");
+});
+
 test("an adapter that was switched off, or not installed, leaves every server off, and is still taken out of the package list", () => {
   for (const [label, packages] of [
     ["off", [{ source: ADAPTER, extensions: [], skills: [], prompts: [], themes: [] }, "npm:pi-web-access"]],
@@ -371,8 +383,10 @@ test("what folders bring is listed, and left as it is", () => {
   d.prepare("INSERT INTO sessions (id, title, workspace) VALUES ('p1', 'a', ?), ('p2', 'b', ?)").run(withAdapter, withConfig);
   const r = run();
   assert.deepEqual(r.projects.map((p) => p.folder).sort(), [withAdapter, withConfig].sort());
-  assert.deepEqual(r.projects.find((p) => p.folder === withAdapter), { folder: withAdapter, adapterSettings: true, mcpJson: false, foreign: [] });
-  assert.deepEqual(r.projects.find((p) => p.folder === withConfig), { folder: withConfig, adapterSettings: false, mcpJson: true, foreign: [".mcp.json"] });
+  assert.deepEqual(r.projects.find((p) => p.folder === withAdapter), { folder: withAdapter, adapterSettings: true, mcpJson: false, foreign: [], hashes: {} });
+  const config = r.projects.find((p) => p.folder === withConfig);
+  assert.deepEqual({ ...config, hashes: Object.keys(config.hashes).sort() }, { folder: withConfig, adapterSettings: false, mcpJson: true, foreign: [".mcp.json"], hashes: [path.join(".pi", "mcp.json"), ".mcp.json"].sort() });
+  assert.match(config.hashes[".mcp.json"], /^[0-9a-f]{64}$/);
   assert.equal(JSON.parse(readFileSync(path.join(withAdapter, ".pi", "settings.json"), "utf8")).packages[0], ADAPTER, "a project's own settings are not edited");
   // What a project's own file says in the adapter's keys is not connected: pi would take it without them, with every tool open.
   const { servers, errors } = chatServers(withConfig, true);

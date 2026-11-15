@@ -1,5 +1,5 @@
 import path from "node:path";
-import { chatServers, entryEnabled, mcpConfigPath, type ChatServer } from "../api/mcp.js";
+import { chatServers, entryEnabled, mcpConfigPath, mcpServer, type ChatServer } from "../api/mcp.js";
 import { configHash, declarationTokens, cachedServer, rememberServerTools, type CachedServer, type CachedTool } from "../mcp-tools.js";
 import { mcpNamespace, resolvedEntry, toolExposureOf } from "../mcp-config.js";
 import { MCP_RESOURCE_TOOLS, isResourceTool, mcpNamespaceOf, serversOfNamespace } from "./mcp-origin.js";
@@ -302,12 +302,26 @@ export class McpRuntime {
       const config = configFor(one.server.entry, plan, head, name, only);
       this.planned.set(name, { server: one.server, plan, config });
       if (plan !== "start") continue;
+      if (this.changed(name)) continue;
       try {
         this.pi?.registerMcpServer(name, config);
       } catch (e) {
         console.warn(`[portal] could not start the MCP server ${name}: ${(e as Error).message}`);
       }
     }
+  }
+
+  /**
+   * Whether the person's file no longer has this server as the chat planned it: it is gone, switched off, or its entry
+   * changed. A chat that is busy takes such a change at its next step, and until then it must not start the server from the
+   * old entry: the package that was switched off because it turned out to be bad, or the `!` value taken out of a header,
+   * would run once more. Project servers are the repository's own, and are read at the chat's start.
+   */
+  private changed(server: string): boolean {
+    const one = this.planned.get(server);
+    if (!one || one.server.from !== "user") return false;
+    const now = mcpServer(server);
+    return !now || !now.on || configHash(now.entry) !== configHash(one.server.file ?? one.server.entry);
   }
 
   /** The names of the servers this chat's configuration has, enabled or not: what a tool's namespace is told apart by. */
@@ -516,24 +530,32 @@ export class McpRuntime {
       const retry = this.failed.has(server);
       start = (async () => {
         if (!this.pi) throw new Error("MCP is not available in this chat");
+        if (this.changed(server)) throw new Error(`The MCP server "${server}" was changed in the settings; this chat takes the change at its next step.`);
+        // Until it connects, or the wait ends: whether it did.
+        const waitUp = async (): Promise<boolean> => {
+          const from = Date.now();
+          while (!(await this.reached(server))) {
+            if (stop.aborted) throw new Error(`Stopped while the MCP server "${server}" was starting.`);
+            if (Date.now() - from > this.connectWait) return false;
+            await sleep(25, stop);
+          }
+          return true;
+        };
         // pi keeps a server that did not connect as it is: registering the same entry again changes nothing, and it
         // reconnects only for a call of one of the server's tools, which a server that never connected has none of. Taking
-        // it away first makes pi open a new connection.
-        if (retry) {
+        // it away first makes pi open a new connection. But an earlier wait that ran out of time may only have been too
+        // short for a slow start, and taking the server away would kill it before it is up: the connection under way gets
+        // one more wait first, and only a server that is still not there after it is started anew.
+        if (retry && !(await waitUp())) {
           try {
             this.pi.unregisterMcpServer(server);
           } catch (e) {
             console.warn(`[portal] could not reset the MCP server ${server}: ${(e as Error).message}`);
           }
         }
-        this.pi.registerMcpServer(server, planned.config);
-        const from = Date.now();
-        while (!(await this.reached(server))) {
-          if (stop.aborted) throw new Error(`Stopped while the MCP server "${server}" was starting.`);
-          if (Date.now() - from > this.connectWait) {
-            throw new Error(`The MCP server "${server}" did not connect within ${Math.round(this.connectWait / 1000)} seconds. It may need a sign-in (\`pi mcp login ${server}\` in a terminal), or it may be down.`);
-          }
-          await sleep(25, stop);
+        if (!(await this.reached(server))) this.pi.registerMcpServer(server, planned.config);
+        if (!(await waitUp())) {
+          throw new Error(`The MCP server "${server}" did not connect within ${Math.round(this.connectWait / 1000)} seconds. It may need a sign-in (\`pi mcp login ${server}\` in a terminal), or it may be down.`);
         }
         this.failed.delete(server);
         this.snapshot();

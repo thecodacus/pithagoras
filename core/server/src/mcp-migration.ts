@@ -530,7 +530,7 @@ export interface Report {
   /** Stored texts that still name the old tools: scanned, not changed. */
   texts: { where: string; names: string[] }[];
   /** Folders that bring their own MCP configuration or the adapter. */
-  projects: { folder: string; adapterSettings: boolean; mcpJson: boolean; foreign: string[] }[];
+  projects: { folder: string; adapterSettings: boolean; mcpJson: boolean; foreign: string[]; /** sha256 of each listed file as the move found it, by its path in the folder: the import takes only a file that is still that one. */ hashes?: Record<string, string> }[];
   /** What the old file said beside its servers, which has no counterpart. */
   gone: string[];
   notes: string[];

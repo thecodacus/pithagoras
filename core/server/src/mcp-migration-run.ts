@@ -125,7 +125,16 @@ function projectsOf(d: Database.Database): Report["projects"] {
     const adapterSettings = adapterIn(readProjectPiSettings(folder).packages) !== undefined;
     const mcpJson = existsSync(path.join(folder, ".pi", "mcp.json"));
     const foreign = [".mcp.json", path.join(".vscode", "mcp.json"), "opencode.json"].filter((file) => existsSync(path.join(folder, file)));
-    if (adapterSettings || mcpJson || foreign.length) out.push({ folder, adapterSettings, mcpJson, foreign });
+    // What the report found is what its import offers: somebody who may write in the folder can change the file before the person clicks.
+    const hashes: Record<string, string> = {};
+    for (const file of [...(mcpJson ? [path.join(".pi", "mcp.json")] : []), ...foreign]) {
+      try {
+        hashes[file] = sha(readFileSync(path.join(folder, file), "utf8"));
+      } catch {
+        // Not readable: nothing can be imported from it.
+      }
+    }
+    if (adapterSettings || mcpJson || foreign.length) out.push({ folder, adapterSettings, mcpJson, foreign, hashes });
   }
   return out;
 }
@@ -470,6 +479,23 @@ export function migrateMcp(d: Database.Database): void {
 
   // --- the files, after everything the database holds: a failure here rolls the whole upgrade back, and the next start tries it all again ---
   const out = migration.finish();
+  // Trust and confirmations are by name, and a name that is not a server of the file any more would attach to the next one that is given it (a folder's own file imported).
+  {
+    const present = new Set(Object.keys(out.mcpServers));
+    const trustedStored = jsonIn(d, "guard_trusted_mcp_servers");
+    if (Array.isArray(trustedStored)) {
+      const strays = trustedStored.filter((one): one is string => typeof one === "string" && !present.has(one));
+      if (strays.length) {
+        untrusted = [...untrusted, ...strays];
+        putIn(d, "guard_trusted_mcp_servers", JSON.stringify(trustedStored.filter((one) => !strays.includes(one))));
+      }
+    }
+    const approveStored = jsonIn(d, "mcp_approve");
+    if (isRecord(approveStored)) {
+      const kept = Object.fromEntries(Object.entries(approveStored).filter(([server]) => present.has(server)));
+      if (Object.keys(kept).length !== Object.keys(approveStored).length) putIn(d, "mcp_approve", Object.keys(kept).length ? JSON.stringify(kept) : "");
+    }
+  }
   const newFile = { ...out.extra, mcpServers: out.mcpServers };
   const text = JSON.stringify(newFile, null, 2) + "\n";
   const file = mcpConfigPath();

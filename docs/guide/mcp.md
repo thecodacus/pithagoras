@@ -126,7 +126,9 @@ minutes without use, so a chat that never needs a server never runs it. What the
 search finds before the server is up is what the portal kept of what it offered
 when it last ran, which is what the lists in Settings → Tools show for a server
 that has not run in a chat. A server nothing is known of yet counts as lazy; its
-first search starts it and waits for it.
+first search starts it and waits for it. A server that did not connect in time gets one more wait on its next call, as a slow start may only be
+about to finish, and is started afresh if it is still not there; a server whose entry you switched off or changed while a chat was
+busy is not started from the old entry, and the chat takes the change at its next step.
 
 A server that is direct (marked so, or small enough) is started with the chat, and
 its tools are in the model's list from the first request. An extension that

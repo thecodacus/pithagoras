@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import express, { type Router } from "express";
@@ -107,6 +108,10 @@ export function mcpPortalRouter(): Router {
       text = readFileSync(where, "utf8");
     } catch (e) {
       return res.status(404).json({ error: `Cannot read ${file}: ${(e as Error).message}` });
+    }
+    // The file the move found, not one that was written since: a colleague's write, or an agent's after it read something untrusted, could have changed what runs.
+    if (project.hashes?.[file] !== createHash("sha256").update(text).digest("hex")) {
+      return res.status(409).json({ error: `${file} has changed since the move to pi's MCP support: look at it, and add its servers in the form or by pasting them` });
     }
     let parsed: unknown;
     try {

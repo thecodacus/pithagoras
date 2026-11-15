@@ -118,6 +118,20 @@ test("removed, it is gone from the file, from what the chats have and from the s
   assert.equal(db.trustedMcpServers().has("memory"), false);
 });
 
+test("removing a name the file does not have leaves the per-tool marks of a server that folds to the same namespace", async () => {
+  // Round 5 of PR B, correctness finding 3: `a-b` and `a_b` are one namespace.
+  const mcp = await start();
+  writeFileSync(mcpFile(), JSON.stringify({ mcpServers: { a_b: NOTES } }));
+  db.setToolMarks({ "<tool>mcp__a_b__search": "direct" });
+  try {
+    await mcp.set("a-b", undefined);
+    assert.deepEqual(db.toolMarks(), { "<tool>mcp__a_b__search": "direct" }, "the person's mark on a_b's tool stays");
+    assert.ok(servers().a_b, "and so does the server");
+  } finally {
+    db.setToolMarks({});
+  }
+});
+
 test("a name or an entry pi would not take is refused, and so is a file that cannot be read", async () => {
   const mcp = await start();
   writeFileSync(mcpFile(), JSON.stringify({ mcpServers: { memory: NOTES } }));

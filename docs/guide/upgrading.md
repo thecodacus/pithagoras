@@ -266,7 +266,7 @@ What became of each thing the adapter's file said:
 A server whose name has a dot (`docs.v2`) is **renamed** (`docs_v2`): pi's server names have letters, digits, `_`
 and `-`. Two names that differ only in `-` and `_` are one server to pi; the second is renamed (`a_b_2`) and off. What
 is stored under a server's name follows the rename: its marks, its group's name, the servers you trust in Settings →
-Guard (a server that was renamed because of a clash is no longer trusted, and is listed), and the tools switched on or
+Guard (a server that was renamed because of a clash, or whose name is no server of the file, is no longer trusted, and is listed), and the tools switched on or
 off.
 
 **A switch that cannot be carried over switches its server off.** A stored name that starts like a server's tools and
@@ -305,8 +305,9 @@ you have looked at them (Settings → MCP → On), and change what it lists:
   `opencode.json` is not read by pi. The report lists each such folder with a button for every file that can be taken over
   (`.pi/mcp.json`, `.mcp.json`, `.vscode/mcp.json`): **Import into the user config** adds its servers to your own
   `mcp.json`, **switched off**, so that you look at what each one runs before you switch it on (a name you already
-  have is not replaced). It says which commands each one runs and which of the portal's environment variables it
-  sends to its address in a header. A server that signs in with a provider's credentials (`auth`) is not imported: a
+  have is not replaced). It says which command or address each one has, which commands it runs and which of the portal's environment variables it
+  sends to its address in a header. Only the file as the move found it is imported: one that was changed since is
+  refused, and you paste its servers instead after reading them. A server that signs in with a provider's credentials (`auth`) is not imported: a
   repository does not choose where those go. `opencode.json` has another shape: paste its servers into Settings → MCP.
 - **Servers that signed in with OAuth** sign in again with `pi mcp login <name>`; signing in from the portal is not
   built yet.

@@ -397,7 +397,7 @@ function mcpApproval(mcp: McpRuntime, definition: any, name: string, input: Reco
     const server = serverOfArgument(input.server, mcp.names());
     // A server that was taken out of the file while this chat has it loaded: its confirmations went with it, and the
     // chat keeps it connected until its next turn. Nothing it does goes unasked then.
-    if (server !== undefined && gone.includes(server)) return true;
+    if (server !== undefined && gone.includes(server) && !mcp.projectOwned(server)) return true;
     const globs = server === undefined ? undefined : approve[server];
     return globs?.length ? matchesTool(globs, name) : false;
   }
@@ -407,7 +407,8 @@ function mcpApproval(mcp: McpRuntime, definition: any, name: string, input: Reco
   // Every configured server a namespace can be: two names that differ by a hyphen and an underscore are one namespace, pi
   // connects one of them, and the one that asks first is not necessarily the one that comes first in the file.
   return serversOfNamespace(space, mcp.names()).some((server) => {
-    if (gone.includes(server)) return true;
+    // `mcp_removed` outlives the reload, so a project's own server of that name is not the one that was removed.
+    if (gone.includes(server) && !mcp.projectOwned(server)) return true;
     const globs = approve[server];
     if (!globs?.length) return false;
     const original = label.startsWith(`${server}/`) ? label.slice(server.length + 1) : name;

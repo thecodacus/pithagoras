@@ -101,7 +101,8 @@ const SHOWN_CHARS = 3000;
  * writes, sends or acts on). As JSON, with what does not show made visible, and cut with a note where it is long.
  */
 function argumentsShown(input: unknown): string {
-  const text = (JSON.stringify(input ?? {}) ?? "{}").replace(/[\u007f-\u009f\u200b-\u200f\u2028-\u202f\u2060-\u206f\ufeff]/g, (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`);
+  // Controls and format characters (the bidi marks, the tag characters that spell ASCII without showing, the zero-width ones), the variation selectors that can carry any byte after a visible character, and the fillers that draw as blanks.
+  const text = (JSON.stringify(input ?? {}) ?? "{}").replace(/[\p{Cc}\p{Cf}\u2028-\u202f\u00ad\u115f\u1160\u3164\uffa0\ufe00-\ufe0f\u{e0100}-\u{e01ef}]/gu, (char) => `\\u${char.length > 1 || char.codePointAt(0)! > 0xffff ? `{${char.codePointAt(0)!.toString(16)}}` : char.charCodeAt(0).toString(16).padStart(4, "0")}`);
   return text.length > SHOWN_CHARS ? `${text.slice(0, SHOWN_CHARS)}\n[cut: ${text.length - SHOWN_CHARS} more characters]` : text;
 }
 

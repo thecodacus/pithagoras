@@ -394,6 +394,8 @@ export interface ImportResult {
   commands: Record<string, string[]>;
   /** The variables of the portal's environment each added server sends to its address, in its headers and its sign-in's client secret (`${NAME}` or `$NAME`). */
   variables: Record<string, string[]>;
+  /** What each added server runs or reaches: its command line, or its address. */
+  targets: Record<string, string>;
 }
 
 /**
@@ -450,6 +452,7 @@ export function importServers(incoming: Record<string, unknown>, options: { off?
   const skipped: ImportResult["skipped"] = [];
   const commands: Record<string, string[]> = {};
   const variables: Record<string, string[]> = {};
+  const targets: Record<string, string> = {};
   for (const [name, given] of Object.entries(incoming)) {
     if (name === "settings" || name === "imports" || name === "autoEnableCodemode") continue;
     if (!SERVER_NAME_RE.test(name)) {
@@ -479,9 +482,12 @@ export function importServers(incoming: Record<string, unknown>, options: { off?
     if (run.length) commands[name] = run;
     const sent = sentVariables(entry);
     if (sent.length) variables[name] = sent;
+    const { command, args, url } = entry as { command?: unknown; args?: unknown; url?: unknown };
+    if (typeof command === "string") targets[name] = [command, ...(Array.isArray(args) ? args.filter((one): one is string => typeof one === "string") : [])].join(" ");
+    else if (typeof url === "string") targets[name] = url;
   }
   if (added.length) writeMcpFile(config);
-  return { added, skipped, commands, variables };
+  return { added, skipped, commands, variables, targets };
 }
 
 /** What a file of servers says, comments and all: the portal has always read them, and so do other tools' files. */
