@@ -26,7 +26,8 @@ import { splitSubChats } from "./sub-chats";
 import { useDialogFocus } from "./dialog-focus";
 import { t, useLanguage } from "./i18n";
 import { Here, setNavigate, startExtensions } from "./extensions/loader";
-import { alerts, chats, sessions, setOpener } from "./kernel/wire";
+import { alerts, setOpener } from "./kernel/wire";
+import { useKernel } from "./kernel/context";
 import { useOpenChat, useSessions, useUnlisted, useViewport } from "./kernel/use";
 import { titleOf, useSlot } from "./extensions/slots";
 
@@ -161,6 +162,7 @@ function Shell({
   const { sessionId, tab, "*": extensionPart = "" } = useParams<{ sessionId?: string; tab?: string; "*"?: string }>();
   const navigate = useNavigate();
   const { pathname, search, state } = useLocation();
+  const { chats, sessions } = useKernel();
   // What the installed extensions draw in the portal: see extensions/loader.ts.
   useEffect(() => {
     setNavigate(navigate);
@@ -216,8 +218,6 @@ function Shell({
   /** The chat the portal says it has none of: deleted, say, on another device, while this one still had it open. */
   const gone = Boolean(sessionId) && (missingFromList || chat.missing);
   const active = listed ?? other;
-  /** What a person does in the chat: the kernel asks what must be asked first. */
-  const controller = active ? chats.controller(active.id) : null;
   // A click on a notification goes where the router goes: `navigate` changes with the address, so it is given again each time.
   useEffect(() => setOpener((id) => navigate(`/s/${id}`)), [navigate]);
   useEffect(() => alerts.start(), []);
@@ -406,22 +406,6 @@ function Shell({
         ) : active ? (
           <Chat
             session={active}
-            events={chat.loaded ? chat.events : []}
-            loading={!chat.loaded}
-            hasEarlier={chat.loaded && chat.moreBefore}
-            loadingEarlier={chat.loadingBefore}
-            onLoadEarlier={controller!.loadEarlier}
-            onSend={controller!.send}
-            versions={chat.versions}
-            onEditMessage={controller!.edit}
-            onDeleteMessage={controller!.deleteMessage}
-            onTakeBackQueued={controller!.queued.takeBack}
-            onSendQueuedNow={controller!.queued.sendNow}
-            onAbort={controller!.abort}
-            onRename={controller!.rename}
-            onSetMode={controller!.setMode}
-            onTrustFlagged={controller!.trustFlagged}
-            onSwitchVersion={controller!.switchVersion}
             onOpenNavigation={() => setMobileNav(true)}
             parentTitle={active.parent ? sessionList.find((s) => s.id === active.parent)?.title : undefined}
             onClientCommand={async (name, args) => {
@@ -433,7 +417,7 @@ function Shell({
                 setMobileNav(false);
                 navigate(`/s/${s.id}`);
               } else if (name === "name" && args.trim()) {
-                await controller!.rename(args.trim());
+                await chats.controller(active.id).rename(args.trim());
               }
             }}
           />

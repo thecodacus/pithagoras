@@ -1,0 +1,10 @@
+{
+  "name": "test-contract-new",
+  "version": "0.1.0",
+  "description": "The portal's tests' stand-in for an extension written for a newer interface API than the portal has",
+  "type": "module",
+  "keywords": ["pi-package"],
+  "pi": {},
+  "pithagoras": { "client": "./web/client.js", "api": "^2.0" },
+  "license": "Apache-2.0"
+}

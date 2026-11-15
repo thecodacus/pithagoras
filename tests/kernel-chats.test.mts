@@ -46,6 +46,8 @@ function make(opts: { modes?: ChatMode[]; answers?: boolean[]; most?: number; ol
     chatModes: async (id: string) => (calls.push(`modes ${id}`), { modes: opts.modes ?? [] }),
     setMode: async (id: string, mode: string, confirmed?: boolean) => (calls.push(`setMode ${id} ${mode} ${confirmed ? "confirmed" : "plain"}`), { mode }),
     renameSession: async (id: string) => (calls.push(`rename ${id}`), session(id)),
+    compact: async (id: string) => (calls.push(`compact ${id}`), { ok: true }),
+    respondUi: async (id: string, request: string, answer: unknown) => (calls.push(`respond ${id} ${request}`), (body.respond = answer), { ok: true, note: "late" }),
   } as unknown as ChatsApi;
   const chats = createChats({
     api,
@@ -242,6 +244,28 @@ test("a stream that drops keeps what arrived, says so, and reads on from where i
   assert.ok(calls.includes("session a"));
 });
 
+test("a replay cut off before it was all in is read again from the start, and not shown in part", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const { chats, sources } = make();
+  chats.acquire("a");
+  const first = sources.of("a");
+  first.open();
+  first.named_("reloads", { reloads: 0 });
+  first.send(said(1, "The whole task"));
+  first.fail();
+  // Nothing of the half read is the chat.
+  assert.deepEqual(chats.peek("a").events, []);
+  assert.equal(chats.peek("a").loaded, false);
+  for (let i = 0; i < 5; i++) await Promise.resolve();
+  t.mock.timers.tick(2000);
+  const second = sources.of("a");
+  assert.notEqual(second, first);
+  assert.equal(second.since, 0);
+  second.start({ events: [said(1, "The whole task"), said(2, "The whole answer")] });
+  assert.deepEqual(chats.peek("a").events.map((e) => e.seq), [1, 2]);
+  assert.equal(chats.peek("a").loaded, true);
+});
+
 test("a chat the portal has none of is missing, and its stream is not tried again", async () => {
   const { chats, sources } = make({ missing: ["a"] });
   chats.open("a");
@@ -361,6 +385,18 @@ test("sending, stopping and editing go to the portal for the chat they are bound
   assert.ok(refreshed() >= 4);
   // The same actions each time, for what is drawn with them.
   assert.equal(chats.controller("a"), c);
+});
+
+test("compacting and answering the agent's question go to the portal for the chat they are bound to", async () => {
+  const { chats, calls, body, refreshed } = make();
+  const c = chats.controller("a");
+  await c.compact();
+  assert.deepEqual(await c.respond("q1", { value: "yes" }), { ok: true, note: "late" });
+  assert.deepEqual(await chats.controller("b").respond("q2", { cancelled: true }), { ok: true, note: "late" });
+  assert.deepEqual(calls, ["compact a", "respond a q1", "respond b q2"]);
+  assert.deepEqual(body.respond, { cancelled: true });
+  await settle();
+  assert.ok(refreshed() >= 1);
 });
 
 test("deleting a message asks first, and calls the portal only after a yes", async () => {

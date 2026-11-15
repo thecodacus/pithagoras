@@ -418,6 +418,13 @@ export interface ChatEvents {
   loading: boolean;
   /** The portal has no such chat (deleted, or never made): nothing more is asked. */
   missing: boolean;
+  /** The versions of messages edited or sent again, by the seq of the one shown: the seqs of all of them, oldest first. */
+  versions: Readonly<Record<number, readonly number[]>>;
+  /** Anything older than what is held is on the portal still: `portal.chats.controller(id).loadEarlier()` reads it. */
+  hasEarlier: boolean;
+  loadingEarlier: boolean;
+  /** Streamed; false for a snapshot asked for every few seconds, which the chats past the fourth are (see the data contract). */
+  live: boolean;
 }
 
 /** The panels of the chat on screen, any of them, by name. */
@@ -763,6 +770,269 @@ export interface Shortcut {
   run(context: { chat: Chat; windows: VoiceWindows }): boolean | void;
 }
 
+// --- the data contract: what the page knows, and what can be done to it ---
+//
+// Every member below is `@experimental` while the portal is on 0.x: it may change in a minor version. They are the
+// portal's own data as small view models, not its REST routes: a change to a route does not break them. The portal's
+// stock interface reads and acts through exactly these. What destroys something or raises what the agent may do
+// (`sessions.actions.remove`, `ChatController.deleteMessage`, `trustFlagged`, `setMode` to a mode that asks) asks the
+// person in the portal first and calls it only after a yes: an interface cannot skip the question. A secret (a
+// provider's key, a token, a password) is in none of them.
+
+/** The version of this contract, which is its own and not the portal's: a minor version adds, a major one breaks. `portal.api.version` has it at run time. */
+export type ContractVersion = string;
+
+/** What `portal.has` knows by name: a part of the contract that an older portal may not have. */
+export type Feature =
+  | "data.sessions"
+  | "data.chats"
+  | "data.composer"
+  | "data.models"
+  | "data.settings"
+  | "data.me"
+  | "data.status"
+  | "data.prefs"
+  | "data.env"
+  | "data.media";
+
+/** How a chat stands: at work, waiting, or stopped by an error or by hand. */
+export type ChatStatus = "idle" | "running" | "error" | "interrupted";
+
+/**
+ * A chat as the list has it. `kind` and `parent` say how it came to exist: a sub-chat has a `parent`, which is its
+ * chat's id.
+ * @experimental
+ */
+export interface SessionRow {
+  id: string;
+  title: string;
+  /** The folder it works in. */
+  workspace: string;
+  status: ChatStatus;
+  pinned: boolean;
+  created_at: string;
+  updated_at: string;
+  /** What stopped it, where it stopped with an error. */
+  last_error: string | null;
+  /** How it came to exist; a task where absent. */
+  kind?: "task" | "agent" | "routine" | "heartbeat";
+  /** The mode it was started in; null is Standard. */
+  mode: string | null;
+  /** The model and effort chosen for this chat alone, to draw the composer's pills before the portal is asked: null follows the default. */
+  provider: string | null;
+  model: string | null;
+  thinking_level: string | null;
+  parent?: string;
+  /** For a sub-chat: whether it is in the chat list. One that is not is opened by its id alone. */
+  listed?: boolean;
+  /** For a sub-chat: it waits on a person. */
+  asking?: boolean;
+  /** Results of the chat flagged as a suspected prompt injection that the person trusted. */
+  trustedResults?: string[];
+}
+
+/** @experimental */
+export interface SessionsView {
+  /** The task list: agent and routine chats are not in it. The same array while a poll finds nothing new. */
+  list: readonly SessionRow[];
+  /** `loading` until the list was asked for; `offline` when the last time did not answer. */
+  status: "loading" | "ready" | "offline";
+  /** Where the chats run: "host" or "container". */
+  executor: string;
+  /** What the first ask failed with, until a list comes. */
+  error: string | null;
+}
+
+/** What is done to a chat from the list. @experimental */
+export interface SessionActions {
+  /** A chat started in `workspace`, or where "New" goes without one. */
+  create(workspace?: string): Promise<SessionRow>;
+  rename(id: string, title: string): Promise<void>;
+  pin(id: string, pinned: boolean): Promise<void>;
+  /** Deletes a chat and its sub-chats, once the person says yes to the portal's question. False where they said no. */
+  remove(id: string): Promise<boolean>;
+  /** Deletes several after one question. Null where the person said no; otherwise the ones the portal kept, with what it said. */
+  removeMany(ids: readonly string[]): Promise<{ id: string; error: string }[] | null>;
+  dismissError(): void;
+}
+
+/** A question an extension of the agent is blocking on, which the portal draws. @experimental */
+export interface ChatDialog {
+  id: string;
+  method: string;
+  [key: string]: unknown;
+}
+
+/** What `deleteMessage`, `trustFlagged` and `setMode` take: `accepted` is called once the person said yes, just before the portal is asked. @experimental */
+export interface Asked {
+  accepted?: () => void;
+}
+
+/** A picture waiting to go with the next message. @experimental */
+export interface Attachment {
+  id: string;
+  name: string;
+  mimeType: string;
+  /** The picture as base64. */
+  data: string;
+}
+
+/** A slash command the chat has. @experimental */
+export interface SlashCommand {
+  name: string;
+  description?: string;
+  /** Where it comes from: "builtin", "extension", "prompt", "skill", or what a newer portal names. */
+  source: string;
+  /** Builtins only: handled by the page, not sent to the agent. */
+  where?: "server" | "client";
+  /** Builtins only: does nothing without an argument. */
+  needsArgument?: boolean;
+}
+
+/** A mode a chat can be put in. @experimental */
+export interface ChatModeView {
+  id: string;
+  label: string;
+  description: string;
+  /** Asked, with a yes or no, before a chat is put in it. */
+  confirm?: string;
+  /** The package that offers it. */
+  extension?: string;
+}
+
+/** Options of a message sent. @experimental */
+export interface SendOptions {
+  /** It was spoken. */
+  voice?: boolean;
+  images?: readonly { data: string; mimeType: string }[];
+  /** Sent mid-run: it goes into that run instead of waiting for it to end. */
+  steer?: boolean;
+}
+
+/** What is done in one chat. Bound to its id, so that nothing is done in another by mistake. @experimental */
+export interface ChatController {
+  readonly id: string;
+  send(message: string, options?: SendOptions): Promise<void>;
+  abort(): Promise<void>;
+  /** Replaces a sent message: it and everything after it are dropped, and the new text is sent. */
+  edit(seq: number, message: string): Promise<void>;
+  /** Removes a sent message and the agent's answer to it, once the person says yes. False where they said no. */
+  deleteMessage(seq: number, asked?: Asked): Promise<boolean>;
+  /** Removes the turn a flagged result came in: the same as `deleteMessage`, and asks the same. */
+  removeTurn(seq: number, asked?: Asked): Promise<boolean>;
+  /** Trusts a result flagged as a suspected prompt injection, once the person says yes. False where they said no. */
+  trustFlagged(result: string, asked?: Asked): Promise<boolean>;
+  queued: {
+    /** Takes back a message that waits for the agent to read it. */
+    takeBack(seq: number): Promise<void>;
+    /** Stops the run and sends a waiting message now, the others still waiting behind it. */
+    sendNow(seq: number): Promise<void>;
+  };
+  /** Shows another version of a message, and what followed it then. */
+  switchVersion(seq: number, to: number): Promise<void>;
+  /** Folds the conversation so far into a summary, to make room in the model's window. */
+  compact(): Promise<void>;
+  /** Answers a question the agent asked in the chat, or cancels it. */
+  respond(requestId: string, answer: { value?: unknown; cancelled?: boolean }): Promise<{ ok: boolean; note?: string }>;
+  /** Reads what is above the oldest event held. */
+  loadEarlier(): Promise<void>;
+  rename(title: string): Promise<void>;
+  /** The modes the chat may be put in: none where it may not choose one. */
+  modes(): Promise<ChatModeView[]>;
+  /** Puts the chat, which has said nothing yet, in a mode. A mode that asks first is asked about: false where the person said no. */
+  setMode(mode: string, asked?: Asked): Promise<boolean>;
+}
+
+/** What is written in a chat's box, and put with it: kept per chat, so that changing the interface in the middle of a message loses nothing. @experimental */
+export interface ComposerView {
+  draft: string;
+  attachments: readonly Attachment[];
+  /** Pictures being read or files being uploaded: a message waits for them. */
+  adding: number;
+  /** The commands the chat has, once `loadCommands` asked for them. */
+  commands: readonly SlashCommand[];
+  /** A message is on its way. */
+  sending: boolean;
+}
+
+/** @experimental */
+export interface ComposerActions {
+  setDraft(chatId: string, text: string): void;
+  /** Pictures wait with the message; any other file is put in the chat's folder at once and the draft says so. What went wrong is returned. */
+  attach(chatId: string, files: readonly File[]): Promise<string[]>;
+  detach(chatId: string, attachmentId: string): void;
+  /** The commands the chat has, fetched once for `key` (a run can install an extension: pass something that changes after each). Listing them starts the chat's agent. */
+  loadCommands(chatId: string, key?: string): Promise<readonly SlashCommand[]>;
+  canSubmit(chatId: string): boolean;
+  /** Sends what is in the box with its pictures; empties it at once and puts it back if it did not go (the failure is thrown). False where there was nothing to send. */
+  submit(chatId: string, options?: Pick<SendOptions, "voice" | "steer">): Promise<boolean>;
+}
+
+/** A model the portal can use. @experimental */
+export interface ModelChoice {
+  provider: string;
+  id: string;
+  name: string;
+  /** The window, in tokens, where the provider says. */
+  contextWindow?: number;
+  /** It takes an effort level. */
+  reasoning: boolean;
+  /** It reads pictures. */
+  images: boolean;
+}
+
+/** @experimental */
+export interface ModelsView {
+  models: readonly ModelChoice[];
+  status: "loading" | "ready" | "offline";
+}
+
+/** The model a chat uses and how hard it thinks. @experimental */
+export interface ChatModelView {
+  /** Null while the chat follows the default and the portal has not started it. */
+  model: { provider: string; id: string } | null;
+  /** The level the chat thinks at, "" where none. */
+  thinking: string;
+  /** The levels the model offers. */
+  levels: readonly string[];
+}
+
+/** The few settings an interface may read. Changed in Settings, which an interface links to. @experimental */
+export interface PublicSettings {
+  provider: string;
+  model: string;
+  thinkingLevel: string;
+  /** Where the chats run: "host" or "container". */
+  executor: string;
+}
+
+/** @experimental */
+export interface SettingsView {
+  values: PublicSettings;
+  status: "loading" | "ready" | "offline";
+}
+
+/** Who is using the portal. Every login is its owner's for now. @experimental */
+export interface MeView {
+  name: string;
+  role: "owner";
+  status: "loading" | "ready" | "offline";
+}
+
+/** How the portal stands, as codes: the interface says them in the page's language. @experimental */
+export interface StatusView {
+  /** `offline`: the chat list does not come. `unstable`: the chat on screen lost its stream more than once in a row. */
+  connection: "online" | "unstable" | "offline";
+  update: {
+    /** How many commits the portal is behind, where it has told that there are some. */
+    behind: number;
+    running: boolean;
+    /** An update was restarting the portal and it has not come back in a long while. */
+    lost: boolean;
+  };
+  executor: string;
+}
+
 // --- the portal ---
 
 /** A count's forms in a language, by the language's plural rules: `{ one: "{n} Datei", other: "{n} Dateien" }`. */
@@ -790,7 +1060,12 @@ export interface Portal {
   /** A hook: the page's address, drawn again when it changes, Back and Forward included. */
   useLocation(): { path: string; search: string };
   ui: Ui;
+  /** Whether this portal has a part of the contract that an older one may not: `portal.has("data.sessions")`. A feature it does not know is false. */
+  has(feature: Feature | (string & {})): boolean;
   api: {
+    /** The version of the data contract this portal has, and the features it names (`has`). Its own semver, apart from the portal's: see `pithagoras.api` in package.json. */
+    readonly version: ContractVersion;
+    readonly features: readonly Feature[];
     /** A request as the portal's own are made: JSON back, an ApiError with what was said for one refused, and a login that is gone told to the page. */
     json<T = unknown>(url: string, init?: RequestInit): Promise<T>;
     /** The address of a route of the package's own server half: `url("/notes")`. Throws when it has none running. */
@@ -853,6 +1128,66 @@ export interface Portal {
      * asked without an id.
      */
     useEvents(chatId: string | undefined): ChatEvents;
+    /** What is done in a chat: the same for the portal's own interface. A question the portal must ask first is asked there. @experimental */
+    controller(chatId: string): ChatController;
+  };
+  /** The chat list and what is done to it. @experimental */
+  sessions: {
+    /** A hook: the list, or what `pick` takes of it. The same object while it says the same, so a part is not drawn again for a poll that found nothing. */
+    use<T = SessionsView>(pick?: (view: SessionsView) => T, same?: (a: T, b: T) => boolean): T;
+    /** A chat by its id, from the list or from one a hook watches. Nothing for one the page does not have. */
+    find(id: string): SessionRow | null;
+    actions: SessionActions;
+  };
+  /** What is written in a chat's box, and put with it. @experimental */
+  composer: {
+    /** A hook: this chat's box. */
+    use(chatId: string): ComposerView;
+    actions: ComposerActions;
+  };
+  /** The models there are, and the one a chat uses. @experimental */
+  models: {
+    /** A hook: the models, asked for once. */
+    use(): ModelsView;
+    /** A hook: what the chat uses now, asked for once. */
+    useChat(chatId: string): ChatModelView;
+    /** Puts the chat on another model or effort. Rejects where the portal refuses. */
+    set(chatId: string, choice: { provider?: string; modelId?: string; thinkingLevel?: string }): Promise<void>;
+  };
+  /** The few settings an interface may read. @experimental */
+  settings: {
+    use(): SettingsView;
+  };
+  /** Who is using the portal. @experimental */
+  me: {
+    use(): MeView;
+  };
+  /** How the portal stands. @experimental */
+  status: {
+    use(): StatusView;
+  };
+  /** What a person chose for how the page looks and behaves, kept in this browser and apart from other packages'. @experimental */
+  prefs: {
+    /** A hook: the value of `key`, or `fallback`. */
+    use(key: string, fallback: string): string;
+    set(key: string, value: string): void;
+    remove(key: string): void;
+  };
+  /** The window. @experimental */
+  env: {
+    /** A hook: a phone's window or a desk's, by one width for the whole page, drawn again when it becomes the other. */
+    useViewport(): "phone" | "desk";
+  };
+  /** Where a chat's files are fetched from. Addresses only, nothing is asked. @experimental */
+  media: {
+    /** A picture sent with a message, by its name. */
+    image(chatId: string, name: string): string;
+    /** A picture in the chat's folder, by its path there; `version` is anything that changes when the file does. */
+    picture(chatId: string, path: string, version?: string | number): string;
+    /** A clip in the chat's folder. */
+    video(chatId: string, path: string, version?: string | number): string;
+    /** Any file in the chat's folder, to be saved. */
+    file(chatId: string, path: string, version?: string | number): string;
   };
   shortcuts: {
     /** A shortcut of the extension's: see `Shortcut`. Its label is translated as the extension's own texts are. */

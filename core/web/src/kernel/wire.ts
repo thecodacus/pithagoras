@@ -15,6 +15,7 @@ import { createAlerts } from "./alerts";
 import { createChats, type StreamSource } from "./chats";
 import { createComposer } from "./composer";
 import { createMe } from "./me";
+import { createMedia } from "./media";
 import { createModels } from "./models";
 import { createPrefs } from "./prefs";
 import { createSessions } from "./sessions";
@@ -85,6 +86,7 @@ export const alerts = createAlerts({
 
 export const composer = createComposer({ api, drafts, pending, chat: (id) => chats.controller(id) });
 export const models = createModels(api);
+export const media = createMedia(api);
 export const settings = createSettings(api);
 export const me = createMe(api);
 export const status = createStatus({ sessions, chats, update: { snapshot: () => updateSnapshot(), subscribe: (listener) => onUpdate(listener) } });

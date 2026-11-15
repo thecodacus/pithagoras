@@ -44,3 +44,4 @@ export function createSettings(api: SettingsApi) {
     },
   };
 }
+export type Settings = ReturnType<typeof createSettings>;

@@ -41,6 +41,7 @@ export default defineConfig({
           { text: "Models and providers", link: "/guide/models" },
           { text: "Extensions", link: "/guide/extensions" },
           { text: "Building an extension", link: "/guide/extension-ui" },
+          { text: "The data contract", link: "/guide/data-contract" },
           { text: "Creator mode", link: "/guide/creator-mode" },
           { text: "Skills", link: "/guide/skills" },
           { text: "Prompt injection", link: "/guide/security" },

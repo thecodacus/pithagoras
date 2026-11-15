@@ -164,6 +164,11 @@ test("the models there are, and what a chat uses, are asked of the portal and ch
   assert.equal(after.thinking, "high");
   assert.deepEqual(calls, [["a", { thinkingLevel: "high" }]]);
   assert.equal(models.current("a").thinking, "high");
+  // A change that does not read the chat back, for the pills that read it themselves.
+  const asked: string[] = [];
+  const bare = createModels({ setConfig: async (id: string) => void asked.push(id), models: async () => (asked.push("read"), {}) } as never);
+  await bare.change("b", { autoCompaction: false });
+  assert.deepEqual(asked, ["b"]);
 });
 
 test("the status says whether the portal can be reached, whether it is behind, and where chats run", async (t) => {
@@ -303,4 +308,53 @@ test("the commands of a chat are fetched once for a key, and again when the key 
   await composer.loadCommands("a", "2");
   assert.equal(listed(), 2);
   await settle();
+});
+
+test("a message put back, a box emptied and a send on its way are each shown to every reader of the composer", async () => {
+  const { composer, drafts, pending } = composerOf();
+  composer.setDraft("a", "typed since");
+  composer.putBack("a", "did not go", [{ id: "p", name: "p.png", mimeType: "image/png", data: "" }]);
+  assert.equal(composer.store.get().a.draft, "did not go\ntyped since");
+  assert.equal(composer.store.get().a.attachments.length, 1);
+  // Held for as long as the work runs, and not after it, whether it went or not.
+  let release!: () => void;
+  const going = composer.whileSending("a", () => new Promise<void>((r) => (release = r)));
+  assert.equal(composer.store.get().a.sending, true);
+  assert.equal(composer.canSubmit("a"), false);
+  release();
+  await going;
+  assert.equal(composer.store.get().a.sending, false);
+  await assert.rejects(composer.whileSending("a", async () => Promise.reject(new Error("no"))), /no/);
+  assert.equal(composer.store.get().a.sending, false);
+  composer.clear("a");
+  assert.equal(composer.store.get().a.draft, "");
+  assert.equal(composer.store.get().a.attachments.length, 0);
+  assert.equal(drafts.get("a"), "");
+  assert.deepEqual(pending.get("a"), []);
+});
+
+test("commands are asked of a pi that is up without starting one, and a list that came that way is the list for its key", async () => {
+  const asked: unknown[] = [];
+  const running = { value: false };
+  const { safe } = mapStorage();
+  const composer = createComposer({
+    api: {
+      commands: async (_id: string, opts?: { ifRunning?: boolean }) => (asked.push(opts ?? "start"), opts?.ifRunning && !running.value ? { commands: [], notRunning: true } : { commands: [{ name: "deploy", source: "extension" }] }),
+    } as never,
+    drafts: createDrafts(safe),
+    pending: createPending(),
+    chat: () => ({ send: async () => {} }),
+  });
+  assert.equal(composer.commandsAreFor("a", "1"), false);
+  assert.equal(await composer.loadCommandsIfRunning("a", "1"), undefined);
+  assert.equal(composer.commandsAreFor("a", "1"), false);
+  assert.deepEqual(composer.get("a").commands, []);
+  running.value = true;
+  assert.deepEqual((await composer.loadCommandsIfRunning("a", "1"))?.map((c) => c.name), ["deploy"]);
+  assert.equal(composer.commandsAreFor("a", "1"), true);
+  assert.deepEqual(composer.get("a").commands.map((c) => c.name), ["deploy"]);
+  // The same key again is the list held, not a new question; and none of it started a pi.
+  await composer.loadCommands("a", "1");
+  assert.deepEqual(asked, [{ ifRunning: true }, { ifRunning: true }]);
+  assert.equal(composer.commandsAreFor("a", "2"), false);
 });

@@ -56,6 +56,19 @@ test('a package that declares a browser half has its web folder, its module and 
   assert.match(half.rev, /^[\w-]{16}$/);
 });
 
+test('the interface API a browser half needs is read from its package.json, as the range it names, and nothing else is taken for one', () => {
+  const needs = (api: unknown) => clientHalf(pkg({ client: './web/client.js', api }, ['web/client.js']))!.api;
+  assert.equal(needs('^1.2'), '^1.2');
+  assert.equal(needs('  >=1.0 <2  '), '>=1.0 <2');
+  // None declared, or something that is not text: the page takes it as the first version.
+  assert.equal(needs(undefined), undefined);
+  assert.equal(needs(''), undefined);
+  assert.equal(needs(1), undefined);
+  assert.equal(needs({ range: '^1' }), undefined);
+  // A long one is cut where the page will still say it, not carried whole into every list.
+  assert.equal(needs('x'.repeat(500))!.length, 100);
+});
+
 test('what a browser half imports along with itself is found by what each module says, down to the last, and not what it imports when called', () => {
   const dir = pkg({ client: './web/client.js' }, ['web/client.js']);
   const web = (file: string, text: string) => {

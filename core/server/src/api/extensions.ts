@@ -535,6 +535,8 @@ export function extensionsRouter(): Router {
             // Its revision, which a page says a failure of it under.
             ...(client ? { rev: client.rev, entry: clientUrl(client, client.entry) } : {}),
             ...(client?.style ? { style: clientUrl(client, client.style) } : {}),
+            // The versions of the interface API its module needs: the page checks them before it loads the module.
+            ...(client?.api ? { api: client.api } : {}),
             // What its module imports along with itself, for the page to ask for all at once.
             ...(client && preloadOf(client).length ? { preload: preloadOf(client) } : {}),
             // Where its server half's own routes are, when it has one that is running.

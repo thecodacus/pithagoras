@@ -42,7 +42,7 @@ const files = (marker) => ({
   "web/big.js": `export const lines = [\n${Array.from({ length: 400 }, (_, i) => `  "line ${i} of a module that is long enough to be worth compressing",`).join("\n")}\n];\n`,
 });
 const SERVER = "export default function (portal) { portal.router.get('/hello', (_req, res) => res.json({ from: portal.extension })); }";
-const scoped = pkg("scoped", "@codacus/notes", { ...WEB, server: "./server.js" }, { ...files("scoped"), "server.js": SERVER });
+const scoped = pkg("scoped", "@codacus/notes", { ...WEB, api: "^1.2", server: "./server.js" }, { ...files("scoped"), "server.js": SERVER });
 const off = pkg("off", "switched-off", { ...WEB, server: "./server.js" }, { ...files("off"), "server.js": SERVER });
 const plain = pkg("plain", "no-interface", undefined, { "index.ts": "export default () => {};" });
 const project = pkg("project", "from-a-folder", { ...WEB, server: "./server.js" }, { ...files("project"), "server.js": SERVER });
@@ -117,6 +117,9 @@ test("the browser halves listed are those of the portal's own packages that are 
   assert.match(notes.rev, /^[\w-]{16}$/);
   assert.equal(notes.entry, `/api/extension-ui/%40codacus/notes/~${notes.rev}/client.js`);
   assert.equal(notes.style, `/api/extension-ui/%40codacus/notes/~${notes.rev}/client.css`);
+  // The interface API its module needs, as it wrote it, for the page to check before it loads the module; none for one that names none.
+  assert.equal(notes.api, "^1.2");
+  assert.equal(extensions.find((e) => e.name === "breaks").api, undefined);
 });
 
 test("what a module imports along with itself is listed, for the page to ask for at once, and what it only imports when it is called is not", async () => {

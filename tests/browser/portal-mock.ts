@@ -84,6 +84,7 @@ export function extensionOnDisk(dir: string) {
     ...(client ? { rev: 'test', entry: `${prefix}${path.basename(client)}?v=test` } : {}),
     ...(client && typeof declared.style === 'string' ? { style: `${prefix}${path.relative(served!, path.resolve(dir, declared.style)).split(path.sep).join('/')}?v=test` } : {}),
     ...(typeof declared.server === 'string' ? { server: `/api/x/${meta.name}` } : {}),
+    ...(typeof declared.api === 'string' ? { api: declared.api } : {}),
   };
   const serve = async (urlPath: string, route: Route): Promise<boolean> => {
     if (!served || !urlPath.startsWith(prefix)) return false;

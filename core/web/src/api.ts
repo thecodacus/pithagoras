@@ -396,6 +396,8 @@ export interface ExtensionUi {
   /** The revision of its browser half, which `entry` and `style` carry: what a failure of it is told to the portal under. */
   rev?: string;
   style?: string;
+  /** The versions of the interface API its module needs (`pithagoras.api` in its package.json), as a semver range: checked before the module is loaded. */
+  api?: string;
   /** Why its browser half failed in a page, this one or another, while that revision is the one installed: to load, to draw, or in what it runs of its own. */
   clientError?: string;
   /** Where it failed, as that page had it: the error's stack, and the components it was drawn in. */

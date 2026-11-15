@@ -11,14 +11,16 @@ import semver from "semver";
  * nothing of it.
  *
  *   "pi":         { "extensions": ["./index.ts"] }
- *   "pithagoras": { "client": "./web/client.js", "style": "./web/client.css", "server": "./server.js",
+ *   "pithagoras": { "client": "./web/client.js", "style": "./web/client.css", "server": "./server.js", "api": "^1.0",
  *                   "themes": [{ "id": "dusk", "name": "Dusk", "dark": { "canvas": "#1b1626" } }] }
  *
  * `client` is a JavaScript module the portal's page loads, which puts what it
  * draws into the portal's slots (see web/src/extensions). The folder it is in
  * is the package's web folder: the portal serves that folder, and nothing else
  * of the package, to whoever is signed in. `style`, in the same folder, is a
- * stylesheet loaded with it.
+ * stylesheet loaded with it. `api` is the versions of the interface API the
+ * module needs, as a semver range: a portal whose API is not one of them does
+ * not load it, and says why in Settings.
  *
  * `server` is a JavaScript module the portal itself loads, once, for all
  * chats: the package's own routes, what it keeps, and what outlives a chat's
@@ -58,6 +60,12 @@ export interface ClientHalf {
   /** The module, and the stylesheet if it has one, as paths inside `dir`. */
   entry: string;
   style?: string;
+  /**
+   * The versions of the interface API the module needs (`pithagoras.api`), as a semver range: "^1.0". The page
+   * checks it against the contract version it has, before it loads the module (web/src/extensions/contract.ts).
+   * Absent: it needs nothing beyond 1.0.
+   */
+  api?: string;
   /** Changes when a file of `dir` does (see revOf), so a page loads it again rather than the one it has. */
   rev: string;
 }
@@ -199,6 +207,7 @@ export function clientHalf(packageDir: string): ClientHalf | undefined {
     dir,
     entry: path.basename(client),
     ...(style ? { style } : {}),
+    ...(typeof declared.api === "string" && declared.api.trim() ? { api: declared.api.trim().slice(0, 100) } : {}),
     // Read as it is first asked for: a file a page fetches is found by the folder alone, and every fetch would otherwise
     // look at every file of every half. The stylesheet too, however many files there are: the page tells one revision
     // from another by the module's address alone.

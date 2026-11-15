@@ -19,15 +19,25 @@ export interface ChatEvents {
   loading: boolean;
   /** The portal has no such chat: deleted, say, or never made. Nothing more is asked. */
   missing: boolean;
+  /** The versions of messages edited or sent again, by the seq of the one shown: the seqs of all of them, oldest first. */
+  versions: Readonly<Record<number, readonly number[]>>;
+  /** Anything older than what is held is on the portal still (`controller(id).loadEarlier()` reads it). */
+  hasEarlier: boolean;
+  loadingEarlier: boolean;
+  /** Streamed; false for a snapshot asked for every few seconds, which the chats past the fourth are. */
+  live: boolean;
 }
 
-const EMPTY: ChatEvents = { events: [], status: "idle", loading: false, missing: false };
+const EMPTY: ChatEvents = { events: [], status: "idle", loading: false, missing: false, versions: {}, hasEarlier: false, loadingEarlier: false, live: true };
 
 /** A chat's events by its id, streamed while the component is drawn; nothing, and nothing asked, without an id. */
 export function useChatEvents(chatId: string | undefined): ChatEvents {
   const chat = useChat(chatId);
   return useMemo(
-    () => (chatId ? { events: chat.events, status: chat.status, loading: !chat.loaded, missing: chat.missing } : EMPTY),
-    [chatId, chat.events, chat.status, chat.loaded, chat.missing],
+    () =>
+      chatId
+        ? { events: chat.events, status: chat.status, loading: !chat.loaded, missing: chat.missing, versions: chat.versions, hasEarlier: chat.loaded && chat.moreBefore, loadingEarlier: chat.loadingBefore, live: chat.live }
+        : EMPTY,
+    [chatId, chat.events, chat.status, chat.loaded, chat.missing, chat.versions, chat.moreBefore, chat.loadingBefore, chat.live],
   );
 }

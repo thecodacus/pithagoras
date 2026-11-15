@@ -57,3 +57,4 @@ export function createStatus(deps: { sessions: Sessions; chats: Chats; update: U
     };
   });
 }
+export type Status = ReturnType<typeof createStatus>;

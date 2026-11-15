@@ -75,10 +75,15 @@ export function createModels(api: ModelsApi) {
     load,
     loadChat,
     current,
-    /** Puts the chat on another model or effort, and reads what it uses now. Rejects where the portal refuses. */
+    /** Changes how the chat is set (its model, its effort, whether it compacts by itself). Rejects where the portal refuses. */
+    async change(id: string, choice: ConfigPatch): Promise<void> {
+      await api.setConfig(id, choice);
+    },
+    /** `change`, and reads what the chat uses now. */
     async set(id: string, choice: ConfigPatch): Promise<ChatModel> {
       await api.setConfig(id, choice);
       return loadChat(id);
     },
   };
 }
+export type Models = ReturnType<typeof createModels>;

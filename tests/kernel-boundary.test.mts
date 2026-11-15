@@ -41,6 +41,28 @@ test("the chat does not ask the questions the kernel asks, nor call what they gu
   assert.ok(!/\bapi\.(trustFlagged|deleteMessage|setMode|switchVersion|editMessage)\(/.test(chat));
 });
 
+test("the chat view takes its chat's row and two things only the frame knows, and reads and does the rest through the kernel", () => {
+  const chat = code("src/components/Chat.tsx");
+  const props = chat.slice(chat.indexOf("export function Chat({"), chat.indexOf("}) {", chat.indexOf("export function Chat({")));
+  // What it is handed: no events, no flags of the stream, none of the eleven callbacks it was handed before.
+  const handed = [...props.matchAll(/^\s{2}(\w+)\??[:,]/gm)].map((m) => m[1]);
+  assert.deepEqual([...new Set(handed)].sort(), ["onClientCommand", "onOpenNavigation", "parentTitle", "session"]);
+  assert.match(chat, /useKernel\(\)/);
+  assert.match(chat, /useChat\(session\.id\)/);
+  assert.match(chat, /useComposer\(session\.id\)/);
+  // The draft, the pictures and the commands are the composer's, not the view's.
+  assert.ok(!/import \{[^}]*\b(drafts|pending|api)\b[^}]*\} from/.test(chat), "the chat view imports the portal or the box's stores itself");
+  assert.ok(!/\b(drafts|pending|api)\./.test(chat));
+});
+
+test("the parts of the chat that need a picture's address, an answer to the agent or a setting go through the kernel, not the portal's API", () => {
+  for (const file of ["TranscriptRow", "CallFiles", "ChatPictures", "VoiceConversation", "VoicePictures", "QuestionCard"]) {
+    assert.ok(!/\bapi\b/.test(code(`src/components/${file}.tsx`).replace(/import type[^;]*;/g, "")), `${file} calls the portal itself`);
+  }
+  assert.ok(!/\bapi\.(setConfig|compact)\(/.test(code("src/components/ComposerBar.tsx")));
+  assert.ok(!/\bapi\.(setConfig|compact)\(/.test(code("src/components/ContextPill.tsx")));
+});
+
 test("the mode picker, the chat list and the sessions page leave the questions to the kernel", () => {
   assert.ok(!/confirmDialog/.test(code("src/components/ModePicker.tsx")));
   assert.ok(!/confirmDeleteSession/.test(code("src/components/SessionsPage.tsx")));

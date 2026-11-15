@@ -158,6 +158,8 @@ async function serveStream(page: Page, answers: ((since: number) => string)[]) {
   const connects: string[] = [];
   await page.clock.install();
   await page.route('**/api/sessions/kid1/events**', async (route) => {
+    // The page's other question of the chat, whether anything is above what it read: not one of the stream's connections.
+    if (new URL(route.request().url()).pathname.endsWith('/events/before')) return route.fulfill({ json: { events: [], more: false } });
     const since = new URL(route.request().url()).searchParams.get('since') ?? '';
     connects.push(since);
     const body = answers[Math.min(connects.length, answers.length) - 1](Number(since));

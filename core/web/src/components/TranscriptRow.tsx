@@ -1,7 +1,7 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type { DiagramPlugin } from "streamdown";
 import { LuAudioLines, LuCheck, LuChevronLeft, LuChevronRight, LuClock, LuCopy, LuPencil, LuRotateCw, LuSend, LuShieldAlert, LuTrash2 } from "react-icons/lu";
-import { api } from "../api";
+import { useKernel } from "../kernel/context";
 import { copyText } from "../clipboard";
 import { sentPictureId } from "../chat-pictures";
 import { splitContext } from "../context-blocks";
@@ -158,6 +158,7 @@ export const TranscriptRow = memo(function TranscriptRow({
 }) {
   // What it says is in the language chosen: a row that is not drawn for the chat's draws is drawn for that.
   useLanguage();
+  const { media } = useKernel();
   // Worked out once per entry, not for each draw.
   const context = useMemo(() => (item.kind === "user" ? splitContext(item.text) : null), [item]);
   // An open question is drawn above the message box (see QuestionCard); what is kept here is its record.
@@ -249,7 +250,7 @@ export const TranscriptRow = memo(function TranscriptRow({
               {item.images.map((image) => (
                 <PictureButton key={image.name} id={sentPictureId(item.id, image.name)} onOpen={act.openPicture} title={t("Open the picture")}>
                   <img
-                    src={api.imageUrl(sessionId, image.name)}
+                    src={media.image(sessionId, image.name)}
                     alt={t("A picture sent with this message")}
                     loading="lazy"
                     className="max-h-48 max-w-full rounded-lg object-contain ring-1 ring-line"

@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { LuArrowDown, LuArrowUp, LuCheck, LuChevronDown, LuChevronUp, LuMessageCircleQuestion } from "react-icons/lu";
-import { api } from "../api";
+import { useKernel } from "../kernel/context";
 import { t } from "../i18n";
 import type { Item } from "../transcript";
 import { codeAreaCls, inputCls, primarySmCls } from "./SettingsUi";
@@ -63,6 +63,7 @@ export function QuestionCard({
   questions: AgentQuestion[];
   onDone: () => void;
 }) {
+  const { chats } = useKernel();
   const [drafts, setDrafts] = useState<Record<string, Draft>>(() => Object.fromEntries(questions.map((q) => [q.id, emptyDraft(q)])));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -83,7 +84,7 @@ export function QuestionCard({
     setBusy(true);
     setError("");
     try {
-      const result = await api.respondUi(sessionId, requestId, payload);
+      const result = await chats.controller(sessionId).respond(requestId, payload);
       if (!result.ok) { setError(result.note || t("This question has expired. Your answer was not delivered.")); return; }
       onDone();
     } catch (e) {

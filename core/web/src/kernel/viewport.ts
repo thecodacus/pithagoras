@@ -35,3 +35,4 @@ export function createViewport(query: Query) {
     },
   };
 }
+export type ViewportStore = ReturnType<typeof createViewport>;

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { LuChevronLeft, LuChevronRight, LuExternalLink } from "react-icons/lu";
-import { api, type PortalEvent } from "../api";
+import type { PortalEvent } from "../api";
+import { useKernel } from "../kernel/context";
 import { shownFiles } from "../../../server/src/file-outputs";
 import { t } from "../i18n";
 
@@ -26,12 +27,13 @@ export function shownPictures(events: PortalEvent[]): Shown[] {
  * and another fits it again. The arrows go back through earlier ones.
  */
 export function VoicePictures({ sessionId, pictures, index, onIndex }: { sessionId: string; pictures: Shown[]; index: number; onIndex: (index: number) => void }) {
+  const { media } = useKernel();
   const [zoomed, setZoomed] = useState(false);
   const [failed, setFailed] = useState(false);
   useEffect(() => { setZoomed(false); setFailed(false); }, [index, pictures[index]?.seq]);
   const picture = pictures[index];
   if (!picture) return <p className="voice-pictures-empty">{t("No pictures yet. Ask the agent to show you one.")}</p>;
-  const url = api.pictureUrl(sessionId, picture.path, picture.seq);
+  const url = media.picture(sessionId, picture.path, picture.seq);
   return <div className="voice-pictures">
     <div className={`voice-pictures-view ${zoomed ? "is-zoomed" : ""}`}>
       {failed

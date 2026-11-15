@@ -8,6 +8,7 @@ import { Chat } from '../../../../core/web/src/components/Chat';
 import type { PortalEvent, Session } from '../../../../core/web/src/api';
 import { startExtensions } from '../../../../core/web/src/extensions/loader';
 import '../../../../core/web/src/styles';
+import { createFakeKernel, WithKernel } from '../../../../core/web/tests/fake-kernel';
 // The installed extensions, loaded as the app loads them: the browser test installs Media (`installed` in tests/browser/portal-mock.ts).
 startExtensions();
 // A microphone that hears nothing, for voice mode to listen to.
@@ -28,10 +29,13 @@ function Fixture() {
     { seq: 3, type: 'message_end', payload: {} },
   ]);
   const [running, setRunning] = useState(false);
+  // The chat reads its conversation from the kernel's chats store, which this page fills as it draws (see core/web/tests/fake-kernel.tsx).
+  const [fake] = useState(() => createFakeKernel({ controller: () => ({ abort: async () => setRunning(false) }) }));
   const session: Session = { id: 'test', title: 'A little room to think', workspace: '/workspaces/pithagoras', executor: 'host', status: running ? 'running' : 'idle', created_at: '', updated_at: '', last_error: null, pinned: false, provider: 'llama-server', model: 'Model A', thinking_level: 'medium', mode: null };
-  return <>
+  fake.feed(session.id, events);
+  return <WithKernel fake={fake}>
     <main data-testid="workspace" style={{ maxWidth: 980, height: 'calc(100vh - 96px)', minHeight: 540, margin: '16px auto 0' }}>
-      <Chat session={session} events={events} onClientCommand={() => {}} onEditMessage={async () => {}} onDeleteMessage={async () => {}} onTakeBackQueued={async () => {}} onSendQueuedNow={async () => {}} onRename={async () => {}} onSetMode={async () => {}} onAbort={async () => setRunning(false)} onSend={async () => {}} />
+      <Chat session={session} onClientCommand={() => {}} />
     </main>
     <aside style={{ display: 'flex', flexWrap: 'wrap', gap: 10, fontSize: 10, padding: 8 }}>
       <button onClick={() => setEvents(previous => [...previous,
@@ -49,7 +53,7 @@ function Fixture() {
         { seq: previous.length + 1, type: 'tool_execution_start', payload: { toolName: 'generate_image', toolCallId: 'gen-failed', input: { prompt: 'A castle in the clouds' } } },
         { seq: previous.length + 2, type: 'tool_execution_end', payload: { toolName: 'generate_image', toolCallId: 'gen-failed', isError: true, result: { content: [{ type: 'text', text: 'The image endpoint answered 401: the key was refused' }] } } }]); }}>Fail generating a picture</button>
     </aside>
-  </>;
+  </WithKernel>;
 }
 // Inside a router, as in the app: the chat's links go through it.
 createRoot(document.getElementById('root')!).render(<BrowserRouter><Fixture /></BrowserRouter>);

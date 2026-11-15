@@ -1,17 +1,18 @@
 import { useCallback, useSyncExternalStore } from "react";
 import { LOADING, type ChatState } from "./chats";
-import { chats, composer, me, models, prefs, sessions, settings, status, viewport } from "./wire";
+import { useKernel } from "./context";
 import type { ComposerState } from "./composer";
 import type { SessionsState, Unlisted } from "./sessions";
 import { useStore } from "./store";
 
-/** The kernel's stores as hooks: what an interface reads the page's data through. */
+/** The kernel's stores as hooks: what an interface reads the page's data through. They read the stores of the nearest `KernelProvider`, the page's own where there is none. */
 
-/** The chat list, or what `pick` takes of it. */
-export const useSessions = <P = SessionsState>(pick?: (state: SessionsState) => P): P => useStore(sessions.store, pick);
+/** The chat list, or what `pick` takes of it (drawn again when what it picked is no longer `same`). */
+export const useSessions = <P = SessionsState>(pick?: (state: SessionsState) => P, same?: (a: P, b: P) => boolean): P => useStore(useKernel().sessions.store, pick, same);
 
 /** A chat that is not in the list, for as long as the component is drawn. */
 export function useUnlisted(id: string | undefined): Unlisted {
+  const { sessions } = useKernel();
   const subscribe = useCallback(
     (listener: () => void) => {
       if (!id) return () => {};
@@ -22,13 +23,14 @@ export function useUnlisted(id: string | undefined): Unlisted {
         release();
       };
     },
-    [id],
+    [id, sessions],
   );
   return useSyncExternalStore(subscribe, () => (id ? sessions.unlisted.get()[id] ?? NOT_ASKED : NOT_ASKED));
 }
 const NOT_ASKED: Unlisted = { session: null, missing: false };
 
 function useChatState(id: string | undefined, onScreen: boolean): ChatState {
+  const { chats } = useKernel();
   const subscribe = useCallback(
     (listener: () => void) => {
       if (!id) return () => {};
@@ -39,7 +41,7 @@ function useChatState(id: string | undefined, onScreen: boolean): ChatState {
         release();
       };
     },
-    [id, onScreen],
+    [id, onScreen, chats],
   );
   return useSyncExternalStore(subscribe, () => (id ? chats.peek(id) : LOADING));
 }
@@ -50,27 +52,38 @@ export const useChat = (id: string | undefined): ChatState => useChatState(id, f
 export const useOpenChat = (id: string | undefined): ChatState => useChatState(id, true);
 
 /** What is written in a chat's box, and put with it. */
-export const useComposer = (id: string): ComposerState => useStore(composer.store, (all) => all[id] ?? composer.get(id));
+export function useComposer(id: string): ComposerState {
+  const { composer } = useKernel();
+  return useStore(composer.store, (all) => all[id] ?? composer.get(id));
+}
 
-export const useModels = () => useStore(models.store);
-export const useSettings = () => useStore(settings.store);
-export const useMe = () => useStore(me.store);
-export const useStatus = () => useSyncExternalStore(status.subscribe, status.get);
+export const useModels = () => useStore(useKernel().models.store);
+export const useSettings = () => useStore(useKernel().settings.store);
+export const useMe = () => useStore(useKernel().me.store);
+export const useStatus = () => {
+  const { status } = useKernel();
+  return useSyncExternalStore(status.subscribe, status.get);
+};
 
 /** Whether the window is a phone's or a desk's, drawn again when it becomes the other. */
 export function useViewport() {
-  const subscribe = useCallback((listener: () => void) => {
-    const release = viewport.watch();
-    const stop = viewport.store.subscribe(listener);
-    return () => {
-      stop();
-      release();
-    };
-  }, []);
+  const { viewport } = useKernel();
+  const subscribe = useCallback(
+    (listener: () => void) => {
+      const release = viewport.watch();
+      const stop = viewport.store.subscribe(listener);
+      return () => {
+        stop();
+        release();
+      };
+    },
+    [viewport],
+  );
   return useSyncExternalStore(subscribe, viewport.store.get);
 }
 
 /** A preference of this browser, drawn again when it changes. */
 export function usePref(key: string, fallback: string): string {
+  const { prefs } = useKernel();
   return useSyncExternalStore(prefs.subscribe, () => prefs.snapshot(key, fallback));
 }

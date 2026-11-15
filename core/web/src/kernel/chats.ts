@@ -91,7 +91,7 @@ export interface FanOut {
 
 export type ChatsApi = Pick<
   typeof realApi,
-  "olderEvents" | "session" | "prompt" | "abort" | "editMessage" | "deleteMessage" | "takeBackQueued" | "sendQueuedNow" | "switchVersion" | "trustFlagged" | "chatModes" | "setMode" | "renameSession"
+  "olderEvents" | "session" | "prompt" | "abort" | "editMessage" | "deleteMessage" | "takeBackQueued" | "sendQueuedNow" | "switchVersion" | "trustFlagged" | "chatModes" | "setMode" | "renameSession" | "compact" | "respondUi"
 >;
 
 export interface ChatsDeps {
@@ -137,6 +137,10 @@ export interface ChatController {
   };
   /** Shows another version of a message, and what followed it then. */
   switchVersion(seq: number, to: number): Promise<void>;
+  /** Folds the conversation so far into a summary, to make room in the model's window. */
+  compact(): Promise<void>;
+  /** Answers a question the agent asked in the chat (`ask_user` and what an extension's dialog asks), or cancels it. */
+  respond(requestId: string, answer: { value?: unknown; cancelled?: boolean }): Promise<{ ok: boolean; note?: string }>;
   /** Reads what is above the oldest event held. */
   loadEarlier(): Promise<void>;
   rename(title: string): Promise<void>;
@@ -356,11 +360,14 @@ export function createChats(deps: ChatsDeps) {
       });
       es.onerror = () => {
         drain();
-        // Keep what arrived: the resume cursor has already moved past it. Unless the chat is being read again: part of
-        // it would replace all of what is shown, so that stays, and the reading starts over.
-        if (replacing) {
+        // Keep what arrived once the chat has caught up: the resume cursor has already moved past it. Cut off before that,
+        // what was read is not the chat, and the cursor is past it: the chat is read again from the start, whatever is shown
+        // staying until all of it has come. The same when the chat was being read again: part of it would replace all of
+        // what is shown.
+        if (replacing || replay?.length) {
           replay = null;
           seq = 0;
+          replacing = true;
         } else flush();
         es.close();
         failed += 1;
@@ -544,6 +551,11 @@ export function createChats(deps: ChatsDeps) {
       async switchVersion(seq, to) {
         await api.switchVersion(id, seq, to);
       },
+      async compact() {
+        await api.compact(id);
+        void refreshed();
+      },
+      respond: (requestId, answer) => api.respondUi(id, requestId, answer),
       async loadEarlier() {
         const e = entries.get(id);
         if (!e) return;

@@ -67,6 +67,30 @@ export function createComposer(deps: ComposerDeps) {
   /** Which `commands` list is for what: fetched once per chat and `key`, which changes after each run (it may install an extension). */
   const listed = new Map<string, { key: string; list: Promise<PiCommand[]> }>();
 
+  /** A message that did not go, back in front of whatever was typed since (not over it), with its pictures in front of those waiting. */
+  const putBack = (id: string, message: string, images: readonly Attachment[] = []): void => {
+    if (message) drafts.set(id, withUnsent(drafts.get(id), message));
+    if (images.length) pending.set(id, [...images, ...pending.get(id)]);
+    publish(id);
+  };
+
+  /**
+   * The commands the chat has, fetched once for `key` (the chat's turn count, say: a run can install an extension,
+   * whose commands should then be offered). Asked for only when wanted: listing them starts pi for the chat, and it stays up.
+   */
+  const loadCommands = (id: string, key = ""): Promise<readonly PiCommand[]> => {
+    const was = listed.get(id);
+    let list = was?.list;
+    if (!was || was.key !== key) {
+      list = api.commands(id).then((r) => r.commands, () => [] as PiCommand[]);
+      listed.set(id, { key, list });
+    }
+    return list!.then((found) => {
+      if (listed.get(id)?.key === key) hold(id, { commands: found });
+      return found;
+    });
+  };
+
   const canSubmit = (id: string): boolean => {
     const s = get(id);
     return (Boolean(s.draft.trim()) || s.attachments.length > 0) && !s.sending && s.adding === 0;
@@ -108,25 +132,50 @@ export function createComposer(deps: ComposerDeps) {
       }
       return problems;
     },
+    /** The cursor moved in the chat's box: told to the portal again, with where it is now (see drafts.ts). */
+    moved: (id: string): void => drafts.moved(id),
+    putBack,
+    loadCommands,
+    /** Empties the box: the words and the pictures. */
+    clear(id: string): void {
+      drafts.set(id, "");
+      pending.set(id, []);
+      publish(id);
+    },
+    /** Runs `work` (a message on its way) with the chat shown as sending, so that a second is not started over it. */
+    async whileSending<T>(id: string, work: () => Promise<T>): Promise<T> {
+      hold(id, { sending: true });
+      try {
+        return await work();
+      } finally {
+        hold(id, { sending: false });
+      }
+    },
     /** Takes a picture out of the box. */
     detach(id: string, attachment: string): void {
       pending.set(id, pending.get(id).filter((a) => a.id !== attachment));
     },
     /**
-     * The commands the chat has, fetched once for `key` (the chat's turn count, say: a run can install an extension,
-     * whose commands should then be offered). Asked for only when wanted: listing them starts pi for the chat, and it stays up.
+     * The commands from a pi that is up, for `key`, without starting one: a status line that names a command can run
+     * it once it is known to be one of the chat's. Nothing where the chat has none up or the list is for `key` already.
      */
-    loadCommands(id: string, key = ""): Promise<readonly PiCommand[]> {
-      const was = listed.get(id);
-      let list = was?.list;
-      if (!was || was.key !== key) {
-        list = api.commands(id).then((r) => r.commands, () => [] as PiCommand[]);
-        listed.set(id, { key, list });
+    async loadCommandsIfRunning(id: string, key = ""): Promise<readonly PiCommand[] | undefined> {
+      if (listed.get(id)?.key === key) return loadCommands(id, key);
+      let r: Awaited<ReturnType<ComposerApi["commands"]>>;
+      try {
+        r = await api.commands(id, { ifRunning: true });
+      } catch {
+        return undefined;
       }
-      return list!.then((found) => {
-        if (listed.get(id)?.key === key) hold(id, { commands: found });
-        return found;
-      });
+      if (r.notRunning) return undefined;
+      // The same list a "/" would fetch, so kept as that.
+      if (listed.get(id)?.key !== key) listed.set(id, { key, list: Promise.resolve(r.commands) });
+      hold(id, { commands: r.commands });
+      return r.commands;
+    },
+    /** Whether the chat's commands were fetched for `key`: a list from before the last run may lack what the run installed. */
+    commandsAreFor(id: string, key = ""): boolean {
+      return listed.get(id)?.key === key;
     },
     canSubmit,
     /**
@@ -149,9 +198,7 @@ export function createComposer(deps: ComposerDeps) {
         });
         return true;
       } catch (e) {
-        if (message) drafts.set(id, withUnsent(drafts.get(id), message));
-        if (images.length) pending.set(id, [...images, ...pending.get(id)]);
-        publish(id);
+        putBack(id, message, images);
         throw e;
       } finally {
         hold(id, { sending: false });

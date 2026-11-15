@@ -29,3 +29,4 @@ export function createMe(api: MeApi) {
     },
   };
 }
+export type Me = ReturnType<typeof createMe>;

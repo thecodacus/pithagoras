@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef } from "react";
 import { Markdown } from "./Markdown";
-import { api } from "../api";
+import { useKernel } from "../kernel/context";
 import type { Item } from "../transcript";
 import { t } from "../i18n";
 import { assistantText } from "../voice";
@@ -21,6 +21,7 @@ const SHOWN = 30;
  * string beside the orb, and sits in a speech bubble like what you said.
  */
 export function VoiceConversation({ sessionId, items }: { sessionId: string; items: Item[] }) {
+  const { media } = useKernel();
   const list = items.filter(item => item.kind === "user" || (item.kind === "assistant" && item.text.trim()) || (item.kind === "notice" && item.tone === "error")).slice(-SHOWN);
   const viewport = useRef<HTMLDivElement>(null);
   const last = list.at(-1);
@@ -34,7 +35,7 @@ export function VoiceConversation({ sessionId, items }: { sessionId: string; ite
       {list.map(item => item.kind === "user"
         ? <div key={item.id} className="voice-said is-user">
             {item.text && <p>{item.text}</p>}
-            {item.images?.length ? <div className="voice-said-pictures">{item.images.map(image => <img key={image.name} src={api.imageUrl(sessionId, image.name)} alt="" loading="lazy" />)}</div> : null}
+            {item.images?.length ? <div className="voice-said-pictures">{item.images.map(image => <img key={image.name} src={media.image(sessionId, image.name)} alt="" loading="lazy" />)}</div> : null}
           </div>
         : item.kind === "assistant"
           ? <div key={item.id} className="voice-said is-agent md">
