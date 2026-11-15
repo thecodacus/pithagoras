@@ -45,12 +45,18 @@ const changed = () => { for (const watcher of [...watchers]) watcher(); };
 const same = (a: Colours | Tokens = {}, b: Colours | Tokens = {}) => JSON.stringify(Object.entries(a).sort()) === JSON.stringify(Object.entries(b).sort());
 
 const NAME_MOST = 60;
-/** What a name may not hold: a line break, a bidi control or any other control or invisible character, and the quotes the question puts around it. */
-const NOT_IN_A_NAME = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}“”"]/u;
+/**
+ * What a name may not hold: a control character, a line or paragraph separator, a bidi control or a zero-width space, and
+ * the double quotes the question puts around it, or one that looks like them. The joiner and the tag characters that
+ * emoji are made of stay.
+ */
+const NOT_IN_A_NAME = /[\p{Cc}\p{Zl}\p{Zp}\u061c\u200b\u200e\u200f\u202a-\u202e\u2060-\u2069\ufeff“”„‟″〝〞＂ˮ«»"]/u;
+/** A space other than the plain one, or two in a row: they are break opportunities that can push the rest of the question out of sight. */
+const ODD_SPACE = /(?! )\p{Zs}| {2}/u;
 
 /**
  * A theme of `extension`'s. Returns what takes it out again. Throws for one
- * without an id and a name (or with a name of more than 60 characters, or with a line break, a control character or a quote in it), with a colour the portal has no name for or that
+ * without an id and a name (or with a name of more than 60 characters, or with a line break, a control character, odd spacing or a quote in it), with a colour the portal has no name for or that
  * is not a colour, with a token it has none of or a value its variable does not
  * take, with neither colours nor tokens, or under an id the extension has used
  * already.
@@ -59,7 +65,7 @@ export function registerTheme(extension: string, given: ThemeGiven): () => void 
   if (typeof given?.id !== "string" || !given.id || typeof given.name !== "string" || !given.name.trim()) throw new Error("A theme needs an id and a name");
   // The name is what the person reads when another extension asks to switch to it: a name, not a message.
   if (given.name.length > NAME_MOST) throw new Error(`The theme "${given.id}" has a name longer than ${NAME_MOST} characters`);
-  if (NOT_IN_A_NAME.test(given.name)) throw new Error(`The theme "${given.id}" has a name with a line break, a control character or a quote in it`);
+  if (NOT_IN_A_NAME.test(given.name) || ODD_SPACE.test(given.name)) throw new Error(`The theme "${given.id}" has a name with a line break, a control character, odd spacing or a quote in it`);
   const light = coloursOf(given.light), dark = coloursOf(given.dark);
   if (!light || !dark) throw new Error(`The theme "${given.id}" has a colour the portal has no name for, or one that is not "#rrggbb" or three numbers`);
   const tokens = tokensOf(given.tokens);
@@ -116,9 +122,13 @@ const paletteOf = ({ id, name, light, dark, tokens }: Theme): Palette => ({ id, 
  */
 let declared: string | null = null;
 let spoken = false;
+/** An extension switched before the interface spoke: what it was made over is whatever the interface declares first. */
+let overPending = false;
 export function setUiDefaultTheme(id: string | null): void {
   spoken = true;
   declared = id === null ? null : themeIdNow(id);
+  if (overPending) local.set(OVER_KEY, declared ?? "");
+  overPending = false;
   settleDefault();
 }
 
@@ -166,7 +176,8 @@ export async function setThemeAs(extension: string, requested: string | null, as
   // Asked a moment ago, it may have gone since.
   if (id !== null && !held.includes(theme!)) throw new Error(`There is no theme called "${requested}"`);
   const by: SetBy = !own || paletteSetBy() === "person" ? "person" : "extension";
-  if (by === "extension") local.set(OVER_KEY, declared ?? "");
+  overPending = by === "extension" && !spoken;
+  if (by === "extension" && spoken) local.set(OVER_KEY, declared ?? "");
   choose(id, by);
   return true;
 }

@@ -303,8 +303,8 @@
 .composer-toolbar { display: flex; align-items: center; gap: 12px; }
 .composer-settings { display: flex; flex-wrap: wrap; align-items: center; gap: 1px; min-width: 0; flex: 1; }
 .composer-actions { display: flex; align-items: center; gap: 6px; margin-left: auto; align-self: flex-end; }
-/* iOS zooms the page into any field under 16px. */
-@media (max-width: 767px) { .prompt-input { font-size: 16px; } }
+/* iOS zooms the page into any field under 16px; above that it follows the text size, as it does on a wide window. */
+@media (max-width: 767px) { .prompt-input { font-size: max(16px, calc(var(--text-base) * 0.875)); } }
 
 /*
  * The rest is split by where it is drawn, and imported after this file in

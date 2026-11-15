@@ -257,6 +257,9 @@ test("the person's text size and spacing sliders change what is made of text and
   await size.fill('120');
   await spacing.fill('140');
   await expect(dialog.getByText('120 %')).toBeVisible();
+  // A screen reader reads the percent, not a bare number.
+  await expect(size).toHaveAttribute('aria-valuetext', '120 %');
+  await expect(spacing).toHaveAttribute('aria-valuetext', '140 %');
   await expect.poll(() => css(page, '.nav-item', 'padding-left')).toBe('14px');
   expect(await css(page, 'body', 'font-size')).toBe('19.2px');
   expect(await css(page, '.ui-select-md', 'font-size')).toBe('15.6px');
@@ -310,4 +313,24 @@ test("a theme's font is a file its extension ships and its stylesheet declares: 
   await expect.poll(() => page.evaluate(async () => (await document.fonts.load('16px "Shipped Face"')).length)).toBe(1);
   expect(served).toEqual(['/api/extension-ui/test-typeface/assets/face.woff2']);
   expect(await page.evaluate(() => [...document.fonts].filter((face) => face.family.includes('Shipped Face')).map((face) => face.status))).toEqual(['loaded']);
+});
+
+test("on a narrow window with a mouse, what is typed in the composer follows the text size, and stays at 16px or more", async ({ page }) => {
+  await page.setViewportSize({ width: 700, height: 800 });
+  await page.addInitScript(() => localStorage.setItem('pithagoras.appearance', JSON.stringify({ text: 140, density: 100 })));
+  await themed(page, [SOFT]);
+  await expect(page.getByRole('dialog', { name: 'Settings' })).toBeVisible();
+  const typed = (text: number) => page.evaluate((value) => {
+    document.documentElement.style.setProperty('--text-base', `${value}px`);
+    const probe = document.createElement('textarea');
+    probe.className = 'prompt-input';
+    document.body.append(probe);
+    const size = getComputedStyle(probe).fontSize;
+    probe.remove();
+    return size;
+  }, text);
+  // 140 % of 16px is 22.4px, and the composer's 0.875 of it is 19.6px: more than the 16px that keeps iOS from zooming.
+  expect(await typed(22.4)).toBe('19.6px');
+  // At the stock size it is the 16px it always was.
+  expect(await typed(16)).toBe('16px');
 });

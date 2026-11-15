@@ -337,7 +337,7 @@ and gaps (`p-*`, `px-*`, `py-*`, `gap-*`, `space-*`) are each read from a variab
 of the page, and
 `z-raised` up to `z-viewer` (the full-screen viewers), `max-w-chat` and `w-nav` are the portal's
 layers and widths. The layer above them, `z-confirm`, is the portal's own, for its questions and the approvals
-(what the guard asks before a command runs): it is not in the preset, and nothing of an extension is drawn at or over it. As the portal ships them they are what Tailwind's own were,
+(what the guard asks before a command runs): it is not in the preset, and an extension is not to use it (the class exists in the portal's own stylesheet, so one written by hand would work: do not). As the portal ships them they are what Tailwind's own were,
 so nothing changes until the person's text size or density, or a theme, sets
 them; widths, heights, margins and offsets stay fixed, so icons do not grow
 with the density. A stylesheet built before these variables existed carries the

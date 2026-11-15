@@ -1620,7 +1620,7 @@ const de: Locale = {
     "Back to 100 %": "Zurück auf 100 %",
     "Change the colours?": "Farben ändern?",
     "Change colours": "Farben ändern",
-    "{extension} wants to change the colours to “{theme}”, a theme of {owner}.": "{extension} möchte die Farben auf „{theme}“ ändern, ein Design von {owner}.",
+    "{extension} wants to change the colours to a theme of {owner}: “{theme}”.": "{extension} möchte die Farben auf ein Design von {owner} ändern: „{theme}“.",
     "{extension} wants to go back to the portal's own colours.": "{extension} möchte zu den eigenen Farben des Portals zurück.",
     "Aurora": "Aurora",
     "Ember": "Glut",

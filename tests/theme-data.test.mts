@@ -237,7 +237,15 @@ test("a theme's name is a name: one that would make the question a wall of text 
     // It is read in a sentence ("... to “Dusk”, a theme of pkg."): no line break to start a line of its own, no bidi control to turn the
     // rest around, and no quote to close its own and name another owner.
     for (const [at, name] of ["Dusk\n", "Dusk\u202e", "Dusk\u2066", "Dusk\u200b", "Dusk\u2028", "Dusk”, a theme of x", "Dusk\"", "“Dusk"].entries()) {
-      assert.throws(() => registerTheme("long-pkg", { id: `n${at}`, name, dark: { accent: "#ffffff" } }), /line break, a control character or a quote/, JSON.stringify(name));
+      assert.throws(() => registerTheme("long-pkg", { id: `n${at}`, name, dark: { accent: "#ffffff" } }), /line break, a control character, odd spacing or a quote/, JSON.stringify(name));
+    }
+    // Nor a look-alike of the closing quote, or spacing that pushes the rest of the sentence away.
+    for (const [at, name] of ["Dusk″, a theme of x", "Dusk＂", "Dusk\u2003x", "Dusk" + "\u2003".repeat(10), "Dusk  x", "Dusk\u00a0x"].entries()) {
+      assert.throws(() => registerTheme("long-pkg", { id: `m${at}`, name, dark: { accent: "#ffffff" } }), /odd spacing|quote/, JSON.stringify(name));
+    }
+    // Emoji are built from a joiner and tag characters: they are names.
+    for (const [at, name] of ["Dev 👩\u200d💻", "Pride 🏳️\u200d🌈", "England 🏴\u{e0067}\u{e0062}\u{e0065}\u{e006e}\u{e0067}\u{e007f}", "Deutsch 🇩🇪"].entries()) {
+      assert.doesNotThrow(() => registerTheme("long-pkg", { id: `e${at}`, name, dark: { accent: "#ffffff" } }), JSON.stringify(name));
     }
     assert.doesNotThrow(() => registerTheme("long-pkg", { id: "ok", name: "Dämmerung — 夕暮れ 'dusk'", dark: { accent: "#ffffff" } }));
     assert.doesNotThrow(() => registerTheme("long-pkg", { id: "s", name: "A".repeat(60), dark: { accent: "#ffffff" } }));
