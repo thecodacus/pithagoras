@@ -57,6 +57,7 @@ writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR, "settings.json"), JSON.
 const { SdkPiClient } = await import("../dist/pi/sdk-client.js");
 const { AUDIO_SYSTEM_RULE, DEFAULT_VOICE_INSTRUCTIONS, audioSystemRule } = await import("../dist/pi/voice-first.js");
 const { getDb } = await import("../dist/db.js");
+const { lazyHintOf } = await import("../dist/lazy-head.js");
 
 /** Saves the speaking instructions as Settings → Voice does; none takes them away again. */
 function saveInstructions(text) {
@@ -485,7 +486,7 @@ test("a lazy tool that the chat reaches through tool_search is told of in a spok
   saveInstructions(undefined);
   globalThis.boardTool = true;
   const remembered = [];
-  const head = { v: 1, lazy: ["<tool>board_write"], direct: [], hint: "", outside: false, voice: [] };
+  const head = { v: 1, lazy: ["<tool>board_write"], direct: [], hint: lazyHintOf([{ label: "board", tools: ["board_write"] }]), outside: false, voice: [] };
   const client = await open(undefined, { sessionId: "board-lazy-chat", lazy: head, rememberLazy: (kept) => remembered.push(kept) });
   try {
     const spoken = await say(client, "Spoken", true);
