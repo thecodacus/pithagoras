@@ -59,15 +59,15 @@ export interface ChatState {
 /** Before a chat's stream is open: the same object each time, as `useSyncExternalStore` wants. */
 export const LOADING: ChatState = {
   events: Object.freeze([]) as unknown as PortalEvent[],
-  versions: {},
+  versions: Object.freeze({}),
   status: "idle",
   loaded: false,
   moreBefore: false,
   loadingBefore: false,
   failures: 0,
   missing: false,
-  dialogs: [],
-  trusted: [],
+  dialogs: Object.freeze([]) as unknown as UiRequest[],
+  trusted: Object.freeze([]) as unknown as string[],
   live: true,
 };
 
@@ -198,6 +198,11 @@ function frozen(events: PortalEvent[]): void {
   Object.freeze(events);
 }
 
+function deepFrozen<T>(value: T): T {
+  deepFreeze(value);
+  return value;
+}
+
 function deepFreeze(value: unknown): void {
   if (!value || typeof value !== "object" || Object.isFrozen(value)) return;
   Object.freeze(value);
@@ -294,7 +299,7 @@ export function createChats(deps: ChatsDeps) {
         reloads = now;
         if (missed) reload();
       });
-      es.addEventListener("versions", (m) => set(e, { versions: (JSON.parse(m.data) as { versions: Record<number, number[]> }).versions }));
+      es.addEventListener("versions", (m) => set(e, { versions: deepFrozen((JSON.parse(m.data) as { versions: Record<number, number[]> }).versions) }));
       es.addEventListener("live-reset", () => {
         drain();
         set(e, (s) => ({ events: resetLiveEvents(s.events) }));
@@ -327,7 +332,7 @@ export function createChats(deps: ChatsDeps) {
           set(e, (s) => (s.dialogs.some((x) => x.id === asked) ? { dialogs: s.dialogs.filter((x) => x.id !== asked) } : {}));
         }
       };
-      const flush = () => {
+      const flush = (withDialogs = true) => {
         const batch = replay;
         replay = null;
         if (!batch) return;
@@ -342,7 +347,7 @@ export function createChats(deps: ChatsDeps) {
         // Only where the chat ended up is news; the statuses it passed through on the way were each a request for the list.
         const last = [...batch].reverse().find((ev) => ev.type === "portal_status");
         if (last) applyStatus(last);
-        batch.forEach(applyDialog);
+        if (withDialogs) batch.forEach(applyDialog);
         if (fan()) for (const ev of batch) fanOut.fill(id, ev);
       };
       es.onmessage = (m) => {
@@ -365,7 +370,7 @@ export function createChats(deps: ChatsDeps) {
         // Another version of a message was brought back, or an edit undone: events came back under seqs this stream
         // has read past, so it reads the chat again from the start.
         if (ev.type === "portal_versions") {
-          set(e, { versions: (ev.payload as { versions: Record<number, number[]> }).versions });
+          set(e, { versions: deepFrozen((ev.payload as { versions: Record<number, number[]> }).versions) });
           return;
         }
         if (ev.type === "portal_reload") {
@@ -399,8 +404,21 @@ export function createChats(deps: ChatsDeps) {
         // The dialogs this connection's replay holds are the ones open now: the server sends each that is still open as
         // a stream opens. One this page heard of on an earlier connection and the replay lacks was answered or timed
         // out while it was away, and no cancel will come for it.
-        if (e.state.get().dialogs.length) set(e, { dialogs: [] });
-        flush();
+        // Set in one step, from the replay and keeping the objects already held: a stop at an empty list in between
+        // would show a question that is still open as news again (a second notification).
+        const held = e.state.get().dialogs;
+        let next: UiRequest[] = [];
+        for (const ev of replay ?? []) {
+          if (ev.type === "extension_ui_request") {
+            const req = ev.payload as UiRequest;
+            if (DIALOGS.includes(req.method) && !next.some((x) => x.id === req.id)) next.push(held.find((x) => x.id === req.id) ?? req);
+          } else if (ev.type === "extension_ui_cancel") {
+            const asked = (ev.payload as { id: string }).id;
+            next = next.filter((x) => x.id !== asked);
+          }
+        }
+        if (next.length !== held.length || next.some((x, i) => x !== held[i])) set(e, { dialogs: next });
+        flush(false);
         set(e, { loaded: true });
         // Only now do we know where the replayed window starts, and therefore whether the conversation continues above it.
         const asked = e.loadedAgain;

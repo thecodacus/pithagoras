@@ -177,6 +177,8 @@ test("the models there are, and what a chat uses, are asked of the portal and ch
   } as never);
   await models.load();
   assert.deepEqual(models.store.get().models.map((m) => [m.id, m.images, m.reasoning]), [["m1", true, true], ["m2", false, false]]);
+  assert.throws(() => (models.store.get().models as unknown[]).push({}), TypeError);
+  assert.throws(() => { (models.store.get().models[0] as { name: string }).name = "x"; }, TypeError);
   assert.deepEqual(models.current("a"), { model: null, thinking: "", levels: [] });
   const chat = await models.loadChat("a");
   assert.deepEqual(chat, { model: { provider: "p", id: "m1" }, thinking: "low", levels: ["low", "high"] });
@@ -501,4 +503,17 @@ test("the models, the settings and who is using the portal are asked once howeve
   assert.equal(me.store.get().name, "Ada");
   void me.load();
   assert.equal(asks.people, 3);
+});
+
+test("what the composer and the models give a part is frozen, and the message still goes with its picture", async () => {
+  const { composer, sent } = composerOf();
+  assert.throws(() => (composer.get("nobody").attachments as Attachment[]).push({} as Attachment), TypeError);
+  assert.throws(() => (composer.get("nobody").commands as unknown[]).push({}), TypeError);
+  composer.setDraft("a", "look at this");
+  await composer.attach("a", [new File(["x"], "pic.png", { type: "image/png" })]);
+  const shown = composer.get("a").attachments as Attachment[];
+  assert.throws(() => { shown.length = 0; }, TypeError);
+  assert.throws(() => { shown[0].data = "other"; }, TypeError);
+  await composer.submit("a");
+  assert.equal((sent[0] as [string, { images: Attachment[] }])[1].images[0].name, "pic.png");
 });

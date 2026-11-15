@@ -34,7 +34,7 @@ export interface ComposerDeps {
   chat: (id: string) => Pick<ChatController, "send">;
 }
 
-const EMPTY: ComposerState = { draft: "", attachments: [], adding: 0, commands: [], sending: false };
+const EMPTY: ComposerState = Object.freeze({ draft: "", attachments: Object.freeze([]) as unknown as Attachment[], adding: 0, commands: Object.freeze([]) as readonly PiCommand[], sending: false });
 
 export function createComposer(deps: ComposerDeps) {
   const { api, drafts, pending } = deps;
@@ -55,6 +55,8 @@ export function createComposer(deps: ComposerDeps) {
       return { ...all, [id]: now };
     });
   const hold = (id: string, change: Partial<{ adding: number; commands: readonly PiCommand[]; sending: number }>) => {
+    // Frozen, as it is what a part reads: see `frozen` in chats.ts.
+    if (change.commands) Object.freeze(change.commands);
     extra.set(id, { adding: 0, commands: [], sending: 0, ...extra.get(id), ...change });
     publish(id);
   };

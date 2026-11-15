@@ -1,8 +1,9 @@
 # The data contract
 
-The portal's own interface reads what the page knows (the chat list, a chat, what is written in its box, the models)
-and does what a person does (send, stop, rename, delete) through one set of small, typed members of `portal`. An
-extension's browser half is given the same ones. They are the *data contract*, and what follows is what an extension
+The portal's own chat, sidebar and box read what the page knows (the chat list, a chat, what is written in its box) and
+do what a person does (send, stop, rename, delete) through one set of small, typed members of `portal`. The members for the
+models, the settings, who is signed in and the status are not read by the stock interface yet. An extension's browser half
+is given the same ones. They are the *data contract*, and what follows is what an extension
 may rely on and what it may not.
 
 ::: warning Experimental

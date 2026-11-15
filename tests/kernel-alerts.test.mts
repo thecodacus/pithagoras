@@ -106,3 +106,21 @@ test("the tab is said again when the language changes, in case its words did", a
   language();
   assert.equal(titles.length, before + 1);
 });
+
+test("a reconnect of the chat on screen, whose replay holds the question still open, does not tell about it again", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const { sessions, chats, alerts, told, src } = make([session("a", { title: "Fix login" })]);
+  await sessions.refresh();
+  t.after(alerts.start());
+  chats.open("a");
+  const ask = event(-1, "extension_ui_request", { id: "q1", method: "confirm" });
+  src.of("a").start({ events: [ask] });
+  assert.equal(told.length, 1);
+  const held = chats.peek("a").dialogs[0];
+  src.of("a").fail();
+  for (let i = 0; i < 5; i++) await Promise.resolve();
+  t.mock.timers.tick(2000);
+  src.of("a").start({ events: [ask] });
+  assert.equal(told.length, 1);
+  assert.equal(chats.peek("a").dialogs[0], held);
+});

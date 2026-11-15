@@ -751,3 +751,15 @@ test("a delete or a mode that a part started is marked, so that the person's swi
   await c.setMode("risky", { unasked: true });
   assert.deepEqual(asked.map((q) => q.unasked), [undefined, true, true, true, true]);
 });
+
+test("the versions a part reads, and what a chat shows before its stream, are frozen", () => {
+  const { chats, sources } = make();
+  assert.throws(() => { (chats.peek("nobody").versions as Record<number, number[]>)[5] = [1]; }, TypeError);
+  assert.throws(() => (chats.peek("nobody").dialogs as unknown[]).push({}), TypeError);
+  chats.open("a");
+  const s = sources.of("a");
+  s.start({ versions: { 5: [2, 5] } });
+  assert.throws(() => { (chats.peek("a").versions[5] as number[]).push(9); }, TypeError);
+  s.send(event(-9, "portal_versions", { versions: { 5: [2, 5, 9] } }));
+  assert.throws(() => { (chats.peek("a").versions as Record<number, number[]>)[6] = [1]; }, TypeError);
+});

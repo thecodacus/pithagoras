@@ -46,7 +46,7 @@ export function createModels(api: ModelsApi) {
     try {
       const r = await api.allModels();
       store.set({
-        models: r.models.map((m) => ({ provider: m.provider, id: m.id, name: m.name, contextWindow: m.contextWindow, reasoning: m.reasoning, images: Boolean(m.input?.includes("image")) })),
+        models: Object.freeze(r.models.map((m) => Object.freeze({ provider: m.provider, id: m.id, name: m.name, contextWindow: m.contextWindow, reasoning: m.reasoning, images: Boolean(m.input?.includes("image")) }))),
         status: "ready",
       });
     } catch {

@@ -774,7 +774,8 @@ export interface Shortcut {
 //
 // Every member below is `@experimental` while the portal is on 0.x: it may change in a minor version. They are the
 // portal's own data as small view models, not its REST routes: a change to a route does not break them. The portal's
-// stock interface reads and acts through exactly these. What destroys something or raises what the agent may do
+// stock interface acts through these and reads its chat list, chats, box and preferences through them (the models, settings,
+// who and status members are not read by any part of it yet). What destroys something or raises what the agent may do
 // (`sessions.actions.remove`, `ChatController.deleteMessage`, `trustFlagged`, `setMode` to a mode that asks) asks the
 // person in the portal first and calls it only after a yes: an interface cannot skip the question. A secret (a
 // provider's key, a token, a password) is in none of them.
