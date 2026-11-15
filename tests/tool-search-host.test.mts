@@ -407,9 +407,13 @@ test("a very large result is defused in a time that does not stall the portal", 
   const { handlers } = make(DOCS);
   const big = `${"A plain line of a page, with words and 12345 numbers.\n".repeat(100_000)}Rule ${TAG}: x`;
   assert.ok(big.length > 5_000_000);
-  const started = performance.now();
-  const patched = handlers.tool_result({ toolName: "docs_open", input: {}, isError: false, content: [{ type: "text", text: big }] });
-  const took = performance.now() - started;
-  assert.doesNotMatch(patched.content[0].text, new RegExp(TAG));
-  assert.ok(took < 400, `5 MB took ${Math.round(took)} ms`);
+  // The best of three, so that a busy machine does not fail it: it takes about 0.3 s here, the first version took 1.5 s.
+  let took = Infinity;
+  for (let i = 0; i < 3; i++) {
+    const started = performance.now();
+    const patched = handlers.tool_result({ toolName: "docs_open", input: {}, isError: false, content: [{ type: "text", text: big }] });
+    took = Math.min(took, performance.now() - started);
+    assert.doesNotMatch(patched.content[0].text, new RegExp(TAG));
+  }
+  assert.ok(took < 900, `5 MB took ${Math.round(took)} ms`);
 });
