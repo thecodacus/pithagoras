@@ -259,6 +259,8 @@ export interface ChatServer {
   entry: Record<string, unknown>;
   /** The portal's own file, or the project's `.pi/mcp.json`. */
   from: "user" | "project";
+  /** The user's entry as the file has it, where a project's override narrowed `entry`: what the tool cache is kept and read by. */
+  file?: Record<string, unknown>;
 }
 
 /**
@@ -348,7 +350,7 @@ export function chatServers(cwd: string, projectTrusted: boolean): { servers: Ch
           else {
             const { entry: merged, ignored } = narrowed(base.entry, entry);
             if (ignored.length) errors.push(`${file}: server "${name}": a project can only switch a server of the user's off or hide its tools; ${ignored.join(", ")} ignored`);
-            servers.set(name, { ...base, entry: merged });
+            servers.set(name, { ...base, entry: merged, file: base.file ?? base.entry });
           }
           continue;
         }

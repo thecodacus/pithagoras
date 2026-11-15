@@ -1,7 +1,7 @@
 import path from "node:path";
 import { chatServers, entryEnabled, mcpConfigPath, type ChatServer } from "../api/mcp.js";
 import { configHash, declarationTokens, cachedServer, rememberServerTools, type CachedServer, type CachedTool } from "../mcp-tools.js";
-import { mcpNamespace, resolvedEntry } from "../mcp-config.js";
+import { mcpNamespace, resolvedEntry, toolExposureOf } from "../mcp-config.js";
 import { MCP_RESOURCE_TOOLS, isResourceTool, mcpNamespaceOf, serversOfNamespace } from "./mcp-origin.js";
 import { headLazy, toolEntry, type LazyHead } from "../tool-lazy.js";
 
@@ -58,9 +58,17 @@ function chatToolExposure(toolExposure: unknown, exposure: string): Record<strin
 }
 
 /** What is remembered of a server's tools, where it was read from the configuration it has now: an entry changed since, or another server of that name, is not served as this one. */
-function cachedFor(name: string, entry: Record<string, unknown>): CachedServer | undefined {
+function cachedFor(name: string, entry: Record<string, unknown>, narrowedTo: Record<string, unknown> = entry): CachedServer | undefined {
   const cached = cachedServer(name);
-  return cached && cached.hash === configHash(entry) ? cached : undefined;
+  if (!cached || cached.hash !== configHash(entry)) return undefined;
+  // A trusted project can hide tools of the user's server for its own chats: what the file's entry has, less those.
+  return narrowedTo === entry ? cached : { ...cached, tools: cached.tools.filter((tool) => toolExposureOf(narrowedTo, tool.original) !== "hidden") };
+}
+
+/** The entry a server's tools are remembered by: the user's, as the file has it, and none where a project's override took tools away from it (the chat saw fewer than the server has). */
+function rememberedEntry(server: ChatServer): Record<string, unknown> | undefined {
+  if (server.from !== "user") return undefined;
+  return server.file && configHash(server.file) !== configHash(server.entry) ? undefined : (server.file ?? server.entry);
 }
 
 /**
@@ -69,10 +77,10 @@ function cachedFor(name: string, entry: Record<string, unknown>): CachedServer |
  * every tool the portal knows of it is switched off in this chat, and its resources are not reached either). Decided
  * from the chat's frozen head and the tools it has off, never from what is connected now.
  */
-export function planOf(entry: Record<string, unknown>, name: string, head: Pick<LazyHead, "lazy" | "direct">, codemodeOnly: boolean, off: ReadonlySet<string>, from: ChatServer["from"] = "user"): Plan {
+export function planOf(entry: Record<string, unknown>, name: string, head: Pick<LazyHead, "lazy" | "direct">, codemodeOnly: boolean, off: ReadonlySet<string>, from: ChatServer["from"] = "user", file: Record<string, unknown> = entry): Plan {
   if (!entryEnabled(entry) || resolvedEntry(entry).exposure === "hidden") return "off";
   // A project's server is not remembered (see snapshot): what is kept under its name is another server's.
-  const cached = from === "user" ? cachedFor(name, entry) : undefined;
+  const cached = from === "user" ? cachedFor(name, file, entry) : undefined;
   const known = cached?.tools ?? [];
   // pi's resource tools reach every server that has resources, whatever its own tools are switched to.
   const resources = cached?.resources === true && MCP_RESOURCE_TOOLS.some((tool) => !off.has(tool));
@@ -234,9 +242,9 @@ export class McpRuntime {
     const connect: { name: string; config: any; source: string; scope: "global" | "project" }[] = [];
     const project = path.join(String(ctx.cwd ?? ""), ".pi", "mcp.json");
     for (const server of read.servers) {
-      const plan = planOf(server.entry, server.name, head, only, off, server.from);
+      const plan = planOf(server.entry, server.name, head, only, off, server.from, server.file);
       const config = configFor(server.entry, plan, head, server.name, only);
-      const byOff = plan === "off" && planOf(server.entry, server.name, head, only, new Set(), server.from) !== "off";
+      const byOff = plan === "off" && planOf(server.entry, server.name, head, only, new Set(), server.from, server.file) !== "off";
       this.planned.set(server.name, { server, plan, config, ...(byOff ? { byOff } : {}) });
       if (plan === "start") connect.push({ name: server.name, config, source: server.from === "project" ? project : mcpConfigPath(), scope: server.from === "project" ? "project" : "global" });
     }
@@ -256,7 +264,7 @@ export class McpRuntime {
     const off = this.options.off();
     for (const [name, one] of this.planned) {
       if (one.plan !== "off" || !one.byOff) continue;
-      const plan = planOf(one.server.entry, name, head, only, off, one.server.from);
+      const plan = planOf(one.server.entry, name, head, only, off, one.server.from, one.server.file);
       if (plan === "off") continue;
       const config = configFor(one.server.entry, plan, head, name, only);
       this.planned.set(name, { server: one.server, plan, config });
@@ -332,7 +340,7 @@ export class McpRuntime {
   /** What is remembered of a server of this chat, where it is the user's and the entry is the one it was read from. */
   private known(server: string): CachedServer | undefined {
     const planned = this.planned.get(server);
-    return planned && planned.server.from === "user" ? cachedFor(server, planned.server.entry) : undefined;
+    return planned && planned.server.from === "user" ? cachedFor(server, planned.server.file ?? planned.server.entry, planned.server.entry) : undefined;
   }
 
   /**
@@ -360,16 +368,18 @@ export class McpRuntime {
     for (const [server, found] of by) {
       const planned = this.planned.get(server);
       // Only the user's servers are remembered: a project's is somebody else's, and a server of that name in another chat
-      // would be shown its tools and descriptions as its own.
-      if (!planned || planned.server.from !== "user") continue;
+      // would be shown its tools and descriptions as its own. Nor is one whose tools a project's override took away: what
+      // this chat saw is less than the file's entry offers.
+      const entry = planned && rememberedEntry(planned.server);
+      if (!entry) continue;
       const sorted = found.sort((a, b) => a.name.localeCompare(b.name));
       try {
-        rememberServerTools(server, configHash(planned.server.entry), sorted);
+        rememberServerTools(server, configHash(entry), sorted);
       } catch (e) {
         console.error(`[portal] could not keep the tools of ${server}: ${(e as Error).message}`);
       }
     }
-    for (const [server, one] of this.planned) if (one.plan === "start" && one.server.from === "user" && !this.probed.has(server)) void this.noteResources(server, one);
+    for (const [server, one] of this.planned) if (one.plan === "start" && rememberedEntry(one.server) && !this.probed.has(server)) void this.noteResources(server, one);
   }
 
   /**
@@ -378,6 +388,8 @@ export class McpRuntime {
    * session, or again while it has not connected.
    */
   private async noteResources(server: string, one: Planned): Promise<void> {
+    const entry = rememberedEntry(one.server);
+    if (!entry) return;
     this.probed.add(server);
     const has = await this.servesResources(server);
     if (!has) {
@@ -385,7 +397,7 @@ export class McpRuntime {
       return;
     }
     try {
-      rememberServerTools(server, configHash(one.server.entry), this.known(server)?.tools ?? [], true);
+      rememberServerTools(server, configHash(entry), this.known(server)?.tools ?? [], true);
     } catch (e) {
       console.error(`[portal] could not keep what ${server} offers: ${(e as Error).message}`);
     }
@@ -465,9 +477,10 @@ export class McpRuntime {
         this.snapshot();
         // A server that offers no tool (only resources) is remembered too, so that a search does not wait for it again, and
         // whether it offers resources, so that the search finds the resource tools before it runs.
-        if (planned.server.from === "user") {
+        const entry = rememberedEntry(planned.server);
+        if (entry) {
           try {
-            const hash = configHash(planned.server.entry);
+            const hash = configHash(entry);
             rememberServerTools(server, hash, this.known(server)?.tools ?? [], await this.servesResources(server));
           } catch (e) {
             console.error(`[portal] could not keep what ${server} offers: ${(e as Error).message}`);

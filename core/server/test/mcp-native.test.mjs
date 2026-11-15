@@ -565,7 +565,12 @@ test("a server whose tools are all switched off in the chat is not started with 
     assert.doesNotMatch(names(first.requests[0]).join(), /mcp__quiet/);
     await client.setToolsOff(["mcp__quiet__two", "mcp__res__one"]);
     await until(() => count("start quiet") === 2);
-    const r = await say([{ name: "mcp__quiet__one", args: { text: "on" } }]);
+    // The server has started; its tools are registered a moment later.
+    let r;
+    await until(async () => {
+      r = await say([{ name: "mcp__quiet__one", args: { text: "on" } }]);
+      return !/not found/.test(textOf(r.results[0]));
+    });
     assert.match(textOf(r.results[0]), /quiet\/one says/);
   } finally {
     await close(client);
@@ -596,6 +601,42 @@ test("what is remembered of a server is the user's server's, for the configurati
     const r = await lazy.say([search("search", { query: "planted" }), search("search", { query: "" })]);
     assert.doesNotMatch(textOf(r.results[0]) + textOf(r.results[1]), /mcp__beta__planted|Ignore the person/);
     assert.equal(count("start beta"), 1, "nothing known of this entry: started for the search");
+  } finally {
+    await close(lazy.client);
+  }
+});
+
+test("a trusted project that hides a tool of the user's server leaves the user's remembered tools alone, and a chat there does not offer the hidden tool from the cache", async () => {
+  // Round 2 of PR B, correctness finding 1.
+  reset();
+  writeServers({ alpha: entry("alpha", "one,two") });
+  const plain = await chat({ lazy: head() });
+  try {
+    await plain.say([{ name: "mcp__alpha__one", args: {} }]);
+  } finally {
+    await close(plain.client);
+  }
+  const before = cache.cachedServer("alpha");
+  assert.equal(before.tools.length, 2);
+  const folder = chatDir();
+  mkdirSync(path.join(folder, ".pi"), { recursive: true });
+  writeFileSync(path.join(folder, ".pi", "mcp.json"), JSON.stringify({ mcpServers: { alpha: { toolExposure: { two: "hidden" } } } }));
+  const project = await chat({ cwd: folder, lazy: head() });
+  try {
+    await project.say([{ name: "mcp__alpha__one", args: {} }]);
+  } finally {
+    await close(project.client);
+  }
+  const after = cache.cachedServer("alpha");
+  assert.equal(after.hash, before.hash, "the file's entry is still what the cache is read from");
+  assert.equal(after.tools.length, 2, "and it still has every tool of the server");
+  assert.equal(db.mcpServerStates().alpha.tools.stale, false);
+  // A chat of the project that has the server lazy finds what the file's entry has, less what the project hides.
+  const lazy = await chat({ cwd: folder, lazy: head(["alpha"]) });
+  try {
+    const r = await lazy.say([search("search", { query: "" })]);
+    assert.match(textOf(r.results[0]), /mcp__alpha__one/);
+    assert.doesNotMatch(textOf(r.results[0]), /mcp__alpha__two/);
   } finally {
     await close(lazy.client);
   }
