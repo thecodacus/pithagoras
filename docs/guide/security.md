@@ -72,11 +72,12 @@ content. What `tool_search` shows when you search or describe is the tools' own
 descriptions and parameters, which the server wrote: such a result is wrapped when it
 shows a tool of a server you have not counted as your own, and left as it is when every
 tool it shows is the portal's, an extension's, or a trusted server's. The same goes for what a code mode script asks of
-the servers about themselves (`searchTools`, `describeTool`, `describeNamespace`: their descriptions and the instructions
+the servers about themselves (`searchTools`, `describeTool`, `describeNamespace` and the `ALL_TOOLS` list: their descriptions and the instructions
 a server gives when it connects): where the chat has a server you have not counted as your own, the script's result is
 wrapped. Trust is by the server's name in your own file: a server a project brings is never trusted, even if a server
 of your own is given its name later, and taking a server out of the file takes its trust, its mark and its confirmations
-with it. The usage rules such a result
+with it, and so do the per-tool marks and the allow rules that were given for its tools. A chat that is working with the
+server at that moment asks before each of its calls until its next turn. The usage rules such a result
 carries start with a random tag of the chat's that a page, a file or a server has no way to know, and the tag is taken out of
 the text of every result of every tool but the portal's own search and describe, in the usual ways to write it (twice in a row, with the
 look-alike Latin, Greek and Cyrillic letters, zero-width characters or other separators between its letters), so a line
@@ -167,7 +168,7 @@ problem are held: put to you where you are there to answer (see
 | `pipe-to-shell` | Downloading something and running it unseen: a pipe into a shell, or into `python`, `perl`, `ruby`, `node` or `php` given nothing to run but what comes in (`curl … \| python3`, and not `\| python3 -m json.tool`); a shell, `source` or `eval` handed a download (`bash <(curl …)`, `sh -c "$(curl …)"`, `bash <<< "$(curl …)"`); and a download run in the same line (`curl -o i.sh … && sh i.sh`) |
 | `write-to-path` | A file on `PATH` runs later, without anyone asking |
 | `upload` | Data carried out: `curl`/`wget` with a body (`-d`, `-F`, `-T`, alone or folded into a group like `-sd`; `--data*`, `--form`, `--json`, `--post-data`, `--post-file`, `--body-*`) or a `POST`, `PUT` or `PATCH`; `scp` or `rsync` to another machine; a pipe or a file into `nc`, `socat`, `telnet` or `ssh`; mail sent (`mail`, `sendmail`, `mutt -s`, `himalaya … send`); httpie with a body; `gh gist create` and a write through `gh api`; a copy to an S3, GCS or rclone remote; a script's own `requests.post` or `fetch` with a body |
-| `read-credentials` | `auth.json`, `.env`, `.ssh/`, tokens, also among the files a tool declares it takes |
+| `read-credentials` | `auth.json`, `mcp-auth.json`, pi's own `mcp.json`, `.env`, `.ssh/`, tokens, also among the files a tool declares it takes |
 | `publish` | `git push` is not undoable from here, also with git's options before it (`git -C repo push`, `git -c k=v push`) |
 | `persist` | What outlives the conversation: a routine, `cron`, a systemd unit, a shell start-up file, and a change to what the agent loads as its own (`AGENTS.md`, `CLAUDE.md`, its context files, `WATCH.md`, `.pi/`, `.agents/`; see [what a colleague may do](/people/roles#what-a-colleague-may-do)), by a tool or by a command that writes there (a redirect, `tee`, `cp`, `mv`, `ln`, `sed -i`, a download's `-o`, a clone) |
 | `delegate` | A `subagent` and a routine work in a conversation of their own, which has not read what this one read and so is not held back as it is: a tainted session may start neither, nor send a subagent at work a message (that is a `subagent` call too). Listing and stopping its subagents (`subagents`) stays open. A chat's mark never passes down to its subagents, since a tainted chat starts none, and a subagent's own mark passes up to its chat. A subagent's chat is guarded on its own, and marked by what it reads itself. When it was marked, the chat it worked for is marked as its answer comes back, and stays marked when the chat is opened again, so what it relays is held like outside content. Nothing it says reaches that chat before: `subagents` lists none of what one at work has said, and gives what one it stopped had only once its run has ended, held the same way |

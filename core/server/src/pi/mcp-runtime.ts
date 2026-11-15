@@ -142,6 +142,21 @@ const sleep = (ms: number, signal?: AbortSignal) =>
     signal?.addEventListener("abort", done, { once: true });
   });
 
+/** A promise a caller waits for, ended with its own signal: the promise itself goes on for the others that wait for it. */
+function abortable<T>(promise: Promise<T>, signal: AbortSignal | undefined, message: string): Promise<T> {
+  if (!signal) return promise;
+  if (signal.aborted) {
+    // Nobody else is told of a failure that comes later.
+    promise.catch(() => {});
+    return Promise.reject(new Error(message));
+  }
+  return new Promise<T>((resolve, reject) => {
+    const stop = () => reject(new Error(message));
+    signal.addEventListener("abort", stop, { once: true });
+    promise.then(resolve, reject).finally(() => signal.removeEventListener("abort", stop));
+  });
+}
+
 export interface McpRuntimeOptions {
   /** The chat's frozen head, read at each use: it is the one place the chat's lazy servers are said. */
   head: () => LazyHead;
@@ -488,13 +503,29 @@ export class McpRuntime {
     if (!planned || planned.plan !== "lazy") return;
     if (this.life.signal.aborted) return;
     this.started.set(server, Date.now());
-    if (await this.reached(server)) return;
-    // The caller's signal, and the end of the session: a connect does not poll for a chat that has gone.
-    const stop = signal ? AbortSignal.any([signal, this.life.signal]) : this.life.signal;
+    if (await this.reached(server)) {
+      // It came up after an earlier wait gave up on it.
+      this.failed.delete(server);
+      return;
+    }
     let start = this.starting.get(server);
     if (!start) {
+      // The wait ends with the session, not with the caller: the start is shared, and one caller who stops its turn must not
+      // leave the others, or a later search, with its abort as the server's failure.
+      const stop = this.life.signal;
+      const retry = this.failed.has(server);
       start = (async () => {
         if (!this.pi) throw new Error("MCP is not available in this chat");
+        // pi keeps a server that did not connect as it is: registering the same entry again changes nothing, and it
+        // reconnects only for a call of one of the server's tools, which a server that never connected has none of. Taking
+        // it away first makes pi open a new connection.
+        if (retry) {
+          try {
+            this.pi.unregisterMcpServer(server);
+          } catch (e) {
+            console.warn(`[portal] could not reset the MCP server ${server}: ${(e as Error).message}`);
+          }
+        }
         this.pi.registerMcpServer(server, planned.config);
         const from = Date.now();
         while (!(await this.reached(server))) {
@@ -518,12 +549,13 @@ export class McpRuntime {
           }
         }
       })().then(undefined, (error: Error) => {
-        this.failed.set(server, error.message);
+        // The end of the session is not the server's failure.
+        if (!stop.aborted) this.failed.set(server, error.message);
         throw error;
       }).finally(() => this.starting.delete(server));
       this.starting.set(server, start);
     }
-    await start;
+    await abortable(start, signal, `Stopped while the MCP server "${server}" was starting.`);
   }
 
   /**
@@ -560,7 +592,7 @@ export class McpRuntime {
    */
   async learn(signal?: AbortSignal): Promise<string[]> {
     const unknown = this.lazyServers().filter((server) => !this.known(server) && this.may(server));
-    // One that did not connect is not waited for again by every search: it is said, and a call of its tool tries it again.
+    // One that did not connect is not waited for again by every search: it is said, and a call of its tool starts it afresh (connect() takes it from pi first).
     await Promise.allSettled(unknown.filter((server) => !this.failed.has(server)).map((server) => this.connect(server, signal)));
     return unknown.filter((server) => this.failed.has(server)).map((server) => this.failed.get(server)!);
   }

@@ -117,6 +117,28 @@ test("the trust and the mark of a removed server go with it, so that a server gi
   assert.deepEqual(db.toolMarks(), {});
 });
 
+test("the marks given to a removed server's tools and the rules that let colleagues call them go with it, and no other server's do", async () => {
+  // Round 4 of PR B, correctness finding 3 and security finding 4: a server given the name later would start with them (a
+  // tool marked direct starts it with every chat; a rule lets a colleague call it).
+  seed();
+  db.setToolMarks({ jira: "direct", "<tool>mcp__jira__search": "direct", "<tool>mcp__notes__read": "direct", "<tool>mcp__notes_staging__read": "lazy" });
+  for (const [id, tool] of [["jira-rule", "mcp__jira__search"], ["notes-rule", "mcp__notes__read"], ["staging-rule", "mcp__notes_staging__read"], ["bash-rule", "bash"]]) {
+    db.addToolRule({ id, role: "colleague", tool, pattern: "*", note: "", person_key: null });
+  }
+  try {
+    // A rename removes the old name.
+    assert.equal((await put("tracker", { command: "jira-mcp" }, "jira")).status, 200);
+    assert.deepEqual(db.toolMarks(), { "<tool>mcp__notes__read": "direct", "<tool>mcp__notes_staging__read": "lazy" });
+    assert.deepEqual(db.listToolRules().map((rule) => rule.id).sort(), ["bash-rule", "notes-rule", "staging-rule"]);
+    // `notes` is not the start of `notes_staging`.
+    assert.equal((await del("notes")).status, 200);
+    assert.deepEqual(db.toolMarks(), { "<tool>mcp__notes_staging__read": "lazy" });
+    assert.deepEqual(db.listToolRules().map((rule) => rule.id).sort(), ["bash-rule", "staging-rule"]);
+  } finally {
+    for (const id of ["jira-rule", "notes-rule", "staging-rule", "bash-rule"]) db.deleteToolRule(id);
+  }
+});
+
 test("a chat that still has the removed server loaded does not bring its tools back", async () => {
   seed();
   assert.equal((await del("jira")).status, 200);

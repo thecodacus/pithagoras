@@ -317,3 +317,15 @@ test("a heartbeat reads what its watch list names, but no secret, and what is al
     for (const id of ids) deleteToolRule(id);
   }
 });
+
+test("pi's MCP sign-ins and the file with the servers' bearer headers are places where secrets are kept, a project's own MCP file is not", () => {
+  // Round 4 of PR B, security finding 2: `auth.json` was named, `mcp-auth.json` was not.
+  const h = tainted();
+  for (const where of [path.join(agent, "mcp-auth.json"), path.join(agent, "mcp.json"), "~/.pi/agent/mcp-auth.json", "/root/.pi/agent/mcp.json"]) {
+    const result = call(h, "read", { path: where });
+    assert.equal(refused(result), true, where);
+    assert.match(result.reason, /\(read-credentials\)/, where);
+  }
+  assert.equal(refused(call(tainted(), "bash", { command: `cat ${path.join(agent, "mcp.json")}` })), true, "by a command too");
+  for (const where of [path.join(workspace, ".mcp.json"), path.join(workspace, "mcp.json"), ".pi/mcp.json"]) assert.equal(call(tainted(), "read", { path: where }), undefined, where);
+});

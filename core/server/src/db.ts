@@ -8,6 +8,7 @@ import { DEFAULT_LIMITS, guessTokens, isLazy, parseMarks, resolveThreshold, type
 import { projectOf } from "./workspaces.js";
 import { entryEnabled, mcpConfigPath, mcpWritten, onMcpWritten, readMcpFile, readableMcpConfig, serversAndBrowsers } from "./api/mcp.js";
 import { cachedServers, configHash, dropCachedServers, mcpToolCachePath } from "./mcp-tools.js";
+import { mcpNamespace } from "./pi/mcp-origin.js";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, rmdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { isWithinText } from "./within.js";
@@ -3738,13 +3739,34 @@ export function mcpServersRemoved(before: string[], after: string[]): void {
   // What the person said of a server by its name is not said of the next one that is given the name (a rename, an import of a
   // folder's own file): its tools asked first, whether its words are trusted, how it is marked. Settings → Guard lists only
   // the servers there are, so a name left trusted could not be seen or taken out.
-  const marks = toolMarks();
-  let marked = false;
   for (const name of removed) {
     setMcpApprove(name, undefined);
     untrustMcpServer(name);
-    if (marks[name]) {
-      delete marks[name];
+  }
+  forgetMcpMarks(removed, after);
+  // The same goes for what colleagues were allowed to call of it: a rule is by the tool's name, and would apply to whatever
+  // server is given the name next (a repository's own file imported). Settings → Guard lists the rules, but nothing there
+  // connects one to the new server.
+  for (const rule of listToolRules()) if (ofMcpServers(rule.tool, removed, after)) deleteToolRule(rule.id);
+}
+
+/** Whether a tool name is one of the servers that are named, and of none of those that are kept: a namespace that is a prefix of another's must not take it along. */
+function ofMcpServers(tool: string, named: string[], kept: string[]): boolean {
+  const within = (servers: string[]) => servers.some((server) => tool.startsWith(`${mcpNamespace(server)}__`));
+  return within(named) && !within(kept);
+}
+
+/**
+ * What the person said of a server's tools, one by one, goes with the server as the mark of the whole server does: a server
+ * given the name later is not marked by it, and a tool marked direct would start the new server with every chat. `kept` is
+ * the servers that stay, whose namespace may begin with the same words.
+ */
+export function forgetMcpMarks(removed: string[], kept: string[] = []): void {
+  const marks = toolMarks();
+  let marked = false;
+  for (const key of Object.keys(marks)) {
+    if (removed.includes(key) || (key.startsWith("<tool>") && ofMcpServers(key.slice("<tool>".length), removed, kept))) {
+      delete marks[key];
       marked = true;
     }
   }
@@ -3752,7 +3774,7 @@ export function mcpServersRemoved(before: string[], after: string[]): void {
 }
 
 /** The servers the portal has removed and that are not configured again, by name as they were configured. */
-function removedMcpServers(): string[] {
+export function removedMcpServers(): string[] {
   try {
     const parsed = JSON.parse(getSetting("mcp_removed") ?? "[]");
     return Array.isArray(parsed) ? parsed.filter((n): n is string => typeof n === "string") : [];

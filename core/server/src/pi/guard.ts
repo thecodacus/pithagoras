@@ -105,8 +105,8 @@ function argumentsShown(input: unknown): string {
   return text.length > SHOWN_CHARS ? `${text.slice(0, SHOWN_CHARS)}\n[cut: ${text.length - SHOWN_CHARS} more characters]` : text;
 }
 
-/** The functions of pi's code mode that hand a script what MCP servers say of themselves: descriptions, and the `instructions` a server gives when it connects. */
-const SCRIPT_DISCOVERY = /\b(?:searchTools|describeTool|describeNamespace)\b/;
+/** The functions and the list of pi's code mode that hand a script what MCP servers say of themselves: descriptions, and the `instructions` a server gives when it connects. */
+const SCRIPT_DISCOVERY = /\b(?:searchTools|describeTool|describeNamespace|ALL_TOOLS)\b/;
 
 /**
  * Does what this call returned carry somebody else's words? Mail and the web
@@ -206,11 +206,21 @@ const declaredValues = (input: Record<string, unknown>, names: readonly string[]
 
 /** Where secrets are kept, by a path's name: keys, tokens, and the folders tools keep their logins in. */
 const SECRET_PLACES =
-  /(?<![\w.-])(?:auth\.json|\.secrets(?=$|[\s'"*}/])|id_(?:rsa|dsa|ecdsa|ed25519)|\.(?:ssh|aws|kube|gnupg)(?=\/|$|[\s'"*}])|\.docker\/config\.json|\.config\/(?:gh|gcloud|hub)(?=\/|$|[\s'"*}])|\.netrc)|(?<![\w$])\.env(?:\.(?!(?:example|sample|template|dist|defaults?)\b)[\w-]+)*(?=$|[\s'"*}/;)])/i;
+  /(?<![\w.-])(?:(?:mcp-)?auth\.json|\.pi\/agent\/mcp\.json(?![\w.-])|\.secrets(?=$|[\s'"*}/])|id_(?:rsa|dsa|ecdsa|ed25519)|\.(?:ssh|aws|kube|gnupg)(?=\/|$|[\s'"*}])|\.docker\/config\.json|\.config\/(?:gh|gcloud|hub)(?=\/|$|[\s'"*}])|\.netrc)|(?<![\w$])\.env(?:\.(?!(?:example|sample|template|dist|defaults?)\b)[\w-]+)*(?=$|[\s'"*}/;)])/i;
+
+/**
+ * pi's `mcp.json`, by its place: it holds the bearer tokens of the servers (and `mcp-auth.json` next to it their sign-ins).
+ * By the path and not the name, so that a project's `.mcp.json` or `mcp.json` stays readable.
+ */
+function isAgentMcpFile(where: string): boolean {
+  if (/\s/.test(where)) return false;
+  const full = homeOf(where);
+  return path.isAbsolute(full) && path.resolve(full) === path.join(piAgentDir(), "mcp.json");
+}
 
 /** Whether a call reads a place where secrets are kept: the command, or the path, and each file a tool declares (`files`). */
 function readsCredentials(tool: string, input: Record<string, unknown>, files?: readonly string[]): boolean {
-  const secret = (where: string) => SECRET_PLACES.test(where) || SECRET_NAMES.test(where);
+  const secret = (where: string) => SECRET_PLACES.test(where) || SECRET_NAMES.test(where) || isAgentMcpFile(where);
   if (tool !== "bash") return secret(target(input)) || declaredValues(input, files).some(secret);
   const command = cmd(input);
   // gh hands its token out by more than one spelling.

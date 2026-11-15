@@ -37,7 +37,7 @@ import { proxyBaseUrl } from "../llama-progress.js";
 import { bridgeSubagents, SUBAGENT_INPUT, SUBAGENT_STOP, type Bridge } from "../subagent-protocol.js";
 import { bridgeExtensionUi, UI_RECEIVE } from "../extension-ui.js";
 import { hostExtensions } from "../extension-host.js";
-import { contextWindowFor, getSkipThinkingProviders, getVoiceInstructions, getVoiceModel, lazyAllowed, listToolRules, mcpApprove, questionWaitMs, toolGroupNames, voiceSpeaks } from "../db.js";
+import { contextWindowFor, getSkipThinkingProviders, getVoiceInstructions, getVoiceModel, lazyAllowed, listToolRules, mcpApprove, questionWaitMs, removedMcpServers, toolGroupNames, voiceSpeaks } from "../db.js";
 import { configStamp, isLlamaProvider } from "../providers.js";
 import { rereadConfig } from "./model-runtime.js";
 import { browserServers } from "../api/mcp.js";
@@ -391,9 +391,13 @@ const RESOURCE_SET = "MCP resources";
  */
 function mcpApproval(mcp: McpRuntime, definition: any, name: string, input: Record<string, unknown> = {}): boolean {
   const approve = mcpApprove();
+  const gone = removedMcpServers();
   // pi's resource tools are no server's own, and a read names the one it reaches: it asks as that server's tools do (`*` covers them).
   if (isResourceTool(name)) {
     const server = serverOfArgument(input.server, mcp.names());
+    // A server that was taken out of the file while this chat has it loaded: its confirmations went with it, and the
+    // chat keeps it connected until its next turn. Nothing it does goes unasked then.
+    if (server !== undefined && gone.includes(server)) return true;
     const globs = server === undefined ? undefined : approve[server];
     return globs?.length ? matchesTool(globs, name) : false;
   }
@@ -403,6 +407,7 @@ function mcpApproval(mcp: McpRuntime, definition: any, name: string, input: Reco
   // Every configured server a namespace can be: two names that differ by a hyphen and an underscore are one namespace, pi
   // connects one of them, and the one that asks first is not necessarily the one that comes first in the file.
   return serversOfNamespace(space, mcp.names()).some((server) => {
+    if (gone.includes(server)) return true;
     const globs = approve[server];
     if (!globs?.length) return false;
     const original = label.startsWith(`${server}/`) ? label.slice(server.length + 1) : name;

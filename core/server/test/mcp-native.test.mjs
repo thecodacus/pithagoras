@@ -104,6 +104,7 @@ function reset() {
   rmSync(cache.mcpToolCachePath(), { force: true });
   db.setTrustedMcpServers([]);
   db.setMcpApprove("beta", undefined);
+  db.putSetting("mcp_removed", "[]");
 }
 
 test("a server that is direct in the chat connects with it, its tools are declared, and they run by name", async () => {
@@ -452,6 +453,10 @@ test("what a script's discovery functions return of a server that is not the per
     const r = await first.say([{ name: "codemode", args: { code } }]);
     assert.match(textOf(r.results[0]), /id_ed25519/, "the script got the server's words");
     assert.match(textOf(r.results[0]), /<<<untrusted/, "and they are fenced as outside content");
+    // Round 4, security finding 1: pi's code tool names ALL_TOOLS first as the way to find MCP tools.
+    const all = await first.say([{ name: "codemode", args: { code: 'return ALL_TOOLS.filter((tool) => tool.name.startsWith("mcp__alpha"));' } }]);
+    assert.match(textOf(all.results[0]), /mcp__alpha__one/, "the script got the server's tools");
+    assert.match(textOf(all.results[0]), /<<<untrusted/, "and they are fenced as outside content");
     // A script that does not ask what a server says of itself is not held to it.
     const plain = await first.say([{ name: "codemode", args: { code: "return 1 + 1;" } }]);
     assert.doesNotMatch(textOf(plain.results[0]), /untrusted/);
@@ -464,6 +469,9 @@ test("what a script's discovery functions return of a server that is not the per
     const r = await second.say([{ name: "codemode", args: { code } }]);
     assert.match(textOf(r.results[0]), /id_ed25519/);
     assert.doesNotMatch(textOf(r.results[0]), /untrusted/);
+    const all = await second.say([{ name: "codemode", args: { code: 'return ALL_TOOLS.filter((tool) => tool.name.startsWith("mcp__alpha"));' } }]);
+    assert.match(textOf(all.results[0]), /mcp__alpha__one/);
+    assert.doesNotMatch(textOf(all.results[0]), /untrusted/);
   } finally {
     await close(second.client);
     db.setTrustedMcpServers([]);
@@ -535,6 +543,37 @@ test("the question about a tool that asks first shows the whole call, not only t
   } finally {
     await close(client);
     db.setMcpApprove("beta", undefined);
+  }
+});
+
+test("a server taken out of the file while a chat has it loaded still asks before each of its calls", async () => {
+  // Round 4 of PR B, security finding 3: its confirmations went with it at once, the chat keeps it connected until its next turn.
+  reset();
+  writeServers({ beta: entry("beta", "read_it,delete_it", { exposure: "direct" }) });
+  db.setMcpApprove("beta", ["*"]);
+  const { client, say } = await chat({ lazy: head(), dialogs: true });
+  const asked = [];
+  let answer = false;
+  client.on("event", (e) => {
+    if (e?.type === "extension_ui_request" && e.method === "confirm") {
+      asked.push(e);
+      client.respondUi(e.id, { value: answer });
+    }
+  });
+  try {
+    await say([{ name: "mcp__beta__read_it", args: {} }]);
+    assert.equal(asked.length, 1, "asked while it is configured");
+    answer = true;
+    // Taken out by the person (Settings → MCP), and the chat is busy: it has no reload yet.
+    writeServers({});
+    db.mcpServersRemoved(["beta"], []);
+    assert.deepEqual(db.mcpApprove(), {});
+    const r = await say([{ name: "mcp__beta__delete_it", args: {} }]);
+    assert.equal(asked.length, 2, "asked still");
+    assert.match(textOf(r.results[0]), /beta\/delete_it says/);
+  } finally {
+    await close(client);
+    db.putSetting("mcp_removed", "[]");
   }
 });
 
@@ -620,6 +659,57 @@ test("a lazy server that does not connect is said, once waited for, and a later 
     assert.ok(Date.now() - from < 600, "not waited for again");
     assert.match(textOf(again.results[0]), /\\"dead\\" did not connect/);
     assert.equal(count("start dead"), 0);
+  } finally {
+    await close(client);
+  }
+});
+
+test("a lazy server that did not connect once connects when its tool is called again, and a stopped wait is not its failure", async () => {
+  // Round 4 of PR B, correctness findings 1 and 2.
+  reset();
+  const flag = path.join(home, "up.flag");
+  rmSync(flag, { force: true });
+  // `sh` is the server's parent, as `npx` is, and ends where the flag is not there: a server that is down for a while.
+  const wrapped = { command: "/bin/sh", args: ["-c", `[ -f "${flag}" ] || exit 1; exec "$0" "$@"`, process.execPath, FIXTURE, "beta", "--tools", "one", "--log", serversLog] };
+  writeServers({ beta: wrapped });
+  writeFileSync(flag, "");
+  const warm = await chat({ lazy: head(["beta"]) });
+  try {
+    // It has run, so its tools are in the cache.
+    const ran = await warm.say([search("search", { query: "one" }), search("call", { name: "mcp__beta__one", args: { text: "a" } })]);
+    assert.match(textOf(ran.results[1]), /beta\/one says/);
+  } finally {
+    await close(warm.client);
+  }
+  rmSync(flag);
+  const { client, say } = await chat({ lazy: head(["beta"]), mcpTimings: { connectWaitMs: 1500 } });
+  try {
+    const starts = count("start beta");
+    const down = await say([search("call", { name: "mcp__beta__one", args: { text: "b" } })]);
+    assert.match(textOf(down.results[0]), /did not connect/);
+    writeFileSync(flag, "");
+    const up = await say([search("call", { name: "mcp__beta__one", args: { text: "c" } })]);
+    assert.match(textOf(up.results[0]), /beta\/one says/, textOf(up.results[0]));
+    assert.equal(count("start beta"), starts + 1, "pi opened a new connection");
+  } finally {
+    await close(client);
+  }
+});
+
+test("a wait that its caller stopped is not recorded as the server's failure, and the server it was waiting for is still coming up", async () => {
+  reset();
+  writeServers({ slow: entry("slow", "one", { args: [FIXTURE, "slow", "--tools", "one", "--log", serversLog, "--delay", "1200"] }) });
+  const { client, say } = await chat({ lazy: head(["slow"]) });
+  try {
+    await say(["Hi."]);
+    const stop = new AbortController();
+    const waiting = client.mcp.connect("slow", stop.signal);
+    setTimeout(() => stop.abort(), 200);
+    await assert.rejects(waiting, /Stopped while/);
+    // The next search does not say the server was stopped: it waits for it, and finds its tools.
+    assert.deepEqual(await client.mcp.learn(), []);
+    assert.ok(client.mcp.offline().some((tool) => tool.name === "mcp__slow__one") || (await client.getTools()).some((tool) => tool.name === "mcp__slow__one"));
+    assert.equal(count("start slow"), 1, "the one start went on");
   } finally {
     await close(client);
   }

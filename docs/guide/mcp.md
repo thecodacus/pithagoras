@@ -200,7 +200,8 @@ The toggle on each row sets `enabled: false` — the server stays configured and
 visible but is never connected. Better than deleting a server you are debugging.
 (`disabled: true`, which the old adapter wrote, still means off.)
 Deleting one, or renaming it, also takes its tools out of the Tools list and what
-the portal kept of what it offered, whatever took it out of the file: this panel,
+the portal kept of what it offered, and the marks you gave its tools one by one (a rename keeps the mark of the server
+and the tools that ask first, and drops those), whatever took it out of the file: this panel,
 switching a feature such as Understory off, or an edit made by hand. The portal
 remembers which servers it last saw in the file, so an edit made by hand is
 noticed the next time the tools are listed or a chat starts, and one made while

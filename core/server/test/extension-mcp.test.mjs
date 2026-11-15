@@ -98,6 +98,9 @@ test("the old adapter's keys are translated for one release, and the tools to be
   assert.equal(db.toolMarks()["<tool>mcp__listed__b"], "lazy");
   assert.equal(db.toolMarks().listed, "lazy", "the rest of it is found");
   await mcp.set("listed", undefined);
+  // Round 4 of PR B, correctness finding 3: the marks of its tools go with it too, or a server of that name later starts with them.
+  assert.equal(db.toolMarks()["<tool>mcp__listed__a"], undefined);
+  assert.equal(db.toolMarks()["<tool>mcp__listed__b"], undefined);
 });
 
 test("removed, it is gone from the file, from what the chats have and from the servers trusted", async () => {

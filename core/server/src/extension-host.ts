@@ -9,7 +9,7 @@ import semver from "semver";
 import express, { type NextFunction, type Request, type RequestHandler, type Response, type Router } from "express";
 import { agentOf, defaultAgent, listAgents } from "./agents.js";
 import { dataDirOf } from "./extension-data.js";
-import { childSessions, getSession, getSetting, listSessions, putSetting, recordAudit, sessionsByWorkspace, setMcpApprove, setServerHalfOffers, setServerHalvesAsked, setToolMarks, setTrustedMcpServers, toolExceptions, toolMarks, trustedMcpServers, untrustMcpServer, type SessionRow } from "./db.js";
+import { childSessions, forgetMcpMarks, getSession, getSetting, listSessions, putSetting, recordAudit, sessionsByWorkspace, setMcpApprove, setServerHalfOffers, setServerHalvesAsked, setToolMarks, setTrustedMcpServers, toolExceptions, toolMarks, trustedMcpServers, untrustMcpServer, type SessionRow } from "./db.js";
 import { EXECUTOR_KIND } from "./executor-kind.js";
 import { takes, type ServerHalf } from "./extension-ui.js";
 import { moduleAt } from "./half-modules.js";
@@ -701,12 +701,8 @@ function portalFor(ext: Running): ServerPortal {
           if (entry === undefined) {
             untrustMcpServer(server);
             setMcpApprove(server, undefined);
-            // Its mark goes with it, so that a server given that name later is not marked unasked.
-            const marks = toolMarks();
-            if (marks[server]) {
-              delete marks[server];
-              setToolMarks(marks);
-            }
+            // Its marks go with it, the server's and its tools', so that a server given that name later is not marked unasked.
+            forgetMcpMarks([server]);
           } else {
             if (options.trusted === true) setTrustedMcpServers([...trustedMcpServers(), server]);
             // The tools that ask for a confirmation: what the entry said in the old way, and what the call says.
