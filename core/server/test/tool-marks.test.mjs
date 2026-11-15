@@ -637,6 +637,44 @@ test("what a mode of the person's and an agent keep in the model's list stays th
   assert.equal((await send(`/api/agents/${agent.id}/direct`, "PUT", { entries: "x" })).status, 400);
 });
 
+test("a chat that has said nothing and is put in another mode starts with what that mode keeps in the list, not with the head it was given before", async () => {
+  db.rememberTools(big("browser", "pi-browser", 11, 400));
+  const mode = await json("/api/chat-modes", "POST", { label: "Pinned browser", description: "" });
+  await json(`/api/chat-modes/${mode.id}/direct`, "PUT", { entries: ["pi-browser"] });
+  const chat = await json("/api/sessions", "POST", {});
+  assert.deepEqual(headOf(chat.id).lazy, ["pi-browser"], "made as the chat was first asked for it, in the standard mode");
+  assert.deepEqual((await json(`/api/sessions/${chat.id}/modes`, "PUT", { mode: `custom/${mode.id}` })).mode, `custom/${mode.id}`);
+  assert.deepEqual(headOf(chat.id).lazy, [], "the mode's own");
+  assert.ok(headOf(chat.id).direct.includes("pi-browser"));
+});
+
+test("a read again while the chat's pi is still starting is taken up by that pi, which does not go on with the head it started with", async () => {
+  await mark({ "pi-heavy": "lazy" });
+  const chat = await json("/api/sessions", "POST", {});
+  assert.deepEqual(headOf(chat.id).lazy, ["pi-heavy"]);
+  // Held at the moment the start has read the chat's head, while pi is still being made.
+  let read;
+  const headRead = new Promise((resolve) => (read = resolve));
+  const toolsFor = sessions.toolsFor;
+  sessions.toolsFor = function (id) {
+    const tools = toolsFor.call(this, id);
+    if (id === chat.id) read();
+    return tools;
+  };
+  try {
+    const started = sessions.ensureClient(chat.id);
+    await headRead;
+    await mark({});
+    assert.equal(await sessions.readToolsAgain(chat.id), true);
+    assert.deepEqual(headOf(chat.id).lazy, []);
+    const client = await started;
+    assert.deepEqual(client.head.lazy, [], "the pi that was starting has the head that was read again");
+  } finally {
+    delete sessions.toolsFor;
+    await sessions.stop(chat.id);
+  }
+});
+
 test("the model of a real chat is sent no lazy tool and no tool_search until a tool is lazy for a chat that starts, and the hint only then", async () => {
   const offered = (request) => (request.tools ?? []).map((t) => t.function.name);
   const hint = /These tools are not in your list: probe \(probe_open, probe_read\)\. Search them with the tool_search tool/;

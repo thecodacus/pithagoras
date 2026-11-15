@@ -1575,6 +1575,7 @@ export function updateSession(
       | "mode"
       | "role"
       | "last_person_key"
+      | "lazy_head"
     >
   >
 ): void {

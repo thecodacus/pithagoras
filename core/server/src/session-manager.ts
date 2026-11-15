@@ -2844,6 +2844,9 @@ class SessionManager extends EventEmitter {
    */
   async readToolsAgain(sessionId: string): Promise<boolean> {
     if (!getSession(sessionId)) return false;
+    // A pi that is starting has read the head already, and is not live yet to be given the new one: it is let finish, and
+    // is then read again as any running chat is. A start that fails leaves nothing to tell.
+    await this.starting.get(sessionId)?.catch(() => undefined);
     const was = parseHead(getSession(sessionId)?.lazy_head);
     // The tag stays the chat's: it says nothing of the tools, and changing it would change the prompt for nothing.
     const fresh = this.freshLazyHead(sessionId);
