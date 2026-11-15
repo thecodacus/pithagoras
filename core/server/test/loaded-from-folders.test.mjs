@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { scratch } from "./server-harness.mjs";
-import { IN_PLACE, IN_PROJECTS, LOADED_IN_FOLDERS, allowed, conversation, folder, folders, guardAs, loadedAt, loadedPlaces, nova, refused, root, writtenIn } from "./loaded-from-folders-harness.mjs";
+import { IN_PLACE, IN_PROJECTS, LOADED_IN_FOLDERS, allowed, conversation, folder, folders, guardAs, loadedAt, loadedPlaces, nova, outcome, refused, root, writtenIn } from "./loaded-from-folders-harness.mjs";
 
 // What pi, the MCP adapter, the heartbeat and the portal load out of a folder is said once, in
 // pi/loaded-from-folders.ts (see loaded-from-folders-harness.mjs for how the tests walk it). The walk of the links is
@@ -207,7 +207,9 @@ test("the folders and files the portal hands pi or loads itself are held where t
     const as = guardAs(role, conversation);
     for (const place of places) {
       assert.equal(refused(as, "write", path.join(place.path, "x.ts")), true, `${role}: below ${place.path}`);
-      assert.equal(refused(as, "write", place.path), true, `${role}: ${place.path}`);
+      // pi's mcp.json is a place where secrets are kept first (its bearer tokens), and is held as that.
+      if (place.as === "tools") assert.match(outcome(as, "write", place.path), /^blocked: Refused: it reads a place where secrets are kept/, `${role}: ${place.path}`);
+      else assert.equal(refused(as, "write", place.path), true, `${role}: ${place.path}`);
     }
   }
   const named = (as) => places.filter((place) => place.as === as).length;

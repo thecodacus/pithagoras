@@ -1262,7 +1262,8 @@ test("the servers the person said are theirs stay as they said; an Understory of
   const said = path.join(home, "understory-said");
   mkdirSync(said, { recursive: true });
   understoryOfV9(said, { understory_token: "t".repeat(48), guard_trusted_mcp_servers: JSON.stringify(["jira"]) });
-  await upgradedWith(said, UNDERSTORY_ENTRY);
+  // `jira` is a server of the file, as the trust it had is only kept for the servers the move converts (round 5 of PR B).
+  await upgradedWith(said, { ...UNDERSTORY_ENTRY, jira: { command: "j" } });
   assert.equal(understoryIn(said).value("guard_trusted_mcp_servers"), JSON.stringify(["jira"]));
   assert.deepEqual(understoryLeft(said, "settings.json"), { understory_config: null, understory_token: "t".repeat(48), understory_llm_token: null, understory_last_dream: null });
 
