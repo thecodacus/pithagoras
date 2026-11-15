@@ -53,11 +53,15 @@ const Colours = createContext<(type: string | undefined) => string>(colours([]))
 const typesIn = (node: MemoryNode | null): string[] =>
   !node ? [] : [...(node.type ? [node.type] : []), ...(node.children ?? []).flatMap(typesIn)];
 
-/** A note's type: its colour as a dot, its name in the page's own ink, readable on either theme. */
-function TypeBadge({ type, className = "" }: { type: string; className?: string }) {
+/**
+ * A note's type: its colour as a dot, its name in the page's own ink, readable on either theme. Its text size is a prop
+ * of its own, not a class beside the stock one: of two text sizes on one element the stylesheet's order picks, and
+ * that order is by the classes' names, not by what they say.
+ */
+function TypeBadge({ type, size = "text-3xs", className = "" }: { type: string; size?: "text-3xs" | "text-2xs"; className?: string }) {
   const colourOf = useContext(Colours);
   return (
-    <span className={`inline-flex min-w-0 items-center gap-1 rounded bg-fg/5 px-1.5 py-0.5 text-3xs text-fg-muted ${className}`}>
+    <span className={`inline-flex min-w-0 items-center gap-1 rounded bg-fg/5 px-1.5 py-0.5 ${size} text-fg-muted ${className}`}>
       <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: colourOf(type) }} />
       <span className="truncate">{type}</span>
     </span>
@@ -793,7 +797,7 @@ function Note({
               <header className="rounded-xl border border-line bg-raised/40 p-4">
                 {(f?.type || (Array.isArray(f?.tags) && f.tags.length) || when) && (
                   <p className="flex flex-wrap items-center gap-1.5 text-2xs">
-                    {f?.type && <TypeBadge type={f.type} className="text-2xs" />}
+                    {f?.type && <TypeBadge type={f.type} size="text-2xs" />}
                     {(Array.isArray(f?.tags) ? f.tags : []).map((t) => (
                       <span key={String(t)} className="rounded bg-fg/5 px-1.5 py-0.5 text-fg-subtle">
                         #{String(t)}
