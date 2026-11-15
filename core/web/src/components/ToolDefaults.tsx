@@ -52,6 +52,8 @@ export function ToolDefaults({ onError }: { onError: (e: string) => void }) {
   const [notice, setNotice] = useState<string[]>([]);
   /** Whether the limit fields have been filled in: a list read again after a save must not take from under a field being typed in. */
   const typedFrom = useRef(false);
+  /** The last save of the limits, its own or the way back to the defaults: the answer to one before it says nothing any more. */
+  const limitSave = useRef(0);
   const [questionWait, setQuestionWait] = useState(0);
   /** The group being renamed, and what has been typed so far. */
   const [renaming, setRenaming] = useState<{ source: string; value: string } | null>(null);
@@ -91,6 +93,9 @@ export function ToolDefaults({ onError }: { onError: (e: string) => void }) {
     try {
       const r = await api.setToolDefaults(wanted);
       setOff(r.off);
+      // A tool that is off is not counted in the model's list: what the threshold makes lazy, and whether the list is
+      // over the limits, may have changed with it.
+      setTries((n) => n + 1);
     } catch (e) {
       setOff(before);
       onError((e as Error).message);
@@ -144,12 +149,16 @@ export function ToolDefaults({ onError }: { onError: (e: string) => void }) {
     // What is saved is what is typed from now on: a field left again before the answer comes is judged against it.
     const before = limits;
     setLimits({ tokens: next.tokens, tools: next.tools });
+    const save = ++limitSave.current;
     try {
       const r = await api.setLazyLimits({ tokens: next.tokens, tools: next.tools });
+      if (save !== limitSave.current) return;
       setLimits(r.limits);
       setResolved(r.resolved);
       setTries((n) => n + 1);
     } catch (e) {
+      // A later save has the last word: this one failing puts nothing back over it.
+      if (save !== limitSave.current) return;
       setLimits(before);
       setTyped({ tokens: String(before.tokens), tools: String(before.tools) });
       onError((e as Error).message);
@@ -279,9 +288,11 @@ export function ToolDefaults({ onError }: { onError: (e: string) => void }) {
               className={ghostCls}
               onClick={() => {
                 setTyped({ tokens: String(defaultLimits.tokens), tools: String(defaultLimits.tools) });
+                const save = ++limitSave.current;
                 void api
                   .setLazyLimits(defaultLimits)
                   .then((r) => {
+                    if (save !== limitSave.current) return;
                     setLimits(r.limits);
                     setResolved(r.resolved);
                     setTries((n) => n + 1);
@@ -331,7 +342,14 @@ export function ToolDefaults({ onError }: { onError: (e: string) => void }) {
                 lazy: isLazy ? (true as const) : undefined,
               };
             })}
-            onMark={(tool) => setMark(lazyEntry(tool.name), nextMark(tool.mark))}
+            onMark={(tool) => {
+              // The tool's own mark goes round, not the one it shows from its set: from a set's direct the round would end
+              // at no mark, which is direct again. A mark that is the set's own is passed over, as it would change nothing.
+              const inherited = marks[sourceOf(tool)];
+              let next = nextMark(marks[lazyEntry(tool.name)]);
+              if (next !== undefined && next === inherited) next = nextMark(next);
+              setMark(lazyEntry(tool.name), next);
+            }}
             markFixed={(tool) => tool.mcp !== undefined}
             names={names}
             busy={busy}

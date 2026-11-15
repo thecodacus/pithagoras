@@ -59,6 +59,8 @@ interface Portal {
   keepDirect: Record<string, string[]>;
   /** The chat, `a`: its mode and its model. */
   chat: { mode: string | null; model: string | null };
+  /** What a save of a mode's direct groups waits for before it is answered, where a test holds it. */
+  holdDirect?: Promise<void>;
 }
 
 async function portal(page: Page, { modes = [] as Mode[], refuse = false } = {}): Promise<Portal> {
@@ -110,6 +112,7 @@ async function portal(page: Page, { modes = [] as Mode[], refuse = false } = {})
     }
     const direct = /^\/api\/chat-modes\/([^/]+)\/direct$/.exec(p);
     if (direct && method === 'PUT') {
+      await state.holdDirect;
       state.keepDirect[direct[1]] = json().entries;
       return { entries: json().entries };
     }
@@ -359,8 +362,23 @@ test('a mode keeps a group of tools in the model\'s list from its tools, and let
   await expect(dialog(page).getByRole('button', { name: /^Keep pithagoras/ })).toHaveCount(0);
   await keep.click();
   await expect(keep).toHaveAttribute('aria-pressed', 'true');
-  expect(writes(state).at(-1)).toBe('PUT /api/chat-modes/browsing/direct {"entries":["pi-web-access"]}');
+  await expect.poll(() => writes(state).at(-1)).toBe('PUT /api/chat-modes/browsing/direct {"entries":["pi-web-access"]}');
   await keep.click();
   await expect(keep).toHaveAttribute('aria-pressed', 'false');
-  expect(writes(state).at(-1)).toBe('PUT /api/chat-modes/browsing/direct {"entries":[]}');
+  await expect.poll(() => writes(state).at(-1)).toBe('PUT /api/chat-modes/browsing/direct {"entries":[]}');
+});
+
+test('a mode\'s direct groups are saved one at a time: the button waits for the save before it, which sends the whole list', async ({ page }) => {
+  const state = await portal(page, { modes: [mode('Browsing')] });
+  let release!: () => void;
+  state.holdDirect = new Promise<void>((resolve) => (release = resolve));
+  await page.goto('/settings/modes');
+  await dialog(page).getByRole('button', { name: /^Browsing/ }).click();
+  const keep = dialog(page).getByRole('button', { name: "Keep pi-web-access in the model's list" });
+  await keep.click();
+  await expect(keep).toHaveAttribute('aria-pressed', 'true');
+  await expect(keep).toBeDisabled();
+  release();
+  await expect(keep).toBeEnabled();
+  expect(state.keepDirect.browsing).toEqual(['pi-web-access']);
 });

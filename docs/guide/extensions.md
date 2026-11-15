@@ -491,7 +491,9 @@ counts the ones that are in the list and does not take them out.
 
 **Settings → Tools** has a button on the header of each group and one beside each tool that shows the mark: **auto**,
 **lazy** or **direct**. Clicking it goes from auto to lazy to direct and back. Marking a group makes every tool of
-it lazy or direct, including tools that turn up in it later. A mark is no switch: the tools stay on or off as
+it lazy or direct, including tools that turn up in it later. A tool of a group that is marked shows the group's mark
+until it has one of its own, and its button goes between the group's mark and the other one: a tool of a direct group
+from direct to lazy and back to the group's. A mark is no switch: the tools stay on or off as
 they were, and a mark on a tool that is off changes nothing in the chats where it stays off. In a chat in Code mode, or in a
 [mode of yours](/guide/sessions#modes-you-make) that works through the code tool, the marks do not apply: every
 tool that is on is in a script's reach, found with `searchTools`, and `tool_search` is not offered. An MCP server's
@@ -550,7 +552,7 @@ when it first registers.
 
 | Action | What it does |
 | --- | --- |
-| `search` | `query`: words from a tool's name, from what it does, from its parameters or from its group's name, ranked (BM25). Each hit has the tool's name, its parameters and the first line of its description; the best few carry the parameters as a JSON schema, up to a size. No query lists the groups |
+| `search` | `query`: words from a tool's name, from what it does, from its parameters or from its group's name, ranked (BM25). Each hit has the tool's name, its parameters and the first line of its description; the best few carry the parameters as a JSON schema, up to a size. No query lists the groups, as many as fit in a search's size, and counts the rest |
 | `describe` | `name`: the tool's full description, its parameters as a JSON schema, and its rules |
 | `call` | `name` and `args` (an object, or its JSON text): runs the tool and returns its result |
 
