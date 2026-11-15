@@ -933,7 +933,7 @@ export interface ChatController {
   /** Folds the conversation so far into a summary, to make room in the model's window. */
   compact(): Promise<void>;
   /**
-   * Answers a question the agent asked in the chat (its `ask_question` tool), or cancels any question. What an extension
+   * Answers a question the agent asked in the chat (its `ask_question` tool, among the events read of the chat), or cancels any question. What an extension
    * of the agent asks in a dialog the portal draws (the guard's question before a call it held, among them) is only
    * cancelled here: any other answer to it resolves `{ ok: false }` and is not sent.
    */

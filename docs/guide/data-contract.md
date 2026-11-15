@@ -68,7 +68,7 @@ link. Nothing is asked.
 | `….trustFlagged(result)` | Trusts a result flagged as a suspected prompt injection, after the portal's question |
 | `….queued.takeBack(seq)`, `….queued.sendNow(seq)` | A message that waits for the agent to read it |
 | `….switchVersion(seq, to)`, `….compact()`, `….loadEarlier()`, `….rename(title)` | As the chat's own controls |
-| `….respond(requestId, answer)` | Answers a question the agent asked in the chat (its `ask_question` tool), or cancels any question. A question an extension of the agent asks in the portal's own dialog (the guard's, before a call it held) is answered there: here it can only be cancelled, and any other answer resolves `{ ok: false }` |
+| `….respond(requestId, answer)` | Answers a question the agent asked in the chat (its `ask_question` tool, among the events the page reads of that chat), or cancels any question. A question an extension of the agent asks in the portal's own dialog (the guard's, before a call it held) is answered there: here it can only be cancelled, and any other answer resolves `{ ok: false }` |
 | `….modes()`, `….setMode(mode)` | The modes a chat may be put in; puts it in one |
 | `portal.composer.actions.setDraft`, `attach`, `detach`, `loadCommands`, `canSubmit`, `submit` | What the box does |
 | `portal.models.set(id, choice)` | Another model or effort for a chat |
