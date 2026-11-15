@@ -218,10 +218,9 @@ function Shell({
   const active = listed ?? other;
   /** What a person does in the chat: the kernel asks what must be asked first. */
   const controller = active ? chats.controller(active.id) : null;
-  useEffect(() => {
-    setOpener((id) => navigate(`/s/${id}`));
-    return alerts.start();
-  }, [navigate]);
+  // A click on a notification goes where the router goes: `navigate` changes with the address, so it is given again each time.
+  useEffect(() => setOpener((id) => navigate(`/s/${id}`)), [navigate]);
+  useEffect(() => alerts.start(), []);
   // Not tied to where the page is: going from chat to chat is no reason to ask for the list again, nor to start its poll over.
   useEffect(() => sessions.start(), []);
 

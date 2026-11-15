@@ -154,7 +154,7 @@ with it either way.
 | `slots.register(slot, entry)` | Puts an entry into a [slot](#slots). Returns what takes it out |
 | `chats.use(chatId, pick?)` | A hook: [the chat as the page has it](#the-chat-s-events) |
 | `chats.on(chatId, handler)` | The same outside a component |
-| `chats.useEvents(chatId)` | A hook: any chat's events by its id, streamed while the component is drawn, as the page streams the chat on screen: `{ events, status, loading, missing }`. For drawing another chat beside the one on screen, such as a [child chat](#child-chats)'s run with `ui.Transcript`. The latest part of a long one; nothing without an id |
+| `chats.useEvents(chatId)` | A hook: any chat's events by its id, streamed while the component is drawn, as the page streams the chat on screen: `{ events, status, loading, missing }`. For drawing another chat beside the one on screen, such as a [child chat](#child-chats)'s run with `ui.Transcript`. The latest part of a long one; nothing without an id. The page keeps at most four streams open at once (the chat on screen's first): a chat past that is read as a snapshot of its latest events, asked for again every five seconds, since the browser allows six connections to one origin and the portal needs the rest for its own calls |
 | `panels` | [Any panel of the chat on screen](#panels-and-commands), by name |
 | `commands` | [What can be asked of an extension by name](#panels-and-commands) |
 | `api.json(url, init?)` | A request as the portal's own are made |

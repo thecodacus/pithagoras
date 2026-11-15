@@ -108,8 +108,10 @@ conversation is tainted.
 A flagged result shows a notice under its tool card in the chat, with two ways
 out:
 
-- **Trust it**: you looked at it and it is fine. It no longer holds the
-  conversation back, and that is remembered when the chat is opened again.
+- **Trust it**: you looked at it and it is fine. The portal asks once more
+  before it does it, since from then on the chat acts on that result without
+  asking. It no longer holds the conversation back, and that is remembered
+  when the chat is opened again.
 - **Remove the turn**: the message it came in and the agent's answer to it are
   taken out of the conversation, as **Delete** on a message does, so the agent
   no longer knows what it read.
