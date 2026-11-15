@@ -11,6 +11,7 @@ import { useNavigate } from "react-router-dom";
 import { MENU_WIDTH, anchorLeft } from "../menu-anchor";
 import { api, type PiConfig, type PiModel, type Session } from "../api";
 import { useKernel } from "../kernel/context";
+import { useStore } from "../kernel/store";
 import { serialSaver } from "../serial-saver";
 import { local } from "../safe-storage";
 import { cacheModels, cachedModels, catalogueFresh, forgetModels } from "../model-catalogue";
@@ -313,6 +314,16 @@ export function ComposerBar({
     setCfg(seed(session));
     load();
   }, [session.mode]);
+
+  // Another part of the page changed the chat's model or effort through the kernel (an extension's `portal.models.set`):
+  // the pills read them again. Not for another chat's entry, which the switch above loads anyway.
+  const shared = useStore(kernelModels.chats, (all) => all[sessionId]);
+  const sharedWas = useRef({ id: sessionId, shared });
+  useEffect(() => {
+    const was = sharedWas.current;
+    sharedWas.current = { id: sessionId, shared };
+    if (was.id === sessionId && was.shared !== shared && shared) load();
+  }, [sessionId, shared]);
 
   const refreshCatalogue = () => {
     const asked = sessionId;

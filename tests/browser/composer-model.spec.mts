@@ -148,3 +148,28 @@ test("a model pick that fails after its chat was left says nothing in the chat o
   await expect(page.getByRole('alert')).toHaveCount(0);
   await expect(thinkingPill(page)).toBeEnabled();
 });
+
+test.describe('with an extension that changes the model through the data contract', () => {
+  test.use({ installed: ['tests/fixtures/extensions/contract'] });
+
+  test("a model an extension sets for the chat (portal.models.set) is what the pill shows, without opening the chat again", async ({ page }) => {
+    let current = model('prov-a', 'Alpha');
+    await mockPortal(page, async ({ path: p, method, json }) => {
+      if (p === '/api/sessions') return { sessions: [chat('a', 'First chat', 'prov-a', 'Alpha')], executor: 'host' };
+      if (p === '/api/sessions/a') return chat('a', 'First chat', current.provider, current.id);
+      if (p === '/api/sessions/a/config' && method === 'POST') {
+        const { provider, modelId } = json() as { provider: string; modelId: string };
+        current = model(provider, modelId);
+        return { ok: true, applied: ['model'], state: config(current).state };
+      }
+      if (p === '/api/sessions/a/config' || p === '/api/sessions/a/models') return config(current);
+      if (p === '/api/workspaces') return { root: '/w', workspaces: [] };
+      if (p === '/api/models') return { models: [], providers: {} };
+    }, { streams: 'open', settings: true });
+    await page.goto('/s/a');
+    await expect(modelPill(page)).toHaveText('Alpha');
+    await expect.poll(() => page.evaluate(() => (window as any).contractPortal !== undefined)).toBe(true);
+    await page.evaluate(() => (window as any).contractPortal.models.set('a', { provider: 'prov-b', modelId: 'Beta' }));
+    await expect(modelPill(page)).toHaveText('Beta');
+  });
+});

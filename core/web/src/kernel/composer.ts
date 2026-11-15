@@ -68,6 +68,13 @@ export function createComposer(deps: ComposerDeps) {
 
   /** Which `commands` list is for what: fetched once per chat and `key`, which changes after each run (it may install an extension). */
   const listed = new Map<string, { key: string; list: Promise<PiCommand[]> }>();
+  /** Counts the times a chat's commands were asked for: an answer to an earlier ask that comes after a later one is not the list. */
+  const asks = new Map<string, number>();
+  const ask = (id: string): number => {
+    const n = (asks.get(id) ?? 0) + 1;
+    asks.set(id, n);
+    return n;
+  };
 
   /** A message that did not go, back in front of whatever was typed since (not over it), with its pictures in front of those waiting. */
   const putBack = (id: string, message: string, images: readonly Attachment[] = []): void => {
@@ -84,6 +91,7 @@ export function createComposer(deps: ComposerDeps) {
     const was = listed.get(id);
     let list = was?.list;
     if (!was || was.key !== key) {
+      ask(id);
       list = api.commands(id).then((r) => r.commands, () => [] as PiCommand[]);
       listed.set(id, { key, list });
     }
@@ -164,12 +172,14 @@ export function createComposer(deps: ComposerDeps) {
     async loadCommandsIfRunning(id: string, key = ""): Promise<readonly PiCommand[] | undefined> {
       if (listed.get(id)?.key === key) return loadCommands(id, key);
       let r: Awaited<ReturnType<ComposerApi["commands"]>>;
+      const mine = ask(id);
       try {
         r = await api.commands(id, { ifRunning: true });
       } catch {
         return undefined;
       }
-      if (r.notRunning) return undefined;
+      // Asked again since, for a later run: the list that answers that is the one to keep.
+      if (r.notRunning || asks.get(id) !== mine) return undefined;
       // The same list a "/" would fetch, so kept as that.
       if (listed.get(id)?.key !== key) listed.set(id, { key, list: Promise.resolve(r.commands) });
       hold(id, { commands: r.commands });

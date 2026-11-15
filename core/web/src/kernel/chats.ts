@@ -223,6 +223,8 @@ export function createChats(deps: ChatsDeps) {
     let reloads: number | undefined;
     let retry: ReturnType<typeof setTimeout> | undefined;
     let source: StreamSource | undefined;
+    // Counts the connections: what was asked about one that has since been replaced (`reconnect`) is not acted on.
+    let generation = 0;
     // Whether the connection now open has sent all of its replay: one cut off before that has to be read again from the start.
     let caughtUp = false;
     // Once caught up, what arrives is applied a frame at a time, not an event at a time: a reply is a token every few
@@ -243,6 +245,7 @@ export function createChats(deps: ChatsDeps) {
     const fan = () => screen.get() === id;
     const connect = () => {
       if (cancelled) return;
+      generation++;
       e.fanning = fan();
       e.opened = false;
       caughtUp = false;
@@ -398,13 +401,15 @@ export function createChats(deps: ChatsDeps) {
         es.close();
         failed += 1;
         set(e, { failures: failed });
-        // Said by the portal: it has no such chat, which is not an outage to keep retrying.
+        // Said by the portal: it has no such chat, which is not an outage to keep retrying. A connection made while it
+        // was asked (the chat opened, and reconnected) is the one that counts: a second would be left open beside it.
+        const asked = generation;
         api.session(id).then(
           () => {
-            if (!cancelled) retry = setTimeout(connect, reconnectDelay(failed));
+            if (!cancelled && asked === generation) retry = setTimeout(connect, reconnectDelay(failed));
           },
           (err) => {
-            if (cancelled) return;
+            if (cancelled || asked !== generation) return;
             if (err instanceof ApiError && err.status === 404) set(e, { missing: true, loaded: true });
             else retry = setTimeout(connect, reconnectDelay(failed));
           },

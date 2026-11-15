@@ -41,6 +41,18 @@ test('what is not a range is told apart from a range that takes nothing', () => 
   assert.equal(takes('^1.0', '1.0.0-beta'), null);
 });
 
+test('a range is read whole before it is matched: an alternative that takes the version does not hide one that is not a range', () => {
+  for (const range of ['^1.0 || not-a-range', '>=2 nonsense', '^1.0 || >=2 nonsense', '* || ~']) {
+    assert.equal(takes(range, '1.0.0'), null, range);
+    assert.equal(semver.validRange(range), null, `semver reads "${range}"`);
+  }
+  // What the server passes on of a declaration over 100 characters: cut, and marked so that it is not read.
+  const long = `^1.0 || ${'^2.0 || '.repeat(20)}`;
+  const cut = `${long.slice(0, 100)}…`;
+  assert.equal(takes(cut, '1.0.0'), null);
+  assert.match(refusal(cut, '1.0.0')!, /not a version range this portal reads/);
+});
+
 test('an extension that needs a newer contract is refused with the numbers, and one that needs nothing or what there is is not', () => {
   assert.equal(refusal(undefined), undefined);
   assert.equal(refusal('^1.0'), undefined);

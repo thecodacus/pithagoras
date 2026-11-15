@@ -52,15 +52,35 @@ export function createSessions(deps: SessionsDeps) {
   const unlisted = createStore<Readonly<Record<string, Unlisted>>>({});
   const listed = (id: string) => store.get().list.some((s) => s.id === id);
 
-  /** Asks for the list. Rejects when the portal does not answer; the state says so too. */
+  /** Counts the asks for the list. */
+  let asks = 0;
+  /**
+   * The last ask whose answer is shown, or the last ask made before a change shown here (a delete, a rename): an answer
+   * to it or to an earlier one is older than what is shown. Not "the last ask made": the list is polled every few
+   * seconds, and a portal slower than that would then never be shown.
+   */
+  let shown = 0;
+  /** A change the portal has made, shown before the list is asked for again: no answer asked for before it is put over it. */
+  const changedHere = (change: (s: SessionsState) => SessionsState) => {
+    shown = asks;
+    store.update(change);
+  };
+
+  /**
+   * Asks for the list. Rejects when the portal does not answer; the state says so too. An answer older than what is
+   * shown is not put in (a poll sent before a delete brought the chat back), and resolves to the list as it is.
+   */
   async function refresh(): Promise<Session[]> {
+    const mine = ++asks;
     let r: Awaited<ReturnType<SessionsApi["sessions"]>>;
     try {
       r = await api.sessions();
     } catch (e) {
-      store.update((s) => (s.status === "offline" ? s : { ...s, status: "offline" }));
+      if (mine > shown) store.update((s) => (s.status === "offline" ? s : { ...s, status: "offline" }));
       throw e;
     }
+    if (mine <= shown) return store.get().list;
+    shown = mine;
     deps.installed?.(r.extensions);
     // Kept as it was when it says the same: a list asked for every few seconds is mostly unchanged, and a new array is a draw for nothing.
     store.update((s) => ({ list: reconcile(s.list, r.sessions), status: "ready", executor: r.executor, error: null }));
@@ -149,12 +169,12 @@ export function createSessions(deps: SessionsDeps) {
     },
     async rename(id: string, title: string): Promise<void> {
       await api.renameSession(id, title);
-      store.update((s) => ({ ...s, list: s.list.map((c) => (c.id === id ? { ...c, title } : c)) }));
+      changedHere((s) => ({ ...s, list: s.list.map((c) => (c.id === id ? { ...c, title } : c)) }));
       await refreshQuietly();
     },
     async pin(id: string, pinned: boolean): Promise<void> {
       await api.pinSession(id, pinned);
-      store.update((s) => ({ ...s, list: s.list.map((c) => (c.id === id ? { ...c, pinned } : c)) }));
+      changedHere((s) => ({ ...s, list: s.list.map((c) => (c.id === id ? { ...c, pinned } : c)) }));
       await refreshQuietly();
     },
     /**
@@ -207,10 +227,18 @@ export function createSessions(deps: SessionsDeps) {
   /** A chat's sub-chats the list has, whether or not the chat itself is in it. */
   const subChatsOf = (id: string): Session[] => store.get().list.filter((c) => c.parent === id);
 
-  /** Deleted by now, and shown so, whether or not the list then loads: the chats and their sub-chats are out of it. */
+  /**
+   * Deleted by now, and shown so, whether or not the list then loads: the chats and their sub-chats are out of it, and
+   * out of what was fetched of chats outside it, where `find` would still have them. One still looked at is missing.
+   */
   function goneFromList(ids: readonly string[]): void {
     const gone = new Set(ids);
-    store.update((s) => ({ ...s, list: s.list.filter((c) => !gone.has(c.id) && !(c.parent && gone.has(c.parent))) }));
+    const goes = (c: Session) => gone.has(c.id) || Boolean(c.parent && gone.has(c.parent));
+    changedHere((s) => ({ ...s, list: s.list.filter((c) => !goes(c)) }));
+    for (const [id, held] of Object.entries(unlisted.get())) {
+      if (!gone.has(id) && !(held.session && goes(held.session))) continue;
+      setUnlisted(id, watching.has(id) ? { session: null, missing: true } : null);
+    }
   }
 
   return { store, unlisted, refresh, start, watch, find, patchStatus, actions };

@@ -45,14 +45,18 @@ export function createStatus(deps: { sessions: Sessions; chats: Chats; update: U
       off?.();
     };
   };
+  /** The last `update` handed out: `derived` compares one level deep, so a new object that says the same would be a new snapshot each read. */
+  let lastUpdate: StatusState["update"] | undefined;
   return derived<StatusState>([sessions.store.subscribe, onChat, update.subscribe], () => {
     const { status, executor } = sessions.store.get();
     const id = chats.screen.get();
     const failures = id ? chats.peek(id).failures : 0;
     const { status: up, lost } = update.snapshot();
+    const next = { behind: up?.notice?.count ?? 0, running: up?.run?.state === "running" || up?.run?.state === "restarting", lost };
+    if (!lastUpdate || lastUpdate.behind !== next.behind || lastUpdate.running !== next.running || lastUpdate.lost !== next.lost) lastUpdate = next;
     return {
       connection: status === "offline" ? "offline" : failures >= 2 ? "unstable" : "online",
-      update: { behind: up?.notice?.count ?? 0, running: up?.run?.state === "running" || up?.run?.state === "restarting", lost },
+      update: lastUpdate,
       executor,
     };
   });

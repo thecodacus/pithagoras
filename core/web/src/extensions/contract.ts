@@ -88,22 +88,19 @@ function bounds(comparator: string): { from: Triple | null; to: Triple | null } 
 export function takes(range: string, version: string = CONTRACT_VERSION): boolean | null {
   const v = triple(version);
   if (!v) return null;
-  let readable = true;
-  const found = range.split("||").some((alternative) => {
+  // All of it is read before any of it is matched: an alternative that takes the version must not hide one after it
+  // that is not a range (`^1.0 || nonsense`, or a declaration the server cut short).
+  const alternatives = range.split("||").map((alternative) => {
     const text = alternative.trim();
-    if (text === "") return true;
+    // An empty alternative is any version.
+    if (text === "") return [];
     // `>= 1.2` with a space after the operator is one comparator.
-    const parts = text.replace(/(\^|~|>=|<=|>|<|=)\s+/g, "$1").split(/\s+/);
-    return parts.every((part) => {
-      const b = bounds(part);
-      if ("error" in b) {
-        readable = false;
-        return false;
-      }
-      return (!b.from || compare(v, b.from) >= 0) && (!b.to || compare(v, b.to) < 0);
-    });
+    return text.replace(/(\^|~|>=|<=|>|<|=)\s+/g, "$1").split(/\s+/).map(bounds);
   });
-  return readable ? found : null;
+  if (alternatives.some((parts) => parts.some((b) => "error" in b))) return null;
+  return alternatives.some((parts) =>
+    parts.every((b) => !("error" in b) && (!b.from || compare(v, b.from) >= 0) && (!b.to || compare(v, b.to) < 0)),
+  );
 }
 
 /** What the page says of an extension whose `pithagoras.api` this portal's contract is not one of, or nothing where it is. */

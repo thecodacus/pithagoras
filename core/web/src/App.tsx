@@ -295,17 +295,22 @@ function Shell({
     setMobileNav(false);
     navigate(`/s/${id}`);
   });
+  // The chat open as last drawn: a delete that settles reads it then, not as it was when the delete was asked for.
+  const openNow = useRef({ sessionId, parent: active?.parent });
+  openNow.current = { sessionId, parent: active?.parent };
   /** False where the person said no to the question the kernel asks first. */
   const onDeleteChat = useStable(async (id: string) => {
-    // The chat open is this one, or one of its sub-chats, which go with it.
-    // It need not be listed: a sub-chat an extension keeps out of the list is fetched by its id (`active`).
-    const open = sessionId === id || active?.parent === id;
     const parent = sessions.find(id)?.parent;
     // As soon as it is out of the list, in the same draw: waiting for the list to come again showed no chat for a moment.
     return sessions.actions.remove(id, (list) => {
+      // The chat open is this one, or one of its sub-chats, which go with it; another chat opened while the question
+      // was asked or the delete was on its way stays. It need not be listed: a sub-chat an extension keeps out of the
+      // list is fetched by its id (`active`).
+      const now = openNow.current;
+      if (now.sessionId !== id && now.parent !== id) return;
       // A sub-chat gone takes its page back to its chat, if that is listed; a chat gone, to the latest chat of its own.
       const next = parent && list.some((s) => s.id === parent) ? parent : splitSubChats(list).top[0]?.id;
-      if (open) navigate(next ? `/s/${next}` : "/", { replace: true });
+      navigate(next ? `/s/${next}` : "/", { replace: true });
     });
   });
   const onRenameChat = useStable((id: string, title: string) => sessions.actions.rename(id, title));

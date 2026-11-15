@@ -23,7 +23,7 @@ function page() {
   return doc;
 }
 
-function make(opts: { modes?: ChatMode[]; answers?: boolean[]; most?: number; older?: PortalEvent[]; missing?: string[]; visibility?: ReturnType<typeof page> } = {}) {
+function make(opts: { modes?: ChatMode[]; answers?: boolean[]; most?: number; older?: PortalEvent[]; missing?: string[]; visibility?: ReturnType<typeof page>; probe?: (id: string) => Promise<unknown> } = {}) {
   const calls: string[] = [];
   const body: Record<string, unknown> = {};
   const asked: Question[] = [];
@@ -48,6 +48,7 @@ function make(opts: { modes?: ChatMode[]; answers?: boolean[]; most?: number; ol
     },
     session: async (id: string) => {
       calls.push(`session ${id}`);
+      if (opts.probe) return opts.probe(id);
       return opts.missing?.includes(id) ? apiError(404) : session(id);
     },
     prompt: async (id: string, message: string, options: unknown) => (calls.push(`prompt ${id}`), (body.prompt = [message, options]), { ok: true }),
@@ -340,6 +341,25 @@ test("a replay cut off before it was all in is read again from the start, and no
   second.start({ events: [said(1, "The whole task"), said(2, "The whole answer")] });
   assert.deepEqual(chats.peek("a").events.map((e) => e.seq), [1, 2]);
   assert.equal(chats.peek("a").loaded, true);
+});
+
+test("a stream broken while the chat is opened is not connected twice: the question asked about the broken one is not acted on", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let answer!: () => void;
+  const { chats, sources } = make({ probe: (id) => new Promise((resolve) => (answer = () => resolve(session(id)))) });
+  // A panel reads the chat; its stream breaks, and the portal is asked whether the chat is still there.
+  chats.acquire("a");
+  sources.of("a").start({ events: [said(1, "Hi")] });
+  sources.of("a").fail();
+  // Before it answers, the chat is opened: its stream is connected again at once.
+  chats.open("a");
+  assert.equal(sources.all.length, 2);
+  answer();
+  for (let i = 0; i < 5; i++) await Promise.resolve();
+  t.mock.timers.tick(60_000);
+  // The answer about the broken stream starts no third one beside the second.
+  assert.equal(sources.all.length, 2);
+  assert.equal(sources.live().length, 1);
 });
 
 test("a chat the portal has none of is missing, and its stream is not tried again", async () => {

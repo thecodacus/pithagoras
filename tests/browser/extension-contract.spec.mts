@@ -15,10 +15,10 @@ test.beforeEach(async ({ page }) => {
 test('an extension that needs a newer interface API than the portal has is not loaded, and the page says why, with both numbers', async ({ page }) => {
   await page.goto('/tests/contract.html');
   await expect(page.getByTestId('failures')).toContainText('test-contract-new: Needs interface API ^2.0; this portal has 1.0.0');
-  // The one written for what the portal has is loaded: nothing said of it, and the other's module was never called.
+  // The one written for what the portal has is loaded: nothing said of it, and the other's module was never imported.
   await expect(page.getByTestId('failures')).not.toContainText('test-contract:');
   await expect.poll(() => page.evaluate(() => (window as any).contractSeen !== undefined)).toBe(true);
-  expect(await page.evaluate(() => (window as any).contractNewLoaded)).toBeUndefined();
+  expect(await page.evaluate(() => [(window as any).contractNewLoaded, (window as any).contractNewCalled])).toEqual([undefined, undefined]);
 });
 
 test('an extension is handed the contract: its version and features, every member, and the addresses of a chat\'s files', async ({ page }) => {
@@ -50,4 +50,17 @@ test("its hooks read the portal's data, and what it keeps in this browser is und
   expect(await page.evaluate(() => localStorage.getItem('ui.test-contract:density'))).toBeNull();
   await page.setViewportSize({ width: 500, height: 800 });
   await expect(page.getByTestId('reader')).toContainText('phone');
+});
+
+test('a part drawn after the portal did not answer asks again, and shows what it answers then', async ({ page }) => {
+  let down = true;
+  await page.route('**/api/people', (route) => (down ? route.fulfill({ status: 503, json: { error: 'down' } }) : route.fulfill({ json: { people: [{ id: 'p1', name: 'Ada', role: 'primary' }] } })));
+  await page.goto('/tests/contract.html');
+  await expect(page.getByTestId('reader')).toContainText('Owner · roomy');
+  await expect(page.getByTestId('reader')).toContainText('offline');
+  down = false;
+  await page.getByRole('button', { name: 'Hide the reader' }).click();
+  await page.getByRole('button', { name: 'Show the reader' }).click();
+  await expect(page.getByTestId('reader')).toContainText('Ada · roomy');
+  await expect(page.getByTestId('reader')).toContainText('ready');
 });

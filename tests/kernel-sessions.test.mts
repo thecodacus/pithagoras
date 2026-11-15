@@ -169,6 +169,63 @@ test("a chat deleted is out of the list for the page to go on from, before the l
   assert.equal(await done, true);
 });
 
+test("a list asked for before a delete, that comes after it, does not bring the deleted chat back; a slow portal is still shown", async () => {
+  const { sessions, api, state } = make([session("a"), session("b")]);
+  await sessions.refresh();
+  // A poll is on its way when the chat is deleted; the portal answers it with the list from before the delete, late.
+  const asked = api.sessions;
+  let answerPoll!: () => void;
+  const before = await asked();
+  api.sessions = () => new Promise((r) => (answerPoll = () => r(before)));
+  const poll = sessions.refresh();
+  api.sessions = asked;
+  assert.equal(await sessions.actions.remove("a"), true);
+  assert.deepEqual(sessions.store.get().list.map((s) => s.id), ["b"]);
+  answerPoll();
+  await poll;
+  assert.deepEqual(sessions.store.get().list.map((s) => s.id), ["b"]);
+  // A portal slower than the poll: two asks on their way at once, answered in order, are each shown. Only an answer
+  // older than one shown is left out, or a list asked for every few seconds would never be shown.
+  const answers: (() => void)[] = [];
+  api.sessions = () => new Promise((r) => answers.push(() => r(asked())));
+  const first = sessions.refresh();
+  const second = sessions.refresh();
+  state.chats = [session("b"), session("c")];
+  answers[0]();
+  await first;
+  assert.deepEqual(sessions.store.get().list.map((s) => s.id), ["b", "c"]);
+  state.chats = [session("b"), session("c"), session("d")];
+  answers[1]();
+  await second;
+  assert.deepEqual(sessions.store.get().list.map((s) => s.id), ["b", "c", "d"]);
+});
+
+test("a deleted chat that was fetched from outside the list is not found after, nor are its sub-chats", async () => {
+  const { sessions, state } = make([session("a")]);
+  await sessions.refresh();
+  state.single.set("agent-1", session("agent-1", { kind: "agent" }));
+  state.single.set("sub-1", session("sub-1", { parent: "agent-1" }));
+  const release = sessions.watch("agent-1");
+  const releaseSub = sessions.watch("sub-1");
+  await settle();
+  release();
+  releaseSub();
+  // Kept after its readers went, for the next to find at once.
+  assert.equal(sessions.find("agent-1")?.id, "agent-1");
+  // Another sub-chat of it is still looked at.
+  state.single.set("sub-2", session("sub-2", { parent: "agent-1" }));
+  const watched = sessions.watch("sub-2");
+  await settle();
+  // Deleted from a part that is not looking at it.
+  assert.equal(await sessions.actions.remove("agent-1"), true);
+  assert.equal(sessions.find("agent-1"), null);
+  assert.equal(sessions.find("sub-1"), null);
+  // The one still looked at is missing at once, as its next fetch would say.
+  assert.equal(sessions.find("sub-2"), null);
+  assert.equal(sessions.unlisted.get()["sub-2"].missing, true);
+  watched();
+});
+
 test("deleting several names every one in the question, those outside the list too, and counts their sub-chats", async () => {
   const { sessions, asked, state } = make([session("a", { title: "Shopping list" }), session("s1", { parent: "agent", title: "Helper" })], [true]);
   state.single.set("agent", session("agent", { title: "Nightly agent" }));

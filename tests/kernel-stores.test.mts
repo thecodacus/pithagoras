@@ -123,10 +123,20 @@ test("one package's preferences are not another's, whatever dots their names and
   assert.equal(map.size, 2);
 });
 
-test("preferences of a browser that will not store them are the fallbacks", () => {
+test("preferences of a browser that will not store them hold for as long as the page is open", () => {
   const prefs = createPrefs(guarded(() => { throw new Error("blocked"); }));
-  prefs.set("a", "1");
   assert.equal(prefs.get("a", "fallback"), "fallback");
+  let heard = 0;
+  prefs.subscribe(() => heard++);
+  // The sidebar folded in a private window: it stays folded, though nothing remembers it after a reload.
+  prefs.set("a", "1");
+  assert.equal(prefs.get("a", "fallback"), "1");
+  assert.equal(prefs.snapshot("a", "fallback"), "1");
+  prefs.remove("a");
+  assert.equal(prefs.get("a", "fallback"), "fallback");
+  assert.equal(heard, 2);
+  // A browser that will not store them again tomorrow starts from the fallbacks.
+  assert.equal(createPrefs(guarded(() => { throw new Error("blocked"); })).get("a", "fallback"), "fallback");
 });
 
 test("who is using the portal is the person marked primary, and Owner while nobody is", async () => {
@@ -181,6 +191,38 @@ test("the models there are, and what a chat uses, are asked of the portal and ch
   assert.deepEqual(asked, ["b"]);
 });
 
+test("a change of a chat's model is seen by every part that reads it from the store, and a read answered late does not undo it", async () => {
+  let model = "m1";
+  const reads: (() => void)[] = [];
+  const models = createModels({
+    // Each read is answered when the test says, with what the chat used when it was asked.
+    models: () => {
+      const then = model;
+      return new Promise((resolve) => reads.push(() => resolve({ state: { model: { provider: "p", id: then }, thinkingLevel: "low" }, thinking: { levels: ["low"] }, models: { models: [] } })));
+    },
+    setConfig: async (_id: string, patch: { modelId: string }) => void (model = patch.modelId),
+  } as never);
+  // A part starts reading the chat; before the portal answers, the stock picker changes the model.
+  const first = models.loadChat("a");
+  await models.change("a", { provider: "p", modelId: "m2" });
+  reads[0]();
+  await first;
+  // The answer from before the change is not what the chat uses.
+  assert.equal(models.current("a").model, null);
+  const second = models.loadChat("a");
+  reads[1]();
+  await second;
+  assert.equal(models.current("a").model?.id, "m2");
+  // A chat a part reads from the store is read back after a change, without the change waiting for it.
+  const seen: (string | undefined)[] = [];
+  models.chats.subscribe(() => seen.push(models.current("a").model?.id));
+  await models.change("a", { provider: "p", modelId: "m3" });
+  assert.equal(reads.length, 3);
+  reads[2]();
+  await settle();
+  assert.deepEqual(seen, ["m3"]);
+});
+
 test("the status says whether the portal can be reached, whether it is behind, and where chats run", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const poll = polls();
@@ -212,6 +254,29 @@ test("the status says whether the portal can be reached, whether it is behind, a
   await sessions.refresh().catch(() => {});
   assert.equal(status.get().connection, "offline");
   assert.ok(seen.length >= 3);
+  stop();
+});
+
+test("the status is the same object while nothing in it changed, read with or without a listener", async () => {
+  const poll = polls();
+  const sessions = createSessions({ api: { sessions: async () => ({ sessions: [], executor: "host", extensions: "r" }) } as never, ask: async () => true, poll: poll.poll });
+  const chats = createChats({ api: {} as never, ask: async () => true, open: streams().open, poll: poll.poll, frame: frames().frame, sessions, fanOut: { serverPush() {}, extensionMessage() {}, fill() {}, onScreen() {} } });
+  let snapshot = { status: { notice: { count: 2 } }, lost: false };
+  const updateListeners = new Set<() => void>();
+  const status = createStatus({ sessions, chats, update: { snapshot: () => snapshot as never, subscribe: (l) => (updateListeners.add(l), () => void updateListeners.delete(l)) } });
+  await sessions.refresh();
+  // What React's useSyncExternalStore asks of a snapshot: read twice with nothing changed, it is the same, or it draws without end.
+  assert.equal(status.get(), status.get());
+  const stop = status.subscribe(() => {});
+  const before = status.get();
+  // The update module tells of a change that says the same.
+  snapshot = { status: { notice: { count: 2 } }, lost: false };
+  updateListeners.forEach((l) => l());
+  assert.equal(status.get(), before);
+  snapshot = { status: { notice: { count: 3 } }, lost: false };
+  updateListeners.forEach((l) => l());
+  assert.notEqual(status.get(), before);
+  assert.equal(status.get().update.behind, 3);
   stop();
 });
 
@@ -359,6 +424,26 @@ test("two messages on their way in one chat keep it sending until the last has g
   await box;
   assert.equal(composer.store.get().a.sending, false);
   assert.equal(composer.canSubmit("a"), true);
+});
+
+test("a list of commands asked for an earlier run that comes after the list for a later run does not replace it", async () => {
+  const answers: ((names: string[]) => void)[] = [];
+  const { safe } = mapStorage();
+  const composer = createComposer({
+    api: { commands: () => new Promise((resolve) => answers.push((names) => resolve({ commands: names.map((name) => ({ name, source: "extension" })) }))) } as never,
+    drafts: createDrafts(safe),
+    pending: createPending(),
+    chat: () => ({ send: async () => {} }),
+  });
+  // A status line names a command after run 1; before the pi answers, run 2 ends and "/" asks for its list.
+  const early = composer.loadCommandsIfRunning("a", "1");
+  const late = composer.loadCommands("a", "2");
+  answers[1](["deploy", "installed-by-run-2"]);
+  await late;
+  answers[0](["deploy"]);
+  assert.equal(await early, undefined);
+  assert.deepEqual(composer.get("a").commands.map((c) => c.name), ["deploy", "installed-by-run-2"]);
+  assert.equal(composer.commandsAreFor("a", "2"), true);
 });
 
 test("commands are asked of a pi that is up without starting one, and a list that came that way is the list for its key", async () => {

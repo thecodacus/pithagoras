@@ -18,9 +18,9 @@ const family = () => [
 ];
 
 /** A portal with these chats, Home and the projects named; what is deleted is gone from the list it gives next. */
-async function portal(page: Page, sessions: Record<string, unknown>[] = family(), projects: string[] = []) {
+async function portal(page: Page, sessions: Record<string, unknown>[] = family(), projects: string[] = [], hold?: Promise<void>) {
   const deleted: string[] = [];
-  await mockPortal(page, ({ path: p, method }) => {
+  await mockPortal(page, async ({ path: p, method }) => {
     const alive = (s: Record<string, unknown>) => !deleted.includes(s.id as string) && !deleted.includes(s.parent as string);
     // A child an extension keeps out of the list is found by its id only.
     if (p === '/api/sessions' && method === 'GET') return { sessions: sessions.filter((s) => alive(s) && s.listed !== false), executor: 'host' };
@@ -31,6 +31,7 @@ async function portal(page: Page, sessions: Record<string, unknown>[] = family()
     }
     const del = /^\/api\/sessions\/([^/]+)$/.exec(p);
     if (del && method === 'DELETE') {
+      await hold;
       deleted.push(del[1]);
       return { ok: true };
     }
@@ -203,6 +204,24 @@ test('deleting a chat while one of its sub-chats that the lists leave out is ope
   await build.hover();
   await build.getByRole('button', { name: 'Delete Build the site' }).click();
   await page.getByRole('alertdialog').getByRole('button', { name: 'Delete', exact: true }).click();
+  await expect(page).toHaveURL(/\/s\/logo$/);
+});
+
+test('a chat left while its delete is on its way does not take the page with it: the chat opened since stays', async ({ page }) => {
+  let release!: () => void;
+  await portal(page, family(), [], new Promise<void>((resolve) => (release = resolve)));
+  await page.goto('/s/links');
+  const links = subChats(sidebar(page), 'Build the site').locator('[data-flip="links"]');
+  await links.hover();
+  await links.getByRole('button', { name: 'Delete Check the links' }).click();
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Delete', exact: true }).click();
+  // The portal has not answered yet; another chat is opened meanwhile.
+  await sidebar(page).locator('[data-flip="logo"]').click();
+  await expect(page).toHaveURL(/\/s\/logo$/);
+  release();
+  await expect(sidebar(page).locator('[data-flip="links"]')).toHaveCount(0);
+  // Not taken to the deleted sub-chat's chat, where deleting it with it open goes.
+  await page.waitForTimeout(300);
   await expect(page).toHaveURL(/\/s\/logo$/);
 });
 

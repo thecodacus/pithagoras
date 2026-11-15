@@ -47,9 +47,10 @@ export function dataFor(extension: string): Data {
     models: {
       use() {
         const { models } = useKernel();
-        // Asked for once, by the first part that reads it: `status` says how it went.
+        // Asked for by the first part that reads it: `status` says how it went. A part drawn after an ask that failed
+        // asks again, so that the page does not need a reload once the portal answers again.
         useEffect(() => {
-          if (models.store.get().status === "loading") void models.load();
+          if (models.store.get().status !== "ready") void models.load();
         }, [models]);
         return useModels();
       },
@@ -66,7 +67,7 @@ export function dataFor(extension: string): Data {
       use() {
         const { settings } = useKernel();
         useEffect(() => {
-          if (settings.store.get().status === "loading") void settings.load();
+          if (settings.store.get().status !== "ready") void settings.load();
         }, [settings]);
         return useSettings();
       },
@@ -75,7 +76,7 @@ export function dataFor(extension: string): Data {
       use() {
         const { me } = useKernel();
         useEffect(() => {
-          if (me.store.get().status === "loading") void me.load();
+          if (me.store.get().status !== "ready") void me.load();
         }, [me]);
         return useMe();
       },

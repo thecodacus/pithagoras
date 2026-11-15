@@ -1307,6 +1307,8 @@ export function Chat({
       await attempt(async () => {
         try {
           done = (await chats.controller(chat).setMode(mode, { accepted: () => setChosenHere({ chat, mode }) })) !== false;
+          // The person said no to a question the list read before did not know of (the mode asks since): shown as it was.
+          if (!done && modeSave.current === saving) setChosenHere(null);
         } catch (e) {
           // Shown back as it was, unless another choice was made since: that one is shown.
           if (modeSave.current === saving) setChosenHere(null);

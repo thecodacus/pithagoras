@@ -16,7 +16,7 @@ function Reader({ portal }: { portal: Portal }) {
   const chats = portal.sessions.use((s) => s.list.length);
   return (
     <>
-      <p data-testid="reader">{me.name} · {pref} · {viewport} · {chats} chats</p>
+      <p data-testid="reader">{me.name} · {pref} · {viewport} · {chats} chats · {me.status}</p>
       <button onClick={() => portal.prefs.set('density', 'tight')}>Tighten</button>
       <button onClick={() => portal.prefs.remove('density')}>Forget</button>
     </>
@@ -26,6 +26,8 @@ function Reader({ portal }: { portal: Portal }) {
 function Page() {
   const { failures } = useExtensions();
   const [portal, setPortal] = useState<Portal | null>(null);
+  // The reader drawn again, as a part an interface shows and hides.
+  const [shown, setShown] = useState(true);
   useEffect(() => {
     const timer = setInterval(() => {
       const given = (window as any).contractPortal as Portal | undefined;
@@ -36,7 +38,8 @@ function Page() {
   return (
     <>
       <ul data-testid="failures">{Object.entries(failures).map(([name, why]) => <li key={name}>{name}: {why}</li>)}</ul>
-      {portal && <Reader portal={portal} />}
+      <button onClick={() => setShown(!shown)}>{shown ? 'Hide the reader' : 'Show the reader'}</button>
+      {portal && shown && <Reader portal={portal} />}
     </>
   );
 }

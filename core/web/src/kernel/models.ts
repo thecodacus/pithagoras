@@ -53,10 +53,20 @@ export function createModels(api: ModelsApi) {
     }
   }
 
+  /** Counts, per chat, the reads and the changes: a read answered after a later read or change says what is no longer so. */
+  const asks = new Map<string, number>();
+  const ask = (id: string): number => {
+    const n = (asks.get(id) ?? 0) + 1;
+    asks.set(id, n);
+    return n;
+  };
+
   /** What the chat uses, asked of the portal; `current` after. A chat the portal cannot answer for keeps what it had. */
   async function loadChat(id: string): Promise<ChatModel> {
+    const mine = ask(id);
     try {
       const c = await api.models(id);
+      if (asks.get(id) !== mine) return current(id);
       const named = c.named?.model ? { provider: c.named.provider ?? c.state.model.provider, id: c.named.model } : null;
       const model = named ?? { provider: c.state.model.provider, id: c.state.model.id };
       const next: ChatModel = { model, thinking: c.state.thinkingLevel, levels: c.thinking.levels };
@@ -69,19 +79,30 @@ export function createModels(api: ModelsApi) {
 
   const current = (id: string): ChatModel => chats.get()[id] ?? FOLLOWING;
 
+  /** Saves the change; what was being read of the chat before it is out of date. */
+  async function write(id: string, choice: ConfigPatch): Promise<void> {
+    ask(id);
+    await api.setConfig(id, choice);
+  }
+
   return {
     store,
     chats,
     load,
     loadChat,
     current,
-    /** Changes how the chat is set (its model, its effort, whether it compacts by itself). Rejects where the portal refuses. */
+    /**
+     * Changes how the chat is set (its model, its effort, whether it compacts by itself). Rejects where the portal
+     * refuses. Not waiting for the chat to be read back, for the pills that read it themselves; a part that reads it
+     * through this store (`current`) is told once it is read.
+     */
     async change(id: string, choice: ConfigPatch): Promise<void> {
-      await api.setConfig(id, choice);
+      await write(id, choice);
+      if (id in chats.get()) void loadChat(id);
     },
     /** `change`, and reads what the chat uses now. */
     async set(id: string, choice: ConfigPatch): Promise<ChatModel> {
-      await api.setConfig(id, choice);
+      await write(id, choice);
       return loadChat(id);
     },
   };

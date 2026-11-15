@@ -42,7 +42,7 @@ which contract it was written for, and how it finds out whether the portal has w
 | `portal.chats.useEvents(id)` | Its events, `status`, `loading`, `missing`, and what paging and the version switch need: `versions`, `hasEarlier`, `loadingEarlier`, `live` |
 | `portal.composer.use(id)` | `{ draft, attachments, adding, commands, sending }` of a chat's box |
 | `portal.models.use()` | `{ models, status }`: each model is `{ provider, id, name, contextWindow?, reasoning, images }` |
-| `portal.models.useChat(id)` | What the chat uses now: `{ model, thinking, levels }` |
+| `portal.models.useChat(id)` | What the chat uses now: `{ model, thinking, levels }`, read again when the chat's model or effort is changed in the page, in its pills or through `portal.models.set` |
 | `portal.settings.use()` | Four public settings: `provider`, `model`, `thinkingLevel`, `executor` |
 | `portal.me.use()` | `{ name, role }`; the role is always `"owner"` for now |
 | `portal.status.use()` | `{ connection, update, executor }` as codes |
@@ -51,6 +51,10 @@ which contract it was written for, and how it finds out whether the portal has w
 
 `pick` is what `portal.chats.use` has: say what of the value the component uses, and it is drawn again only when
 that changes.
+
+`portal.models.use()`, `portal.settings.use()` and `portal.me.use()` ask the portal when the first of them is drawn. One
+drawn after that ask failed (`status: "offline"`) asks again, so a part shown later finds the portal back without a
+reload.
 
 `portal.media` gives the addresses of a chat's files (`image`, `picture`, `video`, `file`), for an `img`, a `video` or a
 link. Nothing is asked.
@@ -111,7 +115,8 @@ within five seconds.
 ## Preferences
 
 `portal.prefs` keeps strings in the browser under `ui.<package name>:<key>`, which no other package reads. Nothing in it
-follows the person to another browser. The portal's own interface keeps its keys as they have always been, so nobody
+follows the person to another browser. Where the browser keeps nothing (a private window, blocked site data, a full
+quota), a preference set still holds for as long as the page is open. The portal's own interface keeps its keys as they have always been, so nobody
 loses a layout.
 
 ## Versioning

@@ -117,7 +117,8 @@ export function createFakeKernel(options: FakeKernelOptions = {}) {
       const s = store(id);
       const was = s.get();
       const next = { ...was, events, loaded: true, ...more };
-      if (was.events === next.events && was.loaded === next.loaded && was.versions === next.versions && was.moreBefore === next.moreBefore) return;
+      // Nothing new in any field: not stored again, so a draw that feeds the same is not a change.
+      if ((Object.keys(next) as (keyof ChatState)[]).every((key) => was[key] === next[key])) return;
       s.seed(next);
     },
     /** More events, as a stream says them. */
