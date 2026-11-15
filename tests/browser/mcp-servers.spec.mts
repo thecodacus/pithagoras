@@ -4,6 +4,7 @@ import { test, expect, mockPortal } from './portal-mock';
 /** Settings → MCP over canned answers, with every save that was sent. */
 async function portal(page: Page) {
   const saves: string[] = [];
+  const entries: unknown[] = [];
   const status = {
     github: { lazy: true, by: 'threshold', tools: { count: 38, tokens: 9200, at: 1, stale: false }, approve: ['delete_*'], trusted: false },
     notes: { mark: 'direct', lazy: false, by: 'mark', tools: null, approve: [], trusted: true },
@@ -12,7 +13,7 @@ async function portal(page: Page) {
     path: '/a/mcp.json', exists: true, clashes: [], raw: '{}', parseError: null,
     servers: [
       { name: 'github', entry: { url: 'https://mcp.example.test', oauth: { clientId: 'portal-test' }, headers: { 'X-Org': 'a' } }, transport: 'http', disabled: false, problem: null, commands: [] },
-      { name: 'notes', entry: { command: 'notes-mcp' }, transport: 'stdio', disabled: false, problem: null, commands: [] },
+      { name: 'notes', entry: { type: 'stdio', command: 'notes-mcp' }, transport: 'stdio', disabled: false, problem: null, commands: [] },
     ],
   };
   await mockPortal(page, ({ path, method, json }) => {
@@ -28,11 +29,12 @@ async function portal(page: Page) {
     }
     if (path.startsWith('/api/mcp/servers/') && method === 'PUT') {
       saves.push(`${path.slice('/api/mcp/servers/'.length)} from ${json().from}`);
+      entries.push(json().entry);
       return { ok: true };
     }
   }, { settings: true });
   await page.goto('/settings/mcp');
-  return { saves, dialog: page.getByRole('dialog', { name: 'Settings' }) };
+  return { saves, entries, dialog: page.getByRole('dialog', { name: 'Settings' }) };
 }
 
 test('a new server cannot take the name of one that is there: it is said, and nothing is saved', async ({ page }) => {
@@ -95,4 +97,14 @@ test('a renamed server has its mark and its questions said again under the new n
   await dialog.getByRole('textbox', { name: 'Ask before these tools' }).fill('drop');
   await dialog.getByRole('button', { name: 'Save' }).click();
   await expect.poll(() => saves).toEqual(['memo from notes', 'mark memo direct', 'approve memo drop']);
+});
+
+test('a server moved from a local process to an address is saved as one, without the transport it had', async ({ page }) => {
+  // From the CodeRabbit review of #371: `type: "stdio"` stayed beside the new url, and pi's rules refused the save.
+  const { entries, dialog } = await portal(page);
+  await dialog.getByRole('button', { name: /^notes/ }).first().click();
+  await dialog.getByRole('radio', { name: 'HTTP' }).click();
+  await dialog.getByPlaceholder('https://example.com/mcp').fill('https://notes.example.test/mcp');
+  await dialog.getByRole('button', { name: 'Save' }).click();
+  await expect.poll(() => entries).toEqual([{ url: 'https://notes.example.test/mcp' }]);
 });

@@ -243,7 +243,8 @@ test('pi\'s own tools have no mark to set, and the groups that can be lazy have 
 
 test('an MCP server is a group like any other: auto, lazy and direct from its header, and its tools stay on', async ({ page }) => {
   const { puts } = await portal(page, { more: servers });
-  const notes = page.getByRole('button', { name: 'Lazy or direct notes', exact: true });
+  // The name says the mark too, as for every set's button.
+  const notes = page.getByRole('button', { name: /^Lazy or direct notes: / });
   await expect(notes).toHaveText('auto');
   await expect(page.getByRole('button', { name: /^notes/ })).toContainText('2 on');
   await notes.click();
@@ -255,7 +256,7 @@ test('an MCP server is a group like any other: auto, lazy and direct from its he
   await expect(page.getByRole('button', { name: 'Lazy or direct mcp__notes__read' })).toBeEnabled();
   await expect(page.getByRole('button', { name: /^notes/ })).toContainText('2 on');
   // The other server is not touched, and a tool of one can be marked on its own.
-  await expect(page.getByRole('button', { name: 'Lazy or direct memory', exact: true })).toHaveText('auto');
+  await expect(page.getByRole('button', { name: /^Lazy or direct memory: / })).toHaveText('auto');
   await notes.click();
   await expect.poll(() => puts.at(-1)).toEqual({ notes: 'direct' });
   await expect(notes).toHaveText('direct');
