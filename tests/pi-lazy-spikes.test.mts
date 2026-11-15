@@ -198,6 +198,30 @@ test("a tool of the group is callable through executeTool only while it is activ
   }
 });
 
+test("a tool called through executeTool runs as a call of its own, with the id of the call that made it, a slash and a count: what the canvas finds its streamed write by", async () => {
+  const ids: { outer?: string; inner: string[] } = { inner: [] };
+  const lazy = (p: any) => {
+    p.registerTool(tool("direct_one", { async execute(id: string) { ids.inner.push(id); return text("direct_one ran"); } }));
+    p.registerTool(tool("tool_search", {
+      exposure: "model-only",
+      async execute(id: string, _a: any, signal: AbortSignal, _update: unknown, ctx: any) {
+        ids.outer = id;
+        await ctx.executeTool("direct_one", {}, { signal });
+        return (await ctx.executeTool("direct_one", {}, { signal })).result;
+      },
+    }));
+  };
+  const script = [call("tool_search", { name: "direct_one" }), "Done."];
+  const { session, close } = await wireSession(await modelOf("anthropic", "claude-opus-4-5"), [lazy], (n) => script[n]);
+  try {
+    await session.prompt("one");
+    assert.ok(ids.outer);
+    assert.deepEqual(ids.inner, [`${ids.outer}/1`, `${ids.outer}/2`]);
+  } finally {
+    await close();
+  }
+});
+
 test("pi's code mode and the hidden group go together: the tools array holds the code tool and the search, and a script and the search both reach the group", async () => {
   const codemode = pi.createCodemodeExtension({ models: false, mode: "only" });
   const script = [call("codemode", { code: "return (await tools.alpha_open({ x: 'a' })).toString();" }), call("tool_search", { action: "call", name: GROUP[1] }), "Done."];
