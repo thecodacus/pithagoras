@@ -153,7 +153,10 @@ export class ToolSearch {
   private definition?: unknown;
   /** The names the last good request hid, for the request where the registry cannot be read. */
   private hiding: string[] = [];
-  /** The groups whose shared rules the model has been given since the context was last cut (compaction, reload). */
+  /**
+   * The shared rules the model has been given since the context was last cut (compaction, reload), each with its group:
+   * by the rule and not by the group, as a tool that registers later can bring the group a rule it shares with another.
+   */
   private told = new Set<string>();
   /** The tag of a head that has none (one made in a test, or with nothing lazy): this tool's own, as random. */
   private readonly ownTag = randomBytes(4).toString("hex");
@@ -292,9 +295,11 @@ export class ToolSearch {
       const count = new Map<string, number>();
       for (const tool of members) for (const line of new Set(tool.guidelines)) count.set(line, (count.get(line) ?? 0) + 1);
       const shared = [...count].filter(([, n]) => n > 1).map(([line]) => line);
-      if (!this.told.has(label)) {
-        for (const line of shared) add(line);
-        this.told.add(label);
+      for (const line of shared) {
+        const key = `${label}\n${line}`;
+        if (this.told.has(key)) continue;
+        add(line);
+        this.told.add(key);
       }
       if (own) {
         for (const tool of tools.filter((t) => t.label === label)) for (const line of tool.guidelines) if (!shared.includes(line)) add(line);
@@ -356,10 +361,25 @@ export class ToolSearch {
       const groups = new Map<string, Lazy[]>();
       for (const tool of tools) groups.set(tool.label, [...(groups.get(tool.label) ?? []), tool]);
       const sorted = [...groups].sort(([a], [b]) => a.localeCompare(b));
-      const lines = sorted.map(([label, members]) => `- ${label} (${members.length}): ${members.map((m) => m.name).slice(0, 12).join(", ")}${members.length > 12 ? ", …" : ""}`);
-      // The names of each group's first twelve are the words of the list.
-      const named = sorted.flatMap(([, members]) => members.slice(0, 12).map((m) => m.name));
-      return listing(`${tools.length} lazy tool${tools.length === 1 ? "" : "s"} in ${groups.size} group${groups.size === 1 ? "" : "s"}:\n${lines.join("\n")}\n\nSearch with words for what you need; describe gives one tool's parameters.`, named);
+      const head = `${tools.length} lazy tool${tools.length === 1 ? "" : "s"} in ${groups.size} group${groups.size === 1 ? "" : "s"}:`;
+      const tail = "\n\nSearch with words for what you need; describe gives one tool's parameters.";
+      const more = (n: number) => `\n${n} more group${n === 1 ? " is" : "s are"} not listed here: a search with words finds their tools too.`;
+      // A result is the model's context from here on, kept to the size of a search's: the groups that do not fit are
+      // counted and not listed. The names of each listed group's first twelve are the words of the list.
+      const room = RESULT_CHARS - tail.length - more(sorted.length).length;
+      let list = head;
+      const named: string[] = [];
+      for (const [i, [label, members]] of sorted.entries()) {
+        const line = `\n- ${label} (${members.length}): ${members.map((m) => m.name).slice(0, 12).join(", ")}${members.length > 12 ? ", …" : ""}`;
+        // The last group needs no room for the count of those after it.
+        if (list.length + line.length > (i === sorted.length - 1 ? RESULT_CHARS - tail.length : room)) {
+          list += more(sorted.length - i);
+          break;
+        }
+        list += line;
+        named.push(...members.slice(0, 12).map((m) => m.name));
+      }
+      return listing(list + tail, named);
     }
     const found = rank(tools, text);
     if (!found.length) return listing(`No lazy tool matches "${text}". Search with other words, or with none to list the groups.`, []);

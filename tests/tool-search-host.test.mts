@@ -173,6 +173,38 @@ test("the rules of a group's tools are said once for the group with its first hi
   assert.match(text(await run({ action: "describe", name: "calc_add" })), new RegExp(`^Rule ${TAG}: Calc rule\\.$`, "m"));
 });
 
+test("a rule two tools of a group come to share when one registers later is said, though the group was found before", async () => {
+  const late = "Close the page when you are done.";
+  const { run, text, add } = make([{ name: "page_read", description: "Read a page.", group: "web", promptGuidelines: ["Read before you quote."] }], { lazyNames: ["page_read", "page_scroll", "page_close"] });
+  const first = text(await run({ action: "search", query: "page" }));
+  assert.match(first, new RegExp(`^Rule ${TAG}: Read before you quote\\.$`, "m"));
+  // Two more of the group register, with a rule they share and the first does not have.
+  add({ name: "page_scroll", description: "Scroll a page.", group: "web", promptGuidelines: [late] });
+  add({ name: "page_close", description: "Close a page.", group: "web", promptGuidelines: [late] });
+  const again = text(await run({ action: "search", query: "page" }));
+  assert.equal(again.match(new RegExp(`^Rule ${TAG}: ${late}$`, "gm"))?.length, 1, "the new shared rule, once");
+  assert.doesNotMatch(text(await run({ action: "search", query: "page" })), new RegExp(late), "and not again while the model has it");
+});
+
+test("a search with no words lists as many groups as fit in a search's room, counts the rest, and names only the tools it listed", async () => {
+  // Forty groups of twelve tools with long names: far more than a result may hold.
+  const many = Array.from({ length: 40 }, (_, g) => Array.from({ length: 12 }, (_, i): Fake => ({ name: `group_${String(g).padStart(2, "0")}_a_rather_long_tool_name_${i}`, group: `g${String(g).padStart(2, "0")}` }))).flat();
+  const { run, text } = make(many);
+  const result = await run({ action: "search" });
+  const listed = text(result);
+  assert.ok(listed.length <= 9000, `bounded: ${listed.length}`);
+  assert.match(listed, /^480 lazy tools in 40 groups:/);
+  const shown = listed.match(/^- g\d\d \(12\)/gm)?.length ?? 0;
+  assert.ok(shown > 0 && shown < 40, `some groups listed: ${shown}`);
+  assert.match(listed, new RegExp(`^${40 - shown} more groups are not listed here: a search with words finds their tools too\\.$`, "m"));
+  assert.match(listed, /Search with words for what you need; describe gives one tool's parameters\.$/);
+  // What the guard is told the result quotes is what it lists, and no more.
+  assert.equal(result.details.portalListedTools.length, shown * 12);
+  // A list that fits is as it was.
+  const few = make(DOCS, { lazyNames: ["docs_open", "docs_export"] });
+  assert.doesNotMatch(few.text(await few.run({ action: "search" })), /not listed here/);
+});
+
 test("a search with no words lists the groups, and says there are none where nothing is lazy", async () => {
   const { run, text } = make(DOCS, { lazyNames: ["docs_open", "docs_export"] });
   assert.match(text(await run({ action: "search" })), /^2 lazy tools in 1 group:\n- docs \(2\): docs_export, docs_open/);
