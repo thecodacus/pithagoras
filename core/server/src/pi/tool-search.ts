@@ -77,24 +77,47 @@ const rulePrefix = (tag: string): string => `Rule ${tag}:`;
  * characters, marks, punctuation and symbols). Only for finding the tag in a text, never for what the text says.
  */
 const LOOK_ALIKE: Record<string, string> = { "\u0430": "a", "\u0441": "c", "\u0435": "e", "\u0501": "d", "\u043e": "0", "\u03bf": "0", o: "0", l: "1", i: "1" };
+/** The same for the ASCII letters, by code. */
+const LOOK_ALIKE_CODE: Record<number, number> = { 0x6f: 0x30, 0x6c: 0x31, 0x69: 0x31 };
 const BETWEEN = /[\p{Z}\p{C}\p{M}\p{P}\p{S}]/u;
 
-/** A text's letters and digits, as the tag would be read from it, each with where it stands in the text. */
-function lettersOf(text: string): { chars: string; at: number[] } {
-  let chars = "";
-  const at: number[] = [];
+/** A text's letters and digits, as the tag would be read from it, each (each code unit of it) with where it stands in the text. */
+function lettersOf(text: string): { chars: string; at: Int32Array } {
+  // At most one letter for each code unit; NFKC of one character may give more, so these grow if need be.
+  let units = new Uint16Array(text.length + 16);
+  let at = new Int32Array(text.length + 16);
+  let length = 0;
+  const put = (unit: number, i: number): void => {
+    if (length === units.length) {
+      const moreUnits = new Uint16Array(length * 2);
+      moreUnits.set(units);
+      units = moreUnits;
+      const moreAt = new Int32Array(length * 2);
+      moreAt.set(at);
+      at = moreAt;
+    }
+    units[length] = unit;
+    at[length++] = i;
+  };
   for (let i = 0; i < text.length; ) {
-    const point = text.codePointAt(i)!;
-    const width = point > 0xffff ? 2 : 1;
-    const letter = text.slice(i, i + width);
-    for (const part of letter.normalize("NFKC").toLowerCase()) {
+    const code = text.charCodeAt(i);
+    // ASCII is what NFKC leaves as it is: no normalising for most of a text, which is plain.
+    if (code < 0x80) {
+      // Every ASCII character but a letter or a digit is a space, a control character, punctuation or a symbol: between the letters.
+      if ((code >= 0x30 && code <= 0x39) || (code >= 0x61 && code <= 0x7a)) put(LOOK_ALIKE_CODE[code] ?? code, i);
+      else if (code >= 0x41 && code <= 0x5a) put(LOOK_ALIKE_CODE[code + 32] ?? code + 32, i);
+      i++;
+      continue;
+    }
+    const width = text.codePointAt(i)! > 0xffff ? 2 : 1;
+    for (const part of text.slice(i, i + width).normalize("NFKC").toLowerCase()) {
       if (BETWEEN.test(part)) continue;
-      chars += LOOK_ALIKE[part] ?? part;
-      at.push(i);
+      const letter = LOOK_ALIKE[part] ?? part;
+      for (let k = 0; k < letter.length; k++) put(letter.charCodeAt(k), i);
     }
     i += width;
   }
-  return { chars, at };
+  return { chars: new TextDecoder("utf-16le").decode(units.subarray(0, length)), at };
 }
 
 /**
@@ -430,7 +453,7 @@ export class ToolSearch {
       return listing(defuse(list + tail, this.tag), named);
     }
     const found = rank(tools, text);
-    if (!found.length) return listing(`No lazy tool matches "${text}". Search with other words, or with none to list the groups.`, []);
+    if (!found.length) return listing(defuse(`No lazy tool matches "${oneLine(text)}". Search with other words, or with none to list the groups.`, this.tag), []);
     const shown = found.slice(0, HITS);
     const detailed = shown.slice(0, DETAILED);
     let hits = `${found.length} lazy tool${found.length === 1 ? "" : "s"} matching "${oneLine(text)}":`;
@@ -489,6 +512,8 @@ export class ToolSearch {
       const tag = this.tag;
       if (!Array.isArray(event?.content)) return undefined;
       if (event.toolName === TOOL_SEARCH && !event.isError && (event.input?.action === "search" || event.input?.action === "describe") && this.owns()) return undefined;
+      // A call's result was taken through defuse by call() itself: not scanned a second time (a large result costs).
+      if (event.toolName === TOOL_SEARCH && !event.isError && event.input?.action === "call" && this.owns()) return undefined;
       let changed = false;
       const content = event.content.map((part: any) => {
         if (part?.type !== "text" || typeof part.text !== "string") return part;

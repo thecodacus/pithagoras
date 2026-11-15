@@ -692,6 +692,51 @@ test("a read again while the chat's pi is still starting is taken up by that pi,
   }
 });
 
+test("a read again of an idle chat is held like an edit: another read again waits for it instead of reloading the same pi at once", async () => {
+  await mark({ "pi-heavy": "lazy" });
+  const chat = await json("/api/sessions", "POST", {});
+  await sessions.ensureClient(chat.id);
+  const client = sessions.live.get(chat.id).client;
+  const reload = client.reload.bind(client);
+  let running = 0;
+  let most = 0;
+  let release;
+  const held = new Promise((resolve) => (release = resolve));
+  let entered;
+  const inside = new Promise((resolve) => (entered = resolve));
+  client.reload = async (...args) => {
+    running++;
+    most = Math.max(most, running);
+    // Only the first is held; one that comes while it is, on old code, is let through to show itself.
+    if (running === 1) {
+      entered();
+      await held;
+    }
+    try {
+      return await reload(...args);
+    } finally {
+      running--;
+    }
+  };
+  try {
+    await mark({});
+    const first = sessions.readToolsAgain(chat.id);
+    await inside;
+    // The head is read again once more, as another tab would, while the first reload is under way.
+    await mark({ "pi-heavy": "lazy" });
+    assert.equal(await sessions.readToolsAgain(chat.id), true);
+    assert.equal(running, 1, "it did not reload the pi that is reloading: it is due instead");
+    assert.equal(client.reloadDue, true);
+    release();
+    assert.equal(await first, true);
+    assert.equal(most, 1, "one reload at a time on the pi");
+  } finally {
+    release();
+    delete client.reload;
+    await sessions.stop(chat.id);
+  }
+});
+
 test("the model of a real chat is sent no lazy tool and no tool_search until a tool is lazy for a chat that starts, and the hint only then", async () => {
   const offered = (request) => (request.tools ?? []).map((t) => t.function.name);
   const hint = /These tools are not in your list: probe \(probe_open, probe_read\)\. Search them with the tool_search tool/;

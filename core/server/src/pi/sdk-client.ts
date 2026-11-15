@@ -1224,11 +1224,12 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     const prepare = agent?.prepareNextTurnWithContext;
     if (!rule || !loader || typeof prepare !== "function") return;
     agent.prepareNextTurnWithContext = async (turn: unknown, signal: unknown) => {
-      // Not for a head the person asked to read again: that changes what the model is sent first, which a run that goes on
-      // keeps (see useHead); the reload waits for the run to be over.
-      if (this.reloadDue && !this.nextHead && this.canReloadNow?.()) {
+      // Not with a head the person asked to read again: that changes what the model is sent first, which a run that goes on
+      // keeps (see useHead). The reload that a sandbox or a package asks for is made all the same, with the head left for
+      // the reload once the run is over.
+      if (this.dueNow && this.canReloadNow?.()) {
         try {
-          await this.reload();
+          await this.reload(true);
         } catch (e) {
           // The run goes on with what it had, as a chat that could not be reloaded while idle does, and the next step tries again.
           console.error(`[portal] could not reload ${this.portalSessionId ?? "a chat"} between two steps: ${(e as Error).message}`);
@@ -1912,8 +1913,19 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     await this.session.compact();
   }
 
+  /** A reload is due that may be made between two steps of a run. */
+  private dueNow = false;
+  /** A head to read again waits for the run to be over: a reload is due then, and not between two steps. */
+  private dueAfterRun = false;
+
   /** See PiClient.reloadDue. */
-  reloadDue = false;
+  get reloadDue(): boolean {
+    return this.dueNow || this.dueAfterRun;
+  }
+  set reloadDue(due: boolean) {
+    this.dueNow = due;
+    if (!due && !this.nextHead) this.dueAfterRun = false;
+  }
 
   /** Set by create(): whether a reload that is due may happen between two requests of a run. See prepareEachTurn. */
   canReloadNow?: () => boolean;
@@ -1925,9 +1937,10 @@ export class SdkPiClient extends EventEmitter implements PiClient {
    */
   private reloading?: Promise<void>;
 
-  async reload(): Promise<void> {
+  /** `keepHead`: between two steps of a run, which keeps the head it has (a head to read again waits for the run's end). */
+  async reload(keepHead = false): Promise<void> {
     this.reloadDue = false;
-    const reloading = this.loadAgain();
+    const reloading = this.loadAgain(keepHead);
     this.reloading = reloading;
     try {
       await reloading;
@@ -1940,13 +1953,15 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     }
   }
 
-  private async loadAgain(): Promise<void> {
+  private async loadAgain(keepHead: boolean): Promise<void> {
     this.loading = true;
-    if (this.nextHead) {
+    if (this.nextHead && keepHead) this.dueAfterRun = true;
+    else if (this.nextHead) {
       // Before the extensions load again: the portal's tool registers itself with what it is given.
       this.head = this.nextHead;
       this.search?.setHead(this.nextHead, false);
       this.nextHead = undefined;
+      this.dueAfterRun = false;
     }
     await this.session.reload();
     // Reloading has extensions register their providers again, which puts the

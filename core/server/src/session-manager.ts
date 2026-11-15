@@ -2858,7 +2858,8 @@ class SessionManager extends EventEmitter {
     if (client) {
       client.useHead?.(head);
       if (this.isBusy(sessionId) || this.reloadCutsOff(sessionId)) client.reloadDue = true;
-      else await client.reload();
+      // Held like every reload: another reload or an edit on the same pi, meanwhile, would run under this one.
+      else await this.withEdit(sessionId, () => client.reload());
     }
     return true;
   }

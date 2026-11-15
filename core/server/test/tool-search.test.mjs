@@ -612,23 +612,30 @@ test("a head the person asks to read again is taken up by the reload, and not be
   }
 });
 
-test("a head to read again that is asked for in the middle of a run waits for the run to be over, though a reload is due and may be made between two steps", async () => {
+test("a reload that is due while a head to read again waits is made between two steps, and keeps the head it has: the new one comes after the run", async () => {
   const { client, ask } = await chatOf({ lazy: headOf("docs_open"), canReloadNow: () => true });
   try {
     client.useHead({ ...headOf("docs_open", "docs_export"), hint: "A new line." });
-    // As SessionManager.readToolsAgain marks a chat that works: due, for a step of the run to take, were it any other reload.
+    let reloads = 0;
+    const reload = client.session.reload.bind(client.session);
+    client.session.reload = async () => {
+      reloads++;
+      return reload();
+    };
+    // As a sandbox switched on or a package switched off marks a working chat: due, for its next step.
     client.reloadDue = true;
     const run = await ask([via("search", { query: "document" }), via("search", { query: "export" })]);
     assert.ok(run.length >= 3, "a run of several requests");
-    const wire = (request) => JSON.stringify({ tools: request.tools, system: systemOf(request) });
-    for (const request of run) assert.equal(wire(request), wire(run[0]), "the run keeps the head it started with");
-    assert.ok(names(run[0]).includes("docs_export"));
-    assert.equal(client.reloadDue, true, "the reload is still due, for once the run is over");
-    // The run is over: the session manager reloads it (reloadSettled), and the new head is taken up.
+    assert.equal(reloads, 1, "reloaded once, between two steps");
+    // What the reload registers late (a tool that was not bound at the first request) is in the list; the head is the same.
+    const wire = (request) => JSON.stringify({ tools: names(request).filter((name) => name !== "late_hidden"), system: systemOf(request) });
+    for (const request of run) assert.equal(wire(request), wire(run[0]), "the head, and so the prompt, is the one the run started with");
+    assert.ok(names(run[0]).includes("docs_export") && names(run.at(-1)).includes("docs_export"));
+    assert.equal(client.reloadDue, true, "the head still waits for the run's end");
     await client.reload();
     const [after] = await ask();
-    assert.ok(!names(after).includes("docs_export"));
     assert.match(systemOf(after), /A new line\./);
+    assert.equal(client.reloadDue, false);
   } finally {
     client.dispose();
   }
