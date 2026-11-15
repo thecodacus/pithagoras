@@ -148,6 +148,18 @@ export default function (pi) {
       async execute(_id, p) { return text("late " + p.id); },
     });
   });
+  // A lazy group none of whose tools is registered at the first request, as a plain factory that awaits something brings.
+  pi.on("before_agent_start", () => {
+    if (!globalThis.__soloLate || globalThis.__soloLateDone) return;
+    globalThis.__soloLateDone = true;
+    pi.registerTool({
+      name: "solo_late",
+      label: "Solo",
+      description: "Do what only this late group can.",
+      parameters: { type: "object", properties: {} },
+      async execute() { return text("solo ran"); },
+    });
+  });
   // The tool of the portal's name, from an extension that connects late: at the first message, when the switches have been applied.
   pi.on("before_agent_start", () => {
     if (!globalThis.__lateSearch || globalThis.__lateSearchDone) return;
@@ -549,6 +561,24 @@ test("what the model is sent first does not change over a chat: a switch, a late
   }
 });
 
+test("a lazy group whose tools all register after the first request does not change what the model is sent: tool_search is offered from the start", async () => {
+  globalThis.__soloLate = true;
+  const { client, ask } = await chatOf({ lazy: headOf("solo_late") });
+  try {
+    const first = await ask();
+    const second = await ask([via("call", { name: "solo_late", args: {} })]);
+    assert.ok(client.offers("solo_late") === "lazy", "it registered, and is lazy");
+    const wire = (request) => JSON.stringify({ tools: request.tools, system: systemOf(request) });
+    assert.ok(names(first[0]).includes("tool_search"), "the way to the late tool is there at the first request");
+    assert.match(systemOf(first[0]), /Search them with the tool_search tool/);
+    for (const request of [...first, ...second]) assert.equal(wire(request), wire(first[0]), "the same at every request");
+    assert.ok(!names(second[0]).includes("solo_late"));
+  } finally {
+    globalThis.__soloLate = false;
+    client.dispose();
+  }
+});
+
 test("a tool a chat's head does not name is in the list, whatever the marks say now; one it names stays lazy when switched on again", async () => {
   const { client, ask } = await chatOf({ lazy: headOf("docs_open") });
   try {
@@ -646,9 +676,10 @@ test("the model is told which lazy tools it has, and only while something is laz
   const plain = await run([], {});
   assert.doesNotMatch(systemOf(plain.requests[0]), /Search them with the tool_search tool/);
   assert.ok(!names(plain.requests[0]).includes("tool_search"));
-  // A head that names tools that are not registered offers nothing to reach: no tool_search either.
+  // A head that names tools that are not registered is offered the way all the same: a tool that registers later cannot
+  // be told from one that is gone, and the chat's tools and prompt must not change when it turns up (next test).
   const none = await run([], { lazy: headOf("not_registered") });
-  assert.ok(!names(none.requests[0]).includes("tool_search"));
+  assert.ok(names(none.requests[0]).includes("tool_search"));
 });
 
 test("a tool that is lazy answers a call exactly as it does when called directly", async () => {

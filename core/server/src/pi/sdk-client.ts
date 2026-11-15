@@ -1556,18 +1556,16 @@ export class SdkPiClient extends EventEmitter implements PiClient {
   }
 
   /**
-   * Whether the model is offered `tool_search`: the chat froze something lazy, a tool of it is registered (on or off now: a
-   * switch edited in the middle of the chat does not take the tool away), and no extension has a tool of that name of
-   * its own, which pi keeps in its place, and the lazy tools are then offered one by one, as if nothing were lazy: they are
-   * only hidden by this tool's hook, which is not there.
+   * Whether the model is offered `tool_search`: the chat froze something lazy (its head has the line that names the
+   * groups), and no extension has a tool of that name of its own, which pi keeps in its place, and the lazy tools are then
+   * offered one by one, as if nothing were lazy: they are only hidden by this tool's hook, which is not there. Not
+   * whether a lazy tool is registered yet: one that registers after the first request (a factory that awaits something)
+   * would bring the tool, its line and its rule into the chat mid-way, which is the change of the head a lazy group is not
+   * to cause. Where the chat works through the code tool alone nothing is lazy (lazyMember).
    */
   private searchOffered(): boolean {
-    if (!this.search || this.search.taken() || !this.head.lazy.length) return false;
-    try {
-      return (this.session.getAllTools?.() ?? []).some((tool: any) => String(tool?.name) !== TOOL_SEARCH && this.lazyMember(tool));
-    } catch {
-      return false;
-    }
+    if (!this.search || this.search.taken() || !this.head.hint) return false;
+    return !(this.codemodeOnly && !this.switchedOff.has(CODEMODE_TOOL));
   }
 
   /**

@@ -84,7 +84,8 @@ const push = { name: "bash", args: { command: "git push origin main" } };
 /** The result the model was given: a script's own, not those of the calls it made. */
 const own = (results) => results.filter((r) => !r.parentToolCallId);
 /** The page is lazy: it is not in the model's list, and a script calls it as it calls any tool. */
-const lazy = { lazy: { v: 1, lazy: ["<tool>mcp__pages__page"], direct: [], hint: "", outside: false, voice: [] } };
+const { lazyHintOf } = await import("../dist/lazy-head.js");
+const lazy = { lazy: { v: 1, lazy: ["<tool>mcp__pages__page"], direct: [], hint: lazyHintOf([{ label: "pages", tools: ["mcp__pages__page"] }]), outside: false, voice: [], tag: "" } };
 const viaGateway = `tools.mcp__pages__page({})`;
 
 test("what a script read through a lazy tool is wrapped and flagged in the result the model is given, also when it hands on only the words", async () => {
