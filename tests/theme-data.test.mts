@@ -165,9 +165,18 @@ test("a package.json hands its tokens to the page as they are written, for the p
   ] } }));
   assert.deepEqual(packageThemes(dir)?.themes, [
     { id: "soft", name: "Soft", dark: { accent: "#ff79c6" }, tokens: { "radius-lg": "1rem", "font-sans": "url(x)" } },
-    { id: "odd", name: "Odd" },
-    { id: "num", name: "Num" },
+    { id: "odd", name: "Odd", tokens: ["not a map"] },
+    { id: "num", name: "Num", tokens: { pad: 3 } },
   ]);
+  // Handed on as written, the page refuses them with their theme (no half a theme, and not a silent loss of the tokens).
+  page();
+  try {
+    for (const theme of packageThemes(dir)!.themes.slice(1)) {
+      assert.throws(() => registerTheme("look-pkg", { ...theme, dark: { accent: "#112233" } } as never), /token the portal has none of, or a value that its variable does not take/, theme.id);
+    }
+  } finally {
+    away();
+  }
 });
 
 test("an extension switches to a theme of its own unasked, and to another's only when the person says yes", async () => {
@@ -225,6 +234,12 @@ test("a theme's name is a name: one that would make the question a wall of text 
   try {
     assert.throws(() => registerTheme("long-pkg", { id: "l", name: "your current colours, which you chose a while ago and which stay as they are".repeat(2), dark: { accent: "#ffffff" } }), /name longer than 60 characters/);
     assert.throws(() => registerTheme("long-pkg", { id: "b", name: "   ", dark: { accent: "#ffffff" } }), /needs an id and a name/);
+    // It is read in a sentence ("... to “Dusk”, a theme of pkg."): no line break to start a line of its own, no bidi control to turn the
+    // rest around, and no quote to close its own and name another owner.
+    for (const [at, name] of ["Dusk\n", "Dusk\u202e", "Dusk\u2066", "Dusk\u200b", "Dusk\u2028", "Dusk”, a theme of x", "Dusk\"", "“Dusk"].entries()) {
+      assert.throws(() => registerTheme("long-pkg", { id: `n${at}`, name, dark: { accent: "#ffffff" } }), /line break, a control character or a quote/, JSON.stringify(name));
+    }
+    assert.doesNotThrow(() => registerTheme("long-pkg", { id: "ok", name: "Dämmerung — 夕暮れ 'dusk'", dark: { accent: "#ffffff" } }));
     assert.doesNotThrow(() => registerTheme("long-pkg", { id: "s", name: "A".repeat(60), dark: { accent: "#ffffff" } }));
   } finally {
     away();

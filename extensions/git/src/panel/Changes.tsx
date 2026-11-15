@@ -161,7 +161,7 @@ function FileRow({ file, side }: { file: ChangedFile; side: Side }) {
       <button type="button" onClick={open} title={t("{file} — show the changes", { file: `${file.from ? `${file.from} → ` : ""}${file.path}` })} className="flex min-w-0 flex-1 items-center gap-1.5 py-1 text-left">
         <Letter letter={letter} title={LETTER_NAME[letter]} />
         <span className={`min-w-0 truncate text-xs ${deleted ? "text-fg-subtle line-through" : "text-fg"}`}>{name}</span>
-        {dir && <span className="min-w-0 flex-1 truncate text-[10.5px] text-fg-faint">{dir}</span>}
+        {dir && <span className="min-w-0 flex-1 truncate text-[length:calc(var(--text-base,1rem)*0.65625)] text-fg-faint">{dir}</span>}
         {!dir && <span className="flex-1" />}
         {counts && <Counts {...counts} />}
       </button>

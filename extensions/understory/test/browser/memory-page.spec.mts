@@ -200,6 +200,16 @@ test('a note opens with its type, tags and time; its links open other notes, and
   await expect(page).toHaveURL(/note=%2Fdeployment%2Findex\.md/);
 });
 
+test("a note's type in its header is as large as its tags beside it", async ({ page }) => {
+  await portal(page);
+  await page.goto('/x/pithagoras-understory/memory');
+  await notes(page).getByRole('button', { name: /Branch Deployment on Test Host/ }).click();
+  const note = page.getByRole('article', { name: 'Branch Deployment on Test Host' });
+  const size = (text: string) => note.locator('header').getByText(text, { exact: true }).evaluate((el) => getComputedStyle(el.closest('span[class]')!).fontSize);
+  // The tag is the header's own size (2xs); the type was given the same, over its stock 3xs.
+  expect(await size('Deployment Process')).toBe(await size('#test-host'));
+});
+
 test('the log lists the changes newest first, and its links open the notes', async ({ page }) => {
   await portal(page);
   await page.goto('/x/pithagoras-understory/memory');

@@ -11,4 +11,4 @@
 /* Where the browser is shown, beside a chat and in voice mode: black from edge to edge, as the screen it shows is. */
 .browser-screen { display: flex; flex-direction: column; flex: 1; min-height: 0; background: #0b0b0d; color: #d1d8e3; }
 .browser-screen > iframe { flex: 1; min-height: 0; width: 100%; border: 0; }
-.browser-screen > p { margin: auto; padding: 16px; font-size: 13px; text-align: center; }
+.browser-screen > p { margin: auto; padding: 16px; font-size: calc(var(--text-base, 1rem) * 0.8125); text-align: center; }

@@ -91,7 +91,7 @@ export function ProvidersPanel({ onError, onSetup }: { onError: (e: string) => v
         title={t("Providers")}
         hint={t("Where the agent's models come from. Each one's models appear in the model menu under the chat box.")}
         action={editing !== "new" && (
-          <div className="flex items-center gap-1.5">
+          <div className="flex flex-wrap items-center gap-1.5">
             {onSetup && (
               <button type="button" onClick={onSetup} className={ghostCls} title={t("Provider, model and what the agent can do, one step at a time")}>
                 <LuWandSparkles className="h-3.5 w-3.5" /> {t("Setup assistant")}

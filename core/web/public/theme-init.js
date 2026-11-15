@@ -39,7 +39,7 @@
             return out;
           };
           var fontName = /^(?:"[\p{L}\p{N}_ '.-]{1,100}"|'[\p{L}\p{N}_ ".-]{1,100}'|-?[\p{L}_][\p{L}\p{N}_-]*(?: +-?[\p{L}_][\p{L}\p{N}_-]*)*)$/u;
-          var shadowOne = /^(?:inset\s+)?((?:-?\d{1,3}(?:\.\d{1,3})?(?:px|rem)|0)(?:\s+(?:-?\d{1,3}(?:\.\d{1,3})?(?:px|rem)|0)){1,3})(?:\s+(?:rgb\(\s*(\d{1,3})\s+(\d{1,3})\s+(\d{1,3})\s*(?:\/\s*(?:0|1|0?\.\d{1,3})\s*)?\)|#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})|transparent))?$/i;
+          var shadowOne = /^((?:-?\d{1,3}(?:\.\d{1,3})?(?:px|rem)|0)(?:\s+(?:-?\d{1,3}(?:\.\d{1,3})?(?:px|rem)|0)){1,3})(?:\s+(?:rgb\(\s*(\d{1,3})\s+(\d{1,3})\s+(\d{1,3})\s*(?:\/\s*(?:0|1|0?\.\d{1,3})\s*)?\)|#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})|transparent))?$/i;
           var bezier = /^cubic-bezier\(\s*(-?\d{0,2}(?:\.\d{1,3})?)\s*,\s*(-?\d{0,2}(?:\.\d{1,3})?)\s*,\s*(-?\d{0,2}(?:\.\d{1,3})?)\s*,\s*(-?\d{0,2}(?:\.\d{1,3})?)\s*\)$/;
           var kinds = {
             font: function (text) { return text.length <= 200 && text.split(",").every(function (name) { return fontName.test(name.trim()); }); },

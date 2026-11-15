@@ -109,7 +109,8 @@ export default {
         nav: v("z-nav", "50"),
         dialog: v("z-dialog", "50"),
         viewer: v("z-viewer", "55"),
-        confirm: v("z-confirm", "60"),
+        // There is no `confirm` here: the layer above everything is the portal's own, for its questions and an approval
+        // (core/web/tailwind.config.js). An extension's overlay stays at `viewer` or below, so it can never cover one.
       },
     },
   },

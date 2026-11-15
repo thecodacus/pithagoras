@@ -64,10 +64,11 @@ const LENGTH = /^(\d{1,3}(?:\.\d{1,3})?)(px|rem)$/;
 const FONT_NAME = /^(?:"[\p{L}\p{N}_ '.-]{1,100}"|'[\p{L}\p{N}_ ".-]{1,100}'|-?[\p{L}_][\p{L}\p{N}_-]*(?: +-?[\p{L}_][\p{L}\p{N}_-]*)*)$/u;
 const fontStack = (text: string) => text.length <= 200 && text.split(",").every((name) => FONT_NAME.test(name.trim()));
 /**
- * One shadow: `inset` or not, two to four lengths (px or rem, or 0), and a colour as `rgb(0 0 0 / 0.2)`, `#hex` or
- * `transparent`. An `rgb()` of three numbers and an alpha is the one bracket a token may have.
+ * One shadow, two to four lengths (px or rem, or 0) and a colour as `rgb(0 0 0 / 0.2)`, `#hex` or `transparent`. An
+ * `rgb()` of three numbers and an alpha is the one bracket a token may have. Never `inset`: an inset shadow is drawn
+ * over the box's own ground and under its text, and a wide one in the text's colour would blank out a dialog's question.
  */
-const SHADOW = /^(?:inset\s+)?((?:-?\d{1,3}(?:\.\d{1,3})?(?:px|rem)|0)(?:\s+(?:-?\d{1,3}(?:\.\d{1,3})?(?:px|rem)|0)){1,3})(?:\s+(?:rgb\(\s*(\d{1,3})\s+(\d{1,3})\s+(\d{1,3})\s*(?:\/\s*(?:0|1|0?\.\d{1,3})\s*)?\)|#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})|transparent))?$/i;
+const SHADOW = /^((?:-?\d{1,3}(?:\.\d{1,3})?(?:px|rem)|0)(?:\s+(?:-?\d{1,3}(?:\.\d{1,3})?(?:px|rem)|0)){1,3})(?:\s+(?:rgb\(\s*(\d{1,3})\s+(\d{1,3})\s+(\d{1,3})\s*(?:\/\s*(?:0|1|0?\.\d{1,3})\s*)?\)|#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})|transparent))?$/i;
 /** `none`, or one to four shadows, each length at most 4rem either way and each colour's numbers at most 255. */
 function shadow(text: string): boolean {
   if (text === "none") return true;

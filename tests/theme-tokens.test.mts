@@ -45,7 +45,7 @@ test("a theme's shadows, line width, durations and easings are the forms the por
     "ease-out": "cubic-bezier(.22, 1, .36, 1)",
     "ease-spring": "cubic-bezier(.34, 1.56, .64, 1)",
   });
-  for (const fine of [["shadow-pop", "none"], ["shadow-sm", "inset 0 1px 0 #ffffff1a"], ["shadow-sm", "0 0 0 1px transparent"], ["border-width", "0px"], ["dur-fast", "0ms"], ["ease-out", "ease-in-out"], ["ease-out", "linear"]]) {
+  for (const fine of [["shadow-pop", "none"], ["shadow-sm", "0 0 0 1px transparent"], ["border-width", "0px"], ["dur-fast", "0ms"], ["ease-out", "ease-in-out"], ["ease-out", "linear"]]) {
     assert.ok(tokenValue(fine[0], fine[1]), fine.join(": "));
   }
 });

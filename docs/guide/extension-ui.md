@@ -342,8 +342,9 @@ follow the theme. So do its type and its room: `font-sans` and `font-mono`, the
 `shadow-pop`, how long a `transition` takes (and `duration-base`), and the padding
 and gaps (`p-*`, `px-*`, `py-*`, `gap-*`, `space-*`) are each read from a variable
 of the page, and
-`z-dialog` and the other layers, `max-w-chat` and `w-nav` are the portal's
-layers and widths. As the portal ships them they are what Tailwind's own were,
+`z-raised` up to `z-viewer` (the full-screen viewers), `max-w-chat` and `w-nav` are the portal's
+layers and widths. The layer above them, `z-confirm`, is the portal's own, for its questions and the approvals
+(what the guard asks before a command runs): it is not in the preset, and nothing of an extension is drawn at or over it. As the portal ships them they are what Tailwind's own were,
 so nothing changes until the person's text size or density, or a theme, sets
 them; widths, heights, margins and offsets stay fixed, so icons do not grow
 with the density. A stylesheet built before these variables existed carries the
@@ -2865,7 +2866,7 @@ dark alike. Each is a name (the variable without its dashes: `--radius-lg` is
 | `radius-sm`, `radius-md`, `radius-lg`, `radius-xl`, `radius-2xl` | How round things are, from small chips to the message box | `0` to `2rem` | `0.25rem`, `0.375rem`, `0.5rem`, `0.75rem`, `1rem` |
 | `border-width` | How wide a line is (`border`, `border-t`, `divide-y`; `border-2` stays two pixels) | `0` to `4px` | `1px` |
 | `pad`, `gap` | The unit of padding, and of the space between things: `p-4` is four of `pad` | `0.1rem` to `0.6rem` | `0.25rem` |
-| `shadow-sm`, `shadow-pop` | A small shadow under a control, and the shadow of what pops up over the page (menus, dialogs) | `none`, or up to four shadows: `inset` or not, two to four lengths (at most `4rem` each), and a colour as `rgb(0 0 0 / 0.2)`, `#hex` or `transparent` | `0 1px 2px 0 rgb(0 0 0 / 0.05)`; `0 10px 30px -12px rgb(0 0 0 / 0.35), 0 2px 8px -4px rgb(0 0 0 / 0.2)` |
+| `shadow-sm`, `shadow-pop` | A small shadow under a control, and the shadow of what pops up over the page (menus, dialogs) | `none`, or up to four shadows (outer ones, no `inset`), each of two to four lengths (at most `4rem` each) and a colour as `rgb(0 0 0 / 0.2)`, `#hex` or `transparent` | `0 1px 2px 0 rgb(0 0 0 / 0.05)`; `0 10px 30px -12px rgb(0 0 0 / 0.35), 0 2px 8px -4px rgb(0 0 0 / 0.2)` |
 | `dur-fast`, `dur-base` | How long a quick change takes (every `transition` that names no duration), and a larger move such as the sidebar opening | `0ms` to `1000ms`, or the same in `s` | `150ms`; `300ms` |
 | `ease-out`, `ease-spring` | How a move settles, and how it overshoots into place | `linear`, `ease`, `ease-in`, `ease-out`, `ease-in-out`, or `cubic-bezier(x1, y1, x2, y2)` with each x from 0 to 1 | `cubic-bezier(.22, 1, .36, 1)`; `cubic-bezier(.34, 1.56, .64, 1)` |
 | `chat-max` | How wide the conversation's text column is | `24rem` to `90rem` | `48rem` |
@@ -2879,12 +2880,18 @@ the portal's own, so a theme can be one radius.
 columns and offsets do not move with them, so a roomier theme does not grow the icons. The
 layers (`z-index`) are not a theme's to set.
 
+In a stylesheet of your own, size text with `font-size: calc(var(--text-base, 1rem) * 0.8125)` (13 px at the
+portal's own size) rather than `13px`, so that it follows the person's text size and a theme's `text-base`; the
+`1rem` is what an older portal falls back to. Text in a canvas, such as a terminal's screen, takes the size from
+code: read the variable's computed size from an element with `font-size: var(--text-base, 1rem)`.
+
 A theme is data, and is checked as such before anything is painted. A value that is not what
 its variable takes, a token the portal has no variable for, a `url(...)`, a `;`, a `{`, a `\` or a `/*` is refused, and the theme with it:
 there is no half a theme, and a theme cannot carry a rule of CSS. The same checks run in the page before the app, for the
 copy the browser keeps, and a copy that fails them is not painted, its colours included, and is taken out of the browser.
 In code, `portal.theme.register` throws for such a theme and says which part. A theme's `name` is at most 60
-characters: it is what the person reads when an extension asks to switch to it.
+characters, on one line, with no control or invisible character and no quote (`"`, `“`, `”`) in it: it is what the person
+reads, in a sentence, when an extension asks to switch to it.
 
 ### Fonts
 

@@ -106,6 +106,24 @@ test("the sidebar's width and the conversation's are the theme's to set", async 
   expect(await css(page, '.chat-list', 'max-width')).toBe('640px');
 });
 
+test("a theme's widest sidebar still leaves a phone's drawer inside the screen, with its close button and a strip of the page to tap", async ({ page }) => {
+  await page.setViewportSize({ width: 360, height: 740 });
+  await page.addInitScript(() => localStorage.setItem('sidebarCollapsed', 'true'));
+  await portal(page, { tokens: { 'nav-width': '24rem' } }, '/s/a');
+  // The chat's own header has the button once the conversation is there; until then the page's bar has it.
+  await expect(page.locator('.chat-header')).toBeVisible();
+  await page.getByRole('button', { name: 'Open navigation', exact: true }).click();
+  const drawer = page.locator('aside[aria-label="Sidebar"]');
+  await expect(drawer.locator('.nav-item').first()).toBeVisible();
+  // The drawer slides in: measured where it comes to rest.
+  await page.evaluate(() => Promise.all(document.querySelector('.mobile-drawer')!.getAnimations().map((animation) => animation.finished)));
+  const right = (selector: string) => page.locator(selector).first().evaluate((el) => el.getBoundingClientRect().right);
+  expect(await right('aside[aria-label="Sidebar"]')).toBeLessThanOrEqual(360 - 40);
+  expect(await right('.sidebar-content')).toBeLessThanOrEqual(360 - 40);
+  expect(await right('button[aria-label="Close navigation"]')).toBeLessThanOrEqual(360 - 40);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(360);
+});
+
 test('what a layer is above is a variable, with the stock order', async ({ page }) => {
   await portal(page, {}, '/settings');
   const backdrop = page.locator('.ui-backdrop').first();
@@ -256,6 +274,15 @@ test("the person's text size and spacing sliders change what is made of text and
   await expect(dialog.getByRole('slider', { name: 'Spacing' })).toHaveValue('100');
   await expect(dialog.getByRole('button', { name: 'Back to 100 %' })).toHaveCount(0);
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem('pithagoras.appearance') ?? '{}'))).toEqual({ text: 100, density: 100 });
+});
+
+test("at the largest text size and spacing, a phone's Settings keep their buttons inside the window", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await portal(page, { appearance: { text: 140, density: 140 } }, '/settings/models');
+  const add = page.getByRole('button', { name: 'Add a provider' });
+  await expect(add).toBeVisible();
+  const box = (await add.boundingBox())!;
+  expect(box.x + box.width).toBeLessThanOrEqual(390);
 });
 
 test("a theme's font is a file its extension ships and its stylesheet declares: the theme names the family, and the portal serves the file", async ({ page }) => {

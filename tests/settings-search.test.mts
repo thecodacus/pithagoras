@@ -15,6 +15,13 @@ test("a setting is found by its title first, then by what it is about", () => {
   assert.deepEqual(titles("nothing like this"), []);
 });
 
+test("the text size and the spacing are found by what people call them, in English and in German", () => {
+  const titles = (q: string) => searchSettings(q, SETTINGS_INDEX).map((e) => e.title);
+  for (const q of ["text size", "font", "bigger", "schriftgröße", "schriftgrosse"]) assert.equal(titles(q)[0], "Text size", q);
+  for (const q of ["spacing", "density", "abstände", "abstande"]) assert.equal(titles(q)[0], "Spacing", q);
+  assert.ok(titles("compact").includes("Spacing"), "and by a word that other settings share");
+});
+
 test("changing the password is found on its own page, by the English word and the German", () => {
   for (const q of ["password", "passwort", "kennwort", "change password"]) {
     assert.ok(searchSettings(q, SETTINGS_INDEX).some((e) => e.tab === "authentication" && e.title === "Change password"), `${q} leads to Authentication`);

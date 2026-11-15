@@ -34,13 +34,13 @@
 .kb-column { display: flex; flex-direction: column; flex-shrink: 0; width: 17.5rem; max-height: 100%; border: 1px solid rgb(var(--line)); border-radius: 14px; background: rgb(var(--raised) / .45); }
 .kb-column.is-new { background: none; border-style: dashed; padding: 6px; }
 .kb-column-head { display: flex; align-items: center; gap: 6px; padding: 8px 6px 6px 12px; }
-.kb-column-name { flex: 1; min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; color: rgb(var(--fg)); }
-.kb-column-count { flex-shrink: 0; min-width: 22px; padding: 1px 7px; border-radius: 999px; background: rgb(var(--fg) / .07); font-size: 11px; font-variant-numeric: tabular-nums; text-align: center; color: rgb(var(--fg-subtle)); }
+.kb-column-name { flex: 1; min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(var(--text-base, 1rem) * 0.8125); font-weight: 600; color: rgb(var(--fg)); }
+.kb-column-count { flex-shrink: 0; min-width: 22px; padding: 1px 7px; border-radius: 999px; background: rgb(var(--fg) / .07); font-size: calc(var(--text-base, 1rem) * 0.6875); font-variant-numeric: tabular-nums; text-align: center; color: rgb(var(--fg-subtle)); }
 .kb-rename { min-width: 0; }
 .kb-cards { display: flex; flex-direction: column; gap: 6px; min-height: 44px; margin: 0; padding: 2px 8px 8px; list-style: none; overflow-y: auto; overscroll-behavior-y: contain; }
-.kb-column-empty { padding: 10px 4px; font-size: 12px; text-align: center; color: rgb(var(--fg-faint)); }
+.kb-column-empty { padding: 10px 4px; font-size: calc(var(--text-base, 1rem) * 0.75); text-align: center; color: rgb(var(--fg-faint)); }
 .kb-column-foot { padding: 0 8px 8px; }
-.kb-add { display: flex; align-items: center; gap: 6px; width: 100%; padding: 7px 8px; border-radius: 9px; font-size: 12.5px; color: rgb(var(--fg-muted)); transition: background .15s, color .15s; }
+.kb-add { display: flex; align-items: center; gap: 6px; width: 100%; padding: 7px 8px; border-radius: 9px; font-size: calc(var(--text-base, 1rem) * 0.78125); color: rgb(var(--fg-muted)); transition: background .15s, color .15s; }
 .kb-add:hover { background: rgb(var(--fg) / .06); color: rgb(var(--fg)); }
 .kb-add svg { width: 14px; height: 14px; }
 .kb-add-card { display: grid; gap: 6px; }
@@ -55,9 +55,9 @@
 .kb-card.is-dragged { opacity: .35; }
 .kb-card-open { display: flex; flex-direction: column; align-items: stretch; gap: 6px; width: 100%; padding: 9px 34px 9px 11px; border-radius: inherit; text-align: left; color: rgb(var(--fg)); cursor: inherit; }
 .kb-card-open:focus-visible, .kb-card-menu:focus-visible, .kb-icon-button:focus-visible, .kb-add:focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 1px; }
-.kb-card-title { font-size: 13.5px; line-height: 1.35; overflow-wrap: anywhere; }
+.kb-card-title { font-size: calc(var(--text-base, 1rem) * 0.84375); line-height: 1.35; overflow-wrap: anywhere; }
 .kb-card-labels { display: flex; flex-wrap: wrap; gap: 4px; }
-.kb-card-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: 11.5px; color: rgb(var(--fg-subtle)); }
+.kb-card-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: calc(var(--text-base, 1rem) * 0.71875); color: rgb(var(--fg-subtle)); }
 .kb-card-meta svg { width: 12px; height: 12px; flex-shrink: 0; }
 .kb-card-assignee, .kb-card-due, .kb-card-notes { display: inline-flex; align-items: center; gap: 4px; min-width: 0; }
 .kb-card-assignee > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 10rem; }
@@ -70,7 +70,7 @@
   .kb-card:not(:hover):not(:focus-within) .kb-card-menu:not([aria-expanded="true"]) { opacity: 0; }
 }
 
-.kb-label { display: inline-block; max-width: 100%; padding: 1px 7px; border-radius: 999px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; line-height: 1.5; background: hsl(var(--kb-hue) 70% 55% / .17); color: hsl(var(--kb-hue) 65% 76%); }
+.kb-label { display: inline-block; max-width: 100%; padding: 1px 7px; border-radius: 999px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(var(--text-base, 1rem) * 0.6875); line-height: 1.5; background: hsl(var(--kb-hue) 70% 55% / .17); color: hsl(var(--kb-hue) 65% 76%); }
 [data-theme="light"] .kb-label { background: hsl(var(--kb-hue) 70% 50% / .13); color: hsl(var(--kb-hue) 65% 30%); }
 
 /* The card under the pointer, while it is dragged. */
@@ -83,8 +83,8 @@ html.kb-dragging, html.kb-dragging * { cursor: grabbing !important; user-select:
 .kb-note { resize: vertical; }
 .kb-activity { min-width: 0; }
 .kb-entry { display: grid; gap: 2px; padding: 7px 9px; border-radius: 9px; background: rgb(var(--raised) / .5); }
-.kb-entry-note { margin: 2px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12.5px; color: rgb(var(--fg)); }
-.kb-who { display: inline-flex; align-items: center; gap: 4px; min-width: 0; font-size: 12px; font-weight: 500; color: rgb(var(--fg)); }
+.kb-entry-note { margin: 2px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: calc(var(--text-base, 1rem) * 0.78125); color: rgb(var(--fg)); }
+.kb-who { display: inline-flex; align-items: center; gap: 4px; min-width: 0; font-size: calc(var(--text-base, 1rem) * 0.75); font-weight: 500; color: rgb(var(--fg)); }
 .kb-who svg { width: 12px; height: 12px; flex-shrink: 0; color: rgb(var(--fg-subtle)); }
 .kb-who.is-agent svg { color: rgb(var(--accent)); }
 .kb-who-chat { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 400; color: rgb(var(--fg-muted)); text-decoration: underline; text-decoration-color: rgb(var(--fg-faint)); text-underline-offset: 2px; }
@@ -92,16 +92,16 @@ html.kb-dragging, html.kb-dragging * { cursor: grabbing !important; user-select:
 
 /* ───────────────────── A kanban call in the chat ───────────────────── */
 .kb-call { display: flex; flex-direction: column; gap: 4px; max-width: 36rem; margin: 4px 0 8px; padding: 8px 10px; border: 1px solid rgb(var(--line)); border-radius: 12px; background: rgb(var(--surface)); }
-.kb-call-row { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 13px; color: rgb(var(--fg)); }
+.kb-call-row { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: calc(var(--text-base, 1rem) * 0.8125); color: rgb(var(--fg)); }
 .kb-call-icon { display: grid; place-items: center; flex-shrink: 0; width: 22px; height: 22px; border-radius: 6px; background: rgb(var(--accent) / .12); color: rgb(var(--accent)); }
 .kb-call-icon svg { width: 13px; height: 13px; }
 /* What the call did is said whole, on as many lines as the chat's width needs. */
 .kb-call-text { min-width: 0; overflow-wrap: anywhere; }
-.kb-call-board { flex-shrink: 1; min-width: 0; max-width: 14rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: rgb(var(--fg-subtle)); }
+.kb-call-board { flex-shrink: 1; min-width: 0; max-width: 14rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(var(--text-base, 1rem) * 0.75); color: rgb(var(--fg-subtle)); }
 .kb-call-board::before { content: "· "; }
-.kb-call-id { flex-shrink: 0; margin-left: auto; font-size: 11px; color: rgb(var(--fg-faint)); }
+.kb-call-id { flex-shrink: 0; margin-left: auto; font-size: calc(var(--text-base, 1rem) * 0.6875); color: rgb(var(--fg-faint)); }
 .kb-call-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding-left: 30px; }
-.kb-call-more { display: inline-flex; align-items: center; gap: 2px; padding: 1px 4px 1px 6px; border-radius: 6px; font-size: 12px; color: rgb(var(--fg-muted)); transition: background .2s, color .2s; }
+.kb-call-more { display: inline-flex; align-items: center; gap: 2px; padding: 1px 4px 1px 6px; border-radius: 6px; font-size: calc(var(--text-base, 1rem) * 0.75); color: rgb(var(--fg-muted)); transition: background .2s, color .2s; }
 .kb-call-more:hover { background: rgb(var(--fg) / .05); color: rgb(var(--fg)); }
 .kb-call-more svg { width: 12px; height: 12px; transition: transform .3s; }
 .kb-call-more[aria-expanded="true"] svg { transform: rotate(90deg); }

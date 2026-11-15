@@ -45,10 +45,12 @@ const changed = () => { for (const watcher of [...watchers]) watcher(); };
 const same = (a: Colours | Tokens = {}, b: Colours | Tokens = {}) => JSON.stringify(Object.entries(a).sort()) === JSON.stringify(Object.entries(b).sort());
 
 const NAME_MOST = 60;
+/** What a name may not hold: a line break, a bidi control or any other control or invisible character, and the quotes the question puts around it. */
+const NOT_IN_A_NAME = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}“”"]/u;
 
 /**
  * A theme of `extension`'s. Returns what takes it out again. Throws for one
- * without an id and a name (or with a name of more than 60 characters), with a colour the portal has no name for or that
+ * without an id and a name (or with a name of more than 60 characters, or with a line break, a control character or a quote in it), with a colour the portal has no name for or that
  * is not a colour, with a token it has none of or a value its variable does not
  * take, with neither colours nor tokens, or under an id the extension has used
  * already.
@@ -57,6 +59,7 @@ export function registerTheme(extension: string, given: ThemeGiven): () => void 
   if (typeof given?.id !== "string" || !given.id || typeof given.name !== "string" || !given.name.trim()) throw new Error("A theme needs an id and a name");
   // The name is what the person reads when another extension asks to switch to it: a name, not a message.
   if (given.name.length > NAME_MOST) throw new Error(`The theme "${given.id}" has a name longer than ${NAME_MOST} characters`);
+  if (NOT_IN_A_NAME.test(given.name)) throw new Error(`The theme "${given.id}" has a name with a line break, a control character or a quote in it`);
   const light = coloursOf(given.light), dark = coloursOf(given.dark);
   if (!light || !dark) throw new Error(`The theme "${given.id}" has a colour the portal has no name for, or one that is not "#rrggbb" or three numbers`);
   const tokens = tokensOf(given.tokens);
@@ -107,9 +110,14 @@ const paletteOf = ({ id, name, light, dark, tokens }: Theme): Palette => ({ id, 
  * portal's), as "<package>/<id>", or null for none. It is in effect only where nobody has chosen: the person's own choice,
  * even the portal's own colours, stays over it. What it set is the interface's, and goes when the interface does not
  * declare it any more; the person's change in Settings makes it theirs.
+ *
+ * It is to be called before `themesSettled`, and before any theme is relied on: until it has been, in this page, it is
+ * not known whether the interface has a default, so a theme registered meanwhile leaves what was kept alone (`spoken`).
  */
 let declared: string | null = null;
+let spoken = false;
 export function setUiDefaultTheme(id: string | null): void {
+  spoken = true;
   declared = id === null ? null : themeIdNow(id);
   settleDefault();
 }
@@ -123,6 +131,9 @@ const OVER_KEY = "pithagoras.palette.over";
 
 /** Puts the interface's default in effect, or takes away what an earlier interface's default left, where the person has not chosen. */
 function settleDefault(failed: readonly string[] = [], final = false): void {
+  // Before the interface has declared its default, "none" is only the page's start, not what it said: what was kept
+  // (its default, or an extension's switch made over it) is not taken away for a theme that happened to come first.
+  if (!spoken && !final) return;
   const by = paletteSetBy();
   if (by === "person") return;
   if (by === "extension" && (declared ?? "") === (local.get(OVER_KEY) ?? "")) return;
