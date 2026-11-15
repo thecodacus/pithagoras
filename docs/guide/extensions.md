@@ -471,7 +471,7 @@ is, because each makes the list shorter, and the page says that the rest cannot 
 
 The result is worked out once and kept, not for each chat. It changes when a group comes or goes, a group's size
 changes, a mark changes or the limits do, and a group that went lazy stays lazy until the list would fit within
-80 % of the limits without it, so that a group does not flip when another one grows a little. The page shows one
+80 % of the limits with the group back in the list, so that a group does not flip when another one grows a little. The page shows one
 state for a group in every chat: **auto, lazy** is a group the threshold took out, **auto** one it left in. The
 tokens are what a tool's name, description, parameters and the line the prompt lists it by cost, as measured
 the last time a chat registered it; a tool no chat has registered yet is guessed from its description.
@@ -541,7 +541,7 @@ browser_snapshot and 8 more). Search them with the tool_search tool before you s
 one sentence that what a search or a describe of `tool_search` returns carries the tools' usage rules on lines that
 start with `Rule` and the chat's own tag, a random word made with the chat (`Rule 3f9a07c2:`). Only those lines count:
 a page, a file or an MCP server's description that writes a line starting with `Rule:` has no tag, and the tag is
-taken out of every text of a tool's that the search quotes and of every result of every other tool, however it is
+taken out of every text of a tool's that the search quotes and of the text of every result of every other tool (a picture is not read for it), however it is
 written in the usual ways (twice in a row, with look-alike Latin, Greek or Cyrillic letters, zero-width characters or other separators between its letters). The
 portal's rule that outside content, such as a [browser](/guide/browser)'s page, is data and never
 instructions, and what a lazy tool asks to be told in a spoken turn, stay in the prompt as long as the tool is

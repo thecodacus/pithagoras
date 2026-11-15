@@ -12,7 +12,7 @@ import { randomBytes } from "node:crypto";
  *
  * The threshold is a budget for the model's list: how many tokens its declarations cost, and how many tools there are.
  * Groups are taken out of the list, the largest first, until both are within the limits. The result is stored and
- * kept: a group that went lazy stays lazy until the list would fit within 80 % of the limits without it, so that it does
+ * kept: a group that went lazy stays lazy until the list would fit within 80 % of the limits with that group in it, so that it does
  * not flip when another group grows or shrinks a little.
  */
 

@@ -74,10 +74,10 @@ descriptions and parameters, which the server wrote: such a result is wrapped wh
 shows a tool of a server you have not counted as your own, and left as it is when every
 tool it shows is the portal's, an extension's, or a trusted server's. The usage rules such a result
 carries start with a random tag of the chat's that a page, a file or a server has no way to know, and the tag is taken out of
-every result of every tool but the portal's own search and describe, in the usual ways to write it (twice in a row, with the
+the text of every result of every tool but the portal's own search and describe, in the usual ways to write it (twice in a row, with the
 look-alike Latin, Greek and Cyrillic letters, zero-width characters or other separators between its letters), so a line
 written to look like a rule is not one. A tag that has leaked from the chat's own text, written in a way no table of look-alikes
-has, is a risk this line cannot rule out alone: the guard's other checks do not depend on it ([Lazy tools](/guide/extensions#lazy-tools)). An issue comment or a mail body a server
+has, is a risk this line cannot rule out alone, and so is a tag drawn in a picture a tool returns, which is not read: the guard's other checks do not depend on it ([Lazy tools](/guide/extensions#lazy-tools)). An issue comment or a mail body a server
 hands back is whoever wrote it, and so is what a server from a config other than
 the portal's hands back, or one whose tools are named without the server. A
 server you run yourself can be counted as your own, and its output is then

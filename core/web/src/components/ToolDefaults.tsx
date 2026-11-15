@@ -266,7 +266,7 @@ export function ToolDefaults({ onError }: { onError: (e: string) => void }) {
               onChange={(e) => setTyped({ ...typed, tokens: e.target.value })}
               onBlur={saveLimits}
               onKeyDown={(e) => isEnter(e) && (e.target as HTMLInputElement).blur()}
-              className={`${inputSmCls} mt-1 w-32`}
+              className={`${inputSmCls} mt-1 !w-32`}
               aria-label={t("Tokens of tool declarations")}
             />
           </label>
@@ -278,7 +278,7 @@ export function ToolDefaults({ onError }: { onError: (e: string) => void }) {
               onChange={(e) => setTyped({ ...typed, tools: e.target.value })}
               onBlur={saveLimits}
               onKeyDown={(e) => isEnter(e) && (e.target as HTMLInputElement).blur()}
-              className={`${inputSmCls} mt-1 w-32`}
+              className={`${inputSmCls} mt-1 !w-32`}
               aria-label={t("Number of tools")}
             />
           </label>

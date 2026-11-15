@@ -693,6 +693,34 @@ test("a read again while the chat's pi is still starting is taken up by that pi,
   }
 });
 
+test("a read again of a busy chat is due after the run: the next step does not reload the pi between two steps", async () => {
+  await mark({ "pi-heavy": "lazy" });
+  const chat = await json("/api/sessions", "POST", {});
+  await sessions.ensureClient(chat.id);
+  const client = sessions.live.get(chat.id).client;
+  let reloads = 0;
+  const reload = client.reload.bind(client);
+  client.reload = async (...args) => {
+    reloads++;
+    return reload(...args);
+  };
+  client.canReloadNow = () => true;
+  const busy = sessions.isBusy;
+  sessions.isBusy = (id) => id === chat.id || busy.call(sessions, id);
+  try {
+    await mark({});
+    assert.equal(await sessions.readToolsAgain(chat.id), true);
+    assert.equal(client.reloadDue, true, "due, for the end of the run");
+    // What pi calls before each step of a run: with a head to read again alone, it reloads nothing.
+    await client.session.agent.prepareNextTurnWithContext?.({}, undefined);
+    assert.equal(reloads, 0, "no reload between two steps");
+  } finally {
+    sessions.isBusy = busy;
+    delete client.reload;
+    await sessions.stop(chat.id);
+  }
+});
+
 test("a read again of an idle chat is held like an edit: another read again waits for it instead of reloading the same pi at once", async () => {
   await mark({ "pi-heavy": "lazy" });
   const chat = await json("/api/sessions", "POST", {});

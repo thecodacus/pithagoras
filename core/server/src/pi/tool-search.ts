@@ -2,6 +2,7 @@ import { Type } from "typebox";
 import { randomBytes } from "node:crypto";
 import { mcpNamespaceOf } from "./mcp-origin.js";
 import { fail, say } from "./tool-result.js";
+import { deface } from "./guard.js";
 import { LISTED_TOOLS_KEY, TOOL_SEARCH } from "./tool-search-names.js";
 import { rank, type Rankable } from "./tool-rank.js";
 import type { LazyHead } from "../tool-lazy.js";
@@ -143,6 +144,13 @@ function lettersOf(text: string): { chars: string; at: Int32Array } {
  * until none is left (what is cut out can join what was around it into the tag).
  */
 function defuse(text: string, tag: string): string {
+  const cut = cutTag(text, tag);
+  // What was cut can join what was around it into a marker the guard has defaced before (the guard runs first): it is
+  // defaced again, so that no forged marker is built here for the model to read.
+  return cut === text ? cut : deface(cut);
+}
+
+function cutTag(text: string, tag: string): string {
   if (!tag) return text;
   let out = text;
   for (let round = 0; round < 8; round++) {
