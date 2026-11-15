@@ -4,6 +4,8 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import semver from 'semver';
 import { CONTRACT_VERSION, FEATURES, has, refusal, takes } from '../core/web/src/extensions/contract.ts';
+import { addLocale, setLanguage } from '../core/web/src/i18n.ts';
+import de from '../core/web/src/locales/de.ts';
 
 const guide = readFileSync(path.resolve(import.meta.dirname, '../docs/guide/data-contract.md'), 'utf8');
 
@@ -60,4 +62,34 @@ test('an extension that needs a newer contract is refused with the numbers, and 
   assert.equal(refusal('^1.2', '1.0.0'), 'Needs interface API ^1.2; this portal has 1.0.0');
   assert.equal(refusal('^2.0', '1.4.0'), 'Needs interface API ^2.0; this portal has 1.4.0');
   assert.match(refusal('latest')!, /not a version range this portal reads/);
+});
+
+test('an extension that declares nothing is taken as ^1.0: a contract that breaks it refuses it, with the numbers', () => {
+  assert.equal(refusal(undefined, '1.7.0'), undefined);
+  assert.equal(refusal(undefined, '2.0.0'), 'Needs interface API ^1.0; this portal has 2.0.0');
+  assert.equal(refusal(undefined, '0.9.0'), 'Needs interface API ^1.0; this portal has 0.9.0');
+});
+
+test('the reason an extension is refused is said in the page\'s language', () => {
+  addLocale(de);
+  setLanguage('de');
+  try {
+    assert.equal(refusal('^2.0', '1.0.0'), 'Benötigt die Oberflächen-API ^2.0; dieses Portal hat 1.0.0');
+    assert.match(refusal('latest')!, /^Die package\.json nennt die benötigte Oberflächen-API als "latest"/);
+  } finally {
+    setLanguage('en');
+  }
+  assert.equal(refusal('^2.0', '1.0.0'), 'Needs interface API ^2.0; this portal has 1.0.0');
+});
+
+test('every action the contract names is in the guide, with what it resolves where that is not obvious', () => {
+  const types = readFileSync(path.resolve(import.meta.dirname, '../packages/extension-api/index.d.ts'), 'utf8');
+  for (const name of ['SessionActions', 'ChatController', 'ComposerActions']) {
+    const body = types.match(new RegExp(`export interface ${name} \\{\\n([\\s\\S]*?)\\n\\}`))?.[1];
+    assert.ok(body, `${name} is in the types`);
+    // Members at the interface's own level: `  name(` or `  readonly name`.
+    for (const [, member] of body.matchAll(/^ {2}(?:readonly )?(\w+)[(:]/gm)) {
+      assert.ok(guide.includes(member), `${name}.${member} is not in the guide`);
+    }
+  }
 });

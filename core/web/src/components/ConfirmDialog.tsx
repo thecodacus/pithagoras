@@ -22,7 +22,8 @@ interface ConfirmOptions {
   danger?: boolean;
   /**
    * Opened by something other than the person's own click (an extension asking): focus starts on Cancel without the red
-   * look, so a key the person was typing when it opened does not answer yes.
+   * look, so a key the person was typing when it opened does not answer yes. It is asked even where `deletes` was
+   * switched off, which is for the person's own deletes.
    */
   unasked?: boolean;
   /**
@@ -42,7 +43,8 @@ let shown: Pending | undefined;
 let counter = 0;
 
 export function confirmDialog(options: ConfirmOptions): Promise<boolean> {
-  if (options.deletes && !asksBeforeDeleting()) return Promise.resolve(true);
+  // The switch is the person's: it spares them the question about what they delete, not the one about what a part of the page deletes.
+  if (options.deletes && !options.unasked && !asksBeforeDeleting()) return Promise.resolve(true);
   // Nothing mounted to draw it — which is a bug, but not one that should make
   // a delete button do nothing.
   if (!present) {

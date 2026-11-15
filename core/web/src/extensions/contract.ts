@@ -1,4 +1,5 @@
 import type { ContractVersion, Feature } from "@pithagoras/extension-api";
+import { t } from "../i18n";
 
 /**
  * The version of the data contract (docs/guide/data-contract.md): its own semver, apart from the portal's and the
@@ -103,10 +104,17 @@ export function takes(range: string, version: string = CONTRACT_VERSION): boolea
   );
 }
 
-/** What the page says of an extension whose `pithagoras.api` this portal's contract is not one of, or nothing where it is. */
+/** What an extension that declares no `pithagoras.api` is taken to need: the contract as it was first given. */
+export const UNDECLARED_RANGE = "^1.0";
+
+/**
+ * What the page says, in its language, of an extension whose `pithagoras.api` this portal's contract is not one of, or
+ * nothing where it is. An extension that declares nothing is taken as `UNDECLARED_RANGE`, so that a contract that breaks
+ * it refuses the extensions written before it, rather than loading them against it.
+ */
 export function refusal(range: string | undefined, version: string = CONTRACT_VERSION): string | undefined {
-  if (range === undefined) return undefined;
-  const ok = takes(range, version);
-  if (ok === null) return `Its package.json names the interface API it needs as "${range}", which is not a version range this portal reads`;
-  return ok ? undefined : `Needs interface API ${range}; this portal has ${version}`;
+  const needs = range ?? UNDECLARED_RANGE;
+  const ok = takes(needs, version);
+  if (ok === null) return t("Its package.json names the interface API it needs as \"{range}\", which is not a version range this portal reads", { range: needs });
+  return ok ? undefined : t("Needs interface API {range}; this portal has {version}", { range: needs, version });
 }

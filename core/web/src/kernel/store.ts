@@ -42,6 +42,16 @@ export function createStore<T>(initial: T): Store<T> {
 }
 
 /**
+ * `ask`, where a call made while an earlier one is still on its way gets that one's answer instead of asking again:
+ * several parts of a page that read the same thing in one draw send one request, and no answer to an older request
+ * can arrive after a newer one's to overwrite it.
+ */
+export function shared<T>(ask: () => Promise<T>): () => Promise<T> {
+  let flying: Promise<T> | null = null;
+  return () => (flying ??= ask().finally(() => (flying = null)));
+}
+
+/**
  * A store's state in a component, drawn again when it changes. With `pick`, only what the component uses of it: it is
  * drawn again only when what it picked is no longer the same (`same`; by default the same value, or a list or object
  * holding the same values).

@@ -28,7 +28,7 @@ import { t, useLanguage } from "./i18n";
 import { Here, setNavigate, startExtensions } from "./extensions/loader";
 import { alerts, setOpener } from "./kernel/wire";
 import { useKernel } from "./kernel/context";
-import { useOpenChat, useSessions, useUnlisted, useViewport } from "./kernel/use";
+import { useOpenChat, useReloadAfterSettings, useSessions, useUnlisted, useViewport } from "./kernel/use";
 import { titleOf, useSlot } from "./extensions/slots";
 
 // What the first draw needs is the shell, the chat and the sign-in page. The other pages, and the dialogs that
@@ -201,6 +201,7 @@ function Shell({
     }, 1200);
     return () => clearTimeout(t);
   }, []);
+  useReloadAfterSettings(settings);
   useEffect(() => {
     const escape = (e: KeyboardEvent) => { if (e.key === "Escape") setMobileNav(false); };
     document.addEventListener("keydown", escape);

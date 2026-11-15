@@ -1,7 +1,7 @@
 import { ApiError, type Session, type SessionStatus, type api as realApi } from "../api";
 import { reconcile } from "../reconcile";
 import * as questions from "./confirms";
-import type { Ask } from "./confirms";
+import type { Ask, Unasked } from "./confirms";
 import { createStore, type Store } from "./store";
 
 /**
@@ -184,9 +184,9 @@ export function createSessions(deps: SessionsDeps) {
      * `gone` is called as soon as the chat is out of the list, before the list is asked for again: a page that showed
      * the chat goes to the next one in the same draw, not through a moment with no chat while the list is on its way.
      */
-    async remove(id: string, gone?: (list: readonly Session[]) => void): Promise<boolean> {
+    async remove(id: string, gone?: (list: readonly Session[]) => void, by?: Unasked): Promise<boolean> {
       const chat = find(id);
-      if (!(await deps.ask(questions.deleteChat(chat?.title ?? id, false, subChatsOf(id))))) return false;
+      if (!(await deps.ask(questions.byWhom(questions.deleteChat(chat?.title ?? id, false, subChatsOf(id)), by?.unasked)))) return false;
       await api.deleteSession(id);
       goneFromList([id]);
       gone?.(store.get().list);
@@ -197,13 +197,13 @@ export function createSessions(deps: SessionsDeps) {
      * Deletes several at once, after one question for all of them. `null` where the person said no; otherwise the
      * ones the portal kept, each with what it said, one after the other so that it need not do many at once.
      */
-    async removeMany(ids: readonly string[]): Promise<{ id: string; error: string }[] | null> {
+    async removeMany(ids: readonly string[], by?: Unasked): Promise<{ id: string; error: string }[] | null> {
       // Every one is named and counted, listed or not (an agent's chat, a sub-chat kept out of the list): a part that
       // keeps its own selection deletes nothing the question did not name. One not known here is named by its id.
       const chosen = [...new Set(ids)];
       const subs = chosen.reduce((n, id) => n + subChatsOf(id).length, 0);
       const busy = (id: string) => [find(id), ...subChatsOf(id)].some((c) => c?.status === "running" || c?.asking);
-      if (!(await deps.ask(questions.deleteChats(chosen.map((id) => ({ title: find(id)?.title ?? id, busy: busy(id) })), subs)))) return null;
+      if (!(await deps.ask(questions.byWhom(questions.deleteChats(chosen.map((id) => ({ title: find(id)?.title ?? id, busy: busy(id) })), subs), by?.unasked)))) return null;
       const failed: { id: string; error: string }[] = [];
       const done: string[] = [];
       for (const id of chosen) {

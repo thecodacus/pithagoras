@@ -16,7 +16,17 @@ export interface Question {
   danger?: boolean;
   /** Removes something, so Settings → This browser can switch the question off. */
   deletes?: boolean;
+  /** The person's own click did not start it (a part of an extension's interface did): asked whatever Settings says of `deletes`. */
+  unasked?: boolean;
 }
+
+/** Who started an action that asks first: `unasked` where a part of the page did, not the person's own click. */
+export interface Unasked {
+  unasked?: boolean;
+}
+
+/** `question`, marked as one the person did not start where `unasked`. */
+export const byWhom = (question: Question, unasked?: boolean): Question => (unasked ? { ...question, unasked: true } : question);
 
 export type Ask = (question: Question) => Promise<boolean>;
 

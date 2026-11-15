@@ -719,6 +719,8 @@ const de: Locale = {
     "pi publishes no schema for extension settings, so these keys are recovered by reading the package's source. A key built dynamically at runtime won't appear here — use Advanced to edit settings.json directly.": "pi veröffentlicht kein Schema für Einstellungen von Erweiterungen, darum werden diese Schlüssel aus dem Quellcode des Pakets gelesen. Ein Schlüssel, der erst zur Laufzeit gebildet wird, erscheint hier nicht — bearbeite settings.json dann direkt unter Erweitert.",
     "pi's own settings file, where installed extensions keep their configuration.": "pis eigene Einstellungsdatei, in der installierte Erweiterungen ihre Konfiguration ablegen.",
     "Save file": "Datei speichern",
+    "Needs interface API {range}; this portal has {version}": "Benötigt die Oberflächen-API {range}; dieses Portal hat {version}",
+    "Its package.json names the interface API it needs as \"{range}\", which is not a version range this portal reads": "Die package.json nennt die benötigte Oberflächen-API als \"{range}\", und das ist keine Versionsangabe, die dieses Portal liest",
     "Its interface could not be loaded: {reason}": "Die Oberfläche konnte nicht geladen werden: {reason}",
     "Its interface failed in a page: {reason}": "Die Oberfläche ist auf einer Seite fehlgeschlagen: {reason}",
     "Its server half could not be started: {reason}": "Der Serverteil konnte nicht gestartet werden: {reason}",

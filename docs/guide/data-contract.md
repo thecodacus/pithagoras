@@ -52,9 +52,11 @@ which contract it was written for, and how it finds out whether the portal has w
 `pick` is what `portal.chats.use` has: say what of the value the component uses, and it is drawn again only when
 that changes.
 
-`portal.models.use()`, `portal.settings.use()` and `portal.me.use()` ask the portal when the first of them is drawn. One
-drawn after that ask failed (`status: "offline"`) asks again, so a part shown later finds the portal back without a
-reload.
+`portal.models.use()`, `portal.settings.use()` and `portal.me.use()` ask the portal when the first of them is drawn,
+once however many parts are drawn in the same moment. One drawn after that ask failed (`status: "offline"`) asks again, so
+a part shown later finds the portal back without a reload. Settings is where a provider is added and the default model
+is chosen, so what the page holds of the models and the settings is asked for again when Settings is closed. Anything
+else changed elsewhere (another tab) shows after a reload.
 
 `portal.media` gives the addresses of a chat's files (`image`, `picture`, `video`, `file`), for an `img`, a `video` or a
 link. Nothing is asked.
@@ -65,7 +67,8 @@ link. Nothing is asked.
 | --- | --- |
 | `portal.sessions.actions.create(workspace?)` | Starts a chat |
 | `….rename(id, title)`, `….pin(id, pinned)` | As the list does |
-| `….remove(id)`, `….removeMany(ids)` | Deletes, after the portal's question |
+| `….remove(id)`, `….removeMany(ids)` | Deletes, after the portal's question. `remove` resolves `true`, or `false` where the person said no. `removeMany` resolves the chats the portal kept, each as `{ id, error }` (an empty list where all went), or `null` where the person said no |
+| `….dismissError()` | Clears `error` of `portal.sessions.use()` |
 | `portal.chats.controller(id).send(message, options?)` | Sends a message; `options` is `{ voice, images, steer }` |
 | `….abort()`, `….edit(seq, message)` | Stops the run; replaces a sent message and everything after it |
 | `….deleteMessage(seq)`, `….removeTurn(seq)` | Removes a message and the answer to it, after the portal's question |
@@ -74,7 +77,7 @@ link. Nothing is asked.
 | `….switchVersion(seq, to)`, `….compact()`, `….loadEarlier()`, `….rename(title)` | As the chat's own controls |
 | `….respond(requestId, answer)` | Answers a question the agent asked in the chat (its `ask_question` tool, among the events the page reads of that chat), or cancels any question. A question an extension of the agent asks in the portal's own dialog (the guard's, before a call it held) is answered there: here it can only be cancelled, and any other answer resolves `{ ok: false }` |
 | `….modes()`, `….setMode(mode)` | The modes a chat may be put in; puts it in one |
-| `portal.composer.actions.setDraft`, `attach`, `detach`, `loadCommands`, `canSubmit`, `submit` | What the box does |
+| `portal.composer.actions.setDraft`, `attach`, `detach`, `loadCommands`, `canSubmit`, `submit` | What the box does. `attach` resolves what went wrong, as texts; `submit` resolves `false` where there was nothing to send |
 | `portal.models.set(id, choice)` | Another model or effort for a chat |
 | `portal.prefs.set(key, value)`, `remove(key)` | A preference of this browser |
 
@@ -83,8 +86,10 @@ Each is bound to a chat's id, so a part cannot do something in another chat by m
 ### What the portal asks before it does
 
 An action that destroys something or raises what the agent may do asks the person first, in the portal's own dialog,
-and calls the portal only after a yes. It resolves `false` where they said no. A part cannot leave the question out,
-and cannot make it easy to answer without reading it:
+and calls the portal only after a yes. It resolves `false` (`null` for `removeMany`) where they said no. A part cannot
+leave the question out, and cannot make it easy to answer without reading it. This holds where the person has turned
+off [Ask before deleting](/guide/interface#confirmations) too: that switch is for the deletes they start with their own
+click in the portal's interface, and a delete a part asks for always asks.
 
 - `sessions.actions.remove` and `removeMany` (every chat, listed or not, and its sub-chats, named in the question)
 - `chats.controller(id).deleteMessage` and `removeTurn` (the question quotes the start of the message)
@@ -142,8 +147,8 @@ follow either.
 The page reads it before it loads the module. A portal whose contract is not one of them does not load the browser
 half, and says why in Settings → Extensions: "Needs interface API ^1.2; this portal has 1.0.0". A range the page
 cannot read is said the same way, and so is an `api` that is not text (`"api": 2` is read as the range `2`, a list is
-refused) or one longer than 100 characters. An extension that declares nothing is taken as `^1.0` and loads as it
-always did.
+refused) or one longer than 100 characters. An extension that declares nothing is taken as `^1.0`: it loads as it
+always did while the contract is 1.x, and is refused with that reason once the contract is 2.0.
 
 **Ask for a feature.** `portal.has("data.sessions")` says whether this portal has a part of the contract, for an
 extension that can do without it. The names are `data.sessions`, `data.chats`, `data.composer`, `data.models`,

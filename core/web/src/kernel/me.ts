@@ -1,5 +1,5 @@
 import type { api as realApi } from "../api";
-import { createStore } from "./store";
+import { createStore, shared } from "./store";
 
 /**
  * Who is using the portal. Every login is its owner's for now (see Who is behind a request in the extension guide):
@@ -17,8 +17,8 @@ export function createMe(api: MeApi) {
   const store = createStore<MeState>({ name: "Owner", role: "owner", status: "loading" });
   return {
     store,
-    /** Asks who it is; what cannot be asked leaves the name as it was. */
-    async load(): Promise<void> {
+    /** Asks who it is, once however many ask at the same time; what cannot be asked leaves the name as it was. */
+    load: shared(async (): Promise<void> => {
       try {
         const { people } = await api.people();
         const primary = people.find((p) => p.role === "primary");
@@ -26,7 +26,7 @@ export function createMe(api: MeApi) {
       } catch {
         store.update((s) => ({ ...s, status: "offline" }));
       }
-    },
+    }),
   };
 }
 export type Me = ReturnType<typeof createMe>;

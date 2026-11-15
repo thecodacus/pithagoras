@@ -408,6 +408,8 @@ test(`at most ${MOST_LIVE} streams are live: a fifth chat is a snapshot, asked f
   const { chats, sources, poll, calls } = make({ older: [status(9, "running"), said(10, "so far")] });
   for (const id of ["a", "b", "c", "d"]) chats.acquire(id);
   chats.acquire("e");
+  // Where the chats compete for places, who gets one is settled once the step in progress is over.
+  await settle();
   assert.deepEqual(chats.live(), ["a", "b", "c", "d"]);
   assert.deepEqual(chats.polled(), ["e"]);
   assert.equal(sources.live().length, 4);
@@ -430,6 +432,7 @@ test("a place that frees goes to the first chat that waited, which is then strea
   chats.acquire("e");
   await settle();
   releases[1]();
+  await settle();
   assert.deepEqual(chats.live(), ["a", "c", "d", "e"]);
   assert.deepEqual(chats.polled(), []);
   assert.equal(poll.running().length, 0);
@@ -441,6 +444,7 @@ test("the chat on screen is streamed first: it takes the place of the last chat 
   const { chats } = make();
   for (const id of ["a", "b", "c", "d"]) chats.acquire(id);
   chats.open("e");
+  await settle();
   assert.deepEqual(chats.live(), ["a", "b", "c", "e"]);
   assert.deepEqual(chats.polled(), ["d"]);
 });
@@ -622,4 +626,128 @@ test("a mode the portal cannot list is not asked about: the portal refuses one t
   await chats.controller("a").setMode("ext/risky");
   assert.equal(asked.length, 0);
   assert.deepEqual(calls.filter((x) => x.startsWith("setMode")), ["setMode a ext/risky plain"]);
+});
+
+const ask = (id: string) => event(-1, "extension_ui_request", { id, method: "confirm", title: "Sure?" });
+
+test("the dialogs of a chat are the ones its latest connection says are open: one answered while the page was away does not come back", () => {
+  const visibility = page();
+  const { chats, sources } = make({ visibility });
+  chats.open("screen");
+  sources.of("screen").start();
+  // A panel streams a child chat, and its guard asks a question in it.
+  chats.acquire("x");
+  sources.of("x").start({ events: [ask("d1")] });
+  assert.deepEqual(chats.peek("x").dialogs.map((d) => d.id), ["d1"]);
+  // The tab is put away, the question is answered in another tab, and the tab comes back: the new stream knows of no dialog.
+  visibility.set(true);
+  visibility.set(false);
+  sources.of("x").start();
+  assert.deepEqual(chats.peek("x").dialogs, []);
+  // One still open is sent again by each connection, and is held once.
+  sources.of("x").send(ask("d2"));
+  visibility.set(true);
+  visibility.set(false);
+  sources.of("x").start({ events: [ask("d2")] });
+  assert.deepEqual(chats.peek("x").dialogs.map((d) => d.id), ["d2"]);
+});
+
+test("a chat that a panel streamed and is then opened is connected again, and its dialogs are the new connection's", () => {
+  const { chats, sources } = make();
+  chats.acquire("x");
+  sources.of("x").start({ events: [ask("d1")] });
+  assert.deepEqual(chats.peek("x").dialogs.map((d) => d.id), ["d1"]);
+  chats.open("x");
+  sources.of("x").start();
+  assert.deepEqual(chats.peek("x").dialogs, []);
+});
+
+test("a chat the portal says is gone is not asked for again, and holds no place a chat that exists could take", async () => {
+  const { chats, calls, poll, sources } = make({ most: 1, missing: ["gone"] });
+  chats.open("keep");
+  sources.of("keep").start();
+  chats.acquire("gone");
+  await settle();
+  // Behind the chat on screen, so polled: the first answer says it is gone, and no tick asks again.
+  assert.equal(chats.peek("gone").missing, true);
+  const asked = () => calls.filter((c) => c === "older gone 9007199254740991 200").length;
+  assert.equal(asked(), 1);
+  poll.tick();
+  poll.tick();
+  await settle();
+  assert.equal(asked(), 1);
+  assert.equal(poll.running().filter((p) => p.ms === 5000).length, 0);
+});
+
+test("a streamed chat that turns out to be gone gives up its place, and is not streamed again when the tab is shown", async () => {
+  const visibility = page();
+  const { chats, sources, calls } = make({ most: 1, missing: ["gone"], visibility });
+  chats.acquire("gone");
+  sources.of("gone").fail();
+  await settle();
+  assert.equal(chats.peek("gone").missing, true);
+  // It held the only live place: a chat that exists takes it.
+  chats.acquire("other");
+  await settle();
+  assert.deepEqual(chats.live().filter((id) => id === "other"), ["other"]);
+  assert.equal(sources.of("other").closed, false);
+  const opened = sources.all.length;
+  const probes = calls.filter((c) => c === "session gone").length;
+  visibility.set(true);
+  visibility.set(false);
+  await settle();
+  assert.equal(calls.filter((c) => c === "session gone").length, probes);
+  assert.equal(sources.all.filter((s) => s.chat === "gone").length, 1);
+  assert.ok(sources.all.length <= opened + 1);
+});
+
+test("switching chats while the live places are taken opens only the chat switched to, and asks for no snapshot that is thrown away", async () => {
+  const { chats, sources, calls } = make();
+  for (const id of ["c1", "c2", "c3", "c4"]) chats.acquire(id);
+  const releaseChat = chats.acquire("A");
+  const releaseFrame = chats.open("A");
+  await settle();
+  assert.deepEqual(chats.live().sort(), ["A", "c1", "c2", "c3"]);
+  const opened = sources.all.length;
+  const asked = calls.length;
+  // What commits as one: the chat view and the frame let go of A, the chat view reads B, the frame opens it.
+  releaseChat();
+  releaseFrame();
+  chats.acquire("B");
+  chats.open("B");
+  await settle();
+  assert.deepEqual(chats.live().sort(), ["B", "c1", "c2", "c3"]);
+  assert.deepEqual(chats.polled(), ["c4"]);
+  assert.deepEqual(sources.all.slice(opened).map((s) => s.chat), ["B"]);
+  assert.deepEqual(calls.slice(asked).filter((c) => c.startsWith("older")), []);
+});
+
+test("what the store holds of a chat is frozen: a part that sorts it or cuts a payload fails, and a question still quotes the message as it came", async () => {
+  const { chats, sources, asked } = make({ answers: [false] });
+  chats.open("a");
+  const s = sources.of("a");
+  s.start({ events: [event(2, "agent_start"), event(3, "portal_prompt", { message: "Please clean up the old build folders" })] });
+  const { events } = chats.peek("a");
+  assert.throws(() => events.reverse(), TypeError);
+  assert.throws(() => events.push(event(9, "agent_start")), TypeError);
+  assert.throws(() => { (events[1].payload as { message: string }).message = "cut"; }, TypeError);
+  // What came after, a frame at a time, and in a snapshot.
+  s.send(event(4, "agent_start", { nested: { list: [1] } }));
+  s.named_("live-reset");
+  const later = chats.peek("a").events;
+  assert.ok(Object.isFrozen(later));
+  assert.ok(Object.isFrozen(chats.controller("a")));
+  await chats.controller("a").deleteMessage(3);
+  assert.match(asked[0].message ?? "", /^"Please clean up the old build folders"/);
+});
+
+test("a delete or a mode that a part started is marked, so that the person's switch for the question does not spare it", async () => {
+  const { chats, asked } = make({ answers: [true, true, true, true, true], modes: [{ id: "risky", label: "Risky", description: "", confirm: "Really?" }] });
+  const c = chats.controller("a");
+  await c.deleteMessage(3);
+  await c.deleteMessage(3, { unasked: true });
+  await c.removeTurn(3, { unasked: true });
+  await c.trustFlagged("r", { unasked: true });
+  await c.setMode("risky", { unasked: true });
+  assert.deepEqual(asked.map((q) => q.unasked), [undefined, true, true, true, true]);
 });

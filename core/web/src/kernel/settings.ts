@@ -1,5 +1,5 @@
 import type { api as realApi } from "../api";
-import { createStore } from "./store";
+import { createStore, shared } from "./store";
 
 /**
  * The few settings an interface may read: how new chats start, and where they run. Read-only, by a short list of keys:
@@ -30,8 +30,8 @@ export function createSettings(api: SettingsApi) {
   const store = createStore<SettingsState>({ values: { provider: "", model: "", thinkingLevel: "", executor: "host" }, status: "loading" });
   return {
     store,
-    /** Asks for them; what cannot be asked leaves them as they were. */
-    async load(): Promise<void> {
+    /** Asks for them, once however many ask at the same time; what cannot be asked leaves them as they were. */
+    load: shared(async (): Promise<void> => {
       try {
         const r = await api.settings();
         store.set({
@@ -41,7 +41,7 @@ export function createSettings(api: SettingsApi) {
       } catch {
         store.update((s) => ({ ...s, status: "offline" }));
       }
-    },
+    }),
   };
 }
 export type Settings = ReturnType<typeof createSettings>;

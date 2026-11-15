@@ -7,7 +7,7 @@ import { reconnectDelay, type Visibility } from "../poll";
 import { toolNameOf } from "../tool-payload";
 import { flaggedOf, toolOutputText } from "../transcript";
 import * as questions from "./confirms";
-import type { Ask } from "./confirms";
+import type { Ask, Unasked } from "./confirms";
 import type { Sessions } from "./sessions";
 import { createStore, type Store } from "./store";
 
@@ -58,7 +58,7 @@ export interface ChatState {
 
 /** Before a chat's stream is open: the same object each time, as `useSyncExternalStore` wants. */
 export const LOADING: ChatState = {
-  events: [],
+  events: Object.freeze([]) as unknown as PortalEvent[],
   versions: {},
   status: "idle",
   loaded: false,
@@ -121,7 +121,7 @@ export interface ChatsDeps {
 }
 
 /** What `deleteMessage`, `trustFlagged` and `setMode` take: the question comes first, and `accepted` once it was said yes to. */
-export interface Asked {
+export interface Asked extends Unasked {
   /** Called once the person said yes (at once where nothing is asked), right before the portal is asked: a view's own sign that it is on its way. */
   accepted?: () => void;
 }
@@ -187,6 +187,23 @@ interface Entry {
   loadedAgain: number;
 }
 
+/**
+ * One list of events is read by the chat on screen, by every part that reads the chat, and by the kernel's own questions
+ * (which quote a message, name the tool a result came from): a part that sorted it, or cut a payload short for its own
+ * drawing, would change all of them, and a question would no longer say what the action does. So what the store holds is
+ * frozen, and a part that changes it fails at the line that does. An event is frozen once, as it first comes in.
+ */
+function frozen(events: PortalEvent[]): void {
+  for (const ev of events) if (!Object.isFrozen(ev)) deepFreeze(ev);
+  Object.freeze(events);
+}
+
+function deepFreeze(value: unknown): void {
+  if (!value || typeof value !== "object" || Object.isFrozen(value)) return;
+  Object.freeze(value);
+  for (const inner of Object.values(value)) deepFreeze(inner);
+}
+
 const statusOf = (events: readonly PortalEvent[]): SessionStatus | undefined => {
   for (let i = events.length - 1; i >= 0; i--) {
     if (events[i].type === "portal_status") return (events[i].payload as { status?: SessionStatus } | undefined)?.status;
@@ -209,7 +226,11 @@ export function createChats(deps: ChatsDeps) {
   deps.visibility?.addEventListener("visibilitychange", () => rebalance());
 
   const set = (e: Entry, change: Partial<ChatState> | ((s: ChatState) => Partial<ChatState>)) =>
-    e.state.update((s) => ({ ...s, ...(typeof change === "function" ? change(s) : change) }));
+    e.state.update((s) => {
+      const next = { ...s, ...(typeof change === "function" ? change(s) : change) };
+      if (next.events !== s.events) frozen(next.events);
+      return next;
+    });
 
   /** A chat's stream: replay, then tail. Keeps what is shown until a reload has all come. `keep`: there is something shown to keep. */
   function startLive(e: Entry, keep: boolean): void {
@@ -375,6 +396,10 @@ export function createChats(deps: ChatsDeps) {
       };
       es.addEventListener("caught-up", () => {
         caughtUp = true;
+        // The dialogs this connection's replay holds are the ones open now: the server sends each that is still open as
+        // a stream opens. One this page heard of on an earlier connection and the replay lacks was answered or timed
+        // out while it was away, and no cancel will come for it.
+        if (e.state.get().dialogs.length) set(e, { dialogs: [] });
         flush();
         set(e, { loaded: true });
         // Only now do we know where the replayed window starts, and therefore whether the conversation continues above it.
@@ -410,7 +435,7 @@ export function createChats(deps: ChatsDeps) {
           },
           (err) => {
             if (cancelled || asked !== generation) return;
-            if (err instanceof ApiError && err.status === 404) set(e, { missing: true, loaded: true });
+            if (err instanceof ApiError && err.status === 404) gone(e);
             else retry = setTimeout(connect, reconnectDelay(failed));
           },
         );
@@ -438,6 +463,16 @@ export function createChats(deps: ChatsDeps) {
     };
   }
 
+  /**
+   * The portal says it has no such chat: nothing more is asked of it, so its stream or polling stops, and it holds no
+   * place from then on (`rebalance` leaves it out), a chat that exists taking it.
+   */
+  function gone(e: Entry): void {
+    set(e, { missing: true, loaded: true });
+    e.stop();
+    rebalance();
+  }
+
   /** A chat past `most`: its latest events, asked for now and again every few seconds. */
   function startPolled(e: Entry): void {
     let live = true;
@@ -454,7 +489,7 @@ export function createChats(deps: ChatsDeps) {
         },
         (err) => {
           if (!live) return;
-          if (err instanceof ApiError && err.status === 404) set(e, { missing: true, loaded: true });
+          if (err instanceof ApiError && err.status === 404) gone(e);
           else set(e, (s) => ({ failures: s.failures + 1 }));
         },
       );
@@ -472,7 +507,7 @@ export function createChats(deps: ChatsDeps) {
    * While the page is hidden only the chat on screen is streamed; the others wait, polled, until it is shown again.
    */
   function rebalance(): void {
-    const order = [...entries.values()].sort((a, b) => Number(b.id === screen.get()) - Number(a.id === screen.get()) || a.order - b.order);
+    const order = [...entries.values()].filter((e) => !e.state.get().missing).sort((a, b) => Number(b.id === screen.get()) - Number(a.id === screen.get()) || a.order - b.order);
     const away = hidden();
     order.forEach((e, i) => {
       const mode = i < most && (!away || e.id === screen.get()) ? "live" : "polled";
@@ -492,6 +527,24 @@ export function createChats(deps: ChatsDeps) {
     });
   }
 
+  let scheduled = false;
+  /**
+   * `rebalance`, now where every chat read has a place (nothing is started that a next step takes back); where they
+   * compete it is done once the step in progress is over. Switching chats is several steps (the old one is let go of,
+   * by the chat view and by the frame, the new one is read, then opened), and done at each, the place the old one frees
+   * would be given to a waiting chat, the new one polled for a moment, and the waiting chat's stream closed again: a
+   * stream and two snapshots asked of the portal for nothing.
+   */
+  function rebalanceSoon(competing: boolean): void {
+    if (!competing) return rebalance();
+    if (scheduled) return;
+    scheduled = true;
+    queueMicrotask(() => {
+      scheduled = false;
+      rebalance();
+    });
+  }
+
   /** Reads a chat: its stream is opened with the first to ask and closed with the last. Returns the release. */
   function acquire(id: string, onScreen = false): () => void {
     let e = entries.get(id);
@@ -505,14 +558,15 @@ export function createChats(deps: ChatsDeps) {
       screen.set(id);
       fanOut.onScreen(id);
     }
-    if (held.count === 1 || onScreen) rebalance();
+    if (held.count === 1 || onScreen) rebalanceSoon(entries.size > most);
     return () => {
       if (--held.count > 0) return;
+      const competing = entries.size > most;
       held.stop();
       held.stop = () => {};
       if (entries.get(id) === held) entries.delete(id);
       // A place freed: the first of those that waited is streamed now.
-      rebalance();
+      rebalanceSoon(competing);
     };
   }
 
@@ -560,7 +614,7 @@ export function createChats(deps: ChatsDeps) {
     /** The chat's title where it is not the one on screen: a question about another chat says which. */
     const elsewhere = () => (screen.get() === id ? undefined : sessions.find?.(id)?.title || id);
     const removeMessage = async (seq: number, asked?: Asked) => {
-      if (!(await deps.ask(questions.deleteMessage({ chat: elsewhere(), text: messageText(events(), seq) })))) return false;
+      if (!(await deps.ask(questions.byWhom(questions.deleteMessage({ chat: elsewhere(), text: messageText(events(), seq) }), asked?.unasked)))) return false;
       asked?.accepted?.();
       await api.deleteMessage(id, seq);
       return true;
@@ -582,7 +636,7 @@ export function createChats(deps: ChatsDeps) {
       deleteMessage: removeMessage,
       removeTurn: removeMessage,
       async trustFlagged(result, asked) {
-        if (!(await deps.ask(questions.trustFlagged({ chat: elsewhere(), tool: flaggedTool(events(), result) })))) return false;
+        if (!(await deps.ask(questions.byWhom(questions.trustFlagged({ chat: elsewhere(), tool: flaggedTool(events(), result) }), asked?.unasked)))) return false;
         asked?.accepted?.();
         await api.trustFlagged(id, result);
         const e = entries.get(id);
@@ -646,7 +700,7 @@ export function createChats(deps: ChatsDeps) {
         const picked = list.find((m) => m.id === mode);
         let confirmed = false;
         if (picked?.confirm) {
-          if (!(await deps.ask(questions.useMode(modeLabel(picked), modeConfirm(picked) ?? picked.confirm)))) return false;
+          if (!(await deps.ask(questions.byWhom(questions.useMode(modeLabel(picked), modeConfirm(picked) ?? picked.confirm), asked?.unasked)))) return false;
           confirmed = true;
         }
         asked?.accepted?.();

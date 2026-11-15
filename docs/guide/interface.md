@@ -142,6 +142,8 @@ Deleting a session, a project, a routine and the like asks first, and so does re
 This browser → Confirmations → Ask before deleting** turns the question off.
 It is kept per browser deliberately: a phone that trips over a delete button is
 not made safer by the laptop having turned the question off.
+It covers what you delete with your own click: a chat or message that an extension's interface deletes always asks
+(see [the data contract](/guide/data-contract#what-the-portal-asks-before-it-does)).
 
 Closing a dialog with something typed in that is not saved yet — a skill you
 rewrote, a provider (its key, its models and their windows), project, MCP server

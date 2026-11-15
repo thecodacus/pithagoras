@@ -471,3 +471,34 @@ test("commands are asked of a pi that is up without starting one, and a list tha
   assert.deepEqual(asked, [{ ifRunning: true }, { ifRunning: true }]);
   assert.equal(composer.commandsAreFor("a", "2"), false);
 });
+
+test("the models, the settings and who is using the portal are asked once however many parts ask in the same draw, and an older failure cannot overwrite a newer answer", async () => {
+  const asks = { models: 0, settings: 0, people: 0 };
+  // Each ask is answered when the test says.
+  const answers: Record<string, (ok: boolean) => void> = {};
+  const later = <T,>(name: keyof typeof asks, value: T) => () => {
+    asks[name]++;
+    return new Promise<T>((resolve, reject) => (answers[name] = (ok) => (ok ? resolve(value) : reject(new Error("502")))));
+  };
+  const models = createModels({ allModels: later("models", { providers: {}, models: [] }) } as never);
+  const settings = createSettings({ settings: later("settings", { settings: { provider: "p" }, executor: "host" }) } as never);
+  const me = createMe({ people: later("people", { people: [{ name: "Ada", role: "primary" }] }) } as never);
+  for (const store of [models, settings, me]) {
+    const three = [store.load(), store.load(), store.load()];
+    assert.equal(three[0], three[1]);
+  }
+  assert.deepEqual(asks, { models: 1, settings: 1, people: 1 });
+  for (const name of Object.keys(answers)) answers[name](true);
+  await settle();
+  assert.equal(me.store.get().status, "ready");
+  assert.equal(models.store.get().status, "ready");
+  // Asked again once the first has answered, not while it is on its way.
+  const again = me.load();
+  assert.equal(asks.people, 2);
+  answers.people(false);
+  await again;
+  assert.equal(me.store.get().status, "offline");
+  assert.equal(me.store.get().name, "Ada");
+  void me.load();
+  assert.equal(asks.people, 3);
+});

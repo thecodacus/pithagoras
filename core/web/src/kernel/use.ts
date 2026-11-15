@@ -1,4 +1,4 @@
-import { useCallback, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
 import { LOADING, type ChatState } from "./chats";
 import { useKernel } from "./context";
 import type { ComposerState } from "./composer";
@@ -55,6 +55,24 @@ export const useOpenChat = (id: string | undefined): ChatState => useChatState(i
 export function useComposer(id: string): ComposerState {
   const { composer } = useKernel();
   return useStore(composer.store, (all) => all[id] ?? composer.get(id));
+}
+
+/**
+ * Settings is where a provider is added and the default model is chosen: what the page holds of the models and the
+ * public settings is asked for again once it is closed, by those that were asked for in the first place.
+ */
+export function useReloadAfterSettings(open: boolean): void {
+  const { models, settings } = useKernel();
+  const was = useRef(false);
+  useEffect(() => {
+    if (open) {
+      was.current = true;
+      return;
+    }
+    if (!was.current) return;
+    was.current = false;
+    for (const store of [models, settings]) if (store.store.get().status !== "loading") void store.load();
+  }, [open, models, settings]);
 }
 
 export const useModels = () => useStore(useKernel().models.store);

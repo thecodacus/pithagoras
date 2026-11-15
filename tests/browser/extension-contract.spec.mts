@@ -64,3 +64,22 @@ test('a part drawn after the portal did not answer asks again, and shows what it
   await expect(page.getByTestId('reader')).toContainText('Ada · roomy');
   await expect(page.getByTestId('reader')).toContainText('ready');
 });
+
+test('the models and the settings a part read are asked for again once Settings is closed, and what no part read is not asked for', async ({ page }) => {
+  let models = ['m1'];
+  let model = 'm1';
+  let people = 0;
+  await page.route('**/api/models', (route) => route.fulfill({ json: { providers: {}, models: models.map((id) => ({ provider: 'p', id, name: id, reasoning: false })) } }));
+  await page.route('**/api/settings', (route) => route.fulfill({ json: { settings: { provider: 'p', model }, executor: 'host' } }));
+  await page.route('**/api/people', (route) => (people++, route.fulfill({ json: { people: [{ id: 'p1', name: 'Ada', role: 'primary' }] } })));
+  await page.goto('/tests/contract.html');
+  await expect(page.getByTestId('settings')).toHaveText('m1 · m1');
+  await page.getByRole('button', { name: 'Open Settings' }).click();
+  // A provider is added, and the default model chosen, in Settings.
+  models = ['m1', 'm2'];
+  model = 'm2';
+  await page.getByRole('button', { name: 'Close Settings' }).click();
+  await expect(page.getByTestId('settings')).toHaveText('m1,m2 · m2');
+  // Who is using the portal is not something Settings changes.
+  expect(people).toBe(1);
+});

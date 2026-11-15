@@ -1,5 +1,5 @@
 import type { ConfigPatch, api as realApi } from "../api";
-import { createStore } from "./store";
+import { createStore, shared } from "./store";
 
 /**
  * The models there are, and which one a chat uses and how hard it thinks. What the chat's pills draw: where the
@@ -41,7 +41,8 @@ export function createModels(api: ModelsApi) {
   /** What each chat uses, by its id, once asked. */
   const chats = createStore<Readonly<Record<string, ChatModel>>>({});
 
-  async function load(): Promise<void> {
+  /** Asks for the list, once however many ask at the same time. */
+  const load = shared(async (): Promise<void> => {
     try {
       const r = await api.allModels();
       store.set({
@@ -51,7 +52,7 @@ export function createModels(api: ModelsApi) {
     } catch {
       store.update((s) => ({ ...s, status: "offline" }));
     }
-  }
+  });
 
   /** Counts, per chat, the reads and the changes: a read answered after a later read or change says what is no longer so. */
   const asks = new Map<string, number>();

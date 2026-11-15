@@ -341,3 +341,15 @@ test("a status heard on a chat's stream shows at once, in the list and for a cha
   assert.equal(sessions.store.get().list[0].status, "running");
   assert.equal(sessions.find("o")?.status, "running");
 });
+
+test("a delete a part started is marked as one the person did not start, and one from the stock interface is not", async () => {
+  const { sessions, asked, state } = make([session("a"), session("b")], [true, true, true, true]);
+  sessions.start();
+  await settle();
+  await sessions.actions.remove("a");
+  await sessions.actions.remove("b", undefined, { unasked: true });
+  await sessions.actions.removeMany(["a"]);
+  await sessions.actions.removeMany(["b"], { unasked: true });
+  assert.deepEqual(asked.map((q) => q.unasked), [undefined, true, undefined, true]);
+  assert.ok(state.calls.includes("delete b"));
+});
