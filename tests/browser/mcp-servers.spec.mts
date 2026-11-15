@@ -2,11 +2,11 @@ import { type Page } from '@playwright/test';
 import { test, expect, mockPortal } from './portal-mock';
 
 /** Settings → MCP over canned answers, with every save that was sent. */
-async function portal(page: Page) {
+async function portal(page: Page, extra = false) {
   const saves: string[] = [];
   const entries: unknown[] = [];
   const status = {
-    github: { lazy: true, by: 'threshold', tools: { count: 38, tokens: 9200, at: 1, stale: false }, approve: ['delete_*'], trusted: false },
+    github: { lazy: true, by: 'threshold', tools: { count: 38, tokens: 9200, at: 1, stale: false, resources: false }, approve: ['delete_*'], trusted: false },
     notes: { mark: 'direct', lazy: false, by: 'mark', tools: null, approve: [], trusted: true },
   };
   const mcp = {
@@ -16,6 +16,17 @@ async function portal(page: Page) {
       { name: 'notes', entry: { type: 'stdio', command: 'notes-mcp' }, transport: 'stdio', disabled: false, problem: null, commands: [] },
     ],
   };
+  if (extra) {
+    // A server that connected and offers only resources, and one whose entry changed since it was read.
+    Object.assign(status, {
+      docs: { lazy: true, by: 'resources', tools: { count: 0, tokens: 0, at: 1, stale: false, resources: true }, approve: [], trusted: false },
+      wiki: { lazy: false, by: 'size', tools: { count: 3, tokens: 90, at: 1, stale: true, resources: false }, approve: [], trusted: false },
+    });
+    mcp.servers.push(
+      { name: 'docs', entry: { type: 'stdio', command: 'docs-mcp' }, transport: 'stdio', disabled: false, problem: null, commands: [] },
+      { name: 'wiki', entry: { type: 'stdio', command: 'wiki-mcp' }, transport: 'stdio', disabled: false, problem: null, commands: [] },
+    );
+  }
   await mockPortal(page, ({ path, method, json }) => {
     if (path === '/api/mcp') return mcp;
     if (path === '/api/mcp/status') return { servers: status, limits: { tokens: 3000, tools: 20 } };
@@ -74,6 +85,12 @@ test('each server says what a chat does with its tools and what is known of them
   await expect(github).toContainText("auto, lazy now: the model's list is over the limits · 38 tools, about 9,200 tokens · asks first: delete_*");
   const notes = dialog.getByRole('button', { name: /^notes/ }).first();
   await expect(notes).toContainText("direct: always in the model's list · never connected, so its tools are not known yet");
+});
+
+test('a server that offers only resources is said to have run, and a server read from an older entry says so', async ({ page }) => {
+  const { dialog } = await portal(page, true);
+  await expect(dialog.getByRole('button', { name: /^docs/ }).first()).toContainText('auto, lazy: it offers only resources, no tools · no tools of its own, only resources');
+  await expect(dialog.getByRole('button', { name: /^wiki/ }).first()).toContainText('3 tools, about 90 tokens (as of before its entry was changed)');
 });
 
 test("a server's mark and the tools that ask first are saved with the server, and only when they changed", async ({ page }) => {
