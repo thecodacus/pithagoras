@@ -1,4 +1,4 @@
-import { knownTools, lazySetLabels, resolvedLazy, sizedTools, toolMarks } from "./db.js";
+import { knownTools, lazySetLabels, mcpView, resolvedLazy, sizedTools, toolGroupNames, toolMarks } from "./db.js";
 import { headLazy, ruleTag, type LazyHead } from "./tool-lazy.js";
 import { TOOL_SEARCH } from "./pi/tool-search-names.js";
 
@@ -14,6 +14,8 @@ const HINT_TOOLS = 3;
 export function lazyHintOf(groups: readonly { label: string; tools: readonly string[] }[]): string {
   if (!groups.length) return "";
   const shown = groups.slice(0, HINT_GROUPS).map((group) => {
+    // A server nothing is known of yet has no tools to name: its name is what there is.
+    if (!group.tools.length) return group.label;
     const names = group.tools.slice(0, HINT_TOOLS).join(", ");
     const more = group.tools.length > HINT_TOOLS ? ` and ${group.tools.length - HINT_TOOLS} more` : "";
     return `${group.label} (${names}${more})`;
@@ -32,12 +34,18 @@ export function buildLazyHead(pinned: readonly string[] = [], off: ReadonlySet<s
   const tools = sizedTools();
   const kept = new Set(pinned);
   const direct = new Set([...Object.entries(marks).filter(([, mark]) => mark === "direct").map(([entry]) => entry), ...kept]);
-  const lazy = new Set([...Object.entries(marks).filter(([, mark]) => mark === "lazy").map(([entry]) => entry), ...resolvedLazy().lazy].filter((entry) => !kept.has(entry)));
+  // An MCP server nothing is known of (it has never connected: no tool of it is remembered) counts as lazy, with an unknown
+  // size: connecting it for every chat to find out is what lazy is there to avoid. A search starts it and finds its tools.
+  const view = mcpView();
+  const seen = new Set(knownTools().flatMap((tool) => (tool.server ? [tool.server] : [])));
+  const unseen = view.servers.filter((server) => !view.off.has(server) && !seen.has(server) && !view.catalogue.some((tool) => tool.server === server) && !direct.has(server));
+  const lazy = new Set([...Object.entries(marks).filter(([, mark]) => mark === "lazy").map(([entry]) => entry), ...resolvedLazy().lazy, ...unseen].filter((entry) => !kept.has(entry)));
   const head = { lazy: [...lazy].sort(), direct: [...direct].sort() };
   // The tools that are lazy in it and may be: judged as the marks do (lazyAllowed), so that a mark on a set whose tools cannot be lazy names none.
   const inHead = tools.filter((tool) => tool.allowed && headLazy(head, tool));
   const names = inHead.filter((tool) => !off.has(tool.name)).map((tool) => tool.name);
-  if (!names.length) return { v: 1, lazy: [], direct: head.direct, hint: "", outside: false, voice: [], tag: ruleTag() };
+  const unseenLazy = unseen.filter((server) => head.lazy.includes(server));
+  if (!names.length && !unseenLazy.length) return { v: 1, lazy: [], direct: head.direct, hint: "", outside: false, voice: [], tag: ruleTag() };
   // What the lazy tools say of themselves that stays in the head (decision 13): the line that outside content is data, and
   // their lines for a spoken turn. From what they said when a chat last registered them, so that it is said from the first
   // request and a lazy tool that registers late adds nothing to the prompt. One no chat has registered yet adds its own
@@ -47,5 +55,7 @@ export function buildLazyHead(pinned: readonly string[] = [], off: ReadonlySet<s
   // its line then, and the head must not change under the chat for a tool the model is not even shown.
   const lazyTools = inHead.map((tool) => said.get(tool.name));
   const voice = [...new Set(lazyTools.flatMap((tool) => tool?.voice ?? []))];
-  return { v: 1, ...head, hint: lazyHintOf(lazySetLabels(names)), outside: lazyTools.some((tool) => tool?.outside === true), voice, tag: ruleTag() };
+  const given = toolGroupNames();
+  const groups = [...lazySetLabels(names), ...unseenLazy.map((server) => ({ label: given[server] ?? server, tools: [] as string[] }))].sort((a, b) => a.label.localeCompare(b.label));
+  return { v: 1, ...head, hint: lazyHintOf(groups), outside: lazyTools.some((tool) => tool?.outside === true), voice, tag: ruleTag() };
 }

@@ -1,6 +1,6 @@
 import { test, before, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fakeModel, resultsIn } from "./fake-model.mjs";
 import { freePort, inProcessHome, serverEnv, startServer } from "./server-harness.mjs";
@@ -63,7 +63,7 @@ const states = (r) => Object.fromEntries(r.tools.map((t) => [t.name, t.enabled])
 /** The tools a page marks as reached through `tool_search`. */
 const lazyOf = (r) => r.tools.filter((t) => t.lazy).map((t) => t.name).sort();
 
-/** The MCP adapter's configuration: the servers there are. */
+/** pi's MCP configuration: the servers there are. */
 const writeMcp = (servers) => writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR, "mcp.json"), JSON.stringify({ mcpServers: servers }));
 
 beforeEach(async () => {
@@ -336,38 +336,39 @@ test("a running chat is told what is off, and a tool it switched off is among th
   }
 });
 
-test("a mark cannot make an MCP server's tools or pi's built-in tools lazy: the first are lazy by their server's own setting, the others are always offered", async () => {
+/** A tool of an MCP server as a chat reports it: pi's name for it, and its server from pi's namespace. */
+const server = (name, tool) => ({ name: `mcp__${name}__${tool}`, source: name, server: name, package: null });
+
+test("a mark cannot make pi's built-in tools lazy, and an MCP server's tools are a set like any other, which can be", async () => {
   writeMcp({ notes: {} });
-  db.rememberTools([
-    { name: "notes_read", source: "pi-mcp-adapter", package: null },
-    { name: "mcp", source: "pi-mcp-adapter", package: null },
-    { name: "bash", source: "built in", package: null },
-    { name: "read", source: "built in", package: null },
-  ]);
-  for (const entry of ["notes", "built in", "pi-mcp-adapter", lazyToolEntry("notes_read"), lazyToolEntry("mcp"), lazyToolEntry("bash")]) {
+  db.rememberTools([server("notes", "read"), { name: "bash", source: "built in", package: null }, { name: "read", source: "built in", package: null }]);
+  for (const entry of ["built in", lazyToolEntry("bash")]) {
     const res = await send("/api/tools/marks", "PUT", { marks: { [entry]: "lazy" } });
     assert.equal(res.status, 400, `${entry} is refused`);
     assert.equal((await res.json()).code, "lazy-refused");
   }
-  // A server that is configured but has no tool seen yet is refused by its name too.
+  // The server is a set, and a tool of it a tool: both are taken.
+  assert.equal((await send("/api/tools/marks", "PUT", { marks: { notes: "lazy" } })).status, 200);
+  assert.equal((await send("/api/tools/marks", "PUT", { marks: { [lazyToolEntry("mcp__notes__read")]: "lazy" } })).status, 200);
+  // A server that is configured but has no tool seen yet is taken by its name too: it is a set, and its tools turn up.
   writeMcp({ notes: {}, wiki: {} });
-  assert.equal((await send("/api/tools/marks", "PUT", { marks: { wiki: "lazy" } })).status, 400);
-  // Mixed with a mark that is fine, the whole request is refused and nothing is stored.
-  assert.equal((await send("/api/tools/marks", "PUT", { marks: { "pi-heavy": "lazy", notes: "lazy" } })).status, 400);
+  assert.equal((await send("/api/tools/marks", "PUT", { marks: { wiki: "lazy" } })).status, 200);
+  // Mixed with a mark that is refused, the whole request is refused and nothing is stored.
+  await mark({});
+  assert.equal((await send("/api/tools/marks", "PUT", { marks: { "pi-heavy": "lazy", "built in": "lazy" } })).status, 400);
   assert.deepEqual(db.toolMarks(), {});
   // `direct` is nothing to refuse: they are in the list anyway.
   assert.equal((await send("/api/tools/marks", "PUT", { marks: { bash: "direct" } })).status, 200);
   await mark({});
 
   // A mark that got in some other way (the database, an older portal) names tools that are not lazy.
-  db.setToolMarks({ notes: "lazy", "built in": "lazy", [lazyToolEntry("bash")]: "lazy", "pi-heavy": "lazy" });
+  db.setToolMarks({ "built in": "lazy", [lazyToolEntry("bash")]: "lazy", "pi-heavy": "lazy" });
   assert.deepEqual([...db.lazyToolNames()].sort(), ["heavy_open", "heavy_read"]);
   const chat = await json("/api/sessions", "POST", {});
-  // The portal's own tool has nothing of the server's: the adapter's `mcp` tool does that. The lists say it is lazy all the same.
-  assert.deepEqual(lazyOf(await json(`/api/sessions/${chat.id}/tools`)), ["heavy_open", "heavy_read", "notes_read"]);
+  assert.deepEqual(lazyOf(await json(`/api/sessions/${chat.id}/tools`)), ["heavy_open", "heavy_read"]);
   // And such a mark does not stand in the way of an unrelated change to the list.
-  const kept = await mark({ notes: "lazy", "built in": "lazy", "pi-heavy": "lazy", "pi-web-access": "lazy" });
-  assert.deepEqual(Object.keys(kept.marks).sort(), ["built in", "notes", "pi-heavy", "pi-web-access"]);
+  const kept = await mark({ "built in": "lazy", "pi-heavy": "lazy", "pi-web-access": "lazy" });
+  assert.deepEqual(Object.keys(kept.marks).sort(), ["built in", "pi-heavy", "pi-web-access"]);
 });
 
 test("a body that is not marks is refused", async () => {
@@ -426,79 +427,76 @@ test("a tool the portal registers itself can be lazy, on its own and with the re
   assert.deepEqual(page.tools.filter((t) => t.noLazy).map((t) => t.name), []);
 });
 
-const adapter = (...names) => names.map((name) => ({ name, source: "pi-mcp-adapter", package: null }));
-/** The MCP adapter's configuration as written, and read back. */
-const mcpFileOf = () => JSON.parse(readFileSync(path.join(process.env.PI_CODING_AGENT_DIR, "mcp.json"), "utf8"));
+test("an MCP server is a set like any other: lazy or direct by its mark, or by the threshold, and in a chat by what the chat froze", async () => {
+  writeMcp({ notes: { command: "n" }, understory: { url: "http://localhost:3800/mcp", exposure: "direct" }, wiki: { command: "w" } });
+  db.rememberTools([server("notes", "read"), server("notes", "write"), server("understory", "memory_recall"), server("wiki", "page")]);
+  // Nothing marked and the list short: all of them are in the model's list, and the page says whose tools they are.
+  let page = await json("/api/tools");
+  assert.deepEqual(lazyOf(page), []);
+  assert.deepEqual(Object.fromEntries(page.tools.filter((t) => t.name.startsWith("mcp__")).map((t) => [t.name, t.source])), {
+    mcp__notes__read: "notes", mcp__notes__write: "notes", mcp__understory__memory_recall: "understory", mcp__wiki__page: "wiki",
+  });
+  assert.deepEqual(page.tools.filter((t) => t.noLazy).map((t) => t.name), [], "an MCP server's tool has a lazy state");
 
-test("an MCP server's tools are lazy unless the server registers them directly: the setting is the server's, and a mark cannot name it", async () => {
-  writeMcp({
-    notes: { command: "n" },
-    // As Understory's extension writes it: its tools registered directly.
-    understory: { url: "http://localhost:3800/mcp", lifecycle: "lazy", directTools: true },
-    wiki: { command: "w", directTools: ["page"] },
-    legacy: { command: "l", directTools: false },
-  });
-  db.rememberTools(adapter("notes_read", "understory_memory_recall", "wiki_page", "wiki_edit", "legacy_ping"));
-  const page = await json("/api/tools");
-  // The adapter's default is the proxy: lazy. Understory, written with its tools registered, stays as it was.
-  assert.deepEqual(lazyOf(page), ["legacy_ping", "notes_read", "wiki_edit"]);
-  assert.deepEqual(Object.fromEntries(page.tools.filter((t) => t.mcp).map((t) => [t.name, t.mcp])), {
-    notes_read: "notes", understory_memory_recall: "understory", wiki_page: "wiki", wiki_edit: "wiki", legacy_ping: "legacy",
-  });
-  assert.deepEqual(page.tools.filter((t) => t.noLazy).map((t) => t.name), [], "an MCP server's tool has a lazy state; the adapter's own tools are not in this list");
-  // A chat is shown the same, and so is a project's list.
+  // One server marked lazy: its tools are, and the chat that starts after it freezes that.
+  await mark({ notes: "lazy" });
+  page = await json("/api/tools");
+  assert.deepEqual(lazyOf(page), ["mcp__notes__read", "mcp__notes__write"]);
+  assert.deepEqual(page.tools.find((t) => t.name === "mcp__notes__read").mark, "lazy");
   const chat = await json("/api/sessions", "POST", {});
-  assert.deepEqual(lazyOf(await json(`/api/sessions/${chat.id}/tools`)), ["legacy_ping", "notes_read", "wiki_edit"]);
-  assert.deepEqual(lazyOf(await json("/api/projects/research/tools")), ["legacy_ping", "notes_read", "wiki_edit"]);
-  // `tool_search` has none of them: they are reached through the adapter's `mcp` tool, and nothing is marked.
-  assert.deepEqual(headOf(chat.id).lazy, []);
-  assert.deepEqual(page.marks, {});
-  assert.equal((await send("/api/tools/marks", "PUT", { marks: { notes: "lazy" } })).status, 400, "the server's own setting is the one switch");
-  // The adapter-wide setting is the default of a server that says nothing, and a server's own word wins.
-  writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR, "mcp.json"), JSON.stringify({ settings: { directTools: true }, mcpServers: { notes: { command: "n" }, legacy: { command: "l", directTools: false } } }));
-  assert.deepEqual(lazyOf(await json("/api/tools")), ["legacy_ping"]);
+  assert.deepEqual(lazyOf(await json(`/api/sessions/${chat.id}/tools`)), ["mcp__notes__read", "mcp__notes__write"]);
+  assert.deepEqual(lazyOf(await json("/api/projects/research/tools")), ["mcp__notes__read", "mcp__notes__write"]);
+  assert.deepEqual(headOf(chat.id).lazy.includes("notes"), true);
+  assert.match(headOf(chat.id).hint, /notes \(mcp__notes__read, mcp__notes__write\)/);
+
+  // A server nothing is known of counts as lazy, with an unknown size: its name is what the hint says.
+  writeMcp({ notes: { command: "n" }, understory: { url: "http://localhost:3800/mcp" }, wiki: { command: "w" }, fresh: { command: "f" } });
+  const next = await json("/api/sessions", "POST", {});
+  assert.deepEqual(headOf(next.id).lazy.sort(), ["fresh", "notes"], "never seen, and marked");
+  assert.match(headOf(next.id).hint, /fresh[;.,]/);
+  // Unless the person says the server is in the list.
+  await mark({ notes: "lazy", fresh: "direct" });
+  const third = await json("/api/sessions", "POST", {});
+  assert.deepEqual(headOf(third.id).lazy, ["notes"]);
+
+  // A server switched off in the file is not there to be switched: its tools are not listed, and it is not lazy.
+  writeMcp({ notes: { command: "n", enabled: false }, understory: { url: "http://localhost:3800/mcp" }, wiki: { command: "w" } });
+  page = await json("/api/tools");
+  assert.ok(!page.tools.some((t) => t.name.startsWith("mcp__notes__")));
 });
 
-test("Register tools directly of an MCP server is what makes its tools lazy: one setting, changed from the Tools page", async () => {
-  const entry = { command: "n", env: { KEEP: "this" } };
-  writeMcp({ notes: entry, other: { command: "o" } });
-  db.rememberTools(adapter("notes_read", "other_ping"));
-  const direct = (name, body) => send(`/api/mcp/servers/${name}/direct`, "PUT", body);
-  assert.deepEqual(lazyOf(await json("/api/tools")), ["notes_read", "other_ping"]);
+test("a server that has run in no chat the portal has heard from is counted and named by what the portal kept of it", async () => {
+  writeMcp({ kept: { command: "k" } });
+  const cache = await import("../dist/mcp-tools.js");
+  cache.rememberServerTools("kept", "h", ["one", "two", "three"].map((name) => ({ name: `mcp__kept__${name}`, original: name, description: `The ${name} tool.`, parameters: { type: "object", properties: {} }, tokens: 1500 })));
+  try {
+    // No chat reported its tools, yet the threshold knows them: 4,500 tokens is over the limit, so the server goes lazy by its size.
+    assert.deepEqual((await json("/api/tools")).resolved.lazy.includes("kept"), true);
+    const chat = await json("/api/sessions", "POST", {});
+    assert.ok(headOf(chat.id).lazy.includes("kept"));
+    assert.match(headOf(chat.id).hint, /kept \(mcp__kept__one, mcp__kept__three, mcp__kept__two\)/, "named with its tools, though no chat reported them");
+  } finally {
+    cache.dropCachedServers(["kept"]);
+  }
+});
 
-  assert.equal((await direct("notes", { direct: true })).status, 200);
-  assert.deepEqual(mcpFileOf().mcpServers.notes, { ...entry, directTools: true }, "only that key changed");
-  assert.deepEqual(mcpFileOf().mcpServers.other, { command: "o" });
-  assert.deepEqual(lazyOf(await json("/api/tools")), ["other_ping"]);
-
-  assert.equal((await direct("notes", { direct: false })).status, 200);
-  assert.deepEqual(mcpFileOf().mcpServers.notes, entry, "lazy is no key at all: the adapter's default");
-  assert.deepEqual(lazyOf(await json("/api/tools")), ["notes_read", "other_ping"]);
-
-  // Where the adapter-wide setting registers tools directly, lazy has to say no to it.
-  writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR, "mcp.json"), JSON.stringify({ settings: { directTools: true }, mcpServers: { notes: entry } }));
-  assert.deepEqual(lazyOf(await json("/api/tools")), []);
-  await direct("notes", { direct: false });
-  assert.deepEqual(mcpFileOf().mcpServers.notes, { ...entry, directTools: false });
-  assert.deepEqual(mcpFileOf().settings, { directTools: true });
-  assert.deepEqual(lazyOf(await json("/api/tools")), ["notes_read"]);
-
-  assert.equal((await direct("nobody", { direct: true })).status, 404);
-  assert.equal((await direct("notes", { direct: "yes" })).status, 400);
-  assert.equal((await direct("notes", {})).status, 400);
+test("the route that set an MCP server's lazy setting on its own is gone: the server's mark is the one switch, like any set's", async () => {
+  writeMcp({ notes: { command: "n" } });
+  assert.equal((await send("/api/mcp/servers/notes/direct", "PUT", { direct: true })).status, 404);
+  assert.equal((await send("/api/mcp/settings", "PUT", { settings: {} })).status, 404);
 });
 
 test("the page is told which tools cannot be lazy, so it offers no mark for them", async () => {
   writeMcp({ notes: {} });
   db.rememberTools([
-    { name: "notes_read", source: "pi-mcp-adapter", package: null },
+    server("notes", "read"),
     { name: "bash", source: "built in", package: null },
     { name: "browser_navigate", source: "pithagoras-browser", package: null, inline: true },
   ]);
   const page = await json("/api/tools");
-  // Only pi's own: an MCP server's tool has a lazy state, set on its server.
+  // Only pi's own: an MCP server's tool has a lazy state, set with its server's mark.
   assert.deepEqual(page.tools.filter((t) => t.noLazy).map((t) => t.name).sort(), ["bash"]);
-  assert.equal(page.tools.find((t) => t.name === "notes_read").mcp, "notes");
+  assert.equal(page.tools.find((t) => t.name === "mcp__notes__read").source, "notes");
 });
 
 test("a tool that turns up later in a lazy set is lazy, and the callers are told of what is off only; one seen before is not new", async () => {

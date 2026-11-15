@@ -40,7 +40,9 @@ export interface PiTool {
   inline?: true;
   /** Offered to scripts only (pi's `codemode` and `deferred` exposure): never in what the model is offered, so it has no lazy mark to give. */
   scriptsOnly?: true;
-  /** An MCP server's tool listed from the adapter's cache, its server not started until the tool is first used. */
+  /** The MCP server it is a tool of, as configured, told by pi's namespace of the tool. The set the lists file it under. */
+  server?: string;
+  /** An MCP server's tool listed from what the portal remembers of the server, which is not running in this chat: it is started when the tool is first used. */
   cached?: true;
   /** Registered with `offByDefault: true`: off in every chat until somebody switches it on. */
   offByDefault?: true;

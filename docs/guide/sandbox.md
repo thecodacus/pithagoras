@@ -46,13 +46,12 @@ runs as the first agent's user.
 
 ## What a chat's folder may load
 
-pi and the MCP adapter run inside the portal, as root, and the folder a chat
+pi and its MCP servers run inside the portal, as root, and the folder a chat
 works in is the agent's to write. So while the sandbox is on, nothing that would
 run is taken from that folder: pi treats it as an untrusted project and leaves
-out its `.pi/extensions`, its packages and its `.pi/settings.json`, and the MCP
-adapter reads no `.mcp.json` or `.pi/mcp.json` there, nor what those import. MCP
-servers come only from your own config (Settings → MCP), and work in a folder of
-the portal's, `/data/sandbox/mcp`.
+out its `.pi/extensions`, its packages, its `.pi/settings.json` and its
+`.pi/mcp.json`. MCP servers come only from your own config (Settings → MCP), and
+work in a folder of the portal's, `/data/sandbox/mcp`.
 
 The folder's skills, in `.pi/skills` and in `.agents/skills` up to the root of
 its repository, are still loaded: a skill is text the model reads, and what it

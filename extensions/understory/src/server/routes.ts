@@ -1,5 +1,5 @@
 import type { Router } from "express";
-import { UNDERSTORY, UNDERSTORY_TOKEN_ENV, understoryDefaultUrl, understoryEntry, understoryTokenOf } from "./entry";
+import { UNDERSTORY, UNDERSTORY_TOKEN_ENV, authorizationKey, understoryDefaultUrl, understoryEntry, understoryTokenOf } from "./entry";
 import { portal } from "./host";
 import { modelServer } from "./llm";
 import * as service from "./service";
@@ -55,7 +55,7 @@ async function understoryState() {
   const url = typeof server?.entry.url === "string" && server.entry.url ? server.entry.url : understoryDefaultUrl();
   const [reached, runtime] = await Promise.all([reachable(url), service.status()]);
   return {
-    // As the chats see it: on only with the adapter its tools come through.
+    // As the chats see it: there, and not switched off.
     enabled: server?.on === true,
     url,
     tokenSet: Boolean(understoryTokenOf(server?.entry) ?? process.env[UNDERSTORY_TOKEN_ENV]),
@@ -87,19 +87,29 @@ async function understoryState() {
 async function switchUnderstory(enabled: boolean, url?: string): Promise<{ reloaded: number; waiting: number }> {
   const { mcp } = portal();
   if (!enabled) return mcp.set(UNDERSTORY, undefined);
-  // Kept: whatever else somebody put in the entry by hand, except how it signs in, which is said anew.
-  const { disabled: _off, auth: _a, bearerToken: _t, bearerTokenEnv: _e, ...had } = mcp.get(UNDERSTORY)?.entry ?? {};
+  // Kept: whatever else somebody put in the entry by hand, except how it signs in (the Authorization header), which is said anew.
+  // The keys of the old adapter are not kept either: the entry is pi's now, and the sign-in is said in a header.
+  const { disabled: _old, enabled: _on, headers: hadHeaders, auth: _a, bearerToken: _t, bearerTokenEnv: _e, lifecycle: _l, directTools: _d, ...had } = mcp.get(UNDERSTORY)?.entry ?? {};
+  const headers = (hadHeaders && typeof hadHeaders === "object" ? hadHeaders : {}) as Record<string, string>;
+  const authKey = authorizationKey(headers);
+  const otherHeaders = Object.fromEntries(Object.entries(headers).filter(([key]) => key !== authKey));
+  const entry = (made: Record<string, unknown>) => {
+    // A sign-in that was there stays for the same address when nothing new is given (switched off and on again with no
+    // token in the environment), and never goes to another address.
+    const kept = authKey && !made.headers && made.url === had.url ? { [authKey]: headers[authKey] } : {};
+    const all = { ...otherHeaders, ...kept, ...(made.headers as Record<string, string> | undefined) };
+    return { ...had, ...made, ...(Object.keys(all).length ? { headers: all } : {}) };
+  };
   // An address given is the one meant; without one, the portal's own Understory where it runs one.
   return mcp.set(
     UNDERSTORY,
     url === undefined && (await service.installed())
-      ? { ...had, ...understoryEntry(service.managedUrl(), { token: await service.heldToken() }) }
-      : {
-          ...had,
-          ...understoryEntry(url ?? (typeof had.url === "string" && had.url ? had.url : understoryDefaultUrl()), {
+      ? entry(understoryEntry(service.managedUrl(), { token: await service.heldToken() }))
+      : entry(
+          understoryEntry(url ?? (typeof had.url === "string" && had.url ? had.url : understoryDefaultUrl()), {
             ...(process.env[UNDERSTORY_TOKEN_ENV] ? { tokenEnv: UNDERSTORY_TOKEN_ENV } : {}),
           }),
-        },
+        ),
     { trusted: true },
   );
 }

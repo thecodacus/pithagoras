@@ -58,10 +58,9 @@ any tool.
 What is wrapped: mail and the web read through a command (`curl`, `wget`, `ssh`,
 `git clone` and the like), the tools of an MCP server, the browser, and a tool
 that declares outside content. A
-server's tools count however they are called: through the adapter's `mcp` tool,
-under their own names (`jira_get_issue`) where its tools are direct, and through
-the `tool_search` tool where they are lazy. The adapter's tools are attributed by the
-adapter's package and by the server their name says. Where the portal uses pi's own MCP support, a tool it registers
+server's tools count however they are called: under their own names
+(`mcp__jira__get_issue`) where its tools are direct, and through
+the `tool_search` tool where they are lazy. A tool that pi's own MCP support registers
 (`mcp__<server>__<tool>`) belongs to the server pi recorded for it, never to the
 server its name looks like: a tool called `mcp_page` that an extension brought is that
 extension's, and is trusted as it is. So an extension that hands back what a server or anyone
@@ -72,7 +71,13 @@ the server they are asked for, and a listing of every server's counts as outside
 content. What `tool_search` shows when you search or describe is the tools' own
 descriptions and parameters, which the server wrote: such a result is wrapped when it
 shows a tool of a server you have not counted as your own, and left as it is when every
-tool it shows is the portal's, an extension's, or a trusted server's. The usage rules such a result
+tool it shows is the portal's, an extension's, or a trusted server's. The same goes for what a code mode script asks of
+the servers about themselves (`searchTools`, `describeTool`, `describeNamespace` and the `ALL_TOOLS` list: their descriptions and the instructions
+a server gives when it connects): where the chat has a server you have not counted as your own, the script's result is
+wrapped. Trust is by the server's name in your own file: a server a project brings is never trusted, even if a server
+of your own is given its name later, and taking a server out of the file takes its trust, its mark and its confirmations
+with it, and so do the per-tool marks and the allow rules that were given for its tools. A chat that is working with the
+server at that moment asks before each of its calls until its next turn. The usage rules such a result
 carries start with a random tag of the chat's that a page, a file or a server has no way to know, and the tag is taken out of
 the text of every result of every tool but the portal's own search and describe, in the usual ways to write it (twice in a row, with the
 look-alike Latin, Greek and Cyrillic letters, zero-width characters or other separators between its letters), so a line
@@ -163,9 +168,9 @@ problem are held: put to you where you are there to answer (see
 | `pipe-to-shell` | Downloading something and running it unseen: a pipe into a shell, or into `python`, `perl`, `ruby`, `node` or `php` given nothing to run but what comes in (`curl … \| python3`, and not `\| python3 -m json.tool`); a shell, `source` or `eval` handed a download (`bash <(curl …)`, `sh -c "$(curl …)"`, `bash <<< "$(curl …)"`); and a download run in the same line (`curl -o i.sh … && sh i.sh`) |
 | `write-to-path` | A file on `PATH` runs later, without anyone asking |
 | `upload` | Data carried out: `curl`/`wget` with a body (`-d`, `-F`, `-T`, alone or folded into a group like `-sd`; `--data*`, `--form`, `--json`, `--post-data`, `--post-file`, `--body-*`) or a `POST`, `PUT` or `PATCH`; `scp` or `rsync` to another machine; a pipe or a file into `nc`, `socat`, `telnet` or `ssh`; mail sent (`mail`, `sendmail`, `mutt -s`, `himalaya … send`); httpie with a body; `gh gist create` and a write through `gh api`; a copy to an S3, GCS or rclone remote; a script's own `requests.post` or `fetch` with a body |
-| `read-credentials` | `auth.json`, `.env`, `.ssh/`, tokens, also among the files a tool declares it takes |
+| `read-credentials` | `auth.json`, `mcp-auth.json`, pi's own `mcp.json` and the copies of the old one the move to pi's MCP support keeps beside it (`mcp.json.adapter`), `.env`, `.ssh/`, tokens, also among the files a tool declares it takes |
 | `publish` | `git push` is not undoable from here, also with git's options before it (`git -C repo push`, `git -c k=v push`) |
-| `persist` | What outlives the conversation: a routine, `cron`, a systemd unit, a shell start-up file, and a change to what the agent loads as its own (`AGENTS.md`, `CLAUDE.md`, its context files, `WATCH.md`, `.pi/`, `.agents/`, `.mcp.json`; see [what a colleague may do](/people/roles#what-a-colleague-may-do)), by a tool or by a command that writes there (a redirect, `tee`, `cp`, `mv`, `ln`, `sed -i`, a download's `-o`, a clone) |
+| `persist` | What outlives the conversation: a routine, `cron`, a systemd unit, a shell start-up file, and a change to what the agent loads as its own (`AGENTS.md`, `CLAUDE.md`, its context files, `WATCH.md`, `.pi/`, `.agents/`; see [what a colleague may do](/people/roles#what-a-colleague-may-do)), by a tool or by a command that writes there (a redirect, `tee`, `cp`, `mv`, `ln`, `sed -i`, a download's `-o`, a clone) |
 | `delegate` | A `subagent` and a routine work in a conversation of their own, which has not read what this one read and so is not held back as it is: a tainted session may start neither, nor send a subagent at work a message (that is a `subagent` call too). Listing and stopping its subagents (`subagents`) stays open. A chat's mark never passes down to its subagents, since a tainted chat starts none, and a subagent's own mark passes up to its chat. A subagent's chat is guarded on its own, and marked by what it reads itself. When it was marked, the chat it worked for is marked as its answer comes back, and stays marked when the chat is opened again, so what it relays is held like outside content. Nothing it says reaches that chat before: `subagents` lists none of what one at work has said, and gives what one it stopped had only once its run has ended, held the same way |
 
 A tool that declares that every call of it is the shape of one of these rules
@@ -339,7 +344,7 @@ What it does not do:
 The guard also enforces what a teammate may do, checked per tool call so it
 follows whoever is speaking. That is documented under [People](/people/). What
 a colleague or a guest may write stops short of everything that the portal, pi,
-its MCP adapter or an agent's heartbeat load on their own, which would put their
+its MCP support or an agent's heartbeat load on their own, which would put their
 words, their tools or a process into your next conversation, and nothing opens
 the tools that would run what they write with your rights (a subagent, a
 routine): the list is under

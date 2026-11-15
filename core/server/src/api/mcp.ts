@@ -2,48 +2,33 @@ import { existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import express, { type Router } from "express";
 import { writeFileAtomic } from "../atomic-write.js";
-import { isSwitchedOff, sourceOf } from "../extension-switch.js";
-import { piAgentDir, piSettingsPath, readPiSettings } from "../pi-settings.js";
+import { SERVER_NAME_RE, approvePatterns, clashes, commandValues, entryProblem, matchesTool, mcpNamespace, withExposure } from "../mcp-config.js";
+import { adapterKeysOf } from "../mcp-migration.js";
+import { piAgentDir } from "../pi-settings.js";
 import { BROWSER_MCP } from "../tool-policy.js";
 
 /**
- * MCP servers, as configured for `pi-mcp-adapter`.
+ * MCP servers, as pi's own MCP support reads them.
  *
- * The adapter reads several files in precedence order; the portal edits the
- * pi-global one at `<agentDir>/mcp.json`, because every session here shares an
- * agent home and a project-local `.mcp.json` would only reach one workspace.
+ * pi reads `<agent dir>/mcp.json` (the file this portal edits: every session here shares one agent home) and, in a
+ * trusted project, `<project>/.pi/mcp.json`. The shape is pi's (`docs/mcp.md`): `command` or `url`, `env`, `headers`,
+ * `enabled`, `exposure`, `toolExposure` and the rest. What is the portal's own (whether the person trusts a server's
+ * output, which tools need a confirmation, whether the server is lazy) is kept in its database by the server's name, and
+ * not in the file, so that the file is valid for pi alone: the pi CLI and the container executor read it too.
  *
- * The shape is the adapter's, not ours — entries are stored as given rather
- * than filtered through a whitelist, so a field a newer adapter understands
- * survives a round trip through this API.
+ * Entries are stored as given rather than filtered through a whitelist, so a field a newer pi understands survives a
+ * round trip through this API.
  */
 export const mcpConfigPath = (): string => path.join(piAgentDir(), "mcp.json");
 
-const ADAPTER = "pi-mcp-adapter";
-
-/**
- * Pinned, not whatever npm has today.
- *
- * 3.0 stopped reading `<agentDir>/mcp.json` — the file this portal writes — in
- * favour of `mcp-adapter.json`, and from 2.21.1 the adapter wants pi-ai 0.84 or
- * later where the portal runs 0.82. An unpinned install picked up 3.3 and the
- * agent saw no servers at all. 2.18.0 is the release the portal runs with.
- */
-export const ADAPTER_SPEC = `npm:${ADAPTER}@2.18.0`;
-
-export const NAME_RE = /^[A-Za-z0-9][\w.-]*$/;
-
 export interface McpFile {
   mcpServers: Record<string, Record<string, unknown>>;
-  settings?: Record<string, unknown>;
-  imports?: string[];
   [key: string]: unknown;
 }
 
 /**
- * The adapter parses its config with strip-json-comments, so a hand-written
- * file may carry comments and still be valid to it. Refusing to read one would
- * make the panel wrong about a working setup.
+ * The file may carry comments (the portal has always accepted them, and refusing to read one would make the panel wrong
+ * about a setup that works for it). pi itself reads plain JSON.
  */
 function stripComments(text: string): string {
   let out = "";
@@ -86,12 +71,9 @@ function stripComments(text: string): string {
 let lastReadable: McpFile | undefined;
 
 /**
- * The configuration as it last could be read: the file now, or, while it
- * cannot be parsed, what it was before. What the servers offer is judged by
- * this (db.ts mcpView), and so is which servers a write took out: a typo in
- * the file must neither withdraw a tool nor hand back one that was withdrawn,
- * nor make the write that fixes it forget the servers it leaves out.
- * Undefined where the file has not been readable since the portal started.
+ * The configuration as it last could be read: the file now, or, while it cannot be parsed, what it was before. Which
+ * servers a write took out is judged by this: a typo in the file must not make the write that fixes it forget the servers
+ * it leaves out. Undefined where the file has not been readable since the portal started.
  */
 export function readableMcpConfig(): McpFile | undefined {
   const { config, error } = readMcpFile();
@@ -99,72 +81,35 @@ export function readableMcpConfig(): McpFile | undefined {
   return lastReadable;
 }
 
-export function readMcpFile(): { config: McpFile; raw: string; error?: string } {
+export function readMcpFile(): { config: McpFile; raw: string; error?: string; unreadable?: true } {
   const file = mcpConfigPath();
   if (!existsSync(file)) return { config: { mcpServers: {} }, raw: "" };
-  const raw = readFileSync(file, "utf8");
+  let raw: string;
+  try {
+    raw = readFileSync(file, "utf8");
+  } catch (e) {
+    // There, and not to be read (its permissions, a folder of that name): no servers, and no empty file either, which a
+    // write would take for one and the migration for nothing to move.
+    return { config: { mcpServers: {} }, raw: "", error: (e as Error).message, unreadable: true };
+  }
   try {
     const parsed = JSON.parse(stripComments(raw));
-    const config: McpFile =
-      parsed && typeof parsed === "object" ? (parsed as McpFile) : { mcpServers: {} };
-    if (!config.mcpServers || typeof config.mcpServers !== "object") config.mcpServers = {};
+    const config: McpFile = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as McpFile) : { mcpServers: {} };
+    if (!config.mcpServers || typeof config.mcpServers !== "object" || Array.isArray(config.mcpServers)) config.mcpServers = {};
     return { config, raw };
   } catch (e) {
-    // Hand it back unparsed rather than silently starting from scratch — the
-    // raw editor is how a broken file gets fixed, and overwriting it would
-    // destroy the servers someone already configured.
+    // Hand it back unparsed rather than silently starting from scratch — the raw editor is how a broken file gets fixed,
+    // and overwriting it would destroy the servers someone already configured.
     return { config: { mcpServers: {} }, raw, error: (e as Error).message };
   }
 }
 
-/**
- * The names of the servers configured, which is what tells an MCP tool apart
- * from any other: the adapter registers them all as one package and names each
- * tool `<server>_<tool>`.
- */
+/** The names of the servers configured in the user's file. */
 export function mcpServerNames(): string[] {
   try {
     return Object.keys(readMcpFile().config.mcpServers ?? {});
   } catch {
     return [];
-  }
-}
-
-/**
- * The adapter's own file of what each server offered, `servers.<name>`, which
- * it reads to list tools before a server has been started. A server that is
- * removed from the configuration leaves its entry there, and its tools with it.
- */
-export const mcpCachePath = (): string => path.join(piAgentDir(), "mcp-cache.json");
-
-/** The adapter's cache as it is on disk, or null where it is not there or cannot be read. */
-export function readMcpCache(): { servers?: Record<string, { tools?: unknown; resources?: unknown } | undefined> } | null {
-  try {
-    const cache = JSON.parse(readFileSync(mcpCachePath(), "utf8"));
-    const servers = cache?.servers;
-    return servers && typeof servers === "object" && !Array.isArray(servers) ? cache : null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Take the named servers out of the adapter's cache. A cache that is not there
- * or cannot be read is left alone: it is the adapter's file, it rebuilds it,
- * and a removal that is done must not fail over it.
- */
-export function dropMcpCache(names: string[]): void {
-  const file = mcpCachePath();
-  try {
-    const cache = JSON.parse(readFileSync(file, "utf8"));
-    const servers = cache?.servers;
-    if (!servers || typeof servers !== "object" || Array.isArray(servers)) return;
-    const present = names.filter((name) => Object.prototype.hasOwnProperty.call(servers, name));
-    if (!present.length) return;
-    for (const name of present) delete servers[name];
-    writeFileAtomic(file, JSON.stringify(cache, null, 2) + "\n");
-  } catch {
-    // Missing, unparsable or not writable.
   }
 }
 
@@ -182,11 +127,9 @@ function connectedIn(config: McpFile): string[] {
 /**
  * Which servers are the agent's browser.
  *
- * Found by what they connect to, not by a name: `--cdp-endpoint` is what makes
- * a Playwright server a browser the agent is signed into, at whatever address,
- * rather than a throwaway Chromium, and an entry written by hand or by an older
- * portal may be called anything. One called `browser` counts too — it is the
- * name the portal wrote, and has always looked for.
+ * Found by what they connect to, not by a name: `--cdp-endpoint` is what makes a Playwright server a browser the agent is
+ * signed into, at whatever address, rather than a throwaway Chromium, and an entry written by hand or by an older portal
+ * may be called anything. One called `browser` counts too — it is the name the portal wrote, and has always looked for.
  */
 export function browserServers(): string[] {
   return serversAndBrowsers().browsers;
@@ -202,9 +145,8 @@ export function serversAndBrowsers(): { servers: string[]; browsers: string[] } 
 }
 
 /**
- * The file holds the keys and tokens of the MCP servers, so it is for its
- * owner alone, and put in place whole: one cut off by a full disk would take
- * every MCP server with it.
+ * The file holds the keys and tokens of the MCP servers, so it is for its owner alone, and put in place whole: one cut
+ * off by a full disk would take every MCP server with it.
  */
 export function writeMcpText(text: string): void {
   const file = mcpConfigPath();
@@ -217,10 +159,9 @@ export function writeMcpText(text: string): void {
 const writtenListeners = new Set<(before: string[]) => void>();
 
 /**
- * Tell the listeners (onMcpWritten) that the file was written, with the
- * servers it had before: by writeMcpText, after its write, and for an edit
- * made outside the portal that adds or takes out a server, once it is noticed
- * (db.ts noticeMcpEdits), with the servers the portal last saw in the file.
+ * Tell the listeners (onMcpWritten) that the file was written, with the servers it had before: by writeMcpText, after its
+ * write, and for an edit made outside the portal that adds or takes out a server, once it is noticed (db.ts
+ * noticeMcpEdits), with the servers the portal last saw in the file.
  */
 export function mcpWritten(before: string[]): void {
   for (const listener of [...writtenListeners]) {
@@ -233,13 +174,10 @@ export function mcpWritten(before: string[]): void {
 }
 
 /**
- * Told after every write of the file, whoever wrote it — a route of the panel,
- * a feature switched off, the browser moved over, or an edit made outside the
- * portal that adds or takes out a server, once it is noticed — with the
- * servers it had before: what the configuration offers decides which tools a
- * running chat may still use (see mcp-offer.ts), and a chat that has to be
- * restarted to notice a server switched off is a switch that looks broken.
- * Returns the way to stop listening.
+ * Told after every write of the file, whoever wrote it — a route of the panel, a feature switched off, or an edit made
+ * outside the portal that adds or takes out a server, once it is noticed — with the servers it had before. pi reads the
+ * file when a chat starts or is loaded again, so a running chat has to be loaded again to notice a server added, changed
+ * or taken out. Returns the way to stop listening.
  */
 export function onMcpWritten(listener: (before: string[]) => void): () => void {
   writtenListeners.add(listener);
@@ -250,85 +188,310 @@ export function writeMcpFile(config: McpFile): void {
   writeMcpText(JSON.stringify(config, null, 2));
 }
 
-/**
- * pi-mcp-adapter as pi's settings list it, if they do: without it, none of this
- * configuration does anything, and no MCP server is a tool. Read from the
- * settings, not by asking `pi list`: that starts pi, which takes a second or
- * more, and this is asked each time the panel opens or something in it changes.
- */
-export function mcpAdapter(packages: unknown = readPiSettings().packages): { source: string; enabled: boolean } | undefined {
-  for (const entry of Array.isArray(packages) ? packages : []) {
-    const source = sourceOf(entry);
-    if (source && /(^|[:/])pi-mcp-adapter(@[^/]*)?$/.test(source)) return { source, enabled: !isSwitchedOff(entry) };
+/** What `mcpServer` answers from: the servers as the file was when last read. */
+let lastRead: { stamp: string; servers?: McpFile["mcpServers"] } | undefined;
+
+/** When mcp.json last changed: read again only when it did. */
+function fileStamp(): string {
+  try {
+    const st = statSync(mcpConfigPath());
+    return `${st.mtimeMs}:${st.size}`;
+  } catch {
+    return "-";
   }
-  return undefined;
 }
 
-/** What `mcpServer` answers from: the servers and the adapter as the files were when last read. */
-let lastRead: { stamp: string; servers?: McpFile["mcpServers"]; adapter: boolean } | undefined;
-
-/** When mcp.json and pi's settings last changed: read again only when they did. */
-function filesStamp(): string {
-  return [mcpConfigPath(), piSettingsPath()]
-    .map((f) => {
-      try {
-        const st = statSync(f);
-        return `${st.mtimeMs}:${st.size}`;
-      } catch {
-        return "-";
-      }
-    })
-    .join("|");
-}
+/** Whether a server is switched on in its entry: `enabled` is pi's key; `disabled` is how the adapter said it, and still means off. */
+export const entryEnabled = (entry: Record<string, unknown>): boolean => entry.enabled !== false && entry.disabled !== true;
 
 /**
- * The server of that name, and whether the chats have its tools now (`on`):
- * there, not switched off, and pi-mcp-adapter, which its tools come through,
- * installed and on. Asked each time a chat starts, and read from the files
- * whenever they changed, so mcp.json is the one place it is said: switching
- * the server or the adapter off in Settings is heard too. Nothing where there
- * is no such server, or the file cannot be read.
+ * The server of that name, and whether the chats have its tools now (`on`): it is there and not switched off. Asked each
+ * time a chat starts, and read from the file whenever it changed, so mcp.json is the one place it is said. Nothing where
+ * there is no such server, or the file cannot be read.
  */
 export function mcpServer(name: string): { entry: Record<string, unknown>; on: boolean } | undefined {
-  const stamp = filesStamp();
+  const stamp = fileStamp();
   if (lastRead?.stamp !== stamp) {
     let servers: McpFile["mcpServers"] | undefined;
-    let adapter = false;
     try {
       const { config, error } = readMcpFile();
       if (!error) servers = config.mcpServers;
-      adapter = mcpAdapter()?.enabled === true;
     } catch {
       // Not readable: no server is there.
     }
-    lastRead = { stamp, servers, adapter };
+    lastRead = { stamp, servers };
   }
-  const { servers, adapter } = lastRead;
+  const { servers } = lastRead;
   const entry = servers && Object.prototype.hasOwnProperty.call(servers, name) ? servers[name] : undefined;
   if (!entry || typeof entry !== "object") return undefined;
   // A copy: what the next caller is told is the file's, not what this one made of it.
-  return { entry: structuredClone(entry), on: entry.disabled !== true && adapter };
+  return { entry: structuredClone(entry), on: entryEnabled(entry) };
 }
 
-/** stdio, http and socket are mutually exclusive in the adapter. */
-function transportOf(entry: Record<string, unknown>): "stdio" | "http" | "socket" | "unknown" {
+/** What is wrong with an enabled entry that is written in the old adapter's keys, or null: the portal connects none (see chatServers), and nothing converts it. */
+function adapterProblem(entry: unknown): string | null {
+  if (!entry || typeof entry !== "object" || Array.isArray(entry) || !entryEnabled(entry as Record<string, unknown>)) return null;
+  const old = adapterKeysOf(entry);
+  return old.length ? `It is written for the old MCP adapter (${old.join(", ")}) and is not connected until it is changed to pi's keys: see the docs for what each became.` : null;
+}
+
+/** stdio and http are mutually exclusive in pi. */
+function transportOf(entry: Record<string, unknown>): "stdio" | "http" | "unknown" {
   if (typeof entry.command === "string" && entry.command) return "stdio";
   if (typeof entry.url === "string" && entry.url) return "http";
-  if (typeof entry.socket === "string" && entry.socket) return "socket";
   return "unknown";
 }
 
-export function validateEntry(entry: unknown): string | null {
-  if (!entry || typeof entry !== "object" || Array.isArray(entry)) return "Server must be an object";
+/**
+ * Why this entry cannot be written under this name, or null: what pi would skip it for, and a name that pi would take for
+ * another server's (it folds `-` and `_`, and refuses the second).
+ */
+export function validateEntry(name: string, entry: unknown, others: Iterable<string> = []): string | null {
+  const problem = entryProblem(name, entry);
+  if (problem) return problem;
+  // pi takes a blank one as a command to run or an address to open, and fails on it at every start: not worth writing.
   const e = entry as Record<string, unknown>;
-  const transports = ["command", "url", "socket"].filter(
-    (k) => typeof e[k] === "string" && (e[k] as string).trim(),
-  );
-  if (transports.length === 0) return "Needs a command, a url or a socket path";
-  if (transports.length > 1) return `Only one of command, url or socket — got ${transports.join(", ")}`;
-  if (e.args !== undefined && !Array.isArray(e.args)) return "args must be a list";
-  return null;
+  if ((typeof e.command === "string" && !e.command.trim()) || (typeof e.url === "string" && !e.url.trim())) return `server "${name}" needs a command or an address that is not blank`;
+  const clash = [...others].find((other) => other !== name && mcpNamespace(other) === mcpNamespace(name));
+  return clash ? `"${name}" would be taken for "${clash}": pi puts - and _ together, and takes one of the two` : null;
 }
+
+/** An entry that is an override of a server defined elsewhere, as pi's project files have them. */
+const isOverride = (entry: Record<string, unknown>): boolean => entry.command === undefined && entry.url === undefined && entry.type === undefined;
+const OVERRIDE_KEYS = ["enabled", "exposure", "toolExposure"];
+
+/** One server a chat reads: where it came from decides what the guard may take for granted of it. */
+export interface ChatServer {
+  name: string;
+  entry: Record<string, unknown>;
+  /** The portal's own file, or the project's `.pi/mcp.json`. */
+  from: "user" | "project";
+  /** The user's entry as the file has it, where a project's override narrowed `entry`: what the tool cache is kept and read by. */
+  file?: Record<string, unknown>;
+}
+
+/**
+ * A project's override of a server of the user's, as the portal applies it: it can only take away. pi lets a project's
+ * entry set `enabled`, `exposure` and `toolExposure` of the user's server; here a repository can switch the server off for
+ * itself, hide it, or hide some of its tools, and nothing else. Switching on a server the person (or the move from the old
+ * adapter) switched off, or showing tools the person's file hides, is the person's to do in their own file.
+ */
+function narrowed(base: Record<string, unknown>, override: Record<string, unknown>): { entry: Record<string, unknown>; ignored: string[] } {
+  const entry: Record<string, unknown> = { ...base };
+  const ignored: string[] = [];
+  if (override.enabled === false) entry.enabled = false;
+  else if (override.enabled !== undefined) ignored.push("enabled");
+  if (override.exposure === "hidden") entry.exposure = "hidden";
+  else if (override.exposure !== undefined) ignored.push("exposure");
+  const tools = override.toolExposure;
+  if (tools !== undefined) {
+    const given = tools && typeof tools === "object" && !Array.isArray(tools) ? Object.entries(tools as Record<string, unknown>) : [];
+    const hidden = given.filter(([, one]) => one === "hidden");
+    if (hidden.length !== given.length || !given.length) ignored.push("toolExposure entries that are not hidden");
+    // First, so that a pattern of the project's comes before the user's patterns, which pi tries in order.
+    const own = base.toolExposure && typeof base.toolExposure === "object" && !Array.isArray(base.toolExposure) ? (base.toolExposure as Record<string, unknown>) : {};
+    // A tool the user's file names exactly is taken before any pattern: one the project's patterns hide is hidden there too.
+    const hides = hidden.map(([name]) => name);
+    const kept = Object.entries(own)
+      .filter(([tool]) => !hides.includes(tool))
+      .map(([tool, one]): [string, unknown] => [tool, !tool.includes("*") && matchesTool(hides, tool) ? "hidden" : one]);
+    if (hidden.length) entry.toolExposure = { ...Object.fromEntries(hidden), ...Object.fromEntries(kept) };
+  }
+  return { entry, ignored };
+}
+
+/**
+ * The servers a chat reads, as pi's own `loadMcpConfig` would: the user's file, and in a trusted project its
+ * `.pi/mcp.json`, which pi reads only then. Not other tools' configs (`.mcp.json`, `.vscode/mcp.json`, `opencode.json`):
+ * pi reads none of them. An entry pi would skip is skipped (entryProblem). A project's entry with no `command`, `url` or
+ * `type` overrides the user's server of that name, and only to take away (narrowed); a project's `auth` is refused; and a
+ * project's entry that is a whole server cannot take a name that is the user's, or one pi would fold into it, whether the
+ * user's entry connects or not: a server of the portal's file is defined there and nowhere else, whatever a repository says
+ * (the guard attributes a tool to a server by name, and trusts the ones the person named).
+ */
+export function chatServers(cwd: string, projectTrusted: boolean): { servers: ChatServer[]; errors: string[] } {
+  const errors: string[] = [];
+  const servers = new Map<string, ChatServer>();
+  const user = readableMcpConfig()?.mcpServers ?? {};
+  // Every name of the user's file, those that are not connected included: the guard reads the file's names, and trusts by them.
+  const reserved = Object.keys(user);
+  for (const [name, entry] of Object.entries(user)) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+    // pi skips it, so does the portal: its `loadConfig` hands pi entries it does not check again (an `auth` token over plain
+    // http, for one). One that is off is skipped without a word, as it connects nothing anyway.
+    const problem = entryProblem(name, entry);
+    if (problem) {
+      if (entryEnabled(entry as Record<string, unknown>)) errors.push(`mcp.json: ${problem}`);
+      continue;
+    }
+    // pi ignores the adapter's keys, and a server that was held back by them (`includeTools`, `directTools`) would come in whole: it is not connected.
+    const old = adapterKeysOf(entry);
+    // One that is off connects nothing, whatever it says.
+    if (old.length && entryEnabled(entry as Record<string, unknown>)) {
+      errors.push(`mcp.json: server "${name}" is written for the old MCP adapter (${old.join(", ")}) and is not connected until it is changed to pi's keys; Settings → MCP shows how`);
+      continue;
+    }
+    servers.set(name, { name, entry: { ...entry }, from: "user" });
+  }
+  if (projectTrusted) {
+    const file = path.join(cwd, ".pi", "mcp.json");
+    let parsed: unknown;
+    try {
+      if (existsSync(file)) parsed = JSON.parse(stripComments(readFileSync(file, "utf8")));
+    } catch (e) {
+      errors.push(`${file}: ${(e as Error).message}`);
+    }
+    const projectServers = (parsed as { mcpServers?: unknown } | undefined)?.mcpServers;
+    if (projectServers && typeof projectServers === "object" && !Array.isArray(projectServers)) {
+      for (const [name, value] of Object.entries(projectServers as Record<string, unknown>)) {
+        if (!value || typeof value !== "object" || Array.isArray(value)) {
+          errors.push(`${file}: server "${name}" must be an object`);
+          continue;
+        }
+        const entry = value as Record<string, unknown>;
+        if (isOverride(entry)) {
+          const base = servers.get(name);
+          const extra = Object.keys(entry).filter((key) => !OVERRIDE_KEYS.includes(key));
+          if (!base) errors.push(`${file}: server "${name}" needs "command" or "url", or a server of the user's to override`);
+          else if (extra.length) errors.push(`${file}: server "${name}": an override can only set ${OVERRIDE_KEYS.join(", ")}`);
+          else {
+            const { entry: merged, ignored } = narrowed(base.entry, entry);
+            if (ignored.length) errors.push(`${file}: server "${name}": a project can only switch a server of the user's off or hide its tools; ${ignored.join(", ")} ignored`);
+            servers.set(name, { ...base, entry: merged, file: base.file ?? base.entry });
+          }
+          continue;
+        }
+        const clash = [...reserved, ...servers.keys()].find((other) => mcpNamespace(other) === mcpNamespace(name));
+        if (clash) {
+          errors.push(`${file}: server "${name}" is the user's "${clash}", which the project cannot define again`);
+          continue;
+        }
+        if ("auth" in entry) {
+          errors.push(`${file}: server "${name}": auth is only allowed in the user's mcp.json`);
+          continue;
+        }
+        const old = adapterKeysOf(entry);
+        if (old.length) {
+          errors.push(`${file}: server "${name}" is written for the old MCP adapter (${old.join(", ")}) and is not connected until it is changed to pi's keys`);
+          continue;
+        }
+        const problem = entryProblem(name, entry);
+        if (problem) {
+          errors.push(`${file}: ${problem}`);
+          continue;
+        }
+        servers.set(name, { name, entry: { ...entry }, from: "project" });
+      }
+    }
+  }
+  return { servers: [...servers.values()], errors };
+}
+
+export interface ImportResult {
+  added: string[];
+  skipped: { name: string; reason: string }[];
+  /** The places in each added server whose value pi runs as a command. */
+  commands: Record<string, string[]>;
+  /** The variables of the portal's environment each added server sends to its address, in its headers and its sign-in's client secret (`${NAME}` or `$NAME`). */
+  variables: Record<string, string[]>;
+  /** What each added server runs or reaches: its command line, or its address. */
+  targets: Record<string, string>;
+}
+
+/**
+ * The names of the environment variables a value as pi reads them fills in: `${NAME}` and a bare `$NAME`, and not the `$$` and
+ * `$!` that stand for a `$` and a `!` (pi's `parseConfigValueTemplate`). A value that starts with `!` is a command, not a template.
+ */
+function variablesIn(value: string): string[] {
+  if (value.startsWith("!")) return [];
+  const names: string[] = [];
+  for (let at = value.indexOf("$"); at >= 0; at = value.indexOf("$", at)) {
+    const next = value[at + 1];
+    if (next === "$" || next === "!") {
+      at += 2;
+      continue;
+    }
+    if (next === "{") {
+      const end = value.indexOf("}", at + 2);
+      if (end < 0) {
+        at += 1;
+        continue;
+      }
+      const name = value.slice(at + 2, end);
+      if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) names.push(name);
+      at = end + 1;
+      continue;
+    }
+    const bare = /^[A-Za-z_][A-Za-z0-9_]*/.exec(value.slice(at + 1));
+    if (bare) names.push(bare[0]);
+    at += 1 + (bare?.[0].length ?? 0);
+  }
+  return names;
+}
+
+/** The variables of the portal's environment an entry sends to its address: the ones pi fills in, in its headers and in its sign-in's client secret. */
+export function sentVariables(entry: unknown): string[] {
+  if (!entry || typeof entry !== "object") return [];
+  const { headers, oauth } = entry as { headers?: unknown; oauth?: unknown };
+  const values: unknown[] = [];
+  if (headers && typeof headers === "object" && !Array.isArray(headers)) values.push(...Object.values(headers as Record<string, unknown>));
+  if (oauth && typeof oauth === "object" && !Array.isArray(oauth)) values.push((oauth as { clientSecret?: unknown }).clientSecret);
+  return [...new Set(values.flatMap((value) => (typeof value === "string" ? variablesIn(value) : [])))].sort();
+}
+
+/**
+ * Put servers into the user's file: the ones a README handed out, or those of a project's own file. A server whose name is
+ * taken is not replaced (what is there is somebody's setup), one pi would skip is listed with why, and nothing is written
+ * when nothing was added. `off` writes them switched off, for what the person has not read yet; `prepare` may change an
+ * entry first, or refuse it by throwing. A file that cannot be read stops it, as the form's save does.
+ */
+export function importServers(incoming: Record<string, unknown>, options: { off?: boolean; prepare?: (name: string, entry: unknown) => unknown } = {}): ImportResult {
+  const { config, error } = readMcpFile();
+  if (error) throw Object.assign(new Error(`Fix the file first: ${error}`), { status: 409 });
+  const added: string[] = [];
+  const skipped: ImportResult["skipped"] = [];
+  const commands: Record<string, string[]> = {};
+  const variables: Record<string, string[]> = {};
+  const targets: Record<string, string> = {};
+  for (const [name, given] of Object.entries(incoming)) {
+    if (name === "settings" || name === "imports" || name === "autoEnableCodemode") continue;
+    if (!SERVER_NAME_RE.test(name)) {
+      skipped.push({ name, reason: "Unusable name" });
+      continue;
+    }
+    let entry = given;
+    try {
+      entry = options.prepare ? options.prepare(name, given) : given;
+    } catch (e) {
+      skipped.push({ name, reason: (e as Error).message });
+      continue;
+    }
+    const problem = validateEntry(name, entry, Object.keys(config.mcpServers));
+    if (problem) {
+      skipped.push({ name, reason: problem });
+      continue;
+    }
+    // As the form's save refuses it: what is there is somebody's setup, and a pasted README snippet would replace it unseen.
+    if (Object.prototype.hasOwnProperty.call(config.mcpServers, name)) {
+      skipped.push({ name, reason: `A server called ${name} already exists` });
+      continue;
+    }
+    config.mcpServers[name] = withExposure({ ...(entry as Record<string, unknown>), ...(options.off ? { enabled: false } : {}) });
+    added.push(name);
+    const run = commandValues(entry);
+    if (run.length) commands[name] = run;
+    const sent = sentVariables(entry);
+    if (sent.length) variables[name] = sent;
+    const { command, args, url } = entry as { command?: unknown; args?: unknown; url?: unknown };
+    if (typeof command === "string") targets[name] = [command, ...(Array.isArray(args) ? args.filter((one): one is string => typeof one === "string") : [])].join(" ");
+    else if (typeof url === "string") targets[name] = url;
+  }
+  if (added.length) writeMcpFile(config);
+  return { added, skipped, commands, variables, targets };
+}
+
+/** What a file of servers says, comments and all: the portal has always read them, and so do other tools' files. */
+export const parseMcpText = (text: string): unknown => JSON.parse(stripComments(text));
 
 export function mcpRouter(): Router {
   const router = express.Router();
@@ -336,19 +499,22 @@ export function mcpRouter(): Router {
   router.get("/mcp", async (_req, res) => {
     try {
       const { config, raw, error } = readMcpFile();
+      const names = Object.keys(config.mcpServers);
       const servers = Object.entries(config.mcpServers).map(([name, entry]) => ({
         name,
         entry,
         transport: transportOf(entry as Record<string, unknown>),
-        disabled: (entry as Record<string, unknown>).disabled === true,
+        disabled: !entryEnabled((entry ?? {}) as Record<string, unknown>),
+        // What pi would skip it for, which the page shows beside the server; and an entry in the old adapter's keys, which the
+        // portal does not connect (an entry restored from `mcp.json.adapter` or pasted from an old README is one).
+        problem: validateEntry(name, entry, names) ?? adapterProblem(entry),
+        commands: commandValues(entry),
       }));
       res.json({
         path: mcpConfigPath(),
         exists: existsSync(mcpConfigPath()),
-        adapterInstalled: mcpAdapter() !== undefined,
-        adapterSpec: ADAPTER_SPEC,
         servers,
-        settings: config.settings ?? {},
+        clashes: clashes(names),
         raw,
         parseError: error ?? null,
       });
@@ -361,49 +527,30 @@ export function mcpRouter(): Router {
   router.put("/mcp/servers/:name", (req, res) => {
     const name = req.params.name;
     const from = typeof req.body?.from === "string" ? req.body.from : null;
-    if (!NAME_RE.test(name)) {
-      return res.status(400).json({ error: "Name must be letters, digits, dot, dash or underscore" });
+    if (!SERVER_NAME_RE.test(name)) {
+      return res.status(400).json({ error: "Name must be letters, digits, dash or underscore" });
     }
-    const problem = validateEntry(req.body?.entry);
-    if (problem) return res.status(400).json({ error: problem });
-
     const { config, error } = readMcpFile();
     if (error) return res.status(409).json({ error: `Fix the file first: ${error}` });
+    const others = Object.keys(config.mcpServers).filter((other) => other !== from);
+    const problem = validateEntry(name, req.body?.entry, others);
+    if (problem) return res.status(400).json({ error: problem });
+    // The tools that ask first, where the form sends them with the entry: checked before the server is written, so that it is
+    // not there without them (they are kept by their own route, which needs the portal's database).
+    if (req.body?.approve !== undefined) {
+      const checked = approvePatterns(req.body.approve);
+      if ("error" in checked) return res.status(400).json({ error: checked.error });
+    }
     // An entry of that name already there is somebody's setup — environment, headers, an oauth block the form does not show — and a new or renamed server would replace it unseen.
     if (name !== from && Object.prototype.hasOwnProperty.call(config.mcpServers, name)) {
       return res.status(409).json({ error: `A server called ${name} already exists`, code: "exists" });
     }
     // A rename removes the old name, and its tools are not the new one's (see writeMcpText).
     if (from && from !== name) delete config.mcpServers[from];
-    config.mcpServers[name] = req.body.entry;
+    config.mcpServers[name] = withExposure(req.body.entry);
     try {
       writeMcpFile(config);
-      res.json({ ok: true });
-    } catch (e) {
-      res.status(500).json({ error: (e as Error).message });
-    }
-  });
-
-  /**
-   * Register a server's tools one by one (`directTools`), or leave them to the adapter's `mcp` tool. The same
-   * setting the form has as "Register tools directly", for the Tools page, where leaving them to `mcp` is
-   * what the page calls lazy: only that setting is changed, the rest of the entry is as it was. A server
-   * that is not lazy gets `true`; one that is lazy loses the key, or has it `false` where the adapter-wide
-   * setting would register them. Read when a chat starts, as the rest of the file.
-   */
-  router.put("/mcp/servers/:name/direct", (req, res) => {
-    const name = req.params.name;
-    if (typeof req.body?.direct !== "boolean") return res.status(400).json({ error: "direct must be true or false" });
-    const { config, error } = readMcpFile();
-    if (error) return res.status(409).json({ error: `Fix the file first: ${error}` });
-    const entry = Object.prototype.hasOwnProperty.call(config.mcpServers, name) ? config.mcpServers[name] : undefined;
-    if (!entry || typeof entry !== "object") return res.status(404).json({ error: `No server called ${name}` });
-    if (req.body.direct) entry.directTools = true;
-    else if (config.settings?.directTools) entry.directTools = false;
-    else delete entry.directTools;
-    try {
-      writeMcpFile(config);
-      res.json({ ok: true, direct: req.body.direct });
+      res.json({ ok: true, commands: commandValues(req.body.entry) });
     } catch (e) {
       res.status(500).json({ error: (e as Error).message });
     }
@@ -421,27 +568,9 @@ export function mcpRouter(): Router {
     }
   });
 
-  /** Adapter-wide settings — the `settings` object beside `mcpServers`. */
-  router.put("/mcp/settings", (req, res) => {
-    const settings = req.body?.settings;
-    if (!settings || typeof settings !== "object" || Array.isArray(settings)) {
-      return res.status(400).json({ error: "settings must be an object" });
-    }
-    const { config, error } = readMcpFile();
-    if (error) return res.status(409).json({ error: `Fix the file first: ${error}` });
-    if (Object.keys(settings).length === 0) delete config.settings;
-    else config.settings = settings;
-    try {
-      writeMcpFile(config);
-      res.json({ ok: true });
-    } catch (e) {
-      res.status(500).json({ error: (e as Error).message });
-    }
-  });
-
   /**
-   * Merge a pasted config. Every MCP server's README hands out the same blob,
-   * so accepting it directly beats retyping it into a form field by field.
+   * Merge a pasted config. Every MCP server's README hands out the same blob, so accepting it directly beats retyping it
+   * into a form field by field.
    */
   router.post("/mcp/import", (req, res) => {
     const text = req.body?.text;
@@ -461,40 +590,12 @@ export function mcpRouter(): Router {
       obj.mcpServers && typeof obj.mcpServers === "object" ? obj.mcpServers : obj
     ) as Record<string, unknown>;
 
-    const { config, error } = readMcpFile();
-    if (error) return res.status(409).json({ error: `Fix the file first: ${error}` });
-
-    const added: string[] = [];
-    const skipped: { name: string; reason: string }[] = [];
-    for (const [name, entry] of Object.entries(incoming)) {
-      if (name === "settings" || name === "imports") continue;
-      if (!NAME_RE.test(name)) {
-        skipped.push({ name, reason: "Unusable name" });
-        continue;
-      }
-      const problem = validateEntry(entry);
-      if (problem) {
-        skipped.push({ name, reason: problem });
-        continue;
-      }
-      // As the form's save refuses it: what is there is somebody's setup, and a pasted README snippet would replace it unseen.
-      if (Object.prototype.hasOwnProperty.call(config.mcpServers, name)) {
-        skipped.push({ name, reason: `A server called ${name} already exists` });
-        continue;
-      }
-      config.mcpServers[name] = entry as Record<string, unknown>;
-      added.push(name);
-    }
-    if (!added.length && !skipped.length) {
-      return res.status(400).json({ error: "No servers found in that JSON" });
-    }
     try {
-      if (added.length) {
-        writeMcpFile(config);
-      }
-      res.json({ ok: true, added, skipped });
+      const done = importServers(incoming);
+      if (!done.added.length && !done.skipped.length) return res.status(400).json({ error: "No servers found in that JSON" });
+      res.json({ ok: true, ...done });
     } catch (e) {
-      res.status(500).json({ error: (e as Error).message });
+      res.status((e as { status?: number }).status ?? 500).json({ error: (e as Error).message });
     }
   });
 
@@ -502,8 +603,10 @@ export function mcpRouter(): Router {
   router.put("/mcp/raw", (req, res) => {
     const content = req.body?.content;
     if (typeof content !== "string") return res.status(400).json({ error: "content required" });
+    // Unlike the portal, which has always read a file with comments in it, pi reads this one with a plain JSON.parse: a comment
+    // saved here would make its own command line and a container's pi skip every server.
     try {
-      JSON.parse(stripComments(content));
+      JSON.parse(content);
     } catch (e) {
       return res.status(400).json({ error: `Not valid JSON: ${(e as Error).message}` });
     }

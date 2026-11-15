@@ -57,7 +57,6 @@ import {
   toolDefaultsOff,
   lazyAllowed,
   lazyMarks,
-  lazyRefused,
   toolMarks,
   lazyLimits,
   setLazyLimits,
@@ -65,10 +64,11 @@ import {
   lazyListed,
   lazyNotice,
   dismissLazyNotice,
+  mcpMigration,
+  dismissMcpMigrationNotice,
   agentDirect,
   setAgentDirect,
   noticeMcpEdits,
-  setToolMarks,
   toolGroupNames,
   updateSession,
   type SessionRow,
@@ -89,7 +89,8 @@ import { EXECUTOR_KIND } from "./executor-kind.js";
 import { sessions, CodemodeHeld, CommandFailed, IMAGE_ROOT } from "./session-manager.js";
 import { ImageError, MAX_IMAGE_BYTES, MAX_IMAGES, imagePath, mimeOf, parseImages, saveImages } from "./prompt-images.js";
 import { defaultsFor, toolSource } from "./tool-policy.js";
-import { mcpRouter, mcpServerNames, onMcpWritten } from "./api/mcp.js";
+import { mcpRouter, onMcpWritten } from "./api/mcp.js";
+import { mcpPortalRouter, storeMarks } from "./api/mcp-portal.js";
 import { authMode, changePassword, checkPassword, isAuthed, issueCookie, passwordRefused, requireAuth, setUpPassword, shortPassword, signOut } from "./auth.js";
 import { activeSso, endSessionUrl, oidcRouter, providerFor, rememberProvider } from "./oidc-login.js";
 import { CALLBACK_PATH, OidcConfigError, discover, parseOidcConfig, shownForm } from "./oidc.js";
@@ -1301,20 +1302,19 @@ app.get("/api/tools", (_req, res) => {
   // and answers every flip with an error is the switch that looks like it works.
   if (EXECUTOR_KIND === "container") return res.status(400).json(toolsUnsupported);
   const off = new Set(toolDefaultsOff());
-  const servers = mcpServerNames();
   const lazy = lazyMarks();
   res.json({
     tools: shownTools().map((tool) => {
       const marks = lazy(tool);
       return {
         ...tool,
-        source: toolSource(tool.name, tool.source, servers),
+        source: toolSource(tool),
         defaultOn: !off.has(tool.name),
-        // Not offered one by one: found through `tool_search`, or for an MCP server's tool through `mcp`, where `mcp` is the server whose setting says so.
+        // Not offered one by one: found through `tool_search`.
         // `mark` is what somebody set on the tool or its set, and `auto` that nothing is, so the threshold decides.
         ...marks,
-        // Neither marked nor set on a server: pi's own tools and the adapter's `mcp` tool, which the page offers no lazy mark for.
-        ...(lazyAllowed(tool, servers) || marks.mcp !== undefined ? {} : { noLazy: true as const }),
+        // Not marked: pi's own tools, which the page offers no lazy mark for.
+        ...(lazyAllowed(tool) ? {} : { noLazy: true as const }),
       };
     }),
     off: [...off].sort(),
@@ -1370,9 +1370,8 @@ app.put("/api/tools", async (req, res) => {
  * What is lazy and what is not: marks on tool sets, named as the boxes of the tools list name them, and on single tools
  * (`<tool>name`), each `lazy` (behind `tool_search`) or `direct` (always in the model's list). What has no mark is `auto`:
  * the threshold decides. A lazy tool is on like any other. The marks reach the chats that start afterwards, and a chat that
- * is running when it is asked to read its tools again (a chat keeps what was lazy in it, see LazyHead). An MCP server's
- * tools are lazy by the server's own setting (`PUT /api/mcp/servers/:name/direct`) and pi's own cannot be lazy, and a
- * `lazy` mark that names them is refused.
+ * is running when it is asked to read its tools again (a chat keeps what was lazy in it, see LazyHead). An MCP server is a
+ * set like any other; pi's own tools cannot be lazy, and a `lazy` mark that names them is refused.
  */
 app.put("/api/tools/marks", (req, res) => {
   if (EXECUTOR_KIND === "container") return res.status(400).json(toolsUnsupported);
@@ -1380,15 +1379,9 @@ app.put("/api/tools/marks", (req, res) => {
   if (!given || typeof given !== "object" || Array.isArray(given) || !Object.values(given).every((mark) => mark === "lazy" || mark === "direct")) {
     return res.status(400).json({ error: 'marks must be an object of "lazy" or "direct" by tool set or `<tool>name`' });
   }
-  // Only what is new is checked: a mark kept from before must not stand in the way of an unrelated change.
-  const before = toolMarks();
-  const added = Object.fromEntries(Object.entries(given as Record<string, "lazy" | "direct">).filter(([entry, mark]) => before[entry] !== mark));
-  const refused = lazyRefused(added);
-  if (refused.length) {
-    return res.status(400).json({ error: `Cannot be lazy: ${refused.join(", ")}. An MCP server's tools are lazy by the server's own setting (Register tools directly), and pi's built-in tools are always offered.`, code: "lazy-refused" });
-  }
-  const stored = setToolMarks(given as Record<string, "lazy" | "direct">);
-  res.json({ marks: stored, resolved: resolvedLazy() });
+  const done = storeMarks(given as Record<string, "lazy" | "direct">);
+  if ("error" in done) return res.status(done.status).json({ error: done.error, code: done.code });
+  res.json({ marks: done.marks, resolved: resolvedLazy() });
 });
 
 /** How big the model's list may get before `auto` groups are lazy: tokens of declarations, and number of tools; 0 turns a part off. */
@@ -1777,12 +1770,20 @@ app.use("/api", agentsRouter());
 app.use("/api", routinesRouter());
 app.use("/api", skillsRouter());
 app.use("/api", filesRouter());
-// What the configuration offers is what a running chat may use: told at once, as a default is.
+// pi reads the servers when a chat starts or is loaded again: the chats that are running are loaded again to take in a
+// server that was added, changed or taken out, at once where they are idle and once they can be where they work.
 onMcpWritten(() => {
-  sessions.applyToolDefaults().catch((e) => console.error(`[portal] could not apply the MCP configuration to running chats: ${(e as Error).message}`));
+  sessions.reloadIdle().catch((e) => console.error(`[portal] could not load the chats again for the MCP configuration: ${(e as Error).message}`));
 });
 // An edit made to mcp.json while the portal was not running, taken in before anything lists the tools or starts a chat.
 noticeMcpEdits();
+// What the move to pi's own MCP support did, and the note about it that stays until it is read.
+app.get("/api/mcp/migration", (_req, res) => res.json(mcpMigration()));
+app.delete("/api/mcp/migration/notice", (_req, res) => {
+  dismissMcpMigrationNotice();
+  res.json({ ok: true });
+});
+app.use("/api", mcpPortalRouter());
 app.use("/api", mcpRouter());
 app.use("/api", providersRouter());
 app.use("/api", peopleRouter());

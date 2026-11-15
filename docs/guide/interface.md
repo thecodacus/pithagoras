@@ -179,7 +179,7 @@ snaps back with the reason beside it.
 Both are safety tools as much as convenience: a browser or shell tool that a
 chat has no business with is simply not there to be talked into. An MCP server is a
 group like any other, switched whole or tool by tool; a tool switched off is not
-reachable through the adapter's `mcp` tool either, and one the MCP configuration
+found or called through `tool_search` either, and one the MCP configuration
 leaves out is not listed at all; see
 [MCP servers](/guide/mcp#what-the-tool-lists-show).
 

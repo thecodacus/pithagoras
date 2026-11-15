@@ -9,7 +9,7 @@ import semver from "semver";
 import express, { type NextFunction, type Request, type RequestHandler, type Response, type Router } from "express";
 import { agentOf, defaultAgent, listAgents } from "./agents.js";
 import { dataDirOf } from "./extension-data.js";
-import { childSessions, getSession, getSetting, listSessions, putSetting, recordAudit, sessionsByWorkspace, setServerHalfOffers, setServerHalvesAsked, setTrustedMcpServers, toolExceptions, trustedMcpServers, untrustMcpServer, type SessionRow } from "./db.js";
+import { childSessions, getSession, getSetting, listSessions, putSetting, recordAudit, sessionsByWorkspace, setMcpApprove, setServerHalfOffers, setServerHalvesAsked, setToolMarks, setTrustedMcpServers, toolExceptions, toolMarks, trustedMcpServers, untrustMcpServer, type SessionRow } from "./db.js";
 import { EXECUTOR_KIND } from "./executor-kind.js";
 import { takes, type ServerHalf } from "./extension-ui.js";
 import { moduleAt } from "./half-modules.js";
@@ -28,6 +28,7 @@ import { chatOwner, folderAllowed, folderLabel, listFolders } from "./agent-fold
 import { handoffDone, takeHandoff } from "./handoff.js";
 import { modelEndpoint, modelOf, modelProviders, type LiveModel } from "./models.js";
 import { mcpServer } from "./api/mcp.js";
+import { commandValues, mcpToolName } from "./mcp-config.js";
 import { holdMemory } from "./memory-holder.js";
 import { provideMode } from "./chat-modes.js";
 import { logFileLine, onLogLine, scrubSecrets, type LogLine } from "./logs.js";
@@ -689,14 +690,32 @@ function portalFor(ext: Running): ServerPortal {
       // The portal's own work, which it asks for: not its code (see scope).
       set: (server, entry, options = {}) =>
         scope.exit(async () => {
-          // Imported when first asked: it installs packages through what starts and stops these halves, which imports this module.
           const { setMcpServer } = await import("./mcp-entry.js");
-          await setMcpServer(server, entry);
+          const written = await setMcpServer(server, entry);
+          // A value that runs a command is code the portal's user runs, as a `command` is: left on the record.
+          const commands = commandValues(written.entry);
+          if (commands.length) recordAudit({ kind: "mcp-command", tool: "portal.mcp.set", subject: server, reason: `${name} wrote the MCP server ${server} with values that run a command: ${commands.join(", ")}`, personKey: undefined, sessionId: undefined });
           // Counted as the person's own on the extension's word, and no longer once the server is gone: Settings → Guard
           // lists only the servers there are, so a name left trusted could not be taken out, and would trust whatever
           // server is given that name next.
-          if (entry === undefined) untrustMcpServer(server);
-          else if (options.trusted === true) setTrustedMcpServers([...trustedMcpServers(), server]);
+          if (entry === undefined) {
+            untrustMcpServer(server);
+            setMcpApprove(server, undefined);
+            // Its marks went with it through the write (`mcpServersRemoved`, which keeps those of a server that shares the namespace).
+          } else {
+            if (options.trusted === true) setTrustedMcpServers([...trustedMcpServers(), server]);
+            // The tools that ask for a confirmation: what the entry said in the old way, and what the call says.
+            const approve = [...written.approve, ...(Array.isArray(options.approve) ? options.approve.filter((glob): glob is string => typeof glob === "string") : [])];
+            if (approve.length || options.approve !== undefined) setMcpApprove(server, approve);
+            // What the extension says of how the model is offered the server's tools is where the person's own mark starts, and no further:
+            // a mark the person set is theirs.
+            const marks = toolMarks();
+            const next = { ...marks };
+            if (!marks[server] && (written.said === "direct" || written.said === "deferred")) next[server] = written.said === "direct" ? "direct" : "lazy";
+            // The tools an old `directTools` list named stay in the model's list: the chats go by the marks, not by the file's toolExposure.
+            for (const tool of written.direct) if (!marks[`<tool>${mcpToolName(server, tool)}`]) next[`<tool>${mcpToolName(server, tool)}`] = "direct";
+            if (JSON.stringify(next) !== JSON.stringify(marks)) setToolMarks(next);
+          }
           return reloadChats();
         }),
     },

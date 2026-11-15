@@ -2,7 +2,7 @@ import { acceptPrompt } from "./accept-prompt.js";
 import { AUDIO_MESSAGE_PREFIX, AudioRule, VoiceFirstTurn, audioMessage, spokenIn } from "./voice-first.js";
 import { sandboxTools } from "../sandbox/tools.js";
 import { sandboxOn } from "../sandbox/policy.js";
-import { projectSkillPaths, withoutFolderMcp } from "../sandbox/project-trust.js";
+import { projectSkillPaths, withoutAdapter, withoutFolderMcp } from "../sandbox/project-trust.js";
 import { agentSkillsDir, skillsLine } from "../agent-skills.js";
 import { agentFilesAt, agentFor, memoryHeldAt } from "../project-agent.js";
 import { crossModelThinkingExtension } from "./cross-model-thinking.js";
@@ -18,7 +18,7 @@ import type { DraftStore, LoadError, PiClient, PiCommand, PiState, PiStats, PiTo
 import type { ImageContent } from "../prompt-images.js";
 import { routineTools } from "./routine-tools.js";
 import { reportTool, reportToFor } from "./report-tool.js";
-import { OUTSIDE_CONTENT_GUIDELINE, declaredFiles, declaredGuard, guardExtension, type DeclaredGuard } from "./guard.js";
+import { OUTSIDE_CONTENT_GUIDELINE, declaredFiles, declaredGuard, guardExtension, ruleAllows, type DeclaredGuard } from "./guard.js";
 import { CODEMODE_TOOL, CODEMODE_TOOLS, codemodeExtension } from "./codemode.js";
 import { findSessionFile } from "./session-file.js";
 import { withModeParams } from "./request-params.js";
@@ -27,7 +27,8 @@ import { CONTEXT_FILES, SHARED_FILES } from "./context-files.js";
 import { heartbeatTool } from "./heartbeat-tool.js";
 import { ToolSearch } from "./tool-search.js";
 import { CALLED_TOOL_KEY, TOOL_SEARCH, calledThrough } from "./tool-search-names.js";
-import { mcpNamespaceOf } from "./mcp-origin.js";
+import { isResourceTool, mcpNamespace, mcpNamespaceOf, serverOfArgument, serversOfNamespace } from "./mcp-origin.js";
+import { McpRuntime } from "./mcp-runtime.js";
 import { NO_LAZY, headLazy, type LazyHead } from "../tool-lazy.js";
 import { askPrimaryTool } from "./ask-primary.js";
 import { ASK_QUESTION_SOURCE, askQuestionTool } from "./ask-question.js";
@@ -36,11 +37,12 @@ import { proxyBaseUrl } from "../llama-progress.js";
 import { bridgeSubagents, SUBAGENT_INPUT, SUBAGENT_STOP, type Bridge } from "../subagent-protocol.js";
 import { bridgeExtensionUi, UI_RECEIVE } from "../extension-ui.js";
 import { hostExtensions } from "../extension-host.js";
-import { adapterTool, contextWindowFor, getSkipThinkingProviders, getVoiceInstructions, getVoiceModel, lazyAllowed, questionWaitMs, toolGroupNames, voiceSpeaks } from "../db.js";
+import { contextWindowFor, getSkipThinkingProviders, getVoiceInstructions, getVoiceModel, lazyAllowed, listToolRules, mcpApprove, questionWaitMs, removedMcpServers, toolGroupNames, voiceSpeaks } from "../db.js";
 import { configStamp, isLlamaProvider } from "../providers.js";
 import { rereadConfig } from "./model-runtime.js";
 import { browserServers } from "../api/mcp.js";
 import { BUILT_IN_SET, PI_BUILT_IN_TOOLS } from "../tool-policy.js";
+import { matchesTool } from "../mcp-config.js";
 
 /** A message on its way into pi: see SdkPiClient.prompt(). */
 interface Handoff {
@@ -379,6 +381,41 @@ function callable(obj: any, key: string): any {
   return typeof v === "function" ? v.call(obj) : v;
 }
 
+/** The set the three resource tools of pi's MCP support are filed under: they belong to no one server, and reach all of them. */
+const RESOURCE_SET = "MCP resources";
+
+/**
+ * Whether a call of this tool asks for a confirmation each time: its server's `approve` (patterns of the server's own tool
+ * names, as `portal.mcp.set` was given them) names it. By the name the server gave the tool, which pi keeps in the tool's
+ * label (`server/tool`), and by pi's name for it.
+ */
+function mcpApproval(mcp: McpRuntime, definition: any, name: string, input: Record<string, unknown> = {}): boolean {
+  const approve = mcpApprove();
+  const gone = removedMcpServers();
+  // pi's resource tools are no server's own, and a read names the one it reaches: it asks as that server's tools do (`*` covers them).
+  if (isResourceTool(name)) {
+    const server = serverOfArgument(input.server, mcp.names());
+    // A server that was taken out of the file while this chat has it loaded: its confirmations went with it, and the
+    // chat keeps it connected until its next turn. Nothing it does goes unasked then.
+    if (server !== undefined && gone.includes(server) && !mcp.projectOwned(server)) return true;
+    const globs = server === undefined ? undefined : approve[server];
+    return globs?.length ? matchesTool(globs, name) : false;
+  }
+  const space = mcpNamespaceOf(definition);
+  if (space === undefined) return false;
+  const label = String(definition?.label ?? "");
+  // Every configured server a namespace can be: two names that differ by a hyphen and an underscore are one namespace, pi
+  // connects one of them, and the one that asks first is not necessarily the one that comes first in the file.
+  return serversOfNamespace(space, mcp.names()).some((server) => {
+    // `mcp_removed` outlives the reload, so a project's own server of that name is not the one that was removed.
+    if (gone.includes(server) && !mcp.projectOwned(server)) return true;
+    const globs = approve[server];
+    if (!globs?.length) return false;
+    const original = label.startsWith(`${server}/`) ? label.slice(server.length + 1) : name;
+    return matchesTool(globs, original) || matchesTool(globs, name);
+  });
+}
+
 /**
  * pi driven through its SDK, in this process.
  *
@@ -515,6 +552,8 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     rememberChatModel?: (provider: string, modelId: string) => void;
     /** Whether a reload that is due may happen between two requests of a run: see prepareEachTurn. */
     canReloadNow?: () => boolean;
+    /** How long the chat's MCP servers are waited for and left running, in milliseconds: the defaults are McpRuntime's; for tests. */
+    mcpTimings?: { connectWaitMs?: number; idleMs?: number; idleCheckMs?: number };
   }): Promise<SdkPiClient> {
     // Imported lazily so the server still boots (and the container executor
     // still works) if the SDK cannot initialise in this environment.
@@ -536,10 +575,27 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     let switchedOff: () => ReadonlySet<string> = () => new Set(opts.toolsOff ?? []);
     // The files a tool declares it is approved for, from its definition once the session has it: see declaredFiles.
     let filesOf: (name: string) => readonly string[] | undefined = () => undefined;
-    // Whether the MCP adapter registered a tool, from what the session knows of it once there is one: see untrustedResult.
-    let fromAdapter: (name: string) => boolean = () => false;
+    // Whether the portal asks for a confirmation of a call of this tool each time (an MCP server's `approve`), once the session is there: see mcpApproval.
+    let needsApproval: (name: string, input: Record<string, unknown>) => boolean = () => false;
     // The namespace pi's MCP support registered a tool under, from its definition once the session has it: see mcp-origin.ts.
     let namespaceOf: (name: string) => string | undefined = () => undefined;
+    // The chat's client and pi's session, for the MCP servers of the chat (see McpRuntime), which are asked before either exists.
+    let chat: SdkPiClient | undefined;
+    let piSession: any;
+    const mcp = new McpRuntime({
+      head: () => chat?.head ?? opts.lazy ?? NO_LAZY,
+      // As the client sees it (lazyMember): with the code tool switched off, the chat is a plain one, and a server's tools
+      // are offered to the model, not to scripts that cannot run.
+      codemodeOnly: () => opts.codemode === "only" && !(chat?.switchedOff ?? new Set(opts.toolsOff ?? [])).has(CODEMODE_TOOL),
+      off: () => chat?.switchedOff ?? new Set(opts.toolsOff ?? []),
+      session: () => piSession,
+      // Only the primary user's chat starts a server of its own accord, or on a call a standing rule allows: see McpRuntimeOptions.
+      mayStart: (_server, call) => {
+        const who: { role: string; key?: string } = (opts.whoNow ?? (() => ({ role: "primary" })))();
+        return who.role === "primary" || (call !== undefined && ruleAllows(listToolRules(), who.role, call.tool, call.args, who.key, opts.cwd, filesOf(call.tool)));
+      },
+      ...opts.mcpTimings,
+    });
     // What a tool declares the guard is to hold it to, from its definition once the session has it: see declaredGuard.
     let guardOf: (name: string) => DeclaredGuard | undefined = () => undefined;
     // The line that outside content is data, while a tool that declares it is on or lazy: asked once the session is there (below).
@@ -574,13 +630,16 @@ export class SdkPiClient extends EventEmitter implements PiClient {
             () => switchedOff(),
             () => search.owns(),
             (name) => filesOf(name),
-            (name) => fromAdapter(name),
+            (name, input) => needsApproval(name, input),
             (name) => guardOf(name),
             opts.dialogs !== false,
             (name) => namespaceOf(name),
+            { live: () => mcp.live(), projectOwned: (server) => mcp.projectOwned(server) },
           ) },
         // Offered only while the conversation has a lazy tool: see applyToolsOff.
         { name: "tool-search", factory: search.extension },
+        // pi's own MCP support, and after it the portal's handlers on it (handlers run in load order: see McpRuntime).
+        ...mcp.factories(pi),
       ];
       // While the sandbox is on, pi's own tools do what they do to the system as the sandbox user: see sandbox/.
       factories.push({ name: SANDBOX, factory: await sandboxTools(pi, opts.cwd) });
@@ -606,8 +665,12 @@ export class SdkPiClient extends EventEmitter implements PiClient {
         cwd: opts.cwd,
         // One for the loader and the session, so the folder's trust the loader decides holds for both.
         settingsManager,
-        // The MCP adapter reads no config from the folder, and starts no server there, while the sandbox is on.
-        extensionsOverride: (loaded: { extensions: any[] }) => (sandboxOn() ? withoutFolderMcp(loaded) : loaded),
+        // pi's MCP support reads no config from the folder, and starts no server there, while the sandbox is on.
+        // The old MCP adapter is in none of them: see withoutAdapter.
+        extensionsOverride: (loaded: { extensions: any[] }) => {
+          const kept = withoutAdapter(loaded);
+          return sandboxOn() ? withoutFolderMcp(kept) : kept;
+        },
         ...(eventBus ? { eventBus } : {}),
         agentDir: pi.getAgentDir(),
         // Available everywhere without being installed, and not editable in
@@ -698,15 +761,16 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     });
     // The chat's mode's model parameters, on the requests its agent makes (not on compactions): see request-params.ts.
     if (opts.modeParams) session.agent.streamFunction = withModeParams(session.agent.streamFunction, opts.modeParams);
+    piSession = session;
     filesOf = (name) => declaredFiles(session.getToolDefinition(name));
     guardOf = (name) => declaredGuard(session.getToolDefinition(name));
-    namespaceOf = (name) => mcpNamespaceOf(session.getToolDefinition(name));
-    fromAdapter = (name) => {
-      const tool = (session.getAllTools?.() ?? []).find((one: any) => one?.name === name);
-      return tool !== undefined && adapterTool({ source: sourceLabel(tool.sourceInfo), package: packageOf(tool.sourceInfo) });
-    };
+    // By the registry, and for a tool of a server that is not running (found in the search from what the portal remembers of it) by that.
+    namespaceOf = (name) => mcpNamespaceOf(session.getToolDefinition(name)) ?? mcp.namespaceOfCached(name);
+    needsApproval = (name, input) => mcpApproval(mcp, session.getToolDefinition(name), name, input);
 
     const client = new SdkPiClient(session, modelRuntime, () => {});
+    chat = client;
+    client.mcp = mcp;
     switchedOff = () => client.switchedOff;
     client.head = opts.lazy ?? NO_LAZY;
     client.rememberLazy = opts.rememberLazy;
@@ -715,6 +779,13 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       lazy: (tool) => client.lazyMember(tool),
       off: () => client.switchedOff,
       label: (tool) => client.setLabel(tool),
+      // The names the adapter gave the tools, which a chat from before has in its history.
+      alias: (name) => mcp.alias(name),
+      // The tools of lazy servers that are not running, and what it takes to start one.
+      offline: () => mcp.offline().map((tool) => ({ name: tool.name, description: tool.description, parameters: tool.parameters, label: isResourceTool(tool.name) ? RESOURCE_SET : (toolGroupNames()[tool.server] ?? tool.server) })),
+      ensure: (name, signal, args) => mcp.ensure(name, signal, args),
+      warm: (names) => mcp.warm(names),
+      learn: (signal) => mcp.learn(signal),
     });
     // What the tools that are on ask to be told in a spoken turn, the lazy ones among them (they are on, only not declared):
     // a line that says how to use one is no less true for its being found through the search. The lines of lazy tools are
@@ -927,8 +998,12 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       // wait ends goes with it, so that a question kept over a restart of the portal still ends then.
       questions: (payload: { title?: string; questions: unknown[] }, opts?: any) =>
         ask({ method: "questions", ...payload, ...(opts?.timeout > 0 ? { until: Date.now() + opts.timeout } : {}) }, opts, undefined),
-      notify: (message: string, type?: string) =>
-        fireAndForget({ method: "notify", message, notifyType: type }),
+      notify: (message: string, type?: string) => {
+        // pi's MCP support says that neither codemode nor its own tool search is active, because it knows no other: the portal's
+        // is, and says it of itself. A notice that is untrue is no notice.
+        if (/^MCP tools are only reachable from the codemode or tool_search tool/.test(String(message))) return;
+        fireAndForget({ method: "notify", message, notifyType: type });
+      },
       setStatus: (key: string, text: string) =>
         fireAndForget({ method: "setStatus", statusKey: key, statusText: text }),
       setWidget: (key: string, content: unknown) => {
@@ -1368,6 +1443,8 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     } catch {
       // best effort
     }
+    // The MCP servers of the chat go with it, told of the shutdown or not: see McpRuntime.close.
+    this.mcp?.close().catch((e) => console.warn(`[portal] could not stop the chat's MCP servers: ${(e as Error).message}`));
     try {
       this.session.dispose?.();
     } catch {
@@ -1522,9 +1599,23 @@ export class SdkPiClient extends EventEmitter implements PiClient {
   /** The `tool_search` tool of this session, which is told what the chat froze. */
   search?: ToolSearch;
 
+  /** The MCP servers of this session: see McpRuntime. */
+  mcp?: McpRuntime;
+
+  /**
+   * The set a registered tool is filed in: its MCP server, as configured, told by pi's namespace on the tool; the three
+   * resource tools that reach every server are a set of their own; any other tool's is the package or file that brought it.
+   */
+  private setOf(tool: any): string {
+    const server = this.mcp?.serverOf(tool);
+    if (server !== undefined) return server;
+    if (isResourceTool(String(tool?.name)) && sourceLabel(tool?.sourceInfo) === "mcp") return RESOURCE_SET;
+    return sourceLabel(tool?.sourceInfo).trim() || BUILT_IN_SET;
+  }
+
   /** What a registered tool's set is called to the person: the name the settings page gives the box, else its own. */
   setLabel(tool: any): string {
-    const set = sourceLabel(tool?.sourceInfo).trim() || BUILT_IN_SET;
+    const set = this.setOf(tool);
     return toolGroupNames()[set] ?? set;
   }
 
@@ -1540,10 +1631,15 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     if (this.codemodeOnly && !this.switchedOff.has(CODEMODE_TOOL)) return false;
     const name = String(tool?.name);
     const info = tool?.sourceInfo;
-    const set = sourceLabel(info).trim() || BUILT_IN_SET;
+    const server = this.mcp?.serverOf(tool);
+    // The resource tools reach every server, and pi declares them with the widest exposure among the servers that have
+    // resources: a direct server's would put them into the middle of the chat's list. They are lazy with the lazy servers,
+    // found through the search, and declared where there is none.
+    if (isResourceTool(name) && sourceLabel(info) === "mcp") return this.mcp?.hasLazy() === true;
+    const set = this.setOf(tool);
     const scriptsOnly = tool?.exposure === "codemode" || tool?.exposure === "deferred";
-    // No MCP servers named: the adapter's tools are the adapter's by their package, which lazyAllowed refuses.
-    if (!lazyAllowed({ name, source: set, package: packageOf(info) ?? null, inline: isInline(info), scriptsOnly }, [])) return false;
+    // A server's tool is that server's, whatever package or file the extension that registered it is: it is no package's.
+    if (!lazyAllowed({ name, source: set, ...(server !== undefined ? { server } : {}), package: server !== undefined ? null : (packageOf(info) ?? null), inline: server !== undefined ? false : isInline(info), scriptsOnly })) return false;
     return headLazy(this.head, { name, set });
   }
 
@@ -1749,19 +1845,26 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     const offered = (this.wanted.size ? all.filter((tool) => this.wanted.has(String(tool.name)) || forScripts(tool)) : all).filter((tool) => !this.isSearch(String(tool.name)));
     // A rule the tools of a set share is printed once by pi, so it is counted once, with the first tool that has it.
     const counted = new Map<string, Set<string>>();
-    return offered.map((tool) => ({
-      name: String(tool.name),
-      description: typeof tool.description === "string" ? tool.description : undefined,
-      source: sourceLabel(tool.sourceInfo),
-      package: packageOf(tool.sourceInfo),
-      ...(isInline(tool.sourceInfo) ? { inline: true as const } : {}),
-      ...(forScripts(tool) ? { scriptsOnly: true as const } : {}),
-      ...(this.offByDefault(String(tool.name)) ? { offByDefault: true as const } : {}),
-      tokens: this.declarationTokens(String(tool.name), tool, countedFor(counted, sourceLabel(tool.sourceInfo))),
-      ...((files) => (files ? { approvalFiles: [...files] } : {}))(declaredFiles(this.session.getToolDefinition(String(tool.name)))),
-      ...this.saysOfItself(String(tool.name)),
-      enabled: !this.switchedOff.has(String(tool.name)),
-    }));
+    return offered.map((tool) => {
+      const server = this.mcp?.serverOf(tool);
+      // A server's tools are its own set and no package's or inline extension's; the resource tools are a set of their own.
+      const own = server !== undefined || this.setOf(tool) === RESOURCE_SET;
+      const source = own ? this.setOf(tool) : sourceLabel(tool.sourceInfo);
+      return {
+        name: String(tool.name),
+        description: typeof tool.description === "string" ? tool.description : undefined,
+        source,
+        ...(server !== undefined ? { server } : {}),
+        package: own ? undefined : packageOf(tool.sourceInfo),
+        ...(!own && isInline(tool.sourceInfo) ? { inline: true as const } : {}),
+        ...(forScripts(tool) ? { scriptsOnly: true as const } : {}),
+        ...(this.offByDefault(String(tool.name)) ? { offByDefault: true as const } : {}),
+        tokens: this.declarationTokens(String(tool.name), tool, countedFor(counted, source)),
+        ...((files) => (files ? { approvalFiles: [...files] } : {}))(declaredFiles(this.session.getToolDefinition(String(tool.name)))),
+        ...this.saysOfItself(String(tool.name)),
+        enabled: !this.switchedOff.has(String(tool.name)),
+      };
+    });
   }
 
   /**
@@ -1798,9 +1901,15 @@ export class SdkPiClient extends EventEmitter implements PiClient {
    * active set is computed from what pi wants right now, every time.
    */
   async setToolsOff(names: string[]): Promise<void> {
+    const codeWasOff = this.switchedOff.has(CODEMODE_TOOL);
     // The portal's switches name a tool that is off until switched on only once it has seen it: until then it stays off.
     this.switchedOff = new Set([...names, ...this.unseenOff()]);
+    // Where the chat works through the code tool alone, the code tool decides how pi is given the servers (their tools go to
+    // scripts, or to the model): pi takes that from its config, so a switch of it is a reload, when the chat can have one.
+    if (this.codemodeOnly && codeWasOff !== this.switchedOff.has(CODEMODE_TOOL) && this.mcp?.names().length) this.reloadDue = true;
     this.applyToolsOff();
+    // A server left off because all of its tools were is wanted again once one is on.
+    this.mcp?.switched();
     // What the rule says of a tool that is switched off or on is for the next message, as for a reload.
     this.sayAudioRuleAgain();
   }

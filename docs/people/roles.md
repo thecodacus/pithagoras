@@ -28,7 +28,7 @@ refused. Secrets are told by the name of the file, so a `tokenizer.ts` or a page
 about credentials is read like any other. The same goes for a rule you allowed:
 it opens the tool, not the files the guard keeps from them, so an allowed
 command that names a secret or one of those two files is refused. So is a
-`write` or `edit` rule that reaches anything the portal, pi, its MCP adapter or
+`write` or `edit` rule that reaches anything the portal, pi, its MCP support or
 your agent's heartbeat load on their own: it would reach your own conversations
 as the agent's own words, or its tools, where a colleague's text would be an
 instruction to it, or a process of the portal.
@@ -39,24 +39,22 @@ instruction to it, or a process of the portal.
 | `WATCH.md` | the heartbeat | what it is asked on every look |
 | `.agent-name` | the portal | which agent a kept folder belongs to, and so who takes up what is in it |
 | `AGENTS.override.md`, `AGENTS.md`, `CLAUDE.md` | pi, from the folder and from every folder above it | the project's instructions |
-| `.pi`, `.agents` | pi, with everything in them | its system prompt, settings, skills, prompts, themes and extensions, which run in the portal |
-| `.mcp.json`, `.vscode/mcp.json`, `opencode.json` | pi's MCP adapter | tool servers it starts, each a process of the portal |
+| `.pi`, `.agents` | pi, with everything in them | its system prompt, settings, skills, prompts, themes and extensions, which run in the portal, and the tool servers of `.pi/mcp.json`, each a process of the portal |
 
 These are held in an agent's home, **any agent's** and not only the one they are
 talking to, one that was kept when its agent was deleted and one that nobody has
 made yet (the next agent of that name takes up what it finds there), and in any
 folder of a project. A name in a folder no conversation runs in, such as
 `notes/memory.md` in an agent's home, is only a note. A folder named `.pi` or
-`.agents` is held wherever it is, and so are `AGENTS.override.md`, `AGENTS.md`,
-`CLAUDE.md` and `opencode.json`, which are read from above the folder as well.
+`.agents` is held wherever it is, and so are `AGENTS.override.md`, `AGENTS.md` and
+`CLAUDE.md`, which are read from above the folder as well.
 
 Some places are held whole, whatever is in them: pi's own agent folder, `~/.agents`
-in the home of the user the portal runs as (the user skills pi loads, and the MCP
-adapter's config there), the folders that come with the portal (the skills every
-conversation has, the extensions it installs, the built-in channels), the folder
-channel packages are installed in, which run in the portal, the other files the MCP
-adapter reads in that home, such as `~/.config/mcp/mcp.json`, and the `.mcp.json` of
-the folder the portal itself runs in, which it reads for every conversation.
+in the home of the user the portal runs as (the user skills pi loads), the folders
+that come with the portal (the skills every conversation has, the extensions it
+installs, the built-in channels), and the folder channel packages are installed in,
+which run in the portal. The tool servers every conversation starts are in pi's
+agent folder, in `mcp.json`.
 
 A link is followed, within bounds. What a write really lands on is compared with
 these places as they really are, in whatever case the folder spells them, so a
@@ -138,7 +136,7 @@ So a teammate messaging your bot gets an agent that knows its own name and your
 team's shared notes, and not your private context. `TEAM.md` is the only one of
 these files a colleague or a guest may write, so it is never loaded into your own
 conversations: what somebody else wrote there would reach the agent as its own
-words. What is loaded on its own (`AGENTS.md`, `.pi`, `.mcp.json`, see above) is
+words. What is loaded on its own (`AGENTS.md`, `.pi`, see above) is
 closed to a `write` rule for the same reason.
 
 ## What the agent is told

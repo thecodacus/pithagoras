@@ -6,6 +6,7 @@ import path from "node:path";
 import { Worker } from "node:worker_threads";
 import { DATA_DIR } from "./data-dir.js";
 import { allowNoPassword, bindHost, tlsFiles } from "./http-security.js";
+import { readMcpFile } from "./api/mcp.js";
 import { SCHEMA_VERSION, dbFile } from "./schema-version.js";
 
 /**
@@ -27,6 +28,24 @@ export interface UpgradeCheck {
   from: number;
   /** The file was made by a newer portal than this one: it is not opened, whatever this one could read of it. */
   newer?: boolean;
+  /** At its version, but the move to pi's own MCP support waited for mcp.json, which can be read now: it rewrites the database, after a backup. */
+  mcp?: boolean;
+}
+
+/**
+ * Whether the move to pi's own MCP support waited for an mcp.json that could not be read (its report says `pending`), and
+ * the file can be read now: the next start converts it and rewrites the switches and rules, perhaps long after the upgrade's
+ * backup, so it is an upgrade of its own. While the file is still unreadable nothing is changed, and nothing is backed up.
+ */
+function mcpWaiting(d: Database.Database): boolean {
+  try {
+    const row = d.prepare("SELECT value FROM settings WHERE key = 'mcp_migration'").get() as { value: string } | undefined;
+    if (!row || (JSON.parse(row.value) as { status?: unknown })?.status !== "pending") return false;
+  } catch {
+    return false;
+  }
+  const { raw, error, unreadable } = readMcpFile();
+  return !error || (raw.trim() === "" && !unreadable);
 }
 
 /** Whether the database needs upgrading. A new install has nothing to keep and is not checked. */
@@ -37,6 +56,7 @@ export function upgradeCheck(file = dbFile()): UpgradeCheck {
     const used = Boolean(d.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'sessions'").get());
     const from = d.pragma("user_version", { simple: true }) as number;
     if (used && from > SCHEMA_VERSION) return { needed: false, from, newer: true };
+    if (used && from === SCHEMA_VERSION && mcpWaiting(d)) return { needed: true, from, mcp: true };
     return { needed: used && from < SCHEMA_VERSION, from };
   } finally {
     d.close();
@@ -148,7 +168,7 @@ export async function prepareDatabase(): Promise<void> {
   }
   if (!check.needed) return;
 
-  console.log(`[portal] upgrading the database from version ${check.from} to ${SCHEMA_VERSION}`);
+  console.log(check.mcp ? "[portal] mcp.json can be read now: moving its MCP servers to pi's own MCP support, after a backup" : `[portal] upgrading the database from version ${check.from} to ${SCHEMA_VERSION}`);
   const view = maintenance();
   const outcome = await new Promise<{ backup?: string } | { error: string; damaged: boolean }>((resolve) => {
     const worker = new Worker(new URL("./db-upgrade-worker.js", import.meta.url), {

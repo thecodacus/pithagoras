@@ -31,7 +31,7 @@ export default async function understory(portal: ServerPortal) {
   } catch (e) {
     portal.log(`could not tell Docker which image Understory's container should run: ${(e as Error).message}`);
   }
-  // While its server is the chats' (switched on, and pi-mcp-adapter on): MEMORY.md is left aside for it.
+  // While its server is the chats' (there, and switched on): MEMORY.md is left aside for it.
   portal.memory.hold({ label: "Understory", rule: UNDERSTORY_RULE, on: () => portal.mcp.get(UNDERSTORY)?.on === true });
   understoryRoutes(portal.router);
   memoryRoutes(portal.router);

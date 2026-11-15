@@ -9,7 +9,6 @@ import { bareRef } from "../browser/ref.js";
 import { listToolRules, mcpView, recordAudit, trustResult, trustedMcpServers, trustedResults, untrustResult, useGrant, type McpView, type ToolRule } from "../db.js";
 import { SIGNALS, injectionSignals, type Signal } from "./injection.js";
 import { GUARD_RULE_NAMES, type GuardRuleName } from "./guard-rule-names.js";
-import { mcpClaims, mcpServerOf } from "../tool-policy.js";
 import { DATA_DIR } from "../data-dir.js";
 import { piAgentDir } from "../pi-settings.js";
 import { isWithinText, pathBelow, realPath, realPathAhead } from "../within.js";
@@ -23,6 +22,7 @@ import { HEARTBEAT_ROLE, NOTE_TOOL } from "./heartbeat-names.js";
 import { LISTED_TOOLS_KEY, TOOL_SEARCH } from "./tool-search-names.js";
 import { MCP_RESOURCE_TOOLS, isResourceTool, serverOfArgument, serversOfNamespace } from "./mcp-origin.js";
 import { BROWSER_MCP } from "../tool-policy.js";
+import { CODEMODE_TOOL } from "./codemode.js";
 import { runsAsPrimary } from "./runs-as-primary.js";
 
 /**
@@ -59,8 +59,6 @@ const UNTRUSTED_COMMAND = /\b(himalaya|mutt|neomutt|notmuch|offlineimap|mbsync|c
  * tool's name (see mcp-origin.ts).
  */
 interface Origin {
-  /** The adapter registered it: a server's tool, whatever it is called. */
-  adapter: boolean;
   /** pi's namespace of the tool where its MCP support registered it (`mcp__<server>`): the tool is that server's. */
   namespace?: string;
   /** The tool declares that what it returns is outside content (see declaredGuard). */
@@ -69,23 +67,47 @@ interface Origin {
 
 /**
  * Whether a server's words are not the person's own: a tool of an MCP server is its server's, and the server is trusted
- * (trustedMcpServers) or it is not. By its namespace for a tool pi's MCP support registered, which names the server as
- * pi has it, folded to the configured names; the server of the adapter's by its name, as the adapter gives them (onlyServerOf).
+ * (trustedMcpServers) or it is not. By its namespace, which names the server as pi has it, folded to the configured names.
  * A server that is not configured, and a namespace two configured servers could be, is no trusted one's, and the browser's
  * never is, whoever runs it.
  */
-function serverWords(toolName: string, origin: Origin, mcp: Pick<McpView, "servers" | "naming" | "serverTool">): boolean {
+function serverWords(origin: Origin, mcp: Pick<McpView, "servers">, projectOwned: (server: string) => boolean = () => false): boolean {
+  if (origin.namespace === undefined) return false;
   const trusted = trustedMcpServers();
-  if (origin.namespace !== undefined) {
-    const servers = serversOfNamespace(origin.namespace, mcp.servers);
-    return !servers.length || servers.some((server) => server === BROWSER_MCP || !trusted.has(server));
-  }
-  // A tool the adapter registered is a server's whatever it is called (the adapter can name them without the
-  // server, and merges servers from configs other than the portal's), and one whose server is not told is no trusted one's.
-  if (!(origin.adapter || mcp.serverTool(toolName))) return false;
-  const server = onlyServerOf(toolName, mcp);
-  return server === undefined || !trusted.has(server);
+  const servers = serversOfNamespace(origin.namespace, mcp.servers);
+  return !servers.length || servers.some((server) => server === BROWSER_MCP || !trusted.has(server) || projectOwned(server));
 }
+
+/**
+ * What a conversation's MCP servers are, for the guard: the runtime of the chat knows it, the guard only asks.
+ */
+export interface GuardMcp {
+  /** The servers of this conversation that are not switched off, by the names they are configured under: what a script's discovery functions describe. */
+  live: () => readonly string[];
+  /**
+   * Whether this conversation's server of that name is a project's (its `.pi/mcp.json`) and not the user's file's. The
+   * person trusts a server of their own file by its name; a project's server of that name is no one they trusted, even if
+   * the file has since got one of its name (a chat keeps the servers it started with until it is reloaded).
+   */
+  projectOwned: (server: string) => boolean;
+}
+
+/** The most of a call's arguments a confirmation shows. */
+const SHOWN_CHARS = 3000;
+
+/**
+ * What a call's arguments say, for the person who is asked to allow it: all of them, not the one path the guard files the
+ * call under (an MCP tool declares no files, so its subject is its `path` argument when it has one, whatever else it
+ * writes, sends or acts on). As JSON, with what does not show made visible, and cut with a note where it is long.
+ */
+function argumentsShown(input: unknown): string {
+  // Controls and format characters (the bidi marks, the tag characters that spell ASCII without showing, the zero-width ones), the variation selectors that can carry any byte after a visible character, and the fillers that draw as blanks.
+  const text = (JSON.stringify(input ?? {}) ?? "{}").replace(/[\p{Cc}\p{Cf}\u2028-\u202f\u00ad\u115f\u1160\u3164\uffa0\ufe00-\ufe0f\u{e0100}-\u{e01ef}]/gu, (char) => `\\u${char.length > 1 || char.codePointAt(0)! > 0xffff ? `{${char.codePointAt(0)!.toString(16)}}` : char.charCodeAt(0).toString(16).padStart(4, "0")}`);
+  return text.length > SHOWN_CHARS ? `${text.slice(0, SHOWN_CHARS)}\n[cut: ${text.length - SHOWN_CHARS} more characters]` : text;
+}
+
+/** The functions and the list of pi's code mode that hand a script what MCP servers say of themselves: descriptions, and the `instructions` a server gives when it connects. */
+const SCRIPT_DISCOVERY = /\b(?:searchTools|describeTool|describeNamespace|ALL_TOOLS)\b/;
 
 /**
  * Does what this call returned carry somebody else's words? Mail and the web
@@ -98,11 +120,11 @@ function serverWords(toolName: string, origin: Origin, mcp: Pick<McpView, "serve
  * chat as a flagged result, which flaggedIn finds again when the guard is made again.
  *
  * A server's tools are its words however they are called: under their own names (`mcp__jira__get_issue`, told by
- * their namespace), through the adapter's `mcp` tool, or as `tool_search` runs them where they are lazy (the call it makes is
- * judged as the call of the tool it names, so a result is judged where it is made). An issue comment or a mail body a
- * server hands back is whoever wrote it. A server the person counts as their own (trustedMcpServers) is not outside
- * content, by any of those ways; the browser always is, whoever runs it, and so is what a tool that declares it outside
- * content (`outside`, see declaredGuard) returns.
+ * their namespace), or as `tool_search` runs them where they are lazy (the call it makes is judged as the call of the
+ * tool it names, so a result is judged where it is made). An issue comment or a mail body a server hands back is whoever
+ * wrote it. A server the person counts as their own (trustedMcpServers) is not outside content, by any of those ways;
+ * the browser always is, whoever runs it, and so is what a tool that declares it outside content (`outside`, see
+ * declaredGuard) returns.
  *
  * Two more ways to a server's words go by what they are given. The resource tools are shared by every server and name
  * theirs in the `server` argument: a listing of every server's, and a server that is not configured, are no trusted one's.
@@ -117,116 +139,18 @@ function untrustedResult(
   origin: Origin,
   /** The tools whose words a result of the portal's own search or describe holds: "unknown" where it does not say. */
   listed?: readonly string[] | "unknown",
-  originOf: (name: string) => Origin = () => ({ adapter: false, outside: false }),
+  originOf: (name: string) => Origin = () => ({ outside: false }),
+  projectOwned: (server: string) => boolean = () => false,
 ): boolean {
   if (toolName === "bash") return UNTRUSTED_COMMAND.test(cmd(input));
   if (origin.outside || browserCall(toolName, input).isBrowser) return true;
-  // The adapter's script runs any tool of any server, and says which only as it runs. These two names are the adapter's:
-  // no pattern of names stands for it, since a name that merely starts with `mcp_` is no server's.
-  if (ADAPTER_SCRIPTS.includes(toolName)) return true;
   const mcp = mcpView();
-  if (listed !== undefined) return listed === "unknown" || listed.some((name) => serverWords(name, originOf(name), mcp));
+  if (listed !== undefined) return listed === "unknown" || listed.some((name) => serverWords(originOf(name), mcp, projectOwned));
   if (isResourceTool(toolName)) {
     const server = serverOfArgument(input.server, mcp.servers);
-    return server === undefined || server === BROWSER_MCP || !trustedMcpServers().has(server);
+    return server === undefined || server === BROWSER_MCP || !trustedMcpServers().has(server) || projectOwned(server);
   }
-  const trusted = (server: string | undefined) => server !== undefined && trustedMcpServers().has(server);
-  if (toolName === "mcp") return !trusted(proxiedServer(input, mcp));
-  return serverWords(toolName, origin, mcp);
-}
-
-/** The adapter's script tool, by the two names it has been registered under. Gone with the adapter. */
-const ADAPTER_SCRIPTS: readonly string[] = ["mcp_script", "mcpScript"];
-
-/**
- * The server a tool's name is of, where no other configured server could have it: with `my-notes` and `my`, the name
- * `my_notes_search` is `my-notes`' `search` and as well `my`'s `notes_search`, and which the adapter runs is not told
- * by the name. Such a name is no trusted server's. Every server is looked at in the naming the adapter gives its tools
- * (mcpClaims, with its `toolPrefix`): `docs.v2-mcp` named `short` gives its `search` the name `docs.v2_search`, as
- * `docs.v2` does, and one named `none` could have a tool of any name.
- */
-function onlyServerOf(name: string, mcp: Pick<McpView, "servers" | "naming">): string | undefined {
-  const server = mcpServerOf(name, mcp.servers);
-  if (server === undefined) return undefined;
-  const claimants = mcp.servers.filter((one) => mcpClaims(one, name, mcp.naming(one)));
-  return claimants.length === 1 && claimants[0] === server ? server : undefined;
-}
-
-/**
- * The server whose tool an `mcp` call runs, as configured: the one it names, or the one the tool's name is of.
- * Undefined for a call that runs no tool (a search or a list, which hands back what every server says of itself),
- * and for a tool of no server that is configured.
- */
-function proxiedServer(input: Record<string, unknown>, mcp: Pick<McpView, "servers" | "naming">): string | undefined {
-  // As the adapter finds a tool by its name (findToolByName): hyphens for underscores, and nothing else. A dot is not
-  // an underscore to it: `docs.v2_search` is the tool of a server `docs.v2`, and no tool of `docs`.
-  const asked = typeof input.tool === "string" ? input.tool.trim().replace(/-/g, "_") : "";
-  if (!asked) return undefined;
-  // What the adapter does before or instead of running the tool (a search, a description, a connection, its UI
-  // sessions' messages) hands back what every server says: only a plain call of a tool is that server's own words.
-  if (["action", "search", "describe", "connect"].some((key) => input[key] !== undefined && input[key] !== null && input[key] !== "")) return undefined;
-  // The adapter takes a server by its name as configured, and by no other (executeCall).
-  if (typeof input.server === "string" && input.server.trim()) return mcp.servers.find((server) => server === input.server);
-  return onlyServerOf(asked, mcp);
-}
-
-/**
- * The switched-off tool a call reaches by another way, if it does.
- *
- * The MCP adapter offers every tool of every server it knows through its own
- * `mcp` tool as well as, where a server registers them directly, under their
- * own names: `mcp({ tool: "jira_create_issue" })` is the same call as
- * `jira_create_issue`. Switching the tool off took it out of what the model is
- * offered and left this way to it open, from the adapter's cache whether or
- * not the server was running. So the proxy is held to the switches too: a call
- * or a description of a tool that is off here is refused. The adapter finds a
- * tool by its full name, hyphens or underscores; the bare name with a server is
- * matched as well, whatever the adapter makes of it. Only against a server's
- * tools: `bash` switched off is no reason to refuse a server's `shell_bash`,
- * and the adapter sends a call for one of pi's own tools back to it anyway.
- *
- * A script (`mcp_script`, where the adapter's script mode is on) can call any
- * tool and says which only as it runs, so it is refused while a tool the
- * adapter reaches on a server is switched off here: it cannot be held to the
- * switches one call at a time. Only such a tool: one the configuration leaves
- * out is off for pi too, and the adapter would not reach it anyway; a tool of
- * another extension whose name merely starts like a server's is no script's.
- *
- * `tool_search`, which reaches a conversation's lazy tools, is another such way, and holds itself to the switches: it
- * finds and describes only the tools that are on, and refuses a call of one that is off. The call it makes goes
- * through the guard as a call of the tool it names, which is refused here for a tool that is off (see the nested call
- * below), so the switches hold however the call is made.
- */
-export function switchedOffVia(
-  toolName: string,
-  input: Record<string, unknown>,
-  off: ReadonlySet<string>,
-  given?: Pick<McpView, "servers" | "serverTool">,
-): string | undefined {
-  if (!off.size || (toolName !== "mcp" && toolName !== "mcp_script" && toolName !== "mcpScript")) {
-    return undefined;
-  }
-  // The adapter takes a name with hyphens for underscores (findToolByName). Dots are taken as underscores
-  // here as well, though the adapter keeps a server's (mcpPrefix): wider than the adapter, this only refuses
-  // more, and a name it might take one day is not a way round.
-  const same = (name: string) => name.replace(/[-.]/g, "_");
-  const mcp = given ?? mcpView();
-  if (toolName === "mcp") {
-    const server = typeof input.server === "string" && input.server ? same(input.server) : undefined;
-    for (const key of ["tool", "describe"]) {
-      const asked = input[key];
-      if (typeof asked !== "string" || !asked) continue;
-      const wanted = [same(asked), ...(server ? [`${server}_${same(asked)}`] : [])];
-      const hit = [...off].find((name) => wanted.includes(same(name)) && mcpServerOf(name, mcp.servers) !== undefined);
-      if (hit) return hit;
-    }
-    return undefined;
-  }
-  // `mcpScript` too: the name the portal's own lists have for it, should an adapter register it so.
-  if (toolName === "mcp_script" || toolName === "mcpScript") {
-    return [...off].find((name) => mcp.serverTool(name));
-  }
-  return undefined;
+  return serverWords(origin, mcp, projectOwned);
 }
 
 /**
@@ -283,11 +207,24 @@ const declaredValues = (input: Record<string, unknown>, names: readonly string[]
 
 /** Where secrets are kept, by a path's name: keys, tokens, and the folders tools keep their logins in. */
 const SECRET_PLACES =
-  /(?<![\w.-])(?:auth\.json|\.secrets(?=$|[\s'"*}/])|id_(?:rsa|dsa|ecdsa|ed25519)|\.(?:ssh|aws|kube|gnupg)(?=\/|$|[\s'"*}])|\.docker\/config\.json|\.config\/(?:gh|gcloud|hub)(?=\/|$|[\s'"*}])|\.netrc)|(?<![\w$])\.env(?:\.(?!(?:example|sample|template|dist|defaults?)\b)[\w-]+)*(?=$|[\s'"*}/;)])/i;
+  /(?<![\w.-])(?:(?:mcp-)?auth\.json|\.pi\/agent\/mcp\.json(?:\.(?:adapter|migrating))?(?![\w.-])|\.secrets(?=$|[\s'"*}/])|id_(?:rsa|dsa|ecdsa|ed25519)|\.(?:ssh|aws|kube|gnupg)(?=\/|$|[\s'"*}])|\.docker\/config\.json|\.config\/(?:gh|gcloud|hub)(?=\/|$|[\s'"*}])|\.netrc)|(?<![\w$])\.env(?:\.(?!(?:example|sample|template|dist|defaults?)\b)[\w-]+)*(?=$|[\s'"*}/;)])/i;
+
+/**
+ * pi's `mcp.json`, by its place: it holds the bearer tokens of the servers (and `mcp-auth.json` next to it their sign-ins),
+ * and so do the copies the move to pi's MCP support keeps beside it (`mcp.json.adapter`, `mcp.json.migrating`), which have
+ * the tokens as the old file wrote them. By the path and not the name, so that a project's `.mcp.json` or `mcp.json` stays readable.
+ */
+function isAgentMcpFile(where: string): boolean {
+  if (/\s/.test(where)) return false;
+  const full = homeOf(where);
+  if (!path.isAbsolute(full)) return false;
+  const resolved = path.resolve(full);
+  return ["mcp.json", "mcp.json.adapter", "mcp.json.migrating"].some((name) => resolved === path.join(piAgentDir(), name));
+}
 
 /** Whether a call reads a place where secrets are kept: the command, or the path, and each file a tool declares (`files`). */
 function readsCredentials(tool: string, input: Record<string, unknown>, files?: readonly string[]): boolean {
-  const secret = (where: string) => SECRET_PLACES.test(where) || SECRET_NAMES.test(where);
+  const secret = (where: string) => SECRET_PLACES.test(where) || SECRET_NAMES.test(where) || isAgentMcpFile(where);
   if (tool !== "bash") return secret(target(input)) || declaredValues(input, files).some(secret);
   const command = cmd(input);
   // gh hands its token out by more than one spelling.
@@ -1271,77 +1208,35 @@ function parseArgs(text: string): Record<string, unknown> | undefined {
 }
 
 /**
- * The tool an `mcp` call reaches, and what it is given, as the rules read a call of that tool: the adapter's
- * proxy is another way to a tool a server registers directly under its own name, so the rules about what a
- * call does (the ones after untrusted content, and what is kept from somebody who is not the primary user)
- * hold it as they hold the direct call. Its arguments are an object or the JSON text of one; text that is not
- * JSON reaches nothing, as the adapter refuses it. Undefined for any other call, and for an `mcp` call that names no tool.
- */
-function viaMcp(toolName: string, input: Record<string, unknown>): { toolName: string; input: Record<string, unknown> } | undefined {
-  if (toolName !== "mcp" || typeof input.tool !== "string" || !input.tool.trim()) return undefined;
-  const given =
-    typeof input.args === "string"
-      ? parseArgs(input.args)
-      : input.args && typeof input.args === "object" && !Array.isArray(input.args)
-        ? (input.args as Record<string, unknown>)
-        : undefined;
-  return { toolName: input.tool.trim(), input: given ?? {} };
-}
-
-/**
  * The rules this call is the shape of after untrusted content, in their order: those its tool declares every call of
- * it is (`acts`), the call's own, and those of the tool an `mcp` call reaches.
+ * it is (`acts`), and the call's own.
  */
 function taintRules(toolName: string, input: Record<string, unknown>, context: RuleContext): Rule[] {
-  const reached = viaMcp(toolName, input);
-  return RULES.filter(
-    (rule) =>
-      context.acts?.includes(rule.name as GuardRuleName) ||
-      rule.hit(toolName, input, context) ||
-      (reached !== undefined && rule.hit(reached.toolName, reached.input, { workspace: context.workspace })),
-  );
+  return RULES.filter((rule) => context.acts?.includes(rule.name as GuardRuleName) || rule.hit(toolName, input, context));
 }
 
 /** The rules after a suspected injection as the Guard page shows them: each one's name and what it holds back. */
 export const GUARD_RULES: readonly { name: string; why: string }[] = RULES.map(({ name, why }) => ({ name, why }));
 
 /**
- * Driving the agent's browser, in either of the two shapes the MCP adapter
- * offers: a directly registered tool named for its server, or the proxy tool
- * carrying the same thing as an argument. Told by the name, which is all an MCP
- * server's tools say of themselves; a package's browser tools that declare what
- * the guard holds them to have such names too.
+ * Driving the agent's browser. Told by the name, which is all an MCP server's tools say of themselves; a package's browser
+ * tools that declare what the guard holds them to have such names too.
  *
  * The browser is signed into the agent's own accounts, so a session holding it
  * can act as the agent anywhere it has a login: what it reads is outside
  * content, and where it goes is held to the allowlist.
- *
- * `unreadable` is a call through the proxy whose arguments came as a string
- * that is not JSON: the adapter would parse them itself, and the gate cannot say
- * where the call goes, so it does not let it through.
  */
 function browserCall(
   toolName: string,
   input: Record<string, unknown>
-): { isBrowser: boolean; url?: string; unreadable?: boolean } {
-  // Matched anywhere, not anchored. Playwright's own tools are browser_navigate,
-  // browser_click and so on, so the server prefix puts the telling part in the
-  // middle: browser_browser_navigate, playwright_browser_navigate. Anchoring
-  // meant a second browser server slipped the gate entirely.
-  const direct = /(^|[_.])browser[_.]/i.test(toolName);
-  const viaProxy =
-    toolName === "mcp" &&
-    ["server", "connect", "tool", "describe"].some((k) =>
-      typeof input[k] === "string" ? /browser/i.test(input[k] as string) : false
-    );
-  if (!direct && !viaProxy) return { isBrowser: false };
+): { isBrowser: boolean; url?: string } {
+  // Matched anywhere, not anchored. Playwright's own tools are browser_navigate, browser_click and so on, so the
+  // server's name in front of them (`mcp__browser__browser_navigate`, `mcp__playwright__browser_navigate`) puts the
+  // telling part in the middle. Anchoring meant a second browser server slipped the gate entirely.
+  if (!/(^|[_.])browser[_.]/i.test(toolName)) return { isBrowser: false };
 
-  // The URL, where this shape puts it: in the proxy's arguments, and in the
-  // call's own for a tool called by its name. An `args` beside the `url` of
-  // such a call is not where it goes, and is not read as if it were.
-  const args = viaProxy ? (typeof input.args === "string" ? parseArgs(input.args) : ((input.args ?? input) as Record<string, unknown>)) : input;
-  if (!args) return { isBrowser: true, unreadable: true };
-  const url = typeof args.url === "string" ? args.url : undefined;
+  // The URL, where it is: in the call's own arguments.
+  const url = typeof input.url === "string" ? input.url : undefined;
   return { isBrowser: true, url };
 }
 
@@ -1424,7 +1319,7 @@ const subjectOf = (toolName: string, input: Record<string, unknown>) =>
   toolName === "bash" ? cmd(input) : target(input) || JSON.stringify(input);
 
 /** Tools that are never approved on files: a command, and the ways to a tool server's tools, its resources, or to other tools. */
-const NEVER_FILES = new Set(["bash", "mcp", ...ADAPTER_SCRIPTS, ...MCP_RESOURCE_TOOLS, "codemode", TOOL_SEARCH]);
+const NEVER_FILES = new Set(["bash", ...MCP_RESOURCE_TOOLS, "codemode", TOOL_SEARCH]);
 
 /**
  * The files a call of a tool is approved for, where the tool's own definition
@@ -1881,8 +1776,7 @@ export function approvalCannotHelp(
       if (never) return never;
     }
   } else {
-    const reached = viaMcp(toolName, input);
-    const never = unrunnable(toolName, input, workspace) ?? (reached ? unrunnable(reached.toolName, reached.input, workspace) : undefined);
+    const never = unrunnable(toolName, input, workspace);
     if (never) return never;
   }
   // A conversation that has read something untrusted refuses a push, an upload, a subagent or a schedule after
@@ -2084,7 +1978,7 @@ export function guardExtension(
   workspace?: string,
   /** Other places they may read as well: the skills the agent offers, which are instructions for anybody it serves. */
   alsoReadable: string[] = [],
-  /** What this conversation has switched off, read at each call: see switchedOffVia. */
+  /** What this conversation has switched off, read at each call: a script's or `tool_search`'s call of one is refused. */
   offNow: () => ReadonlySet<string> = () => new Set(),
   /**
    * Whether the tool called `tool_search` that pi runs is the portal's. The name is any extension's to use, and pi
@@ -2095,8 +1989,11 @@ export function guardExtension(
   searchNow: () => boolean = () => false,
   /** The files a tool declares it is approved for (see declaredFiles), read from its definition at each call. */
   filesOf: (toolName: string) => readonly string[] | undefined = () => undefined,
-  /** Whether the MCP adapter registered a tool of this name in this session: a server's tool, whatever it is called (see untrustedResult). */
-  fromAdapter: (toolName: string) => boolean = () => false,
+  /**
+   * Whether a call of this tool is to be confirmed each time, by whoever is speaking: the portal's rule for the tools an MCP
+   * server's `approve` names (see mcpApprove), read at each call. Nobody to ask is a refusal, as for a call held after a suspected injection.
+   */
+  needsApproval: (toolName: string, input: Record<string, unknown>) => boolean = () => false,
   /** What a tool declares the guard is to hold it to (see declaredGuard), read from its definition at each call. */
   guardOf: (toolName: string) => DeclaredGuard | undefined = () => undefined,
   /**
@@ -2106,9 +2003,11 @@ export function guardExtension(
   dialogs = false,
   /** pi's MCP namespace of a tool its MCP support registered in this session (`mcp__<server>`), from its definition: see mcp-origin.ts. */
   namespaceOf: (toolName: string) => string | undefined = () => undefined,
+  /** This conversation's MCP servers: see GuardMcp. */
+  chatMcp: GuardMcp = { live: () => [], projectOwned: () => false },
 ) {
   /** Where a tool came from, as the session knows it now. */
-  const originOf = (name: string, outside = guardOf(name)?.outside === true): Origin => ({ adapter: fromAdapter(name), namespace: namespaceOf(name), outside });
+  const originOf = (name: string, outside = guardOf(name)?.outside === true): Origin => ({ namespace: namespaceOf(name), outside });
   return (pi: any): void => {
     // Per session, not global: a taint belongs to the conversation that read the
     // content, and this factory runs once per session. It is held by each result
@@ -2191,7 +2090,12 @@ export function guardExtension(
       const quoting = toolName === TOOL_SEARCH && searchNow() && !event.isError && (event.input?.action === "search" || event.input?.action === "describe");
       const quoted = quoting ? event.details?.[LISTED_TOOLS_KEY] : undefined;
       const listed = quoting ? (Array.isArray(quoted) ? quoted.filter((name): name is string => typeof name === "string") : "unknown") : undefined;
-      const untrusted = untrustedResult(toolName, event.input ?? {}, origin, listed, originOf) || carried !== undefined;
+      // A script's discovery functions are not tool calls, so nothing above sees them: what they return is what the servers say of
+      // themselves, which is the same as what the portal's own search quotes. Where the script asks for it and one of the
+      // servers it could ask about is not the person's own, the result is outside content.
+      const scriptReadsServers = toolName === CODEMODE_TOOL && typeof event.input?.code === "string" && SCRIPT_DISCOVERY.test(event.input.code)
+        && chatMcp.live().some((server) => server === BROWSER_MCP || !trustedMcpServers().has(server) || chatMcp.projectOwned(server));
+      const untrusted = untrustedResult(toolName, event.input ?? {}, origin, listed, originOf, chatMcp.projectOwned) || carried !== undefined || scriptReadsServers;
       if (!untrusted) return compact ? { content: formatted } : undefined;
 
       // Wrapped as data whatever it says; it taints the conversation only when it looks like it tries to instruct the agent.
@@ -2238,7 +2142,7 @@ export function guardExtension(
       };
     });
 
-    pi.on("tool_call", (event: any, ctx: any) => {
+    const checkCall = (event: any, ctx: any) => {
       if (typeof event.toolCallId === "string") {
         running.add(event.toolCallId);
         if (event.toolName === TOOL_SEARCH && searchNow()) searching.add(event.toolCallId);
@@ -2272,25 +2176,12 @@ export function guardExtension(
             "Say that it is switched off rather than looking for another way to it.",
         };
       }
-      const offTool = switchedOffVia(event.toolName, event.input ?? {}, offNow());
-      if (offTool) {
-        note("refused", `Switched off in this conversation: ${offTool}`);
-        return {
-          block: true,
-          reason:
-            event.toolName !== "mcp"
-              ? `Refused: "${offTool}" is switched off in this conversation, and an MCP script could reach it. ` +
-                "Call the MCP tools you need one at a time instead."
-              : `Refused: "${offTool}" is switched off in this conversation, and the mcp tool does not reach it ` +
-                "either. Say that it is switched off rather than looking for another way to it.",
-        };
-      }
 
       // Where a call goes is held to the allowlist, whoever is speaking: a
       // browser call's address, and each address in the parameters a tool
       // declares hold one (`reaches`), read from the call's own arguments.
       // Whether this conversation may drive a browser at all is its tools'
-      // switches: a tool switched off here is not called (see switchedOffVia).
+      // switches: a tool switched off here is not called.
       const asBrowser = browserCall(event.toolName, event.input ?? {});
       const addresses = [...new Set([...(asBrowser.url ? [asBrowser.url] : []), ...declaredValues(event.input ?? {}, declared?.reaches)])];
       if (asBrowser.isBrowser || addresses.length) {
@@ -2301,15 +2192,6 @@ export function guardExtension(
           if (!declared) {
             inlineBrowserScreenshot(event.toolName, event.input);
             normaliseTarget(event.input);
-          }
-          if (asBrowser.unreadable) {
-            note("refused", "The arguments of a browser call could not be read");
-            return {
-              block: true,
-              reason:
-                "Refused: the arguments of this browser call are not valid JSON, so it cannot be " +
-                "checked against the allowlist. Send them as an object, or as JSON text.",
-            };
           }
         }
         const allowlist = allowlistNow();
@@ -2355,16 +2237,13 @@ export function guardExtension(
       if (role !== "primary") {
         const heartbeat = role === HEARTBEAT_ROLE;
         const reads = PATH_READERS.has(event.toolName);
-        // What a server's tool is given through `mcp` is held to what is kept from this role as it is when it is called directly.
-        const reached = viaMcp(event.toolName, event.input ?? {});
         const why = reads
           ? heartbeat
             ? searchesSecrets(event.toolName, event.input ?? {}, workspace)
             : unreadable(event.toolName, event.input ?? {}, workspace, alsoReadable)
           : readOnly
             ? undefined
-            : (heartbeat ? keptFromAll : unrunnable)(event.toolName, event.input ?? {}, workspace, files) ??
-              (reached ? (heartbeat ? keptFromAll : unrunnable)(reached.toolName, reached.input, workspace) : undefined);
+            : (heartbeat ? keptFromAll : unrunnable)(event.toolName, event.input ?? {}, workspace, files);
         if (why && heartbeat) {
           console.warn(`[guard ${sessionId}] blocked ${event.toolName}: heartbeat, ${why}`);
           note("refused", `Not permitted for a heartbeat: ${why}`);
@@ -2469,6 +2348,42 @@ export function guardExtension(
           return refuse();
         },
       );
+    };
+
+    // A tool its server's `approve` names is confirmed each time it is called, whoever calls it (a script or `tool_search` too:
+    // the nested call is a call of the tool). After everything that would refuse the call, so that nobody is asked about one
+    // that is refused after all.
+    const confirmCall = (event: any, ctx: any) => {
+      if (!needsApproval(event.toolName, event.input ?? {})) return undefined;
+      const { role, key } = whoNow();
+      const subject = callSubject(event.toolName, event.input ?? {}, filesOf(event.toolName));
+      const refuse = (why: string) => {
+        recordAudit({ kind: "refused", tool: event.toolName, subject, reason: `Needs a confirmation each time: ${why}`, personKey: key, sessionId: portalSessionId });
+        return {
+          block: true,
+          reason: `Refused: "${event.toolName}" is a tool whose server is set to be confirmed on each call, and ${why}. Say that it was not confirmed rather than looking for another way to it.`,
+        };
+      };
+      if (role !== "primary" || !dialogs) return refuse("there is nobody here to confirm it");
+      const title = `Let ${event.toolName} run?`;
+      const message = ["This tool is set to ask each time it is called.", "Yes lets this one call run; No refuses it.", "The call's arguments, as the agent wrote them:", argumentsShown(event.input)].join("\n");
+      return new Promise<unknown>((resolve) => resolve(ctx.ui.confirm(title, message))).then(
+        (yes) => {
+          if (yes !== true) return refuse("it was not confirmed");
+          recordAudit({ kind: "allowed-by-approval", tool: event.toolName, subject, reason: "Confirmed for this one call, as its server asks", personKey: key, sessionId: portalSessionId });
+          return undefined;
+        },
+        (error) => {
+          console.warn(`[guard ${sessionId}] could not ask about ${event.toolName}: ${String(error)}`);
+          return refuse("the question could not be put");
+        },
+      );
+    };
+
+    pi.on("tool_call", (event: any, ctx: any) => {
+      const checked = checkCall(event, ctx);
+      const then = (verdict: unknown) => (verdict === undefined ? confirmCall(event, ctx) : verdict);
+      return checked && typeof (checked as { then?: unknown }).then === "function" ? (checked as Promise<unknown>).then(then) : then(checked);
     });
   };
 }

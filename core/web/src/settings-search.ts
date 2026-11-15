@@ -37,7 +37,7 @@ export const SETTINGS_INDEX: SettingEntry[] = [
   { tab: "tools", title: msg("Questions from the agent"), words: "ask_question question questions wait timeout answer fragen frage warten antwort" },
   { tab: "modes", title: msg("Modes"), words: "mode modes chat mode code mode instructions own custom model parameters temperature sampling modus modi anweisungen temperatur parameter" },
   { tab: "skills", title: msg("Skills"), words: "skill procedure import repository fähigkeiten" },
-  { tab: "mcp", title: msg("MCP servers"), words: "mcp model context protocol server adapter tools" },
+  { tab: "mcp", title: msg("MCP servers"), words: "mcp model context protocol server tools" },
   { tab: "extensions", section: msg("Comes with Pithagoras"), title: msg("Extensions that come with Pithagoras"), words: "shipped bundled built-in included sample notes dusk mitgeliefert" },
   { tab: "extensions", section: msg("Official extensions"), title: msg("Official extensions"), words: "office blender godot nextcloud inline avatar flair prometheion repository offiziell" },
   { tab: "extensions", section: msg("Find packages"), title: msg("Find packages"), words: "browse catalog gallery npm pi-package search discover katalog paket" },

@@ -469,8 +469,33 @@ export interface ModelProvider {
   models: string[];
 }
 
-/** One server of pi's mcp.json, in the shape pi-mcp-adapter reads: `url`, `command` or `socket`, and what else the adapter takes. */
-export type McpEntry = Record<string, unknown>;
+/** How pi reaches a server's tools: see `exposure` of {@link McpEntry}. */
+export type McpExposure = "codemode" | "deferred" | "direct" | "hidden";
+
+/**
+ * One server of pi's mcp.json, in the shape pi reads (pi's docs/mcp.md): `command` (stdio) or `url` (streamable HTTP), and
+ * the rest. A key pi knows and this does not name is kept as it is.
+ *
+ * `exposure` is how pi (the CLI, a container) reaches the server's tools. In a chat of the portal it is the person's
+ * mark of the server (Settings → Tools: auto, lazy or direct) that decides; an entry written with `exposure: "direct"` or
+ * `"deferred"` starts that mark as direct or lazy where the person has set none.
+ */
+export interface McpEntry {
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  cwd?: string;
+  url?: string;
+  headers?: Record<string, string>;
+  type?: "stdio" | "http" | "streamable-http";
+  timeout?: number;
+  enabled?: boolean;
+  description?: string;
+  exposure?: McpExposure;
+  /** Exposure of single tools, by the server's own name for each or a pattern with `*`. An exact name wins over a pattern; `hidden` removes a tool. */
+  toolExposure?: Record<string, McpExposure>;
+  [key: string]: unknown;
+}
 
 /** What holds the agent's memory in place of MEMORY.md: see `memory.hold`. */
 export interface MemoryHolder {
@@ -730,27 +755,30 @@ export interface ServerPortal {
     list(): ModelProvider[];
   };
   /**
-   * MCP servers, as pi-mcp-adapter makes them the chats' tools: named `<server>_<tool>`, and switched in Settings → MCP
-   * and Settings → Tools as any other server's are.
+   * MCP servers, as pi's own MCP support makes them the chats' tools: named `mcp__<server>__<tool>`, and switched in
+   * Settings → MCP and Settings → Tools as any other server's are.
    */
   mcp: {
     /**
-     * The server of that name in pi's mcp.json, and whether the chats have its tools now (`on`): it is there, not
-     * switched off, and pi-mcp-adapter, which makes its tools, is installed and on. The file is read again only when
-     * it, or pi's settings, changed. Nothing where there is no such server, or the file cannot be read.
+     * The server of that name in pi's mcp.json, and whether the chats have its tools now (`on`): it is there and not
+     * switched off (`enabled: false`). The file is read again only when it changed. Nothing where there is no such server,
+     * or the file cannot be read.
      */
     get(name: string): { entry: McpEntry; on: boolean } | undefined;
     /**
      * Writes the server of that name into pi's mcp.json (a file for the portal's user alone), in place of what was
-     * there under that name, or removes it (`undefined`). Writing one installs pi-mcp-adapter where it is not
-     * installed, and switches it on where it is off, which waits for the server halves to follow: not while this
-     * half starts. `trusted`: the person counts what its tools return as their own, not outside content; the name
-     * is added to Settings → Guard's trusted servers, where they can take it out. Removing the server takes the name
-     * out of them again, so a server given that name later is not trusted unasked. Then the open chats are loaded
-     * again, as `chats.reload` does, and what that answers is answered. Rejects while the file cannot be read, which
-     * is the person's to fix in Settings → MCP, and for a name or a server the adapter would not take.
+     * there under that name, or removes it (`undefined`). `trusted`: the person counts what its tools return as their
+     * own, not outside content; the name is added to Settings → Guard's trusted servers, where they can take it out.
+     * `approve`: patterns of the server's own tool names (`delete_*`; `*` is any characters) whose calls are confirmed
+     * each time, by whoever is speaking, and refused where nobody can be asked. Removing the server takes the name out
+     * of the trusted servers and drops its `approve` again, so a server given that name later is not trusted unasked.
+     * Then the open chats are loaded again, as `chats.reload` does, and what that answers is answered. Rejects while the
+     * file cannot be read, which is the person's to fix in Settings → MCP, and for a name or a server pi would not take.
+     *
+     * For this release the keys of the old MCP adapter (`directTools`, `includeTools`, `excludeTools`, `approveTools`,
+     * `auth: "bearer"` with `bearerToken`, `lifecycle` …) are still read, translated and logged; write pi's own.
      */
-    set(name: string, entry: McpEntry | undefined, options?: { trusted?: boolean }): Promise<{ reloaded: number; waiting: number }>;
+    set(name: string, entry: McpEntry | undefined, options?: { trusted?: boolean; approve?: string[] }): Promise<{ reloaded: number; waiting: number }>;
   };
   memory: {
     /**

@@ -18,7 +18,9 @@ import { freePort, inProcessHome } from "./server-harness.mjs";
 // src/schema-version.ts (once for the release, not once for each change),
 // pin the new version and fingerprint here, and have an upgrade test for what
 // changed (below) that starts from a database made before it.
-const PINNED = { version: 16, fingerprint: "a62e9d26db4cbd874add924a1ccb9f5a32d4a5cd20aa0ebb002d66ff4a3d2785" };
+const PINNED = { version: 17, fingerprint: "a62e9d26db4cbd874add924a1ccb9f5a32d4a5cd20aa0ebb002d66ff4a3d2785" };
+/** The schema of version 16, which version 17 kept: it only moved the MCP servers from pi-mcp-adapter to pi's own MCP support (mcp-migration-run.ts). */
+const V16_FINGERPRINT = "a62e9d26db4cbd874add924a1ccb9f5a32d4a5cd20aa0ebb002d66ff4a3d2785";
 /** The schema 16 had before a chat froze what is lazy in it, and a mode or an agent could keep tools in the model's list: a portal built from it is at version 16, and gets the columns when it starts. */
 const V16_WITHOUT_LAZY_HEAD = "4881a2f81ac22f97f43990ab83a069821ebf03e86ec21bb7c9603d5a7bc4a0db";
 /** The schema 16 had before a mode could set a temperature: a portal built from it is at version 16, and gets the column when it starts. */
@@ -788,7 +790,7 @@ test("the tools seen of a Playwright server pointed at a browser were the browse
   try {
     await upgraded(dir);
   } finally {
-    rmSync(mcp);
+    rmMcpOfThen();
   }
   const now = browserIn(dir);
   const all = [...BROWSER_TOOLS, PLAYWRIGHT].sort();
@@ -1192,12 +1194,23 @@ const understoryLeft = (dir, file) => JSON.parse(readFileSync(path.join(dir, "ha
 async function upgradedWith(dir, servers) {
   const mcp = path.join(process.env.PI_CODING_AGENT_DIR, "mcp.json");
   mkdirSync(path.dirname(mcp), { recursive: true });
-  if (servers) writeFileSync(mcp, JSON.stringify({ mcpServers: servers }));
+  if (servers) writeMcpOfThen(servers);
   try {
     return await upgraded(dir);
   } finally {
-    rmSync(mcp, { force: true });
+    rmMcpOfThen();
   }
+}
+
+/** pi's agent folder as a portal that has MCP servers had it: the file, and the adapter they were reached through in pi's package list. */
+function writeMcpOfThen(servers) {
+  const agent = process.env.PI_CODING_AGENT_DIR;
+  writeFileSync(path.join(agent, "mcp.json"), JSON.stringify({ mcpServers: servers }));
+  writeFileSync(path.join(agent, "settings.json"), JSON.stringify({ packages: ["npm:pi-mcp-adapter@2.18.0"] }));
+}
+function rmMcpOfThen() {
+  const agent = process.env.PI_CODING_AGENT_DIR;
+  for (const name of ["mcp.json", "mcp.json.adapter", "settings.json", "mcp-cache.json"]) rmSync(path.join(agent, name), { force: true });
 }
 
 test("what the portal kept of Understory is left for its extension, the guard trusts its server where the person had said nothing, and each project's switch is kept under its new name", async () => {
@@ -1207,12 +1220,16 @@ test("what the portal kept of Understory is left for its extension, the guard tr
   assert.deepEqual(upgradeCheck(path.join(dir, "portal.db")), { needed: true, from: 9 });
   const mcp = path.join(process.env.PI_CODING_AGENT_DIR, "mcp.json");
   mkdirSync(path.dirname(mcp), { recursive: true });
-  writeFileSync(mcp, JSON.stringify({ mcpServers: UNDERSTORY_ENTRY }));
+  writeMcpOfThen(UNDERSTORY_ENTRY);
   try {
     assert.match(await upgraded(dir), new RegExp(`upgrading the database from version 9 to ${SCHEMA_VERSION}`));
-    assert.deepEqual(JSON.parse(readFileSync(mcp, "utf8")), { mcpServers: UNDERSTORY_ENTRY }, "the agent's MCP entry is pi's, and stays as it was");
+    // The entry is pi's keys now (the same step carries every MCP server over), and the server is on: the adapter it was reached through was.
+    assert.deepEqual(JSON.parse(readFileSync(mcp, "utf8")), {
+      mcpServers: { understory: { url: "http://127.0.0.1:3800/mcp", headers: { Authorization: `Bearer ${"t".repeat(48)}` }, exposure: "direct" } },
+    });
+    assert.equal(readFileSync(`${mcp}.adapter`, "utf8"), JSON.stringify({ mcpServers: UNDERSTORY_ENTRY }), "and the file as it was is kept");
   } finally {
-    rmSync(mcp);
+    rmMcpOfThen();
   }
   assert.match(path.basename(backupsIn(path.join(dir, "backups"))[0]), /^portal-v9-\d{8}-\d{6}\.db$/);
 
@@ -1245,7 +1262,8 @@ test("the servers the person said are theirs stay as they said; an Understory of
   const said = path.join(home, "understory-said");
   mkdirSync(said, { recursive: true });
   understoryOfV9(said, { understory_token: "t".repeat(48), guard_trusted_mcp_servers: JSON.stringify(["jira"]) });
-  await upgradedWith(said, UNDERSTORY_ENTRY);
+  // `jira` is a server of the file, as the trust it had is only kept for the servers the move converts (round 5 of PR B).
+  await upgradedWith(said, { ...UNDERSTORY_ENTRY, jira: { command: "j" } });
   assert.equal(understoryIn(said).value("guard_trusted_mcp_servers"), JSON.stringify(["jira"]));
   assert.deepEqual(understoryLeft(said, "settings.json"), { understory_config: null, understory_token: "t".repeat(48), understory_llm_token: null, understory_last_dream: null });
 
@@ -1657,7 +1675,7 @@ test("a database of version 15, or of 14, is backed up and given chats nobody at
   }
 });
 
-test("a portal built before a mode could set a temperature, already at version 16, gets the column when it starts, its modes kept", async () => {
+test("a portal built before a mode could set a temperature, at version 16, is backed up and gets the column, its modes kept", async () => {
   const dir = path.join(home, "temperature-at-16");
   mkdirSync(dir, { recursive: true });
   const d = freshWithoutTemperature(path.join(dir, "portal.db"));
@@ -1665,10 +1683,10 @@ test("a portal built before a mode could set a temperature, already at version 1
   assert.equal(schemaFingerprint(d), V16_WITHOUT_TEMPERATURE, "the schema 16 had before");
   d.prepare("INSERT INTO chat_modes (id, label, instructions) VALUES ('coder', 'Coder', 'Be exact.')").run();
   d.close();
-  // Not an upgrade: the version is the one pinned, so nothing is backed up, and migrate() adds the column at the start.
-  assert.deepEqual(upgradeCheck(path.join(dir, "portal.db")), { needed: false, from: 16 });
+  // An upgrade: version 17 carries the MCP servers to pi's own support, so a database of version 16 is checked and backed up; migrate() adds the column.
+  assert.deepEqual(upgradeCheck(path.join(dir, "portal.db")), { needed: true, from: 16 });
   await upgraded(dir);
-  assert.equal(existsSync(path.join(dir, "backups")), false);
+  assert.equal(backupsIn(path.join(dir, "backups")).length, 1);
   const now = new Database(path.join(dir, "portal.db"), { readonly: true });
   try {
     assert.equal(schemaFingerprint(now), PINNED.fingerprint);
@@ -1680,7 +1698,7 @@ test("a portal built before a mode could set a temperature, already at version 1
   }
 });
 
-test("a portal built before a chat froze its lazy tools, already at version 16, gets the columns when it starts, and what was marked lazy is a mark", async () => {
+test("a portal built before a chat froze its lazy tools, at version 16, is backed up and gets the columns, and what was marked lazy is a mark", async () => {
   const dir = path.join(home, "lazy-head-at-16");
   mkdirSync(dir, { recursive: true });
   const d = freshWithoutLazyHead(path.join(dir, "portal.db"));
@@ -1693,10 +1711,10 @@ test("a portal built before a chat froze its lazy tools, already at version 16, 
   const setting = d.prepare("INSERT INTO settings (key, value) VALUES (?, ?)");
   setting.run("tools_lazy", "pi-web\n<tool>web_fetch");
   d.close();
-  // Not an upgrade: the version is the one pinned, so nothing is backed up, and migrate() adds the columns and the marks at the start.
-  assert.deepEqual(upgradeCheck(path.join(dir, "portal.db")), { needed: false, from: 16 });
+  // An upgrade, as above: migrate() adds the columns and the marks.
+  assert.deepEqual(upgradeCheck(path.join(dir, "portal.db")), { needed: true, from: 16 });
   await upgraded(dir);
-  assert.equal(existsSync(path.join(dir, "backups")), false);
+  assert.equal(backupsIn(path.join(dir, "backups")).length, 1);
   const now = new Database(path.join(dir, "portal.db"), { readonly: true });
   try {
     assert.equal(schemaFingerprint(now), PINNED.fingerprint);
@@ -1708,6 +1726,51 @@ test("a portal built before a chat froze its lazy tools, already at version 16, 
     assert.equal(now.prepare("SELECT value FROM settings WHERE key = 'tools_lazy'").get(), undefined);
   } finally {
     now.close();
+  }
+});
+
+// Version 17 moves the MCP servers from pi-mcp-adapter to pi's own MCP support (mcp-migration-run.ts; its own tests are in
+// mcp-migration.test.mjs). Here only what the upgrade itself does: the check and the backup before, the schema after, and the report.
+test("a database of version 16 is backed up and its MCP servers carried to pi's own support in the same start, with the report kept", async () => {
+  const dir = path.join(home, "mcp-at-16");
+  mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, "portal.db");
+  getDb().exec(`VACUUM INTO '${file}'`);
+  const before = new Database(file);
+  before.pragma("user_version = 16");
+  assert.equal(schemaFingerprint(before), V16_FINGERPRINT, "the schema of version 16");
+  before.prepare("DELETE FROM settings").run();
+  const put = before.prepare("INSERT INTO settings (key, value) VALUES (?, ?)");
+  put.run("tools_off_default", "notes_drop_all\nbash");
+  put.run("tools_seen", JSON.stringify([{ name: "notes_drop_all", source: "pi-mcp-adapter", package: "npm:pi-mcp-adapter@2.18.0" }]));
+  before.close();
+  const agent = process.env.PI_CODING_AGENT_DIR;
+  writeFileSync(path.join(agent, "mcp.json"), JSON.stringify({ mcpServers: { notes: { command: "notes-mcp", directTools: true } } }));
+  writeFileSync(path.join(agent, "mcp-cache.json"), JSON.stringify({ version: 1, servers: { notes: { configHash: "h", tools: [{ name: "drop_all" }], resources: [], cachedAt: 1 } } }));
+  writeFileSync(path.join(agent, "settings.json"), JSON.stringify({ packages: ["npm:pi-mcp-adapter@2.18.0"] }));
+  assert.deepEqual(upgradeCheck(file), { needed: true, from: 16 });
+  try {
+    assert.match(await upgraded(dir), new RegExp(`upgrading the database from version 16 to ${SCHEMA_VERSION}`));
+    const backups = backupsIn(path.join(dir, "backups"));
+    assert.equal(backups.length, 1);
+    assert.match(path.basename(backups[0]), /^portal-v16-\d{8}-\d{6}\.db$/);
+    const copy = new Database(backups[0], { readonly: true });
+    assert.equal(copy.prepare("SELECT value FROM settings WHERE key = 'tools_off_default'").get().value, "notes_drop_all\nbash", "the copy from before has the names as the adapter made them");
+    assert.equal(copy.prepare("SELECT value FROM settings WHERE key = 'mcp_migration'").get(), undefined);
+    copy.close();
+    const now = new Database(file, { readonly: true });
+    assert.deepEqual([now.pragma("user_version", { simple: true }), schemaFingerprint(now)], [SCHEMA_VERSION, PINNED.fingerprint]);
+    const value = (key) => now.prepare("SELECT value FROM settings WHERE key = ?").get(key)?.value;
+    assert.equal(value("tools_off_default"), "bash\ncodemode\nmcp__notes__drop_all", "carried over beside code mode, which an upgrade switches off");
+    assert.equal(JSON.parse(value("mcp_migration")).servers[0].state, "on");
+    assert.equal(value("mcp_migration_notice"), "1");
+    now.close();
+    assert.deepEqual(JSON.parse(readFileSync(path.join(agent, "mcp.json"), "utf8")), { mcpServers: { notes: { command: "notes-mcp", exposure: "direct" } } });
+    assert.equal(existsSync(path.join(agent, "mcp.json.adapter")), true);
+    assert.deepEqual(JSON.parse(readFileSync(path.join(agent, "settings.json"), "utf8")), { packages: [] });
+    assert.equal(JSON.parse(readFileSync(path.join(dir, "mcp-migration.json"), "utf8")).adapter.removed, true, "a record beside the database, which going back to the backup does not take away");
+  } finally {
+    rmMcpOfThen();
   }
 });
 

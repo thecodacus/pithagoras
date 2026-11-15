@@ -197,7 +197,7 @@ export const de: Record<string, string | Plural> = {
   "Its model and how often it tidies up are set in its own environment ({llm}, {dream}):": "Sein Modell und wie oft es aufräumt, werden in seiner eigenen Umgebung festgelegt ({llm}, {dream}):",
   "Use Understory as the agent's memory": "Understory als Gedächtnis des Agenten nutzen",
   "On: MEMORY.md is not read while it is. The file is kept, and read again once this is off.": "An: MEMORY.md wird nicht gelesen, solange das an ist. Die Datei bleibt erhalten und wird wieder gelesen, sobald es aus ist.",
-  "Off: the agent's memory is MEMORY.md. Switching on also installs pi-mcp-adapter where it is not, which makes MCP servers into tools.": "Aus: Das Gedächtnis des Agenten ist MEMORY.md. Einschalten installiert auch pi-mcp-adapter, der MCP-Server zu Tools macht, wo er noch fehlt.",
+  "Off: the agent's memory is MEMORY.md.": "Aus: Das Gedächtnis des Agenten ist MEMORY.md.",
   "Switching on…": "Wird eingeschaltet…",
   "Switching off…": "Wird ausgeschaltet…",
   "Switching…": "Wird umgestellt…",

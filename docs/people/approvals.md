@@ -33,6 +33,11 @@ matched against each picture of a call and one for all of them would match none.
 A tool that names no path (a search, an MCP tool) is approved on its arguments, as
 JSON, exactly; the agent is told that as well.
 
+A tool of an MCP server you set to ask first is a different question: it is put to you on every call, whoever
+made it, with all of the call's arguments, and the answer is for that one call. Where nobody can be asked (a
+routine, a heartbeat, a channel's chat) the call is refused. See
+[Tools that ask first](/guide/mcp#tools-that-ask-first).
+
 Nothing is put to you that an approval could not make run. The guard keeps
 some things from everybody who is not you, whatever is allowed: a write to the
 agent's own instructions, a place where secrets are kept, your private notes (see

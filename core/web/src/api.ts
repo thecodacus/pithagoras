@@ -291,17 +291,15 @@ export interface PortalTool {
   byMode?: true;
   /** One of the portal's own, not an extension's of the same name: the list groups code mode by it. */
   inline?: true;
-  /** An MCP server's tool listed from the adapter's cache: the server starts when one of its tools is first used. */
+  /** An MCP server's tool listed from what the portal remembers of the server, which is not running here: it starts when one of its tools is first used. */
   cached?: true;
-  /** Not in the list the model is given one by one but found through `tool_search`, or an MCP server's through `mcp`: on or off like any other. */
+  /** Not in the list the model is given one by one but found through `tool_search`: on or off like any other. */
   lazy?: true;
   /** What was set on the tool or its set: `lazy` or `direct`. Settings → Tools only. */
   mark?: ToolMark;
   /** Nothing is set on the tool or its set, so the threshold decides. Settings → Tools only. */
   auto?: true;
-  /** An MCP server's tool: the server, whose setting "Register tools directly" says whether the tool is lazy. */
-  mcp?: string;
-  /** Settings → Tools only: one of pi's own tools or the adapter's `mcp`, which cannot be made lazy. */
+  /** Settings → Tools only: one of pi's own tools, which cannot be made lazy. */
   noLazy?: true;
 }
 
@@ -747,7 +745,7 @@ export const api = {
   /** Every tool the portal has seen, for setting a default without opening a chat. */
   toolDefaults: () =>
     json<{
-      tools: { name: string; source: string; defaultOn: boolean; inline?: true; lazy?: true; mark?: ToolMark; auto?: true; mcp?: string; noLazy?: true }[];
+      tools: { name: string; source: string; defaultOn: boolean; inline?: true; lazy?: true; mark?: ToolMark; auto?: true; noLazy?: true }[];
       off: string[];
       names: Record<string, string>;
       /** What is marked, on tool sets and on single tools as `<tool>name`: lazy, or direct. What has no mark is auto: the threshold decides. */
@@ -816,23 +814,32 @@ export const api = {
   /** Every model pi can use now, outside any chat — for the defaults. */
   allModels: () => json<{ models: AvailableModel[]; providers: Record<string, string> }>("/api/models"),
   mcp: () => json<McpConfigView>("/api/mcp"),
-  saveMcpServer: (name: string, entry: McpServerEntry, from?: string) =>
-    json<{ ok: true }>(`/api/mcp/servers/${encodeURIComponent(name)}`, {
-      method: "PUT",
-      body: JSON.stringify({ entry, from }),
+  mcpMigration: () => json<McpMigrationView>("/api/mcp/migration"),
+  /** What the portal says of each server beyond its file: the mark and what it comes to, the remembered tools, what asks first. */
+  mcpStatus: () => json<{ servers: Record<string, McpServerState>; limits: LazyLimits }>("/api/mcp/status"),
+  /** The mark on a server: lazy, direct, or auto (the threshold decides). */
+  setMcpMark: (name: string, mark: ToolMark | "auto") =>
+    json<{ marks: Record<string, ToolMark>; resolved: { lazy: string[]; over: boolean } }>(`/api/mcp/servers/${encodeURIComponent(name)}/mark`, { method: "PUT", body: JSON.stringify({ mark }) }),
+  /** The tools of a server that ask before each call, as patterns of the server's own tool names. */
+  setMcpApprove: (name: string, approve: string[]) =>
+    json<{ approve: string[] }>(`/api/mcp/servers/${encodeURIComponent(name)}/approve`, { method: "PUT", body: JSON.stringify({ approve }) }),
+  /** The servers of a folder's own file, which the report names, into the user's file, switched off. */
+  importMcpFolder: (folder: string, file: string) =>
+    json<{ ok: true; added: string[]; skipped: { name: string; reason: string }[]; commands: Record<string, string[]>; variables?: Record<string, string[]>; targets?: Record<string, string> }>("/api/mcp/import-folder", {
+      method: "POST",
+      body: JSON.stringify({ folder, file }),
     }),
-  /** An MCP server's setting "Register tools directly" on its own; off, the server's tools are lazy. */
-  setMcpDirect: (name: string, direct: boolean) =>
-    json<{ ok: true; direct: boolean }>(`/api/mcp/servers/${encodeURIComponent(name)}/direct`, { method: "PUT", body: JSON.stringify({ direct }) }),
+  dismissMcpMigration: () => json<{ ok: true }>("/api/mcp/migration/notice", { method: "DELETE" }),
+  /** `approve`, the tools that ask first, is only checked here, before the server is written; setMcpApprove keeps it. */
+  saveMcpServer: (name: string, entry: McpServerEntry, from?: string, approve?: string[]) =>
+    json<{ ok: true; commands: string[] }>(`/api/mcp/servers/${encodeURIComponent(name)}`, {
+      method: "PUT",
+      body: JSON.stringify({ entry, from, ...(approve ? { approve } : {}) }),
+    }),
   deleteMcpServer: (name: string) =>
     json<{ ok: true }>(`/api/mcp/servers/${encodeURIComponent(name)}`, { method: "DELETE" }),
-  saveMcpSettings: (settings: Record<string, unknown>) =>
-    json<{ ok: true }>("/api/mcp/settings", {
-      method: "PUT",
-      body: JSON.stringify({ settings }),
-    }),
   importMcp: (text: string) =>
-    json<{ ok: true; added: string[]; skipped: { name: string; reason: string }[] }>(
+    json<{ ok: true; added: string[]; skipped: { name: string; reason: string }[]; commands: Record<string, string[]> }>(
       "/api/mcp/import",
       { method: "POST", body: JSON.stringify({ text }) }
     ),
@@ -1420,7 +1427,7 @@ export interface PiCommand {
   sourceInfo?: { path?: string; scope?: string; origin?: string };
 }
 
-/** One MCP server as pi-mcp-adapter reads it. Unlisted keys are kept verbatim. */
+/** One MCP server as pi's own MCP support reads it (pi's docs/mcp.md). Unlisted keys are kept verbatim. */
 export interface McpServerEntry {
   command?: string;
   args?: string[];
@@ -1428,37 +1435,70 @@ export interface McpServerEntry {
   cwd?: string;
   url?: string;
   headers?: Record<string, string>;
-  socket?: string;
-  auth?: "oauth" | "bearer" | false;
-  bearerToken?: string;
-  bearerTokenEnv?: string;
-  lifecycle?: "lazy" | "eager" | "keep-alive" | "lazy-keep-alive";
-  idleTimeout?: number;
-  requestTimeoutMs?: number;
-  exposeResources?: boolean;
-  directTools?: boolean | string[];
-  includeTools?: string[];
-  excludeTools?: string[];
-  debug?: boolean;
-  disabled?: boolean;
+  type?: "stdio" | "http" | "streamable-http";
+  timeout?: number;
+  enabled?: boolean;
+  description?: string;
+  exposure?: "codemode" | "deferred" | "direct" | "hidden";
+  toolExposure?: Record<string, "codemode" | "deferred" | "direct" | "hidden">;
   [key: string]: unknown;
 }
 
 export interface McpServerView {
   name: string;
   entry: McpServerEntry;
-  transport: "stdio" | "http" | "socket" | "unknown";
+  transport: "stdio" | "http" | "unknown";
   disabled: boolean;
+  /** Why pi would skip this entry, or null. */
+  problem: string | null;
+  /** The places in it whose value pi runs as a command (`env.TOKEN`): a value that starts with `!`. */
+  commands: string[];
+}
+
+/** What the portal says of a configured MCP server beyond what its file says (core/server/src/db.ts, McpServerState). */
+export interface McpServerState {
+  /** The person's mark; none is auto. */
+  mark?: ToolMark;
+  /** Whether a chat that starts now has the server's tools behind `tool_search`, and by what. */
+  lazy: boolean;
+  by: "mark" | "threshold" | "unknown" | "resources" | "size";
+  /** What was kept of the server's tools when it last connected; null where it never has. `stale`: its entry has changed since. `resources`: pi's resource tools reach it. */
+  tools: { count: number; tokens: number; at: number; stale: boolean; resources: boolean } | null;
+  approve: string[];
+  trusted: boolean;
+}
+
+/** What the move from the old MCP adapter to pi's own MCP support did, as the server reports it (core/server/src/mcp-migration.ts). */
+export interface McpMigrationReport {
+  v: 1;
+  /** `pending`: mcp.json could not be read, nothing was changed, and the next start tries again. */
+  status: "done" | "pending";
+  at: string;
+  adapter: { was: "on" | "off" | "absent"; removed: boolean; spec?: string; note?: string };
+  file: { state: "converted" | "none" | "unreadable"; copy?: string; note?: string };
+  servers: { name: string; renamedTo?: string; state: "on" | "off" | "native"; why: string[]; notes: string[] }[];
+  names: { converted: number };
+  expanded: { where: string; wrapper: string; count: number }[];
+  unconverted: { where: string; name: string; why: string }[];
+  untrusted: string[];
+  texts: { where: string; names: string[] }[];
+  projects: { folder: string; adapterSettings: boolean; mcpJson: boolean; foreign: string[] }[];
+  gone: string[];
+  notes: string[];
+}
+
+/** The report, and whether the person has yet to read it. Nothing on a portal that had nothing to move. */
+export interface McpMigrationView {
+  report: McpMigrationReport | null;
+  notice: boolean;
 }
 
 export interface McpConfigView {
   path: string;
   exists: boolean;
-  /** Without the adapter installed, nothing here is read by anything. */
-  adapterInstalled: boolean;
-  adapterSpec: string;
   servers: McpServerView[];
-  settings: Record<string, unknown>;
+  /** Pairs of names that differ only in `-` and `_`: pi takes the first and refuses the second. */
+  clashes: [string, string][];
   raw: string;
   parseError: string | null;
 }

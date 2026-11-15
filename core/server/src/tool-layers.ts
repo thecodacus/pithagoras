@@ -1,5 +1,4 @@
 import { ASK_QUESTION_TOOL } from "./pi/ask-question.js";
-import { mcpServerNames } from "./api/mcp.js";
 import { lazyMarks, shownTools, toolGroupNames } from "./db.js";
 import { defaultsFor, exceptionsFor, heldOffUnshown, toolEnabled, toolSource } from "./tool-policy.js";
 
@@ -14,10 +13,9 @@ export const isToolList = (value: unknown): value is string[] => Array.isArray(v
 /**
  * A tool's lazy mark as a page shows it, where the chats it is shown for work through the code tool alone (`scripted`):
  * there no tool is lazy (see lazyMember in pi/sdk-client.ts), as nothing is offered one by one and a script reaches every
- * tool that is on, but an MCP server's tool is still behind `mcp`.
+ * tool that is on, an MCP server's tools too.
  */
-export const scriptedMark = <T extends { mcp?: string }>(mark: T, scripted?: boolean): T | Record<string, never> =>
-  scripted && mark.mcp === undefined ? {} : mark;
+export const scriptedMark = <T extends object>(mark: T, scripted?: boolean): T | Record<string, never> => (scripted ? {} : mark);
 
 /**
  * A layer's tools as its page shows them: what the portal has seen registered
@@ -29,13 +27,12 @@ export const scriptedMark = <T extends { mcp?: string }>(mark: T, scripted?: boo
  * the code tool alone (see scriptedMark).
  */
 export function layerTools(folder: string | undefined, below: string[], exceptions: { off: string[]; on: string[] }, unwatched = false, scripted = false) {
-  const servers = mcpServerNames();
   const lazy = lazyMarks();
   return {
     // A routine's runs have nobody to ask (see asksQuestions), so its page does not offer the tool.
     tools: shownTools(folder).filter((tool) => !(unwatched && tool.name === ASK_QUESTION_TOOL && tool.inline)).map((tool) => ({
       ...tool,
-      source: toolSource(tool.name, tool.source, servers),
+      source: toolSource(tool),
       enabled: toolEnabled(tool.name, below, exceptions),
       defaultOn: !below.includes(tool.name),
       ...scriptedMark(lazy(tool), scripted),

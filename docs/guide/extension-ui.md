@@ -1914,36 +1914,39 @@ container.
 ### MCP servers
 
 An extension whose tools are an MCP server's (a service of its own that speaks
-MCP, say) writes the server into pi's mcp.json with `portal.mcp.set`.
-pi-mcp-adapter then makes its tools the chats', named `<server>_<tool>`, and
+MCP, say) writes the server into pi's mcp.json with `portal.mcp.set`. pi's own
+MCP support then makes its tools the chats', named `mcp__<server>__<tool>`, and
 they are switched in Settings → MCP and Settings → Tools as any server's are.
 
 ```js
 // Switched on from the extension's own page.
-await portal.mcp.set("notes", { url: "http://127.0.0.1:3900/mcp", lifecycle: "lazy", directTools: true }, { trusted: true });
-portal.mcp.get("notes");   // { entry: { url: …, lifecycle: "lazy", directTools: true }, on: true }
+await portal.mcp.set("notes", { url: "http://127.0.0.1:3900/mcp", exposure: "direct" }, { trusted: true, approve: ["delete_*"] });
+portal.mcp.get("notes");   // { entry: { url: …, exposure: "direct" }, on: true }
 // Switched off.
 await portal.mcp.set("notes", undefined);
 ```
 
 - `get(name)` is the server of that name, `{ entry, on }`, or nothing where
   there is none or the file cannot be read. `on` says the chats have its tools
-  now: it is there, not switched off (`disabled`), and pi-mcp-adapter is
-  installed and on. The file is read again only when it, or pi's settings,
-  changed, so `get` can be asked each time a prompt is built. `entry` is a
-  copy.
-- `set(name, entry)` writes the entry in place of what is there under that
-  name; to keep what the person added to it by hand, read it with `get` first.
-  The file is for the portal's user alone (mode 0600), as an entry may hold a
-  token. Writing an entry installs pi-mcp-adapter, in the version the portal
-  pins, where it is not installed, and switches it on where it is off.
-  `set(name, undefined)` removes the server. Either way the open chats are
-  loaded again, as `chats.reload` does, to have the change, and `set` answers
-  what that does: `{ reloaded, waiting }`, for a page that says how many chats
-  have it now and how many at their next step. Installing the
-  adapter waits for the server halves to follow what is installed, this one's
-  start among them: call `set` when the person switches the server on, not
-  while the half starts.
+  now: it is there and not switched off (`enabled: false`). The file is read
+  again only when it changed, so `get` can be asked each time a prompt is built.
+  `entry` is a copy.
+- `set(name, entry)` writes the entry, in pi's own shape (`url` or `command`,
+  `headers`, `env`, `exposure`, `toolExposure`; `McpEntry` in the extension
+  API's types), in place of what is there under that name; to keep what the
+  person added to it by hand, read it with `get` first. The file is for the
+  portal's user alone (mode 0600), as an entry may hold a token. A token goes in
+  a header as `Bearer ${NAME}` where it is in the environment. `set(name,
+  undefined)` removes the server. Either way the open chats are loaded again, as
+  `chats.reload` does, to have the change, and `set` answers what that does:
+  `{ reloaded, waiting }`, for a page that says how many chats have it now and
+  how many at their next step.
+- `exposure` is how pi (the command line, a container) reaches the server's tools.
+  In a chat of the portal it is the person's mark of the server (Settings →
+  Tools: auto, lazy, direct) that decides, and an entry written with `exposure:
+  "direct"` or `"deferred"` starts that mark as direct or lazy where the person
+  has set none. A small server whose tools the agent uses at once (a memory) is
+  `direct`; without one it counts for the threshold like any group.
 - `trusted: true` says the person counts what its tools return as their own
   words, which the guard then neither wraps nor checks (see
   [Prompt injection](/guide/security#marking-untrusted-output)). The name is
@@ -1952,10 +1955,25 @@ await portal.mcp.set("notes", undefined);
   person's word on its page. `set(name, undefined)` takes the name out of the
   trusted servers again: Settings → Guard lists only the servers there are, and
   a server given that name later has to be trusted anew.
+- `approve` is a list of patterns of the server's own tool names (`delete_*`;
+  `*` is any characters) whose calls are confirmed each time, by whoever is
+  speaking: the person is asked in the chat, and where nobody can be asked (a
+  routine, a heartbeat, a channel's chat) the call is refused. It is kept with
+  the server's name and dropped with the server.
 - It rejects while mcp.json cannot be read, which is the person's to fix in
   Settings → MCP (nothing is written over it), for a name that is not letters,
-  digits, dots, dashes and underscores, and for an entry the adapter would not
-  take: one with none, or more than one, of `url`, `command` and `socket`.
+  digits, dashes and underscores, and for an entry pi would not take: one with
+  neither `url` nor `command`, a `type` of `sse`, a `socket`, and the other
+  mistakes pi reports. A value of `env` or `headers` that starts with `!` is run
+  as a command (also for an HTTP server), as a `command` is.
+- For this release the keys of the old MCP adapter (`directTools`, `lifecycle`,
+  `includeTools`, `excludeTools`, `approveTools`, `auth: "bearer"` with
+  `bearerToken` or `bearerTokenEnv`, `disabled`) are still read: translated into
+  pi's own keys, with a line in the log. The patterns are carried to the
+  server's own tool names as the adapter matched them: its prefixes
+  (`<server>_`) taken off, and `-` and `_` alike, so a pattern can come out as
+  several. The tools a `directTools` list names get the mark `direct` where the
+  person has none. An extension that still writes them should move to pi's.
 
 Understory (`extensions/understory`) writes its server so, trusted, when it is
 switched on from its page in Settings.

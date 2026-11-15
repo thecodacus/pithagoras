@@ -15,7 +15,6 @@ import { effectiveOff, exceptionsFor, heldOffUnshown, toolEnabled, toolSetOf, to
 import { scriptedMark } from "./tool-layers.js";
 import { headLazy, parseHead, ruleTag, type LazyHead } from "./tool-lazy.js";
 import { buildLazyHead } from "./lazy-head.js";
-import { unlisted } from "./mcp-offer.js";
 import { projectOf } from "./workspaces.js";
 import { findServerBuiltin, picturesRefused, runBuiltin } from "./pi/builtins.js";
 import { dropMessage, SessionEditError, userTexts, type Scope } from "./pi/session-edit.js";
@@ -88,7 +87,6 @@ import {
   shownTools,
   mcpCatalogueFor,
   mcpView,
-  withdrawnMcpTools,
   type McpView,
   browserAllowlist,
   routineExemptions,
@@ -2782,16 +2780,10 @@ class SessionManager extends EventEmitter {
     );
   }
 
-  /**
-   * What pi is told to have off: the switches (offFor), and the MCP servers'
-   * tools that the adapter's configuration no longer registers. Those are not
-   * the switches' — they are listed nowhere, and nothing is written down for
-   * them — but a chat that loaded one before the configuration changed still
-   * has it, and the configuration is what has the last word over it.
-   */
-  piOff(sessionId: string, reported: Pick<PiTool, "name" | "inline">[] = [], view: McpView = mcpView(), homes?: AgentHome[]): string[] {
+  /** What pi is told to have off: the switches (offFor), for the tools the chat reported and the ones the portal remembers. */
+  piOff(sessionId: string, reported: Pick<PiTool, "name">[] = [], view: McpView = mcpView(), homes?: AgentHome[]): string[] {
     const names = reported.map((t) => t.name);
-    return [...new Set([...this.offFor(sessionId, names, view.known().keys(), homes), ...withdrawnMcpTools(reported, view)])].sort();
+    return [...new Set(this.offFor(sessionId, names, view.known().keys(), homes))].sort();
   }
 
   /**
@@ -2879,21 +2871,15 @@ class SessionManager extends EventEmitter {
   }
 
   /**
-   * What a running chat reported, less the MCP servers' tools the adapter's
-   * configuration says no to — still loaded from before it changed, and off
-   * (piOff) — with those it lists from its cache marked. And the servers' tools
-   * the chat has not registered one by one, which it reaches through `mcp`: a
-   * server is a group like any other, switched whole or tool by tool.
+   * What a running chat reported, with the tools of the MCP servers it has not registered (a lazy one that was not used, one
+   * that has not connected yet), from what the portal remembers of them, marked: a server is a group like any other, switched
+   * whole or tool by tool. Not the tools of a server the file has switched off or taken out.
    */
-  private offered(reported: PiTool[], workspace: string | null | undefined, view: McpView): Omit<PiTool, "enabled">[] {
+  private offered(reported: PiTool[], view: McpView): Omit<PiTool, "enabled">[] {
     if (!reported.length) return [];
-    const listed = reported.flatMap(({ enabled: _enabled, ...tool }) => {
-      const offer = view.offers(tool);
-      if (unlisted(offer)) return [];
-      return [offer === "cached" ? { ...tool, cached: true as const } : tool];
-    });
+    const listed = reported.flatMap(({ enabled: _enabled, ...tool }) => (tool.server !== undefined && (view.off.has(tool.server) || view.gone.includes(tool.server)) ? [] : [tool]));
     const have = new Set(listed.map((t) => t.name));
-    return [...listed, ...mcpCatalogueFor(workspace ?? undefined, view).filter((t) => !have.has(t.name))];
+    return [...listed, ...mcpCatalogueFor(view).filter((t) => !have.has(t.name))];
   }
 
   /**
@@ -2915,45 +2901,44 @@ class SessionManager extends EventEmitter {
     const session = getSession(sessionId);
     const workspace = session?.workspace;
     const view = mcpView();
-    const listed = this.offered(reported, workspace, view);
+    const listed = this.offered(reported, view);
     // What the chat's agent, project and routine start it with, which is what it is "default" against.
     const defaults = toolDefaultsForSession(session);
     const exceptions = sessionTools(sessionId);
-    const lazy = lazyMarks(view);
-    const servers = view.servers;
-    // Where the chat works through the code tool and has it on, no tool is lazy (see lazyOf in pi/sdk-client.ts), but an
-    // MCP server's is still behind `mcp`. Read from the running pi where there is one: its presentation was fixed as it started.
+    const lazy = lazyMarks();
+    // Where the chat works through the code tool and has it on, no tool is lazy (see lazyMember in pi/sdk-client.ts).
+    // Read from the running pi where there is one: its presentation was fixed as it started.
     const scripted = (client ? client.codemodeOnly : modeOf(session?.mode)?.codemode) && toolEnabled(CODEMODE_TOOL, defaults, exceptions);
     // Its switch cannot turn it off here (setTools): the page shows it on and says why.
     const held = modeHoldsCodemode(session?.mode);
     // An idle chat is shown what the portal has seen registered; the tool is not there for every kind of chat (see asksQuestions).
     const asks = session ? canAsk(session) : true;
-    const shown: { name: string; source: string; package?: string | null; description?: string; inline?: true; cached?: true }[] = listed.length
+    const shown: { name: string; source: string; server?: string; package?: string | null; description?: string; inline?: true; cached?: true }[] = listed.length
       ? listed
       : shownTools(workspace, view).filter((tool) => asks || !(tool.name === ASK_QUESTION_TOOL && tool.inline));
     // What the chat froze about its lazy tools is what is lazy in it, not what the marks say now: a running chat's own pi says
     // which, a chat that has started and is idle its stored head.
     const frozen = parseHead(session?.lazy_head);
-    const lazyHere = (name: string, source: string, pkg: string | null | undefined, inline?: true): boolean =>
+    const lazyHere = (name: string, source: string, server: string | undefined, pkg: string | null | undefined, inline?: true): boolean =>
       client?.offers
         ? client.offers(name) === "lazy"
-        : frozen !== undefined && lazyAllowed({ name, source, package: pkg, inline: inline === true }, servers) && headLazy(frozen, { name, set: toolSetOf({ name, source }, servers) });
+        : frozen !== undefined && lazyAllowed({ name, source, server, package: pkg, inline: inline === true }) && headLazy(frozen, { name, set: toolSetOf({ source, server }) });
     return {
-      tools: shown.map(({ name, source, package: pkg, description, inline, cached }) => {
-        const mark = lazy({ name, source, package: pkg });
+      tools: shown.map(({ name, source, server, package: pkg, description, inline, cached }) => {
+        const mark = lazy({ name, source, server, package: pkg });
         return {
           name,
           ...(description !== undefined ? { description } : {}),
-          source: toolSource(name, source, servers),
+          source: toolSource({ source, server }),
           // The portal's own tools are told from an extension's of the same name, so the page can group its code mode apart.
           ...(inline ? { inline: true as const } : {}),
           ...(cached ? { cached: true as const } : {}),
           enabled: toolEnabled(name, defaults, exceptions),
           ...(held && name === CODEMODE_TOOL ? { byMode: true as const } : {}),
           defaultOn: !defaults.includes(name),
-          // Not offered one by one but found through `tool_search`, or an MCP server's through `mcp`: the page says so beside the switch.
+          // Not offered one by one but found through `tool_search`: the page says so beside the switch.
           // In a chat that is running it is what the chat froze that says so, which the marks may have left behind.
-          ...scriptedMark(mark.mcp === undefined && (client?.offers || frozen) ? { ...mark, lazy: lazyHere(name, source, pkg, inline) ? (true as const) : undefined } : mark, scripted),
+          ...scriptedMark(client?.offers || frozen ? { ...mark, lazy: lazyHere(name, source, server, pkg, inline) ? (true as const) : undefined } : mark, scripted),
         };
       }),
       live: Boolean(listed.length),
@@ -2980,8 +2965,8 @@ class SessionManager extends EventEmitter {
     if (wantedOff.includes(CODEMODE_TOOL) && holds) throw new CodemodeHeld();
     const workspace = session?.workspace;
     const view = mcpView();
-    // Not what the adapter no longer registers: the page did not show it, so it said nothing about it.
-    const listed = this.offered(reported, workspace, view);
+    // Not a server's tools that the file has switched off: the page did not show them, so it said nothing about them.
+    const listed = this.offered(reported, view);
     // What this call is answering about: the tools this session registered,
     // plus the ones it already holds an exception for. Not the portal-wide
     // catalogue — a tool that is merely not loaded in this run was not on the

@@ -91,12 +91,13 @@ test("what a script printed: its report is its last line that is JSON; a summary
 
 test("its MCP entry puts its tools in front of the agent: its own token written in, one from the environment named", () => {
   assert.equal(understoryDefaultUrl(), "http://localhost:3800/mcp");
-  assert.deepEqual(understoryEntry("http://understory:3800/mcp"), { url: "http://understory:3800/mcp", lifecycle: "lazy", directTools: true });
-  assert.deepEqual(understoryEntry("http://u/mcp", { tokenEnv: "MEMORY_UNDERSTORY_AUTH_TOKEN" }), { url: "http://u/mcp", lifecycle: "lazy", directTools: true, auth: "bearer", bearerTokenEnv: "MEMORY_UNDERSTORY_AUTH_TOKEN" });
-  assert.deepEqual(understoryEntry("http://127.0.0.1:3800/mcp", { token: "t0k" }), { url: "http://127.0.0.1:3800/mcp", lifecycle: "lazy", directTools: true, auth: "bearer", bearerToken: "t0k" });
-  assert.equal(understoryTokenOf({ bearerToken: "t0k" }), "t0k");
+  assert.deepEqual(understoryEntry("http://understory:3800/mcp"), { url: "http://understory:3800/mcp", exposure: "direct" });
+  assert.deepEqual(understoryEntry("http://u/mcp", { tokenEnv: "MEMORY_UNDERSTORY_AUTH_TOKEN" }), { url: "http://u/mcp", exposure: "direct", headers: { Authorization: "Bearer ${MEMORY_UNDERSTORY_AUTH_TOKEN}" } });
+  assert.deepEqual(understoryEntry("http://127.0.0.1:3800/mcp", { token: "t0k" }), { url: "http://127.0.0.1:3800/mcp", exposure: "direct", headers: { Authorization: "Bearer t0k" } });
+  assert.equal(understoryTokenOf({ headers: { Authorization: "Bearer t0k" } }), "t0k");
+  assert.equal(understoryTokenOf({ headers: { authorization: "Bearer low" } }), "low", "a header's name in any case");
   process.env.SOME_TOKEN = "from-env";
-  assert.equal(understoryTokenOf({ bearerTokenEnv: "SOME_TOKEN" }), "from-env");
+  assert.equal(understoryTokenOf({ headers: { Authorization: "Bearer ${SOME_TOKEN}" } }), "from-env");
   assert.equal(understoryTokenOf({ url: "x" }), undefined);
-  assert.match(UNDERSTORY_RULE, /understory_memory_query/);
+  assert.match(UNDERSTORY_RULE, /mcp__understory__memory_query/);
 });

@@ -5,11 +5,10 @@ import { DATA_DIR as DATA_SETTING } from "../data-dir.js";
 
 /**
  * While the sandbox is on, the folder a chat works in is the agent's to write,
- * and pi and the MCP adapter run inside the portal, as root. So what either
+ * and pi and its MCP servers run inside the portal, as root. So what either
  * would take from that folder and run is not taken from it: pi's project
  * extensions, packages and settings (pi's own "untrusted project"), and the MCP
- * servers named in the folder's `.mcp.json` or `.pi/mcp.json`, or imported by
- * them. The folder's skills are text the model reads, and are kept.
+ * servers named in the folder's `.pi/mcp.json` (pi reads it only in a trusted project). The folder's skills are text the model reads, and are kept.
  */
 
 /** pi's settings for a chat in `cwd`, with the folder untrusted: its settings, extensions and packages left out. */
@@ -43,21 +42,35 @@ export function projectSkillPaths(cwd: string): string[] {
   return found.filter((dir) => dir !== own && existsSync(dir));
 }
 
-/** Where the MCP adapter is told it works: a folder of the portal's with nothing in it. */
+/** Where pi's MCP support is told it works: a folder of the portal's with nothing in it. */
 const MCP_FOLDER = path.join(path.resolve(DATA_SETTING), "sandbox", "mcp");
 
-const isMcpAdapter = (extension: { resolvedPath?: string }) => /[\\/]pi-mcp-adapter[\\/]/.test(extension.resolvedPath ?? "");
+const isAdapter = (extension: { resolvedPath?: string; path?: string }) => /[\\/]pi-mcp-adapter[\\/]/.test(extension.resolvedPath ?? extension.path ?? "");
 
 /**
- * pi's extensions as loaded, with the MCP adapter's handlers given a context
- * whose folder is MCP_FOLDER instead of the chat's. The adapter reads a
- * project's config, and starts its servers, from the folder its context names,
- * so it finds the user's own config and no project's. The servers it starts
- * work in that folder too.
+ * pi's extensions as loaded, without the old MCP adapter (`pi-mcp-adapter`), whoever lists it: pi's settings, as a package
+ * of the person's that is still installed, or a project's own, which a project may bring ("packages a project brings in are
+ * that project's to decide"). The portal's chats have their MCP servers from pi's own support, and a second client in a chat
+ * would connect the same servers again, or, if it registers `/mcp`, take the first one's place (pi replaces the built-in
+ * support by an extension that does). It is left out here, so that it is out of every chat.
+ */
+export function withoutAdapter<T extends { extensions: any[] }>(result: T): T {
+  const extensions = result.extensions.filter((extension) => !isAdapter(extension));
+  return extensions.length === result.extensions.length ? result : { ...result, extensions };
+}
+
+/** The portal's inline extension that gives pi its MCP support (see McpRuntime.factories): inline extensions have a path of `<inline:name>`. */
+const isMcpSupport = (extension: { path?: string; resolvedPath?: string }) => (extension.resolvedPath ?? extension.path) === "<inline:mcp>";
+
+/**
+ * pi's extensions as loaded, with the MCP support's handlers given a context whose folder is MCP_FOLDER instead of the
+ * chat's. pi reads a project's config, and starts a stdio server, from the folder its context names, so it finds the
+ * user's own config and no project's, and the servers it starts work in a folder with nothing in it: a server's command is
+ * started as the portal's user, and `npx` or a `package.json` script in a folder the agent writes would be the agent's.
  */
 export function withoutFolderMcp<T extends { extensions: any[] }>(result: T): T {
   mkdirSync(MCP_FOLDER, { recursive: true, mode: 0o755 });
-  for (const extension of result.extensions.filter(isMcpAdapter)) {
+  for (const extension of result.extensions.filter(isMcpSupport)) {
     for (const [event, handlers] of extension.handlers as Map<string, ((event: unknown, ctx: any) => unknown)[]>) {
       extension.handlers.set(event, handlers.map((handler) => (event: unknown, ctx: any) => handler(event, elsewhere(ctx))));
     }

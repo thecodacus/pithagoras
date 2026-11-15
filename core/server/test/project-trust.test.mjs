@@ -8,20 +8,20 @@ import { inProcessHome } from "./server-harness.mjs";
 
 /**
  * While the sandbox is on, the folder a chat works in is the agent's to write,
- * and pi and the MCP adapter run inside the portal, as root: what they would run
+ * and pi and its MCP servers run inside the portal, as root: what they would run
  * from the folder is not taken from it, and its skills are. The MCP part needs
  * no root and runs anywhere; a chat's pi, as the portal runs it, needs the
  * sandbox, and runs as root on Linux.
  */
 inProcessHome("pithagoras-project-trust-");
 
-const { withoutFolderMcp } = await import("../dist/sandbox/project-trust.js");
+const { withoutAdapter, withoutFolderMcp } = await import("../dist/sandbox/project-trust.js");
 
-test("the MCP adapter's handlers and commands are given a folder of the portal's, and nothing else's are", async () => {
+test("pi's MCP support is given a folder of the portal's for its handlers and commands, and nothing else's are", async () => {
   const seen = {};
   const ctx = { cwd: "/workspaces/project", answer() { return this.cwd; } };
-  const adapter = {
-    resolvedPath: "/data/home/.pi/agent/npm/node_modules/pi-mcp-adapter/index.ts",
+  const mcp = {
+    path: "<inline:mcp>",
     handlers: new Map([["session_start", [(_event, c) => { seen.start = c.cwd; seen.bound = c.answer(); }]]]),
     commands: new Map([["mcp", { name: "mcp", handler: (_args, c) => { seen.command = c.cwd; } }]]),
   };
@@ -30,13 +30,24 @@ test("the MCP adapter's handlers and commands are given a folder of the portal's
     handlers: new Map([["session_start", [(_event, c) => { seen.other = c.cwd; }]]]),
     commands: new Map(),
   };
-  const result = withoutFolderMcp({ extensions: [adapter, other], errors: [] });
+  const result = withoutFolderMcp({ extensions: [mcp, other], errors: [] });
   for (const extension of result.extensions) for (const handler of extension.handlers.get("session_start")) await handler({}, ctx);
-  await adapter.commands.get("mcp").handler("", ctx);
+  await mcp.commands.get("mcp").handler("", ctx);
   assert.match(seen.start, /[\\/]sandbox[\\/]mcp$/);
   assert.equal(seen.command, seen.start);
   assert.equal(seen.bound, "/workspaces/project", "the context's own methods still work on it");
   assert.equal(seen.other, "/workspaces/project");
+});
+
+test("the old MCP adapter is left out of every chat, whoever lists it, and no other extension is", () => {
+  const adapter = { resolvedPath: "/data/home/.pi/agent/npm/node_modules/pi-mcp-adapter/index.ts" };
+  const projects = { path: "/work/site/.pi/npm/node_modules/pi-mcp-adapter/dist/index.js" };
+  const near = { resolvedPath: "/data/home/.pi/agent/npm/node_modules/pi-mcp-adapter-ui/index.ts" };
+  const notes = { resolvedPath: "/data/home/.pi/agent/extensions/notes/index.ts" };
+  const given = { extensions: [adapter, notes, projects, near], errors: [] };
+  const kept = withoutAdapter(given);
+  assert.deepEqual(kept.extensions, [notes, near]);
+  assert.equal(withoutAdapter({ extensions: [notes] }).extensions.length, 1);
 });
 
 const linuxRoot = process.platform === "linux" && process.getuid?.() === 0;

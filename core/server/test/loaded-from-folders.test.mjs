@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { scratch } from "./server-harness.mjs";
-import { IN_PLACE, IN_PROJECTS, LOADED_IN_FOLDERS, allowed, conversation, folder, folders, guardAs, loadedAt, loadedPlaces, nova, refused, root, writtenIn } from "./loaded-from-folders-harness.mjs";
+import { IN_PLACE, IN_PROJECTS, LOADED_IN_FOLDERS, allowed, conversation, folder, folders, guardAs, loadedAt, loadedPlaces, nova, outcome, refused, root, writtenIn } from "./loaded-from-folders-harness.mjs";
 
 // What pi, the MCP adapter, the heartbeat and the portal load out of a folder is said once, in
 // pi/loaded-from-folders.ts (see loaded-from-folders-harness.mjs for how the tests walk it). The walk of the links is
@@ -200,33 +200,16 @@ test("pi reads the instructions from every folder above the workspace root, so a
   }
 });
 
-test("the portal's own folder is read by the MCP adapter, and a link there is followed", () => {
-  const names = [".mcp.json", ".vscode/mcp.json"];
-  for (const name of names) assert.ok(loadedPlaces().some((place) => place.path === path.join(process.cwd(), ...name.split("/")) && place.by === "mcp"), `${name} in the folder the portal runs in is a place`);
-  const was = process.cwd();
-  const where = scratch("loaded-cwd-");
-  process.chdir(where);
-  try {
-    const behind = path.join(folder, "behind-cwd", "tools.json");
-    symlinkSync(behind, path.join(where, ".mcp.json"));
-    for (const role of ["colleague", "guest"]) {
-      assert.equal(refused(guardAs(role, conversation), "write", path.join(os.tmpdir(), path.basename(where), ".mcp.json")), true, `${role}: the file`);
-      assert.equal(refused(guardAs(role, conversation), "write", behind), true, `${role}: what a link there leads to`);
-      assert.equal(allowed(guardAs(role, conversation), "write", path.join(path.dirname(behind), "other.md")), true, `${role}: beside it`);
-    }
-  } finally {
-    process.chdir(was);
-  }
-});
-
 test("the folders and files the portal hands pi or loads itself are held where they are, by whatever path they are reached", () => {
   const places = loadedPlaces();
-  assert.ok(places.length >= 8, "pi's agent folder, what ships with the portal, the channel packages, the MCP adapter's configs in the home");
+  assert.ok(places.length >= 5, "pi's agent folder and its MCP file, what ships with the portal, the channel packages");
   for (const role of ["colleague", "guest"]) {
     const as = guardAs(role, conversation);
     for (const place of places) {
       assert.equal(refused(as, "write", path.join(place.path, "x.ts")), true, `${role}: below ${place.path}`);
-      assert.equal(refused(as, "write", place.path), true, `${role}: ${place.path}`);
+      // pi's mcp.json is a place where secrets are kept first (its bearer tokens), and is held as that.
+      if (place.as === "tools") assert.match(outcome(as, "write", place.path), /^blocked: Refused: it reads a place where secrets are kept/, `${role}: ${place.path}`);
+      else assert.equal(refused(as, "write", place.path), true, `${role}: ${place.path}`);
     }
   }
   const named = (as) => places.filter((place) => place.as === as).length;
@@ -258,8 +241,10 @@ test("a place the environment points at through a link is held by the path it re
 });
 
 test("loadedAt answers by the name and for the folder it would be read from", () => {
-  assert.equal(loadedAt("/w/site/.mcp.json")?.by, "mcp");
-  assert.equal(loadedAt("/w/site/.VSCODE/MCP.json")?.by, "mcp");
+  assert.equal(loadedAt("/w/site/.pi/mcp.json")?.by, "pi", "the tool servers a project starts, which are processes of the portal, are in pi's own folder");
+  assert.equal(loadedAt("/w/site/.PI/MCP.json")?.by, "pi");
+  assert.equal(loadedAt("/w/site/.mcp.json"), undefined, "pi's own MCP support reads no config of another tool's");
+  assert.equal(loadedAt("/w/site/.vscode/mcp.json"), undefined);
   assert.equal(loadedAt("/w/site/AGENTS.md")?.by, "pi");
   assert.equal(loadedAt("/w/site/.pi/x/y")?.by, "pi");
   assert.equal(loadedAt("/w/site/notes.md"), undefined);
@@ -303,24 +288,14 @@ test("what pi's resource loader reads by name is on the list, and what is on the
   assert.match(piSource("core/package-manager.js"), /join\(dir, "\.agents", "skills"\)/, "pi still reads skills from .agents, which is on the list as a folder");
 });
 
-test("the adapter's names on the list are the ones of the version the portal installs", async () => {
-  // The adapter is not a dependency of the portal, so its source is not here to read: what ties the list to it is
-  // the version it was compared with, which the portal pins. When the pin moves, whoever moves it compares the adapter's
-  // config.ts with the list first, and then says so here.
-  const { ADAPTER_SPEC } = await import("../dist/api/mcp.js");
-  const COMPARED = "npm:pi-mcp-adapter@2.18.0";
-  assert.equal(ADAPTER_SPEC, COMPARED, "the adapter the portal installs changed: compare its IMPORT_PATHS and PROJECT_CONFIG_NAME (config.ts) with LOADED_IN_FOLDERS and loadedPlaces in loaded-from-folders.ts, add what is new, then set the version compared here");
-  // What 2.18.0 reads, as its config.ts has it: the names in a folder, and the files in the home folder.
-  for (const name of [".mcp.json", ".vscode/mcp.json", "opencode.json", ".pi/mcp.json", ".agents/mcp.json"]) assert.ok(loadedAt(path.join("/w/site", name)), `${name} is on the list`);
-  const home = os.homedir();
-  for (const file of [".config/mcp/mcp.json", ".cursor/mcp.json", ".claude/mcp.json", ".claude.json", ".claude/claude_desktop_config.json", "Library/Application Support/Claude/claude_desktop_config.json", ".codex/config.toml", ".codex/config.json", ".config/opencode/opencode.json", ".windsurf/mcp.json", ".agents/mcp.json"]) {
-    assert.ok(loadedPlaces().some((place) => place.path === path.join(home, file)) || loadedAt(path.join(home, file)), `~/${file} is held`);
-  }
-});
-
-test("the page on roles names everything on the list", () => {
-  const docs = (file) => readFileSync(fileURLToPath(new URL(`../../../docs/${file}`, import.meta.url)), "utf8").replace(/\s+/g, " ");
-  const roles = docs("people/roles.md");
-  for (const entry of LOADED_IN_FOLDERS) assert.ok(roles.includes(`\`${entry.name}\``), `docs/people/roles.md names ${entry.name}`);
-  for (const word of ["pi's own agent folder", "the folders that come with the portal", "channel packages", "tool servers"]) assert.ok(roles.includes(word), `docs/people/roles.md says ${word}`);
+test("the MCP files on the list are the ones pi's MCP support reads: the agent folder's and a trusted project's, and no other tool's", async () => {
+  // What pi reads is in its extension's config.ts, which is shipped with it and read here: when pi reads another file, this fails
+  // until the list says so, as it does for the names its resource loader reads.
+  const config = piSource("extensions/mcp/config.js");
+  const files = [...config.matchAll(/join\(([^)]*)"mcp\.json"\)/g)].map((m) => m[1].replace(/\s+/g, " ").trim());
+  assert.deepEqual(files, ["options.agentDir,", "options.cwd, CONFIG_DIR_NAME,"], "pi's MCP support reads the agent folder's mcp.json and a project's .pi/mcp.json");
+  assert.ok(loadedAt(path.join("/w/site", ".pi", "mcp.json")), ".pi/mcp.json is on the list");
+  assert.ok(loadedPlaces().some((place) => place.path === path.join(process.env.PI_CODING_AGENT_DIR, "mcp.json") && place.as === "tools"), "and so is the agent folder's");
+  // Nothing else of another tool's: the adapter's imports are not read.
+  assert.equal(/\.cursor|\.vscode|opencode|claude_desktop/.test(config), false);
 });

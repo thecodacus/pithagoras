@@ -201,10 +201,139 @@ when it first starts again. Old chats keep their calls of `tools` in their histo
 the tools they called.
 
 A tool is no longer counted as an MCP server's by a name that starts with `mcp_`: the guard asks pi which server a
-tool came from, and a name proves nothing, as any extension can register one. What the pi-mcp-adapter's tools hand
-back is still wrapped, by their package. A pi package of yours that hands back another server's or somebody else's
+tool came from, and a name proves nothing, as any extension can register one. Servers that pi's own MCP support runs
+are told by the namespace pi gave their tools (see [MCP servers](#mcp-servers-run-on-pi-s-own-mcp-support) below). A pi package of yours that hands back another server's or somebody else's
 words under such a name (another MCP bridge, say) is now trusted as the extension it is, so its tools have to say so:
 `guard: { outside: true }` on their definition ([What the guard holds a tool to](/guide/extension-ui#what-the-guard-holds-a-tool-to)).
+
+## MCP servers run on pi's own MCP support
+
+The portal no longer needs `pi-mcp-adapter`: pi has MCP support of its own, and the portal's chats use it. It
+reads the same file, `mcp.json` in pi's agent folder, in pi's own shape (`exposure`, `toolExposure`, `enabled`,
+`headers`, `env`; the adapter's `lifecycle`, `directTools`, `includeTools`, `excludeTools`, `approveTools` and
+bearer keys are not pi's). A server's tools are named `mcp__<server>__<tool>` and not `<server>_<tool>`. The adapter
+is left out of every chat, whoever lists it, so the two never both connect a server.
+
+An MCP server is a group of tools like any other: it has the three marks and counts for the threshold, by the size
+of its tools as the portal remembers them from when it last ran. A lazy server is not started with a chat, only
+when the model first searches for or calls one of its tools, and is stopped again after ten minutes without use.
+What changes for a server you had without the adapter's "Register tools directly": it is lazy as before, found
+through `tool_search` and no longer through `mcp`. See [MCP servers](/guide/mcp).
+
+### What the first start does
+
+The same start that upgrades the database (to schema 17: checked and backed up first, see
+[What happens on the first start](#what-happens-on-the-first-start)) carries everything over, so that nothing that
+was off becomes on. Nothing is asked: a server whose conversion is not certain is **switched off**, and named in the
+report.
+
+1. **The file.** `mcp.json` is written again in pi's keys, as plain JSON. The file as it was, comments and all, is
+   kept beside it as `mcp.json.adapter`, readable by the account the portal runs as and no other. While the move
+   runs, the file it converts is also kept as `mcp.json.migrating`, so that a start that stops halfway does it again
+   from that file; it is removed once the move is done.
+2. **pi's package list.** The adapter's entry goes. Its files stay on disk. A project that lists the adapter in its
+   own `.pi/settings.json` is not edited; the adapter is left out of its chats all the same.
+3. **Every place that names a tool.** The tools switched off or on in the default, an agent, a project, a routine, a
+   mode and every chat, what a mode or an agent keeps in the model's list, the marks, the names given to groups, the
+   frozen lists of chats, the tools the portal has seen, and standing permissions are written again by pi's names. A
+   server's tools are told by what the adapter's `mcp-cache.json` lists of it.
+4. **The report.** It is kept in the database, in `mcp-migration.json` in the data folder (which going back to the
+   backup does not remove), and in the log, and shown in a line at the top of the page and under Settings → MCP.
+
+What became of each thing the adapter's file said:
+
+| In the adapter's file | Now |
+| --- | --- |
+| `command`, `args`, `env`, `cwd`, `url`, `headers`, `description` | The same keys. `$env:NAME` and `{env:NAME}` become `${NAME}`. |
+| `disabled: true` | `enabled: false`. |
+| `directTools` left out, or `false` | The server is **lazy**, as the adapter's default was (`exposure: "deferred"`). |
+| `directTools: true`, or the adapter-wide setting | **Direct** (`exposure: "direct"`). |
+| `directTools: [a, b]` | Those tools `direct` in `toolExposure`, and each **marked direct** in the portal, so they stay in the model's list; the rest lazy. A tool the include or exclude lists hold back is left out. |
+| `includeTools`, `excludeTools` | Worked out as the adapter did against the tools it had cached, and written as the exact names that stay, with `"*": "hidden"` for everything else, so a tool the server adds later is hidden until you allow it. A server it has no cached tools of is **off**. |
+| `toolPrefix`, for one server or all | Used to find the old names of its tools, then dropped. |
+| `approveTools`, for one server or all | Tools that ask before each call, kept by the portal as an extension's `approve` is. The patterns are written as pi's `*` can say them, and where they cannot say what the adapter's did, wider: more questions, never fewer. |
+| `auth: "bearer"` with `bearerToken` or `bearerTokenEnv` | An `Authorization: Bearer …` header (`${NAME}` for the variable). A server that also has an `Authorization` header is **off**. |
+| `auth: "oauth"`, `auth: false`, `oauth: false` | Dropped: pi signs in by itself. A server that signed in through the adapter signs in again, with `pi mcp login <name>` in a terminal. |
+| `oauth` with `clientId`, `clientSecret`, `scope`, `clientName` | Carried over. `redirectUri` on this machine becomes `callbackUrl`. Any other key (`grantType`, `authorizationParams`, `clientUri`) puts the server **off**. |
+| A value in `env` or `headers` that starts with `!` | pi runs it as a command, which the adapter's file did not say. The server is **off** until you have looked at it and switched it on. |
+| `socket` (rmcp-mux) | pi cannot do it. The entry stays, **off**. |
+| `type: "sse"`, or an entry pi would skip | **Off**, with pi's own reason. |
+| `exposeResources: false`, or an include or exclude list that held back a resource | pi's resource tools reach every resource of an enabled server. The server is **off**. |
+| `requestTimeoutMs` | `timeout`, in seconds. |
+| `lifecycle`, `idleTimeout`, `debug`, `trace`, and the adapter's own settings (`scriptMode`, `hostConfigDiscovery`, …) | Dropped, and said in the report where the entry used them. A server starts when a tool of it is first used and stops after ten minutes without use. |
+| `imports` | Dropped: the servers of other tools' configs it read are not read any more; paste them into Settings → MCP. |
+
+A server whose name has a dot (`docs.v2`) is **renamed** (`docs_v2`): pi's server names have letters, digits, `_`
+and `-`. Two names that differ only in `-` and `_` are one server to pi; the second is renamed (`a_b_2`) and off. What
+is stored under a server's name follows the rename: its marks, its group's name, the servers you trust in Settings →
+Guard (a server that was renamed because of a clash, or whose name is no server of the file, is no longer trusted, and is listed), and the tools switched on or
+off.
+
+**A switch that cannot be carried over switches its server off.** A stored name that starts like a server's tools and
+that the cache does not list, a name two tools share, a switch on one of a server's resources, and a tool of another
+package that has the name of an MCP tool, are listed in the report, kept as they were, and the server they might belong
+to is off. That holds for every way the adapter named tools (`toolPrefix`): a server whose tools had no prefix at
+all is off where any such name was switched off. The adapter's `mcp` and `mcp_script` tools switched off in a place are every tool of every server the cache
+lists, switched off there (and a server whose tools are not cached, which cannot be named in a list, is off); the old
+`tools` gateway switched off is every tool that was reached only through it. An adapter that was switched off, narrowed
+so that it loads no extension, or not installed while `mcp.json` listed servers leaves **every** server off, as it did,
+entries already in pi's own keys included: the portal reached none of them but through the adapter. An entry in pi's
+keys keeps its name and its keys; a value in it that starts with `!` puts it **off** as well, and an entry of the
+adapter's whose name pi would take for it is the one renamed.
+
+A standing permission given to the adapter's `mcp` tool for one call becomes one on the tool it called, where that keeps
+all of what it allowed; one for a call with a path and other arguments is deleted and listed, as a permission by the
+path alone would allow any other argument.
+
+A `mcp.json` that cannot be read is not changed. The report says so, the adapter stays listed (out of every chat all the
+same), and the next start tries again; the start that finds it readable backs up the database first, as an upgrade
+does, before it converts.
+
+A new install, whose database is made at that start, carries nothing over: an `mcp.json` already in pi's agent folder
+(pi's own command line writes one) is pi's, and is left as it is.
+
+### What you do
+
+Read the line at the top of the page, or Settings → MCP, which keeps the report. Switch on the servers it names once
+you have looked at them (Settings → MCP → On), and change what it lists:
+
+- **Servers that are off**, with the reason for each.
+- **Texts that still name the old tools**: routine, mode and channel instructions, the agent's files, and settings that
+  hold instructions. They are scanned, not changed; the tools are called `mcp__<server>__<tool>` now.
+- **Folders that bring their own MCP configuration or the adapter.** A project's `.pi/mcp.json` in the adapter's keys is
+  **not connected** until it is written in pi's. What the adapter read from `.mcp.json`, `.vscode/mcp.json` and
+  `opencode.json` is not read by pi. The report lists each such folder with a button for every file that can be taken over
+  (`.pi/mcp.json`, `.mcp.json`, `.vscode/mcp.json`): **Import into the user config** adds its servers to your own
+  `mcp.json`, **switched off**, so that you look at what each one runs before you switch it on (a name you already
+  have is not replaced). It says which command or address each one has, which commands it runs and which of the portal's environment variables it
+  sends to its address in a header. Only the file as the move found it is imported: one that was changed since is
+  refused, and you paste its servers instead after reading them. A server that signs in with a provider's credentials (`auth`) is not imported: a
+  repository does not choose where those go. Nor is one that sets the folder its command runs in (`cwd`) or an
+  environment variable that decides what the command runs or loads (`PATH`, `NODE_OPTIONS`, `LD_PRELOAD`, `PYTHON…`
+  and the like): add such a server yourself, once you have read it. `opencode.json` has another shape: paste its servers into Settings → MCP.
+- **Servers that signed in with OAuth** sign in again with `pi mcp login <name>`; signing in from the portal is not
+  built yet.
+- **An extension that writes a server with the adapter's keys** (`portal.mcp.set`) keeps working for one release: the
+  keys are translated, and it is logged.
+
+What the adapter had that pi has no counterpart for: server sampling, elicitation, MCP prompts as slash commands, MCP App
+resources, keep-alive, its metadata cache (the portal keeps its own), `rmcp-mux` sockets, SSE, `client_credentials`
+sign-in, a configurable output limit (pi cuts a result at 20 KB in the middle, with the whole text in a file) and
+`mcp_script`.
+
+### Going back to a version before the move to pi's MCP support
+
+The backup the upgrade made in `backups/` (`portal-v16-….db`, from the version before) has the switches and marks as
+the adapter named them. Put it back as under [Going back](#going-back), and with the portal stopped:
+
+1. Put the file back: `mv mcp.json.adapter mcp.json` in pi's agent folder (`/data/home/.pi/agent` in the container).
+2. Install the adapter again: `pi install npm:pi-mcp-adapter@2.18.0`, or Settings → Extensions → Install. Its files are
+   still on disk.
+3. Take `mcp-migration.json` out of the data folder, or the next upgrade will find the old report there.
+
+Restoring the backup drops everything done since the upgrade: chats, settings, marks. Servers you added to `mcp.json`
+since are in pi's keys, which the adapter ignores where it does not know them (`exposure`, `toolExposure`, `enabled`);
+move them over by hand.
 
 ## The password moves into the database
 
@@ -1384,8 +1513,7 @@ no server. Those of a dotted server removed before the upgrade stay listed under
 The portal's pi, and the `pi` in the image, move from 0.82 to 1.1. The
 extensions and packages you installed stay at their versions; one written for an
 older pi may need an update of its own, as pi 1.0 changed parts of its extension
-and provider interfaces. `pi-mcp-adapter` 2.18.0, which the portal installs,
-works as before. pi now reads `AGENTS.override.md` before `AGENTS.md` in a
+and provider interfaces. pi now reads `AGENTS.override.md` before `AGENTS.md` in a
 folder. If you use Azure, its provider is renamed from `azure-openai-responses`
 to `azure`: rename it in pi's `auth.json`, `models.json` and `settings.json`, or
 sign in again. A portal run from a checkout needs Node 22.19 or later.

@@ -4,7 +4,7 @@ import { api, ApiError, type LazyLimits, type ToolMark } from "../api";
 import { LoadFailed, Section, WarnBanner, ghostCls, inputSmCls } from "./SettingsUi";
 import { Select } from "./Select";
 import { ToolGroupList } from "./ToolGroupList";
-import { MARK_TITLE, displayName, markCls, markName, nextMark, nextOff, sourceName, sourceOf } from "../tool-groups";
+import { MARK_TITLE, displayName, markCls, markName, markNote, nextMark, nextOff, sourceName, sourceOf } from "../tool-groups";
 import { isEnter, isEscape } from "../shortcuts";
 import { formatNumber, t, tp } from "../i18n";
 
@@ -28,7 +28,7 @@ const lazyEntry = (name: string): string => `<tool>${name}`;
  * wrong way round.
  */
 export function ToolDefaults({ onError }: { onError: (e: string) => void }) {
-  const [tools, setTools] = useState<{ name: string; source: string; inline?: true; lazy?: true; mcp?: string; noLazy?: true }[]>([]);
+  const [tools, setTools] = useState<{ name: string; source: string; inline?: true; lazy?: true; noLazy?: true }[]>([]);
   const [off, setOff] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   /** Why there is nothing to switch here, where the deployment cannot do it. */
@@ -175,22 +175,6 @@ export function ToolDefaults({ onError }: { onError: (e: string) => void }) {
   };
 
   /**
-   * Make an MCP server's tools lazy, or register them one by one. It is the server's own setting, "Register tools
-   * directly", turned off for lazy: the one switch, not a mark of the portal's. It is read when a chat starts.
-   */
-  const flipMcp = async (server: string, lazyNow: boolean) => {
-    setBusy(true);
-    try {
-      await api.setMcpDirect(server, lazyNow);
-      setTools((all) => all.map((tool) => (tool.mcp === server ? { ...tool, lazy: lazyNow ? undefined : (true as const) } : tool)));
-    } catch (e) {
-      onError((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  /**
    * Store a name, or take one away.
    *
    * Blank means "call it what it calls itself" rather than an empty heading,
@@ -332,13 +316,13 @@ export function ToolDefaults({ onError }: { onError: (e: string) => void }) {
           <ToolGroupList
             roomy
             tools={tools.map((tool) => {
-              // An MCP server's tool is lazy by the server's setting; any other by the mark on it or on its set, else by the threshold.
-              const mark = tool.mcp !== undefined || tool.noLazy ? undefined : marks[lazyEntry(tool.name)] ?? marks[sourceOf(tool)];
-              const isLazy = tool.mcp !== undefined ? tool.lazy : tool.noLazy ? undefined : mark ? mark === "lazy" : resolved.lazy.includes(sourceOf(tool));
+              // Lazy by the mark on the tool or on its set, else by the threshold: an MCP server is a set like any other.
+              const mark = tool.noLazy ? undefined : marks[lazyEntry(tool.name)] ?? marks[sourceOf(tool)];
+              const isLazy = tool.noLazy ? undefined : mark ? mark === "lazy" : resolved.lazy.includes(sourceOf(tool));
               return {
                 ...tool,
                 enabled: !off.includes(tool.name),
-                ...(mark ? { mark } : tool.mcp === undefined && !tool.noLazy ? { auto: true as const } : {}),
+                ...(mark ? { mark } : !tool.noLazy ? { auto: true as const } : {}),
                 lazy: isLazy ? (true as const) : undefined,
               };
             })}
@@ -350,7 +334,6 @@ export function ToolDefaults({ onError }: { onError: (e: string) => void }) {
               if (next !== undefined && next === inherited) next = nextMark(next);
               setMark(lazyEntry(tool.name), next);
             }}
-            markFixed={(tool) => tool.mcp !== undefined}
             names={names}
             busy={busy}
             onFlip={flip}
@@ -397,32 +380,21 @@ export function ToolDefaults({ onError }: { onError: (e: string) => void }) {
             // Only here, not in the chat popover: naming a thing is a settings decision, and the popover is for one chat.
             beside={(group) => (
               <>
-                {/* Not for pi's own tools: those are always offered. An MCP server's group has the server's setting. */}
+                {/* Not for pi's own tools: those are always offered. */}
                 {group.tools.some((tool) => !tool.noLazy) && (() => {
-                  const server = group.tools.find((tool) => tool.mcp !== undefined)?.mcp;
                   const own = marks[group.source];
-                  const lazyNow = server !== undefined ? group.tools.every((tool) => tool.lazy) : own ? own === "lazy" : resolved.lazy.includes(group.source);
-                  const state = { mark: server !== undefined ? undefined : own, lazy: lazyNow ? (true as const) : undefined };
+                  const lazyNow = own ? own === "lazy" : resolved.lazy.includes(group.source);
+                  const state = { mark: own, lazy: lazyNow ? (true as const) : undefined };
                   return (
                     <button
                       type="button"
                       disabled={busy}
-                      // Two values only for a server's setting; the mark of a set has three, which its label says.
-                      {...(server !== undefined ? { "aria-pressed": lazyNow } : {})}
-                      onClick={() => (server !== undefined ? flipMcp(server, lazyNow) : setMark(group.source, nextMark(own)))}
-                      title={
-                        server !== undefined
-                          ? t("Lazy: the server's tools are not in the model's list one by one; the model finds and calls them through the `mcp` tool. It is the server's \"Register tools directly\", turned off, and it applies to chats that start from now on. They stay on or off as they are.")
-                          : t(MARK_TITLE)
-                      }
-                      aria-label={
-                        server !== undefined
-                          ? t("Lazy or direct {name}", { name: displayName(group.source, names) })
-                          : t("Lazy or direct {name}: {mark}", { name: displayName(group.source, names), mark: markName(state) })
-                      }
-                      className={`shrink-0 rounded border px-1.5 py-0.5 text-[11px] transition disabled:cursor-not-allowed disabled:opacity-50 ${server !== undefined ? (lazyNow ? "border-accent/40 bg-accent/15 text-accent" : "border-transparent text-fg-subtle hover:text-fg") : markCls(state)}`}
+                      onClick={() => setMark(group.source, nextMark(own))}
+                      title={`${markNote(state)} ${t(MARK_TITLE)}`}
+                      aria-label={t("Lazy or direct {name}: {mark}", { name: displayName(group.source, names), mark: markName(state) })}
+                      className={`shrink-0 rounded border px-1.5 py-0.5 text-[11px] transition disabled:cursor-not-allowed disabled:opacity-50 ${markCls(state)}`}
                     >
-                      {server !== undefined ? t("lazy") : markName(state)}
+                      {markName(state)}
                     </button>
                   );
                 })()}

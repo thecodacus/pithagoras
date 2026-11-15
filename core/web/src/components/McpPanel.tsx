@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from "react";
-import { Select } from "./Select";
 import { confirmDialog } from "./ConfirmDialog";
 import { useUnsavedDraft } from "./Modal";
 import {
@@ -10,24 +9,22 @@ import {
   LuDownload,
   LuFileJson,
   LuGlobe,
-  LuPlug,
   LuPlus,
   LuRefreshCw,
   LuTerminal,
   LuTrash2,
-  LuTriangleAlert,
 } from "react-icons/lu";
-import { api, type McpConfigView, type McpServerEntry, type McpServerView } from "../api";
-import { Field, LoadFailed, Segments, btnCls, codeAreaCls, gridCls, inputCls, primaryCls, primarySmCls } from "./SettingsUi";
-import { msg, t, tx } from "../i18n";
+import { api, type McpConfigView, type McpServerEntry, type McpServerState, type McpServerView, type ToolMark } from "../api";
+import { Field, LoadFailed, Segments, btnCls, codeAreaCls, gridCls, inputCls, primaryCls } from "./SettingsUi";
+import { formatNumber, msg, t, tp, tx } from "../i18n";
+import { McpMigrationSection } from "./McpMigrationReport";
 
 
-type Transport = "stdio" | "http" | "socket";
+type Transport = "stdio" | "http";
 
 const TRANSPORTS: { id: Transport; label: string }[] = [
   { id: "stdio", label: msg("Local process") },
   { id: "http", label: "HTTP" },
-  { id: "socket", label: msg("Unix socket") },
 ];
 
 /** Lines in, list out — blank lines dropped. Used for args, filters and pairs. */
@@ -54,25 +51,47 @@ function textToPairs(text: string, sep: string): Record<string, string> | undefi
   return Object.keys(out).length ? out : undefined;
 }
 
-/**
- * MCP servers for `pi-mcp-adapter`.
- *
- * The adapter is what turns this file into tools; the portal only owns the
- * configuration. So the panel says plainly when the adapter is missing rather
- * than letting someone configure servers that nothing will ever read.
- */
+type Exposure = ToolMark | "auto";
+
+const EXPOSURES: { id: Exposure; label: string }[] = [
+  { id: "auto", label: msg("Auto") },
+  { id: "lazy", label: msg("Lazy") },
+  { id: "direct", label: msg("Direct") },
+];
+
+/** What a chat that starts now does with a server's tools, in words: the mark, or what the threshold made of an auto server. */
+function exposureText(state: McpServerState): string {
+  if (state.by === "mark") return state.lazy ? t("lazy: found through tool_search") : t("direct: always in the model's list");
+  if (state.by === "threshold") return t("auto, lazy now: the model's list is over the limits");
+  if (state.by === "unknown") return t("auto, lazy until it has run once: its size is not known yet");
+  if (state.by === "resources") return t("auto, lazy: it offers only resources, no tools");
+  return t("auto, in the model's list: small enough to stay there");
+}
+
+/** What is remembered of a server's tools: how many and how much of the model's list they take. */
+function toolsText(state: McpServerState): string {
+  if (!state.tools) return t("never connected, so its tools are not known yet");
+  if (state.tools.count === 0 && state.tools.resources) return t("no tools of its own, only resources");
+  const known = tp(state.tools.count, "{n} tool, about {tokens} tokens", "{n} tools, about {tokens} tokens", { tokens: formatNumber(state.tools.tokens) });
+  return state.tools.stale ? t("{tools} (as of before its entry was changed)", { tools: known }) : known;
+}
+
+/** MCP servers, as pi's own MCP support reads them: the file is pi's, and the panel edits it. */
 export function McpPanel({ onError }: { onError: (e: string) => void }) {
   const [view, setView] = useState<McpConfigView | null>(null);
+  /** What the portal says of each server beyond its file; nothing where it cannot say, and the page is as the file shows it. */
+  const [states, setStates] = useState<Record<string, McpServerState>>({});
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState<string | null>(null);
   const [editing, setEditing] = useState<{ name: string | null } | null>(null);
   const [importing, setImporting] = useState(false);
-  const [installing, setInstalling] = useState(false);
   const [rawOpen, setRawOpen] = useState(false);
 
   const load = async () => {
     try {
-      setView(await api.mcp());
+      const [next, status] = await Promise.all([api.mcp(), api.mcpStatus().then((r) => r.servers, () => ({}) as Record<string, McpServerState>)]);
+      setView(next);
+      setStates(status);
       setFailed(null);
     } catch (e) {
       // With nothing read yet, the page says so itself, with a way to try again; the banner is for a refresh.
@@ -113,10 +132,15 @@ export function McpPanel({ onError }: { onError: (e: string) => void }) {
     return (
       <ServerForm
         server={existing}
+        state={existing ? states[existing.name] : undefined}
         taken={view.servers.filter((s) => s.name !== existing?.name).map((s) => s.name)}
         onBack={() => setEditing(null)}
-        onSave={async (name, entry) => {
-          await api.saveMcpServer(name, entry, existing?.name);
+        onSave={async (name, entry, settings) => {
+          await api.saveMcpServer(name, entry, existing?.name, settings.approve);
+          // What the portal keeps by the server's name follows a rename only by being said again under the new one.
+          const moved = existing !== undefined && existing.name !== name;
+          if (settings.exposure !== (states[existing?.name ?? ""]?.mark ?? "auto") || (moved && settings.exposure !== "auto")) await api.setMcpMark(name, settings.exposure);
+          if (settings.approve.join("\n") !== (states[existing?.name ?? ""]?.approve ?? []).join("\n") || (moved && settings.approve.length)) await api.setMcpApprove(name, settings.approve);
           setEditing(null);
           await load();
         }}
@@ -127,42 +151,6 @@ export function McpPanel({ onError }: { onError: (e: string) => void }) {
 
   return (
     <>
-      {!view.adapterInstalled && (
-        <section className="mb-6 rounded-xl border border-warn/30 bg-warn/10 p-3">
-          <div className="flex items-start gap-2">
-            <LuTriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-warn" />
-            <div className="min-w-0 flex-1">
-              <p className="text-sm text-fg">{t("The MCP adapter is not installed")}</p>
-              <p className="mt-1 text-xs text-fg-muted">
-                {tx("MCP support comes from the {name} extension. Until it is installed, servers configured here are read by nothing.", { name: <span className="font-mono">pi-mcp-adapter</span> })}
-              </p>
-              <button
-                className={`${primaryCls} mt-3`}
-                disabled={installing}
-                onClick={async () => {
-                  setInstalling(true);
-                  try {
-                    await api.installPackage(view.adapterSpec);
-                    await load();
-                  } catch (e) {
-                    onError((e as Error).message);
-                  } finally {
-                    setInstalling(false);
-                  }
-                }}
-              >
-                {installing ? (
-                  <LuRefreshCw className="h-4 w-4 animate-spin" />
-                ) : (
-                  <LuDownload className="h-4 w-4" />
-                )}
-                {t("Install it")}
-              </button>
-            </div>
-          </div>
-        </section>
-      )}
-
       {view.parseError && (
         <section role="alert" className="mb-6 rounded-xl border border-danger/30 bg-danger/10 p-3">
           <div className="flex items-start gap-2">
@@ -178,6 +166,8 @@ export function McpPanel({ onError }: { onError: (e: string) => void }) {
         </section>
       )}
 
+      <McpMigrationSection onImported={() => void load()} />
+
       <section className="mb-6 rounded-xl border border-line bg-raised/40 p-3">
         <div className="flex items-center gap-2">
           <LuFileJson className="h-3.5 w-3.5 shrink-0 text-fg-faint" />
@@ -185,7 +175,7 @@ export function McpPanel({ onError }: { onError: (e: string) => void }) {
           <p className="ml-auto truncate pl-3 font-mono text-xs text-fg-muted">{view.path}</p>
         </div>
         <p className="mt-1.5 text-xs text-fg-faint">
-          {t("Applies to every session in this portal. Changes are picked up by sessions started afterwards, so restart a running one to pull in a new server.")}
+          {t("Applies to every session in this portal. Open chats are loaded again to pick up a change.")}
         </p>
       </section>
 
@@ -224,11 +214,14 @@ export function McpPanel({ onError }: { onError: (e: string) => void }) {
               <ServerRow
                 key={s.name}
                 server={s}
+                state={states[s.name]}
                 onOpen={() => setEditing({ name: s.name })}
                 onToggle={() =>
-                  act(() =>
-                    api.saveMcpServer(s.name, { ...s.entry, disabled: !s.disabled }, s.name),
-                  )
+                  act(() => {
+                    // `disabled` is how the old adapter said it; pi's own key is `enabled`.
+                    const { disabled: _old, enabled: _on, ...rest } = s.entry;
+                    return api.saveMcpServer(s.name, s.disabled ? rest : { ...rest, enabled: false }, s.name);
+                  })
                 }
                 onDelete={async () => {
                   // It holds the server's environment, headers and anything written by hand, and a tap beside the On box is easy to make.
@@ -240,11 +233,6 @@ export function McpPanel({ onError }: { onError: (e: string) => void }) {
           </ul>
         )}
       </section>
-
-      <GlobalSettings
-        settings={view.settings}
-        onSave={(next) => act(() => api.saveMcpSettings(next))}
-      />
 
       <section className="mt-6">
         <button
@@ -266,11 +254,13 @@ export function McpPanel({ onError }: { onError: (e: string) => void }) {
 
 function ServerRow({
   server,
+  state,
   onOpen,
   onToggle,
   onDelete,
 }: {
   server: McpServerView;
+  state?: McpServerState;
   onOpen: () => void;
   onToggle: () => void;
   onDelete: () => void;
@@ -281,9 +271,7 @@ function ServerRow({
       ? [e.command, ...(e.args ?? [])].join(" ")
       : server.transport === "http"
         ? e.url
-        : server.transport === "socket"
-          ? e.socket
-          : t("No transport configured");
+        : t("No transport configured");
 
   return (
     <li className="group flex items-center gap-3 rounded-xl border border-line bg-raised/40 px-3 py-2.5">
@@ -298,6 +286,18 @@ function ServerRow({
           {server.disabled && <span className="ml-2 text-xs text-fg-faint">{t("disabled")}</span>}
         </p>
         <p className="truncate font-mono text-xs text-fg-faint">{summary}</p>
+        {/* What pi would skip it for, and the values it would run as a command: both are said where the server is. */}
+        {server.problem && <p className="truncate text-xs text-danger">{server.problem}</p>}
+        {/* What a chat does with its tools, and what is known of them: the state the threshold left it in is said here, where the server is. */}
+        {state && !server.disabled && (
+          <p className="truncate text-xs text-fg-faint" title={`${exposureText(state)}. ${toolsText(state)}`}>
+            {exposureText(state)} · {toolsText(state)}
+            {state.approve.length > 0 && ` · ${t("asks first: {tools}", { tools: state.approve.join(", ") })}`}
+          </p>
+        )}
+        {server.commands.length > 0 && (
+          <p className="truncate text-xs text-warn">{t("Runs a command for {names}", { names: server.commands.join(", ") })}</p>
+        )}
       </button>
       <label className="flex shrink-0 cursor-pointer items-center gap-1.5 text-xs text-fg-subtle">
         <input
@@ -397,16 +397,18 @@ function ImportBox({
 
 function ServerForm({
   server,
+  state,
   taken,
   onBack,
   onSave,
   onError,
 }: {
   server?: McpServerView;
+  state?: McpServerState;
   /** The names of the other servers: a new or renamed one on any of them would replace it. */
   taken: string[];
   onBack: () => void;
-  onSave: (name: string, entry: McpServerEntry) => Promise<void>;
+  onSave: (name: string, entry: McpServerEntry, settings: { exposure: Exposure; approve: string[] }) => Promise<void>;
   onError: (e: string) => void;
 }) {
   const e = server?.entry ?? {};
@@ -420,19 +422,16 @@ function ServerForm({
   const [cwd, setCwd] = useState(e.cwd ?? "");
   const [url, setUrl] = useState(e.url ?? "");
   const [headers, setHeaders] = useState(pairsToText(e.headers, ": "));
-  const [auth, setAuth] = useState<string>(e.auth === false ? "none" : (e.auth ?? "auto"));
-  const [tokenEnv, setTokenEnv] = useState(e.bearerTokenEnv ?? "");
-  const [socket, setSocket] = useState(e.socket ?? "");
-  const [lifecycle, setLifecycle] = useState(e.lifecycle ?? "lazy");
-  const [includeTools, setIncludeTools] = useState((e.includeTools ?? []).join("\n"));
-  const [excludeTools, setExcludeTools] = useState((e.excludeTools ?? []).join("\n"));
-  const [directTools, setDirectTools] = useState(e.directTools === true);
-  const [debug, setDebug] = useState(e.debug === true);
-  const [disabled, setDisabled] = useState(e.disabled === true);
+  const [description, setDescription] = useState(e.description ?? "");
+  const [timeout, setTimeoutSeconds] = useState(e.timeout === undefined ? "" : String(e.timeout));
+  const [disabled, setDisabled] = useState(e.enabled === false || e.disabled === true);
+  /** The portal's own mark on the server, which is not in the file, and the tools that ask first. */
+  const [exposure, setExposure] = useState<Exposure>(state?.mark ?? "auto");
+  const [approve, setApprove] = useState((state?.approve ?? []).join("\n"));
   const [saving, setSaving] = useState(false);
   const nameTaken = taken.includes(name.trim());
   // Whatever it was opened with is not a draft; the first look at the fields is what they are compared with.
-  const fields = JSON.stringify([name, transport, command, args, env, cwd, url, headers, auth, tokenEnv, socket, lifecycle, includeTools, excludeTools, directTools, debug, disabled]);
+  const fields = JSON.stringify([name, transport, command, args, env, cwd, url, headers, description, timeout, disabled, exposure, approve]);
   const opened = useRef(fields);
   useUnsavedDraft(!saving && fields !== opened.current);
 
@@ -440,13 +439,10 @@ function ServerForm({
     if (!name.trim()) return onError(t("Give the server a name"));
     if (nameTaken) return onError(t("A server called {name} already exists", { name: name.trim() }));
     // Start from the stored entry so fields this form does not show — oauth
-    // blocks, tracing, timeouts set by hand — survive an edit here.
+    // blocks, how the tools are exposed, what is hidden — survive an edit here.
     const next: McpServerEntry = { ...e };
-    for (const k of [
-      "command", "args", "env", "cwd", "url", "headers", "socket",
-      "auth", "bearerTokenEnv", "lifecycle", "includeTools", "excludeTools",
-      "directTools", "debug", "disabled",
-    ]) {
+    // `type` too: it names the transport, which the fields below say again (a stdio server moved to an address is no longer `stdio`).
+    for (const k of ["type", "command", "args", "env", "cwd", "url", "headers", "description", "timeout", "enabled", "disabled"]) {
       delete next[k];
     }
 
@@ -460,23 +456,15 @@ function ServerForm({
       next.url = url.trim();
       const parsed = textToPairs(headers, ":");
       if (parsed) next.headers = parsed;
-      if (auth === "none") next.auth = false;
-      else if (auth !== "auto") next.auth = auth as "oauth" | "bearer";
-      if (auth === "bearer" && tokenEnv.trim()) next.bearerTokenEnv = tokenEnv.trim();
-    } else {
-      next.socket = socket.trim();
     }
 
-    if (lifecycle !== "lazy") next.lifecycle = lifecycle as McpServerEntry["lifecycle"];
-    if (lines(includeTools).length) next.includeTools = lines(includeTools);
-    if (lines(excludeTools).length) next.excludeTools = lines(excludeTools);
-    if (directTools) next.directTools = true;
-    if (debug) next.debug = true;
-    if (disabled) next.disabled = true;
+    if (description.trim()) next.description = description.trim();
+    if (timeout.trim() && Number(timeout) > 0) next.timeout = Number(timeout);
+    if (disabled) next.enabled = false;
 
     setSaving(true);
     try {
-      await onSave(name.trim(), next);
+      await onSave(name.trim(), next, { exposure, approve: lines(approve) });
     } catch (err) {
       onError((err as Error).message);
     } finally {
@@ -563,87 +551,40 @@ function ServerForm({
                 onChange={(ev) => setHeaders(ev.target.value)}
               />
             </Field>
-            <Field label={t("Authentication")}>
-              <Select
-                className="w-full"
-                value={auth}
-                onChange={setAuth}
-                options={[
-                  { value: "auto", label: t("Detect"), hint: t("OAuth if the server offers it") },
-                  { value: "oauth", label: "OAuth" },
-                  { value: "bearer", label: t("Bearer token") },
-                  { value: "none", label: t("None") },
-                ]}
-              />
-            </Field>
-            {auth === "bearer" && (
-              <Field
-                label={t("Token environment variable")}
-                hint={t("The variable name, not the token — secrets do not belong in this file")}
-              >
-                <input
-                  className={inputCls}
-                  value={tokenEnv}
-                  placeholder="MY_SERVICE_TOKEN"
-                  onChange={(ev) => setTokenEnv(ev.target.value)}
-                />
-              </Field>
-            )}
+            <p className="text-xs text-fg-faint">
+              {tx("A server that asks for a sign-in is signed in to with {command} in a terminal; a token goes in a header, as {example}.", { command: <span className="font-mono">{"pi mcp login <name>"}</span>, example: <span className="font-mono">{"Authorization: Bearer ${TOKEN}"}</span> })}
+            </p>
           </>
         )}
 
-        {transport === "socket" && (
-          <Field label={t("Socket path")}>
-            <input
-              className={inputCls}
-              value={socket}
-              placeholder="~/.rmcp/mux.sock"
-              onChange={(ev) => setSocket(ev.target.value)}
-            />
-          </Field>
-        )}
-
-        <Field label={t("Lifecycle")} hint={t("Lazy connects on first use, which is usually what you want")}>
-          <Select
-            className="w-full"
-            value={lifecycle}
-            onChange={(v) => setLifecycle(v as McpServerEntry["lifecycle"] & string)}
-            options={[
-              { value: "lazy", label: t("Lazy") },
-              { value: "lazy-keep-alive", label: t("Lazy, then keep alive") },
-              { value: "eager", label: t("Eager") },
-              { value: "keep-alive", label: t("Keep alive") },
-            ]}
-          />
+        <Field label={t("Description")} hint={t("Optional: what the server offers, in a sentence")}>
+          <input className={inputCls} value={description} onChange={(ev) => setDescription(ev.target.value)} />
+        </Field>
+        <Field label={t("Request timeout")} hint={t("Seconds; empty is pi's default")}>
+          <input className={inputCls} value={timeout} inputMode="numeric" onChange={(ev) => setTimeoutSeconds(ev.target.value)} />
         </Field>
 
-        <Field label={t("Only these tools")} hint={t("One name or glob per line; leave empty for all")}>
-          <textarea
-            className={codeAreaCls}
-            rows={2}
-            spellCheck={false}
-            value={includeTools}
-            onChange={(ev) => setIncludeTools(ev.target.value)}
-          />
+        <Field
+          label={t("Tools in the model's list")}
+          hint={t("Auto: the threshold decides, by how long the list is (Settings → Tools). Lazy: the model finds and calls the tools through tool_search, and the server starts when one is first used. Direct: the tools are always in the list, and the server starts with the chat.")}
+        >
+          <Segments label={t("Tools in the model's list")} size="md" className="flex gap-2" value={exposure} options={EXPOSURES} onChange={setExposure} />
+          {state && (
+            <p className="mt-1.5 text-xs text-fg-faint">
+              {t("Now: {state}. {tools}.", { state: exposureText(state), tools: toolsText(state) })}
+              {typeof e.exposure === "string" && " " + t("The file says exposure {value}, which is what pi's command line reads.", { value: e.exposure })}
+              {e.toolExposure && typeof e.toolExposure === "object" && " " + t("It also sets {n} tools by name in the file; edit the file directly to change those.", { n: Object.keys(e.toolExposure).length })}
+            </p>
+          )}
         </Field>
-        <Field label={t("Except these tools")} hint={t("One name or glob per line")}>
-          <textarea
-            className={codeAreaCls}
-            rows={2}
-            spellCheck={false}
-            value={excludeTools}
-            onChange={(ev) => setExcludeTools(ev.target.value)}
-          />
+        <Field
+          label={t("Ask before these tools")}
+          hint={t("One pattern per line, of the server's own tool names, * for any characters: delete_* asks before every tool that starts with delete_. You are asked in the chat before the call runs; where nobody can be asked (a routine, a heartbeat), it is refused.")}
+        >
+          <textarea className={codeAreaCls} rows={2} spellCheck={false} aria-label={t("Ask before these tools")} value={approve} placeholder="delete_*" onChange={(ev) => setApprove(ev.target.value)} />
         </Field>
 
         <div className="space-y-2 rounded-xl border border-line bg-raised/40 p-3">
-          <Toggle
-            checked={directTools}
-            onChange={setDirectTools}
-            label={t("Register tools directly")}
-            hint={t("Puts every tool in the system prompt instead of behind the proxy — 150–300 tokens each, so keep it to small servers. Off, the tools are lazy, as the lazy button of the server in Settings → Tools says.")}
-          />
-          <Toggle checked={debug} onChange={setDebug} label={t("Show server stderr")} />
           <Toggle
             checked={disabled}
             onChange={setDisabled}
@@ -663,95 +604,6 @@ function ServerForm({
         </div>
       </div>
     </>
-  );
-}
-
-function GlobalSettings({
-  settings,
-  onSave,
-}: {
-  settings: Record<string, unknown>;
-  /** True when it was saved: what is not stays to be saved again. */
-  onSave: (next: Record<string, unknown>) => Promise<boolean>;
-}) {
-  const shown = (v: unknown) => (v === undefined ? "" : String(v));
-  const [prefix, setPrefix] = useState(String(settings.toolPrefix ?? "server"));
-  const [idle, setIdle] = useState(shown(settings.idleTimeout));
-  const [request, setRequest] = useState(shown(settings.requestTimeoutMs));
-  const [dirty, setDirty] = useState(false);
-  useUnsavedDraft(dirty);
-
-  // The fields follow the file when it changes elsewhere (the raw editor, another
-  // window), unless something is typed in them: that is saved, or not, as it is.
-  const loaded = JSON.stringify(settings);
-  useEffect(() => {
-    if (dirty) return;
-    setPrefix(String(settings.toolPrefix ?? "server"));
-    setIdle(shown(settings.idleTimeout));
-    setRequest(shown(settings.requestTimeoutMs));
-  }, [loaded]);
-
-  const save = async () => {
-    const next: Record<string, unknown> = { ...settings };
-    if (prefix === "server") delete next.toolPrefix;
-    else next.toolPrefix = prefix;
-    if (idle.trim() === "") delete next.idleTimeout;
-    else next.idleTimeout = Number(idle);
-    if (request.trim() === "") delete next.requestTimeoutMs;
-    else next.requestTimeoutMs = Number(request);
-    if (await onSave(next)) setDirty(false);
-  };
-
-  const track = <T,>(set: (v: T) => void) => (v: T) => {
-    set(v);
-    setDirty(true);
-  };
-
-  return (
-    <section>
-      <div className="mb-2 flex items-center gap-2">
-        <LuPlug className="h-3.5 w-3.5 text-fg-faint" />
-        <h3 className="text-sm font-medium text-fg">{t("Adapter settings")}</h3>
-        {dirty && (
-          <button className={`${primarySmCls} ml-auto`} onClick={save}>
-            {t("Save")}
-          </button>
-        )}
-      </div>
-      <div className="grid gap-3 rounded-xl border border-line bg-raised/40 p-3 sm:grid-cols-3">
-        <Field label={t("Tool naming")}>
-          <Select
-            className="w-full"
-            value={prefix}
-            onChange={(v) => track(setPrefix)(v)}
-            options={[
-              { value: "server", label: "server_tool" },
-              { value: "short", label: "short" },
-              { value: "mcp", label: "mcp_tool" },
-              { value: "none", label: "tool" },
-            ]}
-          />
-        </Field>
-        <Field label={t("Idle timeout")} hint={t("Minutes; 0 never disconnects")}>
-          <input
-            className={inputCls}
-            value={idle}
-            placeholder="10"
-            inputMode="numeric"
-            onChange={(ev) => track(setIdle)(ev.target.value)}
-          />
-        </Field>
-        <Field label={t("Request timeout")} hint={t("Milliseconds")}>
-          <input
-            className={inputCls}
-            value={request}
-            placeholder={t("default")}
-            inputMode="numeric"
-            onChange={(ev) => track(setRequest)(ev.target.value)}
-          />
-        </Field>
-      </div>
-    </section>
   );
 }
 

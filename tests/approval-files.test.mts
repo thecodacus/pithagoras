@@ -161,7 +161,7 @@ test("only a tool that declares its files is approved on them: a command, a tool
   assert.equal(declaredFiles({ name: "merge_pdfs", approvalFiles: ["nowhere"], parameters: params({ inputs: list }) }), undefined, "none of its own");
   assert.equal(declaredFiles({ name: "merge_pdfs", approvalFiles: [], parameters: params({ inputs: list }) }), undefined);
   assert.equal(declaredFiles({ name: "merge_pdfs", parameters: params({ paths: list }) }), undefined, "a list is no declaration");
-  for (const name of ["bash", "mcp", "mcp_script", "mcpScript", "codemode", "tool_search"]) {
+  for (const name of ["bash", "codemode", "tool_search", "read_mcp_resource", "list_mcp_resources", "list_mcp_resource_templates"]) {
     assert.equal(declaredFiles({ name, approvalFiles: ["paths"], parameters: params({ paths: list }) }), undefined, name);
   }
   // Undeclared, a call is matched and shown whole: an extra list is part of its arguments, and the command is the command.
@@ -171,7 +171,7 @@ test("only a tool that declares its files is approved on them: a command, a tool
   const send = { to: "anyone@example.com", body: "the secrets", paths: ["shared/report.pdf"] };
   assert.equal(callSubject("send_mail", send), JSON.stringify(send));
   assert.equal(ruleAllows([rule("send_mail", "shared/*")], "colleague", "send_mail", send), false, "a rule for a folder does not reach a mail with an attachment in it");
-  assert.equal(ruleAllows([rule("mcp", "shared/*")], "colleague", "mcp", { tool: "notes_delete", paths: ["shared/x"] }), false);
+  assert.equal(ruleAllows([rule("mcp__notes__delete", "shared/*")], "colleague", "mcp__notes__delete", { id: "x", paths: ["shared/x"] }), false, "a server's tool declares no files");
   // Declared, each file is a subject: every one must be allowed.
   const pdfs = [rule("merge_pdfs", "shared/*")];
   assert.equal(ruleAllows(pdfs, "colleague", "merge_pdfs", { inputs: ["shared/a.pdf", "shared/b.pdf"], title: "x" }, undefined, undefined, ["inputs"]), true);

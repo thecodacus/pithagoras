@@ -39,6 +39,20 @@ export interface SearchHost {
   label: (tool: any) => string;
   /** The tool a name from before stands for, where there is one: see the aliases of `find`. */
   alias?: (name: string) => string | undefined;
+  /**
+   * The tools of lazy servers that are not running, as the portal remembers them (see mcp-runtime.ts): found and described
+   * as the registered ones are, and started when one is called. pi has no tool of such a server until it has connected.
+   */
+  offline?: () => { name: string; description: string; parameters: unknown; label: string }[];
+  /** Waits for the server of a tool that is not registered to be up (for a resource tool, the server its arguments name), and throws what the model is told where it is not. */
+  ensure?: (name: string, signal?: AbortSignal, args?: Record<string, unknown>) => Promise<void>;
+  /** Starts, in the background, the servers of the tools a search found: the call that follows finds them up. */
+  warm?: (names: readonly string[]) => void;
+  /**
+   * Connects the lazy servers whose tools nothing is known of, so that a search can find them. Says, as lines for the
+   * result, the ones that would not connect.
+   */
+  learn?: (signal?: AbortSignal) => Promise<string[]>;
 }
 
 /** How many tools one search lists: enough to choose from, few enough not to be the prompt it replaced. */
@@ -349,7 +363,7 @@ export class ToolSearch {
     } catch {
       return [];
     }
-    return all
+    const running = all
       .filter((tool) => String(tool.name) !== TOOL_SEARCH && host.lazy(tool) && active.has(String(tool.name)) && !off.has(String(tool.name)))
       .map((tool) => ({
         name: String(tool.name),
@@ -363,8 +377,22 @@ export class ToolSearch {
         guidelines: mcpNamespaceOf(tool)
           ? []
           : (Array.isArray(tool.promptGuidelines) ? tool.promptGuidelines : []).filter((line: unknown): line is string => typeof line === "string" && line.trim() !== "").map((line: string) => oneLine(line).trim()),
-      }))
-      .sort((a, b) => a.name.localeCompare(b.name));
+      }));
+    // A server that is not running has no tool registered: what the portal remembers of it stands in, found and described
+    // like the rest and started when it is called. Never a tool that is switched off.
+    const here = new Set(running.map((tool) => tool.name));
+    const remembered: Lazy[] = (host.offline?.() ?? [])
+      .filter((tool) => !here.has(tool.name) && !off.has(tool.name))
+      .map((tool) => ({
+        name: tool.name,
+        description: tool.description,
+        parameters: tool.parameters,
+        params: Object.keys((tool.parameters as { properties?: object } | undefined)?.properties ?? {}),
+        label: tool.label,
+        group: tool.label,
+        guidelines: [],
+      }));
+    return [...running, ...remembered].sort((a, b) => a.name.localeCompare(b.name));
   }
 
   /**
@@ -445,9 +473,13 @@ export class ToolSearch {
     return fail(`There is no lazy tool called "${name}". Use search to find the names.`);
   }
 
-  private search(query: string): ReturnType<typeof listing> {
+  private async search(query: string, signal?: AbortSignal): Promise<ReturnType<typeof listing>> {
+    // A server nothing is known of cannot be found in: it is started, and waited for, so that this search can.
+    const unreached = (await this.host?.learn?.(signal)) ?? [];
     const tools = this.candidates();
-    if (!tools.length) return listing("There are no lazy tools in this conversation.", []);
+    // What the portal says of a server that did not connect is its own sentence, with the server's name and what to do.
+    const said = (text: string) => (unreached.length ? `${text}\n\n${unreached.map(oneLine).join("\n")}` : text);
+    if (!tools.length) return listing(said("There are no lazy tools in this conversation."), []);
     const text = query.trim();
     if (!text) {
       // No words: the groups and what is in them, for the model that does not know what to ask for.
@@ -472,12 +504,14 @@ export class ToolSearch {
         list += line;
         named.push(...members.slice(0, 12).map((m) => m.name));
       }
-      return listing(defuse(list + tail, this.tag), named);
+      return listing(said(defuse(list + tail, this.tag)), named);
     }
     const found = rank(tools, text);
-    if (!found.length) return listing(defuse(`No lazy tool matches "${oneLine(text)}". Search with other words, or with none to list the groups.`, this.tag), []);
+    if (!found.length) return listing(said(defuse(`No lazy tool matches "${oneLine(text)}". Search with other words, or with none to list the groups.`, this.tag)), []);
     const shown = found.slice(0, HITS);
     const detailed = shown.slice(0, DETAILED);
+    // What was found is wanted next: the servers of the hits start now, so that the call finds them up.
+    this.host?.warm?.(shown.map((tool) => tool.name));
     let hits = `${found.length} lazy tool${found.length === 1 ? "" : "s"} matching "${oneLine(text)}":`;
     shown.forEach((tool, i) => {
       hits += `\n- ${oneLine(tool.name)}${signature(tool.parameters)}: ${blurb(tool.description) || "(no description)"}`;
@@ -492,7 +526,7 @@ export class ToolSearch {
     // A result is the model's context from here on: kept to a size. What does not fit is what is least likely to be wanted.
     const cut = "\n[cut: narrow the search]";
     if (hits.length + tail.length > RESULT_CHARS) hits = `${hits.slice(0, Math.max(0, RESULT_CHARS - tail.length - cut.length)).trimEnd()}${cut}`;
-    return listing(hits + tail, shown.map((tool) => tool.name));
+    return listing(said(hits + tail), shown.map((tool) => tool.name));
   }
 
   private describe(name: string): ReturnType<typeof listing> {
@@ -508,7 +542,9 @@ export class ToolSearch {
   private async call(name: string, rawArgs: unknown, signal: AbortSignal | undefined, onUpdate: unknown, ctx: any) {
     const tool = this.find(name, true);
     if (typeof ctx?.executeTool !== "function") return fail(`"${tool.name}" cannot be called from here.`);
+    // A tool of a server that is not running: the server is started, and the call waits for it.
     const args = argsOf(rawArgs);
+    await this.host?.ensure?.(tool.name, signal, args);
     // Through pi's own pipeline: it validates and coerces the arguments, runs the hooks before and after, and queues the
     // calls of tools that run one at a time. What it hands back is the outcome; the result is what the tool's own was.
     const done = await ctx.executeTool(tool.name, args, { signal, ...(typeof onUpdate === "function" ? { onUpdate } : {}) });
@@ -592,7 +628,7 @@ export class ToolSearch {
         const name = typeof p?.name === "string" ? p.name.trim() : "";
         switch (p?.action) {
           case "search":
-            return this.search(typeof p.query === "string" ? p.query : "");
+            return this.search(typeof p.query === "string" ? p.query : "", signal);
           case "describe":
             return this.describe(name);
           case "call":

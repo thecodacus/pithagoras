@@ -170,9 +170,10 @@ how many they were. Packages a project brings in are that project's to decide
 and have no switch here.
 
 ::: warning Some packages carry others with them
-`pi-mcp-adapter` is what makes MCP servers into tools. Switching it off takes
-every MCP server with it. The agent's [browser](/guide/browser) is not one of them:
-its tools are the Browser extension's.
+A package that carries others with it can be switched off as one. MCP servers are
+no package's: pi runs them itself, and each is switched in Settings → MCP. The
+agent's [browser](/guide/browser) is not a package's either: its tools are the
+Browser extension's.
 :::
 
 ## A chat that is working
@@ -192,8 +193,8 @@ once neither does any more, at a later step, as its run ends, or before the
 next message starts a run. A chat whose pi runs in a container of its own
 (`EXECUTOR=container`) is reloaded once its run is over. A reload keeps the
 conversation and the chat's tool switches; what it loads again is the
-extensions, skills, prompts and pi's settings, and an MCP server the adapter
-keeps connected is started again.
+extensions, skills, prompts and pi's settings, and the MCP servers the chat has
+connected are started again where they are used.
 
 What a chat whose pi runs in the portal's own process could not load (an
 extension that throws as it loads, a tool of a name another extension took
@@ -309,9 +310,9 @@ this conversation**. "Look this up for me" and "do not go online, just read the
 repo" are both reasonable in the same week.
 
 Tools are grouped by what installed them, so a package can be switched off in
-one go. An MCP server is its own group rather than a share of the adapter that
-attached it — three servers used to arrive as one pile of forty tools called
-`pi-mcp-adapter`, and nobody thinks of them that way.
+one go. An MCP server is its own group rather than a share of pi's MCP support
+that connects it — three servers would arrive as one pile of forty tools, and
+nobody thinks of them that way (pi tells the portal which server a tool is of).
 [Media](/guide/media)'s picture tools, `show_image`, `generate_image` and `edit_image`,
 and its video tools, `generate_video` and `show_video`, are together in its group, `pithagoras-media`,
 whichever of them is on offer.
@@ -373,9 +374,9 @@ with it; an uninstalled one's are forgotten. The tools an extension's
 to every chat are left out while its package is switched off or uninstalled, and
 come back with it, with what was switched for them; while it is switched on
 they are listed, even when its server half has crashed or could not start. MCP
-servers' tools go with `pi-mcp-adapter` when it is off or gone, but are
-remembered even when it is uninstalled, since the servers are configured apart
-from it. A package is the same package at any version, so updating one keeps its
+servers' tools are no package's: they are listed while the server is in
+`mcp.json` and not switched off there, and remembered when it is removed only for
+the settings that were made for them. A package is the same package at any version, so updating one keeps its
 tools. One narrowed to some of its extensions keeps all its tools listed here; a
 started chat shows only what is loaded. Before a chat in a project starts, a package the project
 lists and loads itself counts, whatever the user's entry says.
@@ -484,20 +485,21 @@ in the list. Where a group exists for one purpose, a [mode of yours](/guide/sess
 the mode's or the agent's tools page. Without it the largest-first rule could leave out exactly the group the mode is for.
 A mode an extension offers says the same with `keepDirect` (see [Chat modes](/guide/extension-ui#chat-modes)).
 
-An MCP server's tools do not take part: they are lazy by the server's own setting (see below), and the threshold
-counts the ones that are in the list and does not take them out.
+An MCP server takes part like any other group (see below): its tools count with the size the portal remembers of
+them, and the threshold takes a large server out of the list whole.
 
 ### Setting the marks
 
 **Settings → Tools** has a button on the header of each group and one beside each tool that shows the mark: **auto**,
-**lazy** or **direct**. Clicking it goes from auto to lazy to direct and back. Marking a group makes every tool of
+**lazy** or **direct**. Clicking it goes from auto to lazy to direct and back. A group on **auto** shows what the threshold made of it,
+*auto* or *auto, lazy*, and the tip of the button says why in words (the model's list was over the limits, or it stays in the list). Marking a group makes every tool of
 it lazy or direct, including tools that turn up in it later. A tool of a group that is marked shows the group's mark
 until it has one of its own, and its button goes between the group's mark and the other one: a tool of a direct group
 from direct to lazy and back to the group's. A mark is no switch: the tools stay on or off as
 they were, and a mark on a tool that is off changes nothing in the chats where it stays off. In a chat in Code mode, or in a
 [mode of yours](/guide/sessions#modes-you-make) that works through the code tool, the marks do not apply: every
 tool that is on is in a script's reach, found with `searchTools`, and `tool_search` is not offered. An MCP server's
-tools still stay behind `mcp`, which a script calls like any other tool (see [Modes](/guide/sessions#modes)).
+tools are in that reach too: such a chat has every server connected (see [Modes](/guide/sessions#modes)).
 
 Any tool can be made lazy except pi's own built-in ones (`read`, `bash`, `edit`, `write`, `grep`, `find`
 and `ls`), which every conversation works with and which are always offered. They have no button, and
@@ -510,18 +512,14 @@ by its own name, or a lazy one called through `tool_search`. A switched-off one 
 answered "not found", and writes nothing. If a call through `tool_search` turns out to be another tool's (a key
 given twice, the last one counts), only known when the call is whole, the text that came is taken out again.
 
-**An MCP server's tools** are lazy by the server's own setting, which is the same thing as **Register tools
-directly** in [Settings → MCP](/guide/mcp), turned off: the adapter then leaves the tools to its `mcp` tool,
-which the model uses to search for them, describe them and call them. So there is one switch, and the
-lazy button of an MCP server in Settings → Tools is that setting (a tool of the server cannot differ from it;
-a list of tools in `directTools` is shown as it is). **MCP servers are lazy unless they register their
-tools directly**, as the adapter does by default; a server an extension writes with its tools registered
-directly, Understory's for one, stays so. A change reaches the chats that start after it. `tool_search`
-has no part in this, and a lazy mark that names an MCP server is refused. The [guard](/guide/security)
-reads a call through `mcp` by the tool it reaches and what it is given, as it reads that tool called
-directly: the rules after a result that looks like a prompt injection, and what is kept from somebody who is
-not the primary user, such as the places secrets are kept. (A standing approval for a colleague is matched on
-the `mcp` call itself.)
+**An MCP server** is a group like any other: marked auto, lazy or direct (also from the server's form in [Settings → MCP](/guide/mcp#what-each-server-s-row-says)), and counted by the threshold with the size
+of its tools, which the portal remembers from when the server last ran (a server nothing is known of yet counts as
+lazy). Its tools are named `mcp__<server>__<tool>`. A lazy server is not started with the chat but when the model
+first searches for or calls one of its tools, and is stopped again after ten minutes of not being used (see
+[MCP servers](/guide/mcp#tools-and-how-many-of-them)). A change of the mark reaches the chats that start after it.
+The [guard](/guide/security) reads a call through `tool_search` as a call of the tool it names: the rules after a
+result that looks like a prompt injection, and what is kept from somebody who is not the primary user, such as the
+places secrets are kept, hold it as they hold that tool called by its name.
 
 ### How the model reaches a lazy tool
 
