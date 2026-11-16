@@ -152,31 +152,46 @@ const SCENES: Scene[] = [
  * What a scene's elements are drawn with, by the values the tokens set: one line for each distinct tag and set of
  * values, with how many elements have it. Their classes are not part of it: the same look may be written as another
  * class (a literal that became a named step), and the look is what has to stay.
+ *
+ * The font family is read as the page sets it. Every other value is read with the fonts of `steady`, which are the
+ * same on every machine: a length that follows the text (a margin `auto` resolves to, a width in `ch`) is then the same
+ * in CI as here. An `auto` margin stays `auto`, and lengths are whole pixels, as a machine's hinting may move a text's
+ * width by a fraction. So the list is a check that runs everywhere.
  */
 async function styles(page: Page) {
-  return page.evaluate(() => {
+  const families = await page.evaluate(() =>
+    [...document.body.querySelectorAll('*')].map((el) => getComputedStyle(el).fontFamily));
+  await steady(page);
+  return page.evaluate((families) => {
     const props = [
-      'font-family', 'font-size', 'font-weight', 'line-height', 'letter-spacing',
+      'font-size', 'font-weight', 'line-height', 'letter-spacing',
       'padding-top', 'padding-right', 'padding-bottom', 'padding-left', 'margin-top', 'margin-right', 'margin-bottom', 'margin-left',
       'row-gap', 'column-gap', 'border-top-left-radius', 'border-top-right-radius', 'border-bottom-right-radius', 'border-bottom-left-radius',
       'border-top-width', 'border-right-width', 'border-bottom-width', 'border-left-width', 'z-index', 'max-width', 'min-width', 'max-height', 'min-height',
       'box-shadow', 'transition-duration', 'animation-duration',
     ];
+    const whole = (v: string) => v.replace(/(-?\d+(?:\.\d+)?)px/g, (_, n) => `${Math.round(Number(n))}px`);
     const rows = new Map<string, number>();
-    for (const el of document.body.querySelectorAll('*')) {
-      if (el.closest('script,style,noscript')) continue;
+    [...document.body.querySelectorAll('*')].forEach((el, i) => {
+      if (el.closest('script,style,noscript')) return;
       const css = getComputedStyle(el);
-      if (css.display === 'none') continue;
+      if (css.display === 'none') return;
       // What an animation is drawing right now is a moment's value, not the element's style.
       const moving = css.animationName !== 'none';
-      const row = `${el.localName} | ${props.map((p) => (moving && p === 'box-shadow' ? '~' : css.getPropertyValue(p))).join(' | ')}`;
+      const value = (p: string) => {
+        if (moving && p === 'box-shadow') return '~';
+        // getComputedStyle gives the margin `auto` came to; the computed value is `auto` itself.
+        if (p.startsWith('margin-') && el.computedStyleMap?.().get(p)?.toString() === 'auto') return 'auto';
+        return whole(css.getPropertyValue(p));
+      };
+      const row = `${el.localName} | ${families[i]} | ${props.map(value).join(' | ')}`;
       rows.set(row, (rows.get(row) ?? 0) + 1);
-    }
+    });
     return [...rows].map(([row, count]) => `${count}x ${row}`).sort();
-  });
+  }, families);
 }
 
-/** The same fonts on every machine for a picture, and nothing moving. Set after the styles are read: they are not part of them. */
+/** The same fonts on every machine for a picture and for the style lists, and nothing moving. Once per page. */
 async function steady(page: Page) {
   const face = (name: string, file: string) => `@font-face { font-family: "${name}"; src: url("/__fonts/${file}"); }`;
   await page.addStyleTag({ content: [
@@ -233,7 +248,8 @@ for (const scene of SCENES) {
           test.info().annotations.push({ type: 'pictures not compared', description: 'only on the machine that took them; the style lists above were' });
           return;
         }
-        await steady(page);
+        // The dark scene was made steady by its style list already.
+        if (theme !== 'dark') await steady(page);
         await expect(page).toHaveScreenshot(`${scene.name}-${viewport}-${theme}.png`, { maxDiffPixels: 0, threshold: 0.2, animations: 'disabled', caret: 'hide' });
       });
     }
