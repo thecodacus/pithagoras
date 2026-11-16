@@ -63,7 +63,7 @@ import { EffortPicker, Empty, ErrorBanner, Field, LoadFailed, Section, Switch, S
 import { ExtensionsPanel } from "./ExtensionsPanel";
 import { webLink } from "../package-names";
 import { prefetchSettings, refreshFailed, useCached } from "../settings-cache";
-import type { Tab } from "../settings-tabs";
+import { SETTINGS_GROUPS, TABS, type Tab } from "../settings-tabs";
 import { serialSaver } from "../serial-saver";
 import { local } from "../safe-storage";
 import { SETTINGS_INDEX, searchSettings, type SettingEntry } from "../settings-search";
@@ -95,53 +95,26 @@ const OWN_LAYOUT = new Set<Tab>(["extensions", "logs", "advanced"]);
  */
 type Nav = { kind: "tab"; id: Tab } | { kind: "ext"; spec: string } | { kind: "ext"; name: string };
 
-type TabDef = { id: Tab; label: string; icon: ReactNode; hint: string };
-
-/**
- * The rail, in the order a person setting the portal up needs it: where the
- * models come from and how they are used, then what the agent can do, who it
- * talks to, and last the portal itself.
- */
-const GROUPS: { label: string; tabs: TabDef[] }[] = [
-  {
-    label: msg("Models"),
-    tabs: [
-      { id: "models", label: msg("Providers"), icon: <LuServer />, hint: msg("Where the models come from") },
-      { id: "general", label: msg("Defaults"), icon: <LuSlidersHorizontal />, hint: msg("Model, effort and context for new chats") },
-    ],
-  },
-  {
-    label: msg("Agent"),
-    tabs: [
-      { id: "tools", label: msg("Tools"), icon: <LuHammer />, hint: msg("What the agent may reach for, by default") },
-      { id: "modes", label: msg("Modes"), icon: <LuLayers />, hint: msg("Your own ways a chat can work, chosen above the message box") },
-      { id: "sandbox", label: msg("Sandbox"), icon: <LuShieldCheck />, hint: msg("What the agent may read, change and run") },
-      { id: "guard", label: msg("Guard"), icon: <LuShield />, hint: msg("What the agent is held to after it reads something untrusted") },
-      { id: "skills", label: msg("Skills"), icon: <LuWrench />, hint: msg("Procedures the agent can reach for") },
-      { id: "mcp", label: msg("MCP"), icon: <LuPlug />, hint: msg("Servers the agent can pull tools from") },
-      { id: "extensions", label: msg("Extensions"), icon: <LuBlocks />, hint: msg("Install and manage packages") },
-    ],
-  },
-  {
-    label: msg("Reach"),
-    tabs: [
-      { id: "channels", label: msg("Channels"), icon: <LuRadio />, hint: msg("Two-way links into the agent") },
-      { id: "people", label: msg("People"), icon: <LuUsers />, hint: msg("Who the agent will talk to") },
-    ],
-  },
-  {
-    label: msg("Portal"),
-    tabs: [
-      { id: "browser", label: msg("This browser"), icon: <LuMonitor />, hint: msg("Theme, notifications, confirmations") },
-      { id: "authentication", label: msg("Authentication"), icon: <LuKeyRound />, hint: msg("The password, and signing in through a provider") },
-      { id: "shortcuts", label: msg("Shortcuts"), icon: <LuKeyboard />, hint: msg("Keyboard shortcuts, and changing them") },
-      { id: "logs", label: msg("Logs"), icon: <LuScrollText />, hint: msg("What the server prints, and a file to take away") },
-      { id: "about", label: msg("About"), icon: <LuInfo />, hint: msg("Where this portal keeps things") },
-      { id: "advanced", label: msg("Advanced"), icon: <LuFileJson />, hint: msg("pi's raw settings file") },
-    ],
-  },
-];
-const TABS = GROUPS.flatMap((g) => g.tabs);
+/** The icon of each tab of the rail: its name, its hint and its place are in settings-tabs.ts. */
+const TAB_ICONS: Record<Tab, ReactNode> = {
+  models: <LuServer />,
+  general: <LuSlidersHorizontal />,
+  tools: <LuHammer />,
+  modes: <LuLayers />,
+  sandbox: <LuShieldCheck />,
+  guard: <LuShield />,
+  skills: <LuWrench />,
+  mcp: <LuPlug />,
+  extensions: <LuBlocks />,
+  channels: <LuRadio />,
+  people: <LuUsers />,
+  browser: <LuMonitor />,
+  authentication: <LuKeyRound />,
+  shortcuts: <LuKeyboard />,
+  logs: <LuScrollText />,
+  about: <LuInfo />,
+  advanced: <LuFileJson />,
+};
 
 /** The rail's extension pages as last seen, so a reload does not start without them. */
 const RAIL_KEY = "pithagoras.settings.extension-rail";
@@ -327,12 +300,12 @@ export const ConfigModal = memo(function ConfigModal({
       rail={
         <SettingsSearch index={index} onPick={go}>
         <div className="space-y-4">
-          {GROUPS.map((g) => (
+          {SETTINGS_GROUPS.map((g) => (
             <RailGroup key={g.label} name={g.label} label={t(g.label)} held={nav.kind === "tab" && g.tabs.some((tab) => tab.id === nav.id)}>
               {g.tabs.map((tab) => (
                 <RailItem
                   key={tab.id}
-                  icon={tab.icon}
+                  icon={TAB_ICONS[tab.id]}
                   label={t(tab.label)}
                   hint={t(tab.hint)}
                   active={nav.kind === "tab" && nav.id === tab.id}

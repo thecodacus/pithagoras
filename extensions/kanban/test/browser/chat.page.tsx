@@ -11,6 +11,7 @@ import type { PortalEvent, Session } from '../../../../core/web/src/api';
 import { installMotion } from '../../../../core/web/src/motion';
 import { startExtensions } from '../../../../core/web/src/extensions/loader';
 import '../../../../core/web/src/styles';
+import { createFakeKernel, WithKernel } from '../../../../core/web/tests/fake-kernel';
 installMotion();
 // The installed extensions, loaded as the app loads them: the browser test installs Kanban (`installed` in tests/browser/portal-mock.ts).
 startExtensions();
@@ -25,10 +26,13 @@ const events: PortalEvent[] = [
 
 const session = { id: 'preview', title: 'Plan the release', workspace: '/workspaces/pithagoras', executor: 'host', status: 'idle', created_at: '', updated_at: '', last_error: null, pinned: false, provider: 'llama-server', model: 'Model A', thinking_level: 'medium' } as Session;
 const noop = async () => {};
+// The chat reads its conversation from the kernel's chats store, which this page fills as it draws (see core/web/tests/fake-kernel.tsx).
+const fake = createFakeKernel();
 
 function Fixture() {
   const [shown, setShown] = React.useState(events);
   (window as any).emit = (type: string, payload: any) => setShown((list) => [...list, { seq: ++seq, type, at: Date.now(), payload }]);
-  return <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}><div style={{ flex: 1, minHeight: 0 }}><Chat session={session} events={shown} onSend={noop} onEditMessage={noop} onDeleteMessage={noop} onTakeBackQueued={noop} onSendQueuedNow={noop} onAbort={noop} onClientCommand={noop} onRename={noop} onSetMode={noop} loading={false} /></div></div>;
+  fake.feed(session.id, shown);
+  return <WithKernel fake={fake}><div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}><div style={{ flex: 1, minHeight: 0 }}><Chat session={session} onClientCommand={noop} /></div></div></WithKernel>;
 }
 createRoot(document.getElementById('root')!).render(<BrowserRouter><Fixture /><ConfirmHost /></BrowserRouter>);

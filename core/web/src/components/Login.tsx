@@ -2,6 +2,7 @@ import { useState } from "react";
 import { api, ApiError, type SingleSignOn } from "../api";
 import { MIN_PASSWORD_LENGTH, passwordMistake } from "../password";
 import { t } from "../i18n";
+import { brand } from "../brand";
 
 const fieldCls =
   "w-full rounded-xl border border-line bg-surface px-3.5 py-2.5 text-sm text-fg outline-none transition placeholder:text-fg-faint focus:border-accent/50 focus:ring-4 focus:ring-accent/10";
@@ -11,7 +12,7 @@ function Brand({ children }: { children?: React.ReactNode }) {
   return (
     <div className="mb-6 flex flex-col items-center text-center">
       <img src="/icon-512.png" alt="" className="h-16 w-16 object-contain p-3" draggable={false} />
-      <h1 className="mt-3 text-base font-semibold tracking-tight text-fg">Pithagoras</h1>
+      <h1 className="mt-3 text-base font-semibold tracking-tight text-fg">{brand.name}</h1>
       <p className="mt-1 text-xs text-fg-subtle">{t("Give it a task, close the browser, come back later.")}</p>
       {children}
     </div>

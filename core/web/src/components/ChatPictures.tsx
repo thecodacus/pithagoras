@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactNode } from "react";
-import { api } from "../api";
+import { useKernel } from "../kernel/context";
 import { chatPictures } from "../chat-pictures";
 import type { Item } from "../transcript";
 import { ImageViewer } from "./ImageViewer";
@@ -13,6 +13,7 @@ import { ImageViewer } from "./ImageViewer";
  * what arrives while it is open joins the end of the list.
  */
 export function useChatPictures(items: Item[], session: { id: string; workspace: string }) {
+  const { media } = useKernel();
   // Of this chat: another chat's pictures are not the ones to step through.
   const [opened, setOpened] = useState<{ chat: string; id: string } | null>(null);
   // Gone to another chat with it open (a notification does that): it was closed there, and does not come back with this chat.
@@ -23,11 +24,11 @@ export function useChatPictures(items: Item[], session: { id: string; workspace:
     () =>
       open
         ? chatPictures(items, session.workspace, {
-            sent: (name) => api.imageUrl(session.id, name),
-            shown: (path, version) => api.pictureUrl(session.id, path, version),
+            sent: (name) => media.image(session.id, name),
+            shown: (path, version) => media.picture(session.id, path, version),
           })
         : [],
-    [open, items, session.id, session.workspace],
+    [open, items, session.id, session.workspace, media],
   );
   return {
     open: (id: string) => setOpened({ chat: session.id, id }),

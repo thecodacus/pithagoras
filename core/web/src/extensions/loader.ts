@@ -19,6 +19,8 @@ import { addStrings, forgetStrings, translate, translateCount, translateInContex
 import { registerShortcut } from "./shortcuts";
 import { registerTheme, setThemeAs, themes, themesSettled } from "./themes";
 import { chosenPalette, usePalette, useResolvedTheme } from "../theme";
+import { CONTRACT_VERSION, FEATURES, has, refusal } from "./contract";
+import { dataFor } from "./data";
 
 /**
  * Loads the browser halves of the installed extensions into the page, and
@@ -119,7 +121,7 @@ function useThemeNow(): { mode: "light" | "dark"; theme: string | null } {
 }
 
 /** What of an extension the page holds: by these it is known whether what is installed is what is loaded. */
-const stamp = (ext: ExtensionUi) => JSON.stringify([ext.entry ?? null, ext.server ?? null, ext.themes ?? null]);
+const stamp = (ext: ExtensionUi) => JSON.stringify([ext.entry ?? null, ext.server ?? null, ext.themes ?? null, ext.api ?? null]);
 
 /** How long an extension's module may take to be fetched and called: one that hangs must not keep the others, or the page, waiting. */
 const LOAD_MS = 15_000;
@@ -187,22 +189,27 @@ async function activate(ext: ExtensionUi, told: Promise<void>[]): Promise<void> 
     }
     const module = await import(/* @vite-ignore */ entry);
     if (typeof module.default !== "function") throw new Error("Its module has no default export to call");
+    const data = dataFor(ext.name);
     const portal: Portal = {
       version: 1,
       extension: ext.name,
+      has,
       React,
       slots: { register: (slot, entry) => kept(register(ext.name, slot, entry)) },
       navigate: (path, options) => go(path, options),
       useLocation: useHere,
       ui,
-      api: {
+      // Frozen, as the list of features in it: an extension that changed it would change what `has` says for the others.
+      api: Object.freeze({
+        version: CONTRACT_VERSION,
+        features: FEATURES,
         json,
-        url: (path) => {
+        url: (path: string) => {
           if (!ext.server) throw new Error(`${ext.name} has no server half running`);
           return `${ext.server}${path.startsWith("/") ? "" : "/"}${path}`;
         },
         ApiError,
-      },
+      }),
       t: (text, vars) => translate(ext.name, text, vars),
       tp: (n, one, other, vars) => translateCount(ext.name, n, one, other, vars),
       tc: (text, context, vars) => translateInContext(ext.name, text, context, vars),
@@ -211,7 +218,16 @@ async function activate(ext: ExtensionUi, told: Promise<void>[]): Promise<void> 
       locale: { add: (code, strings) => addStrings(ext.name, code, strings), use: useLanguage },
       commands: { register: (name, run) => kept(registerCommand(name, run, ext.name)), run: runCommand, has: hasCommand },
       panels,
-      chats: { use: useChatFeed, on: (chatId, handler) => kept(onChatFeed(chatId, handler)), useEvents: useChatEvents },
+      chats: { use: useChatFeed, on: (chatId, handler) => kept(onChatFeed(chatId, handler)), useEvents: useChatEvents, controller: data.controller },
+      sessions: data.sessions,
+      composer: data.composer,
+      models: data.models,
+      settings: data.settings,
+      me: data.me,
+      status: data.status,
+      prefs: data.prefs,
+      env: data.env,
+      media: data.media,
       shortcuts: { register: (shortcut) => kept(registerShortcut(ext.name, shortcut)) },
       server: { on: (handler) => kept(onServerPush(ext.name, handler)) },
       theme: {
@@ -233,6 +249,13 @@ async function activate(ext: ExtensionUi, told: Promise<void>[]): Promise<void> 
     // The themes its package.json names need no module: a package may be nothing but themes.
     for (const theme of ext.themes ?? []) themesOff.push(registerTheme(ext.name, theme));
     inPage.set(ext.name, ext);
+    // Needs a newer interface API than this portal has: not loaded, and said why in Settings, rather than thrown from its module.
+    const refused = entry ? refusal(ext.api) : undefined;
+    if (refused) {
+      failures = { ...failures, [ext.name]: refused };
+      loaded.set(ext.name, { stamp: "", leave });
+      return;
+    }
     if (entry) await within(LOAD_MS, load(entry), "loading");
     loaded.set(ext.name, { stamp: stamp(ext), leave });
     if (!entry) return;

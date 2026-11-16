@@ -5,7 +5,7 @@ import { PageHeader, Stat } from "./PageHeader";
 import type { Session } from "../api";
 import { when } from "../time";
 import { filterSessions, olderThan } from "../session-filter";
-import { SessionActions, confirmDeleteSessions, sessionError } from "./SessionActions";
+import { SessionActions, sessionError } from "./SessionActions";
 import { ErrorBanner, ghostCls } from "./SettingsUi";
 import { Select } from "./Select";
 import { StatusDot, workingText } from "./StatusDot";
@@ -49,9 +49,10 @@ export const SessionsPage = memo(function SessionsPage({
   onSelect: (id: string) => void;
   /** A chat in `workspace`, or where New starts without one, opened. */
   onNewChat?: (workspace?: string) => Promise<void>;
-  onDelete: (id: string) => Promise<void>;
+  onDelete: (id: string) => Promise<boolean>;
   /** Deletes the chats one after the other, and tells which ones the server refused. */
-  onDeleteMany: (ids: string[]) => Promise<{ id: string; error: string }[]>;
+  /** One question for all, asked in the kernel; null where the person said no. */
+  onDeleteMany: (ids: string[]) => Promise<{ id: string; error: string }[] | null>;
   onPin: (id: string, pinned: boolean) => Promise<void>;
   onRename: (id: string, title: string) => Promise<void>;
 }) {
@@ -180,8 +181,7 @@ export const SessionsPage = memo(function SessionsPage({
   const everyChosen = visible.length > 0 && chosen.length === visible.length;
   const deleteChosen = async () => {
     const ids = chosen.map((s) => s.id);
-    const subs = chosen.reduce((n, s) => n + (all.under.get(s.id)?.length ?? 0), 0);
-    if (!ids.length || deleting || !(await confirmDeleteSessions(chosen.map((s) => ({ title: s.title, busy: busy(s) })), subs))) return;
+    if (!ids.length || deleting) return;
     setError(null);
     setDeleting(true);
     // Pictures of the rows, to break apart where they were once they are gone (see motion.ts).
@@ -193,6 +193,8 @@ export const SessionsPage = memo(function SessionsPage({
     );
     try {
       const failed = await onDeleteMany(ids);
+      // Said no to the question: nothing was deleted.
+      if (!failed) return;
       const refused = new Set(failed.map((f) => f.id));
       for (const [id, leave] of gone) if (!refused.has(id)) leave("row");
       // What the server kept stays chosen, to try again.
@@ -307,7 +309,7 @@ export const SessionsPage = memo(function SessionsPage({
         <span className="shrink-0 text-2xs text-fg-faint">{when(s.updated_at)}</span>
         {!choosing && (
           <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100">
-            <SessionActions session={s} subChats={subChats} nested={nested} onPin={onPin} onStartRename={() => setRenaming(s.id)} onDelete={onDelete} onError={setError} />
+            <SessionActions session={s} nested={nested} onPin={onPin} onStartRename={() => setRenaming(s.id)} onDelete={onDelete} onError={setError} />
           </div>
         )}
       </li>

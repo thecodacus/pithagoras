@@ -136,6 +136,11 @@ portal, is in [What is loaded, and when](#what-is-loaded-and-when).
   and not the portal's. A package installed from an extension's data folder
   always runs so, however it was installed: see
   [A server half in a process of its own](#a-server-half-in-a-process-of-its-own).
+- **`api`** is the versions of the interface API the browser half needs, as a
+  semver range (`"^1.0"`): a portal whose
+  [contract](/guide/data-contract#versioning) is not one of them does not
+  load the module, and says why in Settings → Extensions. Without it the
+  package is taken as `^1.0`.
 - **`themes`** are [colours in place of the portal's own](#themes), with no
   code at all.
 
@@ -154,7 +159,9 @@ with it either way.
 | `slots.register(slot, entry)` | Puts an entry into a [slot](#slots). Returns what takes it out |
 | `chats.use(chatId, pick?)` | A hook: [the chat as the page has it](#the-chat-s-events) |
 | `chats.on(chatId, handler)` | The same outside a component |
-| `chats.useEvents(chatId)` | A hook: any chat's events by its id, streamed while the component is drawn, as the page streams the chat on screen: `{ events, status, loading, missing }`. For drawing another chat beside the one on screen, such as a [child chat](#child-chats)'s run with `ui.Transcript`. The latest part of a long one; nothing without an id |
+| `chats.useEvents(chatId)` | A hook: any chat's events by its id, streamed while the component is drawn, as the page streams the chat on screen: `{ events, status, loading, missing, versions, hasEarlier, loadingEarlier, live }`. For drawing another chat beside the one on screen, such as a [child chat](#child-chats)'s run with `ui.Transcript`. The latest part of a long one; nothing without an id. The page keeps at most four streams open at once (the chat on screen's first): a chat past that is read as a snapshot of its latest events, asked for again every five seconds, since the browser allows six connections to one origin and the portal needs the rest for its own calls |
+| `chats.controller(chatId)`, `sessions`, `composer`, `models`, `settings`, `me`, `status`, `prefs`, `env`, `media` | [The data contract](/guide/data-contract): what the page knows and what is done to it, as small typed members. Experimental |
+| `has(feature)`, `api.version`, `api.features` | Which parts of that contract this portal has, and its [version](/guide/data-contract#versioning) |
 | `panels` | [Any panel of the chat on screen](#panels-and-commands), by name |
 | `commands` | [What can be asked of an extension by name](#panels-and-commands) |
 | `api.json(url, init?)` | A request as the portal's own are made |
@@ -3254,7 +3261,9 @@ interface still changes, and a 0.x minor version may break an extension, so an
 extension depends on `"^0.2.0"`, which takes 0.2.1 and not 0.3.0. `version` on
 the `portal` an extension is given, `1`, is not the package's version: it is
 the version of the interface the portal loads an extension with, raised only
-when something an extension relies on changes.
+when something an extension relies on changes. What an extension reads of the
+portal's data has a version of its own, `portal.api.version`, which an
+extension names in `pithagoras.api`: see [the data contract](/guide/data-contract).
 
 ### Releasing @pithagoras/extension-api
 

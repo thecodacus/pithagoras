@@ -14,13 +14,13 @@ import { DictationButton, DictationStrip } from "./Dictation";
 import { insertAtCaret } from "../dictation";
 import { useDictation } from "../use-dictation";
 import { createPortal } from "react-dom";
-import { Fragment, memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { Fragment, memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { DiagramPlugin } from "streamdown";
 import { followPointer } from "../pointer-drag";
 import { LuGripVertical, LuMenu, LuArrowDown, LuSquare, LuArrowUp, LuPaperclip, LuPuzzle, LuX, LuCornerLeftUp } from "react-icons/lu";
 import { Link } from "react-router-dom";
-import { api, EXTENSIONS_CHANGED, MODES_CHANGED, type ChatMode, type PiCommand, type PortalEvent, type PromptOptions, type Session } from "../api";
-import { pending, refetchImage, sortFiles, uploadedNote, type Attachment } from "../attachments";
+import { EXTENSIONS_CHANGED, MODES_CHANGED, type ChatMode, type PiCommand, type PortalEvent, type Session } from "../api";
+import { refetchImage, type Attachment } from "../attachments";
 import { activity, buildTranscript, keepItems, type Item, type SentImage } from "../transcript";
 import { HAS_MERMAID, loadMermaidPlugin } from "../mermaid";
 import { useResolvedTheme } from "../theme";
@@ -28,14 +28,13 @@ import { ComposerBar } from "./ComposerBar";
 import { ModePicker, ModePill } from "./ModePicker";
 import { QuestionCard } from "./QuestionCard";
 import { useChatPictures } from "./ChatPictures";
-import { confirmDialog } from "./ConfirmDialog";
 import { ErrorBoundary, PartFailed } from "./ErrorBoundary";
 import { moveHighlight, paletteMatches, slashToken, typedCommand } from "../slash-palette";
 import { useCommandTrigger } from "../command-trigger";
 import { TitleInput } from "./TitleInput";
-import { caretFrom, drafts, withUnsent } from "../drafts";
+import { caretFrom } from "../drafts";
 import { onFill } from "../editor-fills";
-import { local } from "../safe-storage";
+import type { Prefs } from "../kernel/prefs";
 import { across as laidAcross, fancy, glide, launch, leaveRef, mark, settle, slideOver, useLeaveRef, type Mark } from "../motion";
 import { CLIENT_COMMANDS, isClientCommand, isCommand } from "../client-commands";
 import { isComposing, isEnter, opensComposer, stopsRun } from "../shortcuts";
@@ -44,25 +43,17 @@ import { labelOf, msg, t } from "../i18n";
 import { titleOf, useSlot, type ChatProps, type PanelHandle, type Panels, type Registered } from "../extensions/slots";
 import { channelFor } from "../extensions/channel";
 import { forgetChatFeed, publishChat } from "../extensions/chat-feed";
+import { useKernel } from "../kernel/context";
+import { useChat, useComposer, useViewport } from "../kernel/use";
 import { forgetOpenCalls, openCalls } from "../open-calls";
 import { setPanelController, type ChatPanels } from "../extensions/panels";
 import { runCommand, useHasCommand } from "../extensions/commands";
 import { failedIn } from "../extensions/loader";
 import { STEP, arrowSteps } from "../resize-keys";
+import { brand } from "../brand";
 
 /** How many messages are drawn at first, and added each time you scroll up to the edge. */
 const PAGE = 40;
-
-/** Wide enough for the panels to sit beside the conversation: below it they cover it. */
-const BESIDE = "(min-width: 768px)";
-let besideQuery: MediaQueryList | undefined;
-/** One query for every chat and every render, made when first asked. */
-const besideNow = () => (besideQuery ??= matchMedia(BESIDE));
-const watchBeside = (changed: () => void) => {
-  const query = besideNow();
-  query.addEventListener("change", changed);
-  return () => query.removeEventListener("change", changed);
-};
 
 /** The panels' edge towards the conversation, or a window's frame when they float. */
 const ASIDE: Record<Dock, string> = {
@@ -145,8 +136,8 @@ function panelBoxes(park: { readonly current: HTMLElement | null }, pressed: { r
 }
 
 /** A size kept in storage, or `fallback` for one that is missing or smaller than may be drawn. */
-const storedSize = (key: string, fallback: number, least: number) => {
-  const n = Number(local.get(key));
+const storedSize = (prefs: Prefs, key: string, fallback: number, least: number) => {
+  const n = Number(prefs.get(key, ""));
   return Number.isFinite(n) && n >= least ? n : fallback;
 };
 
@@ -154,88 +145,67 @@ const COMPOSER_HEIGHT_KEY = "pithagoras.composerHeight";
 const DEFAULT_COMPOSER_HEIGHT = 72;
 const MIN_COMPOSER_HEIGHT = 56;
 
-function storedComposerHeight(): number {
-  const stored = Number.parseInt(local.get(COMPOSER_HEIGHT_KEY) ?? "", 10);
+function storedComposerHeight(prefs: Prefs): number {
+  const stored = Number.parseInt(prefs.get(COMPOSER_HEIGHT_KEY, ""), 10);
   return Number.isFinite(stored) && stored >= MIN_COMPOSER_HEIGHT ? stored : DEFAULT_COMPOSER_HEIGHT;
 }
 
-function persistComposerHeight(height: number) {
-  local.set(COMPOSER_HEIGHT_KEY, String(Math.round(height)));
+function persistComposerHeight(prefs: Prefs, height: number) {
+  prefs.set(COMPOSER_HEIGHT_KEY, String(Math.round(height)));
 }
 
-/** `list` with one `id` taken out. */
-function without(list: string[], id: string): string[] {
-  const at = list.indexOf(id);
-  return at < 0 ? list : list.filter((_, i) => i !== at);
-}
+/** The chat's events while its first replay has not come: drawing none, the conversation is not shown half-built. */
+const NO_EVENTS: PortalEvent[] = [];
 
+/**
+ * The chat view: the conversation, its header, the panels beside it, and the box a message is written in. What it shows
+ * and does is the kernel's (kernel/): the chat's events and versions come from its store, and every action goes through
+ * the chat's controller, which asks what must be asked. It takes the chat's row (`session`) and what only the frame
+ * knows: how a command that is the page's own is run, and how the navigation on a phone is opened.
+ */
 export function Chat({
   session,
-  events,
-  onSend,
-  onEditMessage,
-  onDeleteMessage,
-  onTakeBackQueued,
-  onSendQueuedNow,
-  onAbort,
   onClientCommand,
-  onRename,
-  onSetMode,
   onOpenNavigation,
   parentTitle,
-  versions = {},
-  loading,
-  hasEarlier,
-  loadingEarlier,
-  onLoadEarlier,
 }: {
   session: Session;
-  events: PortalEvent[];
-  /** The conversation is still arriving; drawing it now would show it half-built. */
-  loading?: boolean;
-  hasEarlier?: boolean;
-  loadingEarlier?: boolean;
-  onLoadEarlier?: () => void;
-  onSend: (message: string, options?: PromptOptions) => Promise<void>;
-  /** Replace a sent message: it and everything after it are dropped, and the new text is sent. */
-  onEditMessage: (seq: number, message: string) => Promise<void>;
-  /** Remove a sent message and the agent's answer to it. */
-  onDeleteMessage: (seq: number) => Promise<void>;
-  /** Take back a message that waits for the agent to read it. */
-  onTakeBackQueued: (seq: number) => Promise<void>;
-  /** Stop the run and send a waiting message now, the others still waiting behind it. */
-  onSendQueuedNow: (seq: number) => Promise<void>;
-  onAbort: () => Promise<void>;
   /** Builtins the portal itself services — /settings, /new, /name. */
   onClientCommand: (name: string, args: string) => void | Promise<void>;
-  /** Give the chat another name, from its header. */
-  onRename: (title: string) => Promise<void>;
-  /** Put the chat, which has said nothing yet, in a mode (see ModePicker); `confirmed` for one that asks first. */
-  onSetMode: (mode: string, confirmed?: boolean) => Promise<void>;
   /** On a phone, where the sidebar is a drawer: opens it. */
   onOpenNavigation?: () => void;
   /** For a sub-chat (see sub-chats.ts): its chat's title, where the list has that chat. */
   parentTitle?: string;
-  /**
-   * The versions of messages edited or sent again, by the seq of the one
-   * shown: the seqs of all of them, oldest first. Said by the chat's stream.
-   */
-  versions?: Record<number, number[]>;
 }) {
-  const [input, setInput] = useState(() => drafts.get(session.id));
-  // Where dictated words go. Kept beside the state because several phrases can
-  // arrive before React has drawn the first, and each must land after the last.
+  // The page's preferences (the panels' places and sizes, the box's height), under the keys the portal has always kept.
+  const { chats, composer, media, prefs } = useKernel();
+  /** What is done in this chat: the kernel asks what must be asked first. */
+  const controller = chats.controller(session.id);
+  // The chat as the kernel has it: its stream is shared with whatever else reads it (the frame, a panel).
+  const stream = useChat(session.id);
+  const loading = !stream.loaded;
+  const events = loading ? NO_EVENTS : stream.events;
+  const hasEarlier = !loading && stream.moreBefore;
+  const loadingEarlier = stream.loadingBefore;
+  const versions = stream.versions;
+  // What is written in the box and put with it is the kernel's, so it is kept per chat, and a change of interface in the
+  // middle of a message loses nothing.
+  const compose = useComposer(session.id);
+  const input = compose.draft;
+  const attached = compose.attachments;
+  // Pictures being read or files being uploaded: the message waits for them.
+  const adding = compose.adding;
+  const sending = compose.sending;
+  const commands = compose.commands;
+  // Where dictated words go. The box's text is taken as it now is, not as last drawn: several phrases can arrive before
+  // React has drawn the first, and each must land after the last.
   const box = useRef<HTMLTextAreaElement>(null);
-  const draft = useRef(input);
-  draft.current = input;
+  /** What is in the box now, which a handler that runs after the last draw reads rather than what was drawn. */
+  const draftNow = () => composer.get(session.id).draft;
   const caret = useRef<{ start: number; end: number } | null>(null);
   const caretTo = useRef<number | null>(null);
   const [voiceMode, setVoiceMode] = useState(false);
   const [voiceHost, setVoiceHost] = useState<HTMLDivElement | null>(null);
-  // Sends and uploads on their way, by the chat they are for: this is one component for every chat, and what is
-  // still going on in one must not hold up another (one id for each thing going on).
-  const [sendingIn, setSendingIn] = useState<string[]>([]);
-  const sending = sendingIn.includes(session.id);
   // Which sent message is being rewritten, and what went wrong with the last
   // thing done to one — shown in the transcript, where the message is.
   const [editing, setEditing] = useState<number | null>(null);
@@ -245,31 +215,20 @@ export function Chat({
   // away when another opens: the words half written in the box (kept, and
   // there again when you come back), the message being rewritten — a number
   // that would name a different message here — and the last complaint.
-  // Pictures waiting to go with the next message, kept per chat like the words.
-  const [attached, setAttached] = useState<Attachment[]>(() => pending.get(session.id));
-  // Pictures being read or files being uploaded: the message waits for them.
-  const [addingIn, setAddingIn] = useState<string[]>([]);
-  const adding = addingIn.filter((id) => id === session.id).length;
   const [dragging, setDragging] = useState(false);
   const picker = useRef<HTMLInputElement>(null);
   const [boxOf, setBoxOf] = useState(session.id);
   if (boxOf !== session.id) {
     setBoxOf(session.id);
-    setInput(drafts.get(session.id));
-    setAttached(pending.get(session.id));
     setEditing(null);
     setRenaming(false);
     setActionError(null);
   }
   const currentSession = useRef(session.id);
   currentSession.current = session.id;
-  // Voice mode adds to and takes from the same pictures.
-  useEffect(() => pending.subscribe((id) => {
-    if (id === currentSession.current) setAttached(pending.get(id));
-  }), []);
   const [panelRequest, setPanelRequest] = useState<"model" | "effort" | null>(null);
   const resizeCleanupRef = useRef<(() => void) | null>(null);
-  const [composerHeight, setComposerHeight] = useState(storedComposerHeight);
+  const [composerHeight, setComposerHeight] = useState(() => storedComposerHeight(prefs));
   // A job in the running tray is shown where an extension says jobs are shown (`jobs.show`); while none does, a job
   // there is only listed.
   const jobsShown = useHasCommand("jobs.show");
@@ -412,26 +371,27 @@ export function Chat({
   // one — where they went, how wide or tall, and their one window — is what a
   // panel not placed yet, or a place not sized yet, has.
   const [before] = useState(() => {
-    const stored = local.get("panelDock");
+    const stored = prefs.get("panelDock", "");
     return {
       dock: isDock(stored) ? stored : ("right" as Dock),
-      width: storedSize("panelWidth", 560, DOCKED_MIN.w),
-      height: storedSize("panelHeight", 320, DOCKED_MIN.h),
-      frame: readFrame(local.get("panelFloat")),
+      width: storedSize(prefs, "panelWidth", 560, DOCKED_MIN.w),
+      height: storedSize(prefs, "panelHeight", 320, DOCKED_MIN.h),
+      frame: readFrame(prefs.get("panelFloat", "") || null),
     };
   });
-  const [places, setPlaces] = useState<Places>(() => readPlaces(local.get("panelPlaces")));
-  const [sizes, setSizes] = useState<PlaceSizes>(() => readPlaceSizes(local.get("panelSizes")));
+  const [places, setPlaces] = useState<Places>(() => readPlaces(prefs.get("panelPlaces", "") || null));
+  const [sizes, setSizes] = useState<PlaceSizes>(() => readPlaceSizes(prefs.get("panelSizes", "") || null));
   // Between the two panels in one place. One for all places: no more than two
   // panels are open (useWorkPanels), so only one place ever holds two.
-  const [split, setSplit] = useState(() => Number(local.get("panelSplit")) || SPLIT);
-  const [frames, setFrames] = useState<Frames>(() => readFrames(local.get("panelFloats")));
-  useEffect(() => local.set("panelPlaces", JSON.stringify(places)), [places]);
-  useEffect(() => local.set("panelSizes", JSON.stringify(sizes)), [sizes]);
-  useEffect(() => local.set("panelSplit", String(split)), [split]);
-  useEffect(() => local.set("panelFloats", JSON.stringify(frames)), [frames]);
+  const [split, setSplit] = useState(() => Number(prefs.get("panelSplit", "")) || SPLIT);
+  const [frames, setFrames] = useState<Frames>(() => readFrames(prefs.get("panelFloats", "") || null));
+  useEffect(() => prefs.set("panelPlaces", JSON.stringify(places)), [places]);
+  useEffect(() => prefs.set("panelSizes", JSON.stringify(sizes)), [sizes]);
+  useEffect(() => prefs.set("panelSplit", String(split)), [split]);
+  useEffect(() => prefs.set("panelFloats", JSON.stringify(frames)), [frames]);
   // On a phone the panels cover the conversation, wherever they are docked.
-  const beside = useSyncExternalStore(watchBeside, () => besideNow().matches);
+  // Wide enough for the panels to sit beside the conversation: below it they cover it.
+  const beside = useViewport() === "desk";
   const placeOf = (kind: AsidePanel): Dock => (beside ? places[kind] ?? before.dock : "right");
   const widthAt = (side: "left" | "right") => sizes[side] ?? before.width;
   const heightAt = () => sizes.bottom ?? before.height;
@@ -951,7 +911,7 @@ export function Chat({
         : null;
     }
     if (hiddenHere > 0) setShown((n) => n + PAGE);
-    else if (hasEarlier && !loadingEarlier) onLoadEarlier?.();
+    else if (hasEarlier && !loadingEarlier) void controller.loadEarlier();
   };
   const keepPlace = () => {
     const box = scroller.ref.current;
@@ -1081,9 +1041,9 @@ export function Chat({
     const id = session.id;
     let live = true;
     const read = () =>
-      api.chatModes(id).then(
-        (r) => {
-          if (live) setModes({ chat: id, list: r.modes });
+      controller.modes().then(
+        (list) => {
+          if (live) setModes({ chat: id, list });
         },
         () => undefined,
       );
@@ -1122,55 +1082,23 @@ export function Chat({
   // Asked for only once the command character is typed. Listing them starts pi
   // for the chat, and it stays up — so fetching them on open started a runtime
   // for every chat looked at, which the config route goes out of its way not to do.
-  const [commands, setCommands] = useState<PiCommand[]>([]);
-  const commandList = useRef<{ key: string; list: Promise<PiCommand[]> } | null>(null);
+  /** Which turn the commands were listed at: a run can install an extension, whose commands should then be offered. */
+  const commandsKey = String(turns);
   /** Per chat, a send that is waiting for the command list, which what is sent after it queues behind. */
   const held = useRef(new Map<string, Promise<unknown>>());
   /** The commands for this chat, fetched once per chat and again after each run. */
-  const loadCommands = (): Promise<PiCommand[]> => {
-    // A run can install an extension, whose commands should then be offered.
-    const key = `${session.id}:${turns}`;
-    if (commandList.current?.key !== key) {
-      const list = api.commands(session.id).then(
-        (r) => r.commands,
-        () => [] as PiCommand[],
-      );
-      commandList.current = { key, list };
-    }
-    // Shown every time, not only when fetched: opening another chat empties
-    // the list, and coming back finds this chat's still here to be offered.
-    const { list } = commandList.current;
-    void list.then((found) => {
-      if (commandList.current?.key === key) setCommands(found);
-    });
-    return list;
-  };
-  // What was listed for another chat is not offered here.
-  useEffect(() => setCommands([]), [session.id]);
+  const loadCommands = () => composer.loadCommands(session.id, commandsKey);
   // A status line that names a command can run it — once it is known to be
   // one of this chat's. Asked only of a pi that is up: a status can outlast
   // the pi that set it, and asking must not start another.
   const statusNamesCommand = background.statuses.some((s) => mentionsCommand(s.text));
   useEffect(() => {
     if (!statusNamesCommand) return;
-    const key = `${session.id}:${turns}`;
-    if (commandList.current?.key === key) {
+    if (composer.commandsAreFor(session.id, commandsKey)) {
       void loadCommands();
       return;
     }
-    let live = true;
-    api.commands(session.id, { ifRunning: true }).then(
-      (r) => {
-        if (!live || r.notRunning) return;
-        // The same list a "/" would fetch, so kept as that.
-        if (commandList.current?.key !== key) commandList.current = { key, list: Promise.resolve(r.commands) };
-        setCommands(r.commands);
-      },
-      () => undefined,
-    );
-    return () => {
-      live = false;
-    };
+    void composer.loadCommandsIfRunning(session.id, commandsKey);
   }, [statusNamesCommand, session.id, turns]);
   const commandNames = useMemo(() => new Set(commands.map((c) => c.name)), [commands]);
 
@@ -1237,7 +1165,7 @@ export function Chat({
     // Kept however it ends — let go, cancelled, or the capture lost with no pointerup at all.
     resizeCleanupRef.current = followPointer(event, move, () => {
       resizeCleanupRef.current = null;
-      persistComposerHeight(box.current?.getBoundingClientRect().height ?? composerHeight);
+      persistComposerHeight(prefs, box.current?.getBoundingClientRect().height ?? composerHeight);
     });
   };
 
@@ -1266,14 +1194,14 @@ export function Chat({
     // the next message, and the chat may have been left by then. The portal's
     // own commands do not wait, as under the slash: they open UI here and need
     // nothing from pi.
-    const listCurrent = commandList.current?.key === `${session.id}:${turns}`;
+    const listCurrent = composer.commandsAreFor(session.id, commandsKey);
     const waits = typed !== null && !msg.startsWith("/") && (!commands.length || !listCurrent) && !CLIENT_COMMANDS.has(typed.name);
-    const knownIn = (list: PiCommand[]) => (typed && isCommand(typed.name, list) ? typed : null);
+    const knownIn = (list: readonly PiCommand[]) => (typed && isCommand(typed.name, list) ? typed : null);
     // The pictures in the box go with what came from it, and nothing else. A
     // command is run rather than said — this one here, any other by pi — so
     // they stay in the box for later rather than going where nothing shows them.
     let known = waits ? null : knownIn(commands);
-    let images = fromBox && !known ? attached : [];
+    let images: readonly Attachment[] = fromBox && !known ? attached : [];
 
     if (fromBox) {
       if (known) {
@@ -1299,21 +1227,18 @@ export function Chat({
           else await onClientCommand(command.name, command.args);
           return;
         }
-        setSendingIn((l) => [...l, sent]);
-        try {
-          // Mid-run, typed words steer the run — taken in after the step it is on
-          // — rather than waiting for it to finish, which on a long run looked
-          // like the message had gone nowhere. Voice mode has its own switch.
-          const steer = running && !voiceMode;
-          await onSend(
+        // Mid-run, typed words steer the run — taken in after the step it is on
+        // — rather than waiting for it to finish, which on a long run looked
+        // like the message had gone nowhere. Voice mode has its own switch.
+        const steer = running && !voiceMode;
+        await composer.whileSending(sent, () =>
+          controller.send(
             known ? known.wire : msg,
             voiceMode || images.length || steer
-              ? { voice: voiceMode || undefined, images: images.length ? images : undefined, steer: steer || undefined }
+              ? { voice: voiceMode || undefined, images: images.length ? [...images] : undefined, steer: steer || undefined }
               : undefined,
-          );
-        } finally {
-          setSendingIn((l) => without(l, sent));
-        }
+          ),
+        );
       } catch (e) {
         if (fromBox) putBack(sent, msg, images);
         throw e;
@@ -1335,25 +1260,16 @@ export function Chat({
   };
 
   /** A message that did not go, back where it was typed — in that chat, if you have left it. */
-  const putBack = (id: string, msg: string, images: Attachment[] = []) => {
-    const back = [...images, ...pending.get(id)];
-    if (currentSession.current === id) {
-      changeInput(msg ? withUnsent(draft.current, msg) : draft.current);
-      changeAttached(back);
-    } else {
-      if (msg) drafts.set(id, withUnsent(drafts.get(id), msg));
-      pending.set(id, back);
-    }
-  };
+  const putBack = (id: string, msg: string, images: readonly Attachment[] = []) => composer.putBack(id, msg, images);
 
   /** A message from the conversation, with its pictures, sent as a new one. */
   const sendAgain = async (item: { images?: SentImage[] }, text: string) => {
     const images = await Promise.all(
-      (item.images ?? []).map((image) => refetchImage(api.imageUrl(session.id, image.name), t("A picture"))),
+      (item.images ?? []).map((image) => refetchImage(media.image(session.id, image.name), t("A picture"))),
     );
     // Into a run that is going, the same as typing it again would.
     const steer = running && !voiceMode;
-    await onSend(text, images.length || steer ? { images: images.length ? images : undefined, steer: steer || undefined } : undefined);
+    await controller.send(text, images.length || steer ? { images: images.length ? images : undefined, steer: steer || undefined } : undefined);
   };
 
   /** The latest message that waits for the agent to read it, back in the box for rewriting; sent again, it takes the place of the one that waited. */
@@ -1361,9 +1277,9 @@ export function Chat({
     const id = session.id;
     // Fetched first: a picture that cannot be fetched leaves the message waiting where it was.
     const images = await Promise.all(
-      (item.images ?? []).map((image) => refetchImage(api.imageUrl(id, image.name), t("A picture"))),
+      (item.images ?? []).map((image) => refetchImage(media.image(id, image.name), t("A picture"))),
     );
-    await onTakeBackQueued(item.seq);
+    await chats.controller(id).queued.takeBack(item.seq);
     putBack(id, splitContext(item.text).text, images);
   };
 
@@ -1378,10 +1294,10 @@ export function Chat({
     }
   };
 
-  /** Puts the chat in `mode`: shown at once, and back as it was if it is not saved. */
-  const chooseMode = (mode: string, confirmed?: boolean) => {
+  /** Puts the chat in `mode`: shown at once, and back as it was if it is not saved. A mode that asks first is shown once the person says yes. */
+  const chooseMode = (mode: string) => {
     const chat = session.id;
-    setChosenHere({ chat, mode });
+    if (!modeList.find((m) => m.id === mode)?.confirm) setChosenHere({ chat, mode });
     // One save at a time in a chat: a choice made while the last one is on its way is sent after it, so that the
     // server is not asked to change the mode while it is still changing it, and the choice made last is the one kept.
     const before = modeSave.current?.chat === chat ? modeSave.current.saved : undefined;
@@ -1390,13 +1306,14 @@ export function Chat({
       let done = false;
       await attempt(async () => {
         try {
-          await onSetMode(mode, confirmed);
+          done = (await chats.controller(chat).setMode(mode, { accepted: () => setChosenHere({ chat, mode }) })) !== false;
+          // The person said no to a question the list read before did not know of (the mode asks since): shown as it was.
+          if (!done && modeSave.current === saving) setChosenHere(null);
         } catch (e) {
           // Shown back as it was, unless another choice was made since: that one is shown.
           if (modeSave.current === saving) setChosenHere(null);
           throw e;
         }
-        done = true;
       });
       return done;
     })();
@@ -1418,7 +1335,7 @@ export function Chat({
     saveEdit: (seq, next) => {
       const id = session.id;
       return attempt(async () => {
-        await onEditMessage(seq, next);
+        await chats.controller(id).edit(seq, next);
         // Not the message of that number in the chat open now.
         if (currentSession.current === id) setEditing(null);
       });
@@ -1427,31 +1344,22 @@ export function Chat({
     // answer out of the agent's memory instead of stacking a second question on top of it.
     retry: (seq, text) => {
       takeOut();
-      void attempt(() => onEditMessage(seq, text));
+      void attempt(() => controller.edit(seq, text));
     },
     again: (item, text) => attempt(() => sendAgain(item, text)),
-    dropQueued: (seq) => attempt(() => onTakeBackQueued(seq)),
-    sendQueued: (seq) => attempt(() => onSendQueuedNow(seq)),
+    dropQueued: (seq) => attempt(() => controller.queued.takeBack(seq)),
+    sendQueued: (seq) => attempt(() => controller.queued.sendNow(seq)),
+    // The portal asks first (see kernel/chats.ts), and the row is taken out once the answer is yes.
     remove: async (seq) => {
-      if (
-        await confirmDialog({
-          title: t("Delete this message?"),
-          message: t("The agent's reply to it goes too, and the agent forgets both."),
-          confirmLabel: t("Delete"),
-          danger: true,
-          deletes: true,
-        })
-      ) {
-        takeOut();
-        void attempt(() => onDeleteMessage(seq));
-      }
+      await attempt(async () => {
+        await controller.deleteMessage(seq, { accepted: takeOut });
+      });
     },
     trustFlagged: async (id) => {
       let done = false;
       await attempt(async () => {
-        await api.trustFlagged(session.id, id);
-        trustedHere.current.add(id);
-        done = true;
+        done = await controller.trustFlagged(id);
+        if (done) trustedHere.current.add(id);
       });
       return done;
     },
@@ -1460,7 +1368,7 @@ export function Chat({
       setSwitching(seq);
       void attempt(async () => {
         try {
-          await api.switchVersion(session.id, seq, to);
+          await controller.switchVersion(seq, to);
         } catch (e) {
           setSwitching(null);
           throw e;
@@ -1476,11 +1384,6 @@ export function Chat({
     await attempt(() => submit(msg, true));
   };
 
-  const changeAttached = (next: Attachment[]) => {
-    pending.set(session.id, next);
-    setAttached(next);
-  };
-
   /**
    * Pictures and files pasted, dropped or picked. Pictures wait in the box to
    * go with the message; anything else is put in the chat's folder at once and
@@ -1489,36 +1392,13 @@ export function Chat({
   const addFiles = async (files: File[]) => {
     if (!files.length) return;
     const id = session.id;
-    const { images, others } = sortFiles(files);
     setActionError(null);
-    setAddingIn((l) => [...l, id]);
-    const problems: string[] = [];
-    try {
-      problems.push(...(await pending.add(id, images)));
-      const uploaded: string[] = [];
-      for (const file of others) {
-        try {
-          uploaded.push((await api.uploadFile(id, "", file)).path);
-        } catch (e) {
-          problems.push((e as Error).message);
-        }
-      }
-      const note = uploadedNote(uploaded);
-      if (note) {
-        if (currentSession.current === id) changeInput(draft.current.trim() ? `${draft.current.trimEnd()}\n${note}` : note);
-        else drafts.set(id, drafts.get(id).trim() ? `${drafts.get(id).trimEnd()}\n${note}` : note);
-      }
-    } finally {
-      setAddingIn((l) => without(l, id));
-      if (problems.length && currentSession.current === id) setActionError(problems.join(" "));
-    }
+    const problems = await composer.attach(id, files);
+    if (problems.length && currentSession.current === id) setActionError(problems.join(" "));
   };
 
   /** Every change to the box goes through here, so that the draft is kept as it is typed. */
-  const changeInput = (next: string) => {
-    drafts.set(session.id, next);
-    setInput(next);
-  };
+  const changeInput = (next: string) => composer.setDraft(session.id, next);
 
   // An extension that fills the chat box — pi's setEditorText, pasteToEditor —
   // fills this one, for the person to send or change: the whole of it, or a
@@ -1527,11 +1407,10 @@ export function Chat({
   useEffect(
     () =>
       onFill(session.id, ({ text: given, paste }) => {
-        const before = draft.current;
+        const before = draftNow();
         const where = caret.current ?? { start: before.length, end: before.length };
         const next = paste ? before.slice(0, where.start) + given + before.slice(where.end) : given;
         const at = paste ? where.start + given.length : next.length;
-        draft.current = next;
         caret.current = paste ? { start: at, end: at } : null;
         // The same text again draws nothing, and a cursor left to be placed
         // then would move under the next key typed.
@@ -1548,15 +1427,14 @@ export function Chat({
 
   const clearBox = () => {
     caret.current = null;
-    changeInput("");
-    changeAttached([]);
+    composer.clear(session.id);
   };
 
   /** Dictated words, put in the box where the cursor was and the cursor left after them. */
   const insertSpoken = (text: string) => {
-    const at = caret.current ?? { start: draft.current.length, end: draft.current.length };
-    const next = insertAtCaret(draft.current, at.start, at.end, text);
-    draft.current = next.value;
+    const before = draftNow();
+    const at = caret.current ?? { start: before.length, end: before.length };
+    const next = insertAtCaret(before, at.start, at.end, text);
     caret.current = { start: next.caret, end: next.caret };
     caretTo.current = next.caret;
     changeInput(next.value);
@@ -1577,7 +1455,7 @@ export function Chat({
       if (!opensComposer({ key: e.key, ctrlKey: e.ctrlKey, metaKey: e.metaKey, altKey: e.altKey, altGraph, target }, trigger)) return;
       e.preventDefault();
       box.current?.focus();
-      if (!draft.current.trim()) changeInput(trigger);
+      if (!draftNow().trim()) changeInput(trigger);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -1841,7 +1719,7 @@ export function Chat({
               className="-my-0.5 -ml-1.5 block w-full text-sm font-medium leading-5"
               onCommit={(next) => {
                 setRenaming(false);
-                void attempt(() => onRename(next));
+                void attempt(() => controller.rename(next));
               }}
               onCancel={() => setRenaming(false)}
             />
@@ -1908,7 +1786,7 @@ export function Chat({
         {!loading && hasEarlier && hiddenHere === 0 && (
           <div data-earlier="" className="flex justify-center pb-2">
             <button
-              onClick={onLoadEarlier}
+              onClick={() => void controller.loadEarlier()}
               disabled={loadingEarlier}
               className="rounded-lg border border-line px-3 py-1 text-xs text-fg-muted transition hover:bg-fg/5 hover:text-fg disabled:opacity-50"
             >
@@ -1921,7 +1799,7 @@ export function Chat({
 
         {!loading && items.length === 0 && (
           <div className="chat-empty pt-16 text-center">
-            <img src="/icon-192.png" alt="" draggable={false} className="chat-empty-mark mx-auto mb-4 h-11 w-11 object-contain" />
+            <img src={brand.icon} alt="" draggable={false} className="chat-empty-mark mx-auto mb-4 h-11 w-11 object-contain" />
             <p className="text-sm text-fg-muted">{t("Give pi a task.")}</p>
             <p className="mt-1 text-xs text-fg-faint">{t("You can close this tab — it keeps working.")}</p>
           </div>
@@ -2069,7 +1947,7 @@ export function Chat({
             const direction = event.key === "ArrowUp" ? 16 : -16;
             const nextHeight = Math.max(MIN_COMPOSER_HEIGHT, Math.min(maxHeight, composerHeight + direction));
             setComposerHeight(nextHeight);
-            persistComposerHeight(nextHeight);
+            persistComposerHeight(prefs, nextHeight);
           }}
           aria-label={t("Resize message composer vertically")}
           aria-valuemin={MIN_COMPOSER_HEIGHT}
@@ -2103,7 +1981,7 @@ export function Chat({
                 <img src={a.data} alt={a.name} title={a.name} className="h-14 w-14 rounded-lg object-cover ring-1 ring-line" />
                 <button
                   type="button"
-                  onClick={() => changeAttached(attached.filter((x) => x.id !== a.id))}
+                  onClick={() => composer.detach(session.id, a.id)}
                   aria-label={t("Remove {name}", { name: a.name })}
                   title={t("Remove")}
                   className="absolute -right-1.5 -top-1.5 grid h-5 w-5 place-items-center rounded-full bg-surface text-fg-muted shadow ring-1 ring-line transition hover:text-danger"
@@ -2135,7 +2013,7 @@ export function Chat({
           }}
           onSelect={(e) => {
             caret.current = { start: e.currentTarget.selectionStart, end: e.currentTarget.selectionEnd };
-            drafts.moved(session.id);
+            composer.moved(session.id);
           }}
           onPaste={(e) => {
             // A screenshot, or "Copy image" in a browser. Where there is text as
@@ -2214,7 +2092,7 @@ export function Chat({
               })
             ) {
               e.preventDefault();
-              void attempt(onAbort);
+              void attempt(controller.abort);
               return;
             }
             if (isEnter(e) && !e.shiftKey) {
@@ -2257,11 +2135,11 @@ export function Chat({
                 <LuPaperclip aria-hidden className="h-4 w-4" />
               </button>
               <DictationButton dictation={dictation} />
-              <VoiceControl folder={session.workspace} key={session.id} sessionId={session.id} items={items} running={running} work={phase} onSend={onSend} onAbort={onAbort} stageTarget={voiceHost} onModeChange={setVoiceMode} title={session.title} toolEvents={events} />
+              <VoiceControl folder={session.workspace} key={session.id} sessionId={session.id} items={items} running={running} work={phase} onSend={controller.send} onAbort={controller.abort} stageTarget={voiceHost} onModeChange={setVoiceMode} title={session.title} toolEvents={events} />
               {/* Mid-run, Stop stays while a message is written: it is the
                   moment the agent is seen going the wrong way, and whether to
                   steer it or stop it is still open. */}
-              {running && <button type="button" aria-label={t("Stop generation")} title={t("Stop generation (Esc)")} onClick={() => void attempt(onAbort)} className="prompt-action prompt-stop">
+              {running && <button type="button" aria-label={t("Stop generation")} title={t("Stop generation (Esc)")} onClick={() => void attempt(controller.abort)} className="prompt-action prompt-stop">
                 <LuSquare aria-hidden className="h-4 w-4" fill="currentColor" />
               </button>}
               {(!running || input.trim() || attached.length > 0) && <button type="submit" aria-label={t("Send message")} title={running ? t("Send into the running task — it goes in after the current step") : t("Send message")} disabled={sending || adding > 0 || (!input.trim() && !attached.length)}

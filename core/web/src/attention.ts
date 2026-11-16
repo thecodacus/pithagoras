@@ -1,8 +1,7 @@
 import type { SessionStatus } from "./api";
 import { t } from "./i18n";
 import { splitSubChats } from "./sub-chats";
-
-export const APP_NAME = "Pithagoras";
+import { brand } from "./brand";
 
 /**
  * What the browser tab says, for someone who is looking at another one.
@@ -15,11 +14,11 @@ export function tabTitle(
   session: { title: string; status: SessionStatus } | null,
   waiting: boolean,
 ): string {
-  if (!session) return APP_NAME;
+  if (!session) return brand.name;
   const name = session.title.trim() || t("New chat");
   if (waiting) return `❓ ${t("{name} · asks you", { name })}`;
   if (session.status === "running") return `● ${t("{name} · working", { name })}`;
-  return `${name} · ${APP_NAME}`;
+  return `${name} · ${brand.name}`;
 }
 
 /**

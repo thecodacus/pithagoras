@@ -60,7 +60,7 @@ export function typedCommand(message: string, trigger = DEFAULT_TRIGGER): TypedC
  * A command typed out in full comes first. Enter runs the highlighted one, and
  * `/skill:a` must not run `/skill:ab` because it happened to be listed earlier.
  */
-export function paletteMatches<T extends Slashable>(commands: T[], token: string): T[] {
+export function paletteMatches<T extends Slashable>(commands: readonly T[], token: string): T[] {
   const wanted = token.toLowerCase();
   const starts = commands.filter((c) => c.name.toLowerCase().startsWith(wanted));
   const exact = starts.filter((c) => c.name.toLowerCase() === wanted);

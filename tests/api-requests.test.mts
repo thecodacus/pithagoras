@@ -65,3 +65,19 @@ test('a file sent from this computer is as much a request: a gone login is heard
   assert.equal(seen.at(-1)!.url, '/api/sessions/s1/upload?path=&name=notes.txt');
   assert.equal(SIGNED_OUT, 'pithagoras:signed-out');
 });
+
+test("a chat's id is one part of the address of what is asked about it, whatever it holds", async () => {
+  // The id may come from an extension (`portal.chats.controller(id)`), read out of a tool's text that the agent wrote.
+  const id = '../x/other?y#z';
+  const at = '/api/sessions/..%2Fx%2Fother%3Fy%23z';
+  answer(reply(200, '{"events":[],"more":false}'));
+  await api.olderEvents(id, 5, 1);
+  assert.equal(seen.at(-1)!.url, `${at}/events/before?before=5&limit=1`);
+  for (const ask of [() => api.session(id), () => api.deleteSession(id), () => api.respondUi(id, 'q', { cancelled: true }), () => api.trustFlagged(id, 'r/1')]) {
+    answer(reply(200, '{}'));
+    await ask();
+    assert.ok(seen.at(-1)!.url.startsWith(at), seen.at(-1)!.url);
+  }
+  assert.equal(seen.at(-1)!.url, `${at}/flagged/r%2F1/trust`);
+  assert.equal(api.imageUrl(id, 'a.png'), `${at}/images/a.png`);
+});

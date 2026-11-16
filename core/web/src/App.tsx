@@ -1,37 +1,34 @@
 import { LuMenu, LuX } from "react-icons/lu";
-import { appendLiveEvents, resetLiveEvents } from "./live-events";
-import { fillFrom } from "./editor-fills";
 import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
-import { api, ApiError, SIGNED_OUT, type PortalEvent, type Session, type SessionStatus, type SingleSignOn } from "./api";
+import { api, ApiError, SIGNED_OUT, type SingleSignOn } from "./api";
 import { DialogFailed, ErrorBoundary } from "./components/ErrorBoundary";
 import { Sidebar } from "./components/Sidebar";
 import { Chat } from "./components/Chat";
 import { Login, Setup } from "./components/Login";
 import { isTab, type Tab } from "./settings-tabs";
 import { setupDismissed } from "./setup-state";
-import { load as loadCached, prefetchSettings } from "./settings-cache";
-import { ExtensionDialog, type UiRequest } from "./components/ExtensionDialog";
+import { prefetchSettings } from "./settings-cache";
+import { ExtensionDialog } from "./components/ExtensionDialog";
 import { lazyComponent } from "./lazy";
 import { ThemeSwitcher } from "./components/ThemeSwitcher";
 import { ConfirmHost } from "./components/ConfirmDialog";
 import { UpdateNotice } from "./components/UpdateNotice";
 import { ExtensionsLeftBehind } from "./components/ExtensionsLeftBehind";
 import { ErrorBanner, ghostCls } from "./components/SettingsUi";
-import { pollWhileVisible, reconnectDelay } from "./poll";
-import { APP_NAME, finishedRuns, tabTitle } from "./attention";
-import { notifyIfAway, notifyState } from "./notify";
+import { reconnectDelay } from "./poll";
+import { brand } from "./brand";
 import { guardStrayDrops } from "./drop-guard";
 import { usePlaces } from "./use-session-folders";
 import { fancy, keep, swapPages, type Leave } from "./motion";
-import { reconcile } from "./reconcile";
 import { useStable } from "./use-stable";
 import { splitSubChats } from "./sub-chats";
 import { useDialogFocus } from "./dialog-focus";
 import { t, useLanguage } from "./i18n";
-import { followInstalled, Here, setNavigate, startExtensions } from "./extensions/loader";
-import { extensionMessage } from "./extensions/channel";
-import { serverPush, setChatOnScreen } from "./extensions/server-feed";
+import { Here, setNavigate, startExtensions } from "./extensions/loader";
+import { alerts, setOpener } from "./kernel/wire";
+import { useKernel } from "./kernel/context";
+import { useOpenChat, useReloadAfterSettings, useSessions, useUnlisted, useViewport } from "./kernel/use";
 import { titleOf, useSlot } from "./extensions/slots";
 
 // What the first draw needs is the shell, the chat and the sign-in page. The other pages, and the dialogs that
@@ -165,6 +162,7 @@ function Shell({
   const { sessionId, tab, "*": extensionPart = "" } = useParams<{ sessionId?: string; tab?: string; "*"?: string }>();
   const navigate = useNavigate();
   const { pathname, search, state } = useLocation();
+  const { chats, sessions, models } = useKernel();
   // What the installed extensions draw in the portal: see extensions/loader.ts.
   useEffect(() => {
     setNavigate(navigate);
@@ -179,13 +177,10 @@ function Shell({
   useEffect(() => { setMobileNav(false); }, [sessionId, view, settings]);
   // The drawer covers the page and keeps the keyboard; widened to a window with the sidebar in place, it is only the sidebar.
   const drawer = useDialogFocus<HTMLDivElement>(mobileNav);
+  const viewport = useViewport();
   useEffect(() => {
-    if (!mobileNav) return;
-    const wide = window.matchMedia("(min-width: 768px)");
-    const onChange = () => wide.matches && setMobileNav(false);
-    wide.addEventListener("change", onChange);
-    return () => wide.removeEventListener("change", onChange);
-  }, [mobileNav]);
+    if (mobileNav && viewport === "desk") setMobileNav(false);
+  }, [mobileNav, viewport]);
 
   // A moment after the portal has drawn: fetch what Settings opens on, and
   // offer the setup assistant while there is no model to talk to.
@@ -198,89 +193,47 @@ function Shell({
       // The dialog itself too, so that opening it is not a wait for its file.
       void import("./components/ConfigModal");
       if (setupDismissed()) return;
-      loadCached("models", api.allModels, 30_000).then((r) => r.models.length === 0 && setSetup(true), () => {});
+      // The kernel's models (over the same cache Settings opens on): none to talk to is a list that came empty, not one that did not come.
+      void models.load().then(() => {
+        const { status, models: there } = models.store.get();
+        if (status === "ready" && there.length === 0) setSetup(true);
+      });
     }, 1200);
     return () => clearTimeout(t);
   }, []);
+  useReloadAfterSettings(settings);
   useEffect(() => {
     const escape = (e: KeyboardEvent) => { if (e.key === "Escape") setMobileNav(false); };
     document.addEventListener("keydown", escape);
     return () => document.removeEventListener("keydown", escape);
   }, []);
 
-  const [sessions, setSessions] = useState<Session[]>([]);
-  // The task list deliberately excludes agent and routine sessions, but their
-  // URLs still have to open — the Agent and Routines pages link straight to
-  // them, and without this those links landed on the empty state.
-  const [other, setOther] = useState<Session | null>(null);
-  const [executor, setExecutor] = useState("host");
-  const [events, setEvents] = useState<PortalEvent[]>([]);
-  /** The versions of the chat's messages, as its stream says: see messageVersions on the server. */
-  const [versions, setVersions] = useState<Record<number, number[]>>({});
-  /** How often the chat shown was loaded again from the start: see portal_reload. */
-  const loadedAgain = useRef(0);
-  /** Whether anything older than what we hold is still on the server. */
-  const [moreBefore, setMoreBefore] = useState(false);
-  const [loadingBefore, setLoadingBefore] = useState(false);
-  /**
-   * Which session's replay has arrived, so it is not drawn half-built. A session
-   * id rather than a flag: the first render after switching still holds the
-   * previous session's events, and must not show them under the new title.
-   */
-  const [loadedSession, setLoadedSession] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [uiQueue, setUiQueue] = useState<UiRequest[]>([]);
-  const esRef = useRef<EventSource | null>(null);
-  /** Connection attempts to the open conversation that have failed in a row. */
-  const [failures, setFailures] = useState(0);
+  // The chat list, and the chat in the address, are the kernel's (see kernel/): this draws them. What it says to a person
+  // who is looking elsewhere (the tab's title, a notification) is the kernel's too, and is started here once signed in.
+  const { list: sessionList, status: listStatus, executor, error } = useSessions();
+  /** Whether the chats have been asked for yet, and have come or failed to: the projects are asked for then, not before. */
+  const sessionsAsked = listStatus !== "loading";
+  const { places, reload: reloadPlaces } = usePlaces(sessionList, sessionsAsked);
+  const listed = sessionId ? sessionList.find((s) => s.id === sessionId) ?? null : null;
+  // The task list deliberately excludes agent and routine sessions, but their URLs still have to open — the Agent and
+  // Routines pages link straight to them, and without this those links landed on the empty state.
+  const { session: other, missing: missingFromList } = useUnlisted(listed ? undefined : sessionId);
+  // Replay-then-tail for whichever session is in the URL. Nothing to read from for a chat the portal says it has none of.
+  const chat = useOpenChat(missingFromList ? undefined : sessionId);
   /** The chat the portal says it has none of: deleted, say, on another device, while this one still had it open. */
-  const [missing, setMissing] = useState<string | null>(null);
-
-  /**
-   * Whether the chats have been asked for yet, and have come or failed to: the
-   * projects are asked for then, not before and again once the chats are there
-   * — and not never, when the chats cannot be had and the projects can.
-   */
-  const [sessionsAsked, setSessionsAsked] = useState(false);
-  const { places, reload: reloadPlaces } = usePlaces(sessions, sessionsAsked);
-
-  const refreshSessions = useCallback(async () => {
-    const r = await api.sessions();
-    // What is installed changed since the page last went through it, wherever it was changed: it goes through it again.
-    followInstalled(r.extensions);
-    // Kept as it was when it says the same: a list asked for every few seconds is
-    // mostly unchanged, and a new array is a draw of the portal for nothing.
-    setSessions((prev) => reconcile(prev, r.sessions));
-    setSessionsAsked(true);
-    setExecutor(r.executor);
-    // A list that came is the end of the outage the first one reported.
-    setError(null);
-    return r.sessions;
-  }, []);
-
-  /** A chat started in `workspace`, or where "New" goes (the agent picked for new chats) without one, and opened. */
-  const startChat = useStable(async (workspace?: string) => {
-    const s = await api.createSession(workspace);
-    await refreshSessions();
-    setMobileNav(false);
-    navigate(`/s/${s.id}`);
-  });
-
-  // Not tied to where the page is: going from chat to chat is no reason to ask
-  // for the list again, nor to start its poll over.
-  useEffect(() => {
-    refreshSessions().catch((e) => {
-      setSessionsAsked(true);
-      setError((e as Error).message);
-    });
-    return pollWhileVisible(() => refreshSessions().catch(() => {}), 5000);
-  }, [refreshSessions]);
+  const gone = Boolean(sessionId) && (missingFromList || chat.missing);
+  const active = listed ?? other;
+  // A click on a notification goes where the router goes: `navigate` changes with the address, so it is given again each time.
+  useEffect(() => setOpener((id) => navigate(`/s/${id}`)), [navigate]);
+  useEffect(() => alerts.start(), []);
+  // Not tied to where the page is: going from chat to chat is no reason to ask for the list again, nor to start its poll over.
+  useEffect(() => sessions.start(), []);
 
   // Landing on "/" opens the most recent session — but only "/". The Sessions
   // and Agents pages have no sessionId either, and without the view check they
   // were redirected away the moment they loaded.
-  const latestSessions = useRef(sessions);
-  latestSessions.current = sessions;
+  const latestSessions = useRef(sessionList);
+  latestSessions.current = sessionList;
   useEffect(() => {
     if (!sessionsAsked || sessionId || settings || view !== "chat") return;
     // A chat of its own, not a sub-chat, which is listed under its chat.
@@ -288,267 +241,12 @@ function Shell({
     if (first) navigate(`/s/${first.id}`, { replace: true });
   }, [sessionsAsked, sessionId, settings, view]);
 
-  // Replay-then-tail for whichever session is in the URL.
-  useEffect(() => {
-    esRef.current?.close();
-    setEvents([]);
-    setVersions({});
-    setMoreBefore(false);
-    // An earlier page that is still on its way is the left chat's: it is dropped when it arrives, and this chat asks for its own.
-    loadedAgain.current++;
-    setLoadingBefore(false);
-    setUiQueue([]);
-    setLoadedSession(null);
-    setFailures(0);
-    // Nothing to read from: the stream of a chat that is gone only fails, and was retried as an outage.
-    if (!sessionId || missing === sessionId) return;
-
-    // The chat whose stream is open, for an extension that comes into the page later: see extensions/loader.ts.
-    setChatOnScreen(sessionId);
-    let cancelled = false;
-    let seq = 0;
-    let failed = 0;
-    // Loading the chat again, from the start: what arrives replaces what is
-    // held, once it has all come. See portal_reload.
-    let replacing = false;
-    // How often the chat's events were put back under seqs this page had read
-    // past, as its stream last said: see bumpReloads on the server.
-    let reloads: number | undefined;
-    let retry: ReturnType<typeof setTimeout> | undefined;
-    // Once caught up, what arrives is applied a frame at a time, not an event at
-    // a time: a reply is a token every few milliseconds, and each was a draw of
-    // the chat. The timer is for a tab nobody sees, where frames are not drawn.
-    let pending: PortalEvent[] = [];
-    let frame: number | undefined;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const drain = () => {
-      if (frame !== undefined) cancelAnimationFrame(frame);
-      clearTimeout(timer);
-      frame = timer = undefined;
-      const batch = pending;
-      pending = [];
-      if (batch.length) setEvents((prev) => appendLiveEvents(prev, batch));
-    };
-    const soon = () => {
-      if (frame !== undefined) return;
-      frame = requestAnimationFrame(drain);
-      timer = setTimeout(drain, 120);
-    };
-    const connect = () => {
-      if (cancelled) return;
-      const fresh = seq === 0;
-      const es = new EventSource(`/api/sessions/${sessionId}/events?since=${seq}`);
-      /** Reads the chat again from the start, keeping what is shown until it has all come. */
-      const reload = () => {
-        es.close();
-        seq = 0;
-        replacing = true;
-        connect();
-      };
-      esRef.current = es;
-      es.onopen = () => {
-        failed = 0;
-        setFailures(0);
-      };
-      // A count other than the last one seen: events came back while this page
-      // was away, under seqs it had read past, and going on from its cursor
-      // would never show them. A stream reading from the start has them all.
-      es.addEventListener("reloads", (m) => {
-        const now = (JSON.parse((m as MessageEvent).data) as { reloads: number }).reloads;
-        const missed = reloads !== undefined && now !== reloads && !fresh;
-        reloads = now;
-        if (missed) reload();
-      });
-      es.addEventListener("versions", (m) => setVersions((JSON.parse((m as MessageEvent).data) as { versions: Record<number, number[]> }).versions));
-      es.addEventListener("live-reset", () => {
-        drain();
-        setEvents(resetLiveEvents);
-      });
-      // What the installed extensions' server halves tell what they drew on this chat: see extensions/server-feed.ts.
-      es.addEventListener("extension", (m) => {
-        const { extension, data } = JSON.parse((m as MessageEvent).data) as { extension: string; data: unknown };
-        serverPush(sessionId, extension, data);
-      });
-      // Until it has caught up, what arrives is history being replayed. It is
-      // gathered and applied in one go: drawing the conversation once per event
-      // is what made a long one open at the top, build downwards over seconds and
-      // then jump to the end.
-      let replay: PortalEvent[] | null = [];
-      // Applied straight from the event, not by re-fetching: the round trip
-      // is what made the Stop button appear a beat late, or not at all when
-      // the reply came back before the list did.
-      const applyStatus = (ev: PortalEvent) => {
-        if (ev.type !== "portal_status") return;
-        const status = (ev.payload as { status?: SessionStatus }).status;
-        if (status) {
-          setSessions((prev) =>
-            prev.some((s) => s.id === sessionId && s.status !== status)
-              ? prev.map((s) => (s.id === sessionId ? { ...s, status } : s))
-              : prev,
-          );
-          // An agent or routine session is not in that list at all — it is
-          // fetched once, on its own. Without this it kept whatever status
-          // the fetch happened to catch, so a chat either never started
-          // working or never stopped, and the activity line ran forever.
-          setOther((prev) => (prev?.id === sessionId && prev.status !== status ? { ...prev, status } : prev));
-        }
-        refreshSessions().catch(() => {});
-      };
-      // Dialogs an extension is blocking on. notify/setStatus/setWidget are
-      // one-way and must not open a modal.
-      const applyDialog = (ev: PortalEvent) => {
-        if (ev.type === "extension_ui_request") {
-          const req = ev.payload as UiRequest;
-          if (["select", "confirm", "input", "editor"].includes(req.method)) {
-            setUiQueue((q) => (q.some((x) => x.id === req.id) ? q : [...q, req]));
-          }
-        }
-        if (ev.type === "extension_ui_cancel") {
-          const id = (ev.payload as { id: string }).id;
-          setUiQueue((q) => q.filter((x) => x.id !== id));
-        }
-      };
-      const flush = () => {
-        const batch = replay;
-        replay = null;
-        if (!batch) return;
-        if (replacing) {
-          replacing = false;
-          // What was being fetched from above the old list belongs to it.
-          loadedAgain.current++;
-          setLoadingBefore(false);
-          setEvents(appendLiveEvents([], batch));
-        } else if (batch.length) setEvents((prev) => appendLiveEvents(prev, batch));
-        if (!batch.length) return;
-        // Only where the session ended up is news; the statuses it passed
-        // through on the way were each a request for the session list.
-        const last = [...batch].reverse().find((e) => e.type === "portal_status");
-        if (last) applyStatus(last);
-        batch.forEach(applyDialog);
-        for (const ev of batch) fillFrom(sessionId, ev);
-      };
-      es.onmessage = (m) => {
-        const ev: PortalEvent = JSON.parse(m.data);
-        // A message was taken out of the conversation: drop what it covered,
-        // rather than reloading everything to find out what is left. While the
-        // replay is still being gathered that buffer is where they are, so it
-        // is filtered instead of the rendered list.
-        if (ev.type === "portal_removed") {
-          // What arrived before it is in the list it filters.
-          drain();
-          // `also` and `kept`: messages sent into a run go with the stretch the
-          // agent read them in, not the one whose seq range they were sent in.
-          const { from, to, also = [], kept = [], reloads: now } = ev.payload as { from: number; to: number | null; also?: number[]; kept?: number[]; reloads?: number };
-          // Heard, so not missed: the count this brings is not a reason to load again.
-          if (now !== undefined) reloads = now;
-          const covered = (at: number) =>
-            also.includes(at) || (at >= from && (to == null || at < to) && !kept.includes(at));
-          if (replay) replay = replay.filter((e) => !covered(e.seq));
-          else setEvents((prev) => prev.filter((e) => !covered(e.seq)));
-          return;
-        }
-        // Another version of a message was brought back, or an edit undone:
-        // events came back under seqs this stream has read past, so it reads
-        // the chat again from the start.
-        if (ev.type === "portal_versions") {
-          setVersions((ev.payload as { versions: Record<number, number[]> }).versions);
-          return;
-        }
-        if (ev.type === "portal_reload") {
-          reloads = (ev.payload as { reloads?: number }).reloads ?? reloads;
-          drain();
-          reload();
-          return;
-        }
-        // An extension to what its browser half drew in this chat: theirs, and nothing of the conversation.
-        if (ev.type === "portal_extension_ui") {
-          const { extension, data } = ev.payload as { extension: string; data: unknown };
-          extensionMessage(sessionId, extension, data);
-          return;
-        }
-        // Live-only events (dialogs) use a negative seq and must not move the
-        // resume cursor, or reconnecting would skip real history.
-        if (ev.seq > 0) seq = ev.seq;
-        if (replay) {
-          replay.push(ev);
-          return;
-        }
-        pending.push(ev);
-        soon();
-        applyStatus(ev);
-        applyDialog(ev);
-        fillFrom(sessionId, ev);
-      };
-      es.addEventListener("caught-up", () => {
-        flush();
-        setLoadedSession(sessionId);
-        // Only now do we know where the replayed window starts, and therefore
-        // whether the conversation continues above it.
-        const asked = loadedAgain.current;
-        setEvents((prev) => {
-          const oldest = prev.find((e) => e.seq > 0)?.seq;
-          if (oldest === undefined) return prev;
-          api
-            .olderEvents(sessionId, oldest, 1)
-            // The answer for a chat that was left, or one loaded again since, says nothing of the one shown now.
-            .then((r) => asked === loadedAgain.current && setMoreBefore(r.events.length > 0))
-            .catch(() => {});
-          return prev;
-        });
-      });
-      es.onerror = () => {
-        drain();
-        // Keep what arrived: the resume cursor has already moved past it.
-        // Unless the chat is being read again: part of it would replace all
-        // of what is shown, so that stays, and the reading starts over.
-        if (replacing) {
-          replay = null;
-          seq = 0;
-        } else flush();
-        es.close();
-        failed += 1;
-        setFailures(failed);
-        retry = setTimeout(connect, reconnectDelay(failed));
-      };
-    };
-    connect();
-    return () => {
-      cancelled = true;
-      clearTimeout(retry);
-      if (frame !== undefined) cancelAnimationFrame(frame);
-      clearTimeout(timer);
-      esRef.current?.close();
-      setChatOnScreen(undefined);
-    };
-  }, [sessionId, missing, refreshSessions]);
-
-  const listed = sessions.find((s) => s.id === sessionId) ?? null;
-
-  useEffect(() => {
-    if (!sessionId || listed || missing === sessionId) return setOther(null);
-    let cancelled = false;
-    const load = () =>
-      api
-        .session(sessionId)
-        .then((s) => !cancelled && setOther((prev) => reconcile(prev, s)))
-        .catch((e) => {
-          if (cancelled) return;
-          setOther(null);
-          // Said by the portal: it has no such chat, which is not an outage to keep retrying.
-          if (e instanceof ApiError && e.status === 404) setMissing(sessionId);
-        });
-    load();
-    // The same five seconds the task list gets. Events keep this current
-    // between ticks; the poll is what stops a dropped one from stranding the
-    // session on a status it left long ago.
-    const stop = pollWhileVisible(load, 5000);
-    return () => {
-      cancelled = true;
-      stop();
-    };
-  }, [sessionId, listed, missing]);
-
-  const active = listed ?? (other?.id === sessionId ? other : null);
+  /** A chat started in `workspace`, or where "New" goes (the agent picked for new chats) without one, and opened. */
+  const startChat = useStable(async (workspace?: string) => {
+    const s = await sessions.actions.create(workspace);
+    setMobileNav(false);
+    navigate(`/s/${s.id}`);
+  });
 
   // The page that is left plays out as a picture of itself over the one that
   // comes (see motion.ts). Taken here, while what is on the page is still the
@@ -559,19 +257,19 @@ function Shell({
   /** The chats the list had when it was last drawn. */
   const knownIds = useRef(new Set<string>());
   useEffect(() => {
-    knownIds.current = new Set(sessions.map((s) => s.id));
-  }, [sessions]);
+    knownIds.current = new Set(sessionList.map((s) => s.id));
+  }, [sessionList]);
   const pageKey = view === "chat" ? `chat:${active?.id ?? ""}` : view;
   const leaving = useRef<{ key: string; leave: ((how: Leave) => void) | null; how: Leave }>({ key: pageKey, leave: null, how: "page" });
   if (leaving.current.key !== pageKey) {
     const was = leaving.current.key;
     const page = main.current?.lastElementChild as HTMLElement | null | undefined;
-    const chats = was.startsWith("chat:") && pageKey.startsWith("chat:");
+    const betweenChats = was.startsWith("chat:") && pageKey.startsWith("chat:");
     // Gone from the list it was in: not one the list never has (an agent's or a routine's chat is opened by its address).
-    const deleted = was.startsWith("chat:") && knownIds.current.has(was.slice(5)) && !sessions.some((s) => s.id === was.slice(5));
+    const deleted = was.startsWith("chat:") && knownIds.current.has(was.slice(5)) && !sessionList.some((s) => s.id === was.slice(5));
     leaving.current = {
       key: pageKey,
-      leave: was === "chat:" ? null : keep((chats && page?.querySelector<HTMLElement>("[data-transcript]")) || page || null),
+      leave: was === "chat:" ? null : keep((betweenChats && page?.querySelector<HTMLElement>("[data-transcript]")) || page || null),
       how: deleted ? "gone" : "page",
     };
     if (leaving.current.leave && fancy()) swapPages(true);
@@ -582,46 +280,6 @@ function Shell({
     swapPages(false);
     leave?.(how);
   }, [pageKey]);
-
-  // What the tab says while you are looking at something else, and — if you
-  // asked for them — a notification when a chat you left running is done.
-  const waiting = Boolean(active && uiQueue[0]);
-  const lang = useLanguage();
-  useEffect(() => {
-    document.title = tabTitle(active ? { title: active.title, status: active.status } : null, waiting);
-    return () => {
-      document.title = APP_NAME;
-    };
-  }, [active?.title, active?.status, waiting, lang]);
-
-  // The list stops being polled while the page is hidden, but a chat left
-  // running there can only be seen finishing through it — the open one has its
-  // stream, the rest do not. So while someone asked to be told and something
-  // is running, a hidden page keeps asking, more slowly.
-  const anyRunning = sessions.some((s) => s.status === "running");
-  useEffect(() => {
-    if (!anyRunning) return;
-    const timer = setInterval(() => {
-      if (document.hidden && notifyState() === "on") refreshSessions().catch(() => {});
-    }, 15_000);
-    return () => clearInterval(timer);
-  }, [anyRunning, refreshSessions]);
-
-  const lastStatus = useRef(new Map<string, SessionStatus>());
-  useEffect(() => {
-    for (const s of finishedRuns(lastStatus.current, sessions)) {
-      notifyIfAway(s.title, s.status === "error" ? t("Stopped with an error") : t("Finished"), s.id, () =>
-        navigate(`/s/${s.id}`),
-      );
-    }
-    lastStatus.current = new Map(sessions.map((s) => [s.id, s.status]));
-  }, [sessions]);
-
-  const askedId = active ? uiQueue[0]?.id : undefined;
-  useEffect(() => {
-    if (!active || !askedId) return;
-    notifyIfAway(active.title, t("Waiting for your answer"), `ask-${active.id}`, () => navigate(`/s/${active.id}`));
-  }, [askedId]);
 
   // Handed to the sidebar, the sessions page and Settings, which are not drawn
   // again unless what they show changed: events arrive many times a second, and
@@ -638,26 +296,26 @@ function Shell({
     setMobileNav(false);
     navigate(`/s/${id}`);
   });
+  // The chat open as last drawn: a delete that settles reads it then, not as it was when the delete was asked for.
+  const openNow = useRef({ sessionId, parent: active?.parent });
+  openNow.current = { sessionId, parent: active?.parent };
+  /** False where the person said no to the question the kernel asks first. */
   const onDeleteChat = useStable(async (id: string) => {
-    const gone = sessions.find((s) => s.id === id);
-    // The chat open is this one, or one of its sub-chats, which go with it.
-    // It need not be listed: a sub-chat an extension keeps out of the list is fetched by its id (`active`).
-    const open = sessionId === id || active?.parent === id;
-    await api.deleteSession(id);
-    const list = await refreshSessions();
-    // A sub-chat gone takes its page back to its chat, if that is listed; a chat gone, to the latest chat of its own.
-    const parent = gone?.parent;
-    const next = parent && sessions.some((s) => s.id === parent) ? parent : splitSubChats(list).top[0]?.id;
-    if (open) navigate(next ? `/s/${next}` : "/", { replace: true });
+    const parent = sessions.find(id)?.parent;
+    // As soon as it is out of the list, in the same draw: waiting for the list to come again showed no chat for a moment.
+    return sessions.actions.remove(id, (list) => {
+      // The chat open is this one, or one of its sub-chats, which go with it; another chat opened while the question
+      // was asked or the delete was on its way stays. It need not be listed: a sub-chat an extension keeps out of the
+      // list is fetched by its id (`active`).
+      const now = openNow.current;
+      if (now.sessionId !== id && now.parent !== id) return;
+      // A sub-chat gone takes its page back to its chat, if that is listed; a chat gone, to the latest chat of its own.
+      const next = parent && list.some((s) => s.id === parent) ? parent : splitSubChats(list).top[0]?.id;
+      navigate(next ? `/s/${next}` : "/", { replace: true });
+    });
   });
-  const onRenameChat = useStable(async (id: string, title: string) => {
-    await api.renameSession(id, title);
-    refreshSessions();
-  });
-  const onPin = useStable(async (id: string, pinned: boolean) => {
-    await api.pinSession(id, pinned);
-    refreshSessions();
-  });
+  const onRenameChat = useStable((id: string, title: string) => sessions.actions.rename(id, title));
+  const onPin = useStable((id: string, pinned: boolean) => sessions.actions.pin(id, pinned));
   const onOpenSettings = useStable(() => navigate(sessionId ? `/s/${sessionId}/settings/general` : "/settings/general"));
   const openUpdate = useStable(() => navigate(sessionId ? `/s/${sessionId}/settings/about` : "/settings/about"));
   // Back to the page that opened Settings where it said which (`state.from`), else to the chat.
@@ -666,33 +324,11 @@ function Shell({
     navigate(active ? `/s/${active.id}` : "/");
     setSetup(true);
   });
-  // The sessions page: its own way of opening a chat, which does not close the drawer, and of renaming one.
+  // The sessions page: its own way of opening a chat, which does not close the drawer.
   const openChat = useStable((id: string) => navigate(`/s/${id}`));
-  const deleteListed = useStable(async (id: string) => {
-    await api.deleteSession(id);
-    await refreshSessions();
-  });
-  const deleteListedMany = useStable(async (ids: string[]) => {
-    const failed: { id: string; error: string }[] = [];
-    // One after the other: each stops its chat and its sub-chats, and the server need not do many at once.
-    for (const id of ids) {
-      try {
-        await api.deleteSession(id);
-      } catch (e) {
-        failed.push({ id, error: (e as Error).message });
-      }
-    }
-    // Deleted by now, and shown so, whether or not the list then loads.
-    await refreshSessions().catch(() => {});
-    return failed;
-  });
-  const renameListed = useStable(async (id: string, title: string) => {
-    await api.renameSession(id, title);
-    // Saved by now, and shown so, whether or not the list then loads:
-    // a list that fails to load is not a rename that failed.
-    setSessions((all) => all.map((s) => (s.id === id ? { ...s, title } : s)));
-    await refreshSessions().catch(() => {});
-  });
+  const deleteListed = onDeleteChat;
+  const deleteListedMany = useStable((ids: string[]) => sessions.actions.removeMany(ids));
+  const renameListed = onRenameChat;
 
   return (
     <Here.Provider value={here}>
@@ -709,7 +345,7 @@ function Shell({
       {mobileNav && <button type="button" aria-label={t("Close navigation")} onClick={() => setMobileNav(false)} className="absolute right-2 top-3 z-panel rounded-lg p-2 text-fg md:hidden"><LuX size={20}/></button>}
       <Sidebar
         forceExpanded={mobileNav}
-        sessions={sessions}
+        sessions={sessionList}
         executor={executor}
         activeId={sessionId ?? null}
         view={view === "extension" ? `x/${extensionPart}` : view}
@@ -730,14 +366,14 @@ function Shell({
             would only repeat its title; in voice mode that header is gone. */}
         <header className="app-mobile-bar flex shrink-0 items-center gap-3 border-b border-line px-3 py-2 md:hidden">
           <button type="button" aria-label={t("Open navigation")} aria-expanded={mobileNav} aria-controls="mobile-navigation" onClick={() => setMobileNav(true)} className="rounded-lg p-2 text-fg hover:bg-fg/10"><LuMenu size={20}/></button>
-          <span className="truncate text-sm text-fg">{(extensionPage && titleOf(extensionPage)) || active?.title || "Pithagoras"}</span>
+          <span className="truncate text-sm text-fg">{(extensionPage && titleOf(extensionPage)) || active?.title || brand.name}</span>
         </header>
         <UpdateNotice onDetails={openUpdate} />
         <ExtensionsLeftBehind />
-        {error && <ErrorBanner className="mx-4 mt-2" onClose={() => setError(null)}>{error}</ErrorBanner>}
+        {error && <ErrorBanner className="mx-4 mt-2" onClose={sessions.actions.dismissError}>{error}</ErrorBanner>}
         {/* Not for the first miss: a server restarting, or a wifi that blinked,
             is back before it can be read. Two in a row is an outage. */}
-        {sessionId && failures >= 2 && missing !== sessionId && (
+        {sessionId && chat.failures >= 2 && !gone && (
           <div role="status" className="bg-warn/10 px-4 py-2 text-sm text-warn">
             {t("Lost the connection to the portal — trying again. What is shown may be out of date.")}
           </div>
@@ -747,7 +383,7 @@ function Shell({
         <Suspense fallback={<div className="flex flex-1 items-center justify-center text-sm text-fg-subtle">{t("Loading…")}</div>}>
         {view === "sessions" ? (
           <SessionsPage
-            sessions={sessions}
+            sessions={sessionList}
             places={places}
             onSelect={openChat}
             onNewChat={startChat}
@@ -758,15 +394,14 @@ function Shell({
           />
         ) : view === "projects" ? (
           <ProjectsPage
-            sessions={sessions}
+            sessions={sessionList}
             onOpenChat={(id) => navigate(`/s/${id}`)}
             onNewChat={async (workspace) => {
-              const s = await api.createSession(workspace);
-              await refreshSessions();
+              const s = await sessions.actions.create(workspace);
               navigate(`/s/${s.id}`);
             }}
             onChanged={() => {
-              refreshSessions();
+              sessions.refresh().catch(() => {});
               reloadPlaces();
             }}
           />
@@ -781,92 +416,37 @@ function Shell({
         ) : active ? (
           <Chat
             session={active}
-            events={loadedSession === active.id ? events : []}
-            loading={loadedSession !== active.id}
-            hasEarlier={loadedSession === active.id && moreBefore}
-            loadingEarlier={loadingBefore}
-            onLoadEarlier={async () => {
-              const oldest = events.find((e) => e.seq > 0)?.seq;
-              if (!oldest || loadingBefore) return;
-              setLoadingBefore(true);
-              const asked = loadedAgain.current;
-              try {
-                const r = await api.olderEvents(active.id, oldest);
-                // Loaded again, or another chat opened, meanwhile: what is above the new list is another question.
-                if (asked !== loadedAgain.current) return;
-                setEvents((prev) => [...r.events, ...prev]);
-                setMoreBefore(r.more);
-              } catch {
-                // Leave the button where it is; trying again is free.
-              } finally {
-                // Not the flag of what was asked since: it was reset when the list was replaced, and may be set again.
-                if (asked === loadedAgain.current) setLoadingBefore(false);
-              }
-            }}
-            onSend={async (msg, options) => {
-              await api.prompt(active.id, msg, options);
-              refreshSessions();
-            }}
-            versions={versions}
-            onEditMessage={async (seq, message) => {
-              await api.editMessage(active.id, seq, message);
-              refreshSessions();
-            }}
-            onDeleteMessage={async (seq) => {
-              await api.deleteMessage(active.id, seq);
-            }}
-            onTakeBackQueued={async (seq) => {
-              await api.takeBackQueued(active.id, seq);
-            }}
-            onSendQueuedNow={async (seq) => {
-              await api.sendQueuedNow(active.id, seq);
-              refreshSessions();
-            }}
-            onAbort={async () => {
-              await api.abort(active.id);
-              refreshSessions();
-            }}
-            onRename={async (title) => {
-              await api.renameSession(active.id, title);
-              await refreshSessions();
-            }}
-            onSetMode={async (mode, confirmed) => {
-              await api.setMode(active.id, mode, confirmed);
-              await refreshSessions();
-            }}
             onOpenNavigation={() => setMobileNav(true)}
-            parentTitle={active.parent ? sessions.find((s) => s.id === active.parent)?.title : undefined}
+            parentTitle={active.parent ? sessionList.find((s) => s.id === active.parent)?.title : undefined}
             onClientCommand={async (name, args) => {
               if (name === "settings") {
                 navigate(`/s/${active.id}/settings/general`);
               } else if (name === "new" || name === "clear") {
                 // A fresh chat in the same project, or in Home.
-                const s = await api.createSession(active.workspace);
-                await refreshSessions();
+                const s = await sessions.actions.create(active.workspace);
                 setMobileNav(false);
                 navigate(`/s/${s.id}`);
               } else if (name === "name" && args.trim()) {
-                await api.renameSession(active.id, args.trim());
-                refreshSessions();
+                await chats.controller(active.id).rename(args.trim());
               }
             }}
           />
-        ) : missing === sessionId ? (
+        ) : gone ? (
           <GoneState onSessions={() => navigate("/sessions")} />
         ) : (
-          <EmptyState hasSessions={sessions.length > 0} />
+          <EmptyState hasSessions={sessionList.length > 0} />
         )}
         </Suspense>
         </ErrorBoundary>
       </main>
 
-      {active && uiQueue[0] && (
+      {active && chat.dialogs[0] && (
         <ExtensionDialog
           // One dialog per question: what the last was answered, or failed with, is not this one's.
-          key={uiQueue[0].id}
+          key={chat.dialogs[0].id}
           sessionId={active.id}
-          request={uiQueue[0]}
-          onDone={() => setUiQueue((q) => q.slice(1))}
+          request={chat.dialogs[0]}
+          onDone={() => chats.dismissDialog(active.id, chat.dialogs[0].id)}
         />
       )}
 
@@ -886,8 +466,7 @@ function Shell({
           <SetupAssistant
             onClose={() => setSetup(false)}
             onStartChat={async () => {
-              const s = await api.createSession();
-              await refreshSessions();
+              const s = await sessions.actions.create();
               navigate(`/s/${s.id}`);
             }}
           />
@@ -913,7 +492,7 @@ function GoneState({ onSessions }: { onSessions: () => void }) {
 function EmptyState({ hasSessions }: { hasSessions: boolean }) {
   return (
     <div className="chat-empty flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
-      <img src="/icon-192.png" alt="" draggable={false} className="chat-empty-mark mb-2 h-12 w-12 object-contain" />
+      <img src={brand.icon} alt="" draggable={false} className="chat-empty-mark mb-2 h-12 w-12 object-contain" />
       <p className="text-sm text-fg-muted">
         {/* On a phone the list is behind the menu, not on the left. */}
         {hasSessions ? t("Pick a session from the list.") : t("Start a session to get going.")}

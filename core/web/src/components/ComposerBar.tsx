@@ -10,6 +10,8 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode }
 import { useNavigate } from "react-router-dom";
 import { MENU_WIDTH, anchorLeft } from "../menu-anchor";
 import { api, type PiConfig, type PiModel, type Session } from "../api";
+import { useKernel } from "../kernel/context";
+import { useStore } from "../kernel/store";
 import { serialSaver } from "../serial-saver";
 import { local } from "../safe-storage";
 import { cacheModels, cachedModels, catalogueFresh, forgetModels } from "../model-catalogue";
@@ -211,6 +213,7 @@ export function ComposerBar({
     stats: null,
   });
 
+  const kernelModels = useKernel().models;
   const [cfg, setCfg] = useState<PiConfig>(() => seed(session));
   /** Which model the levels drawn are for, when that is known; see load. */
   const levelsFor = useRef<string | undefined>(levelsModel(session.provider, session.model));
@@ -311,6 +314,16 @@ export function ComposerBar({
     setCfg(seed(session));
     load();
   }, [session.mode]);
+
+  // Another part of the page changed the chat's model or effort through the kernel (an extension's `portal.models.set`):
+  // the pills read them again. Not for another chat's entry, which the switch above loads anyway.
+  const shared = useStore(kernelModels.chats, (all) => all[sessionId]);
+  const sharedWas = useRef({ id: sessionId, shared });
+  useEffect(() => {
+    const was = sharedWas.current;
+    sharedWas.current = { id: sessionId, shared };
+    if (was.id === sessionId && was.shared !== shared && shared) load();
+  }, [sessionId, shared]);
 
   const refreshCatalogue = () => {
     const asked = sessionId;
@@ -426,7 +439,7 @@ export function ComposerBar({
     setBusy(true);
     setPickError(null);
     try {
-      await api.setConfig(sessionId, { provider: m.provider, modelId: m.id });
+      await kernelModels.change(sessionId, { provider: m.provider, modelId: m.id });
       setRecents(pushRecent(modelKey(m)));
       await load();
       setOpen(null);
@@ -463,7 +476,7 @@ export function ComposerBar({
   const saver = useMemo(
     () =>
       serialSaver(
-        (level: string) => api.setConfig(sessionId, { thinkingLevel: level }).then(() => {}),
+        (level: string) => kernelModels.change(sessionId, { thinkingLevel: level }),
         load,
       ),
     [sessionId],

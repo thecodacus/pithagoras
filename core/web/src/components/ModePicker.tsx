@@ -2,33 +2,11 @@ import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { LuCheck, LuChevronDown, LuPlus } from "react-icons/lu";
 import { useNavigate } from "react-router-dom";
 import type { ChatMode } from "../api";
-import { translate } from "../extensions/strings";
-import { labelOf, msg, t } from "../i18n";
+import { t } from "../i18n";
+import { modeDescription, modeLabel } from "../mode-names";
 import { paramsLine } from "../mode-params";
 import { useLeaveRef } from "../motion";
 import { useDismiss } from "../use-dismiss";
-import { confirmDialog } from "./ConfirmDialog";
-
-/**
- * Chat modes: how a chat works, chosen above the message box before its first message and fixed once it has one.
- * The portal's own are named here in the page's language, with the same English as the server's list
- * (core/server/src/chat-modes.ts); an extension's through its own translations; a mode neither knows is shown as the
- * server names it.
- */
-const LABELS: Record<string, string> = {
-  standard: msg("Standard mode"),
-  code: msg("Code mode"),
-};
-const DESCRIPTIONS: Record<string, string> = {
-  standard: msg("The agent as this chat would have it anyway: the tools that Settings → Tools, its agent and its project switch on."),
-  code: msg("The model works through one tool: it writes a short JavaScript script that calls the chat's tools, and is given only what the script puts out."),
-};
-
-/** What a mode is called on the page. */
-export const modeLabel = (mode: ChatMode): string => (mode.extension ? translate(mode.extension, mode.label) : labelOf(LABELS, mode.id, () => mode.label));
-/** The line that says what a mode does. */
-export const modeDescription = (mode: ChatMode): string =>
-  mode.extension ? translate(mode.extension, mode.description) : labelOf(DESCRIPTIONS, mode.id, () => mode.description);
 
 /** The line that says what a mode does, and the model parameters it sets after it, where it sets any. */
 const describe = (mode: ChatMode): string => [modeDescription(mode), paramsLine(mode.params)].filter(Boolean).join("\n");
@@ -47,7 +25,7 @@ function unavailable(stored: string): { label: string; title: string } {
  * the way to make one of your own last (Settings → Modes, over the chat). A button with no type submits the form it is
  * in, the message box's: every button here says it is a button, or choosing a mode would send the draft as the first
  * message, which fixes the mode. A mode that asks first (an extension's `confirm`) is shown in the warning colour, and
- * is chosen only after a yes to its text: `confirmed`.
+ * the portal asks before the chat is put in it.
  */
 export function ModePicker({
   chat,
@@ -58,7 +36,7 @@ export function ModePicker({
   chat: string;
   current: string;
   modes: ChatMode[];
-  onChoose: (mode: string, confirmed?: boolean) => void;
+  onChoose: (mode: string) => void;
 }) {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
@@ -97,20 +75,12 @@ export function ModePicker({
     }
   };
 
-  // The mode the chat has already is no change: nothing is saved, and no pi is let go for it.
-  const choose = async (mode: ChatMode) => {
+  // The mode the chat has already is no change: nothing is saved, and no pi is let go for it. A mode that asks first
+  // is asked about by the portal (kernel/chats.ts setMode), not here.
+  const choose = (mode: ChatMode) => {
     setOpen(false);
     button.current?.focus();
-    if (mode.id === current) return;
-    if (!mode.confirm) return onChoose(mode.id);
-    const name = modeLabel(mode);
-    const yes = await confirmDialog({
-      title: t("Use {mode}?", { mode: name }),
-      message: mode.extension ? translate(mode.extension, mode.confirm) : mode.confirm,
-      confirmLabel: t("Use {mode}", { mode: name }),
-      danger: true,
-    });
-    if (yes) onChoose(mode.id, true);
+    if (mode.id !== current) onChoose(mode.id);
   };
 
   // The menu is placed in the row the chip is drawn in (positioned there), as wide as it needs: not as narrow as the chip.

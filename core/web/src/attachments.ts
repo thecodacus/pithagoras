@@ -135,6 +135,9 @@ export function createPending() {
   const listeners = new Set<(id: string) => void>();
   const get = (id: string): Attachment[] => byChat.get(id) ?? [];
   const set = (id: string, list: Attachment[]): void => {
+    // Frozen: the list is what a part reads and what the next message sends, and it is replaced, never changed in place.
+    for (const a of list) Object.freeze(a);
+    Object.freeze(list);
     if (list.length) byChat.set(id, list);
     else byChat.delete(id);
     for (const listener of listeners) listener(id);

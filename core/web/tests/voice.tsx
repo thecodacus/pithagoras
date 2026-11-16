@@ -8,6 +8,7 @@ import { KeyboardShortcuts } from '../src/components/KeyboardShortcuts';
 import type { PortalEvent, Session } from '../src/api';
 import { serverPush } from '../src/extensions/server-feed';
 import '../src/styles';
+import { createFakeKernel, WithKernel } from './fake-kernel';
 import { register } from '../src/extensions/slots';
 import { registerShortcut } from '../src/extensions/shortcuts';
 import { registerCommand } from '../src/extensions/commands';
@@ -79,19 +80,26 @@ function Fixture() {
   const [shortcuts, setShortcuts] = useState(false);
   // The chat open: another one is the same page shown for another session, as the portal's own switches.
   const [chat, setChat] = useState('test');
+  // The chat reads its conversation from the kernel's chats store, which this page fills as it draws, and acts through
+  // its controller: what is said and stopped is shown beside it (see fake-kernel.tsx).
+  const [fake] = useState(() => createFakeKernel({ controller: () => ({
+    abort: async () => { setAborted(n => n + 1); setRunning(false); },
+    send: async (message, options) => {
+      setVoiceSend(options?.voice === true);
+      setLastSend(JSON.stringify({ message, images: options?.images?.length ?? 0, steer: options?.steer === true }));
+      setSent(n => n + 1); setRunning(true);
+      setEvents(previous => [...previous,
+        { seq: previous.length + 1, type: 'portal_prompt', payload: { message } },
+        { seq: previous.length + 2, type: 'message_update', payload: { assistantMessageEvent: { type: 'text_delta', delta: 'Here is the spoken response.' } } },
+        { seq: previous.length + 3, type: 'message_end', payload: {} },
+      ]);
+    },
+  }) }));
   const session: Session = { id: chat, title: 'A little room to think', workspace: '/workspaces/pithagoras', executor: 'host', status: running ? 'running' : 'idle', created_at: '', updated_at: '', last_error: null, pinned: false, provider: 'llama-server', model: 'Model A', thinking_level: 'medium', mode: null };
-  return <>
+  fake.feed(session.id, events);
+  return <WithKernel fake={fake}>
     <main data-testid="workspace" style={{ maxWidth: 980, height: 'calc(100vh - 96px)', minHeight: 540, margin: '16px auto 0' }}>
-      <Chat session={session} events={events} onClientCommand={() => {}} onEditMessage={async () => {}} onDeleteMessage={async () => {}} onTakeBackQueued={async () => {}} onSendQueuedNow={async () => {}} onRename={async () => {}} onSetMode={async () => {}} onAbort={async () => { setAborted(n => n + 1); setRunning(false); }} onSend={async (message, options) => {
-        setVoiceSend(options?.voice === true);
-        setLastSend(JSON.stringify({ message, images: options?.images?.length ?? 0, steer: options?.steer === true }));
-        setSent(n => n + 1); setRunning(true);
-        setEvents(previous => [...previous,
-          { seq: previous.length + 1, type: 'portal_prompt', payload: { message } },
-          { seq: previous.length + 2, type: 'message_update', payload: { assistantMessageEvent: { type: 'text_delta', delta: 'Here is the spoken response.' } } },
-          { seq: previous.length + 3, type: 'message_end', payload: {} },
-        ]);
-      }} />
+      <Chat session={session} onClientCommand={() => {}} />
     </main>
     {shortcuts && <section aria-label="Shortcut settings" style={{ maxWidth: 700, margin: '8px auto' }}><KeyboardShortcuts /></section>}
     {options && <ExtensionDialog sessionId="test" request={{ id: 'choice', method: 'select', title: 'Choose the next step', options: ['Review changes', 'Run tests'] }} onDone={() => { setSelected(n => n + 1); setOptions(false); }} />}
@@ -137,7 +145,7 @@ function Fixture() {
       <button onClick={() => { document.querySelector('[data-testid=tracks]')!.textContent = destination.stream.getTracks().map(t => `${t.readyState}:${t.enabled}`).join(','); }}>Check mic tracks</button>
       <span data-testid="tracks" />
     </aside>
-  </>;
+  </WithKernel>;
 }
 // Inside a router, as in the app: the chat's links go through it.
 // What an installed extension's server half tells this chat's page, as the app's stream passes it on: see extensions/server-feed.ts.

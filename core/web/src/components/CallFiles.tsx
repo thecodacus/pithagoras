@@ -1,5 +1,5 @@
 import { LuFileDown } from "react-icons/lu";
-import { api } from "../api";
+import { useKernel } from "../kernel/context";
 import { shownPictureId } from "../chat-pictures";
 import type { Item } from "../transcript";
 import { t } from "../i18n";
@@ -14,6 +14,7 @@ import { ChatVideo } from "./ChatVideo";
  * tall one is smaller here, and whole in the viewer.
  */
 export function CallFiles({ item, sessionId, onOpenPicture }: { item: Extract<Item, { kind: "tool" }>; sessionId: string; onOpenPicture: (id: string) => void }) {
+  const { media } = useKernel();
   if (!item.files?.length) return null;
   return (
     <>
@@ -24,12 +25,12 @@ export function CallFiles({ item, sessionId, onOpenPicture }: { item: Extract<It
           <div key={`${i}:${file.path}`} className="chat-picture my-3 flex justify-center">
             {file.kind === "picture" ? (
               <PictureButton id={shownPictureId(item.id, file.path)} onOpen={onOpenPicture} title={name}>
-                <img src={api.pictureUrl(sessionId, file.path, item.filesSeq)} alt={name} loading="lazy" className="max-h-80 max-w-full rounded-lg border border-line object-contain" />
+                <img src={media.picture(sessionId, file.path, item.filesSeq)} alt={name} loading="lazy" className="max-h-80 max-w-full rounded-lg border border-line object-contain" />
               </PictureButton>
             ) : file.kind === "video" ? (
-              <ChatVideo src={api.videoUrl(sessionId, file.path, item.filesSeq)} title={name} />
+              <ChatVideo src={media.video(sessionId, file.path, item.filesSeq)} title={name} />
             ) : (
-              <a className="chat-file" href={api.fileUrl(sessionId, file.path, item.filesSeq)} download title={t("Download {name}", { name: file.path })}>
+              <a className="chat-file" href={media.file(sessionId, file.path, item.filesSeq)} download title={t("Download {name}", { name: file.path })}>
                 <LuFileDown aria-hidden />
                 <span>{name}</span>
               </a>

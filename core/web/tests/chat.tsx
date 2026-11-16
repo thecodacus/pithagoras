@@ -8,7 +8,8 @@ import { Chat } from '../src/components/Chat';
 import { ConfirmHost } from '../src/components/ConfirmDialog';
 import { fillFrom } from '../src/editor-fills';
 import { Select } from '../src/components/Select';
-import type { PortalEvent, Session } from '../src/api';
+import { type PortalEvent, type Session } from '../src/api';
+import { createFakeKernel, WithKernel } from './fake-kernel';
 import '../src/styles';
 import { installTooltips } from '../src/tooltips';
 import { installMotion } from '../src/motion';
@@ -293,6 +294,13 @@ if (phase === 'codemode') {
 }
 
 const session: Session = { id: 'preview', title: 'Fix the build', workspace: '/workspaces/pithagoras', executor: 'host', status: phase === 'interrupted' ? 'interrupted' : phase === 'args' || phase === 'code' || phase === 'pictures' || phase === 'outputs' || phase === 'stats' || phase === 'flagged' || phase === 'flagged-lazy' ? 'idle' : 'running', created_at: '', updated_at: '', last_error: null, pinned: false, provider: 'llama-server', model: 'Model A', thinking_level: 'medium' } as Session;
+// What a person does in a chat is the kernel's controller, as in the app, over the preview's own answers: the portal's
+// questions (delete a message, trust a result) are asked as they are there, a delete is told to the page, and a message
+// sent is kept for a test to read. The chat's events are put in the kernel's store as the preview draws it.
+const fake = createFakeKernel({
+  api: { deleteMessage: async (_id: string, seq: number) => { (window as any).deleted = [...((window as any).deleted ?? []), seq]; return { ok: true as const }; } },
+  controller: () => ({ send: async (message: string) => { (window as any).sent = [...((window as any).sent ?? []), message]; } }),
+});
 const noop = async () => {};
 // An extension moves its status twenty times a second: how often the chat asks for /background is counted.
 if (phase === 'nudge') {
@@ -329,10 +337,11 @@ function Fixture() {
     return () => clearInterval(t);
   }, []);
   const shown = which === session.id ? session : { ...session, id: which, title: which === 'first' ? 'First chat' : 'Second chat', status: 'idle' as const };
-  return <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
+  fake.feed(shown.id, shownEvents, { loaded: !new URLSearchParams(location.search).has('loading') });
+  return <WithKernel fake={fake}><div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
     <div style={{ padding: 8, display: 'flex', gap: 8 }}><Select aria-label="Preview select" size="sm" className="w-64" value={v} onChange={setV} options={[{ value: 'a', label: 'Project notes' }, { value: 'b', label: 'Release plan', hint: 'Temporary — not stored' }, { value: 'c', label: 'Meeting summary' }]} /><label className="flex items-center gap-2 text-xs"><input type="checkbox" defaultChecked />Checkbox</label><input type="range" defaultValue={40} />{phase === 'switch' && <button onClick={() => setWhich('second')}>Open the second chat</button>}{phase === 'switch' && <button onClick={() => setWhich('first')}>Open the first chat</button>}{phase === 'paste' && <button onClick={paste}>Paste from the extension</button>}</div>
-    <div style={{ flex: 1, minHeight: 0 }}><Chat session={shown} events={shownEvents} onSend={async (message) => { (window as any).sent = [...((window as any).sent ?? []), message]; }} onEditMessage={noop} onDeleteMessage={async (seq: number) => { (window as any).deleted = [...((window as any).deleted ?? []), seq]; }} onTakeBackQueued={noop} onSendQueuedNow={noop} onAbort={noop} onClientCommand={noop} onRename={noop} onSetMode={noop} loading={new URLSearchParams(location.search).has('loading')} /></div>
-  </div>;
+    <div style={{ flex: 1, minHeight: 0 }}><Chat session={shown} onClientCommand={noop} /></div>
+  </div></WithKernel>;
 }
 // The language, as Settings changes it: `window.setLang('de')`.
 (window as any).setLang = setLanguage;

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { LuChevronRight, LuRefreshCw } from "react-icons/lu";
 import { api, type PiConfig } from "../api";
+import { useKernel } from "../kernel/context";
 import { parseWindow } from "../context-window";
 import { KeepRecent, useKeepRecentSave } from "./KeepRecent";
 import { SwitchTrack } from "./SettingsUi";
@@ -186,6 +187,7 @@ export function ContextPill({
   /** Stats move after compaction and after toggling auto-compaction. */
   onChanged: () => Promise<void> | void;
 }) {
+  const { chats, models } = useKernel();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<null | "compact" | "auto">(null);
   /** Read when the popup opens rather than with the transcript — it is pi's file. */
@@ -218,7 +220,7 @@ export function ContextPill({
     setBusy("compact");
     setNote(null);
     try {
-      await api.compact(sessionId);
+      await chats.controller(sessionId).compact();
       await onChanged();
       setNote({ text: t("Compacted."), error: false });
     } catch (e) {
@@ -241,7 +243,7 @@ export function ContextPill({
     setBusy("auto");
     setNote(null);
     try {
-      await api.setConfig(sessionId, { autoCompaction: !auto });
+      await models.change(sessionId, { autoCompaction: !auto });
       await onChanged();
     } catch (e) {
       setNote({ text: (e as Error).message, error: true });

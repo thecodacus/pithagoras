@@ -106,6 +106,25 @@ test('a mode that asks first is chosen only after a yes: Cancel leaves Standard 
   await expect(chip(page)).not.toHaveClass(/text-warn/);
 });
 
+test('a mode that asks only since the list was read is asked about, and a no shows the mode the chat was in', async ({ page }) => {
+  const state = await portal(page);
+  // The list the picker drew does not know that Focus asks; the portal does by the time it is chosen.
+  state.modes = [MODES[0], MODES[1], MINE, { ...FOCUS, confirm: undefined }];
+  await page.evaluate(() => window.dispatchEvent(new Event('pithagoras:extensions-changed')));
+  await chip(page).click();
+  await expect(row(page, 'Focus mode').getByText('Focus mode', { exact: true })).not.toHaveClass(/text-warn/);
+  state.modes = MODES;
+  await row(page, 'Focus mode').click();
+  const question = asked(page, 'Use Focus mode?');
+  await expect(question).toBeVisible();
+  await question.getByRole('button', { name: 'Cancel' }).click();
+  await expect(question).toHaveCount(0);
+  await expect(chip(page)).toHaveText('Standard mode');
+  await page.waitForTimeout(300);
+  expect(state.puts).toEqual([]);
+  await expect(chip(page)).toHaveText('Standard mode');
+});
+
 test('a chat started in a mode that asked first has it in its header in the warning colour', async ({ page }) => {
   await portal(page, { mode: FOCUS.id, said: true });
   await expect(page.getByText('Hello there')).toBeVisible();

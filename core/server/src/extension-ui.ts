@@ -11,14 +11,16 @@ import semver from "semver";
  * nothing of it.
  *
  *   "pi":         { "extensions": ["./index.ts"] }
- *   "pithagoras": { "client": "./web/client.js", "style": "./web/client.css", "server": "./server.js",
+ *   "pithagoras": { "client": "./web/client.js", "style": "./web/client.css", "server": "./server.js", "api": "^1.0",
  *                   "themes": [{ "id": "dusk", "name": "Dusk", "dark": { "canvas": "#1b1626" } }] }
  *
  * `client` is a JavaScript module the portal's page loads, which puts what it
  * draws into the portal's slots (see web/src/extensions). The folder it is in
  * is the package's web folder: the portal serves that folder, and nothing else
  * of the package, to whoever is signed in. `style`, in the same folder, is a
- * stylesheet loaded with it.
+ * stylesheet loaded with it. `api` is the versions of the interface API the
+ * module needs, as a semver range: a portal whose API is not one of them does
+ * not load it, and says why in Settings.
  *
  * `server` is a JavaScript module the portal itself loads, once, for all
  * chats: the package's own routes, what it keeps, and what outlives a chat's
@@ -58,6 +60,12 @@ export interface ClientHalf {
   /** The module, and the stylesheet if it has one, as paths inside `dir`. */
   entry: string;
   style?: string;
+  /**
+   * The versions of the interface API the module needs (`pithagoras.api`), as a semver range: "^1.0". The page
+   * checks it against the contract version it has, before it loads the module (web/src/extensions/contract.ts).
+   * Absent: it needs nothing beyond 1.0.
+   */
+  api?: string;
   /** Changes when a file of `dir` does (see revOf), so a page loads it again rather than the one it has. */
   rev: string;
 }
@@ -170,6 +178,24 @@ function fileIn(dir: string, file: string): string | undefined {
   }
 }
 
+/** How long a `pithagoras.api` range is carried into every list: past it, the range is not one the page reads. */
+const RANGE_LONGEST = 100;
+
+/**
+ * What `pithagoras.api` says, as the page is to read it: a range is passed on as it is written, and anything else that
+ * is there (a number, a list, a range too long to carry) as text that the page will not read as a range, so that it
+ * refuses the extension and says why, rather than loading it as if it needed nothing. Absent, null or empty: nothing
+ * declared, as semver takes an empty range.
+ */
+function apiRange(declared: unknown): { api?: string } {
+  if (declared === undefined || declared === null) return {};
+  let text = typeof declared === "string" ? declared.trim() : typeof declared === "number" ? String(declared) : JSON.stringify(declared) ?? String(declared);
+  if (!text) return {};
+  // Cut, it could read as another range: the mark after it makes it no range at all.
+  if (text.length > RANGE_LONGEST) text = `${text.slice(0, RANGE_LONGEST)}…`;
+  return { api: text };
+}
+
 /**
  * The browser half the package in `packageDir` declares, or nothing: it
  * declares none, or what it names is not a file inside it.
@@ -199,6 +225,7 @@ export function clientHalf(packageDir: string): ClientHalf | undefined {
     dir,
     entry: path.basename(client),
     ...(style ? { style } : {}),
+    ...apiRange(declared.api),
     // Read as it is first asked for: a file a page fetches is found by the folder alone, and every fetch would otherwise
     // look at every file of every half. The stylesheet too, however many files there are: the page tells one revision
     // from another by the module's address alone.
