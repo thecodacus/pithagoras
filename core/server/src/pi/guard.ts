@@ -10,7 +10,7 @@ import { listToolRules, mcpView, recordAudit, trustResult, trustedMcpServers, tr
 import { SIGNALS, injectionSignals, type Signal } from "./injection.js";
 import { GUARD_RULE_NAMES, type GuardRuleName } from "./guard-rule-names.js";
 import { mcpClaims, mcpServerOf } from "../tool-policy.js";
-import { DATA_DIR } from "../data-dir.js";
+import { DATA_DIR, dataFolder } from "../data-dir.js";
 import { piAgentDir } from "../pi-settings.js";
 import { isWithinText, pathBelow, realPath, realPathAhead } from "../within.js";
 import { agentsRoot, listAgents } from "../agents.js";
@@ -211,6 +211,21 @@ const target = (input: Record<string, unknown>) =>
 
 /** Directories on PATH: a file here is executed later, by something else. */
 const PATH_DIRS = /(^|[^\w/])(\/data\/bin|\/usr\/local\/bin|\/usr\/bin|\/usr\/local\/sbin)(?=\/|[\s'"]|$)/;
+
+/**
+ * A directory on PATH, or a file in one, by the path of what is written to: the fixed set by its words
+ * (in the Docker image the portal's bin is `/data/bin` of it), and the portal's own bin wherever a native
+ * install puts it — the persistent place for its CLIs, kept on PATH (see server), which is `DATA_DIR/bin`
+ * or where `BIN_DIR` moves it. The path comes already resolved (homeOf), so the `~/…` and `$HOME/…`
+ * spellings of it are no way round, nor a dot segment (the containment is checked normalized). It is
+ * given with a trailing slash, as the rule passes it: that is what makes the directory itself match,
+ * not only the files in it.
+ */
+const onPath = (place: string): boolean => {
+  if (PATH_DIRS.test(place)) return true;
+  const bin = dataFolder("BIN_DIR", "bin");
+  return path.normalize(place).startsWith(bin + "/");
+};
 
 const PERSIST_PATHS = /(?:\/etc\/(?:cron\.[a-z]+|systemd\/system)|(?:~|(?:\/[^\s/]+)+)\/\.config\/(?:autostart|systemd\/user)|(?:~|(?:\/[^\s/]+)+)\/\.(?:bashrc|bash_profile|zshrc|zprofile|profile))(?=\/|[\s'"]|$)/;
 
@@ -1070,12 +1085,16 @@ const RULES: Rule[] = [
     name: "write-to-path",
     why: "a file on PATH runs later, without anyone asking for it",
     hit: (tool, input, { workspace }) => {
-      if (tool === "write" || tool === "edit") return PATH_DIRS.test(target(input) + "/");
+      if (tool === "write" || tool === "edit") {
+        const named = homeOf(target(input));
+        // A relative target is resolved against the workspace, as the tool does.
+        return onPath(`${path.isAbsolute(named) || workspace === undefined ? named : path.resolve(workspace, named)}/`);
+      }
       if (tool !== "bash") return false;
       // Where the line writes to, by its words (see shellWrites): a script that only names /usr/bin in its shebang writes nowhere on PATH.
       return shellWrites(cmd(input), workspace).some(({ place, dir }) => {
         const named = homeOf(place);
-        return PATH_DIRS.test(`${path.isAbsolute(named) || dir === undefined ? named : path.resolve(dir, named)}/`);
+        return onPath(`${path.isAbsolute(named) || dir === undefined ? named : path.resolve(dir, named)}/`);
       });
     },
   },
