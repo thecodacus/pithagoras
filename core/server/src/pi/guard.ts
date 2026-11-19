@@ -213,7 +213,7 @@ const target = (input: Record<string, unknown>) =>
 const PATH_DIRS = /(^|[^\w/])(\/data\/bin|\/usr\/local\/bin|\/usr\/bin|\/usr\/local\/sbin)(?=\/|[\s'"]|$)/;
 
 /**
- * A directory on PATH, or a file in one, by the real path of what is written to: the fixed set by its words
+ * A directory on PATH, or a file in one, by the path of what is written to: the fixed set by its words
  * (in the Docker image the portal's bin is `/data/bin` of it), and the portal's own bin wherever a native
  * install puts it — the persistent place for its CLIs, kept on PATH (see server), which is `DATA_DIR/bin`
  * or where `BIN_DIR` moves it. The path comes already resolved (homeOf), so the `~/…` and `$HOME/…`
@@ -222,7 +222,7 @@ const PATH_DIRS = /(^|[^\w/])(\/data\/bin|\/usr\/local\/bin|\/usr\/bin|\/usr\/lo
 const onPath = (place: string): boolean => {
   if (PATH_DIRS.test(place)) return true;
   const bin = dataFolder("BIN_DIR", "bin");
-  return place === bin || place.startsWith(bin + "/");
+  return place.startsWith(bin + "/");
 };
 
 const PERSIST_PATHS = /(?:\/etc\/(?:cron\.[a-z]+|systemd\/system)|(?:~|(?:\/[^\s/]+)+)\/\.config\/(?:autostart|systemd\/user)|(?:~|(?:\/[^\s/]+)+)\/\.(?:bashrc|bash_profile|zshrc|zprofile|profile))(?=\/|[\s'"]|$)/;
