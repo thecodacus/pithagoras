@@ -37,7 +37,7 @@ export const STATE_DIR = path.join(DATA_DIR, "sandbox");
 export const ON_FLAG = path.join(STATE_DIR, "enabled");
 const SUDOERS = "/etc/sudoers.d/pithagoras-sandbox";
 const WRAPPER_MARK = "# pithagoras sandbox: generated";
-const BIN_DIR = dataFolder("BIN_DIR", "bin");
+export const BIN_DIR = dataFolder("BIN_DIR", "bin");
 
 export interface ApplyReport {
   ok: boolean;
