@@ -219,6 +219,18 @@ async function applyTrusted(policy: SandboxPolicy, ids: Ids, report: ApplyReport
       report.done.push(`${name}: no longer trusted, wrapper removed`);
     }
   }
+  // Wrappers an earlier version wrote into the data dir's bin, before the bin folder followed
+  // BIN_DIR: gone, so nothing unmanaged calls a sudo rule.
+  const legacyBin = path.join(DATA_DIR, "bin");
+  if (legacyBin !== BIN_DIR && existsSync(legacyBin)) {
+    for (const name of readdirSync(legacyBin)) {
+      const file = path.join(legacyBin, name);
+      if (isOurs(file)) {
+        rmSync(file);
+        report.done.push(`${name}: the old wrapper from ${legacyBin} removed`);
+      }
+    }
+  }
 
   const sudoers = `# Written by the Pithagoras sandbox: the agents may run exactly these as ${TOOLS_USER}.\n` +
     `Defaults:%${SANDBOX_GROUP} !requiretty, env_reset\n${lines.join("\n")}\n`;

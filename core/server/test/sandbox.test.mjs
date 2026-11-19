@@ -56,12 +56,14 @@ const why = !linuxRoot ? "needs root on Linux, as the portal runs in its image" 
 
 test("the sandbox holds against the ways round it", { skip: why }, async (t) => {
   users();
-  for (const dir of [DATA, WORK, path.join(WORK, "project"), path.join(DATA, "agent-home"), BIN, path.join(DATA, "home", ".pi", "agent"), path.join(DATA, "trusted"), path.join(DATA, ".secrets")]) mkdirSync(dir, { recursive: true });
+  for (const dir of [DATA, WORK, path.join(WORK, "project"), path.join(DATA, "agent-home"), BIN, path.join(DATA, "bin"), path.join(DATA, "home", ".pi", "agent"), path.join(DATA, "trusted"), path.join(DATA, ".secrets")]) mkdirSync(dir, { recursive: true });
   writeFileSync(path.join(WORK, "project", "notes.txt"), "hello\n");
   execFileSync("git", ["init", "-q", path.join(WORK, "existing")]);
   writeFileSync(path.join(DATA, ".secrets", "key.json"), '{"api_key":"sk-secret-123"}\n');
   writeFileSync(path.join(DATA, "home", ".pi", "agent", "auth.json"), '{"token":"pi-auth-secret"}\n');
   writeFileSync(path.join(BIN, "hello"), "#!/bin/sh\necho hi\n", { mode: 0o755 });
+  // A wrapper an earlier version wrote into the data dir's bin, before the bin folder followed BIN_DIR.
+  writeFileSync(path.join(DATA, "bin", "stale"), "#!/bin/sh\n# pithagoras sandbox: generated\n", { mode: 0o755 });
   // A trusted command that reads the key: only pi-tools can.
   writeFileSync(path.join(DATA, "trusted", "show-key"), `#!/bin/sh\ngrep -o 'sk-[a-z0-9-]*' ${path.join(DATA, ".secrets", "key.json")}\n`, { mode: 0o755 });
 
@@ -80,6 +82,7 @@ test("the sandbox holds against the ways round it", { skip: why }, async (t) => 
   assert.equal(support.available, true, support.reason);
   const report = await applySandbox(policy, support, true);
   assert.equal(report.ok, true, report.warnings.join("\n"));
+  assert.equal(existsSync(path.join(DATA, "bin", "stale")), false, "the old wrapper from the data dir's bin goes");
   // A rule on a read-only filesystem is noted and the others still go on.
   if (spawnSync("sh", ["-c", "touch /sys/x 2>&1 | grep -q 'Read-only'"]).status === 0) assert.ok(report.done.some((d) => /^\/sys: on a read-only filesystem/.test(d)), report.done.join("\n"));
 
