@@ -52,6 +52,8 @@ export const SETTINGS_INDEX: SettingEntry[] = [
   { tab: "guard", section: msg("Allowed once"), title: msg("Open approvals"), words: "approval approve one-off grant revoke freigabe widerrufen" },
   { tab: "guard", section: msg("Trusted results"), title: msg("Trusted results"), words: "trusted flagged result suspected injection untrust vertraut" },
   { tab: "browser", section: msg("Appearance"), title: msg("Theme"), words: "dark light mode appearance colour color design dunkel hell" },
+  { tab: "browser", section: msg("Appearance"), title: msg("Text size"), words: "font bigger larger smaller zoom size text read reading schrift schriftgröße schriftgrosse größer grösser kleiner groß lesen" },
+  { tab: "browser", section: msg("Appearance"), title: msg("Spacing"), words: "density compact roomy padding gap space room dichte abstand abstände kompakt luftig platz" },
   { tab: "browser", section: msg("Animations"), title: msg("Fancy animations"), words: "motion animation animate effects intro transitions flourish reduce reduced motion off animationen bewegung effekte übergänge ausschalten" },
   { tab: "browser", section: msg("Language"), title: msg("Language"), words: "language locale translation german english deutsch englisch sprache übersetzung" },
   { tab: "browser", section: msg("Notifications"), title: msg("Notifications"), words: "notify alert done finished benachrichtigung" },

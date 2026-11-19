@@ -104,11 +104,11 @@ export function Branches() {
               type="button"
               aria-expanded={remotesOpen || !!filter}
               onClick={() => setRemotesOpen((v) => !v)}
-              className="sticky top-0 flex w-full items-center gap-1 border-b border-line/60 bg-surface/95 px-3 py-1 text-left text-[11px] font-medium uppercase tracking-wide text-fg-subtle"
+              className="sticky top-0 flex w-full items-center gap-1 border-b border-line/60 bg-surface/95 px-3 py-1 text-left text-2xs font-medium uppercase tracking-wide text-fg-subtle"
             >
               {remotesOpen || filter ? <LuChevronDown aria-hidden className="h-3 w-3" /> : <LuChevronRight aria-hidden className="h-3 w-3" />}
               {t("On the remote")}
-              <span className="rounded-full bg-fg/8 px-1.5 text-[10px] normal-case">{remote.length}</span>
+              <span className="rounded-full bg-fg/8 px-1.5 text-3xs normal-case">{remote.length}</span>
             </button>
             {(remotesOpen || filter) &&
               remote.map((b) => (
@@ -140,18 +140,18 @@ function BranchRow({ branch: b, onSwitch, onDelete }: { branch: Branch; onSwitch
           {b.current ? <LuCheck aria-label={t("Checked out")} className="h-3 w-3 shrink-0 text-accent" /> : <span className="w-3 shrink-0" />}
           <span className={`min-w-0 truncate font-mono text-xs ${b.current ? "font-semibold text-fg" : "text-fg"}`}>{b.name}</span>
           {(b.ahead > 0 || b.behind > 0) && (
-            <span className="shrink-0 font-mono text-[10px]">
+            <span className="shrink-0 font-mono text-3xs">
               {b.ahead > 0 && <span className="text-accent">↑{b.ahead}</span>}
               {b.behind > 0 && <span className="text-warn">↓{b.behind}</span>}
             </span>
           )}
           {b.gone && (
-            <span className="shrink-0 rounded px-1 text-[10px] text-warn ring-1 ring-inset ring-warn/30" title={t("Its branch on the remote was deleted")}>
+            <span className="shrink-0 rounded px-1 text-3xs text-warn ring-1 ring-inset ring-warn/30" title={t("Its branch on the remote was deleted")}>
               {t("gone")}
             </span>
           )}
         </span>
-        <span className="flex min-w-0 items-center gap-1.5 pl-4 text-[10.5px] text-fg-faint">
+        <span className="flex min-w-0 items-center gap-1.5 pl-4 text-[length:calc(var(--text-base,1rem)*0.65625)] text-fg-faint">
           <span className="min-w-0 flex-1 truncate">{b.subject}</span>
           <span className="shrink-0">{ago(b.date)}</span>
         </span>

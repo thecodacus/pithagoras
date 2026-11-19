@@ -16,7 +16,7 @@ test('the published extension API has the files its exports name, its readme, it
   const printed = JSON.parse(execFileSync('npm', ['pack', '--dry-run', '--json', '-w', 'packages/extension-api'], { cwd: root, encoding: 'utf8' }));
   const packed = Array.isArray(printed) ? printed[0] : printed['@pithagoras/extension-api'];
   const files: string[] = packed.files.map((file: { path: string }) => file.path).sort();
-  assert.deepEqual(files, ['LICENSE', 'NOTICE', 'README.md', 'build.mjs', 'index.d.ts', 'package.json', 'server.d.ts', 'tailwind.mjs']);
+  assert.deepEqual(files, ['LICENSE', 'NOTICE', 'README.md', 'build.mjs', 'index.d.ts', 'package.json', 'server.d.ts', 'tailwind.mjs', 'test.d.ts', 'test.mjs']);
 
   const manifest = JSON.parse(readFileSync(path.join(dir, 'package.json'), 'utf8'));
   const named = [manifest.types, ...Object.values(manifest.exports).flatMap((target) => (typeof target === 'string' ? [target] : Object.values(target as Record<string, string>)))];
@@ -39,4 +39,17 @@ test("the extension API's version is the portal's, in package.json and in the lo
   assert.equal(lock.version, portal, "the lock's version is the root package.json's");
   assert.equal(lock.packages[''].version, portal, "the lock's root entry has the root package.json's version");
   assert.equal(lock.packages['packages/extension-api'].version, portal, "the lock's packages/extension-api entry has the root package.json's version");
+});
+
+/**
+ * The layers an extension's stylesheet is built with stop below the portal's questions and approvals: `z-confirm` is the
+ * portal's own (its Tailwind config), so no overlay of an extension's is drawn over a question that waits for an answer.
+ */
+test("the preset an extension is built with has no z-confirm layer; the portal's own build has", async () => {
+  const preset = (await import(path.join(dir, 'tailwind.mjs'))).default;
+  const layers = preset.theme.extend.zIndex;
+  assert.ok(layers.viewer && layers.dialog, 'the layers up to the viewers are in the preset');
+  assert.equal(layers.confirm, undefined, 'the layer of the portal\'s questions is not');
+  const portal = (await import(path.join(root, 'core/web/tailwind.config.js'))).default;
+  assert.equal(portal.theme.extend.zIndex.confirm, 'var(--z-confirm, 60)', 'the portal\'s own build has it');
 });

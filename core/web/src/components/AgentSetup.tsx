@@ -76,7 +76,7 @@ export function AgentSetup({
               ? t("An agent of its own, with its own character, memory and files in a folder of its own. Two questions and it has somewhere to start.")
               : t("Its channels talk to it, and it keeps what it learns. Two questions and it has somewhere to start.")}
           </p>
-          {home && <p className="mt-1 truncate font-mono text-[11px] text-fg-faint">{home}</p>}
+          {home && <p className="mt-1 truncate font-mono text-2xs text-fg-faint">{home}</p>}
         </div>
       </div>
 
@@ -111,7 +111,7 @@ export function AgentSetup({
               placeholder={t("How it should come across. Direct and a bit dry? Careful and thorough? Leave it empty for a sensible default you can edit later.")}
               className={`${inputCls} mt-1 resize-y text-xs leading-relaxed`}
             />
-            <p className="mt-1 text-[11px] text-fg-faint">{t("Becomes SOUL.md.")}</p>
+            <p className="mt-1 text-2xs text-fg-faint">{t("Becomes SOUL.md.")}</p>
           </label>
 
           <SetupNav leave={onCancel && <button type="button" onClick={onCancel} className={ghostCls}>{t("Cancel")}</button>}>
@@ -161,7 +161,7 @@ export function AgentSetup({
               placeholder={t("Short and blunt? Show the reasoning? Never guess?")}
               className={`${inputCls} mt-1 resize-y text-xs leading-relaxed`}
             />
-            <p className="mt-1 text-[11px] text-fg-faint">{t("Becomes PrimaryUser.md.")}</p>
+            <p className="mt-1 text-2xs text-fg-faint">{t("Becomes PrimaryUser.md.")}</p>
           </label>
 
           {error && <p role="alert" className="text-xs text-danger">{error}</p>}
@@ -179,7 +179,7 @@ export function AgentSetup({
         </fieldset>
       )}
 
-      <p className="mt-8 text-[11px] leading-relaxed text-fg-faint">
+      <p className="mt-8 text-2xs leading-relaxed text-fg-faint">
         {t("Writes SOUL.md, PrimaryUser.md and MEMORY.md into the agent's home directory. All three are handed to pi as context whenever a conversation starts, and stay editable here. A file that is already there is never overwritten.")}
       </p>
     </div>

@@ -113,7 +113,7 @@ export default function App() {
   if (!authed) {
     return (
       <>
-        <div className="fixed right-4 top-4 z-10">
+        <div className="fixed right-4 top-4 z-raised">
           <ThemeSwitcher />
         </div>
         {setup ? <Setup onSuccess={() => { setSetup(false); setAuthed(true); }} /> : <Login sso={sso} onSuccess={() => setAuthed(true)} onSetup={() => setSetup(true)} />}
@@ -697,7 +697,7 @@ function Shell({
   return (
     <Here.Provider value={here}>
     <div data-fits-keyboard className="flex h-[calc(100dvh-var(--keyboard,0px))] min-h-0 overflow-hidden bg-canvas">
-      {mobileNav && <button aria-label={t("Dismiss navigation")} onClick={() => setMobileNav(false)} className="ui-backdrop fixed inset-0 z-40 bg-black/50 md:hidden" />}
+      {mobileNav && <button aria-label={t("Dismiss navigation")} onClick={() => setMobileNav(false)} className="ui-backdrop fixed inset-0 z-backdrop bg-black/50 md:hidden" />}
       <div
         id="mobile-navigation"
         ref={drawer}
@@ -705,8 +705,8 @@ function Shell({
         role={mobileNav ? "dialog" : undefined}
         aria-modal={mobileNav ? true : undefined}
         aria-label={mobileNav ? t("Navigation") : undefined}
-        className={`${mobileNav ? "mobile-drawer fixed inset-y-0 left-0 z-50 flex outline-none" : "hidden"} h-full shrink-0 md:static md:z-auto md:flex`}>
-      {mobileNav && <button type="button" aria-label={t("Close navigation")} onClick={() => setMobileNav(false)} className="absolute right-2 top-3 z-20 rounded-lg p-2 text-fg md:hidden"><LuX size={20}/></button>}
+        className={`${mobileNav ? "mobile-drawer fixed inset-y-0 left-0 z-nav flex outline-none" : "hidden"} h-full shrink-0 md:static md:z-auto md:flex`}>
+      {mobileNav && <button type="button" aria-label={t("Close navigation")} onClick={() => setMobileNav(false)} className="absolute right-2 top-3 z-panel rounded-lg p-2 text-fg md:hidden"><LuX size={20}/></button>}
       <Sidebar
         forceExpanded={mobileNav}
         sessions={sessions}

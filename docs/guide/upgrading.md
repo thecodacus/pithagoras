@@ -1371,6 +1371,27 @@ folder. If you use Azure, its provider is renamed from `azure-openai-responses`
 to `azure`: rename it in pi's `auth.json`, `models.json` and `settings.json`, or
 sign in again. A portal run from a checkout needs Node 22.19 or later.
 
+## Themes set more than colours, and an extension asks before it changes them
+
+A theme can set type, rounding, spacing, shadows, motion and widths as well as colours (see
+[The look beyond colour](/guide/extension-ui#the-look-beyond-colour)), and Settings → This browser → Appearance has
+**Text size** and **Spacing**. As the portal ships them nothing looks different. Nothing needs doing.
+
+For the authors of extensions:
+
+- **`portal.theme.set` returns a promise** that resolves to whether the colours were switched. A theme of the
+  extension's own is switched to at once; another package's, or leaving another's for the portal's own, is asked of the
+  person first. It rejects for a theme there is none of, where it used to throw: code that wrapped it in `try` needs
+  `await` or a `.catch`.
+- **A theme's name is at most 60 characters, on one line, with no control character and no double quote in it.** A package
+  with a longer one, or one with a line break, a control character or a quote, fails to load its themes, as one with a bad colour does.
+  Spaces of any kind (a no-break or ideographic space) are made one plain space.
+- **Build again with this version of `@pithagoras/extension-api`** for your utilities to follow a theme's tokens and
+  the person's text size and spacing. A stylesheet built before keeps the sizes it was built with.
+
+A theme that a browser kept from before and that this version refuses (a value it does not take) is not painted, and
+the browser forgets it: that browser shows the portal's own colours until a theme is chosen again.
+
 ## Upgrading to 0.1.0 from an earlier build
 
 A portal at 0.1.0 has all of this already. What a build made before 0.1.0 meets

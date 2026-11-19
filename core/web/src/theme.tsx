@@ -1,5 +1,6 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { local } from "./safe-storage";
+import { appearanceOf, PAINTED_NAMES, tokenStyles, tokensOf, type Appearance, type Tokens } from "./tokens";
 
 /**
  * Light, dark, or whatever the machine is set to.
@@ -27,7 +28,8 @@ export type Colours = Partial<Record<Token, string>>;
 /**
  * Colours in place of the portal's own, for light, for dark, or for both: a
  * theme an extension brought (see extensions/themes.ts). What a mode does not
- * say stays the portal's.
+ * say stays the portal's. It may also set the look beyond colour (tokens.ts),
+ * for both modes at once.
  */
 export interface Palette {
   /** Which theme it is: "<package>/<id>". */
@@ -35,9 +37,16 @@ export interface Palette {
   name: string;
   light?: Colours;
   dark?: Colours;
+  tokens?: Tokens;
 }
 
 const PALETTE_KEY = "pithagoras.palette";
+/**
+ * Who the theme in effect was chosen by: the person, the interface in use as its default, or an extension that switched to
+ * a theme of its own without asking (extensions/themes.ts).
+ */
+const SET_BY_KEY = "pithagoras.palette.by";
+export type SetBy = "person" | "ui" | "extension";
 
 /**
  * Themes that came with the portal as packages of their own and now are in another. A browser that chose one of them
@@ -77,30 +86,71 @@ export function coloursOf(given: unknown): Colours | null {
   return out;
 }
 
-/** The theme chosen in this browser, with its colours: kept whole, so that it is painted before any extension is loaded. */
+/**
+ * The theme chosen in this browser, with its colours: kept whole, so that it is painted before any extension is loaded.
+ * A kept copy with anything in it that is not a theme's (written by hand, or by something else in the page) is taken
+ * out of the browser, so that the script before the app does not paint it again at every start either.
+ */
 export function storedPalette(): Palette | null {
+  const text = local.get(PALETTE_KEY);
+  if (text === null) return null;
+  let kept: { id?: unknown; name?: unknown; light?: unknown; dark?: unknown; tokens?: unknown } | null;
   try {
-    const kept = JSON.parse(local.get(PALETTE_KEY) ?? "null");
-    const light = coloursOf(kept?.light), dark = coloursOf(kept?.dark);
-    if (typeof kept?.id !== "string" || typeof kept.name !== "string" || !light || !dark) return null;
-    const now = { id: themeIdNow(kept.id), name: kept.name, light, dark };
-    // Kept under the new id from now on, or the old one would be mapped at every start.
-    if (now.id !== kept.id) local.set(PALETTE_KEY, JSON.stringify(now));
-    return now;
+    kept = JSON.parse(text);
   } catch {
+    kept = null;
+  }
+  const light = coloursOf(kept?.light), dark = coloursOf(kept?.dark), tokens = tokensOf(kept?.tokens);
+  if (typeof kept?.id !== "string" || typeof kept.name !== "string" || !light || !dark || !tokens) {
+    local.remove(PALETTE_KEY);
     return null;
+  }
+  const now: Palette = { id: themeIdNow(kept.id), name: kept.name, light, dark, ...(Object.keys(tokens).length ? { tokens } : {}) };
+  // Kept under the new id from now on, or the old one would be mapped at every start.
+  if (now.id !== kept.id) local.set(PALETTE_KEY, JSON.stringify(now));
+  return now;
+}
+
+const APPEARANCE_KEY = "pithagoras.appearance";
+
+/** The person's own text size and density in this browser, as percent of the theme's (tokens.ts). */
+export function storedAppearance(): Appearance {
+  try {
+    return appearanceOf(JSON.parse(local.get(APPEARANCE_KEY) ?? "null"));
+  } catch {
+    return appearanceOf(null);
   }
 }
 
-let palette: Palette | null = storedPalette();
-const paletteWatchers = new Set<() => void>();
+/**
+ * A theme in the browser from before there was a default (or of which nothing says) was the person's: the default only fills
+ * in where nobody has chosen, and "the portal's own" chosen on purpose is a choice as well.
+ */
+function storedSetBy(): SetBy | null {
+  const by = local.get(SET_BY_KEY);
+  return by === "ui" || by === "extension" ? by : by === "person" || local.get(PALETTE_KEY) !== null ? "person" : null;
+}
 
-/** The chosen theme's colours for the mode in effect, set over the portal's own; the portal's own given back where it says none. */
+let palette: Palette | null = storedPalette();
+let setBy: SetBy | null = storedSetBy();
+let appearance: Appearance = storedAppearance();
+const paletteWatchers = new Set<() => void>();
+const appearanceWatchers = new Set<() => void>();
+
+/**
+ * The chosen theme's colours for the mode in effect, and its look beyond colour with the person's own text size and
+ * density over it, set over the portal's own; the portal's own given back where a theme says none.
+ */
 function paint(root: HTMLElement) {
   const colours = palette?.[root.dataset.theme === "light" ? "light" : "dark"] ?? {};
   for (const token of TOKENS) {
     if (colours[token]) root.style.setProperty(`--${token}`, colours[token]!);
     else root.style.removeProperty(`--${token}`);
+  }
+  const looks = tokenStyles(palette?.tokens, appearance);
+  for (const name of PAINTED_NAMES) {
+    if (looks[name]) root.style.setProperty(`--${name}`, looks[name]!);
+    else root.style.removeProperty(`--${name}`);
   }
 }
 
@@ -120,13 +170,40 @@ function apply(theme: Theme) {
 /** The theme in effect beyond light and dark: one an extension brought, or null for the portal's own. */
 export const chosenPalette = (): Palette | null => palette;
 
-/** Choose a theme's colours, or the portal's own with null. Kept in this browser, and painted at once. */
-export function choosePalette(next: Palette | null): void {
+/** Who chose the theme in effect: the person, the interface's default, an extension unasked, or nobody yet. */
+export const paletteSetBy = (): SetBy | null => setBy;
+
+/** Choose a theme's colours, or the portal's own with null. Kept in this browser, and painted at once. `by` the person unless the interface's default or an extension does it. */
+export function choosePalette(next: Palette | null, by: SetBy = "person"): void {
   palette = next;
+  setBy = by;
+  local.set(SET_BY_KEY, by);
   if (next) local.set(PALETTE_KEY, JSON.stringify(next));
   else local.remove(PALETTE_KEY);
   apply(stored());
   for (const watcher of [...paletteWatchers]) watcher();
+}
+
+/** The person's text size and density, as they are kept in this browser. */
+export const chosenAppearance = (): Appearance => appearance;
+
+/** Choose the text size and the density, each in percent of the theme's. Kept in this browser, and painted at once. */
+export function chooseAppearance(next: Appearance): void {
+  appearance = appearanceOf(next);
+  local.set(APPEARANCE_KEY, JSON.stringify(appearance));
+  apply(stored());
+  for (const watcher of [...appearanceWatchers]) watcher();
+}
+
+/** The person's text size and density, drawn again when either is chosen. */
+export function useAppearance(): Appearance {
+  return useSyncExternalStore(
+    (watcher) => {
+      appearanceWatchers.add(watcher);
+      return () => void appearanceWatchers.delete(watcher);
+    },
+    chosenAppearance,
+  );
 }
 
 /** The chosen theme, drawn again when another is chosen. */

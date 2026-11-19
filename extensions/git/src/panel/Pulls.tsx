@@ -29,7 +29,7 @@ function StateBadge({ pull }: { pull: Pick<PullSummary, "state" | "isDraft"> }) 
     MERGED: tc("merged", "pull request state"),
     CLOSED: tc("closed", "pull request state"),
   };
-  return <span className={`shrink-0 rounded px-1 text-[10px] ring-1 ring-inset ${look[state] ?? "text-fg-subtle ring-line"}`}>{named[state] ?? state.toLowerCase()}</span>;
+  return <span className={`shrink-0 rounded px-1 text-3xs ring-1 ring-inset ${look[state] ?? "text-fg-subtle ring-line"}`}>{named[state] ?? state.toLowerCase()}</span>;
 }
 
 /** What reviewers decided, as GitHub names it, in words. */
@@ -104,7 +104,7 @@ export function Pulls() {
       <button
         type="button"
         onClick={() => show({ kind: "compare" })}
-        className="flex w-full items-center gap-1.5 border-b border-line px-3 py-1.5 text-left text-[11px] text-fg-subtle transition hover:bg-fg/5 hover:text-fg"
+        className="flex w-full items-center gap-1.5 border-b border-line px-3 py-1.5 text-left text-2xs text-fg-subtle transition hover:bg-fg/5 hover:text-fg"
       >
         <LuGitCompareArrows aria-hidden className="h-3.5 w-3.5" />
         {t("Compare {branch} with its base", { branch: repo.branch ?? "HEAD" })}
@@ -173,7 +173,7 @@ function PullRow({ pull: p }: { pull: PullSummary }) {
         <span className="min-w-0 flex-1 truncate text-xs text-fg">{p.title}</span>
         <StateBadge pull={p} />
       </span>
-      <span className="flex min-w-0 items-center gap-1.5 pl-5 text-[10.5px] text-fg-faint">
+      <span className="flex min-w-0 items-center gap-1.5 pl-5 text-[length:calc(var(--text-base,1rem)*0.65625)] text-fg-faint">
         <span className="shrink-0">#{p.number}</span>
         <span className="min-w-0 truncate font-mono">
           {p.headRefName} → {p.baseRefName}
@@ -296,10 +296,10 @@ function OpenPull({ onOpened }: { onOpened: (n?: number) => void }) {
         aria-label={t("Description of the pull request")}
         className="resize-y rounded border border-line bg-canvas px-2 py-1 text-xs text-fg outline-none focus:border-accent/60"
       />
-      <div className="flex flex-wrap items-center gap-2 text-[11px] text-fg-subtle">
+      <div className="flex flex-wrap items-center gap-2 text-2xs text-fg-subtle">
         <label className="flex items-center gap-1">
           {t("into")}
-          <input value={base} onChange={(e) => change({ base: e.target.value })} aria-label={t("Base branch")} spellCheck={false} className="w-28 rounded border border-line bg-canvas px-1 py-0.5 font-mono text-[11px] text-fg" />
+          <input value={base} onChange={(e) => change({ base: e.target.value })} aria-label={t("Base branch")} spellCheck={false} className="w-28 rounded border border-line bg-canvas px-1 py-0.5 font-mono text-2xs text-fg" />
         </label>
         <label className="flex cursor-pointer items-center gap-1">
           <input type="checkbox" checked={draft} onChange={(e) => change({ draft: e.target.checked })} className="h-3 w-3 accent-accent" />
@@ -316,8 +316,8 @@ function OpenPull({ onOpened }: { onOpened: (n?: number) => void }) {
           {repo.upstream ? t("Open") : t("Push and open")}
         </TextButton>
       </div>
-      {unfilled && <p className="text-[10.5px] text-fg-faint">{unfilled}</p>}
-      {repo.files.length > 0 && <p className="text-[10.5px] text-warn">{tp(repo.files.length, "{n} changed file is not committed — it is not part of it.", "{n} changed files are not committed — they are not part of it.")}</p>}
+      {unfilled && <p className="text-[length:calc(var(--text-base,1rem)*0.65625)] text-fg-faint">{unfilled}</p>}
+      {repo.files.length > 0 && <p className="text-[length:calc(var(--text-base,1rem)*0.65625)] text-warn">{tp(repo.files.length, "{n} changed file is not committed — it is not part of it.", "{n} changed files are not committed — they are not part of it.")}</p>}
     </form>
   );
 }
@@ -417,7 +417,7 @@ export function PullView({ n }: { n: number }) {
             </a>
           )}
         </div>
-        <p className="mt-1 text-[10.5px] text-fg-faint">
+        <p className="mt-1 text-[length:calc(var(--text-base,1rem)*0.65625)] text-fg-faint">
           {tx("{author} wants {head} in {base}", { author: pull.author?.login ?? "", head: <span className="font-mono">{pull.headRefName}</span>, base: <span className="font-mono">{pull.baseRefName}</span> })}
           {pull.additions !== undefined && (
             <>
@@ -447,7 +447,7 @@ export function PullView({ n }: { n: number }) {
                   { value: "rebase", label: t("Rebase") },
                 ]}
               />
-              <label className="flex cursor-pointer items-center gap-1 text-[11px] text-fg-subtle">
+              <label className="flex cursor-pointer items-center gap-1 text-2xs text-fg-subtle">
                 <input type="checkbox" checked={deleteBranch} onChange={(e) => setDeleteBranch(e.target.checked)} className="h-3 w-3 accent-accent" />
                 {t("delete branch")}
               </label>
@@ -468,7 +468,7 @@ export function PullView({ n }: { n: number }) {
                 <CheckIcon check={c} />
                 <span className="min-w-0 flex-1 truncate text-fg-muted">{c.name ?? c.context}</span>
                 {webLink(c.detailsUrl || c.targetUrl) && (
-                  <a href={webLink(c.detailsUrl || c.targetUrl)} target="_blank" rel="noreferrer" className="shrink-0 text-[10.5px] text-fg-faint hover:text-fg hover:underline">
+                  <a href={webLink(c.detailsUrl || c.targetUrl)} target="_blank" rel="noreferrer" className="shrink-0 text-[length:calc(var(--text-base,1rem)*0.65625)] text-fg-faint hover:text-fg hover:underline">
                     {t("details")}
                   </a>
                 )}
@@ -508,7 +508,7 @@ export function PullView({ n }: { n: number }) {
           <ul>
             {pull.commits!.map((c) => (
               <li key={c.oid} className="flex items-baseline gap-1.5 px-3 py-0.5 text-xs">
-                <span className="shrink-0 font-mono text-[10.5px] text-fg-faint">{c.oid.slice(0, 7)}</span>
+                <span className="shrink-0 font-mono text-[length:calc(var(--text-base,1rem)*0.65625)] text-fg-faint">{c.oid.slice(0, 7)}</span>
                 <span className="min-w-0 truncate text-fg-muted">{c.messageHeadline}</span>
               </li>
             ))}
@@ -519,7 +519,7 @@ export function PullView({ n }: { n: number }) {
       <SectionHead title={t("Conversation")} count={conversation.length} />
       {conversation.map((c, i) => (
         <div key={i} className="border-b border-line/50 px-3 py-2">
-          <p className="mb-1 text-[10.5px] text-fg-faint">
+          <p className="mb-1 text-[length:calc(var(--text-base,1rem)*0.65625)] text-fg-faint">
             <span className="font-medium text-fg-subtle">{c.who}</span>
             {c.state === "APPROVED" && <span className="text-ok"> {t("approved")}</span>}
             {c.state === "CHANGES_REQUESTED" && <span className="text-danger"> {t("asked for changes")}</span>}

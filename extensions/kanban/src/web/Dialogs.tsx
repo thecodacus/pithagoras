@@ -72,7 +72,7 @@ export function ArchivedCards({ board, onOpen, onRestore, onClose }: { board: Bo
               <li key={card.id} className="flex items-center gap-2 rounded-xl border border-line bg-raised/40 px-3 py-2">
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm text-fg">{card.title}</p>
-                  <p className="flex flex-wrap items-center gap-1.5 text-[11px] text-fg-subtle">
+                  <p className="flex flex-wrap items-center gap-1.5 text-2xs text-fg-subtle">
                     <span>{t("From {column}", { column: columnOf(card) })}</span>
                     <span aria-hidden>·</span>
                     <span>{portal.format.date(card.updated)}</span>

@@ -26,7 +26,7 @@ function ContextChip({ label, body }: { label: string; body: string }) {
       <button
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className={`rounded-full px-2 py-0.5 text-[11px] transition ${
+        className={`rounded-full px-2 py-0.5 text-2xs transition ${
           open
             ? "bg-accent/20 text-accent"
             : "bg-fg/5 text-fg-faint hover:bg-fg/10 hover:text-fg-muted"
@@ -36,7 +36,7 @@ function ContextChip({ label, body }: { label: string; body: string }) {
         {label}
       </button>
       {open && (
-        <pre className="mt-1 w-full whitespace-pre-wrap rounded-lg bg-fg/5 p-2 text-left text-[11px] leading-relaxed text-fg-muted">
+        <pre className="mt-1 w-full whitespace-pre-wrap rounded-lg bg-fg/5 p-2 text-left text-2xs leading-relaxed text-fg-muted">
           {body}
         </pre>
       )}
@@ -88,7 +88,7 @@ const SIGNS: Record<string, string> = {
 function FlaggedNotice({ flag, act }: { flag: NonNullable<ToolItem["flagged"]>; act: RowActions }) {
   const [trusted, setTrusted] = useState(() => act.isTrusted(flag.id));
   const [busy, setBusy] = useState(false);
-  if (trusted) return <p className="mt-1 text-[11px] text-fg-faint">{t("You trusted this result.")}</p>;
+  if (trusted) return <p className="mt-1 text-2xs text-fg-faint">{t("You trusted this result.")}</p>;
   const signs = flag.signals.map((s) => (SIGNS[s] ? t(SIGNS[s]) : s)).join("; ");
   return (
     <div role="alert" className="mt-2 rounded-lg border border-warn/40 bg-warn/10 px-3 py-2 text-xs">
@@ -201,9 +201,9 @@ export const TranscriptRow = memo(function TranscriptRow({
         <div data-key={item.id} className={`group flex flex-col items-end gap-1${enter}${mine}`}>
           <div className="max-w-[80%] rounded-2xl rounded-br-md border border-dashed border-accent/30 bg-accent/5 px-3.5 py-2 text-sm text-fg-muted">
             {text && <div className="whitespace-pre-wrap">{text}</div>}
-            {item.images && <div className="mt-1 text-[11px] text-fg-subtle">{tp(item.images.length, "{n} picture", "{n} pictures")}</div>}
+            {item.images && <div className="mt-1 text-2xs text-fg-subtle">{tp(item.images.length, "{n} picture", "{n} pictures")}</div>}
           </div>
-          <div className="flex items-center gap-1.5 text-[11px] text-fg-subtle">
+          <div className="flex items-center gap-1.5 text-2xs text-fg-subtle">
             {waits ? (
               <>
                 <LuClock aria-hidden className="h-3 w-3" />
@@ -243,7 +243,7 @@ export const TranscriptRow = memo(function TranscriptRow({
     return (
       <div data-key={item.id} className={`group flex flex-col items-end gap-1${enter}${mine}`}>
         <div className="max-w-[80%] rounded-2xl rounded-br-md bg-accent/10 px-3.5 py-2 text-sm text-fg ring-1 ring-inset ring-accent/15">
-          {item.audio && <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-medium tracking-wide text-accent" title={t("Sent in voice mode")}><LuAudioLines size={13} aria-hidden="true" /><span>{t("Audio")}</span></div>}
+          {item.audio && <div className="mb-1.5 flex items-center gap-1.5 text-3xs font-medium tracking-wide text-accent" title={t("Sent in voice mode")}><LuAudioLines size={13} aria-hidden="true" /><span>{t("Audio")}</span></div>}
           {item.images && (
             <div className={`flex flex-wrap justify-end gap-1.5 ${text ? "mb-1.5" : ""}`}>
               {item.images.map((image) => (
@@ -441,7 +441,7 @@ function VersionSwitch({
   const at = seqs.indexOf(seq);
   if (at < 0) return null;
   return (
-    <div className="message-versions flex items-center text-[11px] text-fg-subtle" role="group" aria-label={t("Versions of this message")}>
+    <div className="message-versions flex items-center text-2xs text-fg-subtle" role="group" aria-label={t("Versions of this message")}>
       <MessageAction label={running ? t("Stop the run to switch versions") : t("Previous version")} disabled={running || busy || at === 0} onClick={() => onSwitch(seqs[at - 1])}>
         <LuChevronLeft className="h-3 w-3" />
       </MessageAction>
@@ -549,7 +549,7 @@ function MessageEditor({
         className="w-full resize-none bg-transparent px-1.5 py-1 text-sm text-fg outline-none"
       />
       <div className="mt-1 flex items-center gap-2 px-1">
-        <span className="text-[11px] text-fg-faint">
+        <span className="text-2xs text-fg-faint">
           {hasImages ? t("Replaces this message and everything after it. The pictures go with it again.") : t("Replaces this message and everything after it.")}
         </span>
         <button

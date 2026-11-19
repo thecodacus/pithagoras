@@ -414,7 +414,7 @@ export interface ExtensionUi {
   /** The extensions its server half cannot start without, each with the versions it takes. */
   requires?: Record<string, string>;
   /** The themes its package.json names: colours in place of the portal's own, with no code. See extensions/themes.ts. */
-  themes?: { id: string; name: string; light?: Record<string, string>; dark?: Record<string, string> }[];
+  themes?: { id: string; name: string; light?: Record<string, string>; dark?: Record<string, string>; tokens?: Record<string, string> }[];
 }
 
 /**

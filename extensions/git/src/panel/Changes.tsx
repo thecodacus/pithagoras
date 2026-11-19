@@ -59,7 +59,7 @@ export function Changes() {
           className="w-full resize-none rounded-lg border border-line bg-canvas px-2 py-1.5 text-xs text-fg outline-none placeholder:text-fg-faint focus:border-accent/60"
         />
         <div className="mt-1.5 flex items-center gap-2">
-          <label className="flex cursor-pointer items-center gap-1 text-[11px] text-fg-subtle" title={t("Change the last commit instead of making a new one")}>
+          <label className="flex cursor-pointer items-center gap-1 text-2xs text-fg-subtle" title={t("Change the last commit instead of making a new one")}>
             <input type="checkbox" checked={amend} onChange={(e) => setAmend(e.target.checked)} className="h-3 w-3 accent-accent" disabled={!repo.head} />
             {t("Amend")}
           </label>
@@ -161,7 +161,7 @@ function FileRow({ file, side }: { file: ChangedFile; side: Side }) {
       <button type="button" onClick={open} title={t("{file} — show the changes", { file: `${file.from ? `${file.from} → ` : ""}${file.path}` })} className="flex min-w-0 flex-1 items-center gap-1.5 py-1 text-left">
         <Letter letter={letter} title={LETTER_NAME[letter]} />
         <span className={`min-w-0 truncate text-xs ${deleted ? "text-fg-subtle line-through" : "text-fg"}`}>{name}</span>
-        {dir && <span className="min-w-0 flex-1 truncate text-[10.5px] text-fg-faint">{dir}</span>}
+        {dir && <span className="min-w-0 flex-1 truncate text-[length:calc(var(--text-base,1rem)*0.65625)] text-fg-faint">{dir}</span>}
         {!dir && <span className="flex-1" />}
         {counts && <Counts {...counts} />}
       </button>
@@ -233,7 +233,7 @@ function Stashes({ count }: { count: number }) {
   }, [open, id, count, repo.head, repo.files.length, again]);
   return (
     <div className="mt-2 border-t border-line">
-      <button type="button" aria-expanded={open} onClick={() => setOpen((v) => !v)} className="flex w-full items-center gap-1 px-3 py-1.5 text-left text-[11px] text-fg-subtle hover:text-fg">
+      <button type="button" aria-expanded={open} onClick={() => setOpen((v) => !v)} className="flex w-full items-center gap-1 px-3 py-1.5 text-left text-2xs text-fg-subtle hover:text-fg">
         <LuArchiveRestore aria-hidden className="h-3.5 w-3.5" />
         {tp(count, "{n} stash", "{n} stashes")}
         <span className="ml-auto text-fg-faint">{open ? t("hide") : t("show")}</span>
@@ -244,7 +244,7 @@ function Stashes({ count }: { count: number }) {
           <div key={s.ref} className="group flex items-center gap-1 px-2 transition hover:bg-fg/5">
             <button type="button" onClick={() => show({ kind: "diff", title: s.message, path: "", what: { of: "stash", stash: s.ref } })} className="flex min-w-0 flex-1 items-baseline gap-1.5 py-1 text-left">
               <span className="min-w-0 flex-1 truncate text-xs text-fg">{s.message}</span>
-              <span className="shrink-0 text-[10px] text-fg-faint">{ago(s.date)}</span>
+              <span className="shrink-0 text-3xs text-fg-faint">{ago(s.date)}</span>
             </button>
             <TextButton disabled={!!busy} onClick={() => void act(msg("Applying the stash"), () => gitApi.stashDo(id, "apply", s.ref, s.sha))} title={t("Bring it back and keep the stash")}>
               {t("Apply")}

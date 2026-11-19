@@ -144,7 +144,7 @@ export function Modal({
   return (
     <div
       ref={leaving}
-      className="ui-backdrop fixed inset-0 z-50 flex items-center justify-center bg-canvas/80 p-2 backdrop-blur-sm sm:p-4"
+      className="ui-backdrop fixed inset-0 z-dialog flex items-center justify-center bg-canvas/80 p-2 backdrop-blur-sm sm:p-4"
       onMouseDown={(e) => {
         if (e.target !== e.currentTarget) return;
         // The press would otherwise clear focus once the question has taken it, or once it was given back.

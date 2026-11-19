@@ -82,7 +82,7 @@ export function HeartbeatSettings({ agent, onChanged }: { agent: Agent; onChange
               />
             </div>
             <div className="text-xs text-fg-muted">
-              {t("Quiet hours")} <span className="text-[11px] text-fg-faint">{t("the portal's time ({zone})", { zone: hb.timeZone })}</span>
+              {t("Quiet hours")} <span className="text-2xs text-fg-faint">{t("the portal's time ({zone})", { zone: hb.timeZone })}</span>
               <div className="mt-1 flex items-center gap-1.5">
                 <input type="time" aria-label={t("Quiet from")} value={quietStart} onChange={(e) => setQuietStart(e.target.value)} onBlur={() => saveQuiet(quietStart, quietEnd)} className={`${inputSmCls} !w-32`} />
                 <span>{t("to")}</span>
@@ -104,11 +104,11 @@ export function HeartbeatSettings({ agent, onChanged }: { agent: Agent; onChange
           )}
           <div className="mt-3 text-xs text-fg-muted">
             {t("Commands it may run")}
-            <p className="text-[11px] text-fg-faint">{t("Besides reading files. For every agent's heartbeat: a command runs only as written, with * where it varies.")}</p>
+            <p className="text-2xs text-fg-faint">{t("Besides reading files. For every agent's heartbeat: a command runs only as written, with * where it varies.")}</p>
             <ul className="mt-1.5 space-y-1">
               {rules.map((r) => (
                 <li key={r.id} className="flex items-center gap-2 rounded-lg border border-line bg-raised/40 py-1 pl-2.5 pr-1">
-                  <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-fg-muted">{r.pattern}</span>
+                  <span className="min-w-0 flex-1 truncate font-mono text-2xs text-fg-muted">{r.pattern}</span>
                   <button type="button" onClick={() => void act(async () => showRules((await api.deleteToolRule(r.id)).rules))} title={t("Revoke")} aria-label={t("Revoke")} className="shrink-0 rounded-lg p-1 text-fg-faint transition hover:bg-danger/10 hover:text-danger">
                     <LuTrash2 className="h-3.5 w-3.5" />
                   </button>
@@ -209,7 +209,7 @@ export function ActivityFeed({ agent, onChanged, onSelect }: { agent: Agent; onC
                 <span className="min-w-0 flex-1">
                   <span className="block text-sm text-fg">{n.title}</span>
                   {n.detail && <span className="mt-0.5 block whitespace-pre-wrap text-xs text-fg-muted">{n.detail}</span>}
-                  <span className="mt-1 block text-[11px] text-fg-faint">{when(n.at)}</span>
+                  <span className="mt-1 block text-2xs text-fg-faint">{when(n.at)}</span>
                 </span>
               </button>
               <button

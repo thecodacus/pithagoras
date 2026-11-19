@@ -186,7 +186,7 @@ export function ExtensionStep({ choice }: { choice: ExtensionChoice }) {
                         {needs.length > 0 && <span className="block text-xs text-fg-muted">{t("Needs {names}", { names: needs.map(label).join(", ") })}</span>}
                       </span>
                       {installedNow && (
-                        <span className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-ok/10 px-2 py-0.5 text-[11px] text-ok">
+                        <span className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-ok/10 px-2 py-0.5 text-2xs text-ok">
                           <LuCheck className="h-3.5 w-3.5" /> {t("Installed")}
                         </span>
                       )}

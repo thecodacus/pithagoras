@@ -292,8 +292,8 @@ function ModeEditor({
               />
             </div>
           </div>
-          {mode.provider && !mode.model && <p className="text-[11px] text-warn">{t("Choose a model too: a provider alone is not written into a chat.")}</p>}
-          <p className="text-[11px] text-fg-faint">{t("Written into a chat as it is put in this mode; the chat can still change it.")}</p>
+          {mode.provider && !mode.model && <p className="text-2xs text-warn">{t("Choose a model too: a provider alone is not written into a chat.")}</p>}
+          <p className="text-2xs text-fg-faint">{t("Written into a chat as it is put in this mode; the chat can still change it.")}</p>
         </div>
       </Section>
 

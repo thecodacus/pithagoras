@@ -59,11 +59,11 @@ export function BrowserSettings() {
       {/* The page's head, drawn by Settings, has the browser's name and mark already. */}
       <div className="rounded-xl border border-line bg-raised/40 p-3">
         <div className="flex items-start gap-2">
-          <p className="min-w-0 flex-1 text-[11px] text-fg-faint">
+          <p className="min-w-0 flex-1 text-2xs text-fg-faint">
             {t("A real browser with a profile that stays logged in. Sign into it once; the agent drives the same one afterwards and never handles a password.")}
           </p>
           {installed && (
-            <span className="inline-flex shrink-0 items-center gap-1 text-[11px] text-ok">
+            <span className="inline-flex shrink-0 items-center gap-1 text-2xs text-ok">
               <LuCheck className="h-3 w-3" />
               {i.container === "running" ? t("running") : t("installed")}
             </span>
@@ -71,13 +71,13 @@ export function BrowserSettings() {
         </div>
 
         {!i.available && (
-          <p className="mt-2 text-[11px] text-warn">
+          <p className="mt-2 text-2xs text-warn">
             {t("Not possible here — the portal cannot reach Docker and there is no Chrome on the machine.")}
           </p>
         )}
 
         {i.available && !installed && (
-          <p className="mt-2 text-[11px] text-fg-faint">
+          <p className="mt-2 text-2xs text-fg-faint">
             {dockerMode
               ? i.image
                 ? t("Runs as its own container. The image is already downloaded.")
@@ -90,7 +90,7 @@ export function BrowserSettings() {
           <BrowserInstall status={status} reload={load} onError={(message) => setError(message || null)} lifecycle />
         </div>
         {installed && (
-          <p className="mt-2 text-[11px] text-fg-faint">
+          <p className="mt-2 text-2xs text-fg-faint">
             {t("Removing keeps the profile, so its logins are still there if you install it again.")}
           </p>
         )}

@@ -57,7 +57,7 @@ function PictureDetails({ picture }: { picture: GalleryPicture }) {
     <div className="space-y-3 text-sm">
       {picture.prompt && (
         <div>
-          <p className="text-[11px] text-fg-subtle">{picture.kind === "uploaded" ? t("Name") : t("Description")}</p>
+          <p className="text-2xs text-fg-subtle">{picture.kind === "uploaded" ? t("Name") : t("Description")}</p>
           <p className="mt-0.5 whitespace-pre-wrap break-words text-fg">{picture.prompt}</p>
         </div>
       )}

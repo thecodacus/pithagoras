@@ -69,7 +69,7 @@ const ASIDE: Record<Dock, string> = {
   right: "border-l border-line",
   left: "border-r border-line",
   bottom: "border-t border-line",
-  float: "absolute z-20 rounded-xl border border-line bg-surface shadow-pop",
+  float: "absolute z-panel rounded-xl border border-line bg-surface shadow-pop",
 };
 
 /**
@@ -1697,14 +1697,14 @@ export function Chat({
         <span title={t("Drag to an edge to dock this panel there, anywhere else to float it")} className="-ml-1.5 shrink-0 text-fg-faint max-md:hidden">
           <LuGripVertical aria-hidden className="h-3.5 w-3.5" />
         </span>
-        {extensionHead(kind, "header") ?? <span className="text-[11px] text-fg-subtle">{panelName(kind).label}</span>}
+        {extensionHead(kind, "header") ?? <span className="text-2xs text-fg-subtle">{panelName(kind).label}</span>}
         <div className="ml-auto flex items-center gap-0.5">
           {extensionHead(kind, "actions")}
           <button
             onClick={() => closePanel(kind)}
             title={t("Collapse")}
             aria-label={panelName(kind).close}
-            className="rounded px-1.5 py-0.5 text-[11px] text-fg-faint transition hover:text-fg"
+            className="rounded px-1.5 py-0.5 text-2xs text-fg-faint transition hover:text-fg"
           >
             ✕
           </button>
@@ -1716,7 +1716,7 @@ export function Chat({
 
   // On a phone there is no room beside the conversation: the panels cover it,
   // under the header that opened them, until closed.
-  const COVER = "max-md:absolute max-md:inset-0 max-md:z-20 max-md:!h-full max-md:!max-h-none max-md:!w-full max-md:!max-w-none max-md:border-0 max-md:bg-surface";
+  const COVER = "max-md:absolute max-md:inset-0 max-md:z-panel max-md:!h-full max-md:!max-h-none max-md:!w-full max-md:!max-w-none max-md:border-0 max-md:bg-surface";
 
   /** The panels in one place, where each one's own box goes (see panelBoxes), with the divider between two. */
   const slotsIn = (place: Dock, kinds: readonly AsidePanel[]) =>
@@ -1793,7 +1793,7 @@ export function Chat({
         data-dock="float"
         aria-label={t("{panel}, floating", { panel: panelName(kind).label })}
         style={{ left: at.x, top: at.y, width: at.w, height: at.h }}
-        className={`chat-aside flex flex-col overflow-hidden ${ASIDE.float} ${onTop === kind ? "!z-[21]" : ""} ${COVER}`}
+        className={`chat-aside flex flex-col overflow-hidden ${ASIDE.float} ${onTop === kind ? "!z-panel-top" : ""} ${COVER}`}
       >
         {slotsIn("float", [kind])}
         <div
@@ -1815,7 +1815,7 @@ export function Chat({
       {pictures.viewer}
       <div ref={setVoiceHost} className={voiceMode ? "flex min-h-0 flex-1 flex-col" : "hidden"} />
       <header className={voiceMode ? "hidden" : "chat-header border-b border-line px-4 py-3 max-md:px-3 max-md:py-2"}>
-        <div className="mx-auto flex w-full max-w-3xl items-center gap-3 max-md:gap-2">
+        <div className="mx-auto flex w-full max-w-chat items-center gap-3 max-md:gap-2">
         {onOpenNavigation && (
           <button type="button" aria-label={t("Open navigation")} aria-controls="mobile-navigation" onClick={onOpenNavigation} className="-ml-1 rounded-lg p-2 text-fg hover:bg-fg/10 md:hidden">
             <LuMenu size={20} aria-hidden />
@@ -1826,7 +1826,7 @@ export function Chat({
           {session.parent && (
             <Link
               to={`/s/${session.parent}`}
-              className="chat-parent flex min-w-0 max-w-full items-center gap-1 text-[11px] leading-4 text-fg-subtle hover:text-accent"
+              className="chat-parent flex min-w-0 max-w-full items-center gap-1 text-2xs leading-4 text-fg-subtle hover:text-accent"
             >
               <LuCornerLeftUp aria-hidden className="h-3 w-3 shrink-0" />
               <span className="truncate">{parentTitle ? t("Sub-chat of {name}", { name: parentTitle }) : t("Sub-chat: open its chat")}</span>
@@ -1860,7 +1860,7 @@ export function Chat({
         </div>
         <div className="ml-auto flex items-center gap-2">
           {session.status === "interrupted" && (
-            <span className="rounded-md bg-warn/10 px-2 py-0.5 text-[11px] text-warn">
+            <span className="rounded-md bg-warn/10 px-2 py-0.5 text-2xs text-warn">
               {t("interrupted — send a message to resume")}
             </span>
           )}
@@ -1903,7 +1903,7 @@ export function Chat({
         className="scroll-steady flex-1 overflow-y-auto px-4 py-6"
       >
         <div role="status" aria-live="polite" className="sr-only">{heard?.id === session.id ? heard.text : ""}</div>
-        <div ref={list} className={`chat-list mx-auto w-full max-w-3xl space-y-3${opening ? " is-opening" : ""}`}>
+        <div ref={list} className={`chat-list mx-auto w-full max-w-chat space-y-3${opening ? " is-opening" : ""}`}>
         <div ref={topEdge} aria-hidden className="h-px" />
         {!loading && hasEarlier && hiddenHere === 0 && (
           <div data-earlier="" className="flex justify-center pb-2">
@@ -1966,7 +1966,7 @@ export function Chat({
 
       {!loading && asking && (
         <div className="px-4 pt-2 sm:px-6">
-          <div className="mx-auto w-full max-w-3xl">
+          <div className="mx-auto w-full max-w-chat">
             <QuestionCard
               key={asking.questionId}
               sessionId={session.id}
@@ -2007,11 +2007,11 @@ export function Chat({
       >
         {/* How the chat works, chosen before it has said anything: where there is a choice. */}
         {!loading && !started && modeList.length > 1 && (
-          <div className="relative mx-auto mb-1.5 flex w-full max-w-3xl items-center gap-2">
+          <div className="relative mx-auto mb-1.5 flex w-full max-w-chat items-center gap-2">
             <ModePicker chat={session.id} current={currentMode} modes={modeList} onChoose={chooseMode} />
           </div>
         )}
-        <div className="prompt-shell relative mx-auto w-full max-w-3xl">
+        <div className="prompt-shell relative mx-auto w-full max-w-chat">
         {/* Scrolled up to read, the way back to the end is one click rather
             than a long drag — and during a run, where the new output is. */}
         {scroller.away && !loading && matches.length === 0 && (
@@ -2022,7 +2022,7 @@ export function Chat({
               reading.current = null;
               scroller.follow(true);
             }}
-            className="jump-to-end float-in absolute bottom-full left-1/2 z-10 mb-2 flex -translate-x-1/2 items-center gap-1 rounded-full border border-line bg-surface px-3 py-1 text-xs text-fg-muted shadow-pop transition hover:text-fg"
+            className="jump-to-end float-in absolute bottom-full left-1/2 z-raised mb-2 flex -translate-x-1/2 items-center gap-1 rounded-full border border-line bg-surface px-3 py-1 text-xs text-fg-muted shadow-pop transition hover:text-fg"
           >
             <LuArrowDown aria-hidden className="h-3.5 w-3.5" />
             {running ? t("Latest output") : t("Jump to the end")}
@@ -2054,7 +2054,7 @@ export function Chat({
               >
                 <span className="font-mono text-xs text-accent">{trigger}{c.name}</span>
                 <span className="truncate text-xs text-fg-subtle">{c.description}</span>
-                <span className="ml-auto shrink-0 text-[10px] text-fg-faint">{labelOf(COMMAND_SOURCE, c.source)}</span>
+                <span className="ml-auto shrink-0 text-3xs text-fg-faint">{labelOf(COMMAND_SOURCE, c.source)}</span>
               </button>
             ))}
           </div>
@@ -2092,7 +2092,7 @@ export function Chat({
         />
         <DictationStrip dictation={dictation} />
         {dragging && (
-          <div className="pointer-events-none absolute inset-0 z-10 grid place-items-center rounded-2xl border-2 border-dashed border-accent/60 bg-accent/10 text-xs text-accent">
+          <div className="pointer-events-none absolute inset-0 z-raised grid place-items-center rounded-2xl border-2 border-dashed border-accent/60 bg-accent/10 text-xs text-accent">
             {t("Drop pictures to send them, or files to put them in the folder")}
           </div>
         )}
@@ -2112,7 +2112,7 @@ export function Chat({
                 </button>
               </div>
             ))}
-            {adding > 0 && <span role="status" className="text-[11px] text-fg-subtle">{t("Adding…")}</span>}
+            {adding > 0 && <span role="status" className="text-2xs text-fg-subtle">{t("Adding…")}</span>}
           </div>
         )}
         <input

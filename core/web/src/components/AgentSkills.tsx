@@ -58,9 +58,9 @@ export function AgentSkills({ agent }: { agent: { id: string; name: string } }) 
                 <span className="min-w-0 flex-1">
                   <span className="flex flex-wrap items-baseline gap-x-2">
                     <span className="text-sm font-medium text-fg">{s.name}</span>
-                    <span className="text-[11px] text-fg-faint">{ago(new Date(s.updatedAt).toISOString())}</span>
+                    <span className="text-2xs text-fg-faint">{ago(new Date(s.updatedAt).toISOString())}</span>
                     {s.files.length > 0 && (
-                      <span className="text-[11px] text-fg-faint">{tp(s.files.length, "{n} more file", "{n} more files")}</span>
+                      <span className="text-2xs text-fg-faint">{tp(s.files.length, "{n} more file", "{n} more files")}</span>
                     )}
                   </span>
                   {s.description && <span className="mt-0.5 block text-xs text-fg-muted">{s.description}</span>}
@@ -77,7 +77,7 @@ export function AgentSkills({ agent }: { agent: { id: string; name: string } }) 
                     </div>
                   )}
                   {s.files.length > 0 && (
-                    <ul className="mt-3 space-y-0.5 border-t border-line pt-2 font-mono text-[11px] text-fg-faint">
+                    <ul className="mt-3 space-y-0.5 border-t border-line pt-2 font-mono text-2xs text-fg-faint">
                       {s.files.map((f) => (
                         <li key={f}><LuFileText className="mr-1 inline h-3 w-3" />{f}</li>
                       ))}

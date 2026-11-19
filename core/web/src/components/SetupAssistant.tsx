@@ -161,7 +161,7 @@ export function SetupAssistant({ onClose, onStartChat }: { onClose: () => void; 
           {/* In the footer, which is always in sight, rather than in the one-line
               subtitle, where it was cut off: every way out (Set up later, close,
               Escape) leaves the assistant for good. */}
-          <p className="mt-2 text-[11px] text-fg-faint">{t("{settings} → {providers} opens this assistant again.", { settings: t("Settings"), providers: t("Providers") })}</p>
+          <p className="mt-2 text-2xs text-fg-faint">{t("{settings} → {providers} opens this assistant again.", { settings: t("Settings"), providers: t("Providers") })}</p>
         </>
       }
     >
@@ -193,7 +193,7 @@ export function SetupAssistant({ onClose, onStartChat }: { onClose: () => void; 
                       <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-accent/10 text-accent"><KindIcon kind={p.kind} /></span>
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm text-fg">{p.label}</p>
-                        <p className="truncate text-[11px] text-fg-faint">
+                        <p className="truncate text-2xs text-fg-faint">
                           {p.endpoint ? `${tp(p.models.length, "{n} model", "{n} models")} · ${p.baseUrl}` : t("Hosted — every model pi knows of from it")}
                         </p>
                       </div>

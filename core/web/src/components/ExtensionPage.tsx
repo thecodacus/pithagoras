@@ -24,7 +24,7 @@ export function ExtensionPage({ entryKey }: { entryKey: string }) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-2 px-6 text-center text-sm text-fg-subtle" role={settled ? "alert" : "status"}>
         <p>{!settled ? t("Loading…") : failure ? t("This page's extension could not be loaded.") : t("This page's extension is not installed, or is switched off.")}</p>
-        {settled && failure && <p className="max-w-md break-words font-mono text-[11px] text-fg-faint">{failure}</p>}
+        {settled && failure && <p className="max-w-md break-words font-mono text-2xs text-fg-faint">{failure}</p>}
       </div>
     );
   }

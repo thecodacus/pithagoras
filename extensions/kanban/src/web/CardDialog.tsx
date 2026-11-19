@@ -240,7 +240,7 @@ export function CardDialog({
               <li key={`${entry.at}-${i}`} className="kb-entry">
                 <div className="flex items-baseline gap-2">
                   <Who entry={entry} />
-                  <time className="ml-auto shrink-0 text-[11px] text-fg-faint" dateTime={new Date(entry.at).toISOString()}>
+                  <time className="ml-auto shrink-0 text-2xs text-fg-faint" dateTime={new Date(entry.at).toISOString()}>
                     {portal.format.dateTime(entry.at, { dateStyle: "short", timeStyle: "short" })}
                   </time>
                 </div>

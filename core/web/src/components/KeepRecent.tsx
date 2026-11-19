@@ -72,7 +72,7 @@ export function KeepRecent({
         aria-label={t("Tokens kept verbatim by compaction")}
         className="mt-1.5 h-1 w-full cursor-pointer appearance-none rounded-full bg-raised accent-accent disabled:opacity-40"
       />
-      <div className="mt-1 flex justify-between text-[10px] text-fg-faint">
+      <div className="mt-1 flex justify-between text-3xs text-fg-faint">
         <span>{formatTokens(MIN)}</span>
         <span>{formatTokens(max)}</span>
       </div>

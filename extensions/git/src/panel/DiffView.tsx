@@ -43,7 +43,7 @@ export const DiffView = memo(function DiffView({ file, truncated }: { file: Diff
     );
   }
   return (
-    <div className="git-diff min-h-0 flex-1 overflow-auto font-mono text-[11.5px] leading-[1.55]" role="table" aria-label={t("Changes to {path}", { path: file.path })}>
+    <div className="git-diff min-h-0 flex-1 overflow-auto font-mono text-[length:calc(var(--text-base,1rem)*0.71875)] leading-[1.55]" role="table" aria-label={t("Changes to {path}", { path: file.path })}>
       <div role="rowgroup" className="min-w-max">
         {/* Said once, for a screen reader to name the cells by: the two numbers alone are "42" and "42". */}
         <div role="row" className="sr-only">

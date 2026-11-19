@@ -302,9 +302,9 @@ export const SessionsPage = memo(function SessionsPage({
             )}
           </div>
           {/* Under a folder's heading, or on the one folder shown, its name is already there; under its chat, too. */}
-          {!byFolder && !only && !nested && <p className="truncate text-[11px] text-fg-faint">{folderOf(s)}</p>}
+          {!byFolder && !only && !nested && <p className="truncate text-2xs text-fg-faint">{folderOf(s)}</p>}
         </div>
-        <span className="shrink-0 text-[11px] text-fg-faint">{when(s.updated_at)}</span>
+        <span className="shrink-0 text-2xs text-fg-faint">{when(s.updated_at)}</span>
         {!choosing && (
           <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100">
             <SessionActions session={s} subChats={subChats} nested={nested} onPin={onPin} onStartRename={() => setRenaming(s.id)} onDelete={onDelete} onError={setError} />
@@ -344,7 +344,7 @@ export const SessionsPage = memo(function SessionsPage({
               className="w-full rounded-lg border border-line bg-raised/60 py-2 pl-9 pr-3 text-sm outline-none placeholder:text-fg-faint focus:border-accent/60"
             />
             {query && (
-              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-fg-faint">
+              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-2xs text-fg-faint">
                 {t("{n} of {all}", { n: shown.length, all: only ? only.sessions.length : all.top.length })}
               </span>
             )}

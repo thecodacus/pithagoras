@@ -150,7 +150,7 @@ export function VideoMaker({
       <div className="flex items-center gap-2 rounded-xl border border-line bg-canvas/40 p-1.5 pr-2">
         <img src={picture.thumb ? api.galleryThumbUrl(picture.id) : api.galleryFileUrl(picture.id)} alt="" className="h-12 w-12 rounded-lg border border-line object-cover" />
         <div className="min-w-0">
-          <p className="text-[11px] text-fg-subtle">{which === "first" ? t("First frame") : t("Last frame")}</p>
+          <p className="text-2xs text-fg-subtle">{which === "first" ? t("First frame") : t("Last frame")}</p>
           <p className="max-w-[14rem] truncate text-xs text-fg" title={sourceName(picture)}>
             {sourceName(picture)}
           </p>
@@ -212,8 +212,8 @@ export function VideoMaker({
       <div className="mt-2 flex flex-wrap items-center gap-2">
         {frame("first", firstFrame, onFirstFrame)}
         {frame("last", lastFrame, onLastFrame)}
-        {!firstFrame && !lastFrame && <span className="text-[11px] text-fg-faint">{t("Without one, the video is made from the description alone.")}</span>}
-        {lastFrame && <span className="basis-full text-[11px] text-fg-faint">{t("The last frame goes only to a server that says it takes one. Whether the clip really ends on it depends on the model: some ignore it without saying so.")}</span>}
+        {!firstFrame && !lastFrame && <span className="text-2xs text-fg-faint">{t("Without one, the video is made from the description alone.")}</span>}
+        {lastFrame && <span className="basis-full text-2xs text-fg-faint">{t("The last frame goes only to a server that says it takes one. Whether the clip really ends on it depends on the model: some ignore it without saying so.")}</span>}
       </div>
 
       <div className="mt-3">
@@ -247,7 +247,7 @@ export function VideoMaker({
             />
           </div>
         </div>
-        <p className="mt-1.5 text-[11px] text-fg-faint">
+        <p className="mt-1.5 text-2xs text-fg-faint">
           {length !== undefined ? t("{frames} frames at {fps} frames per second play for about {length}.", { frames, fps, length: secondsLabel(length) }) : t("How long a clip plays is its frames over its frame rate.")}{" "}
           {t("The server may round the frames to a count its model takes; the video's details say how many it made. A longer clip takes much longer to make.")}
         </p>
@@ -261,8 +261,8 @@ export function VideoMaker({
             {numberField("seed", t("Seed"), t("Random"))}
             {numberField("sampleSteps", t("Steps"), empty)}
             {numberField("strength", t("Strength"), empty)}
-            <p className="text-[11px] text-fg-faint sm:col-span-2">{t("How strongly the first and last frame hold the clip. What a model does with it is its own; leave it empty for the server's own.")}</p>
-            {count > 1 && <p className="text-[11px] text-fg-faint sm:col-span-2">{t("With a seed, each of the videos takes the next one, so that they are not all the same.")}</p>}
+            <p className="text-2xs text-fg-faint sm:col-span-2">{t("How strongly the first and last frame hold the clip. What a model does with it is its own; leave it empty for the server's own.")}</p>
+            {count > 1 && <p className="text-2xs text-fg-faint sm:col-span-2">{t("With a seed, each of the videos takes the next one, so that they are not all the same.")}</p>}
             <label className="block text-xs text-fg-muted sm:col-span-2">
               {t("Negative prompt")}
               <textarea

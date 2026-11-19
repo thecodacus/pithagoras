@@ -14,13 +14,13 @@
 @keyframes ui-backdrop-in { from { background-color: transparent; } }
 /* It opens out from its middle as it rises. The clip reaches past the box,
    so the shadow is whole once it is open. */
-.ui-dialog { animation: ui-dialog-in .32s var(--ease-out) both; }
+.ui-dialog { animation: ui-dialog-in .32s cubic-bezier(.22, 1, .36, 1) both; }
 @keyframes ui-dialog-in {
   from { translate: 0 10px; clip-path: inset(40% -60px 40% -60px round 16px); }
   to { translate: 0 0; clip-path: inset(-60px round 16px); }
 }
 /* An alert asks something now: it arrives a little quicker and with a small overshoot. */
-.ui-dialog.is-alert { animation: ui-alert-in .3s var(--ease-spring) both; }
+.ui-dialog.is-alert { animation: ui-alert-in .3s cubic-bezier(.34, 1.56, .64, 1) both; }
 @keyframes ui-alert-in {
   from { scale: .94; clip-path: inset(35% -60px 35% -60px round 16px); }
   to { scale: 1; clip-path: inset(-60px round 16px); }
@@ -28,6 +28,8 @@
 
 /* ── The phone's navigation drawer ── */
 @media (max-width: 767px) { .mobile-drawer { animation: drawer-in .3s var(--ease-out) both; box-shadow: 12px 0 40px -12px #0008; } }
+/* A theme's widest sidebar (24rem) is wider than a small phone: the drawer leaves a strip of the page to tap, and its close button stays on the screen. */
+@media (max-width: 767px) { .mobile-drawer aside, .mobile-drawer .sidebar-content { max-width: calc(100vw - 2.5rem); } }
 @keyframes drawer-in { from { transform: translateX(-100%); } to { transform: none; } }
 
 /* ── Pages: the one that comes in rises a little. A chat to another chat is
@@ -44,7 +46,7 @@
 .sidebar-rail-button[aria-current="page"]::before { content: ""; position: absolute; left: -7px; top: 50%; width: 2px; height: 16px; border-radius: 0 2px 2px 0; background: rgb(var(--accent)); transform: translateY(-50%); }
 .sidebar-rail-button svg { width: 17px; height: 17px; }
 .sidebar-rail-button .status-dot { position: absolute; top: 5px; right: 5px; width: 6px; height: 6px; border: 1.5px solid rgb(var(--surface)); box-sizing: content-box; }
-.sidebar-rail-button .status-working { position: absolute; top: -1px; right: -1px; width: 13px; height: 13px; font-size: 9px; background: rgb(var(--surface)); }
+.sidebar-rail-button .status-working { position: absolute; top: -1px; right: -1px; width: 13px; height: 13px; font-size: calc(var(--text-base) * 0.5625); background: rgb(var(--surface)); }
 .sidebar-rail hr { width: 20px; margin: 6px 0; border: 0; border-top: 1px solid rgb(var(--line)); }
 .sidebar-content { animation: fade-in .3s var(--ease-out) both; }
 @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
@@ -119,7 +121,7 @@
 
 /* ── The setup assistant: where you are, as a line that fills ── */
 .setup-steps { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 6px; }
-.setup-step { display: flex; flex-direction: column; gap: 6px; font-size: 11px; color: rgb(var(--fg-faint)); transition: color .3s; }
+.setup-step { display: flex; flex-direction: column; gap: 6px; font-size: calc(var(--text-base) * 0.6875); color: rgb(var(--fg-faint)); transition: color .3s; }
 .setup-step::before { content: ""; height: 3px; border-radius: 99px; background: linear-gradient(90deg, rgb(var(--accent)) 50%, rgb(var(--fg) / .08) 50%) right / 200% 100%; transition: background-position .5s var(--ease-out); }
 .setup-step.is-done, .setup-step.is-current { color: rgb(var(--fg)); }
 .setup-step.is-done::before, .setup-step.is-current::before { background-position: left; }

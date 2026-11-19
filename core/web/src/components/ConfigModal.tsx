@@ -67,7 +67,8 @@ import type { Tab } from "../settings-tabs";
 import { serialSaver } from "../serial-saver";
 import { local } from "../safe-storage";
 import { SETTINGS_INDEX, searchSettings, type SettingEntry } from "../settings-search";
-import { usePalette, useTheme, type Theme } from "../theme";
+import { chooseAppearance, usePalette, useAppearance, useTheme, type Theme } from "../theme";
+import { APPEARANCE_RANGE, STOCK_APPEARANCE, type Appearance as Scales } from "../tokens";
 import { choose as chooseTheme, useThemes } from "../extensions/themes";
 import { humanKey, typed } from "../setting-values";
 import { effortLabel } from "../effort";
@@ -454,7 +455,7 @@ function RailGroup({
           setShut(!shut);
         }}
         // Held open, it does nothing when pressed, and does not look as if it did.
-        className={`flex w-full items-center gap-1 rounded px-2 pb-1 text-left text-[10px] font-semibold uppercase tracking-wider text-fg-faint transition ${
+        className={`flex w-full items-center gap-1 rounded px-2 pb-1 text-left text-3xs font-semibold uppercase tracking-wider text-fg-faint transition ${
           held ? "cursor-default" : "hover:text-fg-subtle"
         }`}
       >
@@ -530,7 +531,7 @@ function SettingsSearch({ index, onPick, children }: { index: (SettingEntry & { 
           aria-activedescendant={query && hits[active] ? `settings-hit-${active}` : undefined}
           className="w-full rounded-lg border border-line bg-surface/70 py-1.5 pl-8 pr-7 text-sm outline-none transition placeholder:text-fg-faint focus:border-accent/60"
         />
-        {!query && <kbd className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 rounded border border-line px-1 font-mono text-[10px] text-fg-faint">/</kbd>}
+        {!query && <kbd className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 rounded border border-line px-1 font-mono text-3xs text-fg-faint">/</kbd>}
       </div>
       {query ? (
         <div id="settings-search-results" role="listbox" aria-label={t("Settings found")} className="float-in space-y-0.5">
@@ -548,7 +549,7 @@ function SettingsSearch({ index, onPick, children }: { index: (SettingEntry & { 
                 className={`block w-full rounded-lg px-2.5 py-1.5 text-left transition ${i === active ? "bg-accent/10 text-accent" : "text-fg-muted hover:bg-fg/5"}`}
               >
                 <span className="block truncate text-sm">{h.title}</span>
-                <span className="block truncate text-[10px] text-fg-faint">
+                <span className="block truncate text-3xs text-fg-faint">
                   {h.where}{h.section && h.section !== h.title && h.section !== h.where ? ` › ${h.section}` : ""}
                 </span>
               </button>
@@ -788,6 +789,35 @@ const THEMES: { value: Theme; label: string; icon: ReactNode }[] = [
 ];
 
 /**
+ * One of the person's two scales, as a slider in whole percent of what the theme has: a hundred is no change. Drawn with
+ * its range at both ends, and the value as text, so that it reads without the slider.
+ */
+function Scale({ name, hint, label, value, onChange }: { name: keyof Scales; hint: string; label: string; value: number; onChange: (next: number) => void }) {
+  const [least, most] = APPEARANCE_RANGE[name];
+  return (
+    <div className="mt-4">
+      <div className="flex items-baseline justify-between gap-2">
+        <label htmlFor={`scale-${name}`} className="text-xs text-fg-muted">{label}</label>
+        <span className="tabular-nums text-xs text-fg">{value} %</span>
+      </div>
+      <input
+        id={`scale-${name}`}
+        type="range"
+        min={least}
+        max={most}
+        step={5}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        aria-valuetext={`${value} %`}
+        aria-describedby={`scale-${name}-hint`}
+        className="mt-1.5 h-1 w-full cursor-pointer appearance-none rounded-full bg-raised accent-accent sm:w-72 sm:block"
+      />
+      <span id={`scale-${name}-hint`} className="mt-1 block text-2xs text-fg-faint">{hint}</span>
+    </div>
+  );
+}
+
+/**
  * Light, dark, or whichever the system is — as three cards, each a glimpse of
  * itself. And, where an installed extension brought any, whose colours: the
  * portal's own or a theme's (see extensions/themes.ts).
@@ -796,6 +826,7 @@ function Appearance() {
   const { theme, setTheme } = useTheme();
   const brought = useThemes();
   const chosen = usePalette();
+  const scales = useAppearance();
   // The one chosen is offered before its extension is loaded as well: it is what is painted.
   const colours = [
     { value: "", label: t("The portal's own") },
@@ -835,6 +866,25 @@ function Appearance() {
           }}
         />
       </Field>
+    )}
+    <Scale
+      name="text"
+      label={t("Text size")}
+      hint={t("How big the text is, as a share of the theme's. Everything made of text follows; pictures and icons do not.")}
+      value={scales.text}
+      onChange={(text) => chooseAppearance({ ...scales, text })}
+    />
+    <Scale
+      name="density"
+      label={t("Spacing")}
+      hint={t("How much room there is inside things and between them. Sizes of icons, pictures and columns stay as they are.")}
+      value={scales.density}
+      onChange={(density) => chooseAppearance({ ...scales, density })}
+    />
+    {(scales.text !== STOCK_APPEARANCE.text || scales.density !== STOCK_APPEARANCE.density) && (
+      <button type="button" onClick={() => chooseAppearance(STOCK_APPEARANCE)} className="mt-3 text-xs text-fg-muted underline-offset-2 hover:text-fg hover:underline">
+        {t("Back to 100 %")}
+      </button>
     )}
     </>
   );
@@ -937,7 +987,7 @@ function AboutDeployment({ onError }: { onError: (e: string) => void }) {
               <div className="min-w-0 flex-1">
                 <dt className="text-xs text-fg-subtle">{r.label}</dt>
                 <dd className="truncate text-sm text-fg" title={r.value}>{r.value}</dd>
-                <p className="text-[11px] text-fg-faint">{r.detail}</p>
+                <p className="text-2xs text-fg-faint">{r.detail}</p>
               </div>
             </div>
           ))}
@@ -1115,7 +1165,7 @@ function GeneralPanel({ onError, onProviders, onExtensions, onSource }: { onErro
           <div>
             <div className="flex items-baseline gap-2">
               <span className="text-xs text-fg-muted">{t("Effort")}</span>
-              <span className="text-[10px] text-fg-faint">
+              <span className="text-3xs text-fg-faint">
                 {stored.thinkingLevel ? t("click again to go back to pi's default") : defaults.thinkingLevel ? t("pi's default: {level}", { level: effortLabel(defaults.thinkingLevel) }) : ""}
               </span>
             </div>
@@ -1129,7 +1179,7 @@ function GeneralPanel({ onError, onProviders, onExtensions, onSource }: { onErro
               />
             </div>
           </div>
-          <p className="flex items-center gap-3 text-[11px] text-fg-faint">
+          <p className="flex items-center gap-3 text-2xs text-fg-faint">
             <span className="inline-flex items-center gap-1"><LuEye className="h-3 w-3" /> {t("sees images")}</span>
             <span className="inline-flex items-center gap-1"><LuBrain className="h-3 w-3" /> {t("thinks — effort applies")}</span>
             <button type="button" onClick={onProviders} className="ml-auto text-accent hover:underline">{t("Providers ›")}</button>
@@ -1250,7 +1300,7 @@ function ExtensionPanel({
         <div className="min-w-0 flex-1">
           <h3 className="truncate text-sm font-medium text-fg">{label}</h3>
           {ext.description && <p className="text-xs text-fg-subtle">{ext.description}</p>}
-          <p className="mt-0.5 truncate font-mono text-[10px] text-fg-faint">{ext.spec}</p>
+          <p className="mt-0.5 truncate font-mono text-3xs text-fg-faint">{ext.spec}</p>
         </div>
         {webLink(ext.homepage) && (
           <a
@@ -1283,7 +1333,7 @@ function ExtensionPanel({
                 <div className="flex items-center gap-2">
                   <div className="min-w-0 flex-1">
                     <p className="text-sm text-fg">{humanKey(s.key)}</p>
-                    <p className="font-mono text-[10px] text-fg-faint">
+                    <p className="font-mono text-3xs text-fg-faint">
                       {s.key}
                       {!s.configured && ` · ${t("not set, so the extension's own default")}`}
                     </p>
@@ -1416,7 +1466,7 @@ function AdvancedPanel({
                 t("Save file")
               )}
             </button>
-            <span className="truncate font-mono text-[11px] text-fg-faint">
+            <span className="truncate font-mono text-2xs text-fg-faint">
               {file.path || settingsPath}
             </span>
           </div>

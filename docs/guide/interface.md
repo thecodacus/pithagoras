@@ -56,6 +56,20 @@ portal's own, for light, for dark or for both. Where one is installed,
 **Colours** under the three appears, with the portal's own and each theme to
 choose from. See [Themes](/guide/extension-ui#themes).
 
+### Text size and spacing
+
+Under the colours, two sliders are yours alone, in this browser:
+
+- **Text size**, from 80 % to 140 %: how big the text is, as a share of the theme's. Everything made of text
+  follows, in the sidebar, the chat, the settings and the extensions that follow the portal's look. Pictures and
+  icons stay as they are, so it is the text you read that grows.
+- **Spacing**, from 70 % to 140 %: how much room there is inside things and between them (padding and the gaps
+  between rows and buttons). Sizes of icons, pictures and columns do not change with it: it is not a zoom.
+
+A hundred is the portal's own, or the theme's if it sets any (a theme can bring a font, rounder corners, a wider
+column: [Themes](/guide/extension-ui#themes)). **Back to 100 %** appears where either is changed. Both are
+painted before the app starts, so a changed size does not flash.
+
 In both themes even the quietest text — hints, timestamps, placeholders — keeps a
 contrast of at least 4.5:1 against what it is drawn on, and the keyboard focus is
 a 2px outline in the full accent colour, round fields, checkboxes, dropdowns and

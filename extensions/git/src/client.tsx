@@ -51,7 +51,7 @@ function Tabs({ panel }: PanelProps) {
       {GIT_TABS.map(({ id, label }) => (
         <button key={id} type="button" role="tab" aria-selected={tab === id} tabIndex={tab === id ? 0 : -1} onClick={() => show(panel, { tab: id })}>
           {t(label)}
-          {id === "changes" && count > 0 && <span className="ml-1 rounded-full bg-fg/10 px-1 text-[10px]">{count}</span>}
+          {id === "changes" && count > 0 && <span className="ml-1 rounded-full bg-fg/10 px-1 text-3xs">{count}</span>}
         </button>
       ))}
     </div>

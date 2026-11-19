@@ -1,5 +1,7 @@
 import { useSyncExternalStore } from "react";
-import { choosePalette, chosenPalette, coloursOf, themeIdNow, type Colours, type Palette } from "../theme";
+import { local } from "../safe-storage";
+import { choosePalette, chosenPalette, coloursOf, paletteSetBy, themeIdNow, type Colours, type Palette, type SetBy } from "../theme";
+import { tokensOf, type Tokens } from "../tokens";
 import { byRank, onRanked } from "./rank";
 
 /**
@@ -12,7 +14,9 @@ import { byRank, onRanked } from "./rank";
  *
  * or its browser half registers one (`portal.theme.register`). Either way it
  * is one of those a person chooses from in Settings, and one an extension can
- * switch to (`portal.theme.set`).
+ * switch to (`portal.theme.set`). Beside its colours it may set the look
+ * beyond them (`tokens`: type, rounding, space, width), checked as the colours
+ * are (tokens.ts).
  *
  * The one chosen is kept in the browser with its colours (theme.tsx), so it is
  * painted before anything here is loaded. What is here keeps that copy true:
@@ -38,25 +42,45 @@ onRanked(() => {
 const watchers = new Set<() => void>();
 const changed = () => { for (const watcher of [...watchers]) watcher(); };
 
-const same = (a: Colours = {}, b: Colours = {}) => JSON.stringify(Object.entries(a).sort()) === JSON.stringify(Object.entries(b).sort());
+const same = (a: Colours | Tokens = {}, b: Colours | Tokens = {}) => JSON.stringify(Object.entries(a).sort()) === JSON.stringify(Object.entries(b).sort());
+
+const NAME_MOST = 60;
+/**
+ * What a name may not hold: a control character, a line or paragraph separator, a bidi control or a zero-width space, and
+ * the double quotes the question puts around it, or one that looks like them. The joiner and the tag characters that
+ * emoji are made of stay, and so do guillemets and the German opening quote: none of them closes the question's quote.
+ */
+const NOT_IN_A_NAME = /[\p{Cc}\p{Zl}\p{Zp}\u061c\u200b\u200e\u200f\u202a-\u202e\u2060-\u2069\ufeff“”‟″〝〞＂ˮ"]/u;
+/** Every kind of space becomes the plain one, and a run of them one: a no-break or ideographic space is ordinary typography, not a reason to refuse a name. */
+const tidy = (name: string) => name.replace(/\p{Zs}+/gu, " ").trim();
 
 /**
  * A theme of `extension`'s. Returns what takes it out again. Throws for one
- * without an id and a name, with a colour the portal has no name for or that
- * is not a colour, with no colours at all, or under an id the extension has
- * used already.
+ * without an id and a name (or with a name of more than 60 characters, or with a line break, a control character or a quote in it; spaces of any kind are made one plain space), with a colour the portal has no name for or that
+ * is not a colour, with a token it has none of or a value its variable does not
+ * take, with neither colours nor tokens, or under an id the extension has used
+ * already.
  */
 export function registerTheme(extension: string, given: ThemeGiven): () => void {
-  if (typeof given?.id !== "string" || !given.id || typeof given.name !== "string" || !given.name) throw new Error("A theme needs an id and a name");
-  const light = coloursOf(given.light), dark = coloursOf(given.dark);
-  if (!light || !dark) throw new Error(`The theme "${given.id}" has a colour the portal has no name for, or one that is not "#rrggbb" or three numbers`);
-  if (!Object.keys(light).length && !Object.keys(dark).length) throw new Error(`The theme "${given.id}" sets no colours`);
-  const theme: Theme = { id: `${extension}/${given.id}`, name: given.name, light, dark, extension };
-  if (held.some((t) => t.id === theme.id)) throw new Error(`${extension} already has a theme called "${given.id}"`);
+  // Each field is read once: a getter must not pass the checks with one value and be stored with another.
+  const { id, name: givenName, light: givenLight, dark: givenDark, tokens: givenTokens } = given ?? ({} as Partial<ThemeGiven>);
+  if (typeof id !== "string" || !id || typeof givenName !== "string" || !tidy(givenName)) throw new Error("A theme needs an id and a name");
+  const name = tidy(givenName);
+  // The name is what the person reads when another extension asks to switch to it: a name, not a message.
+  if (name.length > NAME_MOST) throw new Error(`The theme "${id}" has a name longer than ${NAME_MOST} characters`);
+  if (NOT_IN_A_NAME.test(name)) throw new Error(`The theme "${id}" has a name with a line break, a control character or a quote in it`);
+  const light = coloursOf(givenLight), dark = coloursOf(givenDark);
+  if (!light || !dark) throw new Error(`The theme "${id}" has a colour the portal has no name for, or one that is not "#rrggbb" or three numbers`);
+  const tokens = tokensOf(givenTokens);
+  if (!tokens) throw new Error(`The theme "${id}" has a token the portal has none of, or a value that its variable does not take`);
+  if (!Object.keys(light).length && !Object.keys(dark).length && !Object.keys(tokens).length) throw new Error(`The theme "${id}" sets no colours or tokens`);
+  const theme: Theme = { id: `${extension}/${id}`, name, light, dark, ...(Object.keys(tokens).length ? { tokens } : {}), extension };
+  if (held.some((t) => t.id === theme.id)) throw new Error(`${extension} already has a theme called "${id}"`);
   held = inOrder([...held, theme]);
   // The one in effect, as it is now: the copy kept in the browser may be an older version's.
   const chosen = chosenPalette();
-  if (chosen?.id === theme.id && (chosen.name !== theme.name || !same(chosen.light, light) || !same(chosen.dark, dark))) choose(theme.id);
+  if (chosen?.id === theme.id && (chosen.name !== theme.name || !same(chosen.light, light) || !same(chosen.dark, dark) || !same(chosen.tokens, tokens))) choosePalette(paletteOf(theme), paletteSetBy() ?? "person");
+  settleDefault();
   changed();
   return () => {
     if (!held.includes(theme)) return;
@@ -79,13 +103,102 @@ export function useThemes(): readonly Theme[] {
   );
 }
 
-/** Choose a theme by its id ("<package>/<id>"), or the portal's own with null. Throws for one there is none of. */
-export function choose(requested: string | null): void {
-  if (requested === null) return choosePalette(null);
+/** Choose a theme by its id ("<package>/<id>"), or the portal's own with null; the person's choice unless `by` says whose. Throws for one there is none of. */
+export function choose(requested: string | null, by: SetBy = "person"): void {
+  if (requested === null) return choosePalette(null, by);
   const id = themeIdNow(requested);
   const theme = held.find((t) => t.id === id);
   if (!theme) throw new Error(`There is no theme called "${requested}"`);
-  choosePalette({ id: theme.id, name: theme.name, light: theme.light, dark: theme.dark });
+  choosePalette(paletteOf(theme), by);
+}
+
+const paletteOf = ({ id, name, light, dark, tokens }: Theme): Palette => ({ id, name, light, dark, ...(tokens ? { tokens } : {}) });
+
+/**
+ * The theme the interface in use declares as its own look (an interface's manifest, once there are others than the
+ * portal's), as "<package>/<id>", or null for none. It is in effect only where nobody has chosen: the person's own choice,
+ * even the portal's own colours, stays over it. What it set is the interface's, and goes when the interface does not
+ * declare it any more; the person's change in Settings makes it theirs.
+ *
+ * It is to be called before `themesSettled`, and before any theme is relied on: until it has been, in this page, it is
+ * not known whether the interface has a default, so a theme registered meanwhile leaves what was kept alone (`spoken`).
+ */
+let declared: string | null = null;
+let spoken = false;
+/** An extension switched before the interface spoke: what it was made over is whatever the interface declares first. */
+let overPending = false;
+export function setUiDefaultTheme(id: string | null): void {
+  spoken = true;
+  declared = id === null ? null : themeIdNow(id);
+  if (overPending) local.set(OVER_KEY, declared ?? "");
+  overPending = false;
+  settleDefault();
+}
+
+/**
+ * The interface's default that was declared when an extension last switched to a theme of its own unasked ("" for none).
+ * That switch stands over the default it was made over, across starts; an interface that declares another default (the
+ * person chose another interface) puts its own in effect again.
+ */
+const OVER_KEY = "pithagoras.palette.over";
+
+/** Puts the interface's default in effect, or takes away what an earlier interface's default left, where the person has not chosen. */
+function settleDefault(failed: readonly string[] = [], final = false): void {
+  // Before the interface has declared its default, "none" is only the page's start, not what it said: what was kept
+  // (its default, or an extension's switch made over it) is not taken away for a theme that happened to come first.
+  if (!spoken && !final) return;
+  const by = paletteSetBy();
+  if (by === "person") return;
+  if (by === "extension" && (declared ?? "") === (local.get(OVER_KEY) ?? "")) return;
+  const chosen = chosenPalette();
+  const wanted = declared === null ? undefined : held.find((t) => t.id === declared);
+  if (wanted) {
+    if (chosen?.id !== wanted.id || chosen.name !== wanted.name || !same(chosen.light, wanted.light) || !same(chosen.dark, wanted.dark) || !same(chosen.tokens, wanted.tokens)) choosePalette(paletteOf(wanted), "ui");
+    return;
+  }
+  // The default's own package may still be on its way, and a kept theme is painted as it was when its package failed.
+  if (chosen && (declared === null || final) && !failed.some((name) => chosen.id.startsWith(`${name}/`))) choosePalette(null, "ui");
+}
+
+/** The extensions with a question open. */
+const asking = new Set<string>();
+
+/**
+ * What `portal.theme.set` does for `extension`: a theme of its own is switched to at once; another's, or going back to the
+ * portal's own colours from another's, is asked of the person first (`ask`, told whose theme it is), because a package that
+ * restyles the whole portal unasked is one that can make an approval hard to read. Resolves whether the theme was switched.
+ * Rejects for one there is none of.
+ *
+ * What the person said yes to is their choice. A switch nobody was asked about is the extension's: it does not take the
+ * place of the person's choice, so the interface's default can still come back (settleDefault).
+ */
+export async function setThemeAs(extension: string, requested: string | null, ask: (question: { extension: string; theme: string | null; owner: string | null }) => Promise<boolean>): Promise<boolean> {
+  const id = requested === null ? null : themeIdNow(requested);
+  const theme = id === null ? undefined : held.find((t) => t.id === id);
+  if (id !== null && !theme) throw new Error(`There is no theme called "${requested}"`);
+  const now = chosenPalette()?.id;
+  // What is in effect already is not a change: asking again would only train the person to say yes unread.
+  if (id === (now ?? null)) return true;
+  const own = id === null ? now === undefined || now.startsWith(`${extension}/`) : id.startsWith(`${extension}/`);
+  if (!own) {
+    // One question at a time per extension: a call while its question is open gets no second one.
+    if (asking.has(extension)) return false;
+    asking.add(extension);
+    let said: boolean;
+    try {
+      said = await ask({ extension, theme: theme?.name ?? null, owner: theme?.extension ?? null });
+    } finally {
+      asking.delete(extension);
+    }
+    if (!said) return false;
+  }
+  // Asked a moment ago, it may have gone since.
+  if (id !== null && !held.includes(theme!)) throw new Error(`There is no theme called "${requested}"`);
+  const by: SetBy = !own || paletteSetBy() === "person" ? "person" : "extension";
+  overPending = by === "extension" && !spoken;
+  if (by === "extension" && spoken) local.set(OVER_KEY, declared ?? "");
+  choose(id, by);
+  return true;
 }
 
 /**
@@ -96,6 +209,6 @@ export function choose(requested: string | null): void {
  */
 export function themesSettled(failed: readonly string[] = []): void {
   const chosen = chosenPalette();
-  if (!chosen || held.some((t) => t.id === chosen.id) || failed.some((name) => chosen.id.startsWith(`${name}/`))) return;
-  choosePalette(null);
+  if (chosen && !held.some((t) => t.id === chosen.id) && !failed.some((name) => chosen.id.startsWith(`${name}/`))) choosePalette(null, paletteSetBy() ?? "person");
+  settleDefault(failed, true);
 }

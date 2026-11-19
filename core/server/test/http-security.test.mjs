@@ -15,3 +15,8 @@ test("the portal loads pictures only from itself, so one named by a reply sends 
   const policy = Object.fromEntries(headers().get("content-security-policy").split("; ").map((d) => [d.split(" ")[0], d.split(" ").slice(1)]));
   assert.deepEqual(policy["img-src"], ["'self'", "data:", "blob:"]);
 });
+
+test("the portal loads fonts only from itself, so a theme's font is a file its extension ships and not one from another host", () => {
+  const policy = Object.fromEntries(headers().get("content-security-policy").split("; ").map((d) => [d.split(" ")[0], d.split(" ").slice(1)]));
+  assert.deepEqual(policy["font-src"], ["'self'", "data:"]);
+});

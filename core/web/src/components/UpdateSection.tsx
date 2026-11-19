@@ -76,7 +76,7 @@ export function UpdateSection() {
               {status.branch ?? t("no branch")}
               {current && <> · <span className="font-mono text-xs">{current.sha.slice(0, 7)}</span> {current.subject}</>}
             </dd>
-            {current?.date && <p className="text-[11px] text-fg-faint">{formatDateTime(current.date)}</p>}
+            {current?.date && <p className="text-2xs text-fg-faint">{formatDateTime(current.date)}</p>}
           </div>
         </div>
       </dl>
@@ -131,7 +131,7 @@ export function UpdateSection() {
             <ErrorBanner className="mt-3">
               <span className="block">{failureText(run.failed)}</span>
               <span className="mt-1 block text-xs opacity-80">{run.failed.message}</span>
-              {run.failed.output && <pre className="mt-2 max-h-56 overflow-auto rounded-lg bg-fg/5 p-2 font-mono text-[11px] leading-snug text-fg-muted">{run.failed.output}</pre>}
+              {run.failed.output && <pre className="mt-2 max-h-56 overflow-auto rounded-lg bg-fg/5 p-2 font-mono text-2xs leading-snug text-fg-muted">{run.failed.output}</pre>}
             </ErrorBanner>
           )}
         </div>

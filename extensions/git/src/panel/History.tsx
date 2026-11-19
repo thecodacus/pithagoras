@@ -70,7 +70,7 @@ export function History() {
         <button
           type="button"
           onClick={() => show({ kind: "compare" })}
-          className="flex w-full items-center gap-1.5 border-b border-line px-3 py-1.5 text-left text-[11px] text-fg-subtle transition hover:bg-fg/5 hover:text-fg"
+          className="flex w-full items-center gap-1.5 border-b border-line px-3 py-1.5 text-left text-2xs text-fg-subtle transition hover:bg-fg/5 hover:text-fg"
         >
           <LuGitCompareArrows aria-hidden className="h-3.5 w-3.5" />
           {t("Compare this branch with its base — what a pull request would show")}
@@ -100,10 +100,10 @@ function CommitList({ commits }: { commits: Commit[] }) {
             className="flex w-full flex-col gap-0.5 border-b border-line/50 px-3 py-1.5 text-left transition hover:bg-fg/5"
           >
             <span className="flex min-w-0 items-center gap-1">
-              {c.parents.length > 1 && <span className="shrink-0 text-[10px] text-fg-faint">{t("merge")}</span>}
+              {c.parents.length > 1 && <span className="shrink-0 text-3xs text-fg-faint">{t("merge")}</span>}
               <span className="min-w-0 flex-1 truncate text-xs text-fg">{c.subject}</span>
             </span>
-            <span className="flex min-w-0 items-center gap-1.5 text-[10.5px] text-fg-faint">
+            <span className="flex min-w-0 items-center gap-1.5 text-[length:calc(var(--text-base,1rem)*0.65625)] text-fg-faint">
               <span className="shrink-0 font-mono">{c.short}</span>
               <span className="min-w-0 truncate">{c.author}</span>
               <span className="shrink-0">{ago(c.date)}</span>
@@ -138,7 +138,7 @@ export function ChangeList({ files, open }: { files: FileChange[]; open: (f: Fil
             >
               <Letter letter={f.status} title={LETTER_NAME[f.status]} />
               <span className={`min-w-0 truncate text-xs ${f.status === "D" ? "text-fg-subtle line-through" : "text-fg"}`}>{name}</span>
-              <span className="min-w-0 flex-1 truncate text-[10.5px] text-fg-faint">{dir}</span>
+              <span className="min-w-0 flex-1 truncate text-[length:calc(var(--text-base,1rem)*0.65625)] text-fg-faint">{dir}</span>
               <Counts added={f.added} removed={f.removed} binary={f.binary} />
             </button>
           </li>
@@ -167,7 +167,7 @@ export function CommitView({ sha }: { sha: string }) {
       <div className="border-b border-line px-3 py-2">
         <p className="text-sm font-medium text-fg">{subject}</p>
         {body.join("\n").trim() && <p className="mt-1 whitespace-pre-wrap text-xs text-fg-muted">{body.join("\n").trim()}</p>}
-        <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10.5px] text-fg-faint">
+        <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[length:calc(var(--text-base,1rem)*0.65625)] text-fg-faint">
           <span className="font-mono">{detail.sha.slice(0, 12)}</span>
           <IconButton label={t("Copy the commit's hash")} onClick={() => void copyText(detail.sha)}>
             <LuCopy aria-hidden className="h-3 w-3" />

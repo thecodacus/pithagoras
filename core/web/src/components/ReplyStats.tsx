@@ -28,7 +28,7 @@ export function ReplyStatsLine({ stats }: { stats: ReplyStats }) {
   ].filter(Boolean).join("\n");
   // The details are in the tooltip for a pointer, and read out with the line for a screen reader, which has no hover.
   return (
-    <span className="ml-1.5 select-none text-[11px] tabular-nums text-fg-faint" title={details}>
+    <span className="ml-1.5 select-none text-2xs tabular-nums text-fg-faint" title={details}>
       {parts.join(" · ")}
       <span className="sr-only">{`. ${details.replace(/\n/g, ". ")}`}</span>
     </span>

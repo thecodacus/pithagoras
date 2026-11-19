@@ -21,7 +21,7 @@
 .gallery-tile .image-preview { --ratio: 1 !important; width: 100%; margin: 0; }
 .gallery-tile .image-preview-img { object-fit: cover; }
 .gallery-tile .image-preview.is-failed:not(.is-compact) .image-preview-frame { aspect-ratio: 1; }
-.gallery-tile .image-preview-failed { padding: 8px 10px; font-size: 11.5px; }
+.gallery-tile .image-preview-failed { padding: 8px 10px; font-size: calc(var(--text-base, 1rem) * 0.71875); }
 .gallery-tile .image-preview-failed p { -webkit-line-clamp: 3; }
 /* A clip that was not made is as high as its message, and at least as high as a square tile is wide enough for. */
 .gallery-tile .image-preview.is-clip.is-failed:not(.is-compact) .image-preview-frame { aspect-ratio: auto; min-height: 9.5rem; }
@@ -31,11 +31,11 @@
 .gallery-type-tile { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; width: 100%; aspect-ratio: 1; padding: 8px; border: 1px dashed rgb(var(--line)); border-radius: 8px; background: rgb(var(--raised) / .4); color: rgb(var(--fg-muted)); text-align: center; cursor: pointer; transition: background .15s, border-color .15s; }
 .gallery-type-tile:hover { background: rgb(var(--raised) / .7); border-color: rgb(var(--fg-faint)); }
 .gallery-type-tile > svg { width: 28px; height: 28px; opacity: .7; }
-.gallery-type-tile b { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; color: rgb(var(--fg)); }
-.gallery-type-tile small { font-size: 11px; line-height: 1.35; color: rgb(var(--fg-subtle)); }
+.gallery-type-tile b { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(var(--text-base, 1rem) * 0.8125); font-weight: 600; color: rgb(var(--fg)); }
+.gallery-type-tile small { font-size: calc(var(--text-base, 1rem) * 0.6875); line-height: 1.35; color: rgb(var(--fg-subtle)); }
 
 /* Under the picture: where it is from and when, quietly. */
-.gallery-meta { display: flex; align-items: center; gap: 5px; min-width: 0; margin: 1px 0 0; font-size: 11px; color: rgb(var(--fg-faint)); }
+.gallery-meta { display: flex; align-items: center; gap: 5px; min-width: 0; margin: 1px 0 0; font-size: calc(var(--text-base, 1rem) * 0.6875); color: rgb(var(--fg-faint)); }
 .gallery-meta > svg { flex-shrink: 0; width: 11px; height: 11px; }
 .gallery-meta > span { flex: 1; min-width: 0; }
 .gallery-meta > time { flex-shrink: 0; }
@@ -58,13 +58,13 @@
 .gallery-check-hit:has(.gallery-check:focus-visible) { outline: 2px solid rgb(var(--accent)); outline-offset: 2px; }
 
 /* Choosing pictures for an edit: the place each has in the edit beside the box, and what cannot be taken any more drawn back. */
-.gallery-order { position: absolute; top: 14px; left: 46px; z-index: 5; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px; background: rgb(var(--accent)); color: #fff; font-size: 11px; font-variant-numeric: tabular-nums; line-height: 20px; text-align: center; pointer-events: none; }
+.gallery-order { position: absolute; top: 14px; left: 46px; z-index: 5; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px; background: rgb(var(--accent)); color: #fff; font-size: calc(var(--text-base, 1rem) * 0.6875); font-variant-numeric: tabular-nums; line-height: 20px; text-align: center; pointer-events: none; }
 @media (pointer: coarse) { .gallery-order { top: 14px; left: 52px; } }
 .gallery-tile.is-locked .image-preview-frame { opacity: .45; }
 .gallery-tile.is-locked .gallery-check-hit, .gallery-tile.is-locked .gallery-check { cursor: not-allowed; }
 
 /* Stop and Dismiss, in the place the title has company. */
-.gallery-tile-action { flex-shrink: 0; padding: 1px 6px; border-radius: 6px; font-size: 12px; color: rgb(var(--fg-muted)); transition: background .2s, color .2s; }
+.gallery-tile-action { flex-shrink: 0; padding: 1px 6px; border-radius: 6px; font-size: calc(var(--text-base, 1rem) * 0.75); color: rgb(var(--fg-muted)); transition: background .2s, color .2s; }
 .gallery-tile-action:hover { background: rgb(var(--fg) / .05); color: rgb(var(--fg)); }
 
 /* In the viewer, over a stage that takes every touch: this scrolls by itself. */
@@ -77,7 +77,7 @@
  * clip's player.
  */
 /* Beside what the picture is of: the way to the call it came from. */
-.picture-call-more { flex-shrink: 0; display: inline-flex; align-items: center; gap: 2px; padding: 1px 4px 1px 6px; border-radius: 6px; font-size: 12px; color: rgb(var(--fg-muted)); transition: background .2s, color .2s; }
+.picture-call-more { flex-shrink: 0; display: inline-flex; align-items: center; gap: 2px; padding: 1px 4px 1px 6px; border-radius: 6px; font-size: calc(var(--text-base, 1rem) * 0.75); color: rgb(var(--fg-muted)); transition: background .2s, color .2s; }
 .picture-call-more:hover { background: rgb(var(--fg) / .05); color: rgb(var(--fg)); }
 .picture-call-more svg { width: 12px; height: 12px; transition: transform .3s var(--ease-out); }
 .picture-call-more[aria-expanded="true"] svg { transform: rotate(90deg); }

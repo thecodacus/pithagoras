@@ -46,7 +46,7 @@ function KindIcon({ kinds, className }: { kinds: PackageKind[]; className?: stri
   return <Icon aria-hidden className={className} />;
 }
 
-const pillCls = "shrink-0 rounded-md bg-fg/5 px-1.5 py-0.5 text-[10px] leading-4 text-fg-subtle";
+const pillCls = "shrink-0 rounded-md bg-fg/5 px-1.5 py-0.5 text-3xs leading-4 text-fg-subtle";
 
 function KindPills({ kinds }: { kinds: PackageKind[] }) {
   return (
@@ -81,7 +81,7 @@ function Card({ kinds, name, title, version, description, off, action, children,
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-2">
             <p title={title ?? name} className={`truncate text-sm font-medium ${off ? "text-fg-subtle" : "text-fg"}`}>{name}</p>
-            {version && <span className="shrink-0 font-mono text-[10px] text-fg-faint">v{version}</span>}
+            {version && <span className="shrink-0 font-mono text-3xs text-fg-faint">v{version}</span>}
           </div>
           {description && <Clamped className="mt-0.5">{description}</Clamped>}
           <div className="mt-1.5 flex flex-wrap items-center gap-1">{children}</div>
@@ -202,7 +202,7 @@ export function ExtensionsPanel({
   /** What a card of something to install has where its action is: that it is installed, or the button that installs it. */
   const installButton = (ext: { name: string; spec: string }) =>
     installed.has(ext.name) ? (
-      <span className="pop-in inline-flex shrink-0 items-center gap-1 rounded-lg bg-ok/10 px-2 py-1 text-[11px] text-ok">
+      <span className="pop-in inline-flex shrink-0 items-center gap-1 rounded-lg bg-ok/10 px-2 py-1 text-2xs text-ok">
         <LuCheck className="h-3.5 w-3.5" /> {t("Installed")}
       </span>
     ) : (
@@ -211,7 +211,7 @@ export function ExtensionsPanel({
         onClick={() => act(ext.spec, () => installExtension(ext.spec, { progress: setStep }))}
         disabled={busy !== null}
         aria-label={t("Install {name}", { name: ext.name })}
-        className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-accent/12 px-2 py-1 text-[11px] text-accent ring-1 ring-inset ring-accent/25 transition hover:bg-accent/20 disabled:opacity-40"
+        className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-accent/12 px-2 py-1 text-2xs text-accent ring-1 ring-inset ring-accent/25 transition hover:bg-accent/20 disabled:opacity-40"
       >
         {busy === ext.spec ? <LuRefreshCw className="h-3.5 w-3.5 animate-spin" /> : <LuDownload className="h-3.5 w-3.5" />}
         {busy === ext.spec ? t("Installing…") : t("Install")}
@@ -231,7 +231,7 @@ export function ExtensionsPanel({
     >
       <Icon aria-hidden className="h-4 w-4 shrink-0" />
       {label}
-      {count !== undefined && count > 0 && <span className="rounded-full bg-fg/10 px-1.5 text-[10px] leading-4 text-fg-muted">{count}</span>}
+      {count !== undefined && count > 0 && <span className="rounded-full bg-fg/10 px-1.5 text-3xs leading-4 text-fg-muted">{count}</span>}
     </button>
   );
 
@@ -327,10 +327,10 @@ export function ExtensionsPanel({
                       }
                       foot={
                         <>
-                          <span title={ext.spec} className="min-w-0 truncate font-mono text-[10px] text-fg-faint">{ext.spec}</span>
+                          <span title={ext.spec} className="min-w-0 truncate font-mono text-3xs text-fg-faint">{ext.spec}</span>
                           <span className="ml-auto flex shrink-0 items-center gap-1">
                             {configurable && (
-                              <button onClick={() => onConfigure(ext.spec)} className="rounded-lg px-2 py-1 text-[11px] text-accent transition hover:bg-accent/10">
+                              <button onClick={() => onConfigure(ext.spec)} className="rounded-lg px-2 py-1 text-2xs text-accent transition hover:bg-accent/10">
                                 {ext.settings.length > 0 ? t("Configure ({n})", { n: ext.settings.length }) : t("Configure")} ›
                               </button>
                             )}
@@ -348,7 +348,7 @@ export function ExtensionsPanel({
                       }
                     >
                       <KindPills kinds={kindsOf(ext)} />
-                      {off && <span className="shrink-0 rounded-md bg-warn/10 px-1.5 py-0.5 text-[10px] leading-4 text-warn">{t("off")}</span>}
+                      {off && <span className="shrink-0 rounded-md bg-warn/10 px-1.5 py-0.5 text-3xs leading-4 text-warn">{t("off")}</span>}
                       {ext.filtered && (
                         <span title={t("Some of what it brings is switched off in settings.json. Switching it off and on again keeps that.")} className={pillCls}>
                           {t("filtered")}
@@ -386,7 +386,7 @@ export function ExtensionsPanel({
                           {serverCrashes[ext.name].lines.length > 0 && (
                             <details className="mt-1">
                               <summary className="cursor-pointer text-fg-subtle">{t("What it said last")}</summary>
-                              <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-md bg-fg/5 p-2 font-mono text-[10px] leading-4 text-fg-muted">
+                              <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-md bg-fg/5 p-2 font-mono text-3xs leading-4 text-fg-muted">
                                 {serverCrashes[ext.name].lines.join("\n")}
                               </pre>
                             </details>
@@ -496,7 +496,7 @@ export function ExtensionsPanel({
                     key={s.label}
                     onClick={() => setSpec(s.placeholder)}
                     title={t(s.hint)}
-                    className="rounded-lg bg-fg/5 px-2 py-0.5 font-mono text-[11px] text-fg-muted transition hover:bg-fg/10 hover:text-fg"
+                    className="rounded-lg bg-fg/5 px-2 py-0.5 font-mono text-2xs text-fg-muted transition hover:bg-fg/10 hover:text-fg"
                   >
                     {s.label}
                   </button>

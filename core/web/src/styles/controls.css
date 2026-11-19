@@ -2,8 +2,8 @@
 
 /* ── Select: a dropdown drawn by the portal ── */
 .ui-select { display: inline-flex; align-items: center; gap: 8px; min-width: 0; text-align: left; border: 1px solid rgb(var(--line)); background: rgb(var(--raised) / .6); color: rgb(var(--fg)); border-radius: 10px; transition: border-color .18s, background .18s, box-shadow .18s; }
-.ui-select-md { padding: 7px 10px 7px 12px; font-size: 13px; }
-.ui-select-sm { padding: 5px 8px 5px 10px; font-size: 12px; border-radius: 8px; }
+.ui-select-md { padding: 7px 10px 7px 12px; font-size: calc(var(--text-base) * 0.8125); }
+.ui-select-sm { padding: 5px 8px 5px 10px; font-size: calc(var(--text-base) * 0.75); border-radius: 8px; }
 .ui-select:hover:not(:disabled) { border-color: rgb(var(--fg-faint)); background: rgb(var(--raised)); }
 .ui-select.is-open { border-color: rgb(var(--accent) / .6); box-shadow: 0 0 0 3px rgb(var(--accent) / .15); }
 /* The accent in full, as an outline: the tint above is the open list's, and was under 3:1 as the mark of the focus. */
@@ -18,16 +18,16 @@
 @keyframes ui-pop { from { opacity: 0; transform: translateY(-4px) scale(.97); } to { opacity: 1; transform: none; } }
 .ui-select-list.is-above { animation-name: ui-pop-up; }
 @keyframes ui-pop-up { from { opacity: 0; transform: translateY(4px) scale(.97); } to { opacity: 1; transform: none; } }
-.ui-select-option { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 8px; font-size: 13px; color: rgb(var(--fg-muted)); cursor: pointer; transition: background .12s, color .12s; }
+.ui-select-option { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 8px; font-size: calc(var(--text-base) * 0.8125); color: rgb(var(--fg-muted)); cursor: pointer; transition: background .12s, color .12s; }
 .ui-select-option.is-active { background: rgb(var(--fg) / .07); color: rgb(var(--fg)); }
 .ui-select-option[aria-selected="true"] { color: rgb(var(--fg)); }
 .ui-select-option.is-disabled { opacity: .4; cursor: not-allowed; }
-.ui-select-hint { display: block; margin-top: 1px; font-size: 11px; color: rgb(var(--fg-faint)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ui-select-hint { display: block; margin-top: 1px; font-size: calc(var(--text-base) * 0.6875); color: rgb(var(--fg-faint)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ui-select-check { width: 14px; height: 14px; flex-shrink: 0; color: rgb(var(--accent)); animation: chat-pop .3s var(--ease-spring) both; }
 @media (prefers-reduced-motion: reduce) { .ui-select-list, .ui-select-check { animation: none; } .ui-select-chevron { transition: none; } }
 
 /* ── Tooltips (see tooltips.ts) ── */
-.ui-tooltip { position: fixed; z-index: 300; max-width: min(320px, calc(100vw - 16px)); padding: 5px 9px; border-radius: 8px; background: rgb(var(--fg)); color: rgb(var(--canvas)); font-size: 11.5px; line-height: 1.45; font-weight: 500; box-shadow: 0 6px 20px -6px #0006; pointer-events: none; opacity: 0; transform: translateY(3px) scale(.97); transition: opacity .14s ease, transform .18s var(--ease-out); white-space: normal; overflow-wrap: anywhere; }
+.ui-tooltip { position: fixed; z-index: 300; max-width: min(320px, calc(100vw - 16px)); padding: 5px 9px; border-radius: 8px; background: rgb(var(--fg)); color: rgb(var(--canvas)); font-size: calc(var(--text-base) * 0.71875); line-height: 1.45; font-weight: 500; box-shadow: 0 6px 20px -6px #0006; pointer-events: none; opacity: 0; transform: translateY(3px) scale(.97); transition: opacity .14s ease, transform .18s var(--ease-out); white-space: normal; overflow-wrap: anywhere; }
 .ui-tooltip[data-side="below"] { transform: translateY(-3px) scale(.97); }
 .ui-tooltip.is-shown { opacity: 1; transform: none; }
 @media (prefers-reduced-motion: reduce) { .ui-tooltip { transition: opacity .1s; transform: none; } }
@@ -42,7 +42,7 @@
    that swells and fades. Lists give every mark a 16px slot (status-slot), so
    nothing beside it moves when a chat starts or stops. */
 .status-slot { display: inline-grid; place-items: center; width: 16px; height: 16px; flex-shrink: 0; }
-.status-working { position: relative; display: inline-grid; place-items: center; flex-shrink: 0; width: 16px; height: 16px; border-radius: 50%; background: rgb(var(--accent) / .14); box-shadow: inset 0 0 0 1px rgb(var(--accent) / .4); color: rgb(var(--accent)); font: 700 11px/1 Georgia, "Times New Roman", serif; }
+.status-working { position: relative; display: inline-grid; place-items: center; flex-shrink: 0; width: 16px; height: 16px; border-radius: 50%; background: rgb(var(--accent) / .14); box-shadow: inset 0 0 0 1px rgb(var(--accent) / .4); color: rgb(var(--accent)); font: 700 calc(var(--text-base) * 0.6875)/1 Georgia, "Times New Roman", serif; }
 .status-working::before { content: ""; position: absolute; inset: -5px; border-radius: 50%; background: radial-gradient(circle, rgb(var(--accent) / .4), transparent 65%); animation: chat-halo 1.8s ease-in-out infinite; }
 .status-working > span { position: relative; margin-top: -1px; animation: working-breathe 1.8s ease-in-out infinite; }
 @keyframes working-breathe { 0%, 100% { transform: scale(.92); opacity: .8; } 50% { transform: scale(1.12); opacity: 1; } }

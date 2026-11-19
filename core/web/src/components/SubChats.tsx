@@ -41,7 +41,7 @@ export function SubChats<S extends { id: string }>({
         // Several chats have sub-chats: the button says whose, as the group does.
         aria-label={tp(subs.length, "{n} sub-chat of {name}", "{n} sub-chats of {name}", { name: title })}
         onClick={onToggle}
-        className={`flex items-center gap-1 rounded text-fg-subtle hover:text-fg-muted ${md ? "ml-3 px-1 py-0.5 text-xs" : "ml-6 px-1 py-px text-[11px]"}`}
+        className={`flex items-center gap-1 rounded text-fg-subtle hover:text-fg-muted ${md ? "ml-3 px-1 py-0.5 text-xs" : "ml-6 px-1 py-px text-2xs"}`}
       >
         <LuChevronRight aria-hidden className={`h-3 w-3 shrink-0 text-fg-faint transition-transform motion-reduce:transition-none ${open ? "rotate-90" : ""}`} />
         {tp(subs.length, "{n} sub-chat", "{n} sub-chats")}

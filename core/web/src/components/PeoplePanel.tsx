@@ -194,11 +194,11 @@ function RuleRow({
   return (
     <li className="flex items-center gap-2 rounded-lg border border-line bg-raised/40 py-1 pl-2.5 pr-1">
       {scope && (
-        <span className="shrink-0 rounded bg-fg/5 px-1.5 py-0.5 text-[11px] text-fg-muted">
+        <span className="shrink-0 rounded bg-fg/5 px-1.5 py-0.5 text-2xs text-fg-muted">
           {scope}
         </span>
       )}
-      <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-fg-muted">
+      <span className="min-w-0 flex-1 truncate font-mono text-2xs text-fg-muted">
         {rule.tool}: {rule.pattern}
       </span>
       <button
@@ -282,7 +282,7 @@ function PersonDetail({
         >
           <LuChevronLeft className="h-3.5 w-3.5" /> {t("People")}
         </button>
-        <span className="ml-auto truncate font-mono text-[11px] text-fg-faint">{person.key}</span>
+        <span className="ml-auto truncate font-mono text-2xs text-fg-faint">{person.key}</span>
         <button
           disabled={busy}
           title={t("Forget — the next message from them arrives as a stranger again")}
@@ -320,7 +320,7 @@ function PersonDetail({
           <Segments label={t("Role")} size="cell" className="grid grid-cols-4 gap-1" value={role} options={ROLES} onChange={setRole} />
           {/* One line for the choice in front of you, rather than four
               descriptions competing for the same attention. */}
-          <p className="mt-1 text-[11px] text-fg-faint">
+          <p className="mt-1 text-2xs text-fg-faint">
             {t(ROLES.find((r) => r.id === role)?.hint ?? "")}
           </p>
         </div>
@@ -370,7 +370,7 @@ function PersonDetail({
           <h3 className="text-sm font-medium text-fg">{t("Allowed anyway")}</h3>
           <span className="text-xs text-fg-faint">{rules.length}</span>
         </div>
-        <p className="mb-2 text-[11px] text-fg-faint">
+        <p className="mb-2 text-2xs text-fg-faint">
           {tx("What {name} may do despite their role — written by {allow}, revoked by deleting. {star} covers the parts that vary; a shell rule matches one command, never a pipeline.", { name: person.name, allow: <em>{t("Always allow")}</em>, star: <span className="font-mono">*</span> })}
         </p>
 
@@ -388,14 +388,14 @@ function PersonDetail({
             onChange={(e) => setTool(e.target.value)}
             placeholder="bash"
             aria-label={t("Tool")}
-            className="w-20 rounded-lg border border-line bg-raised/60 px-2 py-1.5 font-mono text-[11px] outline-none focus:border-accent/60"
+            className="w-20 rounded-lg border border-line bg-raised/60 px-2 py-1.5 font-mono text-2xs outline-none focus:border-accent/60"
           />
           <input
             value={pattern}
             onChange={(e) => setPattern(e.target.value)}
             placeholder="himalaya envelope list*"
             aria-label={t("Pattern")}
-            className="min-w-0 flex-1 rounded-lg border border-line bg-raised/60 px-2 py-1.5 font-mono text-[11px] outline-none placeholder:text-fg-faint focus:border-accent/60"
+            className="min-w-0 flex-1 rounded-lg border border-line bg-raised/60 px-2 py-1.5 font-mono text-2xs outline-none placeholder:text-fg-faint focus:border-accent/60"
           />
           <button
             disabled={busy || !pattern.trim()}
@@ -406,7 +406,7 @@ function PersonDetail({
                 setPattern("");
               })
             }
-            className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-accent/12 px-2.5 py-1.5 text-[11px] text-accent ring-1 ring-inset ring-accent/25 transition hover:bg-accent/20 disabled:opacity-40"
+            className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-accent/12 px-2.5 py-1.5 text-2xs text-accent ring-1 ring-inset ring-accent/25 transition hover:bg-accent/20 disabled:opacity-40"
           >
             <LuPlus className="h-3 w-3" /> {t("Allow")}
           </button>

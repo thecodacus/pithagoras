@@ -3,7 +3,8 @@ import { createContext, useContext, useSyncExternalStore } from "react";
 import * as ReactDOM from "react-dom";
 import * as jsxRuntime from "react/jsx-runtime";
 import { api, ApiError, EXTENSIONS_CHANGED, json, type ExtensionUi, type ServerCrash } from "../api";
-import { formatDate, formatDateTime, formatNumber, formatTime, useLanguage } from "../i18n";
+import { formatDate, formatDateTime, formatNumber, formatTime, t, useLanguage } from "../i18n";
+import { confirmDialog } from "../components/ConfirmDialog";
 import { formatElapsed } from "../transcript";
 import type { Portal } from "@pithagoras/extension-api";
 import { onChatFeed, useChatFeed } from "./chat-feed";
@@ -16,7 +17,7 @@ import { rankExtensions } from "./rank";
 import { register } from "./slots";
 import { addStrings, forgetStrings, translate, translateCount, translateInContext, translateWithParts } from "./strings";
 import { registerShortcut } from "./shortcuts";
-import { choose, registerTheme, themes, themesSettled } from "./themes";
+import { registerTheme, setThemeAs, themes, themesSettled } from "./themes";
 import { chosenPalette, usePalette, useResolvedTheme } from "../theme";
 
 /**
@@ -102,6 +103,15 @@ const quietly = (fn: () => void): boolean => {
     return false;
   }
 };
+
+/** An extension asks to switch the colours to a theme that is not its own: the person says whether it may, told whose theme it is. */
+const askToSwitch = ({ extension, theme, owner }: { extension: string; theme: string | null; owner: string | null }) =>
+  confirmDialog({
+    title: t("Change the colours?"),
+    message: theme === null ? t("{extension} wants to go back to the portal's own colours.", { extension }) : t("{extension} wants to change the colours to a theme of {owner}: “{theme}”.", { extension, theme, owner: owner ?? "" }),
+    confirmLabel: t("Change colours"),
+    unasked: true,
+  });
 
 /** The hook behind `portal.theme.use`. */
 function useThemeNow(): { mode: "light" | "dark"; theme: string | null } {
@@ -208,7 +218,7 @@ async function activate(ext: ExtensionUi, told: Promise<void>[]): Promise<void> 
         register: (theme) => kept(registerTheme(ext.name, theme)),
         list: () => themes().map((theme) => ({ id: theme.id, name: theme.name, extension: theme.extension })),
         current: () => chosenPalette()?.id ?? null,
-        set: choose,
+        set: (id) => setThemeAs(ext.name, id, askToSwitch),
         use: useThemeNow,
       },
     };

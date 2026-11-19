@@ -54,7 +54,7 @@ export function Stat({ value, label, tone }: { value: ReactNode; label: string; 
   return (
     <div className="flex items-baseline gap-1.5 rounded-lg bg-raised/60 px-2.5 py-1">
       <span className={`text-sm tabular-nums ${tone ?? "text-fg"}`}>{value}</span>
-      <span className="text-[11px] text-fg-subtle">{label}</span>
+      <span className="text-2xs text-fg-subtle">{label}</span>
     </div>
   );
 }

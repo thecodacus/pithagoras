@@ -136,10 +136,10 @@ export function PackageCatalog({
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-baseline gap-x-2">
                       <p className="truncate text-sm text-fg">{p.name}</p>
-                      <span className="font-mono text-[10px] text-fg-faint">v{p.version}</span>
+                      <span className="font-mono text-3xs text-fg-faint">v{p.version}</span>
                     </div>
                     {p.description && <Clamped className="mt-0.5">{p.description}</Clamped>}
-                    <p className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-[10px] text-fg-faint">
+                    <p className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-3xs text-fg-faint">
                       {p.weekly !== undefined && (
                         <span className="inline-flex items-center gap-1" title={t("{n} downloads last week", { n: formatNumber(p.weekly) })}>
                           <LuTrendingUp className="h-3 w-3" /> {t("{n}/week", { n: compactCount(p.weekly) })}
@@ -155,7 +155,7 @@ export function PackageCatalog({
                     </p>
                   </div>
                   {has ? (
-                    <span className="pop-in inline-flex shrink-0 items-center gap-1 rounded-lg bg-ok/10 px-2 py-1 text-[11px] text-ok">
+                    <span className="pop-in inline-flex shrink-0 items-center gap-1 rounded-lg bg-ok/10 px-2 py-1 text-2xs text-ok">
                       <LuCheck className="h-3.5 w-3.5" /> {t("Installed")}
                     </span>
                   ) : (
@@ -164,7 +164,7 @@ export function PackageCatalog({
                       onClick={() => void install(p)}
                       disabled={busy !== null}
                       aria-label={t("Install {name}", { name: p.name })}
-                      className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-accent/12 px-2 py-1 text-[11px] text-accent ring-1 ring-inset ring-accent/25 transition hover:bg-accent/20 disabled:opacity-40"
+                      className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-accent/12 px-2 py-1 text-2xs text-accent ring-1 ring-inset ring-accent/25 transition hover:bg-accent/20 disabled:opacity-40"
                     >
                       {busy === p.name && step ? <LuRefreshCw className="h-3.5 w-3.5 animate-spin" /> : <LuDownload className="h-3.5 w-3.5" />}
                       {busy === p.name && step ? t("Installing…") : t("Install")}
@@ -178,7 +178,7 @@ export function PackageCatalog({
       )}
 
       {found && found.length > limit && (
-        <button type="button" onClick={() => setMore(!more)} className="mt-2 text-[11px] text-accent hover:underline">
+        <button type="button" onClick={() => setMore(!more)} className="mt-2 text-2xs text-accent hover:underline">
           {more ? t("Fewer") : t("{n} more", { n: found.length - limit })}
         </button>
       )}

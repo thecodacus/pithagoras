@@ -77,7 +77,7 @@ export function SkillsPanel({ onError }: { onError: (e: string) => void }) {
         <p className="text-xs text-fg-subtle">
           {t("A skill is a set of instructions the agent pulls in when its description matches what is being asked. Every session sees them, so they are a good place for a procedure you would otherwise repeat. Switching one off stops pi loading it at all, rather than hiding it here.")}
         </p>
-        <p className="mt-1.5 truncate font-mono text-[11px] text-fg-faint">{root}</p>
+        <p className="mt-1.5 truncate font-mono text-2xs text-fg-faint">{root}</p>
       </section>
 
       {diagnostics.length > 0 && (
@@ -90,7 +90,7 @@ export function SkillsPanel({ onError }: { onError: (e: string) => void }) {
               <LuCircleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
               <div className="min-w-0">
                 <p>{d.message}</p>
-                {d.path && <p className="truncate font-mono text-[10px] opacity-70">{d.path}</p>}
+                {d.path && <p className="truncate font-mono text-3xs opacity-70">{d.path}</p>}
               </div>
             </li>
           ))}
@@ -108,7 +108,7 @@ export function SkillsPanel({ onError }: { onError: (e: string) => void }) {
                 setImporting(!importing);
                 setAdding(false);
               }}
-              className="text-[11px] text-accent hover:text-accent"
+              className="text-2xs text-accent hover:text-accent"
             >
               {importing ? t("Cancel") : t("Import from GitHub")}
             </button>
@@ -117,7 +117,7 @@ export function SkillsPanel({ onError }: { onError: (e: string) => void }) {
                 setAdding(!adding);
                 setImporting(false);
               }}
-              className="text-[11px] text-accent hover:text-accent"
+              className="text-2xs text-accent hover:text-accent"
             >
               {adding ? t("Cancel") : t("+ New")}
             </button>
@@ -225,17 +225,17 @@ function SkillRow({
           <p className="truncate text-sm text-fg">
             {s.name}
             {!s.enabled && (
-              <span className="ml-1.5 rounded bg-fg/5 px-1 py-0.5 text-[10px] text-fg-subtle">
+              <span className="ml-1.5 rounded bg-fg/5 px-1 py-0.5 text-3xs text-fg-subtle">
                 {t("off")}
               </span>
             )}
             {s.manualOnly && (
-              <span className="ml-1.5 rounded bg-fg/5 px-1 py-0.5 text-[10px] text-fg-subtle">
+              <span className="ml-1.5 rounded bg-fg/5 px-1 py-0.5 text-3xs text-fg-subtle">
                 {t("/skill only")}
               </span>
             )}
           </p>
-          <p className="line-clamp-2 text-[11px] text-fg-subtle">
+          <p className="line-clamp-2 text-2xs text-fg-subtle">
             {s.broken ? (
               <span className="text-warn/90">{t("not loading — see the warning above")}</span>
             ) : (
@@ -243,7 +243,7 @@ function SkillRow({
             )}
           </p>
           {s.source && (
-            <p className="mt-0.5 flex items-center gap-1 truncate text-[10px] text-fg-faint">
+            <p className="mt-0.5 flex items-center gap-1 truncate text-3xs text-fg-faint">
               <LuGithub className="h-2.5 w-2.5 shrink-0" />
               {s.source.spec}
             </p>
@@ -307,7 +307,7 @@ function NewSkill({
           placeholder={t("Use when cutting a release: version bump, changelog, tag and push.")}
           className={`${inputCls} mt-1 resize-y text-xs leading-relaxed`}
         />
-        <p className="mt-1 text-[11px] text-fg-faint">
+        <p className="mt-1 text-2xs text-fg-faint">
           {t("This is the only part the model reads when deciding whether the skill applies. Say when, not what.")}
         </p>
       </label>
@@ -378,7 +378,7 @@ function SkillDetail({
               s.description
             )}
           </p>
-          <p className="mt-0.5 truncate font-mono text-[10px] text-fg-faint">{s.path}</p>
+          <p className="mt-0.5 truncate font-mono text-3xs text-fg-faint">{s.path}</p>
         </div>
         {s.editable && (
           <Switch
@@ -393,7 +393,7 @@ function SkillDetail({
       </div>
 
       {!s.enabled && (
-        <p className="mb-4 rounded-lg border border-line bg-raised/40 px-3 py-2 text-[11px] text-fg-subtle">
+        <p className="mb-4 rounded-lg border border-line bg-raised/40 px-3 py-2 text-2xs text-fg-subtle">
           {t("Switched off. pi is not loading this, so the agent cannot see or use it.")}
         </p>
       )}
@@ -408,12 +408,12 @@ function SkillDetail({
             spellCheck={false}
             className={`${codeAreaCls} resize-y`}
           />
-          <p className="mt-1 text-[11px] text-fg-faint">
+          <p className="mt-1 text-2xs text-fg-faint">
             {tx("The frontmatter at the top is what pi reads — changing {name} renames the skill, and {description} is what the model matches against.", { name: <code>name</code>, description: <code>description</code> })}
           </p>
 
           {s.source && (
-            <div className="mt-2 flex items-center gap-2 rounded-lg border border-line bg-raised/40 px-3 py-2 text-[11px] text-fg-subtle">
+            <div className="mt-2 flex items-center gap-2 rounded-lg border border-line bg-raised/40 px-3 py-2 text-2xs text-fg-subtle">
               <LuGithub className="h-3.5 w-3.5 shrink-0 text-fg-faint" />
               <span className="min-w-0 flex-1 truncate">
                 {tx("Imported from {source}", { source: <span className="font-mono">{s.source.spec}</span> })}
@@ -586,16 +586,16 @@ function ImportSkills({
           {busy === "look" ? <LuRefreshCw className="h-4 w-4 animate-spin" /> : t("Look")}
         </button>
       </div>
-      <p className="text-[11px] text-fg-faint">
+      <p className="text-2xs text-fg-faint">
         {tx("{repo}, {branch}, a subdirectory like {folder}, or a GitHub URL pasted from the address bar.", { repo: <code>user/repo</code>, branch: <code>user/repo#branch</code>, folder: <code>user/repo/skills/pdf</code> })}
       </p>
 
-      <p className="text-[11px] text-fg-faint">
+      <p className="text-2xs text-fg-faint">
         {t("A private repository is reached through the git login of this server. Do not put a token in the address.")}
       </p>
 
       {skipped.length > 0 && (
-        <div className="rounded-lg border border-warn/30 bg-warn/10 px-3 py-2 text-[11px] text-warn/90">
+        <div className="rounded-lg border border-warn/30 bg-warn/10 px-3 py-2 text-2xs text-warn/90">
           <p className="flex items-start gap-1.5">
             <LuTriangleAlert className="mt-0.5 h-3 w-3 shrink-0" />
             {t("Not imported:")}
@@ -624,7 +624,7 @@ function ImportSkills({
                   chosen.size === found.length ? new Set() : new Set(found.map((f) => f.name))
                 )
               }
-              className="text-[11px] text-fg-subtle hover:text-fg-muted"
+              className="text-2xs text-fg-subtle hover:text-fg-muted"
             >
               {chosen.size === found.length ? t("none") : t("all")}
             </button>
@@ -656,15 +656,15 @@ function ImportSkills({
                     <p className="truncate text-xs text-fg">
                       {f.name}
                       {f.installed && (
-                        <span className="ml-1.5 rounded bg-warn/12 px-1 py-0.5 text-[10px] text-warn">
+                        <span className="ml-1.5 rounded bg-warn/12 px-1 py-0.5 text-3xs text-warn">
                           {t("installed")}
                         </span>
                       )}
                     </p>
                     {f.description && (
-                      <p className="line-clamp-2 text-[11px] text-fg-subtle">{f.description}</p>
+                      <p className="line-clamp-2 text-2xs text-fg-subtle">{f.description}</p>
                     )}
-                    <p className="truncate font-mono text-[10px] text-fg-faint">{f.from}</p>
+                    <p className="truncate font-mono text-3xs text-fg-faint">{f.from}</p>
                   </div>
                 </button>
               </li>
@@ -672,7 +672,7 @@ function ImportSkills({
           </ul>
 
           {[...chosen].some((n) => found.find((f) => f.name === n)?.installed) && (
-            <p className="flex items-start gap-1.5 text-[11px] text-warn/90">
+            <p className="flex items-start gap-1.5 text-2xs text-warn/90">
               <LuTriangleAlert className="mt-0.5 h-3 w-3 shrink-0" />
               {t("A ticked skill you already have will be replaced, including any edits you made to it.")}
             </p>
@@ -694,7 +694,7 @@ function ImportSkills({
         </>
       )}
 
-      <p className="flex items-start gap-1.5 border-t border-line pt-2 text-[11px] text-fg-faint">
+      <p className="flex items-start gap-1.5 border-t border-line pt-2 text-2xs text-fg-faint">
         <LuTriangleAlert className="mt-0.5 h-3 w-3 shrink-0" />
         {t("Nothing is executed by an import — a skill is markdown. But it is markdown the agent will follow, so take them from somewhere you would take instructions from.")}
       </p>

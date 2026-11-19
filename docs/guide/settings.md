@@ -197,7 +197,7 @@ Advanced to edit `settings.json` directly when that happens.
 ## This browser
 
 What is kept in this browser rather than on the server, so a phone can differ
-from the laptop: the theme (light, dark, or following the system), animations,
+from the laptop: the theme (light, dark, or following the system), text size and spacing, animations,
 language, notifications, the command character, confirmations and sign-out. See
 [The interface](/guide/interface) and
 [Slash commands](/guide/commands#the-command-character).

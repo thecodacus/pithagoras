@@ -165,7 +165,7 @@ export function ToolSwitches(
   return (
     <div className="max-h-80 overflow-y-auto">
       {flipError && (
-        <p role="alert" className="px-3 pt-2 text-[11px] text-danger">
+        <p role="alert" className="px-3 pt-2 text-2xs text-danger">
           {t("That switch was not saved: {error}", { error: flipError })}
         </p>
       )}
@@ -173,7 +173,7 @@ export function ToolSwitches(
           earlier chats registered, and what is switched here is this chat's
           from its start — the default is not touched. */}
       {!live && (
-        <p className="px-3 pb-1.5 pt-2 text-[10px] text-fg-faint">
+        <p className="px-3 pb-1.5 pt-2 text-3xs text-fg-faint">
           {forProject
             ? t("These are the tools earlier chats had. What you switch here is what every chat in this project starts with; the portal-wide defaults stay as they are.")
             : agent !== undefined
@@ -187,12 +187,12 @@ export function ToolSwitches(
       )}
       <ToolGroupList tools={tools} names={names} busy={busy} onFlip={flip} />
       {live && (
-        <p className="px-3 py-1.5 text-[10px] text-fg-faint">
+        <p className="px-3 py-1.5 text-3xs text-fg-faint">
           {t("Applies from the next message, for this conversation. Settings → Tools sets what every conversation starts with.")}
         </p>
       )}
       {(project !== undefined || agent !== undefined || routine !== undefined || mode !== undefined) && (
-        <p className="px-3 py-1.5 text-[10px] text-fg-faint">
+        <p className="px-3 py-1.5 text-3xs text-fg-faint">
           {t("Chats already running here have it from their next message. A chat that switched a tool for itself keeps its own choice.")}
         </p>
       )}

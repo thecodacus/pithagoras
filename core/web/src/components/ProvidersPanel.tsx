@@ -91,7 +91,7 @@ export function ProvidersPanel({ onError, onSetup }: { onError: (e: string) => v
         title={t("Providers")}
         hint={t("Where the agent's models come from. Each one's models appear in the model menu under the chat box.")}
         action={editing !== "new" && (
-          <div className="flex items-center gap-1.5">
+          <div className="flex flex-wrap items-center gap-1.5">
             {onSetup && (
               <button type="button" onClick={onSetup} className={ghostCls} title={t("Provider, model and what the agent can do, one step at a time")}>
                 <LuWandSparkles className="h-3.5 w-3.5" /> {t("Setup assistant")}
@@ -198,10 +198,10 @@ function ProviderCard({ provider: p, status, busy, onEdit, onRemove }: { provide
           <div className="flex flex-wrap items-center gap-1.5">
             <p className="truncate text-sm font-medium text-fg">{p.label}</p>
             {p.label !== presetLabel(p.kind) && (
-              <span className="rounded bg-fg/5 px-1.5 py-0.5 text-[10px] text-fg-subtle">{presetLabel(p.kind)}</span>
+              <span className="rounded bg-fg/5 px-1.5 py-0.5 text-3xs text-fg-subtle">{presetLabel(p.kind)}</span>
             )}
             {p.key.set && (
-              <span className="inline-flex items-center gap-1 rounded bg-ok/10 px-1.5 py-0.5 text-[10px] text-ok" title={p.key.source === "environment" ? t("pi finds its key in the environment") : t("A key is stored for it")}>
+              <span className="inline-flex items-center gap-1 rounded bg-ok/10 px-1.5 py-0.5 text-3xs text-ok" title={p.key.source === "environment" ? t("pi finds its key in the environment") : t("A key is stored for it")}>
                 <LuKeyRound className="h-2.5 w-2.5" />
                 {p.key.source === "environment" ? t("key from the environment") : p.key.hint ?? t("key set")}
               </span>
@@ -209,19 +209,19 @@ function ProviderCard({ provider: p, status, busy, onEdit, onRemove }: { provide
           </div>
           {p.baseUrl && (
             <div className="mt-0.5 flex min-w-0 items-center gap-2">
-              <p className="min-w-0 truncate font-mono text-[11px] text-fg-faint">{p.baseUrl}</p>
+              <p className="min-w-0 truncate font-mono text-2xs text-fg-faint">{p.baseUrl}</p>
               <StatusBadge status={status} />
             </div>
           )}
-          {status?.state === "down" && status.message && <p role="alert" className="float-in mt-1 text-[11px] text-danger/90">{status.message}</p>}
+          {status?.state === "down" && status.message && <p role="alert" className="float-in mt-1 text-2xs text-danger/90">{status.message}</p>}
           {status?.state === "up" && !!status.missing?.length && (
-            <p className="float-in mt-1 text-[11px] text-warn">
+            <p className="float-in mt-1 text-2xs text-warn">
               {status.missing.length === 1
                 ? t("{model} is not listed by the server any more.", { model: status.missing[0] })
                 : t("{n} chosen models are not listed by the server any more.", { n: status.missing.length })}
             </p>
           )}
-          {!p.endpoint && <p className="mt-0.5 text-[11px] text-fg-faint">{t("Every model pi knows of from this service is in the model menu.")}</p>}
+          {!p.endpoint && <p className="mt-0.5 text-2xs text-fg-faint">{t("Every model pi knows of from this service is in the model menu.")}</p>}
         </div>
         <div className="flex shrink-0 items-center gap-0.5 opacity-70 transition group-hover:opacity-100">
           {onEdit && (
@@ -241,7 +241,7 @@ function ProviderCard({ provider: p, status, busy, onEdit, onRemove }: { provide
           {p.models.length === 0 && <span className="text-xs text-warn">{t("No models chosen yet — edit it to pick some.")}</span>}
           {shown.map((m) => <ModelChip key={m.id} model={m} loaded={status?.loaded?.includes(m.id)} missing={status?.missing?.includes(m.id)} />)}
           {p.models.length > 6 && (
-            <button type="button" onClick={() => setOpen(!open)} className="rounded-md px-1.5 py-0.5 text-[11px] text-accent hover:bg-accent/10">
+            <button type="button" onClick={() => setOpen(!open)} className="rounded-md px-1.5 py-0.5 text-2xs text-accent hover:bg-accent/10">
               {open ? t("Fewer") : t("{n} more", { n: p.models.length - 6 })}
             </button>
           )}
@@ -260,7 +260,7 @@ export function StatusBadge({ status }: { status?: ProviderStatus }) {
   const text = state === "up" ? (status?.ms !== undefined ? t("Online · {ms} ms", { ms: status.ms }) : t("Online")) : state === "down" ? t("Offline") : t("Checking…");
   return (
     <span
-      className={`provider-status is-${state} inline-flex shrink-0 items-center gap-1.5 rounded-full px-1.5 py-0.5 text-[10px]`}
+      className={`provider-status is-${state} inline-flex shrink-0 items-center gap-1.5 rounded-full px-1.5 py-0.5 text-3xs`}
       title={state === "down" ? status?.message : state === "up" ? tp(status?.listed ?? 0, "Answered in {ms} ms, listing {n} model", "Answered in {ms} ms, listing {n} models", { ms: status?.ms ?? 0 }) : t("Asking the server")}
     >
       <i aria-hidden="true" />
@@ -272,12 +272,12 @@ export function StatusBadge({ status }: { status?: ProviderStatus }) {
 function ModelChip({ model: m, loaded, missing }: { model: ProviderModel; loaded?: boolean; missing?: boolean }) {
   return (
     <span
-      className={`inline-flex max-w-full items-center gap-1.5 rounded-md px-2 py-0.5 text-[11px] ${loaded ? "bg-ok/10 text-ok" : missing ? "bg-warn/10 text-warn line-through decoration-warn/50" : "bg-fg/5 text-fg-muted"}`}
+      className={`inline-flex max-w-full items-center gap-1.5 rounded-md px-2 py-0.5 text-2xs ${loaded ? "bg-ok/10 text-ok" : missing ? "bg-warn/10 text-warn line-through decoration-warn/50" : "bg-fg/5 text-fg-muted"}`}
       title={loaded ? t("{model} — loaded now", { model: m.id }) : missing ? t("{model} — the server does not list it now", { model: m.id }) : m.id}
     >
       {loaded && <i className="provider-loaded-dot" aria-hidden="true" />}
       <span className="truncate">{m.name ?? m.id}</span>
-      {m.contextWindow && <span className="font-mono text-[10px] text-fg-faint">{formatTokens(m.contextWindow)}</span>}
+      {m.contextWindow && <span className="font-mono text-3xs text-fg-faint">{formatTokens(m.contextWindow)}</span>}
       {m.input?.includes("image") && <LuEye className="h-3 w-3 text-fg-faint" aria-label={t("Sees images")} />}
       {m.reasoning && <LuBrain className="h-3 w-3 text-fg-faint" aria-label={t("Thinks")} />}
     </span>
@@ -481,14 +481,14 @@ export function ProviderEditor({ view, provider, taken, onCancel, onSaved, onErr
       <div className="grid gap-3 sm:grid-cols-2">
         <Field label={t("Kind")} className="sm:col-span-2">
           <Select<EditorKind> className="w-full" aria-label={t("Kind of provider")} value={choice} options={kindOptions} onChange={pickKind} disabled={editing} />
-          {!editing && <p className="mt-1 text-[11px] text-fg-faint">{kindOptions.find((o) => o.value === choice)?.hint}</p>}
+          {!editing && <p className="mt-1 text-2xs text-fg-faint">{kindOptions.find((o) => o.value === choice)?.hint}</p>}
         </Field>
       </div>
 
       {choice === "package" ? (
         <div key="package" className="float-in mt-3">
           <PackageCatalog topic="provider" installed={installed.names} onInstalled={() => { void installed.reload(); forget("models"); onInstalled?.(); }} onError={onError} limit={5} />
-          <p className="mt-2 text-[11px] text-fg-faint">
+          <p className="mt-2 text-2xs text-fg-faint">
             {t("A package's models show in the model menu of chats started after it is installed. Most want a key or an address of their own: they appear under Extension settings when it can be set there.")}
           </p>
         </div>
@@ -552,7 +552,7 @@ export function ProviderEditor({ view, provider, taken, onCancel, onSaved, onErr
           <div className="flex items-center gap-2">
             <p className="text-xs text-fg-muted">{t("Models")}</p>
             {probe.message && (
-              <span role="status" className={`truncate text-[11px] ${probe.state === "failed" ? "text-danger" : "text-fg-faint"}`}>{probe.message()}</span>
+              <span role="status" className={`truncate text-2xs ${probe.state === "failed" ? "text-danger" : "text-fg-faint"}`}>{probe.message()}</span>
             )}
             <button type="button" onClick={() => void ask()} disabled={!baseUrl.trim() || probe.state === "asking"} className={`${ghostCls} ml-auto`}>
               <LuRefreshCw className={`h-3.5 w-3.5 ${probe.state === "asking" ? "animate-spin" : ""}`} /> {t("Ask again")}
@@ -585,7 +585,7 @@ export function ProviderEditor({ view, provider, taken, onCancel, onSaved, onErr
           </button>
         )}
         {!embedded && <button type="button" onClick={onCancel} className={ghostCls}>{choice === "package" ? t("Done") : t("Cancel")}</button>}
-        <span className="ml-auto text-[11px] text-fg-faint">
+        <span className="ml-auto text-2xs text-fg-faint">
           {clash
             ? kind === "openrouter" || kind === "hosted"
               ? t("{name} is set up already — edit it in the list.", { name: kind === "openrouter" ? "OpenRouter" : `“${id.trim()}”` })
@@ -629,9 +629,9 @@ function ModelRows({ rows, onChange, onAll }: { rows: Row[]; onChange: (id: stri
             <LuSearch className="pointer-events-none absolute left-0 top-1/2 h-3 w-3 -translate-y-1/2 text-fg-faint" />
             <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder={t("Filter {n} models", { n: rows.length })} className="w-full bg-transparent pl-4 text-xs outline-none placeholder:text-fg-faint" aria-label={t("Filter models")} />
           </div>
-        ) : <span className="flex-1 text-[11px] text-fg-faint">{t("{n} of {all} chosen", { n: rows.filter((r) => r.keep).length, all: rows.length })}</span>}
-        <span className="w-20 text-right text-[10px] uppercase tracking-wider text-fg-faint">{t("Window")}</span>
-        <span className="w-14 text-center text-[10px] uppercase tracking-wider text-fg-faint">{t("Can")}</span>
+        ) : <span className="flex-1 text-2xs text-fg-faint">{t("{n} of {all} chosen", { n: rows.filter((r) => r.keep).length, all: rows.length })}</span>}
+        <span className="w-20 text-right text-3xs uppercase tracking-wider text-fg-faint">{t("Window")}</span>
+        <span className="w-14 text-center text-3xs uppercase tracking-wider text-fg-faint">{t("Can")}</span>
       </div>
       <ul className="max-h-72 divide-y divide-line/60 overflow-y-auto">
         {shown.map((r) => (
@@ -639,8 +639,8 @@ function ModelRows({ rows, onChange, onAll }: { rows: Row[]; onChange: (id: stri
             <input type="checkbox" checked={r.keep} onChange={() => onChange(r.id, { keep: !r.keep })} className="h-3.5 w-3.5 accent-accent" aria-label={t("Use {model}", { model: r.id })} />
             <div className="min-w-0 flex-1">
               <p className="truncate text-xs text-fg" title={r.id}>{r.name ?? r.id}</p>
-              {r.name && <p className="truncate font-mono text-[10px] text-fg-faint">{r.id}</p>}
-              {!r.found && <p className="text-[10px] text-fg-faint">{t("Not listed by the server right now")}</p>}
+              {r.name && <p className="truncate font-mono text-3xs text-fg-faint">{r.id}</p>}
+              {!r.found && <p className="text-3xs text-fg-faint">{t("Not listed by the server right now")}</p>}
             </div>
             <input
               value={r.ctxText}
@@ -649,7 +649,7 @@ function ModelRows({ rows, onChange, onAll }: { rows: Row[]; onChange: (id: stri
               inputMode="numeric"
               title={t("How many tokens it may hold. Empty: pi's default of 128k.")}
               aria-label={t("Context window of {model}", { model: r.id })}
-              className={`w-20 rounded-md border bg-transparent px-1.5 py-0.5 text-right font-mono text-[11px] outline-none focus:border-accent/60 ${parseWindow(r.ctxText).kind === "bad" ? "border-danger/60" : "border-line"}`}
+              className={`w-20 rounded-md border bg-transparent px-1.5 py-0.5 text-right font-mono text-2xs outline-none focus:border-accent/60 ${parseWindow(r.ctxText).kind === "bad" ? "border-danger/60" : "border-line"}`}
             />
             <div className="flex w-14 justify-center gap-0.5">
               <Toggle on={!!r.input?.includes("image")} label={t("Sees images")} onClick={() => onChange(r.id, { input: r.input?.includes("image") ? undefined : ["text", "image"] })}><LuEye /></Toggle>

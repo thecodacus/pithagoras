@@ -59,19 +59,19 @@ function VideoDetails({ video }: { video: GalleryVideo }) {
     <div className="space-y-3 text-sm">
       {video.prompt && (
         <div>
-          <p className="text-[11px] text-fg-subtle">{t("Description")}</p>
+          <p className="text-2xs text-fg-subtle">{t("Description")}</p>
           <p className="mt-0.5 whitespace-pre-wrap break-words text-fg">{video.prompt}</p>
         </div>
       )}
       {params.firstFrame?.picture && !frameGone && (
         <div>
-          <p className="text-[11px] text-fg-subtle">{t("First frame")}</p>
+          <p className="text-2xs text-fg-subtle">{t("First frame")}</p>
           <img src={api.galleryThumbUrl(params.firstFrame.picture)} alt={t("The picture this video starts from")} onError={() => setFrameGone(true)} className="mt-1 h-20 rounded-lg border border-line object-cover" />
         </div>
       )}
       {params.lastFrame?.picture && !lastGone && (
         <div>
-          <p className="text-[11px] text-fg-subtle">{t("Last frame")}</p>
+          <p className="text-2xs text-fg-subtle">{t("Last frame")}</p>
           <img src={api.galleryThumbUrl(params.lastFrame.picture)} alt={t("The picture this video ends on")} onError={() => setLastGone(true)} className="mt-1 h-20 rounded-lg border border-line object-cover" />
         </div>
       )}

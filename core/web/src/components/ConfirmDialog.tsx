@@ -21,6 +21,11 @@ interface ConfirmOptions {
   /** Destructive: the button is red, and focus starts on Cancel. */
   danger?: boolean;
   /**
+   * Opened by something other than the person's own click (an extension asking): focus starts on Cancel without the red
+   * look, so a key the person was typing when it opened does not answer yes.
+   */
+  unasked?: boolean;
+  /**
    * Removes something, so the question can be switched off in Settings. Not
    * the same as `danger`: throwing away unsaved edits is dangerous too, but
    * there is no copy of them to fall back on and nobody asked to skip it.
@@ -125,7 +130,7 @@ export function ConfirmHost() {
   return (
     <div
       ref={leaving}
-      className="ui-backdrop fixed inset-0 z-[60] flex items-center justify-center bg-canvas/80 p-4 backdrop-blur-sm"
+      className="ui-backdrop fixed inset-0 z-confirm flex items-center justify-center bg-canvas/80 p-4 backdrop-blur-sm"
       onMouseDown={(e) => {
         if (e.target !== e.currentTarget) return;
         // The press would otherwise clear the focus that the answer has just given back to the button.
@@ -155,7 +160,7 @@ export function ConfirmHost() {
             key={`cancel-${current.id}`}
             ref={cancel}
             type="button"
-            autoFocus={current.danger}
+            autoFocus={current.danger || current.unasked}
             onClick={() => answer(false)}
             className="rounded-lg px-3 py-1.5 text-sm text-fg-muted transition hover:bg-fg/5 hover:text-fg"
           >
@@ -165,7 +170,7 @@ export function ConfirmHost() {
             key={`confirm-${current.id}`}
             ref={confirm}
             type="button"
-            autoFocus={!current.danger}
+            autoFocus={!current.danger && !current.unasked}
             onClick={() => answer(true)}
             className={`rounded-lg px-3 py-1.5 text-sm ring-1 ring-inset transition ${
               current.danger

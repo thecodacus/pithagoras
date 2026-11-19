@@ -180,7 +180,7 @@ export function ImageViewer({
   const broken = failed === id;
 
   return createPortal(
-    <div ref={leaving} className="ui-backdrop image-viewer fixed inset-0 z-[55] bg-canvas/95 backdrop-blur-md">
+    <div ref={leaving} className="ui-backdrop image-viewer fixed inset-0 z-viewer bg-canvas/95 backdrop-blur-md">
       <div ref={dialog} role="dialog" aria-modal="true" aria-label={t("Picture viewer")} tabIndex={-1} onClick={closeOnBlank} className="image-viewer-card flex h-full w-full flex-col outline-none">
         <header onClick={closeOnBlank} className="flex shrink-0 flex-wrap items-center justify-end gap-1 px-2 pb-1 pt-[max(0.5rem,env(safe-area-inset-top))] sm:px-3">
           {many && <span aria-hidden className="px-2 text-xs tabular-nums text-fg-muted">{index + 1} / {pictures.length}</span>}

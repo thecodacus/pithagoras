@@ -16,11 +16,11 @@
 .image-preview.is-compact .image-preview-frame { border-radius: 7px; }
 
 /* While it is made: a soft light over the frame, what it is, and how long it has taken. Once the call is over and the picture is on its way, the same place says so, with nothing moving: it may be a while, and a frame that moved would say it was still being made. */
-:is(.image-preview-making, .image-preview-loading) { position: absolute; inset: 0; z-index: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 12px; color: var(--ip-fg); font-size: 12px; text-align: center; }
+:is(.image-preview-making, .image-preview-loading) { position: absolute; inset: 0; z-index: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 12px; color: var(--ip-fg); font-size: calc(var(--text-base) * 0.75); text-align: center; }
 :is(.image-preview-making, .image-preview-loading) > svg { width: 22px; height: 22px; stroke-width: 1.6; color: rgb(var(--ip-accent)); }
 .image-preview-loading > svg { color: rgb(var(--ip-fg)); }
 .image-preview.is-compact :is(.image-preview-making, .image-preview-loading) > svg { width: 16px; height: 16px; }
-.image-preview-making > small { font-size: 11px; color: var(--ip-fg); }
+.image-preview-making > small { font-size: calc(var(--text-base) * 0.6875); color: var(--ip-fg); }
 /* Over an edit's original the words and the seconds each sit on a plate of their own, to be read on any picture, bright or dark: a surface of the theme, nearly opaque, with the theme's own text on it. */
 .image-preview-frame.has-before :is(.image-preview-making, .image-preview-loading) > :is(span, small) { padding: 2px 10px; border-radius: 999px; background: rgb(var(--surface) / .88); color: rgb(var(--fg)); }
 .image-preview-frame.has-before .image-preview-making > small { padding: 1px 8px; }
@@ -45,27 +45,27 @@
 /* Not made, or gone from the folder: quiet, as wide as a message and as high as its words. */
 .image-preview.is-failed:not(.is-compact) { width: min(100%, 24rem); }
 .image-preview.is-failed:not(.is-compact) .image-preview-frame { aspect-ratio: auto; border-style: dashed; background: transparent; }
-.image-preview-failed { display: flex; align-items: flex-start; gap: 10px; padding: 11px 13px; color: var(--ip-fg); font-size: 12.5px; }
+.image-preview-failed { display: flex; align-items: flex-start; gap: 10px; padding: 11px 13px; color: var(--ip-fg); font-size: calc(var(--text-base) * 0.78125); }
 .image-preview-failed > svg { flex-shrink: 0; width: 16px; height: 16px; margin-top: 1px; color: rgb(var(--danger) / .8); }
 .image-preview-failed > div { min-width: 0; }
 .image-preview-failed b { display: block; font-weight: 500; color: rgb(var(--fg)); }
-.image-preview-failed p { margin: 2px 0 0; font-size: 12px; line-height: 1.5; color: rgb(var(--fg-subtle)); overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; overflow: hidden; }
+.image-preview-failed p { margin: 2px 0 0; font-size: calc(var(--text-base) * 0.75); line-height: 1.5; color: rgb(var(--fg-subtle)); overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; overflow: hidden; }
 /* A clip's message is shown whole, however long: it says what the server sent, and is all there is to read to find out why. */
 .image-preview.is-clip .image-preview-failed p { display: block; -webkit-line-clamp: unset; overflow: visible; }
 /* In a tile there is room for the mark only: the card says the rest. */
 .image-preview.is-compact .image-preview-failed { position: absolute; inset: 0; align-items: center; justify-content: center; padding: 0; }
 
 /* Under the picture: what it is of, and what the caller puts beside it. */
-.image-preview-caption { display: flex; align-items: center; gap: 8px; min-width: 0; margin-top: 5px; font-size: 12px; color: rgb(var(--fg-subtle)); }
+.image-preview-caption { display: flex; align-items: center; gap: 8px; min-width: 0; margin-top: 5px; font-size: calc(var(--text-base) * 0.75); color: rgb(var(--fg-subtle)); }
 .image-preview-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* A clip in the chat (ChatVideo), whole in its player. */
 .chat-video { display: block; width: 100%; max-height: 20rem; border: 1px solid rgb(var(--line)); border-radius: 8px; background: #000; }
 .chat-picture .chat-video { width: auto; max-width: 100%; }
-.chat-video-gone { padding: 11px 13px; border: 1px dashed rgb(var(--line)); border-radius: 8px; font-size: 12.5px; color: rgb(var(--fg-muted)); }
+.chat-video-gone { padding: 11px 13px; border: 1px dashed rgb(var(--line)); border-radius: 8px; font-size: calc(var(--text-base) * 0.78125); color: rgb(var(--fg-muted)); }
 
 /* A file a call gave that is no picture or clip: its name, to save it. */
-.chat-file { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; padding: 8px 12px; border: 1px solid rgb(var(--line)); border-radius: 8px; background: rgb(var(--raised) / .6); font-size: 12.5px; color: rgb(var(--fg)); transition: border-color .18s, background .18s; }
+.chat-file { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; padding: 8px 12px; border: 1px solid rgb(var(--line)); border-radius: 8px; background: rgb(var(--raised) / .6); font-size: calc(var(--text-base) * 0.78125); color: rgb(var(--fg)); transition: border-color .18s, background .18s; }
 .chat-file:hover { border-color: rgb(var(--fg-faint)); background: rgb(var(--raised)); }
 .chat-file svg { flex-shrink: 0; width: 15px; height: 15px; color: rgb(var(--fg-muted)); }
 .chat-file span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -65,7 +65,7 @@ export function ExtensionDialog({
   return (
     <div
       ref={leaving}
-      className="ui-backdrop fixed inset-0 z-[60] flex items-center justify-center bg-canvas/80 p-4 backdrop-blur-sm"
+      className="ui-backdrop fixed inset-0 z-confirm flex items-center justify-center bg-canvas/80 p-4 backdrop-blur-sm"
       onMouseDown={(e) => {
         if (e.target !== e.currentTarget) return;
         // Once an answer has failed this closes at once, and the press would clear the focus that was just given back.

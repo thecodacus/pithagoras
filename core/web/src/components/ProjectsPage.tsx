@@ -208,20 +208,20 @@ export function ProjectsPage({
                     <div className="flex items-baseline gap-2">
                       <p className="truncate text-sm text-fg">{p.name}</p>
                       {p.hasInstructions && (
-                        <span className="rounded bg-accent/10 px-1.5 py-0.5 text-[10px] text-accent">{t("instructions")}</span>
+                        <span className="rounded bg-accent/10 px-1.5 py-0.5 text-3xs text-accent">{t("instructions")}</span>
                       )}
                       {p.agent && agents.some((a) => a.id === p.agent) && (
-                        <span className="rounded bg-accent/10 px-1.5 py-0.5 text-[10px] text-accent" title={t("Chats here start with the SOUL.md, PrimaryUser.md and memory of {agent}", { agent: agents.find((a) => a.id === p.agent)!.name })}>
+                        <span className="rounded bg-accent/10 px-1.5 py-0.5 text-3xs text-accent" title={t("Chats here start with the SOUL.md, PrimaryUser.md and memory of {agent}", { agent: agents.find((a) => a.id === p.agent)!.name })}>
                           {t("with {agent}", { agent: agents.find((a) => a.id === p.agent)!.name })}
                         </span>
                       )}
                       {p.hasTools && (
-                        <span className="rounded bg-accent/10 px-1.5 py-0.5 text-[10px] text-accent" title={t("Switches tools differently from the portal-wide default")}>
+                        <span className="rounded bg-accent/10 px-1.5 py-0.5 text-3xs text-accent" title={t("Switches tools differently from the portal-wide default")}>
                           {t("tools")}
                         </span>
                       )}
                     </div>
-                    <p className="truncate text-[11px] text-fg-faint">
+                    <p className="truncate text-2xs text-fg-faint">
                       {tp(p.sessions, "{n} chat", "{n} chats")}
                       {lastActive(p) ? ` · ${t("last {when}", { when: when(lastActive(p)!) })}` : ""}
                     </p>
@@ -425,7 +425,7 @@ function NewProject({
         />
       </label>
       {name.trim() && (
-        <p className="mt-1 truncate font-mono text-[11px] text-fg-subtle">
+        <p className="mt-1 truncate font-mono text-2xs text-fg-subtle">
           {slug ? `→ ${root ? `${root}/` : ""}${slug}` : t("needs at least one letter or digit")}
         </p>
       )}
@@ -620,7 +620,7 @@ function Instructions({
             placeholder={t("What this project is, and how the agent should work in it.")}
             className={`${inputCls} resize-y font-mono text-xs`}
           />
-          <p className="mt-2 text-[11px] text-fg-subtle">
+          <p className="mt-2 text-2xs text-fg-subtle">
             {tx("Chats started after saving pick this up. One already open does after {command}. Leave it empty to remove the file.", { command: <code>/reload</code> })}
           </p>
         </>
@@ -679,7 +679,7 @@ function ProjectAgentChoice({ project, agents, onClose }: { project: Project; ag
             onMemory={(on) => void change({ memory: on })}
             holder={now.memoryAvailable ? (features.value?.memory.by ?? null) : null}
           />
-          <p className="mt-3 text-[11px] text-fg-subtle">
+          <p className="mt-3 text-2xs text-fg-subtle">
             {tx("Chats started after this pick it up. One already open does after {command}.", { command: <code>/reload</code> })}
           </p>
         </>

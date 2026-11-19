@@ -34,7 +34,7 @@ const ChildItem = memo(function ChildItem({ item, running, chat }: { item: Item;
         <div className="side-transcript-reply">
           {item.thinking && <ThinkingBlock thinking={item.thinking} streaming={running && !item.done && !item.text} since={item.thinkingSince} until={item.thinkingUntil} />}
           {item.text && (
-            <div className="md text-[13px] leading-relaxed text-fg">
+            <div className="md text-xs-plus leading-relaxed text-fg">
               <Markdown parseIncompleteMarkdown animated isAnimating={running && !item.done}>
                 {item.text}
               </Markdown>

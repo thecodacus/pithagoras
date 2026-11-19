@@ -23,7 +23,7 @@ export function Shell({ chatId }: { chatId: string }) {
     Terminal.strings.promptLabel = t("Terminal input");
     Terminal.strings.tooMuchOutput = t("Too much output to read out; move through the lines to read it.");
     const term = new Terminal({
-      fontSize: 12,
+      fontSize: fontSize(host.current),
       fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
       // The portal's colours for a terminal, which a theme may set.
       theme: terminalColours(),
@@ -91,7 +91,15 @@ export function Shell({ chatId }: { chatId: string }) {
     observer.observe(host.current);
 
     // Another theme chosen, or light for dark: its colours follow.
-    const themed = new MutationObserver(() => (term.options.theme = terminalColours()));
+    // The same observer sees the person's text size, which sets a variable of the root's style: the screen follows it too.
+    const themed = new MutationObserver(() => {
+      term.options.theme = terminalColours();
+      const size = fontSize(host.current!);
+      if (size === term.options.fontSize) return;
+      term.options.fontSize = size;
+      fit.fit();
+      resize();
+    });
     themed.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme", "style"] });
 
     return () => {
@@ -105,6 +113,16 @@ export function Shell({ chatId }: { chatId: string }) {
   }, [chatId]);
 
   return <div ref={host} className="terminal-shell" />;
+}
+
+/** The screen's font size: 12 px at the portal's own text size, and as much more or less as the person's text size and the theme make it (the screen is a canvas, which CSS does not reach). */
+function fontSize(host: HTMLElement): number {
+  const probe = document.createElement("div");
+  probe.style.cssText = "position: absolute; visibility: hidden; font-size: var(--text-base, 1rem);";
+  host.append(probe);
+  const px = parseFloat(getComputedStyle(probe).fontSize);
+  probe.remove();
+  return Number.isFinite(px) && px > 0 ? (12 * px) / 16 : 12;
 }
 
 /** The terminal's colours as the page has them now (the portal's `--terminal` and `--terminal-fg`), in the form xterm takes. */

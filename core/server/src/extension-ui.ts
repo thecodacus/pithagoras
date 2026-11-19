@@ -273,12 +273,14 @@ export function staticImports(half: ClientHalf): string[] {
   return [...found];
 }
 
-/** A theme a package names: who it is, and its colours as written, for the page to check. */
+/** A theme a package names: who it is, and its colours and tokens as written, for the page to check. */
 export interface NamedTheme {
   id: string;
   name: string;
   light?: Record<string, string>;
   dark?: Record<string, string>;
+  /** As written, whatever it is: the page refuses what is not a map of values a variable takes, with the theme. */
+  tokens?: unknown;
 }
 
 export interface PackageThemes {
@@ -302,7 +304,7 @@ export function packageThemes(packageDir: string): PackageThemes | undefined {
   if (!validName(meta?.name) || !Array.isArray(named)) return undefined;
   const themes = named
     .filter((theme) => typeof theme?.id === "string" && typeof theme.name === "string")
-    .map((theme): NamedTheme => ({ id: theme.id, name: theme.name, ...(colourMap(theme.light) ? { light: theme.light } : {}), ...(colourMap(theme.dark) ? { dark: theme.dark } : {}) }));
+    .map((theme): NamedTheme => ({ id: theme.id, name: theme.name, ...(colourMap(theme.light) ? { light: theme.light } : {}), ...(colourMap(theme.dark) ? { dark: theme.dark } : {}), ...(theme.tokens !== undefined ? { tokens: theme.tokens } : {}) }));
   return themes.length ? { name: meta.name, ...(typeof meta.version === "string" ? { version: meta.version } : {}), themes } : undefined;
 }
 

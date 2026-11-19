@@ -40,7 +40,7 @@ export class ErrorBoundary extends Component<{ resetKey: string; fallback?: (err
           <LuTriangleAlert className="h-5 w-5" />
         </div>
         <p className="text-sm text-fg">{fetching ? <FetchFailed /> : t("This page ran into a problem and could not be shown.")}</p>
-        <p className="max-w-md break-words font-mono text-[11px] text-fg-faint">{error.message}</p>
+        <p className="max-w-md break-words font-mono text-2xs text-fg-faint">{error.message}</p>
         <div className="mt-1 flex gap-2">
           {fetching ? (
             <button type="button" onClick={() => window.location.reload()} className={primarySmCls}>
@@ -87,7 +87,7 @@ export function PartFailed({ error }: { error: Error }) {
   return (
     <div role="alert" className="flex flex-col items-start gap-3 text-sm text-fg-muted">
       <p>{fetching ? <FetchFailed /> : t("This part of the portal ran into a problem and could not be shown.")}</p>
-      <p className="max-w-md break-words font-mono text-[11px] text-fg-faint">{error.message}</p>
+      <p className="max-w-md break-words font-mono text-2xs text-fg-faint">{error.message}</p>
       {fetching && (
         <button type="button" onClick={() => window.location.reload()} className={primarySmCls}>
           <LuRotateCw className="h-3.5 w-3.5" /> {t("Reload the portal")}

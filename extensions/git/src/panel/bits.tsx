@@ -27,7 +27,7 @@ const LETTER_COLOUR: Record<string, string> = {
 /** The letter git gives a change: A added, M modified, D deleted, R renamed, U new here, ! in conflict. */
 export function Letter({ letter, title }: { letter: string; title?: string }) {
   return (
-    <span title={title && t(title)} className={`w-3 shrink-0 text-center font-mono text-[11px] font-semibold ${LETTER_COLOUR[letter] ?? "text-fg-subtle"}`}>
+    <span title={title && t(title)} className={`w-3 shrink-0 text-center font-mono text-2xs font-semibold ${LETTER_COLOUR[letter] ?? "text-fg-subtle"}`}>
       {letter}
     </span>
   );
@@ -45,10 +45,10 @@ export const LETTER_NAME: Record<string, string> = {
 };
 
 export function Counts({ added, removed, binary }: { added: number; removed: number; binary?: boolean }) {
-  if (binary) return <span className="shrink-0 text-[10px] text-fg-faint">{t("binary")}</span>;
+  if (binary) return <span className="shrink-0 text-3xs text-fg-faint">{t("binary")}</span>;
   if (!added && !removed) return null;
   return (
-    <span className="shrink-0 font-mono text-[10px]">
+    <span className="shrink-0 font-mono text-3xs">
       {added > 0 && <span className="text-ok">+{added}</span>}
       {added > 0 && removed > 0 && " "}
       {removed > 0 && <span className="text-danger">−{removed}</span>}
@@ -155,8 +155,8 @@ export function Quiet({ children }: { children: ReactNode }) {
 export function SectionHead({ title, count, children }: { title: string; count?: number; children?: ReactNode }) {
   return (
     <div className="sticky top-0 z-[1] flex items-center gap-1 border-b border-line/60 bg-surface/95 px-3 py-1 backdrop-blur">
-      <span className="text-[11px] font-medium uppercase tracking-wide text-fg-subtle">{title}</span>
-      {count !== undefined && <span className="rounded-full bg-fg/8 px-1.5 text-[10px] text-fg-subtle">{count}</span>}
+      <span className="text-2xs font-medium uppercase tracking-wide text-fg-subtle">{title}</span>
+      {count !== undefined && <span className="rounded-full bg-fg/8 px-1.5 text-3xs text-fg-subtle">{count}</span>}
       <div className="ml-auto flex items-center gap-0.5">{children}</div>
     </div>
   );
@@ -168,7 +168,7 @@ export function RefBadge({ name }: { name: string }) {
   const label = head ? name.slice(8) : name.replace(/^tag: /, "🏷 ");
   return (
     <span
-      className={`max-w-[10rem] shrink-0 truncate rounded px-1 font-mono text-[10px] ring-1 ring-inset ${
+      className={`max-w-[10rem] shrink-0 truncate rounded px-1 font-mono text-3xs ring-1 ring-inset ${
         head ? "bg-accent/10 text-accent ring-accent/30" : "text-fg-subtle ring-line"
       }`}
       title={name}
