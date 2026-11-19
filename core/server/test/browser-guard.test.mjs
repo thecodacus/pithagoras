@@ -56,7 +56,7 @@ test("the paragraph the short envelope leaves out is the portal's, said of any o
   assert.match(mail.tool_result({ toolName: "bash", input: { command: "himalaya envelope list" }, isError: false, content: [{ type: "text", text: "mail" }] }).content[0].text, /Everything between these markers came from outside/);
 });
 
-test("the portal's own bin folder is on PATH wherever a native install puts it, and the home spellings of it are no way round", () => {
+test("the portal's own bin folder is on PATH wherever a native install puts it, and the home, dot-segment and relative spellings of it are no way round", () => {
   const before = { HOME: process.env.HOME, BIN_DIR: process.env.BIN_DIR };
   const h = scratch("guard-native-bin-");
   process.env.HOME = h;
@@ -71,17 +71,26 @@ test("the portal's own bin folder is on PATH wherever a native install puts it, 
       ["bash", { command: "cp evil ~/data/bin/tool" }],
       ["bash", { command: "cp evil $HOME/data/bin/tool" }],
       ["bash", { command: `cp evil ${h}/data/bin/tool` }],
+      ["write", { path: `${h}/data/./bin/tool` }],
+      ["bash", { command: `cp evil ${h}/data/./bin/tool` }],
+      ["bash", { command: `cp evil ${h}/data/bin/../bin/tool` }],
     ]) {
       assert.equal(refused(call(tainted(), tool, input)), true, `${tool} ${JSON.stringify(input)} is refused`);
       assert.equal(call(guardAs(), tool, input), undefined, `${tool} ${JSON.stringify(input)} before the taint`);
     }
     // A folder that merely lies next to the bin is no part of it.
     assert.equal(refused(call(tainted(), "write", { path: path.join(h, "data", "bin-evil", "tool") })), false, "bin-evil is not bin");
+    // A relative target is resolved against the workspace, as the tool does: a workspace that is the bin's parent reaches it.
+    const ws = path.join(h, "data");
+    assert.equal(refused(call(tainted({ workspace: ws }), "write", { path: "bin/tool" })), true, "a relative target into the bin is refused");
+    assert.equal(call(guardAs({ workspace: ws }), "write", { path: "bin/tool" }), undefined, "… and free before the taint");
+    assert.equal(refused(call(tainted({ workspace: ws }), "write", { path: "bin-evil/tool" })), false, "… and bin-evil still is not");
   } finally {
     process.env.HOME = before.HOME;
     process.env.BIN_DIR = before.BIN_DIR;
   }
 });
+
 
 // --- the guard as a whole: what it wraps, what it refuses, and for whom ---
 
