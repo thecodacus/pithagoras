@@ -22,6 +22,8 @@ process.env.AGENT_HOME = path.join(DATA, "agent-home");
 process.env.SESSION_DIR = path.join(DATA, "sessions");
 process.env.PI_CODING_AGENT_DIR = path.join(DATA, "home", ".pi", "agent");
 process.env.PORTAL_SECRET = "portal-secret-value";
+const BIN = path.join(root, "bin");
+process.env.BIN_DIR = BIN;
 
 after(() => rmSync(root, { recursive: true, force: true }));
 
@@ -54,12 +56,12 @@ const why = !linuxRoot ? "needs root on Linux, as the portal runs in its image" 
 
 test("the sandbox holds against the ways round it", { skip: why }, async (t) => {
   users();
-  for (const dir of [DATA, WORK, path.join(WORK, "project"), path.join(DATA, "agent-home"), path.join(DATA, "bin"), path.join(DATA, "home", ".pi", "agent"), path.join(DATA, "trusted"), path.join(DATA, ".secrets")]) mkdirSync(dir, { recursive: true });
+  for (const dir of [DATA, WORK, path.join(WORK, "project"), path.join(DATA, "agent-home"), BIN, path.join(DATA, "home", ".pi", "agent"), path.join(DATA, "trusted"), path.join(DATA, ".secrets")]) mkdirSync(dir, { recursive: true });
   writeFileSync(path.join(WORK, "project", "notes.txt"), "hello\n");
   execFileSync("git", ["init", "-q", path.join(WORK, "existing")]);
   writeFileSync(path.join(DATA, ".secrets", "key.json"), '{"api_key":"sk-secret-123"}\n');
   writeFileSync(path.join(DATA, "home", ".pi", "agent", "auth.json"), '{"token":"pi-auth-secret"}\n');
-  writeFileSync(path.join(DATA, "bin", "hello"), "#!/bin/sh\necho hi\n", { mode: 0o755 });
+  writeFileSync(path.join(BIN, "hello"), "#!/bin/sh\necho hi\n", { mode: 0o755 });
   // A trusted command that reads the key: only pi-tools can.
   writeFileSync(path.join(DATA, "trusted", "show-key"), `#!/bin/sh\ngrep -o 'sk-[a-z0-9-]*' ${path.join(DATA, ".secrets", "key.json")}\n`, { mode: 0o755 });
 
@@ -177,7 +179,7 @@ test("the sandbox holds against the ways round it", { skip: why }, async (t) => 
     assert.equal((await ops.read.readFile(path.join(WORK, "project", "notes.txt"))).toString(), "hello\n");
     await ops.write.writeFile(path.join(WORK, "project", "new.txt"), "made by the agent\n");
     assert.equal(readFileSync(path.join(WORK, "project", "new.txt"), "utf8"), "made by the agent\n");
-    await assert.rejects(ops.write.writeFile(path.join(DATA, "bin", "hello"), "changed"), { code: "EACCES" });
+    await assert.rejects(ops.write.writeFile(path.join(BIN, "hello"), "changed"), { code: "EACCES" });
   });
 
   await t.test("pi's read gives a vision model a picture as a picture, told by its bytes as the agent reads them", async () => {
@@ -216,18 +218,18 @@ test("the sandbox holds against the ways round it", { skip: why }, async (t) => 
   });
 
   await t.test("a read-only folder runs but cannot be changed; a workspace can", () => {
-    assert.equal(bash(`${path.join(DATA, "bin", "hello")}`).stdout.trim(), "hi");
-    assert.notEqual(bash(`echo x >> ${path.join(DATA, "bin", "hello")}`).status, 0);
-    assert.notEqual(bash(`touch ${path.join(DATA, "bin", "new")}`).status, 0);
+    assert.equal(bash(`${path.join(BIN, "hello")}`).stdout.trim(), "hi");
+    assert.notEqual(bash(`echo x >> ${path.join(BIN, "hello")}`).status, 0);
+    assert.notEqual(bash(`touch ${path.join(BIN, "new")}`).status, 0);
     assert.equal(bash("echo ok > made.txt && cat made.txt").stdout.trim(), "ok");
     // What the agent made, the portal (root) and the group can change too.
     assert.equal(spawnSync("stat", ["-c", "%G", path.join(WORK, "project", "made.txt")], { encoding: "utf8" }).stdout.trim(), "pi-sandbox");
   });
 
   await t.test("a trusted command reads its key; the agent cannot change it or its key", () => {
-    const ran = bash(path.join(DATA, "bin", "show-key"));
+    const ran = bash(path.join(BIN, "show-key"));
     assert.equal(ran.stdout.trim(), "sk-secret-123", ran.stderr);
-    assert.equal(bashAs(whoB, path.join(DATA, "bin", "show-key"), second.home).stdout.trim(), "sk-secret-123", "every agent may run it");
+    assert.equal(bashAs(whoB, path.join(BIN, "show-key"), second.home).stdout.trim(), "sk-secret-123", "every agent may run it");
     assert.notEqual(bash(`echo 'cat /etc/shadow' >> ${path.join(DATA, "trusted", "show-key")}`).status, 0);
     assert.notEqual(bash(`sudo -n -u pi-tools cat ${secret}`).status, 0, "only the listed script, not any command");
     assert.notEqual(bash(`sudo -n -u pi-tools /bin/sh -c 'cat ${secret}'`).status, 0);

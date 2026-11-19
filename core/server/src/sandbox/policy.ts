@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { getSetting, putSetting } from "../db.js";
-import { DATA_DIR as DATA_SETTING } from "../data-dir.js";
+import { DATA_DIR as DATA_SETTING, dataFolder } from "../data-dir.js";
 
 /** The data folder, absolute: the rules are compared as absolute paths. */
 const DATA_DIR = path.resolve(DATA_SETTING);
@@ -67,7 +67,7 @@ export function defaultRules(): SandboxRule[] {
   const home = path.resolve(env("HOME", "/data/home"));
   return [
     { path: path.resolve(env("WORKSPACE_ROOT", env("WORKSPACES_DIR", "/workspaces"))), access: "write", note: "The projects." },
-    { path: path.join(DATA_DIR, "bin"), access: "read", note: "Commands on PATH: run, not changed." },
+    { path: dataFolder("BIN_DIR", "bin"), access: "read", note: "Commands on PATH: run, not changed." },
     { path: SECRETS_DIR, access: "none", note: "Keys for trusted commands." },
     { path: path.join(DATA_DIR, "portal.db"), access: "none", note: "The portal's database, with its settings." },
     { path: home, access: "none", note: "The portal's HOME: pi's auth.json, SSH keys, packages." },

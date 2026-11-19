@@ -4,7 +4,7 @@ import { chmodSync, chownSync, existsSync, lstatSync, mkdirSync, readFileSync, r
 import path from "node:path";
 import { promisify } from "node:util";
 import { getSetting, putSetting } from "../db.js";
-import { DATA_DIR as DATA_SETTING } from "../data-dir.js";
+import { DATA_DIR as DATA_SETTING, dataFolder } from "../data-dir.js";
 import { piAgentDir } from "../pi-settings.js";
 import { agentOf, agentsRoot, listAgents, type Agent } from "../agents.js";
 import { identityOf } from "./identity.js";
@@ -37,7 +37,7 @@ export const STATE_DIR = path.join(DATA_DIR, "sandbox");
 export const ON_FLAG = path.join(STATE_DIR, "enabled");
 const SUDOERS = "/etc/sudoers.d/pithagoras-sandbox";
 const WRAPPER_MARK = "# pithagoras sandbox: generated";
-const BIN_DIR = path.join(DATA_DIR, "bin");
+const BIN_DIR = dataFolder("BIN_DIR", "bin");
 
 export interface ApplyReport {
   ok: boolean;
