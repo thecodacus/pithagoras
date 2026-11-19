@@ -400,10 +400,11 @@ is no second one to keep in step with it.
 :::
 
 ::: tip Not in the prompt until it is wanted
-The browser's tools are a large set, and while they are on they sit in the prompt of every chat. They
-are not lazy unless you make them so: mark the group **lazy** in **Settings → Tools** and no chat is
-offered them one by one. The agent is told it has these tools, and finds and calls them through the
-`tools` tool, so a chat that never opens a page carries none of their schemas. A lazy tool is still on
+The browser's tools are a large set, and while they are in the list they sit in the prompt of every chat. When the
+model's list of tools gets long, the portal takes the largest group out of it (see [the threshold](/guide/extensions#the-threshold)),
+and you can mark the group **lazy** in **Settings → Tools** to do it yourself, or **direct** to keep it in the list.
+The agent is then told it has these tools, and finds and calls them through the
+`tool_search` tool, so a chat that never opens a page carries none of their schemas. A lazy tool is still on
 like any other: a call is held to the allowlist and the other rules exactly as a direct one, and a
 switch that turns the browser off for a chat turns it off here too. This is for Browser's tools;
 a browser attached as an MCP server is lazy or not by that server's own "Register tools directly". See [Lazy tools](/guide/extensions#lazy-tools).

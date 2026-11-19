@@ -57,6 +57,7 @@ writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR, "settings.json"), JSON.
 const { SdkPiClient } = await import("../dist/pi/sdk-client.js");
 const { AUDIO_SYSTEM_RULE, DEFAULT_VOICE_INSTRUCTIONS, audioSystemRule } = await import("../dist/pi/voice-first.js");
 const { getDb } = await import("../dist/db.js");
+const { lazyHintOf } = await import("../dist/lazy-head.js");
 
 /** Saves the speaking instructions as Settings → Voice does; none takes them away again. */
 function saveInstructions(text) {
@@ -480,19 +481,22 @@ test("what a tool asks to be told in a spoken turn is in the voice rule while th
   }
 });
 
-test("a lazy tool that the chat reaches through the tools tool is told of in a spoken turn, as one offered by its name is", async () => {
+test("a lazy tool that the chat reaches through tool_search is told of in a spoken turn, as one offered by its name is, and the chat keeps the line", async () => {
   const line = "Write long things on the board, and say only a line about it.";
   saveInstructions(undefined);
   globalThis.boardTool = true;
-  const client = await open(undefined, { sessionId: "board-lazy-chat", toolsLazy: ["board_write"], lazySets: ["board"] });
+  const remembered = [];
+  const head = { v: 1, lazy: ["<tool>board_write"], direct: [], hint: lazyHintOf([{ label: "board", tools: ["board_write"] }]), outside: false, voice: [] };
+  const client = await open(undefined, { sessionId: "board-lazy-chat", lazy: head, rememberLazy: (kept) => remembered.push(kept) });
   try {
     const spoken = await say(client, "Spoken", true);
     assert.ok(!offered.at(-1).includes("board_write"), "not offered by its name");
-    assert.ok(offered.at(-1).includes("tools"), "but through the tools tool");
+    assert.ok(offered.at(-1).includes("tool_search"), "but through tool_search");
     assert.ok(spoken.includes(audioSystemRule(DEFAULT_VOICE_INSTRUCTIONS, line)));
-    // Switched off, it is reached no way, and not told of.
+    assert.deepEqual(remembered.at(-1)?.voice, [line], "the chat's head has it from then on");
+    // Switched off, it is reached no way; the line stays, as what the model was sent first does not change over a chat.
     await client.setToolsOff(["board_write"]);
-    assert.ok(!(await say(client, "Typed, tool off")).includes(line));
+    assert.ok((await say(client, "Spoken, tool off", true)).includes(audioSystemRule(DEFAULT_VOICE_INSTRUCTIONS, line)));
   } finally {
     client.dispose();
     globalThis.boardTool = false;

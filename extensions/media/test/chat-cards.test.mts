@@ -8,7 +8,7 @@ import { failureReason as clipFailure, videoCall } from "../src/web/video-call.t
 /**
  * The cards of Media's tools in a chat: what the preview of a picture being made, and the frame of a clip, know of the
  * call before there is a file, and what each card says of its call in voice mode. A call is as the portal hands it to
- * an extension (ToolCallView): the tool that was called, through the `tools` tool or not, and its parameters, an object.
+ * an extension (ToolCallView): the tool that was called, through the `tool_search` tool or not, and its parameters, an object.
  */
 
 // The browser half's own stylesheet is the build's to make: here it is nothing.

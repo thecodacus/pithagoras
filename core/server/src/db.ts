@@ -4,6 +4,7 @@ import { packageIndex, packageKey, packageLabel, sourceOf, toolAvailability } fr
 import { isLocalSource, localPackagePath } from "./features.js";
 import { GUARD_RULE_NAMES } from "./pi/guard-rule-names.js";
 import { BUILT_IN_SET, PI_BUILT_IN_TOOLS, defaultsFor, lazyToolEntry, mcpServerOf, toolEnabled, toolSetOf } from "./tool-policy.js";
+import { DEFAULT_LIMITS, guessTokens, isLazy, parseMarks, resolveThreshold, type LazyHead, type Limits, type Mark, type Marks, type Resolution, type SizedTool } from "./tool-lazy.js";
 import { projectOf } from "./workspaces.js";
 import { dropMcpCache, mcpAdapter, mcpCachePath, mcpConfigPath, mcpServerNames, mcpWritten, onMcpWritten, readMcpCache, readMcpFile, readableMcpConfig, serversAndBrowsers } from "./api/mcp.js";
 import { mcpCatalogue, mcpDirect, mcpOffer, namingOf, unlisted, type McpOffer } from "./mcp-offer.js";
@@ -108,6 +109,12 @@ export interface SessionRow {
    * those a new chat of its folder starts with, its parent's switches aside. Null for every other chat.
    */
   tools_from: "defaults" | null;
+  /**
+   * What the chat's pi was told about its lazy tools when it started (LazyHead in tool-lazy.ts, as JSON): kept for as long
+   * as the chat lasts and reused when it is reopened or reloaded, so that the model's list and the system prompt do not
+   * change under a conversation. Null before the chat has started one.
+   */
+  lazy_head: string | null;
 }
 
 /**
@@ -1075,6 +1082,24 @@ function handOffSubagentChats(d: Database.Database): void {
 }
 
 /**
+ * What was marked lazy (`tools_lazy`, one entry a line) is `lazy` in the marks that have three values (`tool_marks`):
+ * the marks had two states, and a set or tool that was not marked stays `auto`, which the threshold decides. Once, and
+ * the old setting goes with it: a database that holds both has been converted already. The threshold applies to what
+ * nobody marked, on an upgrade too, and says so (resolvedLazy's notice).
+ */
+function lazyMarksToToolMarks(d: Database.Database): void {
+  const old = settingIn(d, "tools_lazy");
+  if (old === undefined || old === null) return;
+  const marks = parseToolsOff(old);
+  const had = parseMarks(settingIn(d, "tool_marks"));
+  if (marks.length) {
+    for (const entry of marks) had[entry] ??= "lazy";
+    d.prepare("INSERT INTO settings (key, value) VALUES ('tool_marks', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(JSON.stringify(had));
+  }
+  d.prepare("DELETE FROM settings WHERE key = 'tools_lazy'").run();
+}
+
+/**
  * A set of the portal's own tools that are an extension's now, whose are filed
  * under its package's name: a lazy mark on the set, and a name somebody gave
  * its box, go with them.
@@ -1083,6 +1108,13 @@ function setMoved(d: Database.Database, from: string, to: string): void {
   const put = d.prepare("UPDATE settings SET value = ? WHERE key = ?");
   const marks = parseToolsOff(settingIn(d, "tools_lazy"));
   if (marks.includes(from)) put.run([...new Set(marks.map((mark) => (mark === from ? to : mark)))].sort().join("\n"), "tools_lazy");
+  // The marks as they are kept since the model's list has a threshold (lazyMarksToToolMarks).
+  const marked = parseMarks(settingIn(d, "tool_marks"));
+  if (from in marked && !(to in marked)) {
+    marked[to] = marked[from];
+    delete marked[from];
+    put.run(JSON.stringify(marked), "tool_marks");
+  }
   try {
     const names = JSON.parse(settingIn(d, "tool_group_names") ?? "{}");
     if (names && typeof names === "object" && from in names && !(to in names)) {
@@ -1340,6 +1372,14 @@ function migrate(d: Database.Database): void {
   // The temperature of a mode: a portal built before it was added is at schema 16 already.
   const modeCols = (d.prepare("PRAGMA table_info(chat_modes)").all() as { name: string }[]).map((c) => c.name);
   if (modeCols.length && !modeCols.includes("temperature")) d.exec("ALTER TABLE chat_modes ADD COLUMN temperature REAL");
+  // What a mode and an agent keep in the model's list, and the head a chat froze (tool_search): a portal built before
+  // these were added is at schema 16 already.
+  if (modeCols.length && !modeCols.includes("keep_direct")) d.exec("ALTER TABLE chat_modes ADD COLUMN keep_direct TEXT NOT NULL DEFAULT ''");
+  const agentToolCols = (d.prepare("PRAGMA table_info(agent_tools)").all() as { name: string }[]).map((c) => c.name);
+  if (agentToolCols.length && !agentToolCols.includes("keep_direct")) d.exec("ALTER TABLE agent_tools ADD COLUMN keep_direct TEXT NOT NULL DEFAULT ''");
+  const sessionCols = (d.prepare("PRAGMA table_info(sessions)").all() as { name: string }[]).map((c) => c.name);
+  if (sessionCols.length && !sessionCols.includes("lazy_head")) d.exec("ALTER TABLE sessions ADD COLUMN lazy_head TEXT");
+  lazyMarksToToolMarks(d);
   seedCodemodeOff(d);
   // Last, because it reads the tables and settings above.
   if ((d.pragma("user_version", { simple: true }) as number) < 8) browserGrantsToSwitches(d);
@@ -1513,6 +1553,11 @@ export function getSession(id: string): SessionRow | undefined {
   return getDb().prepare("SELECT * FROM sessions WHERE id = ?").get(id) as SessionRow | undefined;
 }
 
+/** Keep what the chat's pi was told about its lazy tools, for as long as the chat lasts (SessionRow.lazy_head). */
+export function setLazyHead(id: string, head: LazyHead): void {
+  getDb().prepare("UPDATE sessions SET lazy_head = ? WHERE id = ?").run(JSON.stringify(head), id);
+}
+
 export function updateSession(
   id: string,
   fields: Partial<
@@ -1530,6 +1575,7 @@ export function updateSession(
       | "mode"
       | "role"
       | "last_person_key"
+      | "lazy_head"
     >
   >
 ): void {
@@ -1679,6 +1725,8 @@ export interface ChatModeRow {
   thinking_level: string | null;
   /** What its chats' requests to the model carry, where set: see ModeParams. */
   temperature: number | null;
+  /** The sets and tools its chats keep in the model's list whatever the marks and the threshold say, one entry a line (modeDirect). */
+  keep_direct: string;
   created_at: string;
   updated_at: string;
 }
@@ -1709,7 +1757,7 @@ export function createCustomMode(fields: { label: string; description: string })
  */
 export function updateCustomMode(
   id: string,
-  fields: Partial<Pick<ChatModeRow, "label" | "description" | "codemode" | "instructions" | "provider" | "model" | "thinking_level" | "temperature">>,
+  fields: Partial<Pick<ChatModeRow, "label" | "description" | "codemode" | "instructions" | "provider" | "model" | "thinking_level" | "temperature" | "keep_direct">>,
 ): ChatModeRow | undefined {
   const d = getDb();
   d.transaction(() => {
@@ -2960,8 +3008,11 @@ export function agentTools(agent: string): SessionTools {
 
 export function setAgentTools(agent: string, tools: SessionTools): SessionTools {
   const stored = { off: clean(tools.off), on: clean(tools.on) };
-  if (!stored.off.length && !stored.on.length) clearAgentTools(agent);
-  else
+  // Without exceptions the row stays where the agent keeps something in the model's list (agentDirect).
+  if (!stored.off.length && !stored.on.length) {
+    getDb().prepare("UPDATE agent_tools SET tools_off = '', tools_on = '' WHERE agent = ?").run(agent);
+    getDb().prepare("DELETE FROM agent_tools WHERE agent = ? AND keep_direct = ''").run(agent);
+  } else
     getDb()
       .prepare(
         `INSERT INTO agent_tools (agent, tools_off, tools_on) VALUES (?, ?, ?)
@@ -3173,23 +3224,54 @@ export function setToolDefaultsOff(names: string[]): string[] {
 }
 
 /**
- * What somebody marked lazy: tool sets, as the boxes of the tools list name them, and single tools
- * (lazyToolEntry). Opt-in: the portal marks nothing on its own, so an install has no lazy tool until
- * somebody says so.
+ * What somebody marked, on a set (as the boxes of the tools list name them) or on a single tool (lazyToolEntry): `lazy`,
+ * always behind `tool_search`, or `direct`, always in the model's list. A set or tool with no mark is `auto`: the
+ * threshold decides (lazyLimits, resolvedLazy). Opt-in until the list is long: the portal marks nothing on its own.
  *
- * A lazy tool is not in the model's prompt — schema, description and guidelines — which is what a
- * large set such as the browser's costs otherwise in every request. The model finds it with `tools`
- * (search, describe, call) instead, so nothing is lost to it. It is a property of the tool and no
- * switch: a lazy tool is on or off like any other, by the portal-wide default and the agent, project,
- * routine and chat switches above it, and only a tool that is on is lazy. One that is off is off for
- * good and no way leads to it.
+ * A lazy tool is not in the model's prompt — schema, description and guidelines — which is what a large set such as
+ * the browser's costs otherwise in every request. The model finds it with `tool_search` (search, describe, call)
+ * instead, so nothing is lost to it. It is a property of the tool and no switch: a lazy tool is on or off like any
+ * other, by the portal-wide default and the agent, project, routine and chat switches above it, and only a tool that is
+ * on is lazy. One that is off is off for good and no way leads to it.
  */
-export function lazyToolSets(): string[] {
-  return parseToolsOff(getSetting("tools_lazy"));
+export function toolMarks(): Marks {
+  return parseMarks(getSetting("tool_marks"));
+}
+
+/** Make exactly these the marks. Entries that say neither lazy nor direct are dropped. */
+export function setToolMarks(marks: Marks): Marks {
+  const stored: Marks = {};
+  for (const key of Object.keys(marks).sort()) {
+    const mark = marks[key];
+    if (key.trim() && (mark === "lazy" || mark === "direct")) stored[key.trim()] = mark;
+  }
+  putSetting("tool_marks", Object.keys(stored).length ? JSON.stringify(stored) : "");
+  return stored;
+}
+
+/** How big the model's list may get before `auto` groups are taken out of it: see tool-lazy.ts. */
+export function lazyLimits(): Limits {
+  try {
+    const raw = JSON.parse(getSetting("lazy_limits") || "{}");
+    const part = (v: unknown, fallback: number) => (typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= 10_000_000 ? v : fallback);
+    return { tokens: part(raw?.tokens, DEFAULT_LIMITS.tokens), tools: part(raw?.tools, DEFAULT_LIMITS.tools) };
+  } catch {
+    return { ...DEFAULT_LIMITS };
+  }
+}
+
+/** Store the limits; undefined for anything that is not two whole numbers, 0 or more. */
+export function setLazyLimits(limits: unknown): Limits | undefined {
+  const raw = limits as Partial<Limits> | null | undefined;
+  const whole = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= 10_000_000;
+  if (!whole(raw?.tokens) || !whole(raw?.tools)) return undefined;
+  const stored: Limits = { tokens: raw.tokens, tools: raw.tools };
+  putSetting("lazy_limits", JSON.stringify(stored));
+  return stored;
 }
 
 /**
- * Can this tool be marked lazy, and have the portal's `tools` tool reach it? Any tool can but pi's own
+ * Can this tool be marked lazy, and have the portal's `tool_search` tool reach it? Any tool can but pi's own
  * (read, bash, edit and the rest are what a conversation works with at all), the MCP adapter's `mcp`
  * tool, the portal's code mode, a tool that is offered to scripts only, and an MCP server's. An MCP server's tool is lazy too, but not by a mark of the portal's: the
  * adapter has a way of its own to keep a server's tools out of the prompt, through its `mcp` tool, and
@@ -3212,47 +3294,150 @@ export function lazyAllowed(
   return toolSetOf(tool, servers) !== BUILT_IN_SET;
 }
 
-/** Does this mark name this tool: as a set it is filed in, or on its own? */
-const marksTool = (mark: string, tool: KnownTool, servers: string[]): boolean =>
-  mark === lazyToolEntry(tool.name) || mark === toolSetOf(tool, servers);
+/**
+ * Whether the threshold may take this tool out of the model's list by its size. Not the portal's own small tools that the
+ * agent needs at once (ask_question, report and the like: its own inline extensions): a mark may still make one lazy.
+ */
+const sizeMayTake = (tool: Pick<KnownTool, "source" | "inline">): boolean => !(tool.inline === true && INLINE_EXTENSIONS.includes(tool.source));
 
-/** The names of the tools the portal has seen that are marked lazy, as a set or on their own, and may be. */
-export function lazyToolNames(): Set<string> {
-  const marks = lazyToolSets();
-  if (!marks.length) return new Set();
+/** The tools the threshold judges: those the tools lists show, with what each declaration costs, and what may become of it. */
+export function sizedTools(): SizedTool[] {
   const servers = mcpServerNames();
-  return new Set(
-    knownTools()
-      .filter((tool) => lazyAllowed(tool, servers) && marks.some((mark) => marksTool(mark, tool, servers)))
-      .map((tool) => tool.name),
-  );
+  const off = new Set(toolDefaultsOff());
+  const known = new Map(knownTools().map((t) => [t.name, t]));
+  return shownTools().map((tool) => {
+    const was = known.get(tool.name);
+    const described = { ...tool, package: was?.package, inline: tool.inline === true };
+    return {
+      name: tool.name,
+      set: toolSetOf(tool, servers),
+      tokens: was?.tokens ?? guessTokens(tool.name, tool.description),
+      allowed: lazyAllowed(described, servers),
+      auto: sizeMayTake(described),
+      // Not in the model's list: off by default, offered to scripts only, or an MCP server's tool the adapter keeps behind `mcp`.
+      counted: !off.has(tool.name) && !tool.scriptsOnly && !tool.cached,
+    };
+  });
 }
 
 /**
- * How a list of tools says which are lazy: not offered to the model one by one. Those the portal's `tools`
- * tool reaches are the ones marked (lazyToolNames). An MCP server's tool is lazy when the adapter leaves it
- * to its `mcp` tool, which is the server's setting "Register tools directly" turned off, and not by any
+ * The sets the threshold made lazy, and whether it could not make the list fit.
+ *
+ * Resolved once and kept (`lazy_resolved`), not worked out for each chat: asked again, it gives the same answer until the
+ * sets, a set's size, the marks or the limits change, and a group that went lazy stays lazy until the list would fit
+ * well within the limits without it (resolveThreshold). A set that the threshold newly takes out is noted for the
+ * person (`lazy_notice`), who may keep it in the list with a `direct` mark.
+ */
+export function resolvedLazy(): Resolution {
+  let before: string[] = [];
+  try {
+    const stored = JSON.parse(getSetting("lazy_resolved") || "{}");
+    if (Array.isArray(stored?.lazy)) before = stored.lazy.filter((s: unknown) => typeof s === "string");
+  } catch {
+    // Read as nothing resolved yet.
+  }
+  const now = resolveThreshold(sizedTools(), toolMarks(), lazyLimits(), before);
+  const same = now.lazy.length === before.length && now.lazy.every((set, i) => set === before[i]);
+  const storedOver = (() => {
+    try {
+      return JSON.parse(getSetting("lazy_resolved") || "{}")?.over === true;
+    } catch {
+      return false;
+    }
+  })();
+  if (!same || storedOver !== now.over) {
+    putSetting("lazy_resolved", JSON.stringify(now));
+    // A set that the threshold newly took out of the model's list: the person is told, and may keep it there.
+    const added = now.lazy.filter((set) => !before.includes(set));
+    if (added.length) noteLazyAdded(added);
+    // And one that is back in the list is no news any more.
+    const noted = notedLazy();
+    const kept = noted.filter((set) => now.lazy.includes(set));
+    if (kept.length !== noted.length) putSetting("lazy_notice", kept.length ? JSON.stringify(kept) : "");
+  }
+  return now;
+}
+
+/** What the model's list holds with the default switches, after what is lazy is taken out of it: the numbers the threshold holds to its limits. */
+export function lazyListed(): { tokens: number; tools: number } {
+  const marks = toolMarks();
+  const resolved = resolvedLazy().lazy;
+  const listed = sizedTools().filter((tool) => tool.counted && !isLazy(tool, marks, resolved));
+  return { tokens: listed.reduce((sum, tool) => sum + tool.tokens, 0), tools: listed.length };
+}
+
+/** The sets noted since the person last looked, whether they are still lazy or not. */
+function notedLazy(): string[] {
+  try {
+    const raw = JSON.parse(getSetting("lazy_notice") || "[]");
+    return Array.isArray(raw) ? raw.filter((s: unknown): s is string => typeof s === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * What the threshold made lazy since the person last looked, for the notice on the tools page: only the sets that are
+ * lazy still. One that was released since, or marked direct, is back in the list, and the notice would say it is not.
+ */
+export function lazyNotice(): string[] {
+  const lazy = new Set(resolvedLazy().lazy);
+  return notedLazy().filter((set) => lazy.has(set));
+}
+
+function noteLazyAdded(sets: string[]): void {
+  putSetting("lazy_notice", JSON.stringify([...new Set([...notedLazy(), ...sets])].sort()));
+}
+
+/** The person has read the notice. */
+export function dismissLazyNotice(): void {
+  putSetting("lazy_notice", "");
+}
+
+/** A mark on a tool or on its set that a mark of the other kind overrides: see markOf. */
+const marksTool = (mark: string, tool: Pick<KnownTool, "name" | "source">, servers: string[]): boolean =>
+  mark === lazyToolEntry(tool.name) || mark === toolSetOf(tool, servers);
+
+/** The names of the tools the portal has seen that are lazy now, by their marks or by the threshold, and may be. */
+export function lazyToolNames(): Set<string> {
+  const marks = toolMarks();
+  const resolved = resolvedLazy().lazy;
+  return new Set(sizedTools().filter((tool) => isLazy(tool, marks, resolved)).map((tool) => tool.name));
+}
+
+/**
+ * How a list of tools says which are lazy: not offered to the model one by one. Those the portal's `tool_search`
+ * tool reaches are the ones marked or taken out by the threshold (lazyToolNames). An MCP server's tool is lazy when the
+ * adapter leaves it to its `mcp` tool, which is the server's setting "Register tools directly" turned off, and not by any
  * mark: `mcp` names that server, for the page to say where the one switch for it is.
  */
-export function lazyMarks(view: McpView = mcpView()): (tool: Pick<KnownTool, "name" | "source" | "package">) => { lazy?: true; mcp?: string } {
+export function lazyMarks(view: McpView = mcpView()): (tool: Pick<KnownTool, "name" | "source" | "package"> & { inline?: boolean; scriptsOnly?: boolean; cached?: boolean }) => { lazy?: true; mark?: Mark; auto?: true; mcp?: string } {
   const portal = lazyToolNames();
+  const marks = toolMarks();
+  const servers = mcpServerNames();
   return (tool) => {
     const direct = view.direct(tool);
-    if (direct === undefined) return portal.has(tool.name) ? { lazy: true as const } : {};
+    if (direct === undefined) {
+      // pi's own tools and the portal's code mode have no mark to give: they are always in the list.
+      if (!lazyAllowed(tool, servers)) return {};
+      const mark = marks[lazyToolEntry(tool.name)] ?? marks[toolSetOf(tool, servers)];
+      return { ...(portal.has(tool.name) ? { lazy: true as const } : {}), ...(mark ? { mark } : { auto: true as const }) };
+    }
     const server = mcpServerOf(tool.name, view.servers);
     return { ...(direct ? {} : { lazy: true as const }), ...(server !== undefined ? { mcp: server } : {}) };
   };
 }
 
 /**
- * Of these marks, the ones that cannot be lazy: a set or a tool of an MCP server or of pi's own. Judged
+ * Of these marks, the entries that say `lazy` and cannot be: a set or a tool of an MCP server or of pi's own. Judged
  * by the tools the portal has seen of it; before it has seen one, by the name of the set. Any other mark is
  * let through, as it holds for the tools that turn up.
  */
-export function lazyRefused(marks: string[]): string[] {
+export function lazyRefused(marks: Marks): string[] {
   const servers = mcpServerNames();
   const tools = knownTools();
-  return clean(marks).filter((mark) => {
+  return Object.keys(marks).filter((mark) => {
+    if (marks[mark] !== "lazy") return false;
     const named = tools.filter((tool) => marksTool(mark, tool, servers));
     if (named.length) return named.every((tool) => !lazyAllowed(tool, servers));
     return mark === BUILT_IN_SET || servers.includes(mark) || PI_BUILT_IN_TOOLS.some((name) => mark === lazyToolEntry(name));
@@ -3260,28 +3445,48 @@ export function lazyRefused(marks: string[]): string[] {
 }
 
 /**
- * What the lazy tools among `names` are called as sets, for the line that tells the model they exist:
- * the name the settings page gives the box, once for each.
+ * What the lazy tools among `names` are called as sets, with a few of their tool names each, for the line that tells
+ * the model they exist: the name the settings page gives the box, once for each.
  */
-export function lazySetLabels(names: Iterable<string>): string[] {
+export function lazySetLabels(names: Iterable<string>): { label: string; tools: string[] }[] {
   const wanted = new Set(names);
   if (!wanted.size) return [];
   const servers = mcpServerNames();
   const given = toolGroupNames();
-  const labels = new Set<string>();
+  const groups = new Map<string, string[]>();
   for (const tool of knownTools()) {
     if (!wanted.has(tool.name)) continue;
     const set = toolSetOf(tool, servers);
-    labels.add(given[set] ?? set);
+    const label = given[set] ?? set;
+    groups.set(label, [...(groups.get(label) ?? []), tool.name]);
   }
-  return [...labels].sort();
+  return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([label, tools]) => ({ label, tools: tools.sort() }));
 }
 
-/** Make exactly these the lazy marks: sets and single tools, as lazyToolSets lists them. */
-export function setLazyToolSets(marks: string[]): string[] {
-  const lazy = clean(marks);
-  putSetting("tools_lazy", lazy.join("\n"));
-  return lazy;
+/**
+ * What a mode keeps in the model's list whatever the marks and the threshold say, so that the group a mode exists for is
+ * not hidden by being the largest: sets, and single tools as `<tool>name`. A mode of the person's says it on its tools
+ * page, an extension's as it offers the mode (`keepDirect` of portal.modes.provide), and an agent on its own (agentDirect).
+ */
+export function modeDirect(id: string | null | undefined): string[] {
+  if (!id) return [];
+  if (id.startsWith(CUSTOM)) return parseToolsOff(customMode(id.slice(CUSTOM.length))?.keep_direct);
+  return [...(providedModes().find((mode) => mode.id === id)?.keepDirect ?? [])];
+}
+
+export function agentDirect(agent: string | null | undefined): string[] {
+  if (!agent) return [];
+  const row = getDb().prepare("SELECT keep_direct FROM agent_tools WHERE agent = ?").get(agent) as { keep_direct: string } | undefined;
+  return parseToolsOff(row?.keep_direct);
+}
+
+/** Say which sets and tools an agent keeps in the model's list. */
+export function setAgentDirect(agent: string, entries: string[]): string[] {
+  const kept = clean(entries);
+  getDb()
+    .prepare("INSERT INTO agent_tools (agent, keep_direct) VALUES (?, ?) ON CONFLICT(agent) DO UPDATE SET keep_direct = excluded.keep_direct")
+    .run(agent, kept.join("\n"));
+  return kept;
 }
 
 /**
@@ -3317,6 +3522,12 @@ export interface KnownTool {
   offByDefault?: true;
   /** The parameters that hold the files it is approved for, as its definition declares them: what an approval of it is written as, answered when no chat of it is running. */
   approvalFiles?: string[];
+  /** What its declaration (name, description, parameters, snippet) costs the model's list, in tokens: what the threshold adds up. */
+  tokens?: number;
+  /** Declares that it returns outside content (`guard.outside`): a chat in which it is lazy says the line about that from its start. */
+  outside?: true;
+  /** What it asks to be told in a spoken turn (`voiceGuidelines`): kept in the head of a chat in which it is lazy, from its start. */
+  voice?: string[];
 }
 
 /** The parameters that hold the files a tool is approved for, as it last declared them: see declaredFiles in guard.ts. */
@@ -3325,7 +3536,7 @@ export function approvalFilesOf(toolName: string): string[] | undefined {
 }
 
 /** A tool a session reported, as it is remembered. */
-export const remembered = (t: { name: string; source: string; description?: string; package?: string; inline?: true; scriptsOnly?: true; offByDefault?: true; approvalFiles?: string[] }): KnownTool => ({
+export const remembered = (t: { name: string; source: string; description?: string; package?: string; inline?: true; scriptsOnly?: true; offByDefault?: true; approvalFiles?: string[]; tokens?: number; outside?: true; voice?: string[] }): KnownTool => ({
   name: t.name,
   source: t.source,
   description: t.description,
@@ -3334,6 +3545,9 @@ export const remembered = (t: { name: string; source: string; description?: stri
   ...(t.scriptsOnly ? { scriptsOnly: true } : {}),
   ...(t.offByDefault ? { offByDefault: true } : {}),
   ...(t.approvalFiles?.length ? { approvalFiles: t.approvalFiles } : {}),
+  ...(typeof t.tokens === "number" ? { tokens: t.tokens } : {}),
+  ...(t.outside ? { outside: true } : {}),
+  ...(t.voice?.length ? { voice: t.voice } : {}),
 });
 
 /**
@@ -3391,6 +3605,9 @@ export function knownTools(): KnownTool[] {
         ...(typeof t.inline === "boolean" ? { inline: t.inline } : {}),
         ...(t.scriptsOnly === true ? { scriptsOnly: true } : {}),
         ...(Array.isArray(t.approvalFiles) && t.approvalFiles.length && t.approvalFiles.every((n: unknown) => typeof n === "string") ? { approvalFiles: t.approvalFiles as string[] } : {}),
+        ...(typeof t.tokens === "number" && t.tokens >= 0 ? { tokens: t.tokens } : {}),
+        ...(t.outside === true ? { outside: true } : {}),
+        ...(Array.isArray(t.voice) && t.voice.length && t.voice.every((line: unknown) => typeof line === "string") ? { voice: t.voice as string[] } : {}),
       }));
   } catch {
     return [];
@@ -3824,8 +4041,9 @@ export async function packageRemoved(source: string): Promise<void> {
  * A tool that arrives saying it is off until switched on (`offByDefault`) is switched off by default here, once:
  * from then on it is a default like any other, and somebody who switches it on by default has it on.
  *
- * Returns the tools that arrived just now and are lazy or off by default, for a caller that has conversations
- * running which were started without knowing them: they offer the tool, or offer it one by one, until they are told.
+ * Returns the tools that arrived just now and are off by default, for a caller that has conversations running which
+ * were started without knowing them: they offer the tool until they are told. A lazy one is not told: what is lazy in
+ * a chat is settled when it starts (see LazyHead).
  */
 export function rememberTools(reported: KnownTool[]): string[] {
   // A session that still has a package loaded which has since been uninstalled
@@ -3875,14 +4093,18 @@ export function rememberTools(reported: KnownTool[]): string[] {
       ...(tool.scriptsOnly ? { scriptsOnly: true } : {}),
       // As its latest report says: a tool that stopped declaring its files is approved whole again.
       ...(tool.approvalFiles?.length ? { approvalFiles: tool.approvalFiles } : {}),
+      // As the latest report measured it; a report that did not keeps what was measured.
+      ...((tool.tokens ?? before?.tokens) !== undefined ? { tokens: tool.tokens ?? before?.tokens } : {}),
+      // As its latest report says, as the files are: what a tool stopped declaring is no longer said for it.
+      ...(tool.outside ? { outside: true } : {}),
+      ...(tool.voice?.length ? { voice: tool.voice } : {}),
     });
   }
   const sorted = [...merged.values()].sort((a, b) => a.name.localeCompare(b.name));
   putSetting("tools_seen", JSON.stringify(sorted));
   const off = tools.filter((t) => t.offByDefault && fresh.includes(t.name)).map((t) => t.name);
   if (off.length) setToolDefaultsOff([...new Set([...toolDefaultsOff(), ...off])]);
-  const lazy = lazyToolNames();
-  return fresh.filter((name) => lazy.has(name) || off.includes(name));
+  return fresh.filter((name) => off.includes(name));
 }
 
 /**

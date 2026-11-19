@@ -74,7 +74,7 @@ test("what a call gives goes to a channel as it is given, with the words after i
       pi.emit("event", { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "Drawing it." }] } });
       pi.emit("event", { type: "tool_execution_start", toolCallId: "t1", toolName: "show_image", args: { path: "chart.png", title: "Sales" } });
       ended("t1", "show_image", [{ path: "chart.png", title: "Sales" }]);
-      // Any tool's, called through the lazy tools' gateway too: a clip, and a file that is neither, in one call.
+      // Any tool's, called through the lazy tools' `tool_search` too: a clip, and a file that is neither, in one call.
       ended("t2", "tools", [{ path: "fox.mp4", title: "A fox" }, { path: path.join(workspace, "sales.csv") }], { portalCalledTool: "plot_tool" });
       // What is not given: a failed call's, a file outside the folder, one that is not there.
       ended("t3", "show_image", [{ path: "chart.png" }], { isError: true });

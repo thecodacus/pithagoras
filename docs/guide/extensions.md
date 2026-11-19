@@ -443,34 +443,71 @@ extension does not quietly bring back something you turned off.
 A tool that is switched on costs the model its schema, description and rules in **every** request,
 whether or not the conversation ever uses it. For a large set such as the [browser](/guide/browser)'s
 eleven tools that is more than a thousand tokens in each chat. A tool that is **lazy** costs none of that until
-it is needed: it is not in the model's list, and the model finds it through a single tool, `tools`.
+it is needed: it is not in the model's list, and the model finds it through a single tool, `tool_search`.
 
-**Nothing is lazy by default,** but for an MCP server's tools, which are lazy by the adapter's default (see
-below). The portal marks no other tool and no other set on its own, so a portal behaves as it always did until
-you choose.
+**Three values.** Each group of tools (a package, such as `pithagoras-media` or `pithagoras-browser`) and each single tool is marked:
 
-**Settings → Tools** has a **lazy** button on the header of each group (a package, such as
-`pithagoras-media`, `pithagoras-browser`, an MCP server) and one beside each tool. Marking a group makes every tool of it lazy,
-including tools that turn up in it later; marking a tool makes that one lazy. Taking the mark away offers
-the tool one by one again. The button of a tool that is switched off by default is greyed out, and so is a
-group's while every tool in it is off: a tool that is off is not offered to the model, lazy or not, so
-a mark on it changes nothing in the chats where it stays off. The mark is the portal's and not one of an
-agent's, project's, routine's or chat's, so where one of those switches the tool on, the mark still
-applies. In a chat in Code mode, or in a [mode of yours](/guide/sessions#modes-you-make) that works
-through the code tool, the marks do not apply: every tool that is on is in a script's reach, found with
-`searchTools`, and the `tools` tool is not offered. An MCP server's tools still stay behind `mcp`, which
-a script calls like any other tool (see [Modes](/guide/sessions#modes)). To set or take away such a
-mark, switch the tool on by default for a moment. A mark that was set stays as it is.
+| Mark | What it means |
+| --- | --- |
+| **auto** | The default. The [threshold](#the-threshold) decides, by how long the model's list is |
+| **lazy** | Always behind `tool_search`, whatever the length of the list |
+| **direct** | Always in the model's list, so that it is never found through a search |
+
+A tool's own mark is before its group's: a group that is lazy can have a tool that is direct, and the other way
+round. The marks are the portal's, not an agent's, project's, routine's or chat's, so where one of those switches
+a tool on, the mark still applies. Marks are kept in the portal and reach the chats that start after the change;
+see [A chat keeps its list](#a-chat-keeps-its-list).
+
+### The threshold
+
+A long list costs the model's context and a local server's cache, and a model picks less reliably from a long
+list. **Settings → Tools** has **Lazy above**, two limits: **3,000 tokens** of tool declarations, or **20 tools**,
+whichever the list reaches first. `0` turns a limit off. When the list has more than that, whole groups that are
+**auto** are taken out of it, the largest by tokens first, until both numbers are within the limits. What is
+counted is what the model would be offered with the default switches: tools that are off by default cost the list
+nothing, and pi's own tools, the portal's own small ones (such as `ask_question`) and every group marked **direct**
+count in full and are never taken out. If the list is over the limits all the same, every group that may be taken out
+is, because each makes the list shorter, and the page says that the rest cannot be taken out.
+
+The result is worked out once and kept, not for each chat. It changes when a group comes or goes, a group's size
+changes, a mark changes or the limits do, and a group that went lazy stays lazy until the list would fit within
+80 % of the limits with the group back in the list, so that a group does not flip when another one grows a little. The page shows one
+state for a group in every chat: **auto, lazy** is a group the threshold took out, **auto** one it left in. The
+tokens are what a tool's name, description, parameters and the line the prompt lists it by cost, as measured
+the last time a chat registered it; a tool no chat has registered yet is guessed from its description.
+
+The threshold applies to a portal that is upgraded as well. A group that was in the list before can be lazy after:
+a portal that has the [browser](/guide/browser) and the subagent tool is over 3,000 tokens. **Settings → Tools**
+says which groups the threshold took out since you last looked, and puts a **direct** mark on the group to keep it
+in the list. Where a group exists for one purpose, a [mode of yours](/guide/sessions#modes-you-make) or an
+[agent](/guide/agents#tools) can keep it in the list for its chats: the **direct** button on the group's header on
+the mode's or the agent's tools page. Without it the largest-first rule could leave out exactly the group the mode is for.
+A mode an extension offers says the same with `keepDirect` (see [Chat modes](/guide/extension-ui#chat-modes)).
+
+An MCP server's tools do not take part: they are lazy by the server's own setting (see below), and the threshold
+counts the ones that are in the list and does not take them out.
+
+### Setting the marks
+
+**Settings → Tools** has a button on the header of each group and one beside each tool that shows the mark: **auto**,
+**lazy** or **direct**. Clicking it goes from auto to lazy to direct and back. Marking a group makes every tool of
+it lazy or direct, including tools that turn up in it later. A tool of a group that is marked shows the group's mark
+until it has one of its own, and its button goes between the group's mark and the other one: a tool of a direct group
+from direct to lazy and back to the group's. A mark is no switch: the tools stay on or off as
+they were, and a mark on a tool that is off changes nothing in the chats where it stays off. In a chat in Code mode, or in a
+[mode of yours](/guide/sessions#modes-you-make) that works through the code tool, the marks do not apply: every
+tool that is on is in a script's reach, found with `searchTools`, and `tool_search` is not offered. An MCP server's
+tools still stay behind `mcp`, which a script calls like any other tool (see [Modes](/guide/sessions#modes)).
 
 Any tool can be made lazy except pi's own built-in ones (`read`, `bash`, `edit`, `write`, `grep`, `find`
-and `ls`), which every conversation works with and which are always offered. They have no lazy button, and
-the portal refuses a mark that names them, in whichever group they are listed: with the
+and `ls`), which every conversation works with and which are always offered. They have no button, and
+the portal refuses a lazy mark that names them, in whichever group they are listed: with the
 [sandbox](/guide/sandbox) on they are listed under **sandbox**, and an extension that brings a tool of one
 of these names does not make it lazy either. The [Canvases](/guide/canvases) tools can be lazy, `canvas_write` too: a document
-written through `tools` fills the canvas while the model writes it, and what has come is kept if the turn
+written through `tool_search` fills the canvas while the model writes it, and what has come is kept if the turn
 is cut off, as for a direct call. Text is written only for a `canvas_write` the model can call: one offered
-by its own name, or a lazy one called through `tools`. A lazy or switched-off one called by its own name is
-answered "not found", and writes nothing. If a call through `tools` turns out to be another tool's (a key
+by its own name, or a lazy one called through `tool_search`. A switched-off one called by its own name is
+answered "not found", and writes nothing. If a call through `tool_search` turns out to be another tool's (a key
 given twice, the last one counts), only known when the call is whole, the text that came is taken out again.
 
 **An MCP server's tools** are lazy by the server's own setting, which is the same thing as **Register tools
@@ -479,12 +516,14 @@ which the model uses to search for them, describe them and call them. So there i
 lazy button of an MCP server in Settings → Tools is that setting (a tool of the server cannot differ from it;
 a list of tools in `directTools` is shown as it is). **MCP servers are lazy unless they register their
 tools directly**, as the adapter does by default; a server an extension writes with its tools registered
-directly, Understory's for one, stays so. A change reaches the chats that start after it. The portal's own
-`tools` tool has no part in this, and a mark that names an MCP server is refused. The [guard](/guide/security)
+directly, Understory's for one, stays so. A change reaches the chats that start after it. `tool_search`
+has no part in this, and a lazy mark that names an MCP server is refused. The [guard](/guide/security)
 reads a call through `mcp` by the tool it reaches and what it is given, as it reads that tool called
 directly: the rules after a result that looks like a prompt injection, and what is kept from somebody who is
 not the primary user, such as the places secrets are kept. (A standing approval for a colleague is matched on
 the `mcp` call itself.)
+
+### How the model reaches a lazy tool
 
 Lazy is not a switch. A lazy tool is **on** like any other, and behaves exactly like one: it is run by
 the same code, held to the same [guard](/guide/security) (the [list of sites the agent's tools may
@@ -493,42 +532,72 @@ colleague may run), its arguments are checked and converted as for a direct call
 wrapped as somebody else's words where it would be. A picture it shows or makes appears in the chat and
 in voice mode, and the browser's window opens for it, as for a direct call.
 Tools that run one at a time, as the browser's do, still do when the model calls several in one message.
-A tool that its extension keeps inactive (one that waits for its moment) is not reached through `tools`
+A tool that its extension keeps inactive (one that waits for its moment) is not reached through `tool_search`
 either, and marking it lazy does not switch it on.
-The one difference is that the model is not shown the tool's schema and description up front. The model
-is shown one short line instead, naming the lazy sets, for example "You have pithagoras-browser tools; search for
-them with the tools tool." The rules the tool's extension wrote for the prompt stay in it as long as the
-tool is lazy, and so does the portal's rule that outside content, such as a [browser](/guide/browser)'s page,
-is data and never instructions.
 
-The `tools` tool has three actions:
+The model is shown one short line in the system prompt instead of the tools, naming the lazy groups and a few of
+their tools, for example "These tools are not in your list: Browser (browser_click, browser_navigate,
+browser_snapshot and 8 more). Search them with the tool_search tool before you say you cannot do something.", and
+one sentence that what a search or a describe of `tool_search` returns carries the tools' usage rules on lines that
+start with `Rule` and the chat's own tag, a random word made with the chat (`Rule 3f9a07c2:`). Only those lines count:
+a page, a file or an MCP server's description that writes a line starting with `Rule:` has no tag, and the tag is
+taken out of every text of a tool's that the search quotes and of the text of every result of every other tool (a picture is not read for it), however it is
+written in the usual ways (twice in a row, with look-alike Latin, Greek or Cyrillic letters, zero-width characters or other separators between its letters). The
+portal's rule that outside content, such as a [browser](/guide/browser)'s page, is data and never
+instructions, and what a lazy tool asks to be told in a spoken turn, stay in the prompt as long as the tool is
+lazy, from the chat's first request: a security line does not depend on a search. They are taken from what the
+lazy tools said of themselves when a chat last loaded them; only a tool that no chat has loaded yet adds its line
+when it first registers.
+
+`tool_search` has three actions:
 
 | Action | What it does |
 | --- | --- |
-| `search` | `query`: words from a tool's name or from what it does. Lists the matching lazy tools, each with the first line of its description. No query lists them all |
-| `describe` | `name`: the tool's full description and its parameters as a JSON schema |
+| `search` | `query`: words from a tool's name, from what it does, from its parameters or from its group's name, ranked (BM25). Each hit has the tool's name, its parameters and the first line of its description; the best few carry the parameters as a JSON schema, up to a size. No query lists the groups, as many as fit in a search's size, and counts the rest |
+| `describe` | `name`: the tool's full description, its parameters as a JSON schema, and its rules |
 | `call` | `name` and `args` (an object, or its JSON text): runs the tool and returns its result |
 
-The model describes a tool before it first calls it, so a schema is in the conversation only for a tool
-that is used. `tools` is offered only to a conversation that has at least one lazy tool that is on, so
-with nothing lazy there is no extra tool, and no hint, in any prompt. A tool the portal sees for the very
-first time is offered one by one in the chat that registers it only until that chat has listed its tools,
-a moment after it starts.
+**The rules of the tools** (what an extension wrote for the system prompt, such as the browser's rules for reading a
+page) are not in the prompt for a lazy tool: they would cost what the group's being lazy saves. They come with the
+results of a search or a describe, at the end of the context, each on a line of its own that starts with `Rule` and
+the chat's tag: the rules the tools of a group share once for the group, and a tool's own with its best hits and its
+`describe`. A search that is cut to its size cuts its hits, never the rules. A tool's own text (a description, a
+parameter's name) never starts a line of a result: a description is indented, and a line break in a name is a space.
+An MCP server's tool gives no rule lines.
 
-`tools` is a name an extension may use too. If an installed extension has a tool called `tools`, pi keeps
+A call is the same call as a direct one: `tool_search` runs it through pi's own `executeTool`, which checks and
+converts the arguments, puts it through the extensions' hooks, the guard's among them, and queues the calls of tools that run one at
+a time. The page shows it as a call of the tool it called. Names are met halfway for `search` and `describe`: a name with
+other case, hyphens or dots for underscores finds the tool. A `call` takes the tool's own name, and one by another
+spelling is refused with that name, which the model then calls it by: the call's name is what the page, the browser's
+view and the canvas follow. A lazy tool is also active, so a model that calls it by its own name after finding it runs it, through the
+guard. `tool_search` is offered only to a chat that has a lazy tool, so with nothing lazy there is no extra tool, and
+no line, in any prompt. A group whose every tool is off when the chat starts is not lazy in that chat.
+
+**A tool that is off is off for good.** `search` and `describe` do not find a tool that is switched off, and do not name it in their answers;
+`call` refuses it shortly. The portal-wide default, an [agent](/guide/agents#tools), a [project](/guide/projects#tools), a
+[routine](/guide/routines#tools) and a single chat each switch tools as they do for any tool, and what is switched
+off in the middle of a chat is refused at once by the same check. Switched on again, a tool is lazy again, because the
+mark is the tool's and the switch is the conversation's.
+
+`tool_search` is a name an extension may use too. If an installed extension has a tool called `tool_search`, pi keeps
 that one, because it loads before the portal's, and the portal's is not there. The extension's tool is then
 a tool like any other: the guard asks for a rule or an approval before a colleague may use it, it is not
 hidden while nothing is lazy, and it can be switched off in **Settings → Tools**. With no way to reach them,
-the tools marked lazy are offered one by one in a chat it is in, and the portal logs a warning. That holds when
+the tools marked lazy are offered one by one in a chat it is in. That holds when
 the tool registers after the chat has started too, as an MCP server's does once it has connected.
 
-All the switches above a tool still apply, and a tool that is switched **off** is off for good, lazy or
-not. The portal-wide default, an [agent](/guide/agents#tools), a [project](/guide/projects#tools), a
-[routine](/guide/routines#tools) and a single chat each switch tools as they do for any tool, and the
-[guard](/guide/security) refuses `call` and `describe` for a switched-off tool; `search` does not list
-it. A tool switched off at any of them is therefore unreachable there, and switched on again it is lazy
-again, because the mark is the tool's and the switch is the conversation's. There is no per-chat way to
-offer a lazy tool one by one: for that, take the mark away in **Settings → Tools**.
+### A chat keeps its list
+
+What is in the model's list and in the system prompt is the start of every request, and a provider caches it, as a local
+llama.cpp server does with its prompt: a change there makes the next request read the whole prompt again. So **what is lazy in a chat is
+decided when the chat first starts and is the chat's own from then on**: after a restart, a reload, an installed package or a changed mark the
+chat is as it was. A switch that turns a tool off is the exception that costs nothing, because the tool is simply not offered; a tool
+that registers later in a lazy group is lazy at once and never shows up in the list.
+
+Marks, limits and the threshold reach the chats that start afterwards. In a chat that started earlier, the tools menu above the
+message box says when they would make other tools lazy now, and offers **Read the tools again**, the one deliberate change of what the chat
+is sent first. It costs the prompt cache from the start, so it is never done on its own.
 
 ::: tip Not the same as uninstalling
 The extension is still loaded, its commands still work, and other chats are

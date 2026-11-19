@@ -15,7 +15,7 @@ import { inProcessHome } from "./server-harness.mjs";
  */
 inProcessHome("pithagoras-chat-modes-custom-");
 mkdirSync(path.join(process.env.PI_CODING_AGENT_DIR, "extensions"), { recursive: true });
-// A tool the portal marks lazy (below): reached through the `tools` tool, unless the chat works through the code tool.
+// A tool the portal marks lazy (below): reached through the `tool_search` tool, unless the chat works through the code tool.
 writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR, "extensions", "lazy.ts"), `
 export default function (pi) {
   pi.registerTool({
@@ -41,13 +41,13 @@ const model = await fakeModel((request) => {
 });
 writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR, "models.json"), JSON.stringify(model.models()));
 
-const { createSession, getSession, getSettings, rememberTools, sessionTools, setLazyToolSets, setSessionTools, setSettings, setToolDefaultsOff, toolDefaultsOff, updateSession } = await import("../dist/db.js");
+const { createSession, getSession, getSettings, rememberTools, sessionTools, setToolMarks, setSessionTools, setSettings, setToolDefaultsOff, toolDefaultsOff, updateSession } = await import("../dist/db.js");
 const { lazyToolEntry } = await import("../dist/tool-policy.js");
 const { CodemodeHeld, sessions } = await import("../dist/session-manager.js");
 const { modesRouter } = await import("../dist/api/modes.js");
 setSettings({ ...getSettings(), provider: "fake", model: "m" });
 rememberTools([{ name: "lazy_one", source: "lazy", package: null }]);
-setLazyToolSets([lazyToolEntry("lazy_one")]);
+setToolMarks({ [lazyToolEntry("lazy_one")]: "lazy" });
 
 // As server.ts has it: JSON parsed for every route.
 const server = express().use(express.json()).use("/api", modesRouter()).listen(0, "127.0.0.1");
@@ -333,7 +333,7 @@ test("a chat in a mode made to work through the code tool, whose tools then swit
   const { requests } = await say(id, "Hello");
   assert.equal(sessions.live.get(id).client.codemodeOnly, true, "started in pi's `only` presentation");
   const names = declared(requests[0]);
-  for (const name of ["bash", "tools"]) assert.ok(names.includes(name), name);
+  for (const name of ["bash", "tool_search"]) assert.ok(names.includes(name), name);
   for (const name of ["codemode", "lazy_one"]) assert.ok(!names.includes(name), name);
   assert.equal((await tool(id, "lazy_one")).lazy, true);
   assert.equal((await tool(id, "codemode")).byMode, undefined);
@@ -352,7 +352,7 @@ test("the code-tool switch of a mode reaches a running chat at its next start; t
   assert.equal(layer.tools.find((t) => t.name === "lazy_one").lazy, true);
   assert.equal((await tool(a, "lazy_one")).lazy, true, "lazy again, with the code tool off");
   const plain = declared((await say(a, "Hello")).requests[0]);
-  for (const name of ["tools", "bash"]) assert.ok(plain.includes(name), name);
+  for (const name of ["tool_search", "bash"]) assert.ok(plain.includes(name), name);
   for (const name of ["codemode", "lazy_one"]) assert.ok(!plain.includes(name), name);
 
   // Started with it off, then on: the code tool is beside the others now, by the layer, and the lazy tool still lazy.
@@ -360,20 +360,20 @@ test("the code-tool switch of a mode reaches a running chat at its next start; t
   const b = chat();
   await choose(b, `custom/${off}`);
   const before = await say(b, "Hello");
-  assert.ok(declared(before.requests[0]).includes("tools"));
+  assert.ok(declared(before.requests[0]).includes("tool_search"));
   assert.ok(!declared(before.requests[0]).includes("lazy_one"));
   assert.ok(!declared(before.requests[0]).includes("codemode"));
   assert.equal((await call("PUT", `/chat-modes/${off}`, { codemode: true })).status, 200);
   assert.equal((await tool(b, "lazy_one")).lazy, true, "its pi was started with every tool offered one by one");
   const after = await say(b, "Hello");
-  for (const name of ["tools", "bash", "codemode"]) assert.ok(declared(after.requests[0]).includes(name), name);
+  for (const name of ["tool_search", "bash", "codemode"]) assert.ok(declared(after.requests[0]).includes(name), name);
   assert.ok(!declared(after.requests[0]).includes("lazy_one"));
 
   // Started again, each is what its mode gives now.
   await sessions.stop(a);
   await sessions.stop(b);
   const a2 = declared((await say(a, "Hello")).requests[0]);
-  for (const name of ["tools", "bash"]) assert.ok(a2.includes(name), name);
+  for (const name of ["tool_search", "bash"]) assert.ok(a2.includes(name), name);
   for (const name of ["codemode", "lazy_one"]) assert.ok(!a2.includes(name), name);
   assert.deepEqual(declared((await say(b, "Hello")).requests[0]), ["codemode"]);
 });

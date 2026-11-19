@@ -55,7 +55,7 @@ test("a server's own tools are outside content however they are called, a server
   assert.equal(wrapped(read(guardAs(), "notes_search")), true, "once it is not");
   try {
     const h = guardAs();
-    // Direct, and as a lazy tool the gateway runs under its own name; through the adapter's `mcp` tool, by its full name or its server.
+    // Direct, and as a lazy tool `tool_search` runs under its own name; through the adapter's `mcp` tool, by its full name or its server.
     for (const [tool, input] of [["jira_search", {}], ["jira_get_issue", { key: "X-1" }], ["mcp", { tool: "jira_search" }], ["mcp", { server: "jira", tool: "search" }], ["mcp", {}], ["mcp_script", { code: "" }]]) {
       assert.equal(wrapped(read(h, tool, input)), true, `${tool} ${JSON.stringify(input)}`);
     }

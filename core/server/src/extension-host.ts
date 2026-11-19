@@ -717,11 +717,18 @@ function portalFor(ext: Running): ServerPortal {
     },
     modes: {
       provide(mode) {
-        const { id, label, description, confirm } = mode ?? {};
+        const { id, label, description, confirm, keepDirect } = mode ?? {};
         const text = (value: unknown) => typeof value === "string" && value.trim() !== "";
+        const texts = (value: unknown) => value === undefined || (Array.isArray(value) && value.every(text));
+        const direct = keepDirect as { sets?: unknown; tools?: unknown } | undefined;
         if (typeof id !== "string" || !/^[a-z0-9][a-z0-9-]*$/.test(id) || !text(label) || !text(description) || (confirm !== undefined && !text(confirm))) {
           throw new TypeError('provide takes { id, label, description, confirm? }: an id of lower-case letters, digits and "-", and texts');
         }
+        if (direct !== undefined && (typeof direct !== "object" || direct === null || Array.isArray(direct) || !texts(direct.sets) || !texts(direct.tools))) {
+          throw new TypeError("keepDirect takes { sets?, tools? }: lists of names");
+        }
+        // As the marks name them: a set by its name, a single tool as `<tool>name`.
+        const kept = direct ? [...((direct.sets as string[] | undefined) ?? []).map((set) => set.trim()), ...((direct.tools as string[] | undefined) ?? []).map((tool) => `<tool>${tool.trim()}`)] : [];
         // "custom/<id>" is what a chat stores for a mode the person made.
         if (name === "custom") throw new TypeError('A package called "custom" cannot offer modes: its modes would be taken for the person\'s own');
         const stored = `${name}/${id}`;
@@ -730,7 +737,7 @@ function portalFor(ext: Running): ServerPortal {
           say(name, `cannot offer the mode ${id}: its server half is not running`);
           return stored;
         }
-        ext.stops.push(provideMode(name, { id, label, description, ...(confirm !== undefined ? { confirm } : {}) }));
+        ext.stops.push(provideMode(name, { id, label, description, ...(confirm !== undefined ? { confirm } : {}), ...(kept.length ? { keepDirect: [...new Set(kept)] } : {}) }));
         return stored;
       },
     },

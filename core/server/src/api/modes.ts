@@ -10,6 +10,7 @@ import {
   getSession,
   modeOf,
   modesFor,
+  parseToolsOff,
   recordAudit,
   setCustomModeTools,
   toolDefaultsOff,
@@ -70,6 +71,9 @@ export function modesRouter(): Router {
         else if (before?.model && session.provider === (before.provider ?? null) && session.model === before.model) Object.assign(fields, { provider: null, model: null });
         if (entry.thinkingLevel) fields.thinking_level = entry.thinkingLevel;
         else if (before?.thinkingLevel && session.thinking_level === before.thinkingLevel) fields.thinking_level = null;
+        // What the chat froze about its lazy tools was made for the mode it had, and nothing was said under it: the next
+        // start makes it afresh, with what the new mode keeps in the model's list.
+        fields.lazy_head = null;
         updateSession(session.id, fields);
       });
       if (!done) return res.status(409).json({ error: STARTED });
@@ -123,7 +127,17 @@ export function modesRouter(): Router {
     const below = toolDefaultsOff();
     const tools = customModeTools(row.id);
     // The lazy marks as a chat in the mode shows them (see getTools): none where it works through the code tool.
-    res.json(layerTools(undefined, below, tools, false, row.codemode === 1 && toolEnabled(CODEMODE_TOOL, below, tools)));
+    res.json({ ...layerTools(undefined, below, tools, false, row.codemode === 1 && toolEnabled(CODEMODE_TOOL, below, tools)), keepDirect: parseToolsOff(row.keep_direct) });
+  });
+
+  /** The sets and tools the mode's chats keep in the model's list whatever the marks and the threshold say; a chat reads it when it starts. */
+  router.put("/chat-modes/:id/direct", (req, res) => {
+    const entries = req.body?.entries;
+    if (!isToolList(entries)) return res.status(400).json({ error: "entries must be a list of tool sets or `<tool>name`" });
+    if (!customMode(req.params.id)) return res.status(404).json({ error: "Not found" });
+    const stored = [...new Set(entries.map((entry: string) => entry.trim()).filter(Boolean))].sort();
+    updateCustomMode(req.params.id, { keep_direct: stored.join("\n") });
+    res.json({ entries: stored });
   });
 
   /** Says which tools the mode's chats start with: what is not named is on. Chats running in it are told at once. */

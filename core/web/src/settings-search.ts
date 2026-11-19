@@ -33,6 +33,7 @@ export const SETTINGS_INDEX: SettingEntry[] = [
   { tab: "general", section: msg("Routine reports"), title: msg("Routine reports"), words: "routine schedule cron report destination channel bericht" },
   { tab: "general", section: msg("Voice mode"), title: msg("Voice mode"), words: "voice speech speak source vad detection silence threshold speaking instructions model thinking stimme sprache sprachmodus quelle" },
   { tab: "tools", title: msg("Default tools"), words: "tools enable disable default on off werkzeuge" },
+  { tab: "tools", title: msg("Lazy above"), words: "lazy direct auto threshold limit tokens tool_search search long list context schwelle grenze" },
   { tab: "tools", title: msg("Questions from the agent"), words: "ask_question question questions wait timeout answer fragen frage warten antwort" },
   { tab: "modes", title: msg("Modes"), words: "mode modes chat mode code mode instructions own custom model parameters temperature sampling modus modi anweisungen temperatur parameter" },
   { tab: "skills", title: msg("Skills"), words: "skill procedure import repository fähigkeiten" },

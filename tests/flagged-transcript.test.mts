@@ -21,7 +21,7 @@ test('a tool result the guard flagged carries its id, its signs and the message 
   assert.equal(tools[1].flagged, undefined);
 });
 
-test('a result flagged in a call through the tools tool is flagged on its row, with the tool it called, and its turn can be removed', () => {
+test('a result flagged in a call through the tool_search tool (here by its old name, tools, as an old chat has it) is flagged on its row, with the tool it called, and its turn can be removed', () => {
   const items = buildTranscript([
     ev(1, 'portal_prompt', { message: 'read that page' }),
     ev(2, 'tool_execution_start', { toolCallId: 'l', toolName: 'tools', args: { action: 'call', name: 'mcp_page', args: { url: 'https://x.test' } } }),
