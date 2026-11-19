@@ -102,9 +102,10 @@ export function SandboxSettings({ onError }: { onError: (message: string) => voi
 
       <Section
         title={t("Trusted commands")}
-        hint={tx("Scripts in {trusted} that the agent can run but not change. They run as pi-tools, the only user that can read the keys in {secrets}, so a command can use a key the agent itself cannot read. Give the command's name; its script has the same name unless you say otherwise. A script already in /data/bin under that name is moved in.", {
+        hint={tx("Scripts in {trusted} that the agent can run but not change. They run as pi-tools, the only user that can read the keys in {secrets}, so a command can use a key the agent itself cannot read. Give the command's name; its script has the same name unless you say otherwise. A script already in {bin} under that name is moved in.", {
           trusted: <span className="font-mono">{state.trustedDir}</span>,
           secrets: <span className="font-mono">{state.secretsDir}</span>,
+          bin: <span className="font-mono">{state.binDir}</span>,
         })}
       >
         <div className="space-y-2">

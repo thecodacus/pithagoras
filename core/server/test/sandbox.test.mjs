@@ -1,7 +1,7 @@
 import test, { after } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -22,6 +22,8 @@ process.env.AGENT_HOME = path.join(DATA, "agent-home");
 process.env.SESSION_DIR = path.join(DATA, "sessions");
 process.env.PI_CODING_AGENT_DIR = path.join(DATA, "home", ".pi", "agent");
 process.env.PORTAL_SECRET = "portal-secret-value";
+const BIN = path.join(root, "bin");
+process.env.BIN_DIR = BIN;
 
 after(() => rmSync(root, { recursive: true, force: true }));
 
@@ -54,16 +56,18 @@ const why = !linuxRoot ? "needs root on Linux, as the portal runs in its image" 
 
 test("the sandbox holds against the ways round it", { skip: why }, async (t) => {
   users();
-  for (const dir of [DATA, WORK, path.join(WORK, "project"), path.join(DATA, "agent-home"), path.join(DATA, "bin"), path.join(DATA, "home", ".pi", "agent"), path.join(DATA, "trusted"), path.join(DATA, ".secrets")]) mkdirSync(dir, { recursive: true });
+  for (const dir of [DATA, WORK, path.join(WORK, "project"), path.join(DATA, "agent-home"), BIN, path.join(DATA, "bin"), path.join(DATA, "home", ".pi", "agent"), path.join(DATA, "trusted"), path.join(DATA, ".secrets")]) mkdirSync(dir, { recursive: true });
   writeFileSync(path.join(WORK, "project", "notes.txt"), "hello\n");
   execFileSync("git", ["init", "-q", path.join(WORK, "existing")]);
   writeFileSync(path.join(DATA, ".secrets", "key.json"), '{"api_key":"sk-secret-123"}\n');
   writeFileSync(path.join(DATA, "home", ".pi", "agent", "auth.json"), '{"token":"pi-auth-secret"}\n');
-  writeFileSync(path.join(DATA, "bin", "hello"), "#!/bin/sh\necho hi\n", { mode: 0o755 });
+  writeFileSync(path.join(BIN, "hello"), "#!/bin/sh\necho hi\n", { mode: 0o755 });
+  // A wrapper an earlier version wrote into the data dir's bin, before the bin folder followed BIN_DIR.
+  writeFileSync(path.join(DATA, "bin", "stale"), "#!/bin/sh\n# pithagoras sandbox: generated\n", { mode: 0o755 });
   // A trusted command that reads the key: only pi-tools can.
   writeFileSync(path.join(DATA, "trusted", "show-key"), `#!/bin/sh\ngrep -o 'sk-[a-z0-9-]*' ${path.join(DATA, ".secrets", "key.json")}\n`, { mode: 0o755 });
 
-  const { parsePolicy, saveSandboxPolicy, sandboxSupport, defaultRules } = await import("../dist/sandbox/policy.js");
+  const { parsePolicy, saveSandboxPolicy, sandboxPolicy, sandboxSupport, defaultRules } = await import("../dist/sandbox/policy.js");
   const { applySandbox } = await import("../dist/sandbox/apply.js");
   const { bashSpawnHook, fileOperations, runToolAsAgent, asAgent } = await import("../dist/sandbox/exec.js");
   const { identityOf } = await import("../dist/sandbox/identity.js");
@@ -78,6 +82,7 @@ test("the sandbox holds against the ways round it", { skip: why }, async (t) => 
   assert.equal(support.available, true, support.reason);
   const report = await applySandbox(policy, support, true);
   assert.equal(report.ok, true, report.warnings.join("\n"));
+  assert.equal(existsSync(path.join(DATA, "bin", "stale")), false, "the old wrapper from the data dir's bin goes");
   // A rule on a read-only filesystem is noted and the others still go on.
   if (spawnSync("sh", ["-c", "touch /sys/x 2>&1 | grep -q 'Read-only'"]).status === 0) assert.ok(report.done.some((d) => /^\/sys: on a read-only filesystem/.test(d)), report.done.join("\n"));
 
@@ -177,7 +182,7 @@ test("the sandbox holds against the ways round it", { skip: why }, async (t) => 
     assert.equal((await ops.read.readFile(path.join(WORK, "project", "notes.txt"))).toString(), "hello\n");
     await ops.write.writeFile(path.join(WORK, "project", "new.txt"), "made by the agent\n");
     assert.equal(readFileSync(path.join(WORK, "project", "new.txt"), "utf8"), "made by the agent\n");
-    await assert.rejects(ops.write.writeFile(path.join(DATA, "bin", "hello"), "changed"), { code: "EACCES" });
+    await assert.rejects(ops.write.writeFile(path.join(BIN, "hello"), "changed"), { code: "EACCES" });
   });
 
   await t.test("pi's read gives a vision model a picture as a picture, told by its bytes as the agent reads them", async () => {
@@ -216,21 +221,64 @@ test("the sandbox holds against the ways round it", { skip: why }, async (t) => 
   });
 
   await t.test("a read-only folder runs but cannot be changed; a workspace can", () => {
-    assert.equal(bash(`${path.join(DATA, "bin", "hello")}`).stdout.trim(), "hi");
-    assert.notEqual(bash(`echo x >> ${path.join(DATA, "bin", "hello")}`).status, 0);
-    assert.notEqual(bash(`touch ${path.join(DATA, "bin", "new")}`).status, 0);
+    assert.equal(bash(`${path.join(BIN, "hello")}`).stdout.trim(), "hi");
+    assert.notEqual(bash(`echo x >> ${path.join(BIN, "hello")}`).status, 0);
+    assert.notEqual(bash(`touch ${path.join(BIN, "new")}`).status, 0);
     assert.equal(bash("echo ok > made.txt && cat made.txt").stdout.trim(), "ok");
     // What the agent made, the portal (root) and the group can change too.
     assert.equal(spawnSync("stat", ["-c", "%G", path.join(WORK, "project", "made.txt")], { encoding: "utf8" }).stdout.trim(), "pi-sandbox");
   });
 
   await t.test("a trusted command reads its key; the agent cannot change it or its key", () => {
-    const ran = bash(path.join(DATA, "bin", "show-key"));
+    const ran = bash(path.join(BIN, "show-key"));
     assert.equal(ran.stdout.trim(), "sk-secret-123", ran.stderr);
-    assert.equal(bashAs(whoB, path.join(DATA, "bin", "show-key"), second.home).stdout.trim(), "sk-secret-123", "every agent may run it");
+    assert.equal(bashAs(whoB, path.join(BIN, "show-key"), second.home).stdout.trim(), "sk-secret-123", "every agent may run it");
     assert.notEqual(bash(`echo 'cat /etc/shadow' >> ${path.join(DATA, "trusted", "show-key")}`).status, 0);
     assert.notEqual(bash(`sudo -n -u pi-tools cat ${secret}`).status, 0, "only the listed script, not any command");
     assert.notEqual(bash(`sudo -n -u pi-tools /bin/sh -c 'cat ${secret}'`).status, 0);
+  });
+
+  await t.test("a policy saved before the bin rule followed BIN_DIR gets its bin rule moved to the bin folder", () => {
+    const old = parsePolicy({ ...policy, rules: policy.rules.map((r) => (r.path === BIN ? { ...r, path: path.join(DATA, "bin") } : r)) });
+    saveSandboxPolicy(old);
+    const loaded = sandboxPolicy();
+    assert.ok(loaded.rules.some((r) => r.path === BIN && r.access === "read"), "the bin rule points at the bin folder again");
+    assert.ok(!loaded.rules.some((r) => r.path === path.join(DATA, "bin")), "the old rule is gone");
+    saveSandboxPolicy(policy);
+  });
+
+  await t.test("a data dir's bin that is a symlink to the bin folder is the same folder, not a legacy one", async () => {
+    rmSync(path.join(DATA, "bin"), { recursive: true });
+    symlinkSync(BIN, path.join(DATA, "bin"));
+    const again = await applySandbox(policy, support, false);
+    assert.equal(again.ok, true, again.warnings.join("\n"));
+    assert.equal(existsSync(path.join(BIN, "show-key")), true, "the live wrapper stays");
+  });
+
+  await t.test("a command on PATH under a trusted name is taken in, and goes with the switch", async () => {
+    writeFileSync(path.join(BIN, "adopted"), "#!/bin/sh\necho adopted\n", { mode: 0o755 });
+    const withAdopted = parsePolicy({ ...policy, trusted: [...policy.trusted, { name: "adopted", script: "adopted" }] });
+    const ran = await applySandbox(withAdopted, support, false);
+    assert.equal(ran.ok, true, ran.warnings.join("\n"));
+    assert.equal(existsSync(path.join(DATA, "trusted", "adopted")), true, "the script is in the trusted folder");
+    assert.equal(bash(path.join(BIN, "adopted")).stdout.trim(), "adopted", "its wrapper runs it");
+    const again = await applySandbox(policy, support, false);
+    assert.equal(again.ok, true, again.warnings.join("\n"));
+    assert.equal(existsSync(path.join(BIN, "adopted")), false, "no longer trusted, wrapper removed");
+    assert.equal(existsSync(path.join(DATA, "trusted", "adopted")), true, "the script stays");
+  });
+
+  await t.test("a rule on a symlink to a folder protects the folder it points at", async () => {
+    const real = path.join(WORK, "real-folder");
+    mkdirSync(real, { recursive: true });
+    writeFileSync(path.join(real, "loose"), "x\n");
+    chmodSync(path.join(real, "loose"), 0o777);
+    const link = path.join(WORK, "link-folder");
+    symlinkSync(real, link);
+    const withLink = parsePolicy({ ...policy, rules: [...policy.rules, { path: link, access: "read" }] });
+    const ran = await applySandbox(withLink, support, true);
+    assert.equal(ran.ok, true, ran.warnings.join("\n"));
+    assert.equal(spawnSync("stat", ["-c", "%a", path.join(real, "loose")], { encoding: "utf8" }).stdout.trim(), "755", "the file inside is held read-only");
   });
 
   await t.test("the sandbox's tools follow the switch each time they are loaded, so a reload reaches open chats", async () => {

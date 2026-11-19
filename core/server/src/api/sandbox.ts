@@ -1,5 +1,5 @@
 import express, { type Router } from "express";
-import { applySandbox, type ApplyReport } from "../sandbox/apply.js";
+import { applySandbox, BIN_DIR, type ApplyReport } from "../sandbox/apply.js";
 import { DEFAULT_POLICY, SECRETS_DIR, TRUSTED_DIR, parsePolicy, sandboxPolicy, sandboxSupport, saveSandboxPolicy } from "../sandbox/policy.js";
 
 /** What the last apply did, for the page to show until the next one. */
@@ -23,6 +23,7 @@ export function sandboxRouter(chats: OpenChats): Router {
       reason: support.reason ?? null,
       trustedDir: TRUSTED_DIR,
       secretsDir: SECRETS_DIR,
+      binDir: BIN_DIR,
       lastReport,
     });
   });

@@ -141,8 +141,9 @@ through a `sudo` rule pinned to that one script, checked with `visudo` before it
 is installed. The agent cannot run anything else as `pi-tools`, and cannot change
 the script to make it do something else.
 
-A script already in `/data/bin` under that name is moved into `/data/trusted`
-when you apply.
+A script already in the bin folder under that name is moved into `/data/trusted`
+when you apply. In the image the bin folder is `/data/bin`; a native install puts it
+where `BIN_DIR` says ([Configuration](/reference/configuration#environment)).
 
 A trusted command must not print its own key: what it prints, the agent reads.
 

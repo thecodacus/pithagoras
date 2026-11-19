@@ -1595,6 +1595,8 @@ export interface SandboxState {
   reason: string | null;
   trustedDir: string;
   secretsDir: string;
+  /** The portal's bin folder, on PATH: where a trusted command's wrapper goes. */
+  binDir: string;
   lastReport: SandboxReport | null;
 }
 
