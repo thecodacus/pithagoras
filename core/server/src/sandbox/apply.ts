@@ -119,7 +119,7 @@ async function applyRule(policy: SandboxPolicy, rule: SandboxPolicy["rules"][num
     report.done.push(`${rule.path}: not there yet`);
     return;
   }
-  const dir = lstatSync(rule.path).isDirectory();
+  const dir = statSync(rule.path).isDirectory();
   if (rule.access === "none") {
     const keys = rule.path === SECRETS_DIR;
     chownSync(rule.path, 0, keys ? ids.tools : 0);
@@ -140,8 +140,10 @@ async function applyRule(policy: SandboxPolicy, rule: SandboxPolicy["rules"][num
   passable(policy, rule.path, report);
   if (rule.access === "read") {
     if (deep && dir) {
-      await recursive(["chown", "-R", "--no-dereference", ":0", rule.path], report);
-      await recursive(["chmod", "-R", "go-w,o+rX", rule.path], report);
+      // By real path: a rule on a symlink to a folder protects the folder, not the link.
+      const real = realpathSync(rule.path);
+      await recursive(["chown", "-R", "--no-dereference", ":0", real], report);
+      await recursive(["chmod", "-R", "go-w,o+rX", real], report);
     } else {
       chownSync(rule.path, statSync(rule.path).uid, 0);
       chmodSync(rule.path, (statSync(rule.path).mode & 0o7777 & ~0o022) | (dir ? 0o005 : 0o004));
@@ -149,9 +151,10 @@ async function applyRule(policy: SandboxPolicy, rule: SandboxPolicy["rules"][num
     report.done.push(`${rule.path}: read-only`);
   } else {
     if (deep && dir) {
-      await recursive(["chown", "-R", "--no-dereference", `:${ids.group}`, rule.path], report);
-      await recursive(["chmod", "-R", "g+rwX", rule.path], report);
-      await recursive(["find", rule.path, "-type", "d", "-exec", "chmod", "g+s", "{}", "+"], report);
+      const real = realpathSync(rule.path);
+      await recursive(["chown", "-R", "--no-dereference", `:${ids.group}`, real], report);
+      await recursive(["chmod", "-R", "g+rwX", real], report);
+      await recursive(["find", real, "-type", "d", "-exec", "chmod", "g+s", "{}", "+"], report);
     } else {
       chownSync(rule.path, statSync(rule.path).uid, ids.group);
       chmodSync(rule.path, (statSync(rule.path).mode & 0o7777) | (dir ? 0o2070 : 0o060));

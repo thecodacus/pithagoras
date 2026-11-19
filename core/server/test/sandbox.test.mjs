@@ -1,7 +1,7 @@
 import test, { after } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -266,6 +266,19 @@ test("the sandbox holds against the ways round it", { skip: why }, async (t) => 
     assert.equal(again.ok, true, again.warnings.join("\n"));
     assert.equal(existsSync(path.join(BIN, "adopted")), false, "no longer trusted, wrapper removed");
     assert.equal(existsSync(path.join(DATA, "trusted", "adopted")), true, "the script stays");
+  });
+
+  await t.test("a rule on a symlink to a folder protects the folder it points at", async () => {
+    const real = path.join(WORK, "real-folder");
+    mkdirSync(real, { recursive: true });
+    writeFileSync(path.join(real, "loose"), "x\n");
+    chmodSync(path.join(real, "loose"), 0o777);
+    const link = path.join(WORK, "link-folder");
+    symlinkSync(real, link);
+    const withLink = parsePolicy({ ...policy, rules: [...policy.rules, { path: link, access: "read" }] });
+    const ran = await applySandbox(withLink, support, true);
+    assert.equal(ran.ok, true, ran.warnings.join("\n"));
+    assert.equal(spawnSync("stat", ["-c", "%a", path.join(real, "loose")], { encoding: "utf8" }).stdout.trim(), "755", "the file inside is held read-only");
   });
 
   await t.test("the sandbox's tools follow the switch each time they are loaded, so a reload reaches open chats", async () => {
