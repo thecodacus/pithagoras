@@ -217,7 +217,8 @@ const PATH_DIRS = /(^|[^\w/])(\/data\/bin|\/usr\/local\/bin|\/usr\/bin|\/usr\/lo
  * (in the Docker image the portal's bin is `/data/bin` of it), and the portal's own bin wherever a native
  * install puts it — the persistent place for its CLIs, kept on PATH (see server), which is `DATA_DIR/bin`
  * or where `BIN_DIR` moves it. The path comes already resolved (homeOf), so the `~/…` and `$HOME/…`
- * spellings of it are no way round.
+ * spellings of it are no way round. It is given with a trailing slash, as the rule passes it: that is
+ * what makes the directory itself match, not only the files in it.
  */
 const onPath = (place: string): boolean => {
   if (PATH_DIRS.test(place)) return true;
