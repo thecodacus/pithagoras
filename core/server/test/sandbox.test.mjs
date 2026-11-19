@@ -67,7 +67,7 @@ test("the sandbox holds against the ways round it", { skip: why }, async (t) => 
   // A trusted command that reads the key: only pi-tools can.
   writeFileSync(path.join(DATA, "trusted", "show-key"), `#!/bin/sh\ngrep -o 'sk-[a-z0-9-]*' ${path.join(DATA, ".secrets", "key.json")}\n`, { mode: 0o755 });
 
-  const { parsePolicy, saveSandboxPolicy, sandboxSupport, defaultRules } = await import("../dist/sandbox/policy.js");
+  const { parsePolicy, saveSandboxPolicy, sandboxPolicy, sandboxSupport, defaultRules } = await import("../dist/sandbox/policy.js");
   const { applySandbox } = await import("../dist/sandbox/apply.js");
   const { bashSpawnHook, fileOperations, runToolAsAgent, asAgent } = await import("../dist/sandbox/exec.js");
   const { identityOf } = await import("../dist/sandbox/identity.js");
@@ -236,6 +236,36 @@ test("the sandbox holds against the ways round it", { skip: why }, async (t) => 
     assert.notEqual(bash(`echo 'cat /etc/shadow' >> ${path.join(DATA, "trusted", "show-key")}`).status, 0);
     assert.notEqual(bash(`sudo -n -u pi-tools cat ${secret}`).status, 0, "only the listed script, not any command");
     assert.notEqual(bash(`sudo -n -u pi-tools /bin/sh -c 'cat ${secret}'`).status, 0);
+  });
+
+  await t.test("a policy saved before the bin rule followed BIN_DIR gets its bin rule moved to the bin folder", () => {
+    const old = parsePolicy({ ...policy, rules: policy.rules.map((r) => (r.path === BIN ? { ...r, path: path.join(DATA, "bin") } : r)) });
+    saveSandboxPolicy(old);
+    const loaded = sandboxPolicy();
+    assert.ok(loaded.rules.some((r) => r.path === BIN && r.access === "read"), "the bin rule points at the bin folder again");
+    assert.ok(!loaded.rules.some((r) => r.path === path.join(DATA, "bin")), "the old rule is gone");
+    saveSandboxPolicy(policy);
+  });
+
+  await t.test("a data dir's bin that is a symlink to the bin folder is the same folder, not a legacy one", async () => {
+    rmSync(path.join(DATA, "bin"), { recursive: true });
+    symlinkSync(BIN, path.join(DATA, "bin"));
+    const again = await applySandbox(policy, support, false);
+    assert.equal(again.ok, true, again.warnings.join("\n"));
+    assert.equal(existsSync(path.join(BIN, "show-key")), true, "the live wrapper stays");
+  });
+
+  await t.test("a command on PATH under a trusted name is taken in, and goes with the switch", async () => {
+    writeFileSync(path.join(BIN, "adopted"), "#!/bin/sh\necho adopted\n", { mode: 0o755 });
+    const withAdopted = parsePolicy({ ...policy, trusted: [...policy.trusted, { name: "adopted", script: "adopted" }] });
+    const ran = await applySandbox(withAdopted, support, false);
+    assert.equal(ran.ok, true, ran.warnings.join("\n"));
+    assert.equal(existsSync(path.join(DATA, "trusted", "adopted")), true, "the script is in the trusted folder");
+    assert.equal(bash(path.join(BIN, "adopted")).stdout.trim(), "adopted", "its wrapper runs it");
+    const again = await applySandbox(policy, support, false);
+    assert.equal(again.ok, true, again.warnings.join("\n"));
+    assert.equal(existsSync(path.join(BIN, "adopted")), false, "no longer trusted, wrapper removed");
+    assert.equal(existsSync(path.join(DATA, "trusted", "adopted")), true, "the script stays");
   });
 
   await t.test("the sandbox's tools follow the switch each time they are loaded, so a reload reaches open chats", async () => {

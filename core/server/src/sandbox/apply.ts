@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, chownSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, chownSync, copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 import { getSetting, putSetting } from "../db.js";
@@ -192,8 +192,10 @@ async function applyTrusted(policy: SandboxPolicy, ids: Ids, report: ApplyReport
   for (const t of policy.trusted) {
     const onPath = path.join(BIN_DIR, t.name);
     // A command already on PATH under that name, not one of ours, is taken in: moved to the trusted folder.
+    // Copied, not renamed: the bin folder can sit on another filesystem than the data dir.
     if (!existsSync(t.script) && existsSync(onPath) && !isOurs(onPath)) {
-      renameSync(onPath, t.script);
+      copyFileSync(onPath, t.script);
+      rmSync(onPath);
       report.done.push(`${t.name}: moved from ${BIN_DIR} into ${TRUSTED_DIR}`);
     }
     if (!existsSync(t.script)) {
@@ -222,7 +224,8 @@ async function applyTrusted(policy: SandboxPolicy, ids: Ids, report: ApplyReport
   // Wrappers an earlier version wrote into the data dir's bin, before the bin folder followed
   // BIN_DIR: gone, so nothing unmanaged calls a sudo rule.
   const legacyBin = path.join(DATA_DIR, "bin");
-  if (legacyBin !== BIN_DIR && existsSync(legacyBin)) {
+  // By real path: a symlink from the data dir's bin to the bin folder is the same folder, not a legacy one.
+  if (legacyBin !== BIN_DIR && existsSync(legacyBin) && realpathSync(legacyBin) !== realpathSync(BIN_DIR)) {
     for (const name of readdirSync(legacyBin)) {
       const file = path.join(legacyBin, name);
       if (isOurs(file)) {

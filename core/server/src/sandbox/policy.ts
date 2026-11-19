@@ -117,7 +117,19 @@ export function parsePolicy(value: unknown): SandboxPolicy {
 export function sandboxPolicy(): SandboxPolicy {
   try {
     const saved = getSetting("sandbox");
-    return saved ? parsePolicy(JSON.parse(saved)) : DEFAULT_POLICY();
+    const policy = saved ? parsePolicy(JSON.parse(saved)) : DEFAULT_POLICY();
+    // A policy saved before the bin rule followed BIN_DIR still names the data dir's bin: the default
+    // rule moves with the folder, a rule the user put there stays.
+    const oldBin = path.join(DATA_DIR, "bin");
+    const newBin = dataFolder("BIN_DIR", "bin");
+    if (oldBin !== newBin) {
+      const oldRule = policy.rules.find((r) => r.path === oldBin && r.access === "read" && r.note === "Commands on PATH: run, not changed.");
+      if (oldRule) {
+        if (policy.rules.some((r) => r.path === newBin)) policy.rules.splice(policy.rules.indexOf(oldRule), 1);
+        else oldRule.path = newBin;
+      }
+    }
+    return policy;
   } catch {
     return DEFAULT_POLICY();
   }
