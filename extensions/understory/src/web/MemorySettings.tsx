@@ -81,6 +81,8 @@ interface Draft {
   /** Kept for each while the other is chosen, so switching back finds it. */
   dreamInterval: string;
   dreamAt: string;
+  /** How far one pass may go; empty is Understory's own 12. */
+  steps: string;
 }
 
 function draftOf(m: ManagedUnderstory): Draft {
@@ -97,6 +99,7 @@ function draftOf(m: ManagedUnderstory): Draft {
     dream: m.config.dreamAt ? "time" : m.config.dreamInterval ? "interval" : "never",
     dreamInterval: m.config.dreamInterval || "6h",
     dreamAt: m.config.dreamAt || "03:00",
+    steps: m.config.agentMaxSteps ?? "",
   };
 }
 
@@ -190,7 +193,7 @@ export function MemorySettings() {
     if (!choice) return;
     const ok = await act(runsHere ? msg("Restarting Understory…") : msg("Saving…"), () =>
       api.setConfig(
-        { llm: choice, dreamInterval: form.dream === "interval" ? form.dreamInterval : "", dreamAt: form.dream === "time" ? form.dreamAt : "" },
+        { llm: choice, dreamInterval: form.dream === "interval" ? form.dreamInterval : "", dreamAt: form.dream === "time" ? form.dreamAt : "", agentMaxSteps: form.steps.trim() },
       ),
     );
     if (ok) setDraft(null);
@@ -371,6 +374,20 @@ export function MemorySettings() {
                   : form.dream === "interval"
                     ? t("An interval is Understory's own timer: it counts from when Understory starts, so saving here begins the count anew.")
                     : ""}
+              </p>
+              <label className="mt-2 block text-xs text-fg-muted">
+                {t("Steps per pass")}
+                <input
+                  value={form.steps}
+                  onChange={(e) => edit({ steps: e.target.value.replace(/\D/g, "") })}
+                  placeholder="12"
+                  inputMode="numeric"
+                  className={`${inputCls} mt-1 w-24 text-xs tabular-nums`}
+                />
+                <span className="ml-2 text-[11px] text-fg-faint">{t("empty is 12")}</span>
+              </label>
+              <p className="mt-1 text-[11px] text-fg-faint">
+                {t("A tidy-up stopped at the limit leaves half-written files behind. Raise this when the last pass says it ran out of steps; it costs nothing to leave it alone until one does.")}
               </p>
               {(runsHere || m.lastDream) && (
                 <p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
