@@ -171,7 +171,7 @@ export const de: Record<string, string | Plural> = {
   "Last: {when} — {said}": "Zuletzt: {when} — {said}",
   "Steps per pass": "Schritte pro Durchgang",
   "empty is 12": "leer ist 12",
-  "A tidy-up stopped at the limit leaves half-written files behind. Raise this when the last pass says it ran out of steps; it costs nothing to leave it alone until one does.": "Ein Aufräumen, das an der Grenze stoppt, hinterlagt halb geschriebene Dateien. Erhöhe dies, wenn der letzte Durchgang meldet, dass ihm die Schritte ausgingen; bis dahin kostet es nichts, es beim Default zu lassen.",
+  "A tidy-up stopped at the limit leaves half-written files behind. Raise this when the last pass says it ran out of steps; it costs nothing to leave it alone until one does.": "Ein Aufräumen, das an der Grenze stoppt, hinterlässt halb geschriebene Dateien. Erhöhe dies, wenn der letzte Durchgang meldet, dass ihm die Schritte ausgingen; bis dahin kostet es nichts, es beim Standardwert zu lassen.",
   "Next: {when}": "Nächstes Mal: {when}",
   "Tidying up — this takes as long as the model needs…": "Wird aufgeräumt — das dauert so lange, wie das Modell braucht…",
   "Tidy up now": "Jetzt aufräumen",
