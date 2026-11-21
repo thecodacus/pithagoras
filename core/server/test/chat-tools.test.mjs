@@ -176,8 +176,6 @@ test("two images in one message get two files, and the search lists them", async
   for (const file of files) assert.ok(existsSync(file), "each image is saved where it is named");
 
   const found = said(await run(tools[CHAT_SEARCH_TOOL], { images: true }));
-  assert.match(found, /2 images in "Two pictures"|two "Two pictures", message 0/);
-  assert.match(found, /two "Two pictures", message 0: \[image: .+\.png\]/);
   assert.match(found, /two "Two pictures", message 0: \[image: .+\.png\]/);
 });
 

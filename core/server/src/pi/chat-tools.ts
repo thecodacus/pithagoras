@@ -265,20 +265,23 @@ export function chatTools(agentId: string, sessionId: string) {
           .sort((a, b) => b.updated_at.localeCompare(a.updated_at));
         if (!chats.length) return say("You have no chats.");
         const shown = chats.slice(0, LIST_CAP);
-        const lines: string[] = [];
-        for (const chat of shown) {
-          const file = fileOf(chat);
-          let count = 0;
-          if (file) {
+        // The counts are independent, so the files are read at once: a list of
+        // many chats is one wait, not one per chat.
+        const counts = await Promise.all(
+          shown.map(async (chat) => {
+            const file = fileOf(chat);
+            if (!file) return 0;
             try {
-              count = countMessages(await readFile(file, "utf8"));
+              return countMessages(await readFile(file, "utf8"));
             } catch {
-              count = 0;
+              return 0;
             }
-          }
+          }),
+        );
+        const lines = shown.map((chat, i) => {
           const here = chat.id === sessionId ? " (this chat)" : "";
-          lines.push(`- ${chat.id} "${chat.title}" (${chat.kind}, ${count} messages, updated ${chat.updated_at})${here}`);
-        }
+          return `- ${chat.id} "${chat.title}" (${chat.kind}, ${counts[i]} messages, updated ${chat.updated_at})${here}`;
+        });
         const more = chats.length > shown.length ? `
 …and ${chats.length - shown.length} older ones, which the search still reaches` : "";
         return say(`${chats.length} chats:
