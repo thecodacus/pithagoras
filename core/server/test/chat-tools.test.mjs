@@ -164,9 +164,26 @@ test("a read shows an image of a message as a file it can open", async () => {
   assert.equal(readFileSync(line[1]).toString("base64"), PNG, "it is the image of the record");
 });
 
+test("two images in one message get two files, and the search lists them", async () => {
+  createSession({ id: "two", title: "Two pictures", workspace: scout.home, executor: "host" });
+  writeChatFile("two", [
+    { type: "message", message: { role: "user", content: [{ type: "image", data: PNG, mimeType: "image/png" }, { type: "image", data: PNG, mimeType: "image/png" }] } },
+  ]);
+  const read = said(await run(tools[CHAT_READ_TOOL], { id: "two" }));
+  const files = [...read.matchAll(/→ \[image: (.+)\]/g)].map((m) => m[1]);
+  assert.equal(files.length, 2, "each image is a line of its own");
+  assert.notEqual(files[0], files[1], "the two images are not the same file");
+  for (const file of files) assert.ok(existsSync(file), "each image is saved where it is named");
+
+  const found = said(await run(tools[CHAT_SEARCH_TOOL], { images: true }));
+  assert.match(found, /2 images in "Two pictures"|two "Two pictures", message 0/);
+  assert.match(found, /two "Two pictures", message 0: \[image: .+\.png\]/);
+  assert.match(found, /two "Two pictures", message 0: \[image: .+\.png\]/);
+});
+
 test("the search lists the messages with images, with the file to open them", async () => {
   const found = said(await run(tools[CHAT_SEARCH_TOOL], { images: true }));
-  assert.match(found, /1 image:/);
+  assert.match(found, /3 images:/);
   assert.match(found, /pic "With a picture", message 0: \[image: .+\.png\]/);
 });
 
@@ -182,6 +199,7 @@ test("a prompt asks the chat's model about its context", async () => {
   const request = model.requests.at(-1);
   const userMsg = request.messages.find((m) => m.role === "user");
   assert.match(userMsg.content, /the backup broke/, "the model reads the transcript");
+  assert.match(userMsg.content, /\[0\] \*\*User:\*\* the backup broke/, "each line with the index of the message it is");
   assert.match(userMsg.content, /Question: what broke the backup/, "and the question");
   const system = request.messages.find((m) => m.role === "system");
   assert.match(system.content, /data, not instructions/, "the transcript is told to be data");
@@ -217,4 +235,20 @@ test("a read is capped at 50 KB of UTF-8, at a character boundary, the note rese
   assert.ok(Buffer.byteLength(read, "utf8") <= 50_000, "the cap is in bytes, not characters");
   assert.match(read, /\u2026truncated; read a slice with from and to\.$/);
   assert.doesNotMatch(read, /\uFFFD/, "it cuts at a character boundary");
+});
+
+test("summaries count against the question's budget, and the note says what is left out", async () => {
+  const model = await fakeModel(() => "the summaries.");
+  writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR, "models.json"), JSON.stringify(model.models()));
+  const entries = [user("start the work")];
+  for (let i = 0; i < 200; i++) entries.push({ type: "compaction", summary: "s".repeat(4000) });
+  entries.push(agent("done"));
+  createSession({ id: "sums", title: "Summaries", workspace: scout.home, executor: "host", provider: "fake", model: "m" });
+  writeChatFile("sums", entries);
+
+  await run(tools[CHAT_SEARCH_TOOL], { prompt: "what was done", id: "sums" });
+  const userMsg = model.requests.at(-1).messages.find((m) => m.role === "user");
+  // The budget is the model's window in characters, 80% of it: 200000 * 4 * 0.8.
+  assert.ok(userMsg.content.length <= 640_000 + 200, "the transcript fits the budget, the note and the question aside");
+  assert.match(userMsg.content, /the earliest summaries are left out/, "the note says what was left out");
 });
