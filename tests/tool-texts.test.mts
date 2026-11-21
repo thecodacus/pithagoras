@@ -12,6 +12,7 @@ const { lazyHintOf } = await import("../core/server/src/lazy-head.ts");
 const { askPrimaryTool } = await import("../core/server/src/pi/ask-primary.ts");
 const { askQuestionTool } = await import("../core/server/src/pi/ask-question.ts");
 const { heartbeatTool } = await import("../core/server/src/pi/heartbeat-tool.ts");
+const { chatTools } = await import("../core/server/src/pi/chat-tools.ts");
 const { reportTool } = await import("../core/server/src/pi/report-tool.ts");
 const { routineTools } = await import("../core/server/src/pi/routine-tools.ts");
 const { default: subagentTool } = await import("../extensions/subagent/src/pi.ts");
@@ -49,6 +50,7 @@ load(new ToolSearch(head).extension, all);
 load(askPrimaryTool("s"), all);
 load(askQuestionTool(), all);
 load(heartbeatTool("a", "s"), all);
+load(chatTools("a", "s"), all);
 load(reportTool(null), all);
 load(routineTools("s"), all);
 // What the subagent tool is given of the portal: none of it is asked for as the tool is registered.
@@ -71,6 +73,9 @@ const AGREED: Record<string, number> = {
   ask_question: 393,
   activity_note: 131,
   report: 88,
+  chat_list: 54,
+  chat_read: 134,
+  chat_search: 95,
   routines_list: 43,
   routine_create: 209,
   routine_update: 142,
@@ -100,10 +105,10 @@ test("every tool of the portal's own is within the length agreed for it", () => 
 test("all of them together stay near the length agreed", () => {
   // The review measured 6,880 tokens for these texts and proposed 4,550, of which the 988 of the picture and video tools are
   // the Media extension's now, and the 1,426 of the browser tools and their rules the Browser extension's; the rules are
-  // counted once, as pi prints each once.
+  // counted once, as pi prints each once. The 283 of the chat tools (#376) came with them.
   const rules = new Set(all.flatMap((tool) => (tool.promptGuidelines ?? []).map((line) => line.trim())));
   const total = all.reduce((sum, tool) => sum + cost(tool), 0) + [...rules].reduce((sum, line) => sum + tokens(`- ${line}`), 0);
-  assert.ok(total <= 2286, `${total} tokens, where 2,136 were agreed`);
+  assert.ok(total <= 2569, `${total} tokens, where 2,416 were agreed`);
 });
 
 test("a tool's snippet does not begin with its own name again, as pi lists it as `- name: snippet`", () => {

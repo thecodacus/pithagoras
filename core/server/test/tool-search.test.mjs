@@ -852,7 +852,7 @@ test("a lazy tool that reads outside content keeps the rule that what it reads i
   assert.ok(!names(lazily.requests[0]).includes("page_read"));
   assert.ok(systemOf(lazily.requests[0]).includes(OUTSIDE_CONTENT_GUIDELINE), "lazy, it still is: the guard's short envelope relies on it");
   // Switched off, nothing on reads outside content, and the rule is not said.
-  const off = await run([], { toolsOff: ["page_read", "page_scroll"] });
+  const off = await run([], { toolsOff: ["page_read", "page_scroll", "chat_read", "chat_search"] });
   assert.ok(!systemOf(off.requests[0]).includes(OUTSIDE_CONTENT_GUIDELINE));
 });
 

@@ -1,6 +1,9 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 
+/** Where the sessions' folders are, as the session manager has it. */
+export const SESSION_ROOT = path.resolve(process.env.SESSION_DIR || "./data/sessions");
+
 /**
  * The file of a conversation a chat recorded, where it is now.
  *

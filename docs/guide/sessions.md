@@ -732,6 +732,24 @@ pi's file for the chat (`/data/sessions/<id>`, see
 gone, the chat still shows its transcript, but the agent starts over, and a
 notice in the chat says so.
 
+## Looking back at old chats
+
+The agent can look back at its own old chats: **chat_list** shows them, newest
+first, with their id, title, kind, message count and last update; **chat_read**
+gives one of them as an account — the user's and the agent's words, a line per
+tool call, the summaries where it was compacted — whole or in a slice by message
+range; **chat_search** finds words across all of them, case-insensitively, each
+match with the chat it is in and a snippet of what is around it. What it reads
+is the conversation: a tool's result is what the work read, not what the chat
+said, and it is not in the account or in the search.
+
+The reach is the agent's own: the chats in its home and in its projects, and
+nothing else — a chat of another agent's is not found, whatever its id. The
+list is metadata alone. What read and search hand back is often other people's
+words — a channel's conversation is whoever wrote it — so it is held as
+[outside content](/guide/security#marking-untrusted-output): the agent reads it as data,
+not as instructions.
+
 ## The tab
 
 The browser tab's title follows the chat you have open: `● Fix login · working`
