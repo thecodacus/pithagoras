@@ -4,6 +4,9 @@ import path from "node:path";
 /** Where the sessions' folders are, as the session manager has it. */
 export const SESSION_ROOT = path.resolve(process.env.SESSION_DIR || "./data/sessions");
 
+/** Where a container's pi finds a session's folder: see ContainerExecutor. */
+export const CONTAINER_SESSION_DIR = "/sessions/";
+
 /**
  * The file of a conversation a chat recorded, where it is now.
  *

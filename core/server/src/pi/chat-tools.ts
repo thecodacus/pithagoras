@@ -10,7 +10,7 @@ import { modelRuntime } from "../api/providers.js";
 import { AUDIO_MESSAGE_PREFIX } from "./voice-first.js";
 import { textOf } from "./entries.js";
 import { Entry, pathTo } from "./session-edit.js";
-import { findSessionFile, SESSION_ROOT } from "./session-file.js";
+import { CONTAINER_SESSION_DIR, findSessionFile, SESSION_ROOT } from "./session-file.js";
 import { fail, say } from "./tool-result.js";
 
 /**
@@ -39,8 +39,6 @@ export const CHAT_LIST_TOOL = "chat_list";
 export const CHAT_READ_TOOL = "chat_read";
 export const CHAT_SEARCH_TOOL = "chat_search";
 
-/** Where a container's pi finds a session's folder: see ContainerExecutor. */
-const CONTAINER_SESSION_DIR = "/sessions/";
 /** The most recent chats the list shows; the older ones are still there for the search. */
 const LIST_CAP = 100;
 /** What one read may hand back, in UTF-8 bytes; more is a slice, not a wall of text. */
@@ -86,24 +84,6 @@ function pathOf(raw: string): Entry[] {
   const leaf = body.at(-1)?.id;
   if (!leaf) return [];
   return pathTo(new Map(body.map((e) => [e.id!, e])), leaf);
-}
-
-/** How many messages a file holds: its user and agent messages, by line, without the path. */
-function countMessages(raw: string): number {
-  let count = 0;
-  for (const line of raw.split("\n")) {
-    if (!line.trim()) continue;
-    let e: Entry;
-    try {
-      e = JSON.parse(line) as Entry;
-    } catch {
-      continue;
-    }
-    if (e.type !== "message") continue;
-    const role = e.message?.role;
-    if (role === "user" || role === "assistant") count++;
-  }
-  return count;
 }
 
 /** One line of the account: what it says, and the message it is, by index. */
@@ -272,7 +252,7 @@ export function chatTools(agentId: string, sessionId: string) {
             const file = fileOf(chat);
             if (!file) return 0;
             try {
-              return countMessages(await readFile(file, "utf8"));
+              return messagesOf(pathOf(await readFile(file, "utf8")));
             } catch {
               return 0;
             }

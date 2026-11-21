@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { inProcessHome } from "./server-harness.mjs";
-import { fakeModel } from "./fake-model.mjs";
+import { fakeModel, resultsIn } from "./fake-model.mjs";
 
 // The agent's own past (#376): the tools that list, read and search its old
 // chats, called as pi calls them. The record of a chat is pi's session file,
@@ -249,4 +249,51 @@ test("summaries count against the question's budget, and the note says what is l
   // The budget is the model's window in characters, 80% of it: 200000 * 4 * 0.8.
   assert.ok(userMsg.content.length <= 640_000 + 200, "the transcript fits the budget, the note and the question aside");
   assert.match(userMsg.content, /the earliest summaries are left out/, "the note says what was left out");
+});
+
+// The guard holds the tools to the primary user: they are not a read, so a role
+// that may not run what is not a read — a colleague, a heartbeat — is refused
+// them by the rule that keeps a non-read tool from a role that has not been
+// allowed it. The primary user reads its own past.
+test("a colleague and a heartbeat are refused the tools by the guard, the primary user is not", async () => {
+  const { SdkPiClient } = await import("../dist/pi/sdk-client.js");
+  const { mkdtempSync } = await import("node:fs");
+  const model = await fakeModel((request) => (resultsIn(request) === 0 ? { name: CHAT_READ_TOOL, args: { id: "plan" } } : "Done."));
+  writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR, "models.json"), JSON.stringify(model.models()));
+
+  const runAs = async (whoNow) => {
+    const client = await SdkPiClient.create({
+      cwd: scout.home,
+      sessionDir: mkdtempSync(path.join(process.env.SESSION_DIR, "guard-")),
+      provider: "fake", modelId: "m",
+      sessionId: "guard-" + Math.random().toString(36).slice(2),
+      whoNow, dialogs: false,
+    });
+    const results = [];
+    const settled = new Promise((resolve) => client.on("event", (e) => {
+      if (e?.type === "tool_execution_end") results.push(e);
+      if (e?.type === "agent_settled") resolve();
+    }));
+    try {
+      await client.prompt("Read the plan chat");
+      await settled;
+      return results;
+    } finally {
+      client.dispose();
+    }
+  };
+
+  const colleague = await runAs(() => ({ role: "colleague", key: "priya" }));
+  assert.equal(colleague.length, 1);
+  assert.equal(colleague[0].isError, true, "a colleague is refused");
+  assert.match(JSON.stringify(colleague[0].result), /not your primary user/);
+
+  const heartbeat = await runAs(() => ({ role: "heartbeat" }));
+  assert.equal(heartbeat.length, 1);
+  assert.equal(heartbeat[0].isError, true, "a heartbeat is refused");
+
+  const primary = await runAs(() => ({ role: "primary" }));
+  assert.equal(primary.length, 1);
+  assert.equal(primary[0].isError, false, "the primary user reads its own past");
+  assert.match(JSON.stringify(primary[0].result), /The backup plan/);
 });
