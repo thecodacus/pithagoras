@@ -34,6 +34,7 @@ test("the settings are kept for their owner alone, each left out while it is emp
     dictationModel: " accurate ",
     ttsUrl: "https://speech.example.test/v1/audio/speech",
     ttsModel: "kokoro",
+    rawSampleRate: " 44100 ",
     voices: [{ id: "af_heart" }, { id: "bm_george", name: "George" }, { id: "am_adam", name: "" }],
     voice: "bm_george",
   });
@@ -43,6 +44,7 @@ test("the settings are kept for their owner alone, each left out while it is emp
     dictationModel: "accurate",
     ttsUrl: "https://speech.example.test/v1/audio/speech",
     ttsModel: "kokoro",
+    rawSampleRate: 44100,
     voices: [{ id: "af_heart", name: "af_heart" }, { id: "bm_george", name: "George" }, { id: "am_adam", name: "am_adam" }],
     voice: "bm_george",
   };
@@ -64,6 +66,7 @@ test("each setting is checked, and a save refused changes nothing", async () => 
   const language = "The input language is a code of two or three small letters, such as en, or empty for the server to detect it";
   const list = "The voices are a list of at most 500";
   const id = "A voice's id is 1–200 characters, with no control characters";
+  const rate = "The sample rate of raw audio is a whole number of hertz from 8000 to 192000, or empty for 24000";
   for (const [settings, error] of [
     [{ sttUrl: "ftp://example.test/inference" }, url("The speech recognition URL")],
     [{ sttUrl: "not an address" }, url("The speech recognition URL")],
@@ -73,6 +76,12 @@ test("each setting is checked, and a save refused changes nothing", async () => 
     [{ sttModel: "a model" }, model("The speech recognition model")],
     [{ dictationModel: "m".repeat(101) }, model("The dictation model")],
     [{ ttsModel: "kokoro/v1" }, model("The speech synthesis model")],
+    [{ rawSampleRate: 7999 }, rate],
+    [{ rawSampleRate: 192001 }, rate],
+    [{ rawSampleRate: 44100.5 }, rate],
+    [{ rawSampleRate: "fast" }, rate],
+    [{ rawSampleRate: "44100 Hz" }, rate],
+    [{ rawSampleRate: true }, rate],
     [{ language: "EN" }, language],
     [{ language: "auto" }, language],
     [{ voices: "af_heart" }, list],
@@ -88,6 +97,11 @@ test("each setting is checked, and a save refused changes nothing", async () => 
     assert.deepEqual(await said(await put(settings)), [400, error], JSON.stringify(settings).slice(0, 100));
   }
   assert.deepEqual(await shown(), { sttUrl: RECOGNITION, chosen: false });
+  // The sample rate of raw audio, as a number or as typed, at both ends of what is played; empty is left out.
+  for (const [given, kept] of [[8000, 8000], ["192000", 192000], ["", undefined], [null, undefined]] as const) {
+    assert.equal((await put({ sttUrl: RECOGNITION, rawSampleRate: given })).status, 200);
+    assert.equal((await shown()).rawSampleRate, kept, String(given));
+  }
   // As many as 500 voices, of up to 200 characters each.
   assert.equal((await put({ voices: [...Array.from({ length: 499 }, (_, n) => ({ id: `voice-${n}` })), { id: "v".repeat(200) }] })).status, 200);
 });

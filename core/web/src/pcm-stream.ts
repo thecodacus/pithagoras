@@ -1,14 +1,25 @@
 import { t } from "./i18n";
-import { joinSamples } from "./samples";
+import { DEFAULT_SAMPLE_RATE, joinSamples } from "./samples";
 import { TimeStretch } from "./time-stretch";
+
+/** The sample rates the portal passes on, in Hz (core/server/src/wav.ts): the audio context resamples to its output. */
+const MIN_SAMPLE_RATE = 8000, MAX_SAMPLE_RATE = 192000;
+
+/** The sample rate a phrase's answer says (`x-sample-rate`), or none where it says none a phrase can be played at. */
+export function sampleRateOf(headers: Headers): number | undefined {
+  const said = headers.get("x-sample-rate");
+  const rate = said !== null && /^\d{1,7}$/.test(said) ? Number(said) : NaN;
+  return rate >= MIN_SAMPLE_RATE && rate <= MAX_SAMPLE_RATE ? rate : undefined;
+}
 
 /**
  * How a phrase is played: `rate` makes it faster without raising the voice
- * (see time-stretch.ts), and `record` is given the phrase's samples as they
+ * (see time-stretch.ts), `sampleRate` is the rate its samples were made at
+ * (24 kHz where left out), and `record` is given the phrase's samples as they
  * were spoken, before any of that, so a reply can be played again later at
  * whatever speed is chosen then.
  */
-export interface SpeechOptions { rate?: number; record?: (samples: Float32Array) => void }
+export interface SpeechOptions { rate?: number; sampleRate?: number; record?: (samples: Float32Array) => void }
 
 const samplesOf = (bytes: Uint8Array, count: number) => {
   const samples = new Float32Array(count), view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
@@ -40,8 +51,8 @@ function pcmDecoder() {
 /** Whatever engine made the audio: nothing here knows which one it was. */
 const incompleteAudio = () => new Error(t("Voice mode's source returned incomplete audio"));
 
-/** A buffer holding `samples`, or none for none: a zero-length AudioBuffer is an error. */
-export function bufferOf(audio: BaseAudioContext, samples: Float32Array, sampleRate = 24000): AudioBuffer | undefined {
+/** A buffer holding `samples` made at `sampleRate`, or none for none: a zero-length AudioBuffer is an error. */
+export function bufferOf(audio: BaseAudioContext, samples: Float32Array, sampleRate = DEFAULT_SAMPLE_RATE): AudioBuffer | undefined {
   if (!samples.length) return undefined;
   const buffer = audio.createBuffer(1, samples.length, sampleRate);
   buffer.getChannelData(0).set(samples);
@@ -56,7 +67,7 @@ export async function readPcmStream(
   const reader = body.getReader();
   // The stretch is worked on each chunk as it arrives, so the whole buffer
   // does not have to wait for one long stretch pass over everything.
-  const stretcher = new TimeStretch(options.rate ?? 1);
+  const stretcher = new TimeStretch(options.rate ?? 1, options.sampleRate);
   const chunks: Uint8Array[] = [];
   const stretched: Float32Array[] = [];
   const decoder = pcmDecoder();
@@ -82,7 +93,7 @@ export async function readPcmStream(
   let offset = 0;
   for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
   options.record?.(samplesOf(bytes, length / 2));
-  const buffer = bufferOf(audio, joinSamples(stretched));
+  const buffer = bufferOf(audio, joinSamples(stretched), options.sampleRate);
   if (!buffer) throw incompleteAudio();
   signal.throwIfAborted();
   return buffer;
@@ -104,7 +115,7 @@ export async function playAudioBuffer(buffer: AudioBuffer, audio: AudioContext, 
 /** Start from a small PCM cushion while the producer continues generating. */
 export async function preparePcmSpeech(body: ReadableStream<Uint8Array>, audio: AudioContext, signal: AbortSignal, options: SpeechOptions = {}) {
   const reader = body.getReader();
-  const stretcher = new TimeStretch(options.rate ?? 1);
+  const stretcher = new TimeStretch(options.rate ?? 1, options.sampleRate);
   let spoken = 0;
   const pending: AudioBuffer[] = [];
   const sources = new Set<AudioBufferSourceNode>();
@@ -142,14 +153,14 @@ export async function preparePcmSpeech(body: ReadableStream<Uint8Array>, audio: 
         const samples = decoder.push(value);
         if (!samples) continue;
         spoken += samples.length; options.record?.(samples);
-        const buffer = bufferOf(audio, stretcher.push(samples));
+        const buffer = bufferOf(audio, stretcher.push(samples), options.sampleRate);
         if (!buffer) continue;
         pending.push(buffer); buffered += buffer.duration;
         if (buffered >= 0.65) ready();
         pump();
       }
       if (!spoken || decoder.cut) throw incompleteAudio();
-      const rest = bufferOf(audio, stretcher.flush());
+      const rest = bufferOf(audio, stretcher.flush(), options.sampleRate);
       if (rest) { pending.push(rest); buffered += rest.duration; }
       finished = true; ready(); pump();
     } catch (error) { rejectReady(error); failPlay?.(error); throw error; }

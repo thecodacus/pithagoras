@@ -2323,7 +2323,7 @@ portal.voice.provide({
     if (!answer.ok) throw new Error(`The recogniser answered HTTP ${answer.status}`);
     return (await answer.json()).text;
   },
-  // One phrase, as 24 kHz audio.
+  // One phrase, as 24 kHz audio: said so, though 24 kHz is what it is taken to be where nothing is said.
   async speak(text, { voice, signal }) {
     const answer = await fetch("http://127.0.0.1:7862/v1/audio/speech", {
       method: "POST",
@@ -2367,13 +2367,17 @@ portal.voice.provide({
 - **`speak(text, { voice, signal })`** speaks one phrase of at most 600
   characters in `voice`, an id from `state().voices` (the agent's own), or its
   own choice where `voice` is undefined or an id it no longer has. It answers an
-  ok `Response` whose body is either `audio/pcm` (mono, 24 kHz, signed 16-bit
-  little-endian; an `x-sample-rate` header, where there is one, says `24000`),
-  which the portal passes on to the page as it arrives, or `audio/wav` (mono,
-  24 kHz, 16-bit PCM), which it reads whole, checks and sends on as PCM. Anything
-  else, a WAV at another rate say, is refused with a message naming the label,
+  ok `Response` whose body is either `audio/pcm` (mono, signed 16-bit
+  little-endian), which the portal passes on to the page as it arrives, or
+  `audio/wav`, which it reads whole, checks and sends on as PCM. The page plays
+  each phrase at its own sample rate and the browser resamples. A WAV says its
+  rate in its header: 8 to 192 kHz, mono or stereo (mixed to mono), 16-bit
+  integer or 32-bit float samples. Raw PCM has none, so it says it, as
+  `x-sample-rate: 44100` or a `rate=` parameter of the content type
+  (`audio/pcm;rate=44100`); one that says nothing is 24 kHz, so a provider
+  written for 24 kHz needs no change. Anything else, a rate outside 8 to 192 kHz
+  or a WAV of 24-bit samples say, is refused with a message naming the label,
   and the portal cancels the answer's body, so that a stream behind it stops.
-  Nothing is resampled.
 - **What they throw** is what the page shows, as a 502: say it so that the
   person knows what to do. `signal` ends when the page gives up on the request
   (the person spoke over the reply, ended voice mode or closed the tab), or after

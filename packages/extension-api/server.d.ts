@@ -513,10 +513,11 @@ export interface VoiceProvider {
   transcribe(wav: Buffer, options: { purpose: "voice" | "dictation"; signal: AbortSignal }): Promise<string>;
   /**
    * One phrase of at most 600 characters, spoken in `voice`: an id from `state().voices`; undefined, or an id it no
-   * longer has, is its own choice. Answers an ok Response whose body is `audio/pcm` (mono, 24 kHz, signed 16-bit
-   * little-endian, passed on to the page as it arrives; an `x-sample-rate` header, where there is one, says 24000) or
-   * `audio/wav` (mono, 24 kHz, 16-bit PCM, read whole and checked). `signal` as for `transcribe`. Throws with what the
-   * page should say.
+   * longer has, is its own choice. Answers an ok Response whose body is `audio/pcm` (mono, signed 16-bit little-endian,
+   * passed on to the page as it arrives; its rate in Hz, 8000 to 192000, is the `x-sample-rate` header or a `rate=`
+   * parameter of the content type, 24000 where it says none) or `audio/wav` (8 to 192 kHz by its header, mono or
+   * stereo, 16-bit integer or 32-bit float samples, read whole and checked). The page plays a phrase at its own rate.
+   * `signal` as for `transcribe`. Throws with what the page should say.
    */
   speak(text: string, options: { voice?: string; signal: AbortSignal }): Promise<globalThis.Response>;
   /**
