@@ -108,7 +108,8 @@ test("a conversation is told what the browser tools that are on need, whichever 
     const system = systemOf(request);
     // The rules of a lazy tool come with the search that finds it, at the end of the context, and are not in the head; that a page is data is, for
     // a lazy tool as for any: the guard's short envelope relies on it.
-    assert.deepEqual(has(system), { ...expected(on.filter((name) => !lazy.includes(name))), untrusted: on.length > 0 }, label);
+    // The rule that a page is data is said while any tool that declares outside content is on: every browser tool does, and so does the chat tool, which the portal keeps on for every chat.
+    assert.deepEqual(has(system), { ...expected(on.filter((name) => !lazy.includes(name))), untrusted: true }, label);
     // Browser's tools have rules of their own, and a Playwright server's, of which there is none here, are not said.
     assert.ok(!system.includes(BROWSER_READING_RULE) && !system.includes(BROWSER_SCREENSHOT_RULE), `${label}: no Playwright rules`);
   };
