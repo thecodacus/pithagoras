@@ -65,6 +65,9 @@ export interface ModelLoad {
 
 type OnModel = (sessionId: string, load: ModelLoad) => void;
 
+/** The window the server says it has, when it refuses a request for being past it: see serverWindowIn. */
+type OnWindow = (sessionId: string, model: string, tokens: number) => void;
+
 /** Upstream origin per session, captured when the model is rewritten. */
 const upstreams = new Map<string, string>();
 
@@ -73,6 +76,7 @@ let port = 0;
 let notify: OnProgress = () => {};
 let notifyModel: OnModel = () => {};
 let notifyTimings: OnTimings = () => {};
+let notifyWindow: OnWindow = () => {};
 
 const PREFIX = "/s/";
 const diskCache = new LlamaSessionCache();
@@ -101,6 +105,20 @@ function readProgress(text: string, sessionId: string): void {
       // A frame split across two packets. The next one carries the same
       // running total, so nothing is lost by skipping it.
     }
+  }
+}
+
+/**
+ * The window llama-server says it has, in the answer it gives a request that goes past it:
+ * `{"error":{"type":"exceed_context_size_error","n_ctx":131072,...}}`. That is the share of `--ctx-size` one chat gets
+ * (`--parallel` divides it), which no listing of the models says.
+ */
+export function serverWindowIn(text: string): number | undefined {
+  try {
+    const error = (JSON.parse(text) as { error?: { type?: unknown; n_ctx?: unknown } }).error;
+    return error?.type === "exceed_context_size_error" && Number.isInteger(error.n_ctx) ? (error.n_ctx as number) : undefined;
+  } catch {
+    return undefined;
   }
 }
 
@@ -300,8 +318,11 @@ function handle(req: http.IncomingMessage, res: http.ServerResponse): void {
           res.writeHead(upstreamRes.statusCode ?? 502, upstreamRes.headers);
           const streaming = (upstreamRes.headers["content-type"] ?? "").includes("event-stream");
           let progressBuffer = "";
+          // A request refused for its size says what the server holds. Its answer is a few hundred bytes of JSON.
+          let refusal: string | undefined = completion && upstreamRes.statusCode === 400 && !streaming ? "" : undefined;
           upstreamRes.on("data", (c: Buffer) => {
             answering(upstreamRes.statusCode === 200);
+            if (refusal !== undefined && refusal.length < 8192) refusal += c.toString("utf8");
             if (streaming) {
               progressBuffer += c.toString("utf8");
               const end = progressBuffer.lastIndexOf("\n");
@@ -310,7 +331,11 @@ function handle(req: http.IncomingMessage, res: http.ServerResponse): void {
             res.write(c);
           });
           upstreamRes.on("error", reject);
-          upstreamRes.on("end", () => { resolve(upstreamRes.statusCode === 200); });
+          upstreamRes.on("end", () => {
+            const tokens = refusal === undefined ? undefined : serverWindowIn(refusal);
+            if (tokens !== undefined) notifyWindow(sessionId, model, tokens);
+            resolve(upstreamRes.statusCode === 200);
+          });
         },
       );
       out.on("error", reject);
@@ -329,10 +354,11 @@ function handle(req: http.IncomingMessage, res: http.ServerResponse): void {
 }
 
 /** Loopback only: this exists for the pi process in front of it, nobody else. */
-export function startLlamaProxy(onProgress: OnProgress, onModel?: OnModel, onTimings?: OnTimings): void {
+export function startLlamaProxy(onProgress: OnProgress, onModel?: OnModel, onTimings?: OnTimings, onWindow?: OnWindow): void {
   notify = onProgress;
   if (onModel) notifyModel = onModel;
   if (onTimings) notifyTimings = onTimings;
+  if (onWindow) notifyWindow = onWindow;
   if (server) return;
   server = http.createServer(handle);
   server.listen(0, "127.0.0.1", () => {
