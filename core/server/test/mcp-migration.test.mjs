@@ -206,6 +206,11 @@ test("`approveTools: []`, the adapter's \"no tool asks first\", is no gate: the 
   assert.deepEqual(moved.carried, ["a", "b"]);
   assert.deepEqual(moved.left.map((l) => l.name), ["c"]);
   assert.equal(moved.file.mcpServers.a.enabled, undefined);
+  assert.equal("approveTools" in moved.file.mcpServers.a, false, "the adapter's key that asks for nothing is not carried on");
+  // A server's own `approveTools: false` outweighs the setting that covers the others, and is gone as well; `oauth: false` is the adapter's word and goes.
+  const own = carryOver(pi, JSON.stringify({ mcpServers: { d: { url: "https://d.example.test/mcp", oauth: false, approveTools: false } }, settings: { approveTools: true } }), false);
+  assert.deepEqual(own.left, []);
+  assert.deepEqual(own.file.mcpServers.d, { url: "https://d.example.test/mcp" });
 });
 
 test("an adapter that was switched off, or never installed, leaves its servers off: nothing ran, and nothing starts", async () => {

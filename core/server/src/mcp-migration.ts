@@ -102,7 +102,8 @@ function convertEntry(pi: PiMcp, name: string, entry: Record<string, unknown>, o
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(entry)) {
     // `oauth: false` and `auth: "oauth"` are the adapter's own words: pi signs in by itself where the server asks. `auth: { provider }` is pi's.
-    const adapters = (DROPPED as readonly string[]).includes(key) || (BEARER as readonly string[]).includes(key) || (key === "oauth" && value === false) || (key === "auth" && typeof value !== "object");
+    // `approveTools` that asks for nothing (`[]`, `false`) is gone with the adapter: one that asks left the server off above.
+    const adapters = (DROPPED as readonly string[]).includes(key) || (BEARER as readonly string[]).includes(key) || (key === "oauth" && value === false) || (key === "auth" && typeof value !== "object") || key === "approveTools";
     if (!adapters) out[key] = value;
   }
   if (bearer.header) out.headers = { ...headers, Authorization: bearer.header };
