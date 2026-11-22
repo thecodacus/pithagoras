@@ -3913,7 +3913,8 @@ export function untrustMcpServer(name: string): void {
 export function mcpApprove(): Record<string, string[]> {
   try {
     const parsed = JSON.parse(getSetting("mcp_approve") || "{}");
-    const out: Record<string, string[]> = {};
+    // Without a prototype: a server named `__proto__` is a key like any other, and no name is answered by Object.prototype.
+    const out: Record<string, string[]> = Object.create(null);
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
       for (const [server, patterns] of Object.entries(parsed)) {
         if (Array.isArray(patterns)) out[server] = patterns.filter((one): one is string => typeof one === "string" && one.trim() !== "");
@@ -3921,7 +3922,7 @@ export function mcpApprove(): Record<string, string[]> {
     }
     return out;
   } catch {
-    return {};
+    return Object.create(null);
   }
 }
 

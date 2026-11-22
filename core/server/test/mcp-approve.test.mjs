@@ -338,6 +338,30 @@ test("the question shows the whole call when it fits, and when it does not, ever
   assert.match(huge, /more arguments than fit here/);
 });
 
+test("a server named like an object's own property keeps its gate: __proto__ is a name like any other", async () => {
+  db.setMcpApprove("__proto__", ["echo"]);
+  db.setMcpApprove("constructor", ["echo"]);
+  try {
+    assert.deepEqual(Object.keys(db.mcpApprove()).sort(), ["__proto__", "constructor"]);
+    assert.deepEqual(db.mcpApprove()["__proto__"], ["echo"]);
+    assert.equal(db.mcpApprove()["toString"], undefined, "no name is answered by Object.prototype");
+    const session = `mcp-approve-unit-${n++}`;
+    const h = {};
+    const namespace = "mcp____proto__";
+    guardExtension("t", () => ({ role: "primary" }), session, () => new Set(), () => [], undefined, [], () => new Set(), () => false, () => undefined, () => undefined, true, () => namespace, () => new Set(), (name) => [name.slice(`${namespace}__`.length)])({ on: (k, f) => (h[k] = f) });
+    const asked = [];
+    const refused = await h.tool_call({ toolName: `${namespace}__echo`, input: { text: "x" } }, { ui: { confirm: async (title) => (asked.push(title), false) } });
+    assert.equal(refused.block, true);
+    assert.deepEqual(asked, [`Let ${namespace}__echo run?`]);
+    // Another's tool is not held.
+    assert.equal(await h.tool_call({ toolName: `${namespace}__ping`, input: {} }, { ui: { confirm: async () => false } }), undefined);
+  } finally {
+    db.setMcpApprove("__proto__", undefined);
+    db.setMcpApprove("constructor", undefined);
+  }
+  assert.deepEqual(Object.keys(db.mcpApprove()), []);
+});
+
 test("somebody who is not the primary user cannot be asked: the call is refused before a one-off approval is looked at, and the approval is still there", async () => {
   db.setMcpApprove("alpha", ["echo"]);
   const h = guardWith({ role: "member", key: "bob" });
