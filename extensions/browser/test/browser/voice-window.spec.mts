@@ -35,7 +35,7 @@ test('the agent driving the browser opens it at the side, its web UI through the
   await voice(page);
   const browser = windowOf(page);
   await expect(browser).toHaveCount(0);
-  // A Playwright MCP's tool, behind the MCP adapter.
+  // A Playwright MCP's tool.
   await page.getByRole('button', { name: 'Use browser', exact: true }).click();
   await expect(browser).toHaveClass(/is-open/);
   // Alone it stands at the side, as every window opened alone does, beside the orb.

@@ -722,7 +722,7 @@ function handOffBrowser(d: Database.Database): void {
  * underscores (the longest name wins, or `browser` would claim `browser_staging`'s tools). Written out here, as the upgrade
  * step below does not change with the code after it: the tools it looks at were named so when it ran.
  */
-function adapterServerOf(name: string, servers: string[]): string | undefined {
+export function adapterServerOf(name: string, servers: string[]): string | undefined {
   let best: string | undefined;
   for (const server of servers) {
     const prefix = server.replace(/-/g, "_");

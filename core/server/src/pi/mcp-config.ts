@@ -15,6 +15,8 @@ export interface PiMcp {
   loadMcpConfig(options: { agentDir: string; cwd: string; projectTrusted: boolean }): LoadedMcpConfig;
   /** One entry of `mcpServers`: a copy of it, or the message that says what is wrong with it. */
   validateMcpServerConfig(name: string, raw: unknown): McpServerConfig | string;
+  /** The name pi gives a server's tool, `mcp__<server>__<tool>` with every character but letters, digits and `_` as `_`. */
+  createMcpToolName(server: string, tool: string): string;
 }
 
 let loaded: PiMcp | undefined;
@@ -23,11 +25,12 @@ let loaded: PiMcp | undefined;
 export async function piMcp(): Promise<PiMcp> {
   if (loaded) return loaded;
   const root = import.meta.resolve("@earendil-works/pi-coding-agent");
-  const [config, servers] = await Promise.all([
+  const [config, servers, tools] = await Promise.all([
     import(new URL("./extensions/mcp/config.js", root).href),
     import(new URL("./core/mcp-servers.js", root).href),
+    import(new URL("./extensions/mcp/tools.js", root).href),
   ]);
-  loaded = { loadMcpConfig: config.loadMcpConfig, validateMcpServerConfig: servers.validateMcpServerConfig };
+  loaded = { loadMcpConfig: config.loadMcpConfig, validateMcpServerConfig: servers.validateMcpServerConfig, createMcpToolName: tools.createMcpToolName };
   return loaded;
 }
 

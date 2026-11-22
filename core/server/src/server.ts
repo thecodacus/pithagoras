@@ -89,6 +89,7 @@ import { sessions, CodemodeHeld, CommandFailed, IMAGE_ROOT } from "./session-man
 import { ImageError, MAX_IMAGE_BYTES, MAX_IMAGES, imagePath, mimeOf, parseImages, saveImages } from "./prompt-images.js";
 import { defaultsFor } from "./tool-policy.js";
 import { mcpRouter, onMcpWritten } from "./api/mcp.js";
+import { moveFromAdapter } from "./mcp-migration.js";
 import { authMode, changePassword, checkPassword, isAuthed, issueCookie, passwordRefused, requireAuth, setUpPassword, shortPassword, signOut } from "./auth.js";
 import { activeSso, endSessionUrl, oidcRouter, providerFor, rememberProvider } from "./oidc-login.js";
 import { CALLBACK_PATH, OidcConfigError, discover, parseOidcConfig, shownForm } from "./oidc.js";
@@ -1854,6 +1855,8 @@ const tls =
     : null;
 
 const host = bindHost(authMode() !== "open", process.env.ALLOW_OPEN);
+// The servers pi-mcp-adapter ran, carried over to pi's own MCP support, once: before a chat reads the file (see mcp-migration.ts).
+await moveFromAdapter().catch((e) => console.error(`[portal] MCP: the servers of pi-mcp-adapter could not be carried over: ${(e as Error).message}`));
 // Before anything can start a run: a catch-up routine marked running in the same
 // moment would be taken for one the last server left.
 const cutOff = sessions.recoverOrphans();

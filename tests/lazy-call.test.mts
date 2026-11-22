@@ -29,7 +29,7 @@ test('a lazy show_image gives the picture a direct one does, in the chat, and re
   const line = items.find((i) => i.kind === 'tool') as any;
   assert.deepEqual(line.files, [file], 'under the tool line, as for a direct call');
   assert.equal(line.filesSeq, 2);
-  // The line reads as the call of the tool it made, as one through the MCP adapter does.
+  // The line reads as the call of the tool it made, as one through the MCP adapter of an old chat does.
   assert.equal(describeCall(start('tool_search', via('show_image', shown)).payload, '/work').label, 'Using show image');
 });
 

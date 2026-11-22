@@ -74,7 +74,7 @@ test('a tool is pictured from the words in its name, whichever extension it come
   });
 });
 
-test('a call through the MCP adapter is named by the tool it asked for', async () => {
+test('a call through the MCP adapter of an old chat is named by the tool it asked for', async () => {
   const { toolName } = await import('../core/web/src/tool-activity.ts');
   assert.equal(toolName('mcp', { tool: 'web_search_exa', args: { query: 'x' } }), 'web_search_exa');
   assert.equal(toolName('mcp', { server: 'exa' }), 'mcp');
