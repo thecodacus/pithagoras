@@ -260,3 +260,35 @@ async function stays(options = {}) {
   };
   return { client, turn, done: async () => { await client.shutdown(); client.dispose(); } };
 }
+
+test("a server whose every tool the chat has switched off is not reached through pi's resource tools either, and the others still are", async () => {
+  putConfig({ secret: withResources("secret", "other"), open: withResources("open", "tool,second") });
+  const read = (server, uri) => ({ name: "read_mcp_resource", args: { server, uri } });
+  const r = await run(
+    [read("secret", "file:///secret/one.txt"), read(" secret ", "file:///secret/one.txt"), { name: "list_mcp_resource_templates", args: { server: "secret" } }, { name: "list_mcp_resources", args: {} }, read("open", "file:///open/one.txt"), { name: "list_mcp_resources", args: { server: "open" } }],
+    { toolsOff: ["mcp__secret__other"] },
+  );
+  const text = r.results.map(textOf);
+  assert.match(text[0], /switched off in this conversation/);
+  assert.match(text[1], /switched off in this conversation/, "the blanks around a name make no difference: pi trims them");
+  assert.match(text[2], /switched off in this conversation/);
+  assert.match(text[3], /Name the server you want to list/, "a listing of every server's would list the switched-off one's");
+  assert.doesNotMatch(text.slice(0, 4).join(" "), /contents of file:\/\/\/secret/);
+  assert.match(text[4], /contents of file:\/\/\/open\/one\.txt/, "a server with a tool still on is read as before");
+  assert.match(text[5], /file:\/\/\/open\/one\.txt/);
+  // One tool of a server off is not the server off, and nothing off lists as before.
+  const some = await run([read("open", "file:///open/one.txt"), { name: "list_mcp_resources", args: {} }], { toolsOff: ["mcp__open__second"] });
+  assert.match(textOf(some.results[0]), /contents of file:\/\/\/open/);
+  assert.match(textOf(some.results[1]), /file:\/\/\/open\/one\.txt/);
+  assert.doesNotMatch(textOf(some.results[1]), /switched off/);
+});
+
+test("a tool the file hides is not one a chat can switch off: a server whose every other tool is off is off, for pi's resource tools too", async () => {
+  putConfig({ secret: { ...withResources("secret", "other,gone"), toolExposure: { gone: "hidden" } } });
+  const read = (server, uri) => ({ name: "read_mcp_resource", args: { server, uri } });
+  const r = await run([read("secret", "file:///secret/one.txt"), { name: "list_mcp_resources", args: {} }], { toolsOff: ["mcp__secret__other"] });
+  assert.match(textOf(r.results[0]), /switched off in this conversation/);
+  assert.match(textOf(r.results[1]), /Name the server you want to list/);
+  assert.doesNotMatch(textOf(r.results[0]), /contents of file/);
+});
+

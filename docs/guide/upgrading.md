@@ -1384,9 +1384,7 @@ the adapter did, a portal where any list of switches still names one of them car
 in Settings → Tools, then switch the servers on in Settings → MCP. A server that
 names a safety key pi does not read (`excludeTools`, `includeTools`, `approveTools`,
 `exposeResources: false`) cannot be switched on in Settings → MCP before the key is
-gone or written in pi's words. A server's resources are read by pi's resource tools,
-a group of their own, whatever is switched off of the server's tools
-([MCP servers](/guide/mcp)).
+gone or written in pi's words.
 pi does not read what the adapter did besides
 (`imports`, `~/.config/mcp/mcp.json`, `~/.agents/mcp.json`, a project's `.mcp.json`),
 so servers that came from there have to be added in Settings → MCP; the log names
