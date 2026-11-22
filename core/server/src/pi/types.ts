@@ -184,6 +184,8 @@ export interface PiClient extends EventEmitter {
    * Optional: an executor that cannot ask pi leaves it out.
    */
   getTools?(): Promise<PiTool[]>;
+  /** The MCP servers pi was given for this chat, by the namespace of their tools. */
+  readonly mcpServers?: ReadonlyMap<string, string>;
   /** Switch tools off by name. Everything not named is on. */
   setToolsOff?(names: string[]): Promise<void>;
   /**

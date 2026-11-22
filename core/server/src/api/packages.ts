@@ -4,6 +4,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { piSettingsPath, readPiSettings, writePiSettingsText } from "../pi-settings.js";
 import { sourceOf } from "../extension-switch.js";
 import { piPackageArg } from "../features.js";
+import { ADAPTER_PACKAGE } from "../mcp-migration.js";
 import { packageRemoved } from "../db.js";
 import express, { type Router } from "express";
 import semver from "semver";
@@ -76,6 +77,10 @@ export function packagesRouter(): Router {
       return res.status(400).json({
         error: "Spec must look like npm:pkg@1.0.0, git:github.com/user/repo, https://…, or a path",
       });
+    }
+    // Beside the portal's own MCP support it would read the same mcp.json with its own rules and reach tools a chat has switched off.
+    if (ADAPTER_PACKAGE.test(spec)) {
+      return res.status(400).json({ error: "pi-mcp-adapter is not used any more: pi's own MCP support runs the servers, and Settings → MCP adds them" });
     }
     try {
       await afterDefaultsInstalled();

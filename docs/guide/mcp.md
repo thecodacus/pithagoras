@@ -70,7 +70,10 @@ another server has is refused, whether the server is new or renamed: it would
 replace that one, with everything the form does not show. So are two names that
 differ only by a dash and an underscore (`my-notes` and `my_notes`): pi gives
 their tools the same prefix and connects only one of them. The form keeps what
-it does not show, an `oauth` block or a `toolExposure` set by hand.
+it does not show, an `oauth` block or a `toolExposure` set by hand. An `auth`
+block (`"auth": { "provider": "…" }`, which makes pi send the portal's key for a
+model provider to the server as its bearer token) is not written by the form or the
+import: write it in the file yourself if that is what you mean.
 
 **The file.** "Edit the file directly" at the bottom of the panel, for anything
 the form does not cover.
@@ -118,7 +121,12 @@ give single tools another exposure, is kept as written.
 
 pi's three tools for a server's resources (`list_mcp_resources`,
 `list_mcp_resource_templates`, `read_mcp_resource`) are a group of their own, "MCP
-resources".
+resources". They reach every connected server by an argument, so a server whose tools
+a chat has all switched off is held to it: the resource tools refuse a call that names it,
+and a listing of every server's, until you name the server you want.
+
+A server that was tried and gave no tool (it does not start, or has none) is not named
+to the model as a place to search until a chat has seen a tool of it.
 
 ## What the tool lists show
 

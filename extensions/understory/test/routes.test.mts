@@ -45,6 +45,19 @@ test("without Docker the page is told so, and what it is told otherwise of the m
   }
 });
 
+test("switched on again, Understory keeps the headers somebody added by hand, and says how it signs in anew", async () => {
+  putServers({ understory: { url: "http://old:3800/mcp", headers: { authorization: "Bearer stale", "X-Team": "a" } } });
+  process.env.MEMORY_UNDERSTORY_AUTH_TOKEN = "from-env";
+  try {
+    const on = await call("PUT", "/use", { enabled: true, url: "http://understory.test:3800/mcp" });
+    assert.equal(on.status, 200);
+    assert.deepEqual(servers().understory, { url: "http://understory.test:3800/mcp", headers: { "X-Team": "a", Authorization: "Bearer ${MEMORY_UNDERSTORY_AUTH_TOKEN}" } });
+  } finally {
+    delete process.env.MEMORY_UNDERSTORY_AUTH_TOKEN;
+    await call("PUT", "/use", { enabled: false });
+  }
+});
+
 test("switched on, Understory elsewhere is the agent's memory, trusted by the guard, with what was in its entry kept; off, it is gone, and so is the trust", async () => {
   putServers({ understory: { url: "http://old:3800/mcp", timeout: 5000, enabled: false, headers: { Authorization: "Bearer stale" } } });
   process.env.MEMORY_UNDERSTORY_AUTH_TOKEN = "from-env";

@@ -1,4 +1,4 @@
-import { NAME_RE, problemWith, readMcpFile, writeMcpFile, type McpFile } from "./api/mcp.js";
+import { NAME_RE, problemForWrite, readMcpFile, writeMcpFile, type McpFile } from "./api/mcp.js";
 
 /**
  * One server in pi's mcp.json, written by a feature rather than in Settings →
@@ -9,7 +9,7 @@ import { NAME_RE, problemWith, readMcpFile, writeMcpFile, type McpFile } from ".
  */
 export async function setMcpServer(name: string, entry: Record<string, unknown> | undefined): Promise<void> {
   if (!NAME_RE.test(name)) throw new TypeError("An MCP server's name is letters, digits, underscore or dash");
-  const problem = entry === undefined ? null : await problemWith(name, entry);
+  const problem = entry === undefined ? null : await problemForWrite(name, entry);
   if (problem) throw new TypeError(problem);
   // Read as late as can be, and written with nothing between: a server saved in the meantime stays.
   const config = readable();

@@ -679,7 +679,7 @@ always costs minutes of its model.
 gives the agent [Understory](https://github.com/thecodacus/understory) as its
 memory: a memory that grows, plain markdown on disk, cross-linked and
 maintained, which the agent looks things up in and adds to through its tools
-(`understory_memory_query`, `…_add`, `…_update`, `…_status`, `…_maintain`).
+(`mcp__understory__memory_query`, `…_add`, `…_update`, `…_status`, `…_maintain`).
 The bundle is human-readable and git-diffable.
 
 Neither Understory nor [Docker](/guide/docker), which it requires, is installed
@@ -894,4 +894,4 @@ a shared Docker network. It can be changed on Understory's page in Settings.
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `MEMORY_UNDERSTORY_URL` | `http://localhost:3800/mcp` | The address Understory's page in Settings starts from. |
-| `MEMORY_UNDERSTORY_AUTH_TOKEN` | — | Sent as `Authorization: Bearer …` when Understory has an `AUTH_TOKEN`. Named in `mcp.json` (`bearerTokenEnv`), never copied into it. |
+| `MEMORY_UNDERSTORY_AUTH_TOKEN` | — | Sent as `Authorization: Bearer …` when Understory has an `AUTH_TOKEN`. Named in `mcp.json` as `headers: { Authorization: "Bearer ${MEMORY_UNDERSTORY_AUTH_TOKEN}" }`, never copied into it. |

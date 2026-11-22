@@ -178,6 +178,19 @@ export async function problemWith(name: string, entry: unknown): Promise<string 
   return typeof checked === "string" ? checked : null;
 }
 
+/**
+ * What is wrong with an entry that is about to be written by a form, an import or a feature: pi's check, and one thing more.
+ * `auth: { provider }` makes pi send the portal's key for that model provider to the server's URL as its bearer token; a pasted
+ * README snippet or a feature must not do that unseen, so it is only in the file by hand (the raw editor).
+ */
+export async function problemForWrite(name: string, entry: unknown): Promise<string | null> {
+  const auth = entry && typeof entry === "object" ? (entry as { auth?: unknown }).auth : undefined;
+  if (auth && typeof auth === "object" && (auth as { provider?: unknown }).provider !== undefined) {
+    return "auth.provider would send the portal's key for a model provider to this server: write it in the file by hand (the raw editor) if that is meant";
+  }
+  return problemWith(name, entry);
+}
+
 /** The server another name would be, for pi: names that differ only in `-` and `_` share a namespace, and pi connects one of them. */
 function sameNamespace(config: McpFile, name: string, except?: string): string | undefined {
   return Object.keys(config.mcpServers).find((other) => other !== name && other !== except && mcpNamespace(other) === mcpNamespace(name));
@@ -215,7 +228,7 @@ export function mcpRouter(): Router {
     const name = req.params.name;
     const from = typeof req.body?.from === "string" ? req.body.from : null;
     try {
-      const problem = await problemWith(name, req.body?.entry);
+      const problem = await problemForWrite(name, req.body?.entry);
       if (problem) return res.status(400).json({ error: problem });
 
       const { config, error } = readMcpFile();
@@ -276,7 +289,7 @@ export function mcpRouter(): Router {
       const skipped: { name: string; reason: string }[] = [];
       for (const [name, entry] of Object.entries(incoming)) {
         if (name === "autoEnableCodemode") continue;
-        const problem = await problemWith(name, entry);
+        const problem = await problemForWrite(name, entry);
         if (problem) {
           skipped.push({ name, reason: problem });
           continue;

@@ -1363,35 +1363,25 @@ upgraded from 0.1.0:
 ## MCP runs on pi's own support
 
 The portal used `pi-mcp-adapter` for MCP servers; it runs pi's own MCP support now
-([MCP servers](/guide/mcp)). The first start after the upgrade carries over what
-the adapter's configuration had, once: the servers in `mcp.json` are put into pi's
-words (the adapter's own keys, `lifecycle`, `directTools`, `includeTools`,
-`excludeTools` and the like, go; `disabled` becomes `enabled: false`; a bearer
-token becomes an `Authorization` header), each server stays on or off as it was,
-and is **Auto** in Settings → Tools, so a server with many tools goes behind
-`tool_search` by itself: mark one **Direct** there where you had registered its
-tools directly. `pi-mcp-adapter` is taken out of pi's packages. The tools are named
-`mcp__<server>__<tool>` now, and what you switched off by the old name is switched
-off by the new one. A server that pi cannot take as it was (one reached by a Unix
-socket, one with a list of the tools it offers or leaves out, an OAuth block of the
-adapter's, a name with a dot) is left off, and named in the one line the log gets
-(Settings → Logs); the file as it was is kept as `mcp.json.adapter` beside it. What
-the adapter imported from other tools' configs is not carried over. If `mcp.json`
-cannot be read, nothing is changed and the adapter stays until it can. If the
-adapter was switched off, or `mcp.json` is a plain file with comments, the file is
-written all the same (servers off, comments gone): nothing ran before, so nothing
-starts. The adapter's variables in a value, `$env:NAME` and `{env:NAME}`, are
-written as `${NAME}`; a server with one in its url, folder or arguments is left
-off, as pi reads them in `env` and `headers` only. The switches you set on the
-adapter's tools (`<server>_<tool>`, in any of its `toolPrefix` namings, from the
-tools it had cached) are put on the new names, and the adapter's own `mcp` tool,
-where you had it off, means every tool of every server: a server whose tools are
-not known stays off then. A project's own `.pi/mcp.json` in the adapter's format
-(a bearer token, `lifecycle` and the like) is not converted: the log line names
-those files, and pi drops what it cannot read of them, so change them by hand to
-`"headers": { "Authorization": "Bearer ${TOKEN}" }`. `pi-mcp-adapter` installed
-again from Settings → Packages does not replace the portal's MCP support, and
-cannot be run beside it: leave it out.
+([MCP servers](/guide/mcp)). The first start after the upgrade carries the servers
+in `mcp.json` over once, each on or off as it was, with the adapter's own keys
+(`lifecycle`, `directTools`, `toolPrefix` and the like) dropped, and takes the
+adapter out of pi's packages. Every server is **Auto** in Settings → Tools, so a
+big one goes behind `tool_search` by itself: mark one **Direct** where you had its
+tools registered directly. A server pi cannot take as it was (a Unix socket, a list
+of the tools it offers or leaves out, a bearer token, `$env:NAME` variables, tools
+that asked before each call, a name with a dot) stays in the file as it was, switched
+off, and is named in the one line the log gets (Settings → Logs): write it in pi's
+words (a token is `"headers": { "Authorization": "Bearer ${TOKEN}" }`) and switch it
+on in Settings → MCP. The tools are named `mcp__<server>__<tool>` now: **switches
+you set on the adapter's tools, or on its `mcp` tool for a project, agent or
+routine, do nothing any more**, so set them again in Settings → Tools; the log line
+says when there are some. pi does not read what the adapter did besides
+(`imports`, `~/.config/mcp/mcp.json`, `~/.agents/mcp.json`, a project's `.mcp.json`),
+so servers that came from there have to be added in Settings → MCP; the log names
+the ones it finds. If `mcp.json` cannot be read (a comment in it, a comma too many),
+nothing is changed and the adapter stays until it can. `pi-mcp-adapter` is not
+installed by the portal any more: leave it out.
 
 ## pi is 1.1
 

@@ -180,3 +180,65 @@ test("an installed extension that brings its own /mcp does not take the portal's
     writeFileSync(settings, "{}");
   }
 });
+
+const withResources = (name, tools) => ({ command: process.execPath, args: [FIXTURE, name, "--tools", tools, "--resources"] });
+
+test("a server whose every tool the chat has switched off is not reached through pi's resource tools either, and the others still are", async () => {
+  putConfig({ secret: withResources("secret", "other"), open: withResources("open", "tool,second") });
+  const read = (server, uri) => ({ name: "read_mcp_resource", args: { server, uri } });
+  const r = await run(
+    [read("secret", "file:///secret/one.txt"), read(" secret ", "file:///secret/one.txt"), { name: "list_mcp_resource_templates", args: { server: "secret" } }, { name: "list_mcp_resources", args: {} }, read("open", "file:///open/one.txt"), { name: "list_mcp_resources", args: { server: "open" } }],
+    { toolsOff: ["mcp__secret__other"] },
+  );
+  const text = r.results.map(textOf);
+  assert.match(text[0], /switched off in this conversation/);
+  assert.match(text[1], /switched off in this conversation/, "the blanks around a name make no difference: pi trims them");
+  assert.match(text[2], /switched off in this conversation/);
+  assert.match(text[3], /Name the server you want to list/, "a listing of every server's would list the switched-off one's");
+  assert.doesNotMatch(text.slice(0, 4).join(" "), /contents of file:\/\/\/secret/);
+  assert.match(text[4], /contents of file:\/\/\/open\/one\.txt/, "a server with a tool still on is read as before");
+  assert.match(text[5], /file:\/\/\/open\/one\.txt/);
+  // One tool of a server off is not the server off.
+  const some = await run([read("open", "file:///open/one.txt"), { name: "list_mcp_resources", args: {} }], { toolsOff: ["mcp__open__second"] });
+  assert.match(textOf(some.results[0]), /contents of file:\/\/\/open/);
+  assert.match(textOf(some.results[1]), /file:\/\/\/open\/one\.txt/);
+  // A server with no tool registered, which cannot have been switched off by its tools, is judged by what it has.
+  assert.doesNotMatch(textOf(some.results[1]), /switched off/);
+});
+
+test("a trusted project cannot undo a tool the person hid in a server of their own", async () => {
+  putConfig({ alpha: server("alpha", "ping", { toolExposure: { delete_repo: "hidden" } }) });
+  const folder = chat();
+  mkdirSync(path.join(folder, ".pi"), { recursive: true });
+  writeFileSync(path.join(folder, ".pi", "mcp.json"), JSON.stringify({ mcpServers: { alpha: { toolExposure: { other: "codemode" } } } }));
+  const { piMcp, configForChat } = await import("../dist/pi/mcp-config.js");
+  const loaded = configForChat(await piMcp(), { cwd: folder, isProjectTrusted: () => true }, agentDir, () => {});
+  assert.deepEqual(loaded.servers.find((s) => s.name === "alpha").config.toolExposure, { other: "codemode", delete_repo: "hidden" });
+  writeFileSync(path.join(folder, ".pi", "mcp.json"), JSON.stringify({ mcpServers: { alpha: { toolExposure: {} } } }));
+  const emptied = configForChat(await piMcp(), { cwd: folder, isProjectTrusted: () => true }, agentDir, () => {});
+  assert.equal(emptied.servers.find((s) => s.name === "alpha").config.toolExposure.delete_repo, "hidden");
+});
+
+test("a server that a chat connected and gave no tool is not named in the hint, and is again once it has been seen", async () => {
+  const db = await import("../dist/db.js");
+  const mute = { command: process.execPath, args: ["/nonexistent/server.mjs"] };
+  putConfig({ mute });
+  db.setToolMarks({});
+  assert.deepEqual(buildLazyHead().lazy, ["mute"], "nothing has been seen of it");
+  db.noteSilentMcpServers(["mute"], []);
+  assert.deepEqual(buildLazyHead().lazy, [], "nothing to search there");
+  assert.equal(buildLazyHead().hint, "");
+  // A chat that gets tools of it makes it seen, and it is no longer silent: so one taken out and brought back is unseen again.
+  const tool = db.remembered({ name: "mcp__mute__x", source: "mute", mcp: "mute", tokens: 50 });
+  db.rememberTools([tool]);
+  db.noteSilentMcpServers(["mute"], [tool]);
+  putConfig({});
+  db.forgetMcpTools(["mute"]);
+  putConfig({ mute });
+  assert.deepEqual(db.unseenMcpServers(), ["mute"]);
+  db.noteSilentMcpServers(["mute"], []);
+  putConfig({});
+  db.forgetMcpTools(["mute"]);
+  putConfig({ mute });
+  assert.deepEqual(db.unseenMcpServers(), ["mute"], "what is forgotten of a server includes its silence");
+});

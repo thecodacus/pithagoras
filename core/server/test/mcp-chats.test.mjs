@@ -144,3 +144,17 @@ test("a server switched off in Settings -> MCP (enabled: false) is not connected
   assert.equal((await send("/api/mcp/servers/notes", "PUT", { entry, from: "notes" })).status, 200);
   assert.equal((await group()).length, 2);
 });
+
+test("a server that does not start gives no tool, and the chats after are not told to search it", async () => {
+  const file = path.join(process.env.PI_CODING_AGENT_DIR, "mcp.json");
+  const config = JSON.parse(readFileSync(file, "utf8"));
+  config.mcpServers.mute = { command: process.execPath, args: ["/nonexistent/server.mjs"] };
+  writeFileSync(file, JSON.stringify(config));
+  await mark({});
+  const unseen = await chat();
+  assert.match(JSON.stringify(unseen.first), /not in your list: mute/, "nothing has been seen of it yet");
+  const next = await chat();
+  assert.doesNotMatch(JSON.stringify(next.first), /mute/, "the chat before it saw none of its tools");
+  delete config.mcpServers.mute;
+  writeFileSync(file, JSON.stringify(config));
+});

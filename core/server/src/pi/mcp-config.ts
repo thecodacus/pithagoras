@@ -56,7 +56,7 @@ export function forChat(config: McpServerConfig): McpServerConfig {
  * of the same name anew, with another command, and its tools would carry the namespace of the user's server, which the guard
  * trusts by name (see serverWords in guard.ts). A project may still override such a server's `enabled`, `exposure` and
  * `toolExposure` (pi's own rule, to turn one off in one project), but not switch on what the person has switched off or
- * hidden: that server would start with the person's own command, environment and headers. A project may bring servers of its
+ * hidden, a tool of it included: that server would start with the person's own command, environment and headers. A project may bring servers of its
  * own, which are nobody's the person has said is theirs.
  *
  * `autoEnableCodemode` is off: whether the code tool is on is a switch of the portal's, and a server's tool a file gives
@@ -75,7 +75,10 @@ export function configForChat(
     const user = own.get(entry.name);
     const redefined = entry.scope === "project" && entry.override === undefined;
     const kept = user && (redefined || (user.config.enabled === false || user.config.exposure === "hidden")) ? user : entry;
-    return { ...kept, config: forChat(kept.config) };
+    // pi's merge of a project's override replaces `toolExposure` whole: a tool the person hid stays hidden.
+    const hidden = Object.entries(user?.config.toolExposure ?? {}).filter(([, how]) => how === "hidden");
+    const config = kept === entry && hidden.length ? { ...entry.config, toolExposure: { ...entry.config.toolExposure, ...Object.fromEntries(hidden) } } : kept.config;
+    return { ...kept, config: forChat(config) };
   });
   onServers(servers);
   return { ...config, servers, autoEnableCodemode: false };

@@ -147,6 +147,22 @@ test("a pasted config adds what is usable, says what it left out, and writes not
   assert.deepEqual(Object.keys(JSON.parse(read(mcpFile)).mcpServers).sort(), ["github", "notes"]);
 });
 
+test("what would send a model provider's key to a server is not written by a form or an import, and pi-mcp-adapter is not installed", async () => {
+  writeFileSync(mcpFile, MCP);
+  const entry = { url: "https://docs.example.test/mcp", auth: { provider: "anthropic" } };
+  refused(await send("/api/mcp/servers/docs", "PUT", { entry }), 400, /auth\.provider/);
+  const imported = await send("/api/mcp/import", "POST", { text: JSON.stringify({ mcpServers: { docs: entry } }) });
+  assert.deepEqual(imported.body.skipped.map((s) => s.name), ["docs"]);
+  assert.match(imported.body.skipped[0].reason, /auth\.provider/);
+  assert.equal(read(mcpFile), MCP, "nothing was written");
+  // By hand it is still there for whoever means it.
+  assert.equal((await send("/api/mcp/raw", "PUT", { content: JSON.stringify({ mcpServers: { docs: entry } }) })).status, 200);
+  for (const spec of ["npm:pi-mcp-adapter", "npm:pi-mcp-adapter@2.18.0", "git:github.com/nicobailon/pi-mcp-adapter"]) {
+    refused(await send("/api/packages", "POST", { spec }), 400, /not used any more/);
+  }
+  assert.deepEqual(runs(), [], "pi was not run for it");
+});
+
 // --- settings.json ---
 
 test("an extension setting is written only under a key that is a name, and the file is as it was", async () => {

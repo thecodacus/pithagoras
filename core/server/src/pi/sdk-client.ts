@@ -27,7 +27,7 @@ import { CONTEXT_FILES, SHARED_FILES } from "./context-files.js";
 import { heartbeatTool } from "./heartbeat-tool.js";
 import { ToolSearch } from "./tool-search.js";
 import { CALLED_TOOL_KEY, TOOL_SEARCH, calledThrough } from "./tool-search-names.js";
-import { MCP_RESOURCES, isResourceTool, mcpNamespace, mcpNamespaceOf } from "./mcp-origin.js";
+import { MCP_RESOURCES, isResourceTool, mcpNamespace, mcpNamespaceOf, serversSwitchedOff } from "./mcp-origin.js";
 import { configForChat, piMcp } from "./mcp-config.js";
 import { NO_LAZY, headLazy, type LazyHead } from "../tool-lazy.js";
 import { askPrimaryTool } from "./ask-primary.js";
@@ -539,6 +539,8 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     let filesOf: (name: string) => readonly string[] | undefined = () => undefined;
     // The namespace pi's MCP support registered a tool under, from its definition once the session has it: see mcp-origin.ts.
     let namespaceOf: (name: string) => string | undefined = () => undefined;
+    // The MCP servers the chat has switched off, by namespace, once the session is there: see serversSwitchedOff.
+    let serversOff: () => ReadonlySet<string> = () => new Set();
     // What a tool declares the guard is to hold it to, from its definition once the session has it: see declaredGuard.
     let guardOf: (name: string) => DeclaredGuard | undefined = () => undefined;
     // The line that outside content is data, while a tool that declares it is on or lazy: asked once the session is there (below).
@@ -580,6 +582,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
             (name) => guardOf(name),
             opts.dialogs !== false,
             (name) => namespaceOf(name),
+            () => serversOff(),
           ) },
         // Offered only while the conversation has a lazy tool: see applyToolsOff.
         { name: "tool-search", factory: search.extension },
@@ -713,6 +716,8 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     filesOf = (name) => declaredFiles(session.getToolDefinition(name));
     guardOf = (name) => declaredGuard(session.getToolDefinition(name));
     namespaceOf = (name) => mcpNamespaceOf(session.getToolDefinition(name));
+    serversOff = () =>
+      serversSwitchedOff(((session.getAllTools?.() ?? []) as { name: string }[]).map((tool) => ({ name: tool.name, definition: session.getToolDefinition(tool.name) })), switchedOff());
 
     const client = new SdkPiClient(session, modelRuntime, () => {});
     client.mcpServers = mcpServers;
