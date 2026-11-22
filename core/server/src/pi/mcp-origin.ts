@@ -6,8 +6,7 @@
  * one, and any extension can register a tool called `mcp_page` or `mcp__x__y`. The three resource tools are shared by every
  * server and name theirs in an argument.
  *
- * Not in use until the portal runs pi's native MCP support (issue 361, PR B): the adapter's tools are attributed by their
- * package and by name (onlyServerOf), and no tool of the portal's carries such a namespace before that.
+ * The portal runs pi's own MCP support (see sdk-client.ts), so every server's tool carries such a namespace.
  *
  * Pure, in a module of its own: the guard and the tests read it, and none of them may wait on the database.
  */
@@ -17,6 +16,9 @@ export const MCP_RESOURCE_TOOLS: readonly string[] = ["list_mcp_resources", "lis
 
 /** Whether this is the name of one of pi's resource tools. */
 export const isResourceTool = (name: string): boolean => MCP_RESOURCE_TOOLS.includes(name);
+
+/** The set the lists file pi's three tools for the servers' resources under, which belong to no one server. */
+export const MCP_RESOURCES = "MCP resources";
 
 /** The namespace pi gives a server's tools: `mcp__<server>`, hyphens as underscores (mcpNamespace in pi's core/mcp-servers). */
 export const mcpNamespace = (server: string): string => `mcp__${server.replace(/-/g, "_")}`;
@@ -35,12 +37,6 @@ export function mcpNamespaceOf(definition: unknown): string | undefined {
  * and an underscore, which pi refuses to connect together, and none where the server is not in the portal's file (one
  * that only a project's own configuration brought, or an extension registered): then it is nobody's the person has said
  * is theirs.
- *
- * A name is all a namespace says, so this holds only while every server pi connects under a name of the portal's file is
- * the one that file defines. pi's own `loadConfig` lets a trusted project's `.pi/mcp.json` define a server of the same
- * name anew, with another command, and its tools would then be taken for the portal's server's. The portal's native MCP
- * runtime (issue 361, PR B) gives pi its own `loadConfig`, which must not let a project define again a server of the
- * portal's file, or must tell the guard where each server came from.
  */
 export function serversOfNamespace(namespace: string, configured: Iterable<string>): string[] {
   return [...configured].filter((server) => mcpNamespace(server) === namespace);

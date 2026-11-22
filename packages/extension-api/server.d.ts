@@ -469,7 +469,7 @@ export interface ModelProvider {
   models: string[];
 }
 
-/** One server of pi's mcp.json, in the shape pi-mcp-adapter reads: `url`, `command` or `socket`, and what else the adapter takes. */
+/** One server of pi's mcp.json, in the shape pi reads: `command` (with `args`, `env`, `cwd`) or `url` (with `headers`), and what else pi takes (`timeout`, `description`, `oauth`, `enabled`). pi's own check is what accepts it. */
 export type McpEntry = Record<string, unknown>;
 
 /** What holds the agent's memory in place of MEMORY.md: see `memory.hold`. */
@@ -730,27 +730,27 @@ export interface ServerPortal {
     list(): ModelProvider[];
   };
   /**
-   * MCP servers, as pi-mcp-adapter makes them the chats' tools: named `<server>_<tool>`, and switched in Settings → MCP
+   * MCP servers, as pi makes them the chats' tools: named `mcp__<server>__<tool>`, and switched in Settings → MCP
    * and Settings → Tools as any other server's are.
    */
   mcp: {
     /**
      * The server of that name in pi's mcp.json, and whether the chats have its tools now (`on`): it is there, not
-     * switched off, and pi-mcp-adapter, which makes its tools, is installed and on. The file is read again only when
-     * it, or pi's settings, changed. Nothing where there is no such server, or the file cannot be read.
+     * switched off (`enabled: false`) and not hidden. Nothing where there is no such server, or the file cannot be read.
      */
     get(name: string): { entry: McpEntry; on: boolean } | undefined;
     /**
      * Writes the server of that name into pi's mcp.json (a file for the portal's user alone), in place of what was
-     * there under that name, or removes it (`undefined`). Writing one installs pi-mcp-adapter where it is not
-     * installed, and switches it on where it is off, which waits for the server halves to follow: not while this
-     * half starts. `trusted`: the person counts what its tools return as their own, not outside content; the name
-     * is added to Settings → Guard's trusted servers, where they can take it out. Removing the server takes the name
-     * out of them again, so a server given that name later is not trusted unasked. Then the open chats are loaded
-     * again, as `chats.reload` does, and what that answers is answered. Rejects while the file cannot be read, which
-     * is the person's to fix in Settings → MCP, and for a name or a server the adapter would not take.
+     * there under that name, or removes it (`undefined`). `trusted`: the person counts what its tools return as their own,
+     * not outside content; the name is added to Settings → Guard's trusted servers, where they can take it out. Removing
+     * the server takes the name out of them again, so a server given that name later is not trusted unasked. `direct`:
+     * its tools are in the model's list from the start, not found through `tool_search` (a server whose tools the agent
+     * has to have at hand, such as its memory); a mark on the server in Settings → Tools, which the person can change,
+     * and which is not set where they have set one. Then the open chats are loaded again, as `chats.reload` does, and what
+     * that answers is answered. Rejects while the file cannot be read, which is the person's to fix in Settings → MCP,
+     * and for a name or an entry pi would not take.
      */
-    set(name: string, entry: McpEntry | undefined, options?: { trusted?: boolean }): Promise<{ reloaded: number; waiting: number }>;
+    set(name: string, entry: McpEntry | undefined, options?: { trusted?: boolean; direct?: boolean }): Promise<{ reloaded: number; waiting: number }>;
   };
   memory: {
     /**

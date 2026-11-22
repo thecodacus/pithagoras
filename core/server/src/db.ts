@@ -3,11 +3,10 @@ import { inTurnWithSettings, piAgentDir, piSetting, readPiSettings, readProjectP
 import { packageIndex, packageKey, packageLabel, sourceOf, toolAvailability } from "./extension-switch.js";
 import { isLocalSource, localPackagePath } from "./features.js";
 import { GUARD_RULE_NAMES } from "./pi/guard-rule-names.js";
-import { BUILT_IN_SET, PI_BUILT_IN_TOOLS, defaultsFor, lazyToolEntry, mcpServerOf, toolEnabled, toolSetOf } from "./tool-policy.js";
+import { BUILT_IN_SET, PI_BUILT_IN_TOOLS, defaultsFor, lazyToolEntry, toolEnabled, toolSetOf } from "./tool-policy.js";
 import { DEFAULT_LIMITS, guessTokens, isLazy, parseMarks, resolveThreshold, type LazyHead, type Limits, type Mark, type Marks, type Resolution, type SizedTool } from "./tool-lazy.js";
 import { projectOf } from "./workspaces.js";
-import { dropMcpCache, mcpAdapter, mcpCachePath, mcpConfigPath, mcpServerNames, mcpWritten, onMcpWritten, readMcpCache, readMcpFile, readableMcpConfig, serversAndBrowsers } from "./api/mcp.js";
-import { mcpCatalogue, mcpDirect, mcpOffer, namingOf, unlisted, type McpOffer } from "./mcp-offer.js";
+import { connectingServers, onMcpWritten, readMcpFile, serversAndBrowsers } from "./api/mcp.js";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, rmdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { isWithinText } from "./within.js";
@@ -719,6 +718,20 @@ function handOffBrowser(d: Database.Database): void {
 }
 
 /**
+ * The MCP server a tool is of, told by its name as pi-mcp-adapter gave it, `<server>_<tool>` with the server's hyphens as
+ * underscores (the longest name wins, or `browser` would claim `browser_staging`'s tools). Written out here, as the upgrade
+ * step below does not change with the code after it: the tools it looks at were named so when it ran.
+ */
+function adapterServerOf(name: string, servers: string[]): string | undefined {
+  let best: string | undefined;
+  for (const server of servers) {
+    const prefix = server.replace(/-/g, "_");
+    if (name.startsWith(`${prefix}_`) && (best === undefined || prefix.length > best.replace(/-/g, "_").length)) best = server;
+  }
+  return best;
+}
+
+/**
  * Who may drive the browser was a switch of its own beside the tools' (`sessions.browser`, `routines.browser`, and
  * the carrying over of it as the portal's browser tools were first seen: `browser_tools_adopted`). It is the tools'
  * switches now, as for any tool: what each routine and chat had is written into its tools, once, as the database is
@@ -736,7 +749,7 @@ function browserGrantsToSwitches(d: Database.Database): void {
   const { servers, browsers } = serversAndBrowsers();
   const seen = new Set(toolsSeenIn(d).flatMap((tool) => (typeof tool?.name === "string" ? [tool.name] : [])));
   const ofBrowser = (name: string) => {
-    const server = mcpServerOf(name, servers);
+    const server = adapterServerOf(name, servers);
     return server !== undefined && browsers.includes(server);
   };
   const browser = clean([...BROWSER_TOOLS, ...[...seen].filter(ofBrowser)]);
@@ -3127,11 +3140,7 @@ export function toolDefaultsForSession(session: Pick<SessionRow, "kind" | "routi
  * pi's, so they go straight to the table rather than widening a type that
  * every launch reads.
  */
-/** Counts the writes to the settings, which hold what the portal remembers of the tools: what a view read before one is not reused after it (mcpView). */
-let settingsWrites = 0;
-
 export function putSetting(key: string, value: string): void {
-  settingsWrites++;
   const db = getDb();
   if (value)
     db.prepare(
@@ -3249,6 +3258,22 @@ export function setToolMarks(marks: Marks): Marks {
   return stored;
 }
 
+/**
+ * An MCP server's tools in the model's list from the start, because the extension that brought it says it must be (`portal.mcp.set` with
+ * `direct`: its memory is no memory the agent has to go looking for): a `direct` mark on the server, where the person has set none.
+ * One they set is theirs, and stays.
+ */
+export function markMcpServerDirect(server: string): void {
+  const marks = toolMarks();
+  if (marks[server] === undefined) setToolMarks({ ...marks, [server]: "direct" });
+}
+
+/** A server that is gone no longer has a mark. */
+export function unmarkMcpServer(server: string): void {
+  const { [server]: _gone, ...rest } = toolMarks();
+  if (_gone !== undefined) setToolMarks(rest);
+}
+
 /** How big the model's list may get before `auto` groups are taken out of it: see tool-lazy.ts. */
 export function lazyLimits(): Limits {
   try {
@@ -3272,26 +3297,19 @@ export function setLazyLimits(limits: unknown): Limits | undefined {
 
 /**
  * Can this tool be marked lazy, and have the portal's `tool_search` tool reach it? Any tool can but pi's own
- * (read, bash, edit and the rest are what a conversation works with at all), the MCP adapter's `mcp`
- * tool, the portal's code mode, a tool that is offered to scripts only, and an MCP server's. An MCP server's tool is lazy too, but not by a mark of the portal's: the
- * adapter has a way of its own to keep a server's tools out of the prompt, through its `mcp` tool, and
- * that is the server's setting "Register tools directly" (see lazyOfServer), the one switch for it. The
- * built-in tools are told by their names: the set they are filed in is the extension's that registers
- * them again, such as the sandbox's.
+ * (read, bash, edit and the rest are what a conversation works with at all), the portal's code mode, and a tool that is
+ * offered to scripts only. An MCP server's tools can: a server is a set like any other, marked as a whole or tool by
+ * tool, and its tools are active and hidden from the model's list as any lazy tool is. The built-in tools are told by
+ * their names: the set they are filed in is the extension's that registers them again, such as the sandbox's.
  */
-export function lazyAllowed(
-  tool: Pick<KnownTool, "name" | "source"> & { package?: string | null; inline?: boolean; cached?: boolean; scriptsOnly?: boolean },
-  servers: string[] = mcpServerNames(),
-): boolean {
+export function lazyAllowed(tool: Pick<KnownTool, "name" | "source"> & { inline?: boolean; scriptsOnly?: boolean }): boolean {
   // Never in what the model is offered, so a mark would keep nothing out of the prompt: it is code mode's description that carries it.
   if (tool.scriptsOnly) return false;
-  if (tool.cached || adapterTool({ source: tool.source, package: tool.package })) return false;
-  if (!noServerOf(tool) && mcpServerOf(tool.name, servers) !== undefined) return false;
   if (PI_BUILT_IN_TOOLS.includes(tool.name)) return false;
   // Code mode is the way to make many calls in one: reached through another tool it would be one more step to it, and the
   // box the lists show it in has no set of its own on the server to mark.
   if (tool.inline && tool.name === CODEMODE_TOOL) return false;
-  return toolSetOf(tool, servers) !== BUILT_IN_SET;
+  return toolSetOf(tool) !== BUILT_IN_SET;
 }
 
 /**
@@ -3302,20 +3320,19 @@ const sizeMayTake = (tool: Pick<KnownTool, "source" | "inline">): boolean => !(t
 
 /** The tools the threshold judges: those the tools lists show, with what each declaration costs, and what may become of it. */
 export function sizedTools(): SizedTool[] {
-  const servers = mcpServerNames();
   const off = new Set(toolDefaultsOff());
   const known = new Map(knownTools().map((t) => [t.name, t]));
   return shownTools().map((tool) => {
     const was = known.get(tool.name);
-    const described = { ...tool, package: was?.package, inline: tool.inline === true };
+    const described = { ...tool, inline: tool.inline === true };
     return {
       name: tool.name,
-      set: toolSetOf(tool, servers),
+      set: toolSetOf(tool),
       tokens: was?.tokens ?? guessTokens(tool.name, tool.description),
-      allowed: lazyAllowed(described, servers),
+      allowed: lazyAllowed(described),
       auto: sizeMayTake(described),
-      // Not in the model's list: off by default, offered to scripts only, or an MCP server's tool the adapter keeps behind `mcp`.
-      counted: !off.has(tool.name) && !tool.scriptsOnly && !tool.cached,
+      // Not in the model's list: off by default or offered to scripts only.
+      counted: !off.has(tool.name) && !tool.scriptsOnly,
     };
   });
 }
@@ -3395,8 +3412,7 @@ export function dismissLazyNotice(): void {
 }
 
 /** A mark on a tool or on its set that a mark of the other kind overrides: see markOf. */
-const marksTool = (mark: string, tool: Pick<KnownTool, "name" | "source">, servers: string[]): boolean =>
-  mark === lazyToolEntry(tool.name) || mark === toolSetOf(tool, servers);
+const marksTool = (mark: string, tool: Pick<KnownTool, "name" | "source">): boolean => mark === lazyToolEntry(tool.name) || mark === toolSetOf(tool);
 
 /** The names of the tools the portal has seen that are lazy now, by their marks or by the threshold, and may be. */
 export function lazyToolNames(): Set<string> {
@@ -3406,41 +3422,32 @@ export function lazyToolNames(): Set<string> {
 }
 
 /**
- * How a list of tools says which are lazy: not offered to the model one by one. Those the portal's `tool_search`
- * tool reaches are the ones marked or taken out by the threshold (lazyToolNames). An MCP server's tool is lazy when the
- * adapter leaves it to its `mcp` tool, which is the server's setting "Register tools directly" turned off, and not by any
- * mark: `mcp` names that server, for the page to say where the one switch for it is.
+ * How a list of tools says which are lazy: not offered to the model one by one, but found through the portal's `tool_search`
+ * tool. Those it reaches are the ones marked or taken out by the threshold (lazyToolNames), an MCP server's among them.
  */
-export function lazyMarks(view: McpView = mcpView()): (tool: Pick<KnownTool, "name" | "source" | "package"> & { inline?: boolean; scriptsOnly?: boolean; cached?: boolean }) => { lazy?: true; mark?: Mark; auto?: true; mcp?: string } {
+export function lazyMarks(): (tool: Pick<KnownTool, "name" | "source"> & { inline?: boolean; scriptsOnly?: boolean }) => { lazy?: true; mark?: Mark; auto?: true } {
   const portal = lazyToolNames();
   const marks = toolMarks();
-  const servers = mcpServerNames();
   return (tool) => {
-    const direct = view.direct(tool);
-    if (direct === undefined) {
-      // pi's own tools and the portal's code mode have no mark to give: they are always in the list.
-      if (!lazyAllowed(tool, servers)) return {};
-      const mark = marks[lazyToolEntry(tool.name)] ?? marks[toolSetOf(tool, servers)];
-      return { ...(portal.has(tool.name) ? { lazy: true as const } : {}), ...(mark ? { mark } : { auto: true as const }) };
-    }
-    const server = mcpServerOf(tool.name, view.servers);
-    return { ...(direct ? {} : { lazy: true as const }), ...(server !== undefined ? { mcp: server } : {}) };
+    // pi's own tools and the portal's code mode have no mark to give: they are always in the list.
+    if (!lazyAllowed(tool)) return {};
+    const mark = marks[lazyToolEntry(tool.name)] ?? marks[toolSetOf(tool)];
+    return { ...(portal.has(tool.name) ? { lazy: true as const } : {}), ...(mark ? { mark } : { auto: true as const }) };
   };
 }
 
 /**
- * Of these marks, the entries that say `lazy` and cannot be: a set or a tool of an MCP server or of pi's own. Judged
- * by the tools the portal has seen of it; before it has seen one, by the name of the set. Any other mark is
- * let through, as it holds for the tools that turn up.
+ * Of these marks, the entries that say `lazy` and cannot be: a set or a tool of pi's own. Judged by the tools the portal
+ * has seen of it; before it has seen one, by the name of the set. Any other mark is let through, as it holds for the tools
+ * that turn up.
  */
 export function lazyRefused(marks: Marks): string[] {
-  const servers = mcpServerNames();
   const tools = knownTools();
   return Object.keys(marks).filter((mark) => {
     if (marks[mark] !== "lazy") return false;
-    const named = tools.filter((tool) => marksTool(mark, tool, servers));
-    if (named.length) return named.every((tool) => !lazyAllowed(tool, servers));
-    return mark === BUILT_IN_SET || servers.includes(mark) || PI_BUILT_IN_TOOLS.some((name) => mark === lazyToolEntry(name));
+    const named = tools.filter((tool) => marksTool(mark, tool));
+    if (named.length) return named.every((tool) => !lazyAllowed(tool));
+    return mark === BUILT_IN_SET || PI_BUILT_IN_TOOLS.some((name) => mark === lazyToolEntry(name));
   });
 }
 
@@ -3451,12 +3458,11 @@ export function lazyRefused(marks: Marks): string[] {
 export function lazySetLabels(names: Iterable<string>): { label: string; tools: string[] }[] {
   const wanted = new Set(names);
   if (!wanted.size) return [];
-  const servers = mcpServerNames();
   const given = toolGroupNames();
   const groups = new Map<string, string[]>();
   for (const tool of knownTools()) {
     if (!wanted.has(tool.name)) continue;
-    const set = toolSetOf(tool, servers);
+    const set = toolSetOf(tool);
     const label = given[set] ?? set;
     groups.set(label, [...(groups.get(label) ?? []), tool.name]);
   }
@@ -3509,6 +3515,12 @@ export interface KnownTool {
    */
   package?: string | null;
   /**
+   * The MCP server that brought it, by the name it is configured under: the set it is filed under (`source`) is the same.
+   * What a chat last saw of a server's tools is what is remembered of them (rememberTools): a count and a size for the
+   * threshold, and the names to switch.
+   */
+  mcp?: string;
+  /**
    * Registered by one of the portal's own inline extensions, which nothing of anyone's can be mistaken for.
    * Every report says it, one way or the other; absent only in an entry remembered before this was recorded.
    */
@@ -3536,11 +3548,12 @@ export function approvalFilesOf(toolName: string): string[] | undefined {
 }
 
 /** A tool a session reported, as it is remembered. */
-export const remembered = (t: { name: string; source: string; description?: string; package?: string; inline?: true; scriptsOnly?: true; offByDefault?: true; approvalFiles?: string[]; tokens?: number; outside?: true; voice?: string[] }): KnownTool => ({
+export const remembered = (t: { name: string; source: string; description?: string; package?: string; mcp?: string; inline?: true; scriptsOnly?: true; offByDefault?: true; approvalFiles?: string[]; tokens?: number; outside?: true; voice?: string[] }): KnownTool => ({
   name: t.name,
   source: t.source,
   description: t.description,
   package: t.package ?? null,
+  ...(t.mcp !== undefined ? { mcp: t.mcp } : {}),
   inline: t.inline === true,
   ...(t.scriptsOnly ? { scriptsOnly: true } : {}),
   ...(t.offByDefault ? { offByDefault: true } : {}),
@@ -3602,6 +3615,7 @@ export function knownTools(): KnownTool[] {
         source: String(t.source ?? ""),
         ...(typeof t.description === "string" && t.description ? { description: t.description } : {}),
         ...(typeof t.package === "string" && t.package ? { package: t.package } : t.package === null ? { package: null } : {}),
+        ...(typeof t.mcp === "string" && t.mcp ? { mcp: t.mcp } : {}),
         ...(typeof t.inline === "boolean" ? { inline: t.inline } : {}),
         ...(t.scriptsOnly === true ? { scriptsOnly: true } : {}),
         ...(Array.isArray(t.approvalFiles) && t.approvalFiles.length && t.approvalFiles.every((n: unknown) => typeof n === "string") ? { approvalFiles: t.approvalFiles as string[] } : {}),
@@ -3641,17 +3655,13 @@ export function setServerHalvesAsked(read: typeof serverHalvesAsked): void {
   serverHalvesAsked = read;
 }
 
-export function shownTools(folder?: string, view: McpView = mcpView()): (Omit<KnownTool, "package" | "inline"> & { inline?: true; cached?: true })[] {
+export function shownTools(folder?: string): (Omit<KnownTool, "package" | "inline"> & { inline?: true })[] {
   const user = readPiSettings().packages;
   const project = folder ? readProjectPiSettings(folder).packages : undefined;
-  // An MCP server's tool that the adapter's configuration no longer registers
-  // is not there to be switched: listing it was the list saying otherwise.
-  const { offers } = view;
-  const catalogue = mcpCatalogueIn(view, user, project);
-  const known = [...view.known().values()];
-  // Every MCP server's tools, from the adapter's cache, whether a chat has had them one by one or not: a server is a
-  // group like any other, whole or tool by tool. A tool a chat reported is listed as it reported it.
-  const seen = new Set(known.map((t) => t.name));
+  // An MCP server's tool is listed while its server is in the file and pi connects it: the file is what there is to switch.
+  // Where the file cannot be read nothing is judged, as a typo in it must not hide a tool.
+  const connecting = connectingServers();
+  const served = (tool: KnownTool) => tool.mcp === undefined || connecting === undefined || connecting.has(tool.mcp);
   // A server half that says what its pi extension registers now (portal.tools.offer): of its tools that are remembered,
   // only those are listed, and those are listed before a chat has reported them. Its tools are known by its name, which
   // the portal files them under as an inline extension's.
@@ -3664,20 +3674,14 @@ export function shownTools(folder?: string, view: McpView = mcpView()): (Omit<Kn
   // judged: hiding a tool on a guess is worse than showing a dead one.
   const asked = serverHalvesAsked();
   const halfOn = (tool: KnownTool) => !asked || tool.inline !== true || INLINE_EXTENSIONS.includes(tool.source) || asked.has(tool.source);
-  const remembered = [...known, ...catalogue.filter((t) => !seen.has(t.name))].filter(toolAvailability(user, project)).filter(halfOn).filter(offered);
+  const remembered = knownTools().filter(served).filter(toolAvailability(user, project)).filter(halfOn).filter(offered);
   const listed = new Set(remembered.map((t) => t.name));
   const fromHalves: KnownTool[] = [...halves].flatMap(([source, tools]) =>
     tools.filter((t) => !listed.has(t.name)).map((t) => ({ name: t.name, source, package: null, inline: true, ...(t.description ? { description: t.description } : {}) })),
   );
-  return [...remembered, ...fromHalves].flatMap((known) => {
-    const offer = offers(known);
-    if (unlisted(offer)) return [];
+  return [...remembered, ...fromHalves].map((known) => {
     const { package: _package, inline, ...tool } = known;
-    return [{
-      ...tool,
-      ...(inline ? { inline: true as const } : {}),
-      ...(offer === "cached" ? { cached: true as const } : {}),
-    }];
+    return { ...tool, ...(inline ? { inline: true as const } : {}) };
   });
 }
 
@@ -3696,16 +3700,15 @@ function listedPackages(): Set<string> | undefined {
  * filed under. The defaults somebody set are kept, as for any tool that is not
  * loaded.
  *
- * An MCP server's tools are kept although the adapter registers them: the
- * server is configured apart from the package and comes back with it.
+ * An MCP server's tools are kept: the server is configured apart from any package.
  */
 export function forgetPackageTools(spec: string): void {
   const listed = listedPackages();
   const key = packageKey(spec);
   const label = packageLabel(spec);
-  const servers = mcpServerNames();
   const gone = (t: KnownTool) => {
-    if (mcpServerOf(t.name, servers) !== undefined) return false;
+    // A server's tools are its server's, configured apart from any package.
+    if (t.mcp !== undefined) return false;
     if (typeof t.package === "string") return listed ? !listed.has(packageKey(t.package)) : packageKey(t.package) === key;
     // A guess, for a folder or a repository especially; one that guesses wrong
     // costs a loaded tool its entry only until the next chat reports it.
@@ -3717,300 +3720,33 @@ export function forgetPackageTools(spec: string): void {
 }
 
 /**
- * An MCP server was removed from the configuration: its tools are not
- * remembered any more, and the adapter's cache of them goes too, or the tools
- * would be listed under it for ever.
- *
- * `before` is the servers as they were, because a tool is told to a server by
- * its name (`browser_staging_click` is not the tool of `browser`) and that
- * needs the longer name to still be there; `after` is what is left. The
- * adapter's own tools and those of the portal's inline extensions are the ones
- * a server's name can claim without being its, and they stay. The defaults and
- * exceptions somebody set for the tools are kept, as for any tool that is not
+ * MCP servers were taken out of the configuration: their tools are not remembered any more, or they would be listed
+ * under them for ever. The defaults and exceptions somebody set for the tools are kept, as for any tool that is not
  * loaded: a server that comes back gets them back.
  */
-export function mcpServersRemoved(before: string[], after: string[]): void {
-  const removed = before.filter((name) => !after.includes(name));
-  // Remembered, so a chat that still has the server loaded cannot bring its tools back (see `rememberTools`).
-  // A server that is configured again is not one that was removed.
-  setRemovedMcpServers([...removedMcpServers(), ...removed].filter((name) => !after.includes(name)));
+export function forgetMcpTools(removed: readonly string[]): void {
   if (!removed.length) return;
   const all = knownTools();
-  const kept = all.filter((t) => {
-    // A server's name is also the start of other tools' names: `web` and pi-web-access's `web_search`.
-    if (!adapterTool(t) || noServerOf(t)) return true;
-    const server = mcpServerOf(t.name, before);
-    return server === undefined || !removed.includes(server);
-  });
+  const kept = all.filter((t) => t.mcp === undefined || !removed.includes(t.mcp));
   if (kept.length !== all.length) putSetting("tools_seen", JSON.stringify(kept));
-  dropMcpCache(removed);
 }
 
-/** The servers the portal has removed and that are not configured again, by name as they were configured. */
-function removedMcpServers(): string[] {
-  try {
-    const parsed = JSON.parse(getSetting("mcp_removed") ?? "[]");
-    return Array.isArray(parsed) ? parsed.filter((n): n is string => typeof n === "string") : [];
-  } catch {
-    return [];
-  }
-}
-
-function setRemovedMcpServers(names: string[]): void {
-  const unique = [...new Set(names)].sort();
-  if (JSON.stringify(unique) !== JSON.stringify(removedMcpServers())) putSetting("mcp_removed", JSON.stringify(unique));
-}
-
-/**
- * The servers of the portal's mcp.json as the portal last saw them, by name:
- * what an edit made outside the portal is judged against (noticeMcpEdits).
- * Kept in the settings, so one made while the portal was not running is
- * noticed when it starts again. Undefined until the portal first looks at the
- * file, which on an install from before this was kept is after whatever was
- * taken out of it by hand until then.
- */
-function configuredMcpServers(): string[] | undefined {
-  const value = getSetting("mcp_configured");
-  if (value === undefined) return undefined;
-  try {
-    const parsed = JSON.parse(value);
-    return Array.isArray(parsed) ? parsed.filter((n): n is string => typeof n === "string") : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function setConfiguredMcpServers(names: string[]): void {
-  const unique = [...new Set(names)].sort();
-  if (JSON.stringify(unique) !== JSON.stringify(configuredMcpServers())) putSetting("mcp_configured", JSON.stringify(unique));
-}
-
-const ADAPTER_LABEL = "pi-mcp-adapter";
-
-/**
- * The tools that are no server's, though a server's name can start theirs: the adapter's own, by their names, and
- * every tool the portal's inline extensions register (its own, and each server half's under its package's name),
- * which no MCP server brings. Told by what is known of the tool, not by a list of names: a package's `browser_open`
- * is not the tool of a server called `browser`.
- */
-const noServerOf = (tool: { name: string; inline?: boolean }): boolean =>
-  tool.inline === true || tool.name === "mcp" || tool.name === "mcp_script" || tool.name === "mcpScript";
-
-/** Does the MCP adapter register this tool? By its package where it is recorded, by the label it is filed under where it is not. */
-export function adapterTool(t: Pick<KnownTool, "source" | "package">): boolean {
-  return typeof t.package === "string" ? packageLabel(t.package) === ADAPTER_LABEL : t.source === ADAPTER_LABEL;
-}
-
-/**
- * The MCP adapter's configuration and cache as they stand now, read once for a
- * pass over a list or over every running chat (see mcp-offer.ts):
- * - `offers`: what the adapter does with each tool, undefined for a tool that
- *   is not a server's;
- * - `catalogue`: every tool of the servers the configuration has on, from the
- *   cache, as the portal remembers a tool: filed under the adapter's package,
- *   which brings them, so they go with it when it is switched off;
- * - `serverTool`: whether a name is a tool the adapter reaches on a server now,
- *   which is what an MCP script could call;
- * - `servers` and `gone`: the servers configured, and those the portal removed
- *   that are not configured again.
- *
- * A configuration that cannot be read is taken as it last could be: the panel
- * offers the file to be fixed, and a typo in it must neither withdraw a tool
- * nor hand back one that was withdrawn — a running chat is told its tools
- * again on any change of a default, and would otherwise get them back.
- */
-export interface McpView {
-  offers: (tool: Pick<KnownTool, "name" | "source" | "package">) => McpOffer | undefined;
-  /** Whether the adapter registers the tool one by one (`directTools`) and not through its `mcp` tool; undefined for a tool that is not a server's. */
-  direct: (tool: Pick<KnownTool, "name" | "source" | "package">) => boolean | undefined;
-  /** Filed under the adapter by its label; `mcpCatalogueIn` files them under its package where a chat would load it. */
-  catalogue: KnownTool[];
-  serverTool: (name: string) => boolean;
-  servers: string[];
-  /** The naming the adapter gives each configured server's tools (`toolPrefix`, see mcpPrefixAs). */
-  naming: (server: string) => string;
-  gone: string[];
-  /** What the portal remembers of every tool, read when first asked for. */
-  known: () => Map<string, KnownTool>;
-}
-
-/** Which file this is now: the adapter and the portal both put theirs in place by renaming, which makes a new one. */
-function fileStamp(file: string): string {
-  try {
-    const s = statSync(file);
-    return `${s.ino}:${s.mtimeMs}:${s.size}`;
-  } catch {
-    return "-";
-  }
-}
-
-/** The mcp.json that was last compared with the servers the portal last saw in it, by fileStamp. */
-let noticedMcpFile: string | undefined;
-
-/**
- * An edit made to the portal's mcp.json outside the portal — by hand, by a
- * script — taken in as a write of its own: the listeners are told
- * (onMcpWritten), with the servers the portal last saw in the file as the ones
- * it had before. A server the edit took out is removed as one taken out
- * through the panel is (its tools forgotten, its cache entry dropped, and it
- * recorded: see mcpServersRemoved), and a chat still running with it has its
- * tools off.
- * Asked for before the tools are listed or a chat's are worked out (mcpView),
- * and as the portal starts, so an edit made while it was not running is
- * noticed then. The file is read again only when it changed, and the
- * listeners are told only when its servers did.
- *
- * Only the servers of this file are judged: the adapter also loads some from a
- * project's own files, from `~/.config/mcp/mcp.json` and from what a file
- * imports, which are in no file the portal writes. Their tools are left as
- * they are, except where one of them has the name of a server taken out of
- * this file, or a name that starts with it and an underscore: its tools are
- * then taken for that server's, as for a removal through the panel. The first
- * time there is nothing to compare with, the servers there are now are
- * remembered and nothing is judged: a tool that a server taken out before then
- * left behind cannot be told from one of a project's own servers.
- * A file that cannot be read takes nothing out, as a typo in it withdraws
- * nothing (readableMcpConfig): it is compared again once it can be read. Nor
- * does one that is not there, as for a moment while an editor or a script puts
- * a new one in its place (`mv mcp.json mcp.json.bak` and then a new one
- * written): the file that is there next is compared with the servers last
- * seen, and a write of the portal's is judged against them too (onMcpWritten).
- */
-export function noticeMcpEdits(): void {
-  const stamp = fileStamp(mcpConfigPath());
-  if (stamp === noticedMcpFile) return;
-  // Before the listeners are told: what they do lists the tools again (mcpView), which must not compare the file again.
-  noticedMcpFile = stamp;
-  // Not there: fileStamp has "-" for a file it cannot look at.
-  if (stamp === "-") return;
-  const { config, error } = readMcpFile();
-  if (error) return;
-  const now = Object.keys(config.mcpServers);
-  const seen = configuredMcpServers();
-  if (seen === undefined) {
-    setConfiguredMcpServers(now);
-    return;
-  }
-  if (seen.length !== now.length || seen.some((name) => !now.includes(name))) mcpWritten(seen);
-}
-
-let lastView: { stamp: string; view: McpView } | undefined;
-
-/**
- * Asked for on every call of the `mcp` tools (pi/guard.ts) and for every list,
- * so kept until one of the files it reads, or the settings, are written.
- */
-export function mcpView(): McpView {
-  // An edit made outside the portal first: taking it in forgets tools and writes the cache, and the view is of what is left.
-  noticeMcpEdits();
-  const stamp = `${fileStamp(mcpConfigPath())}|${fileStamp(mcpCachePath())}|${settingsWrites}`;
-  if (lastView?.stamp === stamp) return lastView.view;
-  const view = readMcpView();
-  lastView = { stamp, view };
-  return view;
-}
-
-function readMcpView(): McpView {
-  const config = readableMcpConfig();
-  let known: Map<string, KnownTool> | undefined;
-  const knownNow = () => (known ??= new Map(knownTools().map((t) => [t.name, t])));
-  if (!config) {
-    return { offers: () => undefined, direct: () => undefined, catalogue: [], serverTool: () => false, servers: [], naming: () => "server", gone: [], known: knownNow };
-  }
-  const cache = readMcpCache();
-  const offer = mcpOffer(config, cache);
-  const catalogue: KnownTool[] = mcpCatalogue(config, cache).map((t) => ({
-    name: t.name,
-    source: ADAPTER_LABEL,
-    ...(t.description ? { description: t.description } : {}),
-  }));
-  const offers = (tool: Pick<KnownTool, "name" | "source" | "package">) =>
-    adapterTool(tool) && !noServerOf(tool) ? offer(tool.name) : undefined;
-  const directly = mcpDirect(config, cache);
-  const direct = (tool: Pick<KnownTool, "name" | "source" | "package">) =>
-    adapterTool(tool) && !noServerOf(tool) ? directly(tool.name) : undefined;
-  let reachable: Set<string> | undefined;
-  const serverTool = (name: string) => {
-    if (!reachable) {
-      reachable = new Set(catalogue.map((t) => t.name));
-      for (const tool of knownNow().values()) {
-        const state = offers(tool);
-        if (state !== undefined && state !== "withdrawn") reachable.add(tool.name);
-      }
-    }
-    return reachable.has(name);
-  };
-  const servers = Object.keys(config.mcpServers ?? {});
-  const gone = removedMcpServers().filter((name) => !servers.includes(name));
-  return { offers, direct, catalogue, serverTool, servers, naming: (server: string) => namingOf(config, server), gone, known: knownNow };
-}
-
-/**
- * The servers' tools from the adapter's cache as a chat in this folder would
- * have them: filed under the adapter's package as pi's settings list it (the
- * user's, or the folder's project's), so a package switched off takes them
- * with it whatever it was installed from. None where the adapter is in
- * neither: nothing would register them.
- */
-function mcpCatalogueIn(view: McpView, packages: unknown, projectPackages: unknown): KnownTool[] {
-  if (!view.catalogue.length) return [];
-  const adapter = mcpAdapter(packages) ?? mcpAdapter(projectPackages);
-  if (!adapter) return [];
-  return view.catalogue.map((t) => ({ ...t, package: adapter.source }));
-}
-
-// A server taken out of the file, whoever wrote it, takes its tools with it. Judged against the servers the file had
-// and those the portal last saw in it: an edit made outside the portal that has not been noticed yet (noticeMcpEdits)
-// may have taken one out, and a write of the portal's right after it must not make that one forgotten unjudged.
+// A server taken out of the file, whoever wrote it, takes its tools with it.
 onMcpWritten((before) => {
-  const after = Object.keys(readableMcpConfig()?.mcpServers ?? {});
-  const was = [...new Set([...(configuredMcpServers() ?? []), ...before])];
-  setConfiguredMcpServers(after);
-  if (was.some((name) => !after.includes(name)) || after.some((name) => !was.includes(name))) mcpServersRemoved(was, after);
+  const after = Object.keys(readMcpFile().config.mcpServers);
+  forgetMcpTools(before.filter((name) => !after.includes(name)));
 });
 
 /**
- * The tools of these, as a chat reported them, and of those the portal
- * remembers, that the MCP adapter no longer registers, by name: what a chat's
- * pi is told to have off on top of its switches, so that one still holding
- * such a tool from before the configuration changed cannot use it. Told by
- * what the portal remembers of each, which is what says it is the adapter's;
- * a name it has never seen is not judged — unless a server the portal removed
- * claims it and the chat's report does not make it one of no server's
- * (noServerOf): removing a server forgets its tools, and a chat still running
- * with it would otherwise go on using the tools of a server that is gone,
- * where one merely switched off would have them off.
+ * The MCP servers that are configured and that no tool of is known yet: nothing of them has been seen, so what they
+ * cost the model's list is not known, and a server counts as lazy until it has been (see buildLazyHead). In the order of
+ * the file; none where the file cannot be read.
  */
-export function withdrawnMcpTools(reported: Iterable<{ name: string; inline?: boolean }> = [], view: McpView = mcpView()): string[] {
-  const known = view.known();
-  const { servers, gone } = view;
-  const asReported = new Map<string, { name: string; inline?: boolean }>();
-  for (const tool of reported) if (!asReported.has(tool.name)) asReported.set(tool.name, tool);
-  const withdrawn = new Set<string>();
-  for (const name of new Set([...asReported.keys(), ...known.keys()])) {
-    const tool = known.get(name);
-    if (tool) {
-      if (view.offers(tool) === "withdrawn") withdrawn.add(name);
-    } else if (gone.length && !noServerOf(asReported.get(name) ?? { name }) && gone.includes(mcpServerOf(name, [...servers, ...gone]) ?? "")) {
-      withdrawn.add(name);
-    }
-  }
-  return [...withdrawn].sort();
-}
-
-/**
- * The servers' tools from the adapter's cache that a chat in this folder would
- * have with its packages, each marked where it is listed from the cache: what a
- * running chat's list adds to what it registered one by one.
- */
-export function mcpCatalogueFor(folder: string | undefined, view: McpView): (Omit<KnownTool, "package" | "inline"> & { cached?: true })[] {
-  if (!view.catalogue.length) return [];
-  const user = readPiSettings().packages;
-  const project = folder ? readProjectPiSettings(folder).packages : undefined;
-  const available = toolAvailability(user, project);
-  return mcpCatalogueIn(view, user, project)
-    .filter(available)
-    .map(({ package: _package, ...tool }) => ({ ...tool, ...(view.offers(tool) === "cached" ? { cached: true as const } : {}) }));
+export function unseenMcpServers(): string[] {
+  const connecting = connectingServers();
+  if (!connecting) return [];
+  const seen = new Set(knownTools().flatMap((t) => (t.mcp !== undefined ? [t.mcp] : [])));
+  return [...connecting].filter((server) => !seen.has(server));
 }
 
 /**
@@ -4050,26 +3786,21 @@ export function rememberTools(reported: KnownTool[]): string[] {
   // would write its tools straight back; a package no longer listed is not
   // remembered. One switched off still is, for when it comes back.
   const listed = listedPackages();
-  // Likewise a chat that is still running with an MCP server that the portal has
-  // since removed: its tools are the adapter's, and would be written straight back.
-  // Only the servers the portal removed count: the adapter also loads some from
-  // a project's own files, which are not in the portal's mcp.json and are no
-  // removed server's. The adapter's own tools and those of the portal's inline
-  // extensions are no server's.
-  const configured = readMcpFile();
-  const gone = removedMcpServers().filter((name) => !Object.hasOwn(configured.config.mcpServers, name));
-  const noServer = (t: KnownTool) =>
-    gone.length > 0 &&
-    !configured.error &&
-    adapterTool(t) &&
-    !noServerOf(t) &&
-    // Told apart from the configured servers too: `notes` removed leaves `notes_staging_read` to the server that is still there.
-    gone.includes(mcpServerOf(t.name, [...Object.keys(configured.config.mcpServers), ...gone]) ?? "");
+  // An MCP server's tools are remembered while the server is in the portal's own mcp.json and pi connects it: a chat that
+  // is still running with a server that has been taken out of it would write its tools straight back. The servers a
+  // project's own `.pi/mcp.json` brings are in no file of the portal's: those tools are listed in the chats that have them.
+  const connecting = connectingServers();
   const tools = reported.filter(
-    (t) => (typeof t.package !== "string" || !listed || listed.has(packageKey(t.package))) && !noServer(t),
+    (t) => (typeof t.package !== "string" || !listed || listed.has(packageKey(t.package))) && (t.mcp === undefined || connecting === undefined || connecting.has(t.mcp)),
   );
   if (!tools.length) return [];
   const merged = new Map(knownTools().map((t) => [t.name, t]));
+  // What a chat last saw of an MCP server is what the portal remembers of it, not what it ever offered: a tool the server
+  // dropped leaves the lists, and the count and size of the server's tools (what the threshold goes by) are its present ones.
+  const reportedNames = new Set(tools.map((t) => t.name));
+  for (const server of new Set(tools.flatMap((t) => (t.mcp !== undefined ? [t.mcp] : [])))) {
+    for (const [name, known] of merged) if (known.mcp === server && !reportedNames.has(name)) merged.delete(name);
+  }
   const fresh = tools.map((t) => t.name).filter((name) => !merged.has(name));
   for (const tool of tools) {
     const before = merged.get(tool.name);
@@ -4089,6 +3820,7 @@ export function rememberTools(reported: KnownTool[]): string[] {
       source: tool.source,
       ...(description ? { description } : {}),
       ...(pkg !== undefined ? { package: pkg } : {}),
+      ...(tool.mcp !== undefined ? { mcp: tool.mcp } : {}),
       ...(tool.inline !== undefined ? { inline: tool.inline } : {}),
       ...(tool.scriptsOnly ? { scriptsOnly: true } : {}),
       // As its latest report says: a tool that stopped declaring its files is approved whole again.

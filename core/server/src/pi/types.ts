@@ -32,7 +32,7 @@ export interface PiStats {
 export interface PiTool {
   name: string;
   description?: string;
-  /** The package or file that registered it, for grouping. */
+  /** The package, file or MCP server that registered it, for grouping. */
   source: string;
   /** The entry in pi's settings that brought it, where a package of the user's did. */
   package?: string;
@@ -40,8 +40,8 @@ export interface PiTool {
   inline?: true;
   /** Offered to scripts only (pi's `codemode` and `deferred` exposure): never in what the model is offered, so it has no lazy mark to give. */
   scriptsOnly?: true;
-  /** An MCP server's tool listed from the adapter's cache, its server not started until the tool is first used. */
-  cached?: true;
+  /** The MCP server that brought it, by the name it is configured under: `source` is the same. */
+  mcp?: string;
   /** Registered with `offByDefault: true`: off in every chat until somebody switches it on. */
   offByDefault?: true;
   /** The parameters that hold the files it is approved for, as its definition declares them (see declaredFiles in guard.ts). */

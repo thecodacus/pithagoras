@@ -9,7 +9,7 @@ import semver from "semver";
 import express, { type NextFunction, type Request, type RequestHandler, type Response, type Router } from "express";
 import { agentOf, defaultAgent, listAgents } from "./agents.js";
 import { dataDirOf } from "./extension-data.js";
-import { childSessions, getSession, getSetting, listSessions, putSetting, recordAudit, sessionsByWorkspace, setServerHalfOffers, setServerHalvesAsked, setTrustedMcpServers, toolExceptions, trustedMcpServers, untrustMcpServer, type SessionRow } from "./db.js";
+import { childSessions, getSession, getSetting, listSessions, putSetting, recordAudit, sessionsByWorkspace, setServerHalfOffers, setServerHalvesAsked, markMcpServerDirect, unmarkMcpServer, setTrustedMcpServers, toolExceptions, trustedMcpServers, untrustMcpServer, type SessionRow } from "./db.js";
 import { EXECUTOR_KIND } from "./executor-kind.js";
 import { takes, type ServerHalf } from "./extension-ui.js";
 import { moduleAt } from "./half-modules.js";
@@ -695,8 +695,14 @@ function portalFor(ext: Running): ServerPortal {
           // Counted as the person's own on the extension's word, and no longer once the server is gone: Settings → Guard
           // lists only the servers there are, so a name left trusted could not be taken out, and would trust whatever
           // server is given that name next.
-          if (entry === undefined) untrustMcpServer(server);
-          else if (options.trusted === true) setTrustedMcpServers([...trustedMcpServers(), server]);
+          if (entry === undefined) {
+            untrustMcpServer(server);
+            // Nor does a server given that name later start with its mark: it is another server's.
+            unmarkMcpServer(server);
+          } else {
+            if (options.trusted === true) setTrustedMcpServers([...trustedMcpServers(), server]);
+            if (options.direct === true) markMcpServerDirect(server);
+          }
           return reloadChats();
         }),
     },

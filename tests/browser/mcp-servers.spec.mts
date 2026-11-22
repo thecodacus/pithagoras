@@ -5,10 +5,10 @@ import { test, expect, mockPortal } from './portal-mock';
 async function portal(page: Page) {
   const saves: string[] = [];
   const mcp = {
-    path: '/a/mcp.json', exists: true, adapterInstalled: true, adapterSpec: 'npm:pi-mcp-adapter', settings: {}, raw: '{}', parseError: null,
+    path: '/a/mcp.json', exists: true, raw: '{}', parseError: null,
     servers: [
-      { name: 'github', entry: { url: 'https://mcp.example.test', auth: 'oauth', headers: { 'X-Org': 'a' } }, transport: 'http', disabled: false },
-      { name: 'notes', entry: { command: 'notes-mcp' }, transport: 'stdio', disabled: false },
+      { name: 'github', entry: { url: 'https://mcp.example.test', auth: 'oauth', headers: { 'X-Org': 'a' } }, transport: 'http', enabled: true, problem: null },
+      { name: 'notes', entry: { command: 'notes-mcp' }, transport: 'stdio', enabled: true, problem: null },
     ],
   };
   await mockPortal(page, ({ path, method, json }) => {

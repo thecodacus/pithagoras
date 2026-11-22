@@ -15,7 +15,7 @@ import { IMAGE, VOLUME, envOf, serveUnderstory } from "./portal.mts";
  */
 
 inProcessHome("pithagoras-understory-routes-");
-const { at, api, docker, machine, scripts, db, adapterOn, servers, putServers, agentDir, host, halves } = await serveUnderstory();
+const { at, api, docker, machine, scripts, db, servers, putServers, agentDir, host, halves } = await serveUnderstory();
 const service = await import("../src/server/service.ts");
 const store = await import("../src/server/store.ts");
 const { understoryEntry } = await import("../src/server/entry.ts");
@@ -29,8 +29,6 @@ const state = async () => (await call("GET", "/state")).body;
 const trusted = () => [...db.trustedMcpServers()];
 const MANAGED = `http://127.0.0.1:${process.env.UNDERSTORY_PORT}/mcp`;
 
-// The adapter its tools come through is there: switching Understory on installs nothing.
-adapterOn();
 putServers({});
 
 test("without Docker the page is told so, and what it is told otherwise of the memory", async () => {
@@ -42,20 +40,20 @@ test("without Docker the page is told so, and what it is told otherwise of the m
     assert.deepEqual([now.managed.available, now.managed.image, now.managed.container], [false, false, "absent"]);
     assert.deepEqual([now.managed.url, now.managed.autoPossible, now.managed.config], [MANAGED, true, { llm: { source: "auto" }, dreamInterval: "", dreamAt: "" }]);
     assert.equal(now.managed.timeZone, Intl.DateTimeFormat().resolvedOptions().timeZone.replace("Etc/Unknown", "UTC"));
-    assert.equal("adapterInstalled" in now || "configError" in now, false);
   } finally {
     process.env.DOCKER_SOCKET = socket;
   }
 });
 
 test("switched on, Understory elsewhere is the agent's memory, trusted by the guard, with what was in its entry kept; off, it is gone, and so is the trust", async () => {
-  putServers({ understory: { url: "http://old:3800/mcp", timeout: 5000, disabled: true, bearerToken: "stale" } });
+  putServers({ understory: { url: "http://old:3800/mcp", timeout: 5000, enabled: false, headers: { Authorization: "Bearer stale" } } });
   process.env.MEMORY_UNDERSTORY_AUTH_TOKEN = "from-env";
   try {
     const on = await call("PUT", "/use", { enabled: true, url: "http://understory.test:3800/mcp" });
     assert.equal(on.status, 200);
     assert.deepEqual([on.body.reloaded, on.body.waiting], [0, 0], "what the reload of the idle chats did");
-    assert.deepEqual(servers().understory, { url: "http://understory.test:3800/mcp", timeout: 5000, lifecycle: "lazy", directTools: true, auth: "bearer", bearerTokenEnv: "MEMORY_UNDERSTORY_AUTH_TOKEN" });
+    assert.deepEqual(servers().understory, { url: "http://understory.test:3800/mcp", timeout: 5000, headers: { Authorization: "Bearer ${MEMORY_UNDERSTORY_AUTH_TOKEN}" } });
+    assert.equal(db.toolMarks().understory, "direct", "its tools are in the model's list, not behind tool_search");
     assert.deepEqual([on.body.understory.enabled, on.body.understory.url, on.body.understory.tokenSet], [true, "http://understory.test:3800/mcp", true]);
     assert.deepEqual(trusted(), ["understory"]);
     assert.deepEqual((await (await fetch(`${api}/features/flags`)).json()).memory, { held: true, by: "Understory" });
@@ -92,7 +90,7 @@ test("installed, it runs here with the image downloaded, on the portal's loopbac
   assert.deepEqual(made.Labels, { "pithagoras.addon": "understory", "pithagoras.extension": "pithagoras-understory" });
   assert.deepEqual((made.made as any).HostConfig, { NetworkMode: "container:portal-one", RestartPolicy: { Name: "unless-stopped" }, Binds: [`${VOLUME}:/bundle`] });
   assert.deepEqual(docker.volumes, [{ Name: VOLUME, Labels: { "pithagoras.extension": "pithagoras-understory" } }]);
-  assert.deepEqual(servers().understory, { url: MANAGED, lifecycle: "lazy", directTools: true, auth: "bearer", bearerToken: store.setting("token") });
+  assert.deepEqual(servers().understory, { url: MANAGED, headers: { Authorization: `Bearer ${store.setting("token")}` } });
   assert.deepEqual(trusted(), ["understory"]);
   const shown = installed.body.understory;
   assert.deepEqual([shown.enabled, shown.url, shown.managed.container, shown.managed.image, shown.managed.pulling.active], [true, MANAGED, "running", true, false]);
@@ -260,14 +258,14 @@ test("while what the portal kept has not been taken up, its container keeps the 
     assert.deepEqual([on.status, on.body.error], [409, saved.body.error]);
     assert.deepEqual(machine.made(), [], "not made again");
     assert.deepEqual([store.setting("token"), store.setting("config")], [undefined, undefined], "no token made, and nothing saved: what the portal kept is still to be taken up");
-    assert.equal(servers().understory.bearerToken, kept);
+    assert.equal(servers().understory.headers.Authorization, `Bearer ${kept}`);
 
     // Taken up, it is made again with the token it had, which the entry carries.
     store.putSettings({ token: kept });
     assert.equal((await call("PUT", "/config", custom)).status, 200);
     assert.equal(envOf(machine.understory()!).AUTH_TOKEN, kept);
     assert.equal((await call("PUT", "/use", { enabled: true })).status, 200);
-    assert.equal(servers().understory.bearerToken, kept);
+    assert.equal(servers().understory.headers.Authorization, `Bearer ${kept}`);
   } finally {
     store.putSettings(had);
     putServers({});

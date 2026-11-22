@@ -1,4 +1,4 @@
-import { knownTools, lazySetLabels, resolvedLazy, sizedTools, toolMarks } from "./db.js";
+import { knownTools, lazySetLabels, resolvedLazy, sizedTools, toolGroupNames, toolMarks, unseenMcpServers } from "./db.js";
 import { headLazy, ruleTag, type LazyHead } from "./tool-lazy.js";
 import { TOOL_SEARCH } from "./pi/tool-search-names.js";
 
@@ -14,6 +14,8 @@ const HINT_TOOLS = 3;
 export function lazyHintOf(groups: readonly { label: string; tools: readonly string[] }[]): string {
   if (!groups.length) return "";
   const shown = groups.slice(0, HINT_GROUPS).map((group) => {
+    // A server that no chat has seen yet has no tools to name.
+    if (!group.tools.length) return group.label;
     const names = group.tools.slice(0, HINT_TOOLS).join(", ");
     const more = group.tools.length > HINT_TOOLS ? ` and ${group.tools.length - HINT_TOOLS} more` : "";
     return `${group.label} (${names}${more})`;
@@ -31,13 +33,16 @@ export function buildLazyHead(pinned: readonly string[] = [], off: ReadonlySet<s
   const marks = toolMarks();
   const tools = sizedTools();
   const kept = new Set(pinned);
+  // An MCP server nothing has been seen of is lazy until it has been: what it costs the model's list is not known, and its
+  // tools are found through the search. Not where it is marked direct, or what the mode or agent keeps in the list.
+  const unseen = unseenMcpServers().filter((server) => !kept.has(server) && marks[server] !== "direct");
   const direct = new Set([...Object.entries(marks).filter(([, mark]) => mark === "direct").map(([entry]) => entry), ...kept]);
-  const lazy = new Set([...Object.entries(marks).filter(([, mark]) => mark === "lazy").map(([entry]) => entry), ...resolvedLazy().lazy].filter((entry) => !kept.has(entry)));
+  const lazy = new Set([...Object.entries(marks).filter(([, mark]) => mark === "lazy").map(([entry]) => entry), ...resolvedLazy().lazy, ...unseen].filter((entry) => !kept.has(entry)));
   const head = { lazy: [...lazy].sort(), direct: [...direct].sort() };
   // The tools that are lazy in it and may be: judged as the marks do (lazyAllowed), so that a mark on a set whose tools cannot be lazy names none.
   const inHead = tools.filter((tool) => tool.allowed && headLazy(head, tool));
   const names = inHead.filter((tool) => !off.has(tool.name)).map((tool) => tool.name);
-  if (!names.length) return { v: 1, lazy: [], direct: head.direct, hint: "", outside: false, voice: [], tag: ruleTag() };
+  if (!names.length && !unseen.length) return { v: 1, lazy: [], direct: head.direct, hint: "", outside: false, voice: [], tag: ruleTag() };
   // What the lazy tools say of themselves that stays in the head (decision 13): the line that outside content is data, and
   // their lines for a spoken turn. From what they said when a chat last registered them, so that it is said from the first
   // request and a lazy tool that registers late adds nothing to the prompt. One no chat has registered yet adds its own
@@ -47,5 +52,7 @@ export function buildLazyHead(pinned: readonly string[] = [], off: ReadonlySet<s
   // its line then, and the head must not change under the chat for a tool the model is not even shown.
   const lazyTools = inHead.map((tool) => said.get(tool.name));
   const voice = [...new Set(lazyTools.flatMap((tool) => tool?.voice ?? []))];
-  return { v: 1, ...head, hint: lazyHintOf(lazySetLabels(names)), outside: lazyTools.some((tool) => tool?.outside === true), voice, tag: ruleTag() };
+  const given = toolGroupNames();
+  const groups = [...lazySetLabels(names), ...unseen.map((server) => ({ label: given[server] ?? server, tools: [] as string[] }))];
+  return { v: 1, ...head, hint: lazyHintOf(groups), outside: lazyTools.some((tool) => tool?.outside === true), voice, tag: ruleTag() };
 }

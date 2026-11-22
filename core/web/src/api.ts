@@ -291,17 +291,15 @@ export interface PortalTool {
   byMode?: true;
   /** One of the portal's own, not an extension's of the same name: the list groups code mode by it. */
   inline?: true;
-  /** An MCP server's tool listed from the adapter's cache: the server starts when one of its tools is first used. */
-  cached?: true;
-  /** Not in the list the model is given one by one but found through `tool_search`, or an MCP server's through `mcp`: on or off like any other. */
+  /** Not in the list the model is given one by one but found through `tool_search`: on or off like any other. */
   lazy?: true;
   /** What was set on the tool or its set: `lazy` or `direct`. Settings → Tools only. */
   mark?: ToolMark;
   /** Nothing is set on the tool or its set, so the threshold decides. Settings → Tools only. */
   auto?: true;
-  /** An MCP server's tool: the server, whose setting "Register tools directly" says whether the tool is lazy. */
+  /** The MCP server that brought it: `source` is the same. */
   mcp?: string;
-  /** Settings → Tools only: one of pi's own tools or the adapter's `mcp`, which cannot be made lazy. */
+  /** Settings → Tools only: one of pi's own tools, which cannot be made lazy. */
   noLazy?: true;
 }
 
@@ -821,16 +819,8 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ entry, from }),
     }),
-  /** An MCP server's setting "Register tools directly" on its own; off, the server's tools are lazy. */
-  setMcpDirect: (name: string, direct: boolean) =>
-    json<{ ok: true; direct: boolean }>(`/api/mcp/servers/${encodeURIComponent(name)}/direct`, { method: "PUT", body: JSON.stringify({ direct }) }),
   deleteMcpServer: (name: string) =>
     json<{ ok: true }>(`/api/mcp/servers/${encodeURIComponent(name)}`, { method: "DELETE" }),
-  saveMcpSettings: (settings: Record<string, unknown>) =>
-    json<{ ok: true }>("/api/mcp/settings", {
-      method: "PUT",
-      body: JSON.stringify({ settings }),
-    }),
   importMcp: (text: string) =>
     json<{ ok: true; added: string[]; skipped: { name: string; reason: string }[] }>(
       "/api/mcp/import",
@@ -1420,7 +1410,7 @@ export interface PiCommand {
   sourceInfo?: { path?: string; scope?: string; origin?: string };
 }
 
-/** One MCP server as pi-mcp-adapter reads it. Unlisted keys are kept verbatim. */
+/** One MCP server as pi reads it from `mcp.json`. Unlisted keys are kept verbatim. */
 export interface McpServerEntry {
   command?: string;
   args?: string[];
@@ -1428,37 +1418,28 @@ export interface McpServerEntry {
   cwd?: string;
   url?: string;
   headers?: Record<string, string>;
-  socket?: string;
-  auth?: "oauth" | "bearer" | false;
-  bearerToken?: string;
-  bearerTokenEnv?: string;
-  lifecycle?: "lazy" | "eager" | "keep-alive" | "lazy-keep-alive";
-  idleTimeout?: number;
-  requestTimeoutMs?: number;
-  exposeResources?: boolean;
-  directTools?: boolean | string[];
-  includeTools?: string[];
-  excludeTools?: string[];
-  debug?: boolean;
-  disabled?: boolean;
+  /** What the server offers, in a sentence: the search for tools ranks its tools by it. */
+  description?: string;
+  /** The request timeout in seconds. */
+  timeout?: number;
+  /** False: kept in the file, never connected. */
+  enabled?: boolean;
   [key: string]: unknown;
 }
 
 export interface McpServerView {
   name: string;
   entry: McpServerEntry;
-  transport: "stdio" | "http" | "socket" | "unknown";
-  disabled: boolean;
+  transport: "stdio" | "http" | "unknown";
+  enabled: boolean;
+  /** What pi says is wrong with the entry, which it skips; null where it takes it. */
+  problem: string | null;
 }
 
 export interface McpConfigView {
   path: string;
   exists: boolean;
-  /** Without the adapter installed, nothing here is read by anything. */
-  adapterInstalled: boolean;
-  adapterSpec: string;
   servers: McpServerView[];
-  settings: Record<string, unknown>;
   raw: string;
   parseError: string | null;
 }

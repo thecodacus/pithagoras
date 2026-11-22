@@ -6,7 +6,7 @@ import { LOADED_IN_FOLDERS, loadedPlaces, type LoadedPlace } from "./loaded-from
 /**
  * Where a link leads, that is loaded because of where it is.
  *
- * The list in loaded-from-folders.ts says what pi, the MCP adapter, the heartbeat
+ * The list in loaded-from-folders.ts says what pi, the heartbeat
  * and the portal load by name and from which places. A link in one of them is
  * loaded as the place it is in is, and what it leads to is what is read: a skill
  * folder that is a link into another folder of the project is read from there, so

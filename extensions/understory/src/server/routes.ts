@@ -55,7 +55,7 @@ async function understoryState() {
   const url = typeof server?.entry.url === "string" && server.entry.url ? server.entry.url : understoryDefaultUrl();
   const [reached, runtime] = await Promise.all([reachable(url), service.status()]);
   return {
-    // As the chats see it: on only with the adapter its tools come through.
+    // As the chats see it: in the file, and not switched off there.
     enabled: server?.on === true,
     url,
     tokenSet: Boolean(understoryTokenOf(server?.entry) ?? process.env[UNDERSTORY_TOKEN_ENV]),
@@ -87,8 +87,8 @@ async function understoryState() {
 async function switchUnderstory(enabled: boolean, url?: string): Promise<{ reloaded: number; waiting: number }> {
   const { mcp } = portal();
   if (!enabled) return mcp.set(UNDERSTORY, undefined);
-  // Kept: whatever else somebody put in the entry by hand, except how it signs in, which is said anew.
-  const { disabled: _off, auth: _a, bearerToken: _t, bearerTokenEnv: _e, ...had } = mcp.get(UNDERSTORY)?.entry ?? {};
+  // Kept: whatever else somebody put in the entry by hand, except how it signs in, which is said anew, and whether it is switched off, which switching it on undoes.
+  const { enabled: _off, headers: _h, ...had } = mcp.get(UNDERSTORY)?.entry ?? {};
   // An address given is the one meant; without one, the portal's own Understory where it runs one.
   return mcp.set(
     UNDERSTORY,
@@ -100,7 +100,7 @@ async function switchUnderstory(enabled: boolean, url?: string): Promise<{ reloa
             ...(process.env[UNDERSTORY_TOKEN_ENV] ? { tokenEnv: UNDERSTORY_TOKEN_ENV } : {}),
           }),
         },
-    { trusted: true },
+    { trusted: true, direct: true },
   );
 }
 

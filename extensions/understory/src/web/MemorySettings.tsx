@@ -513,7 +513,7 @@ export function MemorySettings() {
         detail={
           u.enabled
             ? t("On: MEMORY.md is not read while it is. The file is kept, and read again once this is off.")
-            : t("Off: the agent's memory is MEMORY.md. Switching on also installs pi-mcp-adapter where it is not, which makes MCP servers into tools.")
+            : t("Off: the agent's memory is MEMORY.md. Switching on adds Understory to the MCP servers, whose tools the agent then has at hand.")
         }
         on={u.enabled}
         onChange={(enabled) => void act(enabled ? msg("Switching on…") : msg("Switching off…"), () => api.setUse(enabled && !runsHere ? { enabled, url: address.trim() } : { enabled }))}

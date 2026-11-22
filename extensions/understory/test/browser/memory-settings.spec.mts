@@ -86,7 +86,7 @@ test('Understory is off until switched on, then points the agent at the address 
   const settings = await open(page);
   const memory = settings.getByRole('switch', { name: "Use Understory as the agent's memory" });
   await expect(memory).toHaveAttribute('aria-checked', 'false');
-  await expect(settings.getByText("Off: the agent's memory is MEMORY.md. Switching on also installs pi-mcp-adapter where it is not, which makes MCP servers into tools.")).toBeVisible();
+  await expect(settings.getByText("Off: the agent's memory is MEMORY.md. Switching on adds Understory to the MCP servers, whose tools the agent then has at hand.")).toBeVisible();
   await expect(settings.getByText('Something answers there')).toBeVisible();
 
   await settings.getByLabel("Understory's MCP address").fill('http://understory:3800/mcp');

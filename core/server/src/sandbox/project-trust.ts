@@ -5,11 +5,11 @@ import { DATA_DIR as DATA_SETTING } from "../data-dir.js";
 
 /**
  * While the sandbox is on, the folder a chat works in is the agent's to write,
- * and pi and the MCP adapter run inside the portal, as root. So what either
- * would take from that folder and run is not taken from it: pi's project
- * extensions, packages and settings (pi's own "untrusted project"), and the MCP
- * servers named in the folder's `.mcp.json` or `.pi/mcp.json`, or imported by
- * them. The folder's skills are text the model reads, and are kept.
+ * and pi runs inside the portal, as root. So what it would take from that
+ * folder and run is not taken from it: pi's project extensions, packages and
+ * settings (pi's own "untrusted project", which also leaves out the MCP servers
+ * of the folder's `.pi/mcp.json`), and the folder as the working folder of the MCP
+ * servers it starts. The folder's skills are text the model reads, and are kept.
  */
 
 /** pi's settings for a chat in `cwd`, with the folder untrusted: its settings, extensions and packages left out. */
@@ -43,25 +43,26 @@ export function projectSkillPaths(cwd: string): string[] {
   return found.filter((dir) => dir !== own && existsSync(dir));
 }
 
-/** Where the MCP adapter is told it works: a folder of the portal's with nothing in it. */
+/** Where pi's MCP support is told it works: a folder of the portal's with nothing in it. */
 const MCP_FOLDER = path.join(path.resolve(DATA_SETTING), "sandbox", "mcp");
 
-const isMcpAdapter = (extension: { resolvedPath?: string }) => /[\\/]pi-mcp-adapter[\\/]/.test(extension.resolvedPath ?? "");
+/** The portal's registration of pi's MCP support (see sdk-client.ts): an inline extension of that name. */
+const isMcpExtension = (extension: { resolvedPath?: string }) => extension.resolvedPath === "<inline:mcp>";
 
 /**
- * pi's extensions as loaded, with the MCP adapter's handlers given a context
- * whose folder is MCP_FOLDER instead of the chat's. The adapter reads a
- * project's config, and starts its servers, from the folder its context names,
- * so it finds the user's own config and no project's. The servers it starts
- * work in that folder too.
+ * pi's extensions as loaded, with the handlers of pi's MCP support given a context
+ * whose folder is MCP_FOLDER instead of the chat's. The servers it starts work in
+ * the folder its context names, which is then one nobody can write to as the
+ * agent: a `package.json` or a `node_modules/.bin` the agent put in its own folder
+ * is not what `npx` runs.
  */
 export function withoutFolderMcp<T extends { extensions: any[] }>(result: T): T {
   mkdirSync(MCP_FOLDER, { recursive: true, mode: 0o755 });
-  for (const extension of result.extensions.filter(isMcpAdapter)) {
+  for (const extension of result.extensions.filter(isMcpExtension)) {
     for (const [event, handlers] of extension.handlers as Map<string, ((event: unknown, ctx: any) => unknown)[]>) {
       extension.handlers.set(event, handlers.map((handler) => (event: unknown, ctx: any) => handler(event, elsewhere(ctx))));
     }
-    // `/mcp`, which reloads the config and writes a server's switch into the folder it is given.
+    // `/mcp`, which reloads the config and saves a server's switch to the file that defines it.
     for (const command of (extension.commands as Map<string, { handler?: (args: unknown, ctx: any) => unknown }>).values()) {
       const handler = command.handler;
       if (handler) command.handler = (args, ctx) => handler(args, elsewhere(ctx));
