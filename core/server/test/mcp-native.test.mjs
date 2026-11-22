@@ -157,3 +157,12 @@ test("what a chat's head makes of servers: one nothing has been seen of is lazy 
   assert.deepEqual(buildLazyHead().lazy, ["gamma"]);
   db.setToolMarks({});
 });
+
+test("pi's three tools for a server's resources are a group of their own, filed under no server and not as the portal's own; the sandbox's rebinding finds pi's MCP support by the name it is registered under", async () => {
+  putConfig({ alpha: server("alpha", "ping"), beta: { command: process.execPath, args: [FIXTURE, "beta", "--tools", "other", "--resources"] } });
+  const r = await run([]);
+  const resources = r.tools.filter((t) => ["list_mcp_resources", "list_mcp_resource_templates", "read_mcp_resource"].includes(t.name));
+  assert.equal(resources.length, 3);
+  assert.ok(resources.every((t) => t.source === "MCP resources" && t.mcp === undefined && !t.inline));
+  assert.ok(r.client.session.extensionRunner.extensions.some((e) => e.resolvedPath === "<inline:mcp>"), "an inline extension called mcp");
+});
