@@ -407,3 +407,69 @@ test("Stop ends a question to a past chat", async () => {
   const timer = new Promise((resolve) => setTimeout(() => resolve("still waiting"), 5000));
   assert.equal(await Promise.race([outcome, timer]), "ended", "the question ends when the run is stopped, not at its time limit");
 });
+
+// A chat's file can be megabytes, and the list reads one per chat it shows: all
+// at once held them all in memory together (100 chats of 4 MB peaked at 700 MB).
+test("the list reads a few files at a time, and still counts every chat", async () => {
+  const fsp = (await import("node:fs/promises")).default;
+  const { syncBuiltinESMExports } = await import("node:module");
+  for (let i = 0; i < 12; i++) {
+    createSession({ id: `many-${i}`, title: `Many ${i}`, workspace: scout.home, executor: "host" });
+    writeChatFile(`many-${i}`, [user(`question ${i}`), agent("answer")]);
+  }
+  const original = fsp.readFile;
+  let inFlight = 0;
+  let peak = 0;
+  fsp.readFile = async (file, ...rest) => {
+    if (!String(file).endsWith("chat.jsonl")) return original(file, ...rest);
+    inFlight++;
+    peak = Math.max(peak, inFlight);
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 15));
+      return await original(file, ...rest);
+    } finally {
+      inFlight--;
+    }
+  };
+  syncBuiltinESMExports();
+  let list;
+  try {
+    list = said(await run(tools[CHAT_LIST_TOOL], {}));
+  } finally {
+    fsp.readFile = original;
+    syncBuiltinESMExports();
+  }
+  assert.ok(peak > 1, "the reads do overlap, so a list of many chats is not one wait per chat");
+  assert.ok(peak <= 4, `at most four files are read at once, saw ${peak}`);
+  for (let i = 0; i < 12; i++) assert.match(list, new RegExp(`many-${i} "Many ${i}" \\(task, 2 messages`), `chat ${i} is counted`);
+});
+
+// The question's budget is the window the portal holds the model to: a limit
+// set for the model, or the default as a ceiling, and not only what the model's
+// definition declares (200000 tokens for the fake model).
+test("a question to a chat is budgeted on the model's configured window, and the model is told it", async () => {
+  const { setContextLimit, setDefaultContextLimit } = await import("../dist/db.js");
+  const model = await fakeModel(() => "ok");
+  writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR, "models.json"), JSON.stringify(model.models()));
+  const entries = [];
+  for (let i = 0; i < 100; i++) entries.push(user(`question ${i} ${"q".repeat(1000)}`), agent(`answer ${i} ${"a".repeat(1000)}`));
+  createSession({ id: "windowed", title: "Windowed", workspace: scout.home, executor: "host", provider: "fake", model: "m" });
+  writeChatFile("windowed", entries);
+
+  const transcriptLength = async () => {
+    await run(tools[CHAT_SEARCH_TOOL], { prompt: "what happened", id: "windowed" });
+    return model.requests.at(-1).messages.find((m) => m.role === "user").content.length;
+  };
+  try {
+    setContextLimit("fake", "m", 10_000);
+    // 10000 tokens: 10000 * 4 * 0.8 = 32000 characters, the note and the question aside.
+    assert.ok((await transcriptLength()) <= 32_000 + 200, "the model's own limit is the budget");
+    setContextLimit("fake", "m", null);
+    setDefaultContextLimit(8_000);
+    assert.ok((await transcriptLength()) <= 25_600 + 200, "the default is a ceiling on a model that declares more");
+  } finally {
+    setContextLimit("fake", "m", null);
+    setDefaultContextLimit(null);
+  }
+  assert.ok((await transcriptLength()) > 100_000, "without a limit, the model's declared window is the budget");
+});
