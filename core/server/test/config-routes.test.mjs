@@ -65,6 +65,16 @@ test("the raw editor refuses what is not JSON, and the file is as it was", async
   assert.equal(read(mcpFile), MCP);
 });
 
+test("the raw editor refuses a server that is on with a key pi does not read, as the form and the toggle do, and takes it while it is off", async () => {
+  writeFileSync(mcpFile, MCP);
+  const on = JSON.stringify({ mcpServers: { gated: { command: "notes-mcp", excludeTools: ["delete"] } } });
+  refused(await send("/api/mcp/raw", "PUT", { content: on }), 400, /gated: pi does not read excludeTools/);
+  assert.equal(read(mcpFile), MCP);
+  const off = JSON.stringify({ mcpServers: { gated: { command: "notes-mcp", excludeTools: ["delete"], enabled: false } } });
+  assert.equal((await send("/api/mcp/raw", "PUT", { content: off })).status, 200);
+  writeFileSync(mcpFile, MCP);
+});
+
 test("the raw editor takes what pi reads and puts it in place as typed for its owner alone; a comment is refused, as pi would skip every server of a file with one", async () => {
   refused(await send("/api/mcp/raw", "PUT", { content: '{\n  // the one server\n  "mcpServers": { "notes": { "command": "notes-mcp" } }\n}' }), 400, /Not valid JSON/);
   const content = '{\n  "mcpServers": { "notes": { "command": "notes-mcp" } }\n}';

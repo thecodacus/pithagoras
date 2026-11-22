@@ -1366,7 +1366,9 @@ The portal used `pi-mcp-adapter` for MCP servers; it runs pi's own MCP support n
 ([MCP servers](/guide/mcp)). The first start after the upgrade carries the servers
 in `mcp.json` over once, each on or off as it was, with the adapter's own keys
 (`lifecycle`, `directTools`, `toolPrefix` and the like) dropped, and takes the
-adapter out of pi's packages. Every server is **Auto** in Settings → Tools, so a
+adapter out of pi's packages. Where the adapter was not installed, nothing read
+`mcp.json` before, so its servers come over switched off: switch on in Settings → MCP
+the ones you want. Every server is **Auto** in Settings → Tools, so a
 big one goes behind `tool_search` by itself: mark one **Direct** where you had its
 tools registered directly. A bearer token becomes the `Authorization` header pi takes
 (Understory's entry among them). A server pi cannot take as it was (a Unix socket, a

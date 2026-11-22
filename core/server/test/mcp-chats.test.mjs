@@ -24,6 +24,9 @@ writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR, "settings.json"), JSON.
 const db = await import("../dist/db.js");
 // Opened (and migrated) here before the server opens it too: two processes making the schema at once lock each other out.
 db.getDb();
+// A portal past the move from pi-mcp-adapter: the server in mcp.json is one the person has on (a first start would
+// switch it off, as nothing read the file before; see mcp-migration.test.mjs).
+db.putSetting("mcp_adapter_moved", "1");
 let base;
 before(async () => {
   ({ base } = await startServer(serverEnv(home, await freePort())));

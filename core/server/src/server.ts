@@ -1365,9 +1365,8 @@ app.put("/api/tools", async (req, res) => {
  * What is lazy and what is not: marks on tool sets, named as the boxes of the tools list name them, and on single tools
  * (`<tool>name`), each `lazy` (behind `tool_search`) or `direct` (always in the model's list). What has no mark is `auto`:
  * the threshold decides. A lazy tool is on like any other. The marks reach the chats that start afterwards, and a chat that
- * is running when it is asked to read its tools again (a chat keeps what was lazy in it, see LazyHead). An MCP server's
- * tools are lazy by the server's own setting (`PUT /api/mcp/servers/:name/direct`) and pi's own cannot be lazy, and a
- * `lazy` mark that names them is refused.
+ * is running when it is asked to read its tools again (a chat keeps what was lazy in it, see LazyHead). An MCP server is a
+ * group like any other. pi's own tools cannot be lazy, and a `lazy` mark that names them is refused.
  */
 app.put("/api/tools/marks", (req, res) => {
   if (EXECUTOR_KIND === "container") return res.status(400).json(toolsUnsupported);
@@ -1380,7 +1379,7 @@ app.put("/api/tools/marks", (req, res) => {
   const added = Object.fromEntries(Object.entries(given as Record<string, "lazy" | "direct">).filter(([entry, mark]) => before[entry] !== mark));
   const refused = lazyRefused(added);
   if (refused.length) {
-    return res.status(400).json({ error: `Cannot be lazy: ${refused.join(", ")}. An MCP server's tools are lazy by the server's own setting (Register tools directly), and pi's built-in tools are always offered.`, code: "lazy-refused" });
+    return res.status(400).json({ error: `Cannot be lazy: ${refused.join(", ")}. pi's built-in tools are always offered.`, code: "lazy-refused" });
   }
   const stored = setToolMarks(given as Record<string, "lazy" | "direct">);
   res.json({ marks: stored, resolved: resolvedLazy() });

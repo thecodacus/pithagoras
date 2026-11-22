@@ -287,16 +287,25 @@ test("a switched-off adapter with a plain file: the servers are off in the file 
   assert.deepEqual(readFile().mcpServers.plain, { command: "node", args: ["s.js"], enabled: false });
 });
 
-test("a file that is already pi's, with no adapter, is left as it is and nothing is said", async () => {
+test("a file that is already pi's, with no adapter: nothing read it before, so its servers come over off and the log names them; a file whose servers are off is left as it is", async () => {
   reset();
   logs.length = 0;
-  const native = JSON.stringify({ mcpServers: { a: { command: "x" } } });
-  writeFileSync(mcpFile, native);
+  writeFileSync(mcpFile, JSON.stringify({ mcpServers: { a: { command: "x" }, b: { command: "y", enabled: false } } }));
   listed(["npm:pi-other"]);
   await moveFromAdapter();
-  assert.equal(readFileSync(mcpFile, "utf8"), native);
-  assert.equal(logs.length, 0);
+  assert.deepEqual(readFile().mcpServers, { a: { command: "x", enabled: false }, b: { command: "y", enabled: false } });
+  assert.equal(logs.length, 1);
+  assert.match(logs[0], /Nothing read it before.*: a\. Switch on/);
   assert.equal(db.getSetting("mcp_adapter_moved"), "1", "and it is not looked at again");
+
+  reset();
+  logs.length = 0;
+  const off = JSON.stringify({ mcpServers: { b: { command: "y", enabled: false } } });
+  writeFileSync(mcpFile, off);
+  listed(["npm:pi-other"]);
+  await moveFromAdapter();
+  assert.equal(readFileSync(mcpFile, "utf8"), off);
+  assert.equal(logs.length, 0);
 });
 
 test("a file that cannot be parsed is not touched, the adapter stays, and the move is made on a start after", async () => {

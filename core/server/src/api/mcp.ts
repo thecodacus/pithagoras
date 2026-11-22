@@ -197,14 +197,18 @@ export async function problemForWrite(name: string, entry: unknown): Promise<str
   if (auth && typeof auth === "object" && (auth as { provider?: unknown }).provider !== undefined) {
     return "auth.provider would send the portal's key for a model provider to this server: write it in the file by hand (the raw editor) if that is meant";
   }
-  // The adapter's keys for a gate or an exclusion are not read by pi: switched on with them, the tools would run unasked or be there after all.
-  if (entry && typeof entry === "object" && (entry as { enabled?: unknown }).enabled !== false) {
-    const ignored = ignoredByPi(entry as Record<string, unknown>);
-    if (ignored.length) {
-      return `pi does not read ${ignored.map((one) => one.key).join(", ")} (${ignored.map((one) => one.why).join("; ")}), so a server that is on would run without it: take the key out, or write it in pi's words (a tool to leave out is "toolExposure": { "<tool>": "hidden" }), before switching it on`;
-    }
-  }
-  return problemWith(name, entry);
+  return ignoredProblem(entry) ?? problemWith(name, entry);
+}
+
+/**
+ * Why a server that is on cannot be: a key of the adapter's for a gate or an exclusion, which pi does not read, so
+ * switched on with it the tools would run unasked or be there after all. Null for one that is off, or has none.
+ */
+function ignoredProblem(entry: unknown): string | null {
+  if (!entry || typeof entry !== "object" || (entry as { enabled?: unknown }).enabled === false) return null;
+  const ignored = ignoredByPi(entry as Record<string, unknown>);
+  if (!ignored.length) return null;
+  return `pi does not read ${ignored.map((one) => one.key).join(", ")} (${ignored.map((one) => one.why).join("; ")}), so a server that is on would run without it: take the key out, or write it in pi's words (a tool to leave out is "toolExposure": { "<tool>": "hidden" }), before switching it on`;
 }
 
 /** The server another name would be, for pi: names that differ only in `-` and `_` share a namespace, and pi connects one of them. */
@@ -342,6 +346,14 @@ export function mcpRouter(): Router {
     try {
       const parsed = JSON.parse(content);
       if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return res.status(400).json({ error: 'Expected an object with an "mcpServers" object' });
+      // The raw editor is held to the same rule as the form and the toggle: a server on with a key pi does not read is refused.
+      const servers = (parsed as { mcpServers?: unknown }).mcpServers;
+      if (servers && typeof servers === "object") {
+        for (const [name, entry] of Object.entries(servers as Record<string, unknown>)) {
+          const problem = ignoredProblem(entry);
+          if (problem) return res.status(400).json({ error: `${name}: ${problem}` });
+        }
+      }
     } catch (e) {
       return res.status(400).json({ error: `Not valid JSON: ${(e as Error).message}` });
     }

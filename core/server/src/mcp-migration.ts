@@ -316,9 +316,21 @@ export async function moveFromAdapter(): Promise<void> {
     console.warn(`[portal] MCP: mcp.json cannot be read (${moved.error}), so the adapter's servers are not carried over to pi's own MCP support yet: fix the file in Settings → MCP, and restart.`);
     return;
   }
-  // Nothing of the adapter's here (no package, a file that is pi's): nothing to do now or later. A file with the adapter's keys and no adapter is the adapter's all the same.
+  // Nothing of the adapter's here (no package, a file that is pi's). Before this, the portal's pi read the file only through
+  // the adapter, so its servers ran nowhere: they come over switched off, and the person switches on what they want in
+  // Settings → MCP. A file with the adapter's keys and no adapter is the adapter's all the same.
   if (!adapter && !moved.dialect) {
+    // carryOver, with no adapter, gave every server `enabled: false`: written where the file had one on.
+    const before = (text.trim() ? JSON.parse(text) : {}).mcpServers ?? {};
+    const woken = Object.keys(moved.file.mcpServers).filter((name) => before[name]?.enabled !== false);
+    for (const name of woken) moved.file.mcpServers[name].enabled = false;
+    if (woken.length) writeMcpFile(moved.file, "extension");
     putSetting(MOVED, "1");
+    if (woken.length) {
+      console.log(
+        `[portal] MCP: pi's own MCP support reads mcp.json now. Nothing read it before (pi-mcp-adapter was not installed), so its servers stay as they were, off: ${woken.join(", ")}. Switch on the ones you want in Settings → MCP.`,
+      );
+    }
     return;
   }
 

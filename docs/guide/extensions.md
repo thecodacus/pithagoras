@@ -478,8 +478,7 @@ in the list. Where a group exists for one purpose, a [mode of yours](/guide/sess
 the mode's or the agent's tools page. Without it the largest-first rule could leave out exactly the group the mode is for.
 A mode an extension offers says the same with `keepDirect` (see [Chat modes](/guide/extension-ui#chat-modes)).
 
-An MCP server's tools do not take part: they are lazy by the server's own setting (see below), and the threshold
-counts the ones that are in the list and does not take them out.
+An MCP server is a group like any other: its tools are counted, and the threshold can leave it out of the list.
 
 ### Setting the marks
 
@@ -491,7 +490,7 @@ from direct to lazy and back to the group's. A mark is no switch: the tools stay
 they were, and a mark on a tool that is off changes nothing in the chats where it stays off. In a chat in Code mode, or in a
 [mode of yours](/guide/sessions#modes-you-make) that works through the code tool, the marks do not apply: every
 tool that is on is in a script's reach, found with `searchTools`, and `tool_search` is not offered. An MCP server's
-tools still stay behind `mcp`, which a script calls like any other tool (see [Modes](/guide/sessions#modes)).
+tools are in a script's reach like the rest (see [Modes](/guide/sessions#modes)).
 
 Any tool can be made lazy except pi's own built-in ones (`read`, `bash`, `edit`, `write`, `grep`, `find`
 and `ls`), which every conversation works with and which are always offered. They have no button, and
