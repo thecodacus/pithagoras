@@ -89,14 +89,6 @@ test("a server in the head's direct list stays in the model's list beside a lazy
   assert.doesNotMatch(listed, /mcp__beta/);
 });
 
-test("a server whose tools the chat has all switched off (mcpOff) is not started for it", async () => {
-  putConfig({ alpha: server("alpha"), beta: server("beta", "other") });
-  const r = await run([], { mcpOff: () => new Set(["alpha"]) });
-  const listed = names(r.requests[0]).join(",");
-  assert.doesNotMatch(listed, /mcp__alpha/);
-  assert.match(listed, /mcp__beta__other/);
-});
-
 test("a server the file switches off (enabled: false) is not connected, and one it hides is unreachable", async () => {
   putConfig({ alpha: server("alpha", "ping", { enabled: false }), beta: server("beta", "other", { exposure: "hidden" }), gamma: server("gamma", "third") });
   const r = await run([]);
@@ -132,16 +124,22 @@ test("a trusted project's own mcp.json cannot define a server of the user's file
   const { configForChat } = await import("../dist/pi/mcp-config.js");
   const pi = await piMcp();
   const seen = [];
-  const loaded = configForChat(pi, { cwd: folder, isProjectTrusted: () => true }, agentDir, () => false, (servers) => seen.push(...servers));
+  const loaded = configForChat(pi, { cwd: folder, isProjectTrusted: () => true }, agentDir, (servers) => seen.push(...servers));
   const alpha = loaded.servers.find((s) => s.name === "alpha");
   assert.deepEqual(alpha.config.args.slice(-2), ["--tools", "ping,echo"], "the user's own definition, not the project's");
   assert.equal(alpha.scope, "global");
   assert.ok(loaded.servers.some((s) => s.name === "mine" && s.scope === "project"), "a server of its own is its own");
   assert.equal(loaded.autoEnableCodemode, false);
-  // An override of enabled is pi's own rule and stays.
+  // An override that turns a server off is pi's own rule and stays.
   writeFileSync(path.join(folder, ".pi", "mcp.json"), JSON.stringify({ mcpServers: { alpha: { enabled: false } } }));
-  const overridden = configForChat(pi, { cwd: folder, isProjectTrusted: () => true }, agentDir, () => false, () => {});
+  const overridden = configForChat(pi, { cwd: folder, isProjectTrusted: () => true }, agentDir, () => {});
   assert.equal(overridden.servers.find((s) => s.name === "alpha").config.enabled, false);
+  // One that turns on what the person switched off, or hides, does not: that server would start with the person's own command, environment and headers.
+  putConfig({ alpha: server("alpha", "ping", { enabled: false, env: { TOKEN: "secret" } }), beta: server("beta", "other", { exposure: "hidden" }) });
+  writeFileSync(path.join(folder, ".pi", "mcp.json"), JSON.stringify({ mcpServers: { alpha: { enabled: true }, beta: { exposure: "direct" } } }));
+  const forced = configForChat(pi, { cwd: folder, isProjectTrusted: () => true }, agentDir, () => {});
+  assert.equal(forced.servers.find((s) => s.name === "alpha").config.enabled, false, "still off");
+  assert.equal(forced.servers.find((s) => s.name === "beta").config.exposure, "hidden", "still hidden");
 });
 
 test("what a chat's head makes of servers: one nothing has been seen of is lazy until it has been, one marked direct is not", async () => {
@@ -165,4 +163,20 @@ test("pi's three tools for a server's resources are a group of their own, filed 
   assert.equal(resources.length, 3);
   assert.ok(resources.every((t) => t.source === "MCP resources" && t.mcp === undefined && !t.inline));
   assert.ok(r.client.session.extensionRunner.extensions.some((e) => e.resolvedPath === "<inline:mcp>"), "an inline extension called mcp");
+});
+
+test("an installed extension that brings its own /mcp does not take the portal's MCP support from it", async () => {
+  putConfig({ alpha: server("alpha") });
+  const extension = path.join(home, "other-mcp.mjs");
+  writeFileSync(extension, 'export default (pi) => pi.registerCommand("mcp", { description: "another", handler: async () => {} });');
+  const settings = path.join(agentDir, "settings.json");
+  writeFileSync(settings, JSON.stringify({ extensions: [extension] }));
+  try {
+    const r = await run([]);
+    assert.ok(r.client.session.extensionRunner.extensions.some((e) => e.resolvedPath === "<inline:mcp>"), "the inline mcp is still there");
+    assert.ok(r.client.session.extensionRunner.extensions.some((e) => e.resolvedPath === extension), "and the extension was loaded (the test would say nothing otherwise)");
+    assert.match(names(r.requests[0]).join(","), /mcp__alpha__ping/);
+  } finally {
+    writeFileSync(settings, "{}");
+  }
 });

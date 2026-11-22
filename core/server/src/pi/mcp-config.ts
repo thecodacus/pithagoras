@@ -35,29 +35,29 @@ export async function piMcp(): Promise<PiMcp> {
 }
 
 /**
- * What a chat decides of a server. The server is on unless the file says it is off or hides it, or every tool of it the
- * portal has seen is switched off for the chat (`off`: nothing is to be had of a server whose tools are all off, and it is
- * not started for it). A server that is on is `direct` for pi: its tools are registered and active, and whether the
- * model is offered each one or finds them through `tool_search` is the portal's own lazy setting, the same one as for any
- * other tool (see lazyMember in sdk-client.ts), so pi's own `deferred` and `codemode`, which declare tools only when
- * pi's tool search or a script asks, are not used. A hidden server stays hidden, and so do the tools a `toolExposure` in the
- * file hides or gives to scripts.
+ * What the portal decides of a server's exposure. A server that is on is `direct` for pi: its tools are registered and
+ * active, and whether the model is offered each one or finds them through `tool_search` is the portal's own lazy setting,
+ * the same one as for any other tool (see lazyMember in sdk-client.ts), so pi's own `deferred` and `codemode`, which declare
+ * tools only when pi's tool search or a script asks, are not used. A server the file switches off or hides stays so, and so do
+ * the tools a `toolExposure` in the file hides or gives to scripts. Whether a tool is on for a chat is the chat's tool switch,
+ * as for every tool: a server is connected whatever the chat has switched off of it, so that its tools can be switched on again.
  */
-export function forChat(config: McpServerConfig, off: boolean): McpServerConfig {
+export function forChat(config: McpServerConfig): McpServerConfig {
   if (config.enabled === false || config.exposure === "hidden") return config;
-  if (off) return { ...config, enabled: false };
   return { ...config, exposure: "direct" };
 }
 
 /**
  * pi's configuration for a chat, as `createMcpExtension` is asked for it at each start and reload of the chat: every
- * server of the file as pi reads it, each given what the chat decides of it. `onServers` is told the servers, by which
- * their tools are told apart (see SdkPiClient.serverOf).
+ * server of the file as pi reads it, each given the exposure the portal decides (see forChat). `onServers` is told the
+ * servers, by which their tools are told apart (see SdkPiClient.serverOf).
  *
  * A server the user's file defines stays what the user's file says: pi lets a trusted project's `.pi/mcp.json` define a server
  * of the same name anew, with another command, and its tools would carry the namespace of the user's server, which the guard
  * trusts by name (see serverWords in guard.ts). A project may still override such a server's `enabled`, `exposure` and
- * `toolExposure` (pi's own rule), and bring servers of its own, which are nobody's the person has said is theirs.
+ * `toolExposure` (pi's own rule, to turn one off in one project), but not switch on what the person has switched off or
+ * hidden: that server would start with the person's own command, environment and headers. A project may bring servers of its
+ * own, which are nobody's the person has said is theirs.
  *
  * `autoEnableCodemode` is off: whether the code tool is on is a switch of the portal's, and a server's tool a file gives
  * to scripts must not turn it on.
@@ -66,7 +66,6 @@ export function configForChat(
   pi: PiMcp,
   ctx: { cwd: string; isProjectTrusted(): boolean },
   agentDir: string,
-  off: (server: string) => boolean,
   onServers: (servers: readonly McpServerEntry[]) => void,
 ): LoadedMcpConfig {
   const trusted = ctx.isProjectTrusted();
@@ -74,8 +73,9 @@ export function configForChat(
   const own = trusted ? new Map(pi.loadMcpConfig({ agentDir, cwd: ctx.cwd, projectTrusted: false }).servers.map((entry) => [entry.name, entry])) : new Map<string, McpServerEntry>();
   const servers = config.servers.map((entry) => {
     const user = own.get(entry.name);
-    const kept = entry.scope === "project" && entry.override === undefined && user ? user : entry;
-    return { ...kept, config: forChat(kept.config, off(kept.name)) };
+    const redefined = entry.scope === "project" && entry.override === undefined;
+    const kept = user && (redefined || (user.config.enabled === false || user.config.exposure === "hidden")) ? user : entry;
+    return { ...kept, config: forChat(kept.config) };
   });
   onServers(servers);
   return { ...config, servers, autoEnableCodemode: false };

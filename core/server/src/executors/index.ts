@@ -42,8 +42,6 @@ export interface LaunchOptions {
   toolsOff?: string[];
   /** The tools the portal has seen, for one that says it is off until switched on. */
   toolsSeen?: () => ReadonlySet<string>;
-  /** The MCP servers every tool of which the conversation has switched off, asked each time pi reads its configuration: pi does not connect them for it. */
-  mcpOff?: () => ReadonlySet<string>;
   /** What the chat froze about its lazy tools: found through `tool_search`, not offered one by one. */
   lazy?: LazyHead;
   /** Told what the chat's head has taken in since it was made, to keep with it. */
@@ -117,7 +115,6 @@ export class HostExecutor implements Executor {
       allowlistNow: opts.allowlistNow,
       toolsOff: opts.toolsOff,
       toolsSeen: opts.toolsSeen,
-      mcpOff: opts.mcpOff,
       lazy: opts.lazy,
       rememberLazy: opts.rememberLazy,
       codemode: opts.codemode,

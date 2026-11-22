@@ -2814,11 +2814,10 @@ class SessionManager extends EventEmitter {
   }
 
   /** What pi is told about the tools when a conversation starts: the ones that are off, and what the chat froze about the lazy ones. */
-  private toolsFor(sessionId: string): { toolsOff: string[]; mcpOff: () => ReadonlySet<string>; lazy: LazyHead; rememberLazy: (head: LazyHead) => void; toolsSeen: () => ReadonlySet<string> } {
+  private toolsFor(sessionId: string): { toolsOff: string[]; lazy: LazyHead; rememberLazy: (head: LazyHead) => void; toolsSeen: () => ReadonlySet<string> } {
     const toolsOff = this.offFor(sessionId);
     return {
       toolsOff,
-      mcpOff: () => this.mcpOffFor(sessionId),
       lazy: this.lazyHeadFor(sessionId),
       rememberLazy: (head) => setLazyHead(sessionId, head),
       toolsSeen: () => new Set(knownTools().map((t) => t.name)),
@@ -2865,17 +2864,6 @@ class SessionManager extends EventEmitter {
     // off since it started is no more out of date than one that started with them on, and one that started with them off is not.
     const same = (head: LazyHead) => JSON.stringify(was.lazy) === JSON.stringify(head.lazy) && JSON.stringify(was.direct) === JSON.stringify(head.direct);
     return !same(this.freshLazyHead(sessionId)) && !same(this.freshLazyHead(sessionId, new Set()));
-  }
-
-  /**
-   * The MCP servers every tool of which this chat has switched off, by what the portal has seen of them: pi does not connect
-   * those for the chat (see configForChat). A server nothing is known of is not one, and starts.
-   */
-  private mcpOffFor(sessionId: string): ReadonlySet<string> {
-    const off = new Set(this.offFor(sessionId));
-    const tools = new Map<string, string[]>();
-    for (const tool of knownTools()) if (tool.mcp !== undefined) tools.set(tool.mcp, [...(tools.get(tool.mcp) ?? []), tool.name]);
-    return new Set([...tools].filter(([, names]) => names.every((name) => off.has(name))).map(([server]) => server));
   }
 
   /**

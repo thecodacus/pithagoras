@@ -22,6 +22,8 @@ writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR, "models.json"), JSON.st
 writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR, "settings.json"), JSON.stringify({ defaultProvider: "fake", defaultModel: "m" }));
 
 const db = await import("../dist/db.js");
+// Opened (and migrated) here before the server opens it too: two processes making the schema at once lock each other out.
+db.getDb();
 let base;
 before(async () => {
   ({ base } = await startServer(serverEnv(home, await freePort())));
@@ -88,18 +90,45 @@ test("Lazy and Direct are marks on the server, as on any group, for the chats th
   await mark({});
 });
 
-test("Off: a tool switched off is not offered and not callable, and a server whose tools are all off is not started for the chat", async () => {
+test("Off: a tool switched off is not offered and not callable; a server whose tools are all off is still connected, so that its tools can be switched on again in the chat that has it", async () => {
   const one = await chat([{ name: "mcp__notes__ping", args: {} }]);
   assert.equal(offered(one.first).includes("mcp__notes__ping"), true);
   await json("/api/tools", "PUT", { off: ["mcp__notes__ping"] });
   const partly = await chat([{ name: "mcp__notes__ping", args: {} }]);
   assert.deepEqual(offered(partly.first).filter((name) => name.startsWith("mcp__")), ["mcp__notes__echo"]);
   assert.match(toolText(partly.last), /not found/);
-  const before = starts();
   await json("/api/tools", "PUT", { off: ["mcp__notes__ping", "mcp__notes__echo"] });
   const none = await chat();
   assert.deepEqual(offered(none.first).filter((name) => name.startsWith("mcp__")), []);
-  assert.equal(starts(), before, "the server was not started for the chat that has all its tools off");
+  // The chat is live with every tool of the server off, and the server's tools are in its list: a reload (Settings -> MCP saves
+  // reload the idle chats) keeps it so, and switching them on is a switch like any other's.
+  const mcpTools = async () => (await json(`/api/sessions/${none.id}/tools`)).tools.filter((t) => t.name.startsWith("mcp__notes__"));
+  const settled = async (count) => {
+    // The chats are reloaded in the background after the write: until that is done the list is the one of a chat that is starting.
+    for (let i = 0; i < 100 && (await mcpTools()).length !== count; i++) await new Promise((resolve) => setTimeout(resolve, 50));
+    return mcpTools();
+  };
+  assert.equal((await json(`/api/sessions/${none.id}/tools`)).live, true);
+  assert.deepEqual((await mcpTools()).map((t) => [t.name, t.enabled]).sort(), [["mcp__notes__echo", false], ["mcp__notes__ping", false]]);
+  const file = path.join(process.env.PI_CODING_AGENT_DIR, "mcp.json");
+  const entry = JSON.parse(readFileSync(file, "utf8")).mcpServers.notes;
+  const startsBefore = starts();
+  assert.equal((await send("/api/mcp/servers/notes", "PUT", { entry: { ...entry }, from: "notes" })).status, 200);
+  // The reload connects the server again: that is how it is known to be done.
+  for (let i = 0; i < 100 && starts() === startsBefore; i++) await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.ok(starts() > startsBefore, "the chat was reloaded, and its server connected again");
+  assert.deepEqual((await settled(2)).map((t) => t.name).sort(), ["mcp__notes__echo", "mcp__notes__ping"], "still listed after the chats were reloaded");
+  await json(`/api/sessions/${none.id}/tools`, "PUT", { off: [] });
+  assert.deepEqual((await mcpTools()).map((t) => t.enabled), [true, true]);
+  script = [{ name: "mcp__notes__ping", args: {} }];
+  const before = model.requests.length;
+  await json(`/api/sessions/${none.id}/prompt`, "POST", { message: "Again" });
+  for (let i = 0; i < 600; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    if (model.requests.length > before && db.getSession(none.id).status !== "running") break;
+  }
+  const again = model.requests.slice(before).filter((request) => request.tools?.length);
+  assert.ok(offered(again[0]).includes("mcp__notes__ping"), "offered to the model once switched on");
   await json("/api/tools", "PUT", { off: [] });
 });
 

@@ -494,8 +494,6 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     toolsOff?: string[];
     /** The tools the portal has seen, for one that says it is off until switched on: see `unseenOff`. */
     toolsSeen?: () => ReadonlySet<string>;
-    /** The MCP servers every tool of which the chat has switched off, asked each time pi reads its configuration: they are not connected for it (see configForChat). */
-    mcpOff?: () => ReadonlySet<string>;
     /** What the chat froze about its lazy tools when it started, which stays as it is for as long as the chat lasts: see LazyHead. */
     lazy?: LazyHead;
     /** Told what the chat's head has taken in since it was made (a lazy tool that declares outside content), to keep with it. */
@@ -585,11 +583,12 @@ export class SdkPiClient extends EventEmitter implements PiClient {
           ) },
         // Offered only while the conversation has a lazy tool: see applyToolsOff.
         { name: "tool-search", factory: search.extension },
-        // pi's own MCP support, given each chat's decisions about the servers (see configForChat). Replaceable, as in pi's own CLI:
-        // an installed extension that brings its own `/mcp` takes its place.
-        { name: "mcp", replaceable: true, factory: pi.createMcpExtension({
+        // pi's own MCP support, given each chat's decisions about the servers (see configForChat). Not replaceable, unlike in pi's own
+        // CLI: an installed extension that brings its own `/mcp` (pi-mcp-adapter does) must not take its place, or the switches of the
+        // portal (a server's `enabled: false`, the project's pinned servers) would go and its servers start without them.
+        { name: "mcp", factory: pi.createMcpExtension({
             loadConfig: (ctx: { cwd: string; isProjectTrusted(): boolean }) =>
-              configForChat(mcp, ctx, pi.getAgentDir(), (server) => opts.mcpOff?.().has(server) === true, (servers) => {
+              configForChat(mcp, ctx, pi.getAgentDir(), (servers) => {
                 mcpServers.clear();
                 for (const entry of servers) mcpServers.set(mcpNamespace(entry.name), entry.name);
               }),
