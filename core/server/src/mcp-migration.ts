@@ -198,7 +198,8 @@ export function carryOver(pi: PiMcp, text: string, off: boolean, cache: Readonly
   const file: McpFile = { mcpServers: {} };
   const carried: string[] = [];
   const left: { name: string; why: string }[] = [];
-  const approve: Record<string, string[]> = {};
+  // As pairs, then an object: a server named `__proto__` is a key like any other only where it is defined, not assigned.
+  const approved: [string, string[]][] = [];
   for (const [name, entry] of Object.entries(servers)) {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
       left.push({ name, why: "it is not a server" });
@@ -207,18 +208,21 @@ export function carryOver(pi: PiMcp, text: string, off: boolean, cache: Readonly
     // pi names tools after a server, and takes letters, digits, `_` and `-` of it: `docs.v2` stays as it is, off, and Settings → MCP says why.
     const done = NAME_RE.test(name)
       ? convertEntry(pi, name, entry as Record<string, unknown>, off)
-      : { entry: { ...(entry as Record<string, unknown>), enabled: false }, why: "pi does not take its name (letters, digits, dash and underscore only)" };
+      : { entry: leftOff(entry as Record<string, unknown>), why: "pi does not take its name (letters, digits, dash and underscore only)" };
     file.mcpServers[name] = done.entry;
-    // The server keeps what it was, on or off, and what it asked about stays asked: by the server's own `approveTools`, else the setting's. A server pi does not take by its name is none the portal can gate.
+    // The server keeps what it was, on or off, and what it asked about stays asked: by the server's own `approveTools`, else the setting's.
+    // A server pi does not take by its name has no tools to gate while it is off; its patterns are kept for its name all the same, so a rename
+    // in Settings → MCP (which moves them) carries the gate to the name pi takes.
     const own = (entry as Record<string, unknown>).approveTools;
-    const patterns = NAME_RE.test(name) ? approveOf(name, own !== undefined ? own : settings.approveTools, cache.get(name) ?? []) : [];
-    if (patterns.length) approve[name] = patterns;
+    const patterns = approveOf(name, own !== undefined ? own : settings.approveTools, cache.get(name) ?? []);
+    if (patterns.length) approved.push([name, patterns]);
     if (done.why) left.push({ name, why: done.why });
     else carried.push(name);
   }
   // What else the file had that is pi's too (autoEnableCodemode) stays; the adapter's `settings` and `imports` go.
   for (const [key, value] of Object.entries(old)) if (!["mcpServers", "settings", "imports"].includes(key)) file[key] = value;
   const imports = Array.isArray(old.imports) ? old.imports.filter((one): one is string => typeof one === "string") : [];
+  const approve = Object.fromEntries(approved);
   return { file, carried, left, imports, approve, changed: !isDeepStrictEqual(parsed, file), dialect: inAdapterDialect(old) };
 }
 

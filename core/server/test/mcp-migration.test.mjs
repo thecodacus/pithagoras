@@ -89,8 +89,35 @@ test("the adapter's setting that asks before every call becomes every server's a
   assert.deepEqual(moved.carried, ["a", "b", "e"]);
   assert.deepEqual(moved.file.mcpServers.a, { command: "a" });
   assert.deepEqual(moved.file.mcpServers.e, { command: "e", enabled: false });
-  assert.deepEqual(moved.approve, { a: ["*"], e: ["*"] }, "b said false; a name pi does not take has no server to gate");
+  assert.deepEqual(moved.approve, { a: ["*"], "c.d": ["*"], e: ["*"] }, "b said false; a name pi does not take keeps its gate, for a rename to carry");
   assert.deepEqual(moved.file.mcpServers["c.d"], { command: "c", enabled: false });
+});
+
+test("a server pi does not take by its name keeps the gate the adapter gave it, and a rename in Settings carries it to the new name", async () => {
+  reset();
+  logs.length = 0;
+  writeFileSync(mcpFile, JSON.stringify({ mcpServers: { "docs.v2": { command: "d", approveTools: ["send_*", "delete"] } } }));
+  listed([{ source: ADAPTER, extensions: ["extensions/index.ts"] }]);
+  await moveFromAdapter();
+  assert.deepEqual(readFile().mcpServers["docs.v2"], { command: "d", enabled: false }, "off, and the key is not in the file");
+  assert.deepEqual(db.mcpApprove()["docs.v2"], ["send_*", "delete"]);
+  assert.match(logs[0], /still asked, by each server's `approve`: docs\.v2/);
+  const { mcpRouter } = await import("../dist/api/mcp.js");
+  const { default: express } = await import("express");
+  const app = express();
+  app.use(express.json());
+  app.use("/api", mcpRouter());
+  const listener = app.listen(0, "127.0.0.1");
+  await new Promise((resolve) => listener.once("listening", resolve));
+  try {
+    const put = await fetch(`http://127.0.0.1:${listener.address().port}/api/mcp/servers/docs-v2`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ from: "docs.v2", entry: { command: "d" } }) });
+    assert.equal(put.status, 200, await put.clone().text());
+  } finally {
+    listener.close();
+  }
+  assert.deepEqual(db.mcpApprove()["docs-v2"], ["send_*", "delete"], "the renamed server is gated as it was");
+  assert.equal(db.mcpApprove()["docs.v2"], undefined);
+  db.setMcpApprove("docs-v2", undefined);
 });
 
 test("the adapter's patterns match what the adapter matched: the tool's own name or its prefixed one, `?`, dashes as underscores, and no tool it asked about is left out", async () => {
@@ -216,7 +243,7 @@ test("on the first start: the file is carried over, the adapter leaves pi's pack
   assert.match(logs[0], /pi-mcp-adapter taken out of pi's packages/);
   assert.match(logs[0], /Left off, as they were.*sock \(a Unix socket/);
   assert.match(logs[0], /still asked, by each server's `approve`: gated, gatedList/, "what the adapter asked about before a call is asked still, and the servers are not left off for it");
-  assert.deepEqual(db.mcpApprove(), { gated: ["*"], gatedList: ["delete_*"] });
+  assert.deepEqual({ ...db.mcpApprove() }, { gated: ["*"], gatedList: ["delete_*"] });
   assert.equal(file.mcpServers.gated.enabled, undefined);
   assert.equal(file.mcpServers.gatedList.enabled, false, "on or off as it was");
   assert.match(logs[0], /docs\.v2 \(pi does not take its name/);
