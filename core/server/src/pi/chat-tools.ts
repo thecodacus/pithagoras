@@ -1,11 +1,13 @@
 import { Type } from "typebox";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import path from "node:path";
 import { chatModel, getDb, type SessionRow } from "../db.js";
 import { agentOf, getAgent, listAgents, type Agent } from "../agents.js";
 import { agentLinkedAt } from "../project-agent.js";
 import { DATA_DIR } from "../data-dir.js";
+import { within } from "../paths.js";
 import { modelRuntime } from "../api/providers.js";
 import { AUDIO_MESSAGE_PREFIX } from "./voice-first.js";
 import { textOf } from "./entries.js";
@@ -48,6 +50,8 @@ const MAX_OUTPUT = 50_000;
 const NOTE_RESERVE = 200;
 /** The folder of a chat's images, where the portal keeps them: see session-manager. */
 const IMAGE_ROOT = path.resolve(DATA_DIR, "images");
+/** An entry id as pi writes it (a short hex id); anything else is not put into a file name as it is. */
+const SAFE_ID = /^[0-9a-f-]{1,64}$/;
 /** What a question to a chat's context may take the model. */
 const ASK_TIMEOUT_MS = 300_000;
 /** What the model is told when it searches a chat's context. */
@@ -256,7 +260,12 @@ async function imageOf(sessionId: string, entryId: string, partIndex: number, pa
   if (!data) return undefined;
   const mime = typeof (part as { mimeType?: unknown }).mimeType === "string" ? (part as { mimeType: string }).mimeType : "image/png";
   const ext = { "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp" }[mime] ?? "img";
-  const file = path.join(IMAGE_ROOT, sessionId, `chat-${entryId}-${partIndex}.${ext}`);
+  // The id comes out of a file on disk, so it is not trusted into a name: an id
+  // with a `../` would write outside the chat's folder.
+  const stem = SAFE_ID.test(entryId) ? entryId : createHash("sha1").update(entryId).digest("hex");
+  const folder = path.join(IMAGE_ROOT, sessionId);
+  const file = path.join(folder, `chat-${stem}-${partIndex}.${ext}`);
+  if (!within(IMAGE_ROOT, file) || !within(folder, file)) return undefined;
   try {
     if (!existsSync(file)) {
       await mkdir(path.dirname(file), { recursive: true });
@@ -375,7 +384,7 @@ ${lines.join("\n")}${more}`);
         id: Type.Optional(Type.String({ description: "The chat to ask, for a prompt" })),
         limit: Type.Optional(Type.Number({ description: "Most matches to show; default 20, at most 50" })),
       }),
-      async execute(_id: string, p: any) {
+      async execute(_id: string, p: any, signal?: AbortSignal) {
         const query = String(p.query ?? "").trim();
         const prompt = String(p.prompt ?? "").trim();
         const limit = Math.min(50, Math.max(1, Math.trunc(Number(p.limit ?? 20)) || 20));
@@ -385,7 +394,7 @@ ${lines.join("\n")}${more}`);
           if (query) return fail("A search is for words, or a question to a chat's context, not both.");
           const id = String(p.id ?? "").trim();
           if (!id) return fail("A question to a chat's context needs the chat's id, from chat_list.");
-          return askChat(id, prompt);
+          return askChat(id, prompt, signal);
         }
         if (p.images === true) return listImages(limit);
         if (!query) return fail("Nothing to search for: words, or images: true, or a prompt with the chat's id.");
@@ -451,7 +460,7 @@ ${found.join("\n")}`);
     }
 
     /** A question to one chat's context: the chat's model reads its transcript and answers it. */
-    async function askChat(id: string, prompt: string) {
+    async function askChat(id: string, prompt: string, signal: AbortSignal | undefined) {
       const session = getDb().prepare("SELECT * FROM sessions WHERE id = ?").get(id) as SessionRow | undefined;
       if (!session) return fail("No chat with that id.");
       if (ownerOf(session.workspace, listAgents())?.id !== agentId) return fail("That chat is not one of yours.");
@@ -484,7 +493,8 @@ ${found.join("\n")}`);
           systemPrompt: SEARCH_SYSTEM,
           messages: [{ role: "user", content: `${note}${text}\n\nQuestion: ${prompt}` }],
         },
-        { signal: AbortSignal.timeout(ASK_TIMEOUT_MS) },
+        // Stop ends the question as well as the time limit: the model is not left answering to nobody.
+        { signal: AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(ASK_TIMEOUT_MS)]) },
       );
       const said = (answer?.content ?? []).filter((c: any) => c?.type === "text").map((c: any) => String(c.text ?? "")).join("").trim();
       if (answer?.stopReason === "error" || !said) return fail(`The model gave no answer${answer?.errorMessage ? `:${answer.errorMessage}` : ""}.`);

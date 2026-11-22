@@ -366,3 +366,44 @@ test("a client in a project no agent is linked to has no chat tools", async () =
   const own = await toolNames(scout.home);
   assert.ok(own.includes(CHAT_SEARCH_TOOL), "an agent's own chat has them");
 });
+
+// The entry id is read from a file on disk, and was put into the image's file
+// name as it stood: an id with `../` wrote outside the chat's image folder.
+test("an entry id that is not a plain id does not put an image outside the chat's folder", async () => {
+  createSession({ id: "evil", title: "Evil ids", workspace: scout.home, executor: "host" });
+  writeChatFile("evil", [
+    { id: "x/../../../escaped", type: "message", message: { role: "user", content: [{ type: "image", data: PNG, mimeType: "image/png" }] } },
+    { id: "../../../../also-escaped", type: "message", message: { role: "assistant", content: [{ type: "image", data: PNG, mimeType: "image/png" }] } },
+  ]);
+  const read = said(await run(tools[CHAT_READ_TOOL], { id: "evil" }));
+  const files = [...read.matchAll(/→ \[image: (.+)\]/g)].map((m) => m[1]);
+  assert.equal(files.length, 2, "both images are still shown, as files");
+  const folder = path.join(process.env.DATA_DIR, "images", "evil") + path.sep;
+  for (const file of files) {
+    assert.ok(file.startsWith(folder), `${file} is in the chat's image folder`);
+    assert.ok(existsSync(file));
+    assert.match(path.basename(file), /^chat-[0-9a-f]{40}-\d+\.png$/, "named by a hash of the id");
+  }
+  assert.ok(!existsSync(path.join(process.env.DATA_DIR, "escaped-0.png")), "nothing was written above the image folder");
+  assert.ok(!existsSync(path.join(path.dirname(process.env.DATA_DIR), "also-escaped-0.png")));
+  assert.ok(!existsSync(path.join(process.env.DATA_DIR, "images", "also-escaped-0.png")));
+});
+
+// Stop ends the run, and a question to a chat's model, which can take minutes,
+// is part of it: it ended only with its own time limit.
+test("Stop ends a question to a past chat", async () => {
+  const model = await fakeModel(() => new Promise(() => {}));
+  writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR, "models.json"), JSON.stringify(model.models()));
+  createSession({ id: "slow", title: "Slow", workspace: scout.home, executor: "host", provider: "fake", model: "m" });
+  writeChatFile("slow", [user("the backup broke"), agent("looking")]);
+
+  const stop = new AbortController();
+  const outcome = tools[CHAT_SEARCH_TOOL].execute("call-1", { prompt: "what broke", id: "slow" }, stop.signal).then(
+    () => "answered",
+    () => "ended",
+  );
+  while (!model.requests.length) await new Promise((resolve) => setTimeout(resolve, 20));
+  stop.abort();
+  const timer = new Promise((resolve) => setTimeout(() => resolve("still waiting"), 5000));
+  assert.equal(await Promise.race([outcome, timer]), "ended", "the question ends when the run is stopped, not at its time limit");
+});
