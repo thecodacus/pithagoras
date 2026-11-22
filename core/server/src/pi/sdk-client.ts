@@ -2,7 +2,7 @@ import { acceptPrompt } from "./accept-prompt.js";
 import { AUDIO_MESSAGE_PREFIX, AudioRule, VoiceFirstTurn, audioMessage, spokenIn } from "./voice-first.js";
 import { sandboxTools } from "../sandbox/tools.js";
 import { sandboxOn } from "../sandbox/policy.js";
-import { projectSkillPaths, withoutFolderMcp } from "../sandbox/project-trust.js";
+import { projectSkillPaths, withoutAdapter, withoutFolderMcp } from "../sandbox/project-trust.js";
 import { agentSkillsDir, skillsLine } from "../agent-skills.js";
 import { agentFilesAt, agentFor, memoryHeldAt } from "../project-agent.js";
 import { crossModelThinkingExtension } from "./cross-model-thinking.js";
@@ -494,6 +494,8 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     toolsOff?: string[];
     /** The tools the portal has seen, for one that says it is off until switched on: see `unseenOff`. */
     toolsSeen?: () => ReadonlySet<string>;
+    /** The tools the portal knew when `toolsOff` was worked out: see `unseenMcpOff`. */
+    toolsKnown?: ReadonlySet<string>;
     /** What the chat froze about its lazy tools when it started, which stays as it is for as long as the chat lasts: see LazyHead. */
     lazy?: LazyHead;
     /** Told what the chat's head has taken in since it was made (a lazy tool that declares outside content), to keep with it. */
@@ -621,8 +623,9 @@ export class SdkPiClient extends EventEmitter implements PiClient {
         cwd: opts.cwd,
         // One for the loader and the session, so the folder's trust the loader decides holds for both.
         settingsManager,
-        // The MCP adapter reads no config from the folder, and starts no server there, while the sandbox is on.
-        extensionsOverride: (loaded: { extensions: any[] }) => (sandboxOn() ? withoutFolderMcp(loaded) : loaded),
+        // pi's MCP support reads no config from the folder, and starts no server there, while the sandbox is on. A package of
+        // pi-mcp-adapter that a settings file still names is not loaded beside it.
+        extensionsOverride: (loaded: { extensions: any[] }) => withoutAdapter(sandboxOn() ? withoutFolderMcp(loaded) : loaded),
         ...(eventBus ? { eventBus } : {}),
         agentDir: pi.getAgentDir(),
         // Available everywhere without being installed, and not editable in
@@ -803,6 +806,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     client.toolsSeen = opts.toolsSeen;
     client.codemodeOnly = opts.codemode === "only";
     client.switchedOff = new Set([...(opts.toolsOff ?? []), ...client.unseenOff()]);
+    client.switchesKnown = opts.toolsKnown ?? new Set(opts.toolsSeen?.() ?? []);
     client.search = search;
     try {
       await session.bindExtensions({
@@ -1475,6 +1479,8 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     this.gatewayOff = [...names].some((name) => MCP_GATEWAY.includes(name));
   }
   private gatewayOff = false;
+  /** The tools the portal knew when the switches were last worked out. */
+  private switchesKnown?: ReadonlySet<string>;
   /** The switches alone. */
   private switches = new Set<string>();
 
@@ -1493,14 +1499,16 @@ export class SdkPiClient extends EventEmitter implements PiClient {
   }
 
   /**
-   * The tools of MCP servers that the portal has not seen, while the switches still have pi-mcp-adapter's `mcp` tool off (see
-   * MCP_GATEWAY): that list meant no MCP, and a server's tool that appears later (they connect after the chat starts, and a
-   * server changes its tools) is not named in it. Live, as the tools are registered when the servers have connected.
+   * The tools of MCP servers that the portal did not know when the switches were worked out, while the switches still have
+   * pi-mcp-adapter's `mcp` tool off (see MCP_GATEWAY): that list meant no MCP, and a server's tool that appears later (they
+   * connect after the chat starts, and a server changes its tools) is not named in it. Not the tools the portal has seen
+   * since: a reload of the chat brings them back, and they are held until the switches are worked out again, which names them.
+   * Live, as the tools are registered when the servers have connected.
    */
   private unseenMcpOff(): string[] {
-    const seen = this.toolsSeen?.();
+    const seen = this.switchesKnown;
     if (!seen || !this.gatewayOff) return [];
-    return (this.session.getAllTools?.() ?? []).map((tool: { name: unknown }) => String(tool.name)).filter((name: string) => !seen.has(name) && mcpNamespaceOf(this.session.getToolDefinition(name)) !== undefined);
+    return (this.session.getAllTools?.() ?? []).map((tool: { name: unknown }) => String(tool.name)).filter((name: string) => !seen.has(name) && (mcpNamespaceOf(this.session.getToolDefinition(name)) !== undefined || isResourceTool(name)));
   }
 
   /** A field of the tool's own definition, which pi keeps as it was registered. */
@@ -1849,6 +1857,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
    * active set is computed from what pi wants right now, every time.
    */
   async setToolsOff(names: string[]): Promise<void> {
+    this.switchesKnown = new Set(this.toolsSeen?.() ?? []);
     // The portal's switches name a tool that is off until switched on only once it has seen it: until then it stays off.
     this.switchedOff = new Set([...names, ...this.unseenOff()]);
     this.applyToolsOff();

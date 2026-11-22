@@ -71,6 +71,20 @@ export function withoutFolderMcp<T extends { extensions: any[] }>(result: T): T 
   return result;
 }
 
+/**
+ * Where pi-mcp-adapter would be: a package of that name, by its source, its folder or the file of its extension. The portal
+ * does not install it any more, but a project's own `.pi/settings.json` (the sandbox off) or a hand-edited settings.json can
+ * still name it, and next to pi's own MCP support it would read the same mcp.json by its own rules: `enabled: false` means
+ * nothing to it, and its `mcp` tool reaches servers and tools a chat has switched off, with results the guard does not know as an MCP server's.
+ */
+const isAdapter = (extension: { resolvedPath?: string; path?: string; sourceInfo?: { source?: string; baseDir?: string } }): boolean =>
+  [extension.sourceInfo?.source, extension.sourceInfo?.baseDir, extension.resolvedPath, extension.path].some((where) => typeof where === "string" && /(^|[:/\\])pi-mcp-adapter(@[^/\\]*)?([/\\]|$)/.test(where));
+
+/** pi's extensions as loaded, without pi-mcp-adapter (see isAdapter): its handlers and tools never reach a chat. */
+export function withoutAdapter<T extends { extensions: any[] }>(result: T): T {
+  return { ...result, extensions: result.extensions.filter((extension) => !isAdapter(extension)) };
+}
+
 /** The context, with its folder MCP_FOLDER. */
 function elsewhere(ctx: any): any {
   if (!ctx || typeof ctx !== "object") return ctx;

@@ -86,6 +86,8 @@ function convertEntry(pi: PiMcp, name: string, entry: Record<string, unknown>, o
   if (entry.exposeResources === false) why.push("its resources left out");
   // The adapter asked before each call of a tool: pi's MCP support does not, and the tools would run unasked.
   if (entry.approveTools !== undefined ? entry.approveTools : gate) why.push("tools that ask before each call (approveTools), which pi does not do");
+  // The adapter fell back to the old SSE transport where streamable HTTP failed; pi speaks streamable HTTP only, and cannot tell an SSE-only address from the other kind, except by its look.
+  if (typeof entry.url === "string" && /\/sse\/?([?#].*)?$/i.test(entry.url.replace(/^[a-z]+:\/\/[^/]*/i, ""))) why.push("a URL that looks like the old SSE transport, which pi does not connect (it needs the server's streamable HTTP address)");
   if (entry.oauth !== undefined && entry.oauth !== false) why.push("an OAuth block of the adapter's");
   if (typeof entry.auth === "string" && entry.auth !== "oauth" && entry.auth !== "bearer") why.push(`the sign-in "${entry.auth}", which pi does not have`);
   const bearer = bearerHeader(entry);

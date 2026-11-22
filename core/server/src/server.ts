@@ -87,7 +87,7 @@ import { deleteNotesOf } from "./activity.js";
 import { EXECUTOR_KIND } from "./executor-kind.js";
 import { sessions, CodemodeHeld, CommandFailed, IMAGE_ROOT } from "./session-manager.js";
 import { ImageError, MAX_IMAGE_BYTES, MAX_IMAGES, imagePath, mimeOf, parseImages, saveImages } from "./prompt-images.js";
-import { defaultsFor } from "./tool-policy.js";
+import { defaultsAsShown, defaultsToStore, heldByGateway, onByDefault } from "./tool-policy.js";
 import { mcpRouter, onMcpWritten } from "./api/mcp.js";
 import { moveFromAdapter } from "./mcp-migration.js";
 import { authMode, changePassword, checkPassword, isAuthed, issueCookie, passwordRefused, requireAuth, setUpPassword, shortPassword, signOut } from "./auth.js";
@@ -106,7 +106,7 @@ import { holdsWork, unsavedRefusal, unsavedWork } from "./git.js";
 import { skillsRouter } from "./api/skills.js";
 import { featuresRouter } from "./api/features.js";
 import { modesRouter } from "./api/modes.js";
-import { isToolList, layerExceptions, layerTools, toolsUnsupported } from "./tool-layers.js";
+import { isToolList, layerExceptions, layerOff, layerTools, toolsUnsupported } from "./tool-layers.js";
 import { modelLevels, modelRuntime, providersRouter } from "./api/providers.js";
 import { peopleRouter } from "./api/people.js";
 import { voiceRouter } from "./api/voice.js";
@@ -678,7 +678,7 @@ app.put("/api/projects/:name/tools", async (req, res) => {
     if (EXECUTOR_KIND === "container") return res.status(400).json(toolsUnsupported);
     const stored = saveProjectTools(project, off);
     const applied = await sessions.applyToolDefaults(project.name);
-    res.json({ off: defaultsFor(toolDefaultsFor(project.path, null, "project"), stored), applied });
+    res.json({ off: layerOff(project.path, toolDefaultsFor(project.path, null, "project"), stored), applied });
   } catch (e) {
     projectFailure(res, e);
   }
@@ -719,7 +719,7 @@ app.put("/api/agents/:id/tools", async (req, res) => {
     const below = toolDefaultsFor(agent.home, null, "agent");
     const stored = setAgentTools(agent.id, layerExceptions(agent.home, below, agentTools(agent.id), off));
     const applied = await sessions.applyToolDefaults({ agent: agent.id });
-    res.json({ off: defaultsFor(below, stored), applied });
+    res.json({ off: layerOff(agent.home, below, stored), applied });
   } catch (e) {
     res.status(500).json({ error: (e as Error).message });
   }
@@ -757,7 +757,7 @@ app.put("/api/routines/:id/tools", async (req, res) => {
     const below = toolDefaultsFor(routine.folder, null, "routine");
     const stored = setRoutineTools(routine.slug, layerExceptions(routine.folder, below, routineTools(routine.slug), off));
     const applied = await sessions.applyToolDefaults({ routine: routine.slug });
-    res.json({ off: defaultsFor(below, stored), applied });
+    res.json({ off: layerOff(routine.folder, below, stored), applied });
   } catch (e) {
     res.status(500).json({ error: (e as Error).message });
   }
@@ -1301,18 +1301,20 @@ app.get("/api/tools", (_req, res) => {
   // and answers every flip with an error is the switch that looks like it works.
   if (EXECUTOR_KIND === "container") return res.status(400).json(toolsUnsupported);
   const off = new Set(toolDefaultsOff());
+  const shown = shownTools();
   const lazy = lazyMarks();
   res.json({
-    tools: shownTools().map((tool) => ({
+    tools: shown.map((tool) => ({
       ...tool,
-      defaultOn: !off.has(tool.name),
+      defaultOn: onByDefault(tool.name, [...off]),
       // Not offered one by one: found through `tool_search`.
       // `mark` is what somebody set on the tool or its set, and `auto` that nothing is, so the threshold decides.
       ...lazy(tool),
       // pi's own tools, which the page offers no lazy mark for.
       ...(lazyAllowed(tool) ? {} : { noLazy: true as const }),
     })),
-    off: [...off].sort(),
+    // With a leftover gateway entry spelled out as the MCP tools it holds off, which the page can switch on one by one.
+    off: defaultsAsShown(shown.map((tool) => tool.name), [...off]),
     names: toolGroupNames(),
     marks: toolMarks(),
     // What the threshold decided, and the limits it decided by; the page says which sets are lazy "by size", and when it could not make the list fit.
@@ -1356,9 +1358,10 @@ app.put("/api/tools", async (req, res) => {
   if (EXECUTOR_KIND === "container") return res.status(400).json(toolsUnsupported);
   const off = req.body?.off;
   if (!isToolList(off)) return res.status(400).json({ error: "off must be a list of tool names" });
-  const stored = setToolDefaultsOff(off);
+  const shown = shownTools().map((tool) => tool.name);
+  const stored = setToolDefaultsOff(defaultsToStore(off, shown.filter(heldByGateway)));
   const applied = await sessions.applyToolDefaults();
-  res.json({ off: stored, applied });
+  res.json({ off: defaultsAsShown(shown, stored), applied });
 });
 
 /**

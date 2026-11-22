@@ -221,3 +221,12 @@ test("a file that cannot be parsed is not touched, the adapter stays, and the mo
   assert.deepEqual(readFile().mcpServers.a, { command: "x" });
   assert.deepEqual(JSON.parse(readFileSync(settingsFile, "utf8")).packages, []);
 });
+
+test("a server at an address that looks like the old SSE transport is left off and named: pi speaks streamable HTTP only", async () => {
+  const pi = await piMcp();
+  const moved = carryOver(pi, JSON.stringify({ mcpServers: { sse: { url: "http://localhost:8000/sse" }, other: { url: "http://localhost:8000/mcp" }, query: { url: "http://h.example.test/events/sse?x=1" } } }), false);
+  assert.deepEqual(moved.carried, ["other"]);
+  assert.deepEqual(moved.left.map((l) => l.name).sort(), ["query", "sse"]);
+  assert.match(moved.left[0].why, /SSE/);
+  assert.equal(moved.file.mcpServers.sse.enabled, false);
+});

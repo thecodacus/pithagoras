@@ -247,3 +247,54 @@ test("a trusted project cannot undo a tool the person hid in a server of their o
   const emptied = configForChat(await piMcp(), { cwd: folder, isProjectTrusted: () => true }, agentDir, () => {});
   assert.equal(emptied.servers.find((s) => s.name === "alpha").config.toolExposure.delete_repo, "hidden");
 });
+
+test("pi-mcp-adapter, still named by a project's settings, is not loaded beside pi's own MCP support", async () => {
+  putConfig({ alpha: server("alpha", "ping", { enabled: false }) });
+  const folder = chat();
+  const adapter = path.join(folder, "pi-mcp-adapter");
+  mkdirSync(adapter, { recursive: true });
+  writeFileSync(path.join(adapter, "package.json"), JSON.stringify({ name: "pi-mcp-adapter", pi: { extensions: ["./index.mjs"] } }));
+  writeFileSync(
+    path.join(adapter, "index.mjs"),
+    `export default (pi) => pi.registerTool({ name: "mcp", label: "mcp", description: "the adapter's proxy", parameters: { type: "object", properties: {} }, execute: async () => ({ content: [{ type: "text", text: "adapter ran" }], details: {} }) });`
+  );
+  mkdirSync(path.join(folder, ".pi"), { recursive: true });
+  writeFileSync(path.join(folder, ".pi", "settings.json"), JSON.stringify({ packages: [adapter] }));
+  const r = await run([{ name: "mcp", args: {} }], { cwd: folder });
+  assert.ok(!names(r.requests[0]).includes("mcp"), "its tool is not offered");
+  assert.doesNotMatch(textOf(r.results[0] ?? {}), /adapter ran/);
+});
+
+test("a chat whose lists still have pi-mcp-adapter's `mcp` tool off keeps a server's tools off when the portal has seen them since and the chat's pi is reloaded, until its switches are worked out again", async () => {
+  putConfig({ alpha: server("alpha", "ping,echo") });
+  script = [];
+  const seen = new Set();
+  const client = await SdkPiClient.create({
+    cwd: chat(), sessionDir: mkdtempSync(path.join(home, "chat-")), provider: "fake", modelId: "m", sessionId: `mcp-native-${n++}`, dialogs: false, toolsOff: ["mcp"], toolsSeen: () => seen,
+  });
+  const turn = async (calls) => {
+    script = calls;
+    const results = [];
+    const settled = new Promise((resolve) => client.on("event", (e) => {
+      if (e?.type === "tool_execution_end") results.push(textOf(e));
+      if (e?.type === "agent_settled") resolve();
+    }));
+    await client.prompt("Go on");
+    await settled;
+    return results;
+  };
+  try {
+    assert.match((await turn([{ name: "mcp__alpha__echo", args: { text: "a" } }]))[0], /not found/);
+    // Another chat ran, and the portal remembered the server's tools; this chat's switches were not worked out again.
+    seen.add("mcp__alpha__echo").add("mcp__alpha__ping");
+    await client.reload();
+    assert.match((await turn([{ name: "mcp__alpha__echo", args: { text: "b" } }]))[0], /not found/, "still off after the reload");
+    // Worked out again, as the portal does when a default or a switch changes: now the switches name the tools, and a tool switched on is on.
+    await client.setToolsOff(["mcp", "mcp__alpha__ping"]);
+    await client.reload();
+    assert.match((await turn([{ name: "mcp__alpha__echo", args: { text: "c" } }]))[0], /alpha\/echo says .*c/);
+  } finally {
+    await client.shutdown();
+    client.dispose();
+  }
+});

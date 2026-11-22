@@ -8,6 +8,8 @@ import {
   toolSetOf,
   BUILT_IN_SET,
   MCP_GATEWAY,
+  defaultsAsShown,
+  defaultsToStore,
 } from "../dist/tool-policy.js";
 
 const none = { off: [], on: [] };
@@ -150,4 +152,34 @@ test("a leftover `mcp` entry of pi-mcp-adapter keeps the tools of every MCP serv
   // What pi is told for a project that had MCP off: the server's tools the portal knows are off.
   assert.deepEqual(effectiveOff(["mcp__jira__search", "web_search"], [], { off: ["mcp"], on: [] }), ["mcp", "mcp__jira__search"]);
   assert.deepEqual(defaultsFor(["mcp"], none), ["mcp"], "and the entry goes on to the chats of the project");
+});
+
+test("a leftover `mcp` entry holds pi's three tools for the resources of the servers off too, which reach every server", () => {
+  for (const tool of ["list_mcp_resources", "list_mcp_resource_templates", "read_mcp_resource"]) {
+    assert.equal(toolEnabled(tool, ["mcp"], none), false);
+    assert.equal(toolEnabled(tool, ["mcp"], { off: [], on: [tool] }), true, "on by name");
+    assert.equal(toolEnabled(tool, [], none), true, "as any tool without the entry");
+  }
+});
+
+test("the portal-wide default has no `on` list: with a leftover `mcp` entry, the page is given the MCP tools as off, one by one, and switching one on takes the entry away", () => {
+  const known = ["mcp__jira__search", "mcp__jira__create", "web_search"];
+  // What the page shows: every MCP tool off, as it is in every new chat.
+  const shown = defaultsAsShown(known, ["mcp"]);
+  assert.deepEqual(shown, ["mcp", "mcp__jira__create", "mcp__jira__search"]);
+  // One switched on: the page sends the rest of the list back.
+  const stored = defaultsToStore(shown.filter((name) => name !== "mcp__jira__search"), ["mcp__jira__search", "mcp__jira__create"]);
+  assert.deepEqual(stored, ["mcp__jira__create"]);
+  assert.equal(toolEnabled("mcp__jira__search", stored, none), true);
+  assert.equal(toolEnabled("mcp__jira__create", stored, none), false, "the others stay off");
+  // Nothing switched on, or no MCP tool known yet: the entry stays, and keeps the unseen servers' tools off.
+  assert.deepEqual(defaultsToStore(shown, ["mcp__jira__search", "mcp__jira__create"]), shown);
+  assert.deepEqual(defaultsToStore(["mcp"], []), ["mcp"]);
+  assert.deepEqual(defaultsToStore(["web_search"], ["mcp__jira__search"]), ["web_search"], "no entry, nothing to do");
+});
+
+test("a layer with an `on` list switches one MCP tool on under a leftover entry, and writes only that one", () => {
+  const known = ["mcp__jira__search", "mcp__jira__create"];
+  const wantedOff = defaultsAsShown(known, ["mcp"]).filter((name) => name !== "mcp__jira__search");
+  assert.deepEqual(exceptionsFor(wantedOff, ["mcp"], known), { off: [], on: ["mcp__jira__search"] });
 });
