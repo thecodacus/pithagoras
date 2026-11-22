@@ -3726,7 +3726,6 @@ export function forgetPackageTools(spec: string): void {
  */
 export function forgetMcpTools(removed: readonly string[]): void {
   if (!removed.length) return;
-  putSilentMcp(silentMcp().filter((name) => !removed.includes(name)));
   const all = knownTools();
   const kept = all.filter((t) => t.mcp === undefined || !removed.includes(t.mcp));
   if (kept.length !== all.length) putSetting("tools_seen", JSON.stringify(kept));
@@ -3746,33 +3745,8 @@ onMcpWritten((before) => {
 export function unseenMcpServers(): string[] {
   const connecting = connectingServers();
   if (!connecting) return [];
-  const seen = new Set([...knownTools().flatMap((t) => (t.mcp !== undefined ? [t.mcp] : [])), ...silentMcp()]);
+  const seen = new Set(knownTools().flatMap((t) => (t.mcp !== undefined ? [t.mcp] : [])));
   return [...connecting].filter((server) => !seen.has(server));
-}
-
-/** The servers a chat connected, or tried to, that gave it no tool: one that does not start, or has none. Nothing is to be searched there. */
-const SILENT_MCP = "mcp_silent";
-const silentMcp = (): string[] => {
-  try {
-    const list = JSON.parse(getSetting(SILENT_MCP) ?? "[]");
-    return Array.isArray(list) ? list.filter((name): name is string => typeof name === "string") : [];
-  } catch {
-    return [];
-  }
-};
-const putSilentMcp = (names: string[]): void => {
-  if (names.length !== silentMcp().length || names.some((name, i) => name !== silentMcp()[i])) putSetting(SILENT_MCP, names.length ? JSON.stringify(names) : "");
-};
-
-/**
- * What a chat that has run says of the servers it was given: those that gave it no tool are silent, and an unseen server is
- * not told to the model as a place to search (see buildLazyHead) while it is. One that gave tools is not silent, whenever it did.
- */
-export function noteSilentMcpServers(given: Iterable<string>, reported: readonly { mcp?: string }[]): void {
-  const heard = new Set(reported.flatMap((tool) => (tool.mcp !== undefined ? [tool.mcp] : [])));
-  const connecting = connectingServers();
-  const next = [...new Set([...silentMcp(), ...given])].filter((name) => !heard.has(name) && (!connecting || connecting.has(name)));
-  putSilentMcp(next);
 }
 
 /**

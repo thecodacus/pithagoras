@@ -950,6 +950,7 @@ const de: Locale = {
     "Config file": "Konfigurationsdatei",
     "Applies to every session in this portal. Chats that are running read it again when they are idle or at their next step.": "Gilt für jede Sitzung in diesem Portal. Laufende Chats lesen sie neu, sobald sie ruhen oder bei ihrem nächsten Schritt.",
     "pi skips this entry: {problem}": "pi überspringt diesen Eintrag: {problem}",
+    "pi does not read {keys}, so they would do nothing: remove them to switch this server on.": "pi liest {keys} nicht, sie würden also nichts bewirken: Entferne sie, um diesen Server einzuschalten.",
     "Letters, digits, dash and underscore. Its tools are named mcp__name__tool": "Buchstaben, Ziffern, Bindestrich und Unterstrich. Seine Tools heißen mcp__name__tool",
     "Name: value per line. A token belongs in the environment: Authorization: Bearer ${MY_SERVICE_TOKEN}": "Name: Wert pro Zeile. Ein Token gehört in die Umgebung: Authorization: Bearer ${MY_SERVICE_TOKEN}",
     "What the server offers, in a sentence; the search for tools ranks its tools by it. Optional": "Was der Server bietet, in einem Satz; die Suche nach Tools ordnet seine Tools danach. Optional",

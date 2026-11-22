@@ -56,10 +56,13 @@ export function serverOfArgument(argument: unknown, configured: Iterable<string>
  * The namespaces of the servers a chat has switched off: every tool of the server that the chat has registered is off. A
  * server stays connected whatever a chat has off of it (so a switch can be undone), and pi's resource tools reach every
  * connected server by an argument, so the guard holds them to this. A server with no tool registered cannot be told as off.
+ * A tool pi registered as `hidden` (the file hides it, or the server dropped it) is not one a chat can switch, so it does not
+ * count: a server with every tool that can be switched off is off.
  */
 export function serversSwitchedOff(tools: Iterable<{ name: string; definition: unknown }>, off: ReadonlySet<string>): Set<string> {
   const seen = new Map<string, boolean>();
   for (const tool of tools) {
+    if ((tool.definition as { exposure?: unknown } | undefined)?.exposure === "hidden") continue;
     const namespace = mcpNamespaceOf(tool.definition);
     if (namespace !== undefined) seen.set(namespace, (seen.get(namespace) ?? true) && off.has(tool.name));
   }

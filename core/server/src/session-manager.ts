@@ -81,7 +81,6 @@ import {
   type AgentHome,
   routineOf,
   remembered,
-  noteSilentMcpServers,
   rememberTools,
   knownTools,
   recordAudit,
@@ -1291,12 +1290,10 @@ class SessionManager extends EventEmitter {
     // before you can say "off everywhere" would be the wrong way round.
     // Again when a run has settled: an MCP server's tools are registered once pi has connected it, which is after the chat
     // started, and what a chat last saw of a server is what the threshold counts.
-    const rememberRegistered = (settled = false) =>
+    const rememberRegistered = () =>
       void client
         .getTools?.()
         .then((tools) => {
-          // Only once a run is over: before it, a server has not connected yet.
-          if (settled && client.mcpServers) noteSilentMcpServers(client.mcpServers.values(), tools);
           // A tool that this chat was started with, because nobody had seen it before, and that is off by default, is taken out of its list again.
           if (rememberTools(tools.map(remembered)).length) return this.applyToolDefaults();
         })
@@ -1452,7 +1449,7 @@ class SessionManager extends EventEmitter {
         if (!this.failed.delete(sessionId) && !stoppedHere) this.mark(sessionId, "idle");
         for (const woken of this.settleWaiters.get(sessionId) ?? []) woken();
         this.settleWaiters.delete(sessionId);
-        rememberRegistered(true);
+        rememberRegistered();
         if (client.reloadDue) void this.reloadSettled(sessionId, client);
       }
     });

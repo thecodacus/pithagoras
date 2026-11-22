@@ -1368,14 +1368,18 @@ in `mcp.json` over once, each on or off as it was, with the adapter's own keys
 (`lifecycle`, `directTools`, `toolPrefix` and the like) dropped, and takes the
 adapter out of pi's packages. Every server is **Auto** in Settings → Tools, so a
 big one goes behind `tool_search` by itself: mark one **Direct** where you had its
-tools registered directly. A server pi cannot take as it was (a Unix socket, a list
-of the tools it offers or leaves out, a bearer token, `$env:NAME` variables, tools
-that asked before each call, a name with a dot) stays in the file as it was, switched
-off, and is named in the one line the log gets (Settings → Logs): write it in pi's
-words (a token is `"headers": { "Authorization": "Bearer ${TOKEN}" }`) and switch it
-on in Settings → MCP. The tools are named `mcp__<server>__<tool>` now: **switches
-you set on the adapter's tools, or on its `mcp` tool for a project, agent or
-routine, do nothing any more**, so set them again in Settings → Tools; the log line
+tools registered directly. A bearer token becomes the `Authorization` header pi takes
+(Understory's entry among them). A server pi cannot take as it was (a Unix socket, a
+list of the tools it offers or leaves out, `$env:NAME` variables, a `$` or a leading
+`!!` in a value of `env` or `headers`, tools that asked before each call, a name with a
+dot) stays in the file as it was, switched off, and is named in the one line the log
+gets (Settings → Logs). Settings → MCP shows which keys keep such a server off and does
+not switch it on while they are in it: write them in pi's words (a tool to leave out is
+`"toolExposure": { "<tool>": "hidden" }`) and switch it on. The tools are named
+`mcp__<server>__<tool>` now: **switches you set on the adapter's own tools do nothing
+any more**, so set them again in Settings → Tools. A project, agent, routine or chat
+that had the adapter's `mcp` tool off keeps every MCP server off, including servers
+the portal has not seen yet: switch a server's tools on there to use it. The log line
 says when there are some. pi does not read what the adapter did besides
 (`imports`, `~/.config/mcp/mcp.json`, `~/.agents/mcp.json`, a project's `.mcp.json`),
 so servers that came from there have to be added in Settings → MCP; the log names

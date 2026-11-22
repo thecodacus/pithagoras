@@ -2,13 +2,14 @@ import { type Page } from '@playwright/test';
 import { test, expect, mockPortal } from './portal-mock';
 
 /** Settings → MCP over canned answers, with every save that was sent. */
-async function portal(page: Page) {
+async function portal(page: Page, extra: object[] = []) {
   const saves: string[] = [];
   const mcp = {
     path: '/a/mcp.json', exists: true, raw: '{}', parseError: null,
     servers: [
       { name: 'github', entry: { url: 'https://mcp.example.test', auth: 'oauth', headers: { 'X-Org': 'a' } }, transport: 'http', enabled: true, problem: null },
       { name: 'notes', entry: { command: 'notes-mcp' }, transport: 'stdio', enabled: true, problem: null },
+      ...extra,
     ],
   };
   await mockPortal(page, ({ path, method, json }) => {
@@ -51,4 +52,10 @@ test('a server cannot be renamed onto another, and keeps its own name for an edi
   await name.fill('notes');
   await dialog.getByRole('button', { name: 'Save' }).click();
   await expect.poll(() => saves).toEqual(['notes from notes']);
+});
+
+test('a server left off for keys pi does not read says which, so that switching it on is not a surprise', async ({ page }) => {
+  const { dialog } = await portal(page, [{ name: 'gh', entry: { command: 'gh', excludeTools: ['delete_repo'], enabled: false }, transport: 'stdio', enabled: false, problem: null, ignored: ['excludeTools'] }]);
+  await expect(dialog.getByText('pi does not read excludeTools, so they would do nothing: remove them to switch this server on.')).toBeVisible();
+  await expect(dialog.getByText(/pi does not read/)).toHaveCount(1);
 });

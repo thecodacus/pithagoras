@@ -60,13 +60,13 @@ test("the adapter's servers are put into pi's words: its keys go, on and off sta
   assert.deepEqual(s.plain, { url: "https://p.example.test/mcp", headers: { "X-Org": "a" } }, "pi signs in by itself where the server asks");
   assert.deepEqual(s.keepsOwnHeader, { url: "https://n.example.test/mcp", headers: { Authorization: "Bearer ${NOTION}" } }, "oauth: false is the adapter's word and loses nothing");
   assert.deepEqual(s.ownAuth.auth, { provider: "someone" }, "pi's own auth key is kept");
-  assert.deepEqual(moved.carried.sort(), ["keepsOwnHeader", "notes", "ownAuth", "paused", "plain"]);
-  assert.deepEqual(moved.left.map((l) => l.name).sort(), ["blocked", "docs", "docs.v2", "envish", "filtered", "gated", "nothing", "sock"]);
-  for (const name of ["blocked", "docs", "docs.v2", "envish", "filtered", "gated", "sock"]) assert.equal(s[name].enabled, false, `${name} is off`);
-  assert.deepEqual(s.docs, { url: "https://docs.example.test/mcp", auth: "bearer", bearerTokenEnv: "DOCS_TOKEN", enabled: false }, "and as it was, nothing of it lost");
+  assert.deepEqual(moved.carried.sort(), ["docs", "keepsOwnHeader", "notes", "ownAuth", "paused", "plain"]);
+  assert.deepEqual(moved.left.map((l) => l.name).sort(), ["blocked", "docs.v2", "envish", "filtered", "gated", "nothing", "sock"]);
+  for (const name of ["blocked", "docs.v2", "envish", "filtered", "gated", "sock"]) assert.equal(s[name].enabled, false, `${name} is off`);
+  assert.deepEqual(s.docs, { url: "https://docs.example.test/mcp", headers: { Authorization: "Bearer ${DOCS_TOKEN}" } }, "the bearer variable is an Authorization header in pi's words, and the adapter's keys are gone");
+  assert.deepEqual(s.gated, { command: "node", approveTools: true, enabled: false }, "as it was, nothing of it lost");
   assert.equal("nothing" in s, false, "an entry that is no server is only named");
   assert.match(moved.left.find((l) => l.name === "gated").why, /ask before each call/);
-  assert.match(moved.left.find((l) => l.name === "docs").why, /bearer token/);
   assert.match(moved.left.find((l) => l.name === "envish").why, /\$env:NAME/);
   assert.match(moved.left.find((l) => l.name === "filtered").why, /leaves out/);
   assert.match(moved.left.find((l) => l.name === "docs.v2").why, /name/);
@@ -76,11 +76,45 @@ test("the adapter's servers are put into pi's words: its keys go, on and off sta
   assert.equal(carryOver(pi, ADAPTER_FILE, true).file.mcpServers.notes.enabled, false);
 });
 
-test("the adapter's setting that asks before every call leaves every server it covers off, and one server's own false takes it out", async () => {
+test("the adapter's setting that asks before every call leaves every server it covers off, with the setting written into its entry, and one server's own false takes it out", async () => {
   const pi = await piMcp();
-  const moved = carryOver(pi, JSON.stringify({ mcpServers: { a: { command: "a" }, b: { command: "b", approveTools: false } }, settings: { approveTools: true } }), false);
-  assert.deepEqual(moved.left.map((l) => l.name), ["a"]);
+  const moved = carryOver(pi, JSON.stringify({ mcpServers: { a: { command: "a" }, b: { command: "b", approveTools: false }, "c.d": { command: "c" } }, settings: { approveTools: true } }), false);
+  assert.deepEqual(moved.left.map((l) => l.name), ["a", "c.d"]);
   assert.deepEqual(moved.carried, ["b"]);
+  // Switched on again later, the entry still says it: the page refuses to switch a server on with a key pi ignores (see config-routes).
+  assert.deepEqual(moved.file.mcpServers.a, { command: "a", approveTools: true, enabled: false });
+  assert.deepEqual(moved.file.mcpServers["c.d"], { command: "c", approveTools: true, enabled: false });
+});
+
+test("the entry Understory's extension wrote before the move, with its bearer token, becomes pi's header, and the file is then one pi accepts", async () => {
+  const pi = await piMcp();
+  const written = { url: "http://127.0.0.1:3800/mcp", lifecycle: "lazy", directTools: true, auth: "bearer", bearerToken: "tok123" };
+  const moved = carryOver(pi, JSON.stringify({ mcpServers: { understory: written, fromEnv: { ...written, bearerToken: undefined, bearerTokenEnv: "MEMORY_UNDERSTORY_AUTH_TOKEN" } } }), false);
+  assert.deepEqual(moved.left, []);
+  assert.deepEqual(moved.file.mcpServers.understory, { url: "http://127.0.0.1:3800/mcp", headers: { Authorization: "Bearer tok123" } });
+  assert.deepEqual(moved.file.mcpServers.fromEnv, { url: "http://127.0.0.1:3800/mcp", headers: { Authorization: "Bearer ${MEMORY_UNDERSTORY_AUTH_TOKEN}" } });
+  for (const [name, entry] of Object.entries(moved.file.mcpServers)) assert.equal(typeof pi.validateMcpServerConfig(name, entry), "object", `pi takes ${name}`);
+  // An Authorization header of its own as well is a choice the person makes.
+  const both = carryOver(pi, JSON.stringify({ mcpServers: { x: { url: "https://x.example.test/mcp", bearerToken: "a", headers: { authorization: "Bearer b" } } } }), false);
+  assert.match(both.left[0].why, /Authorization header both/);
+});
+
+test("a value of env or headers that pi reads another way than the adapter did leaves the server off: a `$`, a leading `!!`", async () => {
+  const pi = await piMcp();
+  const one = (env) => carryOver(pi, JSON.stringify({ mcpServers: { x: { command: "srv", env, lifecycle: "lazy" } } }), false);
+  for (const value of ["pa$word", "pa$$word", "!!literal", "cost$", "$NAME"]) {
+    const moved = one({ PASSWORD: value });
+    assert.equal(moved.left.length, 1, value);
+    assert.match(moved.left[0].why, /`\$` or a leading `!!`/);
+    assert.equal(moved.file.mcpServers.x.enabled, false);
+  }
+  for (const value of ["plain", "${TOKEN}", "a${B}c", "x!y"]) assert.deepEqual(one({ PASSWORD: value }).left, [], value);
+  const header = carryOver(pi, JSON.stringify({ mcpServers: { x: { url: "https://x.example.test/mcp", headers: { "X-Key": "pa$word" } } } }), false);
+  assert.equal(header.left.length, 1);
+  // pi's own resolver is the judge of the difference: a `$word` is a variable to it, and `!!x` is a command.
+  const { resolveConfigValueOrThrow } = await import(new URL("./core/resolve-config-value.js", import.meta.resolve("@earendil-works/pi-coding-agent")).href);
+  assert.throws(() => resolveConfigValueOrThrow("pa$word", "x"), /environment variable/);
+  assert.throws(() => resolveConfigValueOrThrow("!!literal", "x"), /shell command/);
 });
 
 test("a file that is already pi's is not changed, and one that cannot be read is no file at all", async () => {
@@ -102,7 +136,7 @@ test("on the first start: the file is carried over, the adapter leaves pi's pack
   writeFileSync(mcpFile, ADAPTER_FILE);
   listed([{ source: ADAPTER, extensions: ["extensions/index.ts"] }, "npm:pi-other"]);
   db.rememberTools([db.remembered({ name: "notes_read", source: "pi-mcp-adapter", package: ADAPTER }), db.remembered({ name: "other_tool", source: "pi-other", package: "npm:pi-other" })]);
-  db.getDb().prepare("INSERT OR REPLACE INTO project_tools (project, tools_off, tools_on) VALUES ('p', 'mcp', '')").run();
+  db.getDb().prepare("INSERT OR REPLACE INTO project_tools (project, tools_off, tools_on) VALUES ('p', 'mcp', ''), ('q', 'notes_read', '')").run();
   mkdirSync(path.join(home, ".config", "mcp"), { recursive: true });
   writeFileSync(path.join(home, ".config", "mcp", "mcp.json"), "{}");
   writeFileSync(path.join(agent, "mcp-cache.json"), "{}");
@@ -112,7 +146,7 @@ test("on the first start: the file is carried over, the adapter leaves pi's pack
   assert.equal(existsSync(path.join(agent, "mcp-cache.json")) || existsSync(path.join(agent, "mcp-npx-cache.json")), false, "the adapter's own cache files go");
   const file = readFile();
   assert.deepEqual(file.mcpServers.notes, { command: "node", args: ["n.js"], env: { A: "1" } });
-  assert.equal(file.mcpServers.docs.enabled, false);
+  assert.deepEqual(file.mcpServers.docs.headers, { Authorization: "Bearer ${DOCS_TOKEN}" });
   assert.equal(file.mcpServers["docs.v2"].enabled, false, "what pi cannot take stays in the file, off");
   assert.equal(statSync(mcpFile).mode & 0o777, 0o600);
   assert.equal(existsSync(`${mcpFile}.adapter`), false, "no copy beside it");
@@ -121,7 +155,7 @@ test("on the first start: the file is carried over, the adapter leaves pi's pack
   assert.ok(db.knownTools().some((t) => t.name === "other_tool"));
 
   assert.equal(logs.length, 1, "one line");
-  assert.match(logs[0], /5 servers .*carried over/);
+  assert.match(logs[0], /6 servers .*carried over/);
   assert.match(logs[0], /pi-mcp-adapter taken out of pi's packages/);
   assert.match(logs[0], /Left off, as they were.*sock \(a Unix socket/);
   assert.match(logs[0], /gated \(tools that ask before each call/);
@@ -129,7 +163,8 @@ test("on the first start: the file is carried over, the adapter leaves pi's pack
   assert.match(logs[0], /nothing \(it is not a server\)/);
   assert.ok(logs[0].includes("what the adapter imported from cursor"), "the adapter's imports are named");
   assert.ok(logs[0].includes(path.join(home, ".config", "mcp", "mcp.json")), "and so is a shared file it read, which pi does not");
-  assert.match(logs[0], /Switches that named the adapter's tools or its `mcp` tool do nothing now/, "a project that had the adapter's mcp tool off is told");
+  assert.match(logs[0], /had the adapter's `mcp` tool off keeps every MCP server off/, "a project that had the adapter's mcp tool off is told");
+  assert.match(logs[0], /Switches that named the adapter's own tools do nothing now/);
 
   // Once: another start does nothing, and a file edited since is not touched.
   writeFileSync(mcpFile, JSON.stringify({ mcpServers: { later: { command: "x", lifecycle: "eager" } } }));

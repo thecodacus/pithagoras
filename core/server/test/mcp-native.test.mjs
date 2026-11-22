@@ -206,6 +206,35 @@ test("a server whose every tool the chat has switched off is not reached through
   assert.doesNotMatch(textOf(some.results[1]), /switched off/);
 });
 
+test("a tool the file hides is not one a chat can switch off: a server whose every other tool is off is off, for pi's resource tools too", async () => {
+  putConfig({ secret: { ...withResources("secret", "other,gone"), toolExposure: { gone: "hidden" } } });
+  const read = (server, uri) => ({ name: "read_mcp_resource", args: { server, uri } });
+  const r = await run([read("secret", "file:///secret/one.txt"), { name: "list_mcp_resources", args: {} }], { toolsOff: ["mcp__secret__other"] });
+  assert.match(textOf(r.results[0]), /switched off in this conversation/);
+  assert.match(textOf(r.results[1]), /Name the server you want to list/);
+  assert.doesNotMatch(textOf(r.results[0]), /contents of file/);
+});
+
+test("a tool pi calls deferred in the file is direct for pi, so the portal's own tool_search covers it and pi's cannot", async () => {
+  putConfig({ x: server("x", "search,other", { toolExposure: { search: "deferred" } }) });
+  const r = await run([]);
+  assert.ok(names(r.requests[0]).includes("mcp__x__search"), "in the model's list, not stranded behind a search tool that is not there");
+  assert.ok(r.active.includes("mcp__x__search"));
+  const lazy = await run([search("search", { query: "search" })], { lazy: lazyHead("x") });
+  assert.ok(!names(lazy.requests[0]).includes("mcp__x__search"), "and behind the portal's tool_search where the server is lazy");
+  assert.match(textOf(lazy.results[0]), /mcp__x__search/);
+});
+
+test("a chat whose lists still have pi-mcp-adapter's `mcp` tool off has the tools of a server it has not seen off, and the ones it has by their own switches", async () => {
+  putConfig({ alpha: server("alpha", "ping,echo") });
+  const seen = new Set(["mcp__alpha__ping"]);
+  const r = await run([], { toolsOff: ["mcp"], toolsSeen: () => seen });
+  assert.ok(!names(r.requests[0]).includes("mcp__alpha__echo"), "not seen yet: off with the list");
+  assert.ok(names(r.requests[0]).includes("mcp__alpha__ping"), "seen: as the portal's switches say, which are by name");
+  const plain = await run([], { toolsOff: [], toolsSeen: () => seen });
+  assert.ok(names(plain.requests[0]).includes("mcp__alpha__echo"), "nothing off in the list: on");
+});
+
 test("a trusted project cannot undo a tool the person hid in a server of their own", async () => {
   putConfig({ alpha: server("alpha", "ping", { toolExposure: { delete_repo: "hidden" } }) });
   const folder = chat();
@@ -217,28 +246,4 @@ test("a trusted project cannot undo a tool the person hid in a server of their o
   writeFileSync(path.join(folder, ".pi", "mcp.json"), JSON.stringify({ mcpServers: { alpha: { toolExposure: {} } } }));
   const emptied = configForChat(await piMcp(), { cwd: folder, isProjectTrusted: () => true }, agentDir, () => {});
   assert.equal(emptied.servers.find((s) => s.name === "alpha").config.toolExposure.delete_repo, "hidden");
-});
-
-test("a server that a chat connected and gave no tool is not named in the hint, and is again once it has been seen", async () => {
-  const db = await import("../dist/db.js");
-  const mute = { command: process.execPath, args: ["/nonexistent/server.mjs"] };
-  putConfig({ mute });
-  db.setToolMarks({});
-  assert.deepEqual(buildLazyHead().lazy, ["mute"], "nothing has been seen of it");
-  db.noteSilentMcpServers(["mute"], []);
-  assert.deepEqual(buildLazyHead().lazy, [], "nothing to search there");
-  assert.equal(buildLazyHead().hint, "");
-  // A chat that gets tools of it makes it seen, and it is no longer silent: so one taken out and brought back is unseen again.
-  const tool = db.remembered({ name: "mcp__mute__x", source: "mute", mcp: "mute", tokens: 50 });
-  db.rememberTools([tool]);
-  db.noteSilentMcpServers(["mute"], [tool]);
-  putConfig({});
-  db.forgetMcpTools(["mute"]);
-  putConfig({ mute });
-  assert.deepEqual(db.unseenMcpServers(), ["mute"]);
-  db.noteSilentMcpServers(["mute"], []);
-  putConfig({});
-  db.forgetMcpTools(["mute"]);
-  putConfig({ mute });
-  assert.deepEqual(db.unseenMcpServers(), ["mute"], "what is forgotten of a server includes its silence");
 });

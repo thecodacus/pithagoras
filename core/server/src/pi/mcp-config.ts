@@ -39,12 +39,15 @@ export async function piMcp(): Promise<PiMcp> {
  * active, and whether the model is offered each one or finds them through `tool_search` is the portal's own lazy setting,
  * the same one as for any other tool (see lazyMember in sdk-client.ts), so pi's own `deferred` and `codemode`, which declare
  * tools only when pi's tool search or a script asks, are not used. A server the file switches off or hides stays so, and so do
- * the tools a `toolExposure` in the file hides or gives to scripts. Whether a tool is on for a chat is the chat's tool switch,
+ * the tools a `toolExposure` in the file hides or gives to scripts (one it calls `deferred` is `direct`, see below). Whether a tool is on for a chat is the chat's tool switch,
  * as for every tool: a server is connected whatever the chat has switched off of it, so that its tools can be switched on again.
  */
 export function forChat(config: McpServerConfig): McpServerConfig {
   if (config.enabled === false || config.exposure === "hidden") return config;
-  return { ...config, exposure: "direct" };
+  // A tool the file calls `deferred` would be reached by pi's own tool search, which is not the portal's: it is `direct` for pi, and behind the portal's `tool_search` where the server is lazy.
+  const tools = config.toolExposure;
+  const toolExposure = tools && Object.values(tools).includes("deferred") ? Object.fromEntries(Object.entries(tools).map(([tool, how]) => [tool, how === "deferred" ? "direct" : how])) : tools;
+  return { ...config, exposure: "direct", ...(toolExposure ? { toolExposure } : {}) };
 }
 
 /**

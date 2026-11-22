@@ -260,6 +260,12 @@ function ServerRow({
             <LuTriangleAlert className="mt-0.5 h-3 w-3 shrink-0" /> {t("pi skips this entry: {problem}", { problem: server.problem })}
           </p>
         )}
+        {/* The adapter's limits on a server, which pi does not read: switching it on would drop them unseen. */}
+        {server.ignored?.length > 0 && (
+          <p className="mt-0.5 flex items-start gap-1 text-xs text-warn">
+            <LuTriangleAlert className="mt-0.5 h-3 w-3 shrink-0" /> {t("pi does not read {keys}, so they would do nothing: remove them to switch this server on.", { keys: server.ignored.join(", ") })}
+          </p>
+        )}
       </button>
       <label className="flex shrink-0 cursor-pointer items-center gap-1.5 text-xs text-fg-subtle">
         <input

@@ -41,7 +41,7 @@ import { contextWindowFor, getSkipThinkingProviders, getVoiceInstructions, getVo
 import { configStamp, isLlamaProvider } from "../providers.js";
 import { rereadConfig } from "./model-runtime.js";
 import { browserServers } from "../api/mcp.js";
-import { BUILT_IN_SET, PI_BUILT_IN_TOOLS } from "../tool-policy.js";
+import { BUILT_IN_SET, MCP_GATEWAY, PI_BUILT_IN_TOOLS } from "../tool-policy.js";
 
 /** A message on its way into pi: see SdkPiClient.prompt(). */
 interface Handoff {
@@ -1467,11 +1467,14 @@ export class SdkPiClient extends EventEmitter implements PiClient {
    * sandbox is on, which are off whatever the switches say: see `taken`.
    */
   get switchedOff(): Set<string> {
-    return this.taken.size ? new Set([...this.switches, ...this.taken]) : this.switches;
+    const unseen = this.unseenMcpOff();
+    return this.taken.size || unseen.length ? new Set([...this.switches, ...this.taken, ...unseen]) : this.switches;
   }
   set switchedOff(names: Set<string>) {
     this.switches = names;
+    this.gatewayOff = [...names].some((name) => MCP_GATEWAY.includes(name));
   }
+  private gatewayOff = false;
   /** The switches alone. */
   private switches = new Set<string>();
 
@@ -1487,6 +1490,17 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     const seen = this.toolsSeen?.();
     if (!seen) return [];
     return (this.session.getAllTools?.() ?? []).map((tool: { name: unknown }) => String(tool.name)).filter((name: string) => !seen.has(name) && this.offByDefault(name));
+  }
+
+  /**
+   * The tools of MCP servers that the portal has not seen, while the switches still have pi-mcp-adapter's `mcp` tool off (see
+   * MCP_GATEWAY): that list meant no MCP, and a server's tool that appears later (they connect after the chat starts, and a
+   * server changes its tools) is not named in it. Live, as the tools are registered when the servers have connected.
+   */
+  private unseenMcpOff(): string[] {
+    const seen = this.toolsSeen?.();
+    if (!seen || !this.gatewayOff) return [];
+    return (this.session.getAllTools?.() ?? []).map((tool: { name: unknown }) => String(tool.name)).filter((name: string) => !seen.has(name) && mcpNamespaceOf(this.session.getToolDefinition(name)) !== undefined);
   }
 
   /** A field of the tool's own definition, which pi keeps as it was registered. */

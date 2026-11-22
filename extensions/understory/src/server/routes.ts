@@ -88,7 +88,9 @@ async function switchUnderstory(enabled: boolean, url?: string): Promise<{ reloa
   const { mcp } = portal();
   if (!enabled) return mcp.set(UNDERSTORY, undefined);
   // Kept: whatever else somebody put in the entry by hand (other headers among it), except how it signs in, which is said anew, and whether it is switched off, which switching it on undoes.
-  const { enabled: _off, headers: hadHeaders, ...had } = mcp.get(UNDERSTORY)?.entry ?? {};
+  // The keys pi-mcp-adapter had in it (the entry an older portal wrote) are not pi's: its sign-in is the header said anew.
+  const { enabled: _off, headers: hadHeaders, lifecycle: _lifecycle, directTools: _directTools, bearerToken: _token, bearerTokenEnv: _tokenEnv, ...hadAll } = mcp.get(UNDERSTORY)?.entry ?? {};
+  const had = typeof hadAll.auth === "string" ? Object.fromEntries(Object.entries(hadAll).filter(([key]) => key !== "auth")) : hadAll;
   const others = Object.entries(hadHeaders && typeof hadHeaders === "object" ? hadHeaders : {}).filter(([name]) => name.toLowerCase() !== "authorization");
   const keeping = (entry: Record<string, unknown>): Record<string, unknown> =>
     others.length ? { ...entry, headers: { ...Object.fromEntries(others), ...(entry.headers as Record<string, unknown> | undefined) } } : entry;

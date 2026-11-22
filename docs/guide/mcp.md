@@ -117,18 +117,27 @@ when a chat starts, and the first message waits for a slow one for up to ten
 seconds; a server slower than that is found through `tool_search` once it has
 connected. `exposure: "hidden"` is kept: the
 server's tools are not reachable. `toolExposure` in an entry, which pi reads to
-give single tools another exposure, is kept as written.
+give single tools another exposure, is kept as written; a tool it calls `deferred`
+is direct for pi, and behind `tool_search` where the server is lazy. A tool it calls
+`hidden` cannot be switched, so it does not count in the next paragraph.
 
 pi's three tools for a server's resources (`list_mcp_resources`,
 `list_mcp_resource_templates`, `read_mcp_resource`) are a group of their own, "MCP
 resources". They reach every connected server by an argument, so a server whose tools
-a chat has all switched off is held to it: the resource tools refuse a call that names it,
+a chat has all switched off (the ones it can switch) is held to it: the resource tools refuse a call that names it,
 and a listing of every server's, until you name the server you want.
 
-A server that was tried and gave no tool (it does not start, or has none) is not named
-to the model as a place to search until a chat has seen a tool of it.
+A server no chat has seen a tool of (it does not start, or has none) is counted as lazy
+and is named to the model as a place to search, and is not listed in Settings → Tools.
 
 ## What the tool lists show
+
+Switching a server's tools off as a group in a list (a project's, an agent's, a
+routine's) writes down the tools the portal knows of it then. A tool the server offers
+later is on there, behind `tool_search` where the server is lazy, as it is for any
+group; and a server that is all off is held off from pi's resource tools only while
+every tool of it that the chat has is off. Switch off the server itself in Settings →
+MCP where a server must not be reached at all.
 
 In the Tools lists (Settings → Tools, an agent's, a project's, a routine's, a
 chat's) an MCP server is a group like any other. Every tool a chat has seen of it
@@ -138,6 +147,13 @@ when it comes back. A server a project's own `.pi/mcp.json` brings is listed in
 the chats that have it, and in no other list.
 
 ## Disabling
+
+A server that was switched off when the adapter's configuration was carried over because
+of a key pi does not read (`excludeTools`, `includeTools`, `approveTools`, `socket`,
+`exposeResources: false`) shows in Settings → MCP which keys those are, and is not
+switched on while they are in the entry: pi would not leave the tools out or ask before
+a call, and says nothing. Take the key out (write a tool to leave out as
+`"toolExposure": { "<tool>": "hidden" }`), then switch the server on.
 
 The toggle on each row sets `enabled: false` — the server stays configured and
 visible but is never connected. Better than deleting a server you are debugging.

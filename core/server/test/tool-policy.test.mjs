@@ -7,6 +7,7 @@ import {
   exceptionsFor,
   toolSetOf,
   BUILT_IN_SET,
+  MCP_GATEWAY,
 } from "../dist/tool-policy.js";
 
 const none = { off: [], on: [] };
@@ -136,4 +137,17 @@ test("a conversation holds its exceptions against what its project leaves", () =
   assert.deepEqual(effectiveOff(["a", "b", "c"], project, { off: ["a"], on: ["b"] }), ["a"]);
   // And wanting what the project says writes nothing down.
   assert.deepEqual(exceptionsFor(["b"], project, ["a", "b", "c"]), { off: [], on: [] });
+});
+
+test("a leftover `mcp` entry of pi-mcp-adapter keeps the tools of every MCP server off in that list, and a tool switched on by name is on", () => {
+  for (const gateway of MCP_GATEWAY) {
+    assert.equal(toolEnabled("mcp__jira__search", [], { off: [gateway], on: [] }), false, `${gateway} off in the list's own exceptions`);
+    assert.equal(toolEnabled("mcp__jira__search", [gateway], none), false, `${gateway} off by the layers below`);
+    assert.equal(toolEnabled("mcp__jira__search", [gateway], { off: [], on: [gateway] }), true, "the list switches the adapter's tool on again");
+    assert.equal(toolEnabled("mcp__jira__search", [gateway], { off: [], on: ["mcp__jira__search"] }), true, "a tool on by name");
+    assert.equal(toolEnabled("web_search", [gateway], none), true, "other tools are as they were");
+  }
+  // What pi is told for a project that had MCP off: the server's tools the portal knows are off.
+  assert.deepEqual(effectiveOff(["mcp__jira__search", "web_search"], [], { off: ["mcp"], on: [] }), ["mcp", "mcp__jira__search"]);
+  assert.deepEqual(defaultsFor(["mcp"], none), ["mcp"], "and the entry goes on to the chats of the project");
 });

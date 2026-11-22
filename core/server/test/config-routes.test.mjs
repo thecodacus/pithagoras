@@ -163,6 +163,22 @@ test("what would send a model provider's key to a server is not written by a for
   assert.deepEqual(runs(), [], "pi was not run for it");
 });
 
+test("a server left off for a key of pi-mcp-adapter's that pi ignores says so, and is not switched on with it in", async () => {
+  const entry = { command: "gh", excludeTools: ["delete_repo"], approveTools: true, enabled: false };
+  writeFileSync(mcpFile, JSON.stringify({ mcpServers: { gh: entry } }));
+  const listed = (await send("/api/mcp")).body.servers.find((s) => s.name === "gh");
+  assert.deepEqual(listed.ignored, ["excludeTools", "approveTools"], "the page can say why it is off");
+  const { enabled: _off, ...on } = entry;
+  refused(await send("/api/mcp/servers/gh", "PUT", { entry: on, from: "gh" }), 400, /does not read excludeTools, approveTools/);
+  assert.deepEqual(JSON.parse(read(mcpFile)).mcpServers.gh, entry, "nothing was written");
+  // Switched off with them in is no harm, and on without them is fine.
+  assert.equal((await send("/api/mcp/servers/gh", "PUT", { entry, from: "gh" })).status, 200);
+  assert.equal((await send("/api/mcp/servers/gh", "PUT", { entry: { command: "gh", toolExposure: { delete_repo: "hidden" } }, from: "gh" })).status, 200);
+  assert.deepEqual((await send("/api/mcp")).body.servers[0].ignored, []);
+  const imported = await send("/api/mcp/import", "POST", { text: JSON.stringify({ mcpServers: { other: { command: "o", includeTools: ["a"] } } }) });
+  assert.match(imported.body.skipped[0].reason, /includeTools/);
+});
+
 // --- settings.json ---
 
 test("an extension setting is written only under a key that is a name, and the file is as it was", async () => {

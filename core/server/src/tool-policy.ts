@@ -50,6 +50,23 @@ export interface ToolExceptions {
   on: string[];
 }
 
+/**
+ * What pi-mcp-adapter's gateway tool was called, and its script tool. A list that switched one off meant "no MCP here", and
+ * the lists still hold the name after the move to pi's own MCP support (nothing renames them). A leftover one keeps every
+ * MCP server's tools off in that list, as it did: failing open would give a project, an agent or an unattended routine that
+ * had MCP off a server it never had. A tool switched on by name in the same list is on.
+ */
+export const MCP_GATEWAY = ["mcp", "mcp_script", "mcpScript"];
+
+/** Whether a name is a tool of an MCP server, as pi names them (`mcp__<server>__<tool>`). By name: an error here only switches more off. */
+export const isMcpToolName = (name: string): boolean => name.startsWith("mcp__");
+
+/** Whether a layer's lists say the adapter's `mcp` tool is off: in its own exceptions, or by the layers under it unless it switches it on again. */
+export function gatewayOff(defaultsOff: readonly string[], exceptions: ToolExceptions): boolean {
+  const named = (list: readonly string[]): boolean => list.some((name) => MCP_GATEWAY.includes(name));
+  return named(exceptions.off) || (named(defaultsOff) && !named(exceptions.on));
+}
+
 /** Is this tool on, for a conversation holding these exceptions? */
 export function toolEnabled(
   name: string,
@@ -58,7 +75,9 @@ export function toolEnabled(
 ): boolean {
   if (exceptions.off.includes(name)) return false;
   if (exceptions.on.includes(name)) return true;
-  return ![...defaultsOff].includes(name);
+  const off = [...defaultsOff];
+  if (isMcpToolName(name) && gatewayOff(off, exceptions)) return false;
+  return !off.includes(name);
 }
 
 /**
