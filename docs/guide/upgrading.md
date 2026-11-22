@@ -1377,7 +1377,21 @@ socket, one with a list of the tools it offers or leaves out, an OAuth block of 
 adapter's, a name with a dot) is left off, and named in the one line the log gets
 (Settings → Logs); the file as it was is kept as `mcp.json.adapter` beside it. What
 the adapter imported from other tools' configs is not carried over. If `mcp.json`
-cannot be read, nothing is changed and the adapter stays until it can.
+cannot be read, nothing is changed and the adapter stays until it can. If the
+adapter was switched off, or `mcp.json` is a plain file with comments, the file is
+written all the same (servers off, comments gone): nothing ran before, so nothing
+starts. The adapter's variables in a value, `$env:NAME` and `{env:NAME}`, are
+written as `${NAME}`; a server with one in its url, folder or arguments is left
+off, as pi reads them in `env` and `headers` only. The switches you set on the
+adapter's tools (`<server>_<tool>`, in any of its `toolPrefix` namings, from the
+tools it had cached) are put on the new names, and the adapter's own `mcp` tool,
+where you had it off, means every tool of every server: a server whose tools are
+not known stays off then. A project's own `.pi/mcp.json` in the adapter's format
+(a bearer token, `lifecycle` and the like) is not converted: the log line names
+those files, and pi drops what it cannot read of them, so change them by hand to
+`"headers": { "Authorization": "Bearer ${TOKEN}" }`. `pi-mcp-adapter` installed
+again from Settings → Packages does not replace the portal's MCP support, and
+cannot be run beside it: leave it out.
 
 ## pi is 1.1
 
