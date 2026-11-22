@@ -81,7 +81,7 @@ each has a section below:
 | 10 | Understory's settings are left for Understory, and its MCP server is trusted where no list was set | [Understory is an extension](#understory-is-an-extension) |
 | 11 | Every chat is in Standard mode, and there is a table for the modes you make | [Chats have a mode](#chats-have-a-mode) |
 
-The same start moves the password into the database, installs the six
+The same start moves the password into the database, installs the
 [extensions a portal starts with](#the-extensions-a-portal-starts-with), puts
 code mode in the tool defaults as off, and removes the rules that no longer
 apply. The rest of the sections say what else is different.
@@ -142,7 +142,7 @@ and every six hours (`PORTAL_UPDATE_CHECK=off` stops that). See
 | Variable | What it sets |
 | --- | --- |
 | `BROWSER_BIND` | The address the browser's own ports listen on: `127.0.0.1` unless set; 0.1.0 opened them on every interface ([Browser is an extension](#browser-is-an-extension)) |
-| `PORTAL_DEFAULT_EXTENSIONS` | `off` installs none of the extensions a portal starts with |
+| `PORTAL_DEFAULT_EXTENSIONS` | `off` installs none of the extensions a portal starts with; a preset's name (`developer`) or a list (`terminal,files,git`) installs that instead |
 | `UNDERSTORY_LLM_PORT` | The loopback port through which Understory reaches the chat's model, `3801` |
 | `UNDERSTORY_LLM_HEADERS_TIMEOUT_MS`, `UNDERSTORY_LLM_BODY_TIMEOUT_MS` | How long the model Understory thinks with may take |
 | `PORTAL_FETCH_HEADERS_TIMEOUT_MS`, `PORTAL_FETCH_BODY_TIMEOUT_MS` | How long a fetch of the portal's process, an MCP call among them, may wait: 30 minutes, where Node cut one off after five |
@@ -187,6 +187,25 @@ default of Settings → Tools as off, beside what you had switched off there, so
 no chat has it until it is switched on for a chat, a project, an agent or every
 chat. A later start does not undo what you choose.
 
+## Lazy tools have three values and a threshold
+
+A tool or a group of tools is **auto**, **lazy** or **direct** now, and a limit decides what is **auto**
+([Lazy tools](/guide/extensions#lazy-tools)). The tool that reaches the lazy tools is called `tool_search`
+and no longer `tools`. On the first start with it, what you had marked lazy stays **lazy**, and everything else is
+**auto**: the model's list is measured, and when it holds more than 3,000 tokens or 20 tools, the largest groups
+that nobody marked are taken out of it, as a lazy group would be. A portal with the browser and the subagent tool
+is over the limit. Settings → Tools says which groups that is, once, and a **direct** mark keeps a group in the
+list; **Lazy above** there changes the limits, and `0` turns them off. A chat that has started keeps the tools it
+started with, and a chat that was running before the upgrade takes its list from what is marked and measured
+when it first starts again. Old chats keep their calls of `tools` in their history, and they are still drawn as
+the tools they called.
+
+A tool is no longer counted as an MCP server's by a name that starts with `mcp_`: the guard asks pi which server a
+tool came from, and a name proves nothing, as any extension can register one. What the pi-mcp-adapter's tools hand
+back is still wrapped, by their package. A pi package of yours that hands back another server's or somebody else's
+words under such a name (another MCP bridge, say) is now trusted as the extension it is, so its tools have to say so:
+`guard: { outside: true }` on their definition ([What the guard holds a tool to](/guide/extension-ui#what-the-guard-holds-a-tool-to)).
+
 ## The password moves into the database
 
 A portal used to take its password from `PORTAL_PASSWORD`. It now keeps it, hashed, in its database, chosen in the browser and changed under Settings → Authentication (see [The password](/guide/deploying#the-password)). What the first start after the upgrade does:
@@ -219,18 +238,27 @@ Installed then lists:
 | Package | What it brings |
 | --- | --- |
 | `pithagoras-terminal` | The [terminal](/guide/terminal) panel beside a chat, and its window in voice mode |
-| `pithagoras-git` | The [Git](/guide/git) panel |
 | `pithagoras-files` | The [Files](/guide/files) panel, and its window in voice mode |
-| `pithagoras-canvas` | [Canvases](/guide/canvases) and the agent's canvas tools |
-| `pithagoras-media` | [Media](/guide/media): the agent's picture and video tools, the Media page and its settings |
 | `pithagoras-themes` | Seven colour themes, chosen under Settings → This browser |
 
 They are ordinary packages from then on
 ([What a portal starts with](/guide/extensions#what-a-portal-starts-with)): one
 you switch off or remove stays so, and a later start does not put it back. With
 `PORTAL_DEFAULT_EXTENSIONS=off` none of them is installed: the portal then has
-no terminal, Git or Files panel, no canvases and no picture tools until you
-install them, and what 0.1.0 kept of the Images page waits for Media.
+no terminal or Files panel until you install them. The rest is chosen, in the
+setup assistant's Extensions step or in Settings → Extensions → Discover, and
+what the portal installs by itself can be set (`PORTAL_DEFAULT_EXTENSIONS`, see
+[Deploying](/guide/deploying#environment)).
+
+Git, Canvases and Media were on this list in 0.2.0, and are opt-in now. A portal
+that has them keeps them: the list names what a new portal installs, and
+shrinking it takes nothing out of one that has more. A portal that comes from
+0.1.0 without having run 0.2.0 starts with the three above and no Git panel, no
+canvases and no picture tools: install Git (`pithagoras-git`), Canvases
+(`pithagoras-canvas`) and Media (`pithagoras-media`) from Settings → Extensions →
+Discover → Comes with Pithagoras, or pick Developer or Creative in the setup
+assistant (**Setup assistant** on Settings → Providers). What 0.1.0 kept of the
+Images page waits for Media until then ([Media is an extension](#media-is-an-extension)).
 
 The others that come with the portal are not installed by the upgrade. They are
 listed under Settings → Extensions → Discover → Comes with Pithagoras: Browser
@@ -264,8 +292,8 @@ same. Background jobs and subagents stay the portal's own.
 
 ## Git is an extension
 
-Git is the `pithagoras-git` extension now ([Git](/guide/git)), installed on
-the first start. The button in a chat's header and the panel are the same, and
+Git is the `pithagoras-git` extension now ([Git](/guide/git)), installed by
+choice (on the first start in 0.2.0). The button in a chat's header and the panel are the same, and
 it has a picker for the repositories inside a chat's folder. A commit message or
 a pull request's text that was being written is kept under the same name in the
 tab's session storage, so a tab that stays open through the upgrade still has it
@@ -281,8 +309,8 @@ after the reload.
 
 ## Canvases are an extension
 
-Canvases are the `pithagoras-canvas` extension now, installed on the first
-start, with a database of their own. The canvases a portal stored before are
+Canvases are the `pithagoras-canvas` extension now, installed by choice
+(on the first start in 0.2.0), with a database of their own. The canvases a portal stored before are
 not carried into it: the first start after the upgrade writes each of them out
 as a Markdown file in its chat's folder, `canvases/<title>.md` (a taken name
 gets a number, as an upload's does), and drops the table they were in. A chat
@@ -303,7 +331,7 @@ the place the panels have by default, and keeps what it is given from then on.
 ## Files is an extension
 
 Files is the `pithagoras-files` extension now, installed on the first start
-like the terminal and Git: the button in a chat's header, the panel, its
+like the terminal: the button in a chat's header, the panel, its
 window in voice mode and <kbd>F</kbd> there are the same. An edit that was not
 saved when the portal was upgraded comes back as it was. Where a panel's place
 or size was set by hand, Files starts at the place the panels have by default
@@ -337,8 +365,8 @@ in older chats are shown as they were. Nothing else in a conversation is changed
 
 ## Media is an extension
 
-Media is the `pithagoras-media` extension now, installed on the first start
-like Canvases and Files, with a store of its own. The page, its settings, the
+Media is the `pithagoras-media` extension now, installed by choice (on the
+first start in 0.2.0), with a store of its own. The page, its settings, the
 agent's picture and video tools and their cards in the chat do what they did,
 under new names and addresses:
 
@@ -399,7 +427,8 @@ everything into its place there, with the same ids and file names, and says in
 the log how many pictures and videos it took up. `extension-data/pithagoras-media/`
 then holds `media.db` (the gallery's rows and the settings), `images/`,
 `videos/`, `image-thumbs/`, `video-posters/` and `video-copies/`. A portal that
-runs with `PORTAL_DEFAULT_EXTENSIONS=off` does not install Media: the hand-off
+has not installed Media (a new one starts without it, and so does one with
+`PORTAL_DEFAULT_EXTENSIONS=off`): the hand-off
 waits, nothing of it lost, until Media is installed from Settings →
 Extensions → Discover → Comes with Pithagoras. Removing Media later keeps its
 folder, and Media installed again has all of it.
@@ -1271,6 +1300,10 @@ chat. Every chat there was is one a person attends, and every child chat keeps
 its parent's switches, as before; nothing is left for an extension, and nothing
 needs doing.
 
+The same step adds the temperature a [mode you made](/guide/sessions#model-parameters-of-a-mode)
+can set for its chats. Every mode there is keeps setting none, so its chats send
+what they sent before.
+
 **Going back.** From `portal-v15-….db` it is only putting the backup in as
 under [Going back](#going-back), and an older backup needs what
 [Sub-chats in the chat list](#sub-chats-in-the-chat-list) says for it.
@@ -1303,14 +1336,14 @@ subagents' chats it made stay, as chats of their own.
 
 A routine's page sets how many minutes its runs may take
 ([Routines](/guide/routines#scheduling)), where every run had the portal's hour.
-The upgrade (schema 17) adds the column that holds it, empty for every routine
-there is, so each keeps the portal's default. It changes no data; nothing is
-left for an extension, and nothing needs doing.
+The upgrade to schema 16 adds the column that holds it; a portal already at 16
+gets it when it starts. It is empty for every routine there is, so each keeps
+the portal's default. It changes no data; nothing is left for an extension, and
+nothing needs doing.
 
-**Going back.** From `portal-v16-….db` it is only putting the backup in as
-under [Going back](#going-back); an older backup also needs what
-[Chats an extension makes for nobody to attend](#chats-an-extension-makes-for-nobody-to-attend)
-says for it.
+**Going back.** As for
+[Chats an extension makes for nobody to attend](#chats-an-extension-makes-for-nobody-to-attend);
+a portal at 16 that goes back to a build without the column keeps it, unused.
 
 ## The guard
 

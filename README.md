@@ -64,7 +64,7 @@ Browsers install the portal as an app (PWA) only over HTTPS or on `localhost`.
 - **Opt-in features** — the agent's own browser (the Browser extension, with Docker, both installed from
   Settings → Extensions), a subagent tool (the Subagents extension, switched on in Settings → Extensions), Understory
   memory with a Memory page (the Understory extension, with Docker, installed from Settings →
-  Extensions), and, from the Media extension the portal installs, image generation
+  Extensions), and, from the Media extension (opt-in too, or Creative in the setup assistant), image generation
   and editing through an endpoint you choose and video generation through a stable-diffusion.cpp
   server, with one Media page to make pictures and short videos without a chat (from a description,
   or from a picture), a gallery of both, and a player for the videos.
@@ -144,8 +144,9 @@ resumes the conversation.
 
 ## More extensions
 
-Extensions that are not part of the portal live in repositories of their own. Each is a package you install by its
-npm name in **Settings → Extensions → Discover**:
+Extensions that are not part of the portal live in repositories of their own. They are listed under **Official
+extensions** in **Settings → Extensions → Discover**, each installed with one click, and each is a package you can
+also install by its npm name:
 
 - [prometheion/pithagoras-extensions](https://github.com/prometheion/pithagoras-extensions) — extensions that give
   the agent more to work with.

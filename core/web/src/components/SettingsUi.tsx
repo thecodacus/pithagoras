@@ -1,4 +1,4 @@
-import { Children, cloneElement, forwardRef, isValidElement, useEffect, useId, useRef, useState, type ReactElement, type ReactNode } from "react";
+import { Children, cloneElement, forwardRef, isValidElement, useEffect, useId, useLayoutEffect, useRef, useState, type ReactElement, type ReactNode } from "react";
 import { LuChevronRight, LuCircleAlert, LuX } from "react-icons/lu";
 import { t } from "../i18n";
 import { EFFORT_LEVELS, effortLabel } from "../effort";
@@ -23,6 +23,37 @@ export function Section({ title, hint, action, children }: { title: string; hint
       </div>
       <div className="mt-2.5">{children}</div>
     </section>
+  );
+}
+
+/**
+ * A card's description: cut to two lines, and with "More" under it where something is cut, which opens all of it
+ * ("Less" closes it again). Only a text that is cut has the button, so a short one stays as it was.
+ */
+export function Clamped({ children, className = "" }: { children: string; className?: string }) {
+  const ref = useRef<HTMLParagraphElement>(null);
+  const [open, setOpen] = useState(false);
+  const [cut, setCut] = useState(false);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el || open) return;
+    const measure = () => setCut(el.scrollHeight > el.clientHeight + 1);
+    measure();
+    // A narrower card cuts more of it.
+    if (typeof ResizeObserver === "undefined") return;
+    const seen = new ResizeObserver(measure);
+    seen.observe(el);
+    return () => seen.disconnect();
+  }, [children, open]);
+  return (
+    <div className={className}>
+      <p ref={ref} className={`break-words text-xs text-fg-subtle ${open ? "" : "line-clamp-2"}`}>{children}</p>
+      {(cut || open) && (
+        <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} className="mt-0.5 text-[11px] text-accent hover:underline">
+          {open ? t("Less") : t("More")}
+        </button>
+      )}
+    </div>
   );
 }
 

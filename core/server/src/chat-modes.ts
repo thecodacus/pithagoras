@@ -2,6 +2,14 @@ import { CODEMODE_TOOL } from "./pi/codemode.js";
 import type { ToolExceptions } from "./tool-policy.js";
 
 /**
+ * What a mode of the person's sets for the requests of its chats to the model, where it is set. Only the temperature:
+ * it is the one parameter every API takes. Without it the request carries nothing and the server's own default applies.
+ */
+export interface ModeParams {
+  temperature?: number;
+}
+
+/**
  * Chat modes: how a chat works, chosen above the message box before its first message and fixed once it has one.
  * A chat keeps its mode in sessions.mode: NULL for Standard, a mode of the portal's by its name, one the person made
  * as "custom/<id>", an extension's as "<package>/<id>". What a mode does past its tool layer is done by whoever
@@ -28,6 +36,10 @@ export interface ChatModeEntry {
   provider?: string;
   model?: string;
   thinkingLevel?: string;
+  /** Sent with every request of its chats to the model (a mode the person made). */
+  params?: ModeParams;
+  /** The sets and single tools (`<tool>name`) its chats keep in the model's list whatever the threshold says (an extension's: see modeDirect). */
+  keepDirect?: string[];
 }
 
 /** What a chat is when it says nothing about its mode. Stored as NULL. */
@@ -53,7 +65,7 @@ const provided: ChatModeEntry[] = [];
  * `extension` offers `mode` (see portal.modes.provide): a chat in it stores "<extension>/<id>". Returns what takes it
  * away again. Throws for an id the package offers already.
  */
-export function provideMode(extension: string, mode: { id: string; label: string; description: string; confirm?: string }): () => void {
+export function provideMode(extension: string, mode: { id: string; label: string; description: string; confirm?: string; keepDirect?: string[] }): () => void {
   const entry: ChatModeEntry = { ...mode, id: `${extension}/${mode.id}`, extension };
   if (provided.some((one) => one.id === entry.id)) throw new TypeError(`${extension} offers the mode "${mode.id}" already`);
   provided.push(entry);

@@ -150,8 +150,9 @@ that the menu above the message box of a new chat offers after Standard and
 Code mode. The page lists them, and **New mode** makes one from a name and a
 description and opens it. A mode's page has its name, description and
 instructions, saved with **Save**; the model and effort a chat put in it starts
-on, which use the same menus as **Defaults**; whether its chats work through
-the code tool; and its tools, the same list as a project's. Each of those is
+on, which use the same menus as **Defaults**; the
+[temperature](/guide/sessions#model-parameters-of-a-mode) its chats send; whether its chats work
+through the code tool; and its tools, the same list as a project's. Each of those is
 saved as it is changed. The bin at the top deletes the mode, after asking.
 
 ## Channels
@@ -341,8 +342,8 @@ A tool call has a line when it begins and one when it ends, with how it ended
 and how long it ran in milliseconds. An approval has the question's short id,
 the tool, what the answer was (`once`, `always`, `denied`, or `answered` for a
 question that was not about an action) and how long the person waited for it.
-`subagent=` names the subagent a call ran in, and `via=tools` a call of a
-[lazy tool](/guide/extensions#lazy-tools) through the `tools` tool, which is filed under the
+`subagent=` names the subagent a call ran in, and `via=tool_search` a call of a
+[lazy tool](/guide/extensions#lazy-tools) through the `tool_search` tool, which is filed under the
 tool it called. An `[audit]` line is a decision
 of the guard that the Audit page lists as well (`refused`, `allowed-by-approval`
 and the like), with its kind and the tool, without the command or the reason.

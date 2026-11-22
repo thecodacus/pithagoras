@@ -58,9 +58,17 @@ import {
   lazyAllowed,
   lazyMarks,
   lazyRefused,
-  lazyToolSets,
+  toolMarks,
+  lazyLimits,
+  setLazyLimits,
+  resolvedLazy,
+  lazyListed,
+  lazyNotice,
+  dismissLazyNotice,
+  agentDirect,
+  setAgentDirect,
   noticeMcpEdits,
-  setLazyToolSets,
+  setToolMarks,
   toolGroupNames,
   updateSession,
   type SessionRow,
@@ -126,6 +134,7 @@ import {
 } from "./pi-settings.js";
 import { getBuiltinCommands, picturesRefused } from "./pi/builtins.js";
 import { SessionEditError } from "./pi/session-edit.js";
+import { DEFAULT_LIMITS } from "./tool-lazy.js";
 import {
   NEW_CHAT_TITLE,
   cleanTitle,
@@ -685,7 +694,19 @@ app.get("/api/agents/:id/tools", (req, res) => {
   const agent = getAgent(req.params.id);
   if (!agent) return res.status(404).json({ error: "No such agent" });
   if (EXECUTOR_KIND === "container") return res.status(400).json(toolsUnsupported);
-  res.json(layerTools(agent.home, toolDefaultsFor(agent.home, null, "agent"), agentTools(agent.id)));
+  res.json({ ...layerTools(agent.home, toolDefaultsFor(agent.home, null, "agent"), agentTools(agent.id)), keepDirect: agentDirect(agent.id) });
+});
+
+/**
+ * The sets and tools an agent keeps in the model's list, whatever the marks and the threshold say, for the chats it has
+ * (a chat reads it when it starts): so that the group an agent exists for is not made lazy for being the largest.
+ */
+app.put("/api/agents/:id/direct", (req, res) => {
+  const entries = req.body?.entries;
+  if (!isToolList(entries)) return res.status(400).json({ error: "entries must be a list of tool sets or `<tool>name`" });
+  if (!getAgent(req.params.id)) return res.status(404).json({ error: "No such agent" });
+  if (EXECUTOR_KIND === "container") return res.status(400).json(toolsUnsupported);
+  res.json({ entries: setAgentDirect(req.params.id, entries) });
 });
 
 app.put("/api/agents/:id/tools", async (req, res) => {
@@ -1231,7 +1252,26 @@ app.get("/api/sessions/:id/tools", async (req, res) => {
   // The whole off list, not only the tools loaded right now: the page sends
   // this back on the next flip, and anything missing from it would read as
   // "switch that one on again".
-  res.json({ tools, live, names, off: sessions.offFor(session.id) });
+  // `lazyStale`: the marks or the threshold would make other tools lazy in a chat that started now than in this one, which froze
+  // its own when it started: the page offers to read the tools again.
+  res.json({ tools, live, names, off: sessions.offFor(session.id), lazyStale: sessions.lazyHeadStale(session.id) });
+});
+
+/**
+ * Read the chat's tools again: what is lazy in it is decided afresh from the marks and the threshold as they are now, and
+ * kept as its own. The one deliberate change of what the model is sent first, which costs the prompt cache from the start
+ * of the chat (see SessionManager.lazyHeadFor).
+ */
+app.post("/api/sessions/:id/tools/read-again", async (req, res) => {
+  const session = getSession(req.params.id);
+  if (!session) return res.status(404).json({ error: "Not found" });
+  if (EXECUTOR_KIND === "container") return res.status(400).json(toolsUnsupported);
+  try {
+    res.json({ changed: await sessions.readToolsAgain(session.id) });
+  } catch (e) {
+    if (e instanceof SessionEditError) return res.status(409).json({ error: e.message });
+    throw e;
+  }
 });
 
 /** Switch tools off for this conversation. Everything not named is on. */
@@ -1270,7 +1310,8 @@ app.get("/api/tools", (_req, res) => {
         ...tool,
         source: toolSource(tool.name, tool.source, servers),
         defaultOn: !off.has(tool.name),
-        // Not offered one by one: found through the `tools` tool, or for an MCP server's tool through `mcp`, where `mcp` is the server whose setting says so.
+        // Not offered one by one: found through `tool_search`, or for an MCP server's tool through `mcp`, where `mcp` is the server whose setting says so.
+        // `mark` is what somebody set on the tool or its set, and `auto` that nothing is, so the threshold decides.
         ...marks,
         // Neither marked nor set on a server: pi's own tools and the adapter's `mcp` tool, which the page offers no lazy mark for.
         ...(lazyAllowed(tool, servers) || marks.mcp !== undefined ? {} : { noLazy: true as const }),
@@ -1278,7 +1319,15 @@ app.get("/api/tools", (_req, res) => {
     }),
     off: [...off].sort(),
     names: toolGroupNames(),
-    lazy: lazyToolSets(),
+    marks: toolMarks(),
+    // What the threshold decided, and the limits it decided by; the page says which sets are lazy "by size", and when it could not make the list fit.
+    resolved: resolvedLazy(),
+    // What the model's list holds now, with what is lazy taken out of it.
+    listed: lazyListed(),
+    limits: lazyLimits(),
+    defaultLimits: DEFAULT_LIMITS,
+    // The sets the threshold made lazy since the person last looked.
+    lazyNotice: lazyNotice(),
     questionWaitMinutes: questionWaitMinutes(),
   });
 });
@@ -1318,25 +1367,42 @@ app.put("/api/tools", async (req, res) => {
 });
 
 /**
- * Which tools are lazy: tool sets, named as the boxes of the tools list name them, and single tools
- * (`<tool>name`). A lazy tool is on like any other, but is not in the model's prompt: it finds it
- * through the `tools` tool. The marks reach the running conversations too. An MCP server's tools are
- * lazy by the server's own setting (`PUT /api/mcp/servers/:name/direct`) and pi's own cannot be lazy,
- * and a mark that names them is refused.
+ * What is lazy and what is not: marks on tool sets, named as the boxes of the tools list name them, and on single tools
+ * (`<tool>name`), each `lazy` (behind `tool_search`) or `direct` (always in the model's list). What has no mark is `auto`:
+ * the threshold decides. A lazy tool is on like any other. The marks reach the chats that start afterwards, and a chat that
+ * is running when it is asked to read its tools again (a chat keeps what was lazy in it, see LazyHead). An MCP server's
+ * tools are lazy by the server's own setting (`PUT /api/mcp/servers/:name/direct`) and pi's own cannot be lazy, and a
+ * `lazy` mark that names them is refused.
  */
-app.put("/api/tools/lazy", async (req, res) => {
+app.put("/api/tools/marks", (req, res) => {
   if (EXECUTOR_KIND === "container") return res.status(400).json(toolsUnsupported);
-  const lazy = req.body?.lazy;
-  if (!isToolList(lazy)) return res.status(400).json({ error: "lazy must be a list of tool set names" });
+  const given = req.body?.marks;
+  if (!given || typeof given !== "object" || Array.isArray(given) || !Object.values(given).every((mark) => mark === "lazy" || mark === "direct")) {
+    return res.status(400).json({ error: 'marks must be an object of "lazy" or "direct" by tool set or `<tool>name`' });
+  }
   // Only what is new is checked: a mark kept from before must not stand in the way of an unrelated change.
-  const before = lazyToolSets();
-  const refused = lazyRefused(lazy.filter((mark) => !before.includes(mark)));
+  const before = toolMarks();
+  const added = Object.fromEntries(Object.entries(given as Record<string, "lazy" | "direct">).filter(([entry, mark]) => before[entry] !== mark));
+  const refused = lazyRefused(added);
   if (refused.length) {
     return res.status(400).json({ error: `Cannot be lazy: ${refused.join(", ")}. An MCP server's tools are lazy by the server's own setting (Register tools directly), and pi's built-in tools are always offered.`, code: "lazy-refused" });
   }
-  const stored = setLazyToolSets(lazy);
-  const applied = await sessions.applyToolDefaults();
-  res.json({ lazy: stored, applied });
+  const stored = setToolMarks(given as Record<string, "lazy" | "direct">);
+  res.json({ marks: stored, resolved: resolvedLazy() });
+});
+
+/** How big the model's list may get before `auto` groups are lazy: tokens of declarations, and number of tools; 0 turns a part off. */
+app.put("/api/tools/lazy-limits", (req, res) => {
+  if (EXECUTOR_KIND === "container") return res.status(400).json(toolsUnsupported);
+  const limits = setLazyLimits(req.body);
+  if (!limits) return res.status(400).json({ error: "tokens and tools must be whole numbers, 0 or more" });
+  res.json({ limits, resolved: resolvedLazy() });
+});
+
+/** The person has read what the threshold made lazy. */
+app.delete("/api/tools/lazy-notice", (_req, res) => {
+  dismissLazyNotice();
+  res.json({ ok: true });
 });
 
 app.post("/api/sessions/:id/abort", async (req, res) => {

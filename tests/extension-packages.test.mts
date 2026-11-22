@@ -27,13 +27,13 @@ test('every package the portal ships says with a "pi" key what it brings pi, if 
 });
 
 /**
- * What a fresh portal installs on its first start, and an upgraded one with it: the upgrading guide lists these
- * packages under "The extensions a portal starts with", as a portal at 0.1.0 finds them under Installed afterwards.
- * Changing the list means changing the guide.
+ * What a fresh portal installs on its first start: the upgrading guide lists these packages under "The extensions a
+ * portal starts with", as a portal finds them under Installed afterwards. Changing the list means changing the guide.
+ * Git, Canvases and Media were on the list until 0.3.0: a portal that has them keeps them, and the guide says so.
  */
-test('the extensions a portal starts with are the six the upgrading guide lists, by their package names', () => {
+test('the extensions a portal starts with are the three the upgrading guide lists, by their package names', () => {
   const defaults: string[] = JSON.parse(readFileSync(path.join(ROOT, 'defaults.json'), 'utf8'));
-  assert.deepEqual(defaults, ['terminal', 'git', 'files', 'themes', 'canvas', 'media']);
+  assert.deepEqual(defaults, ['terminal', 'files', 'themes']);
   const guide = readFileSync(path.resolve(import.meta.dirname, '../docs/guide/upgrading.md'), 'utf8');
   const from = guide.indexOf('## The extensions a portal starts with');
   assert.ok(from >= 0, 'the guide has the section');

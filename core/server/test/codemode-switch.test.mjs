@@ -95,7 +95,7 @@ test("code mode cannot be marked lazy: its row says so, and a mark that names it
   assert.equal(codemodeOf(defaults).noLazy, true);
   assert.equal(codemodeOf(defaults).lazy, undefined);
   for (const mark of ["codemode", "<tool>codemode"]) {
-    const res = await send("/api/tools/lazy", "PUT", { lazy: [mark] });
+    const res = await send("/api/tools/marks", "PUT", { marks: { [mark]: "lazy" } });
     assert.equal(res.status, 400, mark);
     assert.equal((await res.json()).code, "lazy-refused");
   }
@@ -105,21 +105,21 @@ test("code mode cannot be marked lazy: its row says so, and a mark that names it
 });
 
 test("a tool that is offered to scripts only cannot be marked lazy either: nothing would be kept out of the prompt", async () => {
-  // As a session reports it (pi's `codemode` exposure): the model is never offered it, so the gateway has nothing to reach.
+  // As a session reports it (pi's `codemode` exposure): the model is never offered it, so `tool_search` has nothing to reach.
   db.rememberTools([
     db.remembered({ name: "scripted", source: "pi-scripts", scriptsOnly: true }),
     db.remembered({ name: "direct", source: "pi-scripts" }),
   ]);
   // The server reads what is remembered again after a write of its settings, which a report to it would have been.
-  await json("/api/tools/lazy", "PUT", { lazy: [] });
+  await json("/api/tools/marks", "PUT", { marks: {} });
   const rows = Object.fromEntries((await json("/api/tools")).tools.map((tool) => [tool.name, tool]));
   assert.equal(rows.scripted.noLazy, true, "no lazy button for its row");
   assert.equal(rows.direct.noLazy, undefined, "a tool of the same package that is offered keeps its own");
-  const res = await send("/api/tools/lazy", "PUT", { lazy: ["<tool>scripted"] });
+  const res = await send("/api/tools/marks", "PUT", { marks: { "<tool>scripted": "lazy" } });
   assert.equal(res.status, 400);
   assert.equal((await res.json()).code, "lazy-refused");
   // Its package marked lazy is the other tool's mark: it is not applied to this one, and not shown as applied.
-  await json("/api/tools/lazy", "PUT", { lazy: ["pi-scripts"] });
+  await json("/api/tools/marks", "PUT", { marks: { "pi-scripts": "lazy" } });
   const marked = Object.fromEntries((await json("/api/tools")).tools.map((tool) => [tool.name, tool]));
   assert.equal(marked.direct.lazy, true);
   assert.equal(marked.scripted.lazy, undefined);
@@ -127,7 +127,7 @@ test("a tool that is offered to scripts only cannot be marked lazy either: nothi
   // A report that no longer says it takes the mark off: the tool is offered to the model now, and may be lazy.
   db.rememberTools([db.remembered({ name: "scripted", source: "pi-scripts" })]);
   assert.deepEqual([...db.lazyToolNames()].sort(), ["direct", "scripted"]);
-  await json("/api/tools/lazy", "PUT", { lazy: [] });
+  await json("/api/tools/marks", "PUT", { marks: {} });
   assert.equal((await json("/api/tools")).tools.find((tool) => tool.name === "scripted").noLazy, undefined);
 });
 

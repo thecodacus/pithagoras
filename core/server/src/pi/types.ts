@@ -1,5 +1,6 @@
 import type { EventEmitter } from "node:events";
 import type { ImageContent } from "../prompt-images.js";
+import type { LazyHead } from "../tool-lazy.js";
 
 export interface PiState {
   model: {
@@ -45,13 +46,19 @@ export interface PiTool {
   offByDefault?: true;
   /** The parameters that hold the files it is approved for, as its definition declares them (see declaredFiles in guard.ts). */
   approvalFiles?: string[];
+  /** What its declaration costs the model's list, in tokens: what the threshold of the lazy tools adds up. */
+  tokens?: number;
+  /** Declares that it returns outside content (`guard.outside`), for the head of a chat it is lazy in (see LazyHead). */
+  outside?: true;
+  /** What it asks to be told in a spoken turn (`voiceGuidelines`), for the head of a chat it is lazy in. */
+  voice?: string[];
   /** False when this conversation has it switched off. */
   enabled: boolean;
   /** Whether it is on by default, so the page can say where a chat disagrees. */
   defaultOn?: boolean;
   /** The code tool, on in a chat whose mode switches it on: the chat's own switch cannot turn it off (see setTools). */
   byMode?: true;
-  /** Not offered one by one but found through the `tools` tool: a tool marked lazy. It is on, and switched like any other. */
+  /** Not offered one by one but found through the `tool_search` tool: a tool marked lazy. It is on, and switched like any other. */
   lazy?: true;
 }
 
@@ -114,7 +121,7 @@ export interface PiClient extends EventEmitter {
   subagentStop?(id: string): boolean;
   /** What a page says to an extension's own half in this chat. Absent where the executor cannot reach the extensions. */
   tellExtension?(extension: string, data: unknown): boolean;
-  /** How the model is offered a tool now: by its own name, through the `tools` tool, or not at all. Absent where the executor cannot tell. */
+  /** How the model is offered a tool now: by its own name, through `tool_search`, or not at all. Absent where the executor cannot tell. */
   offers?(tool: string): "direct" | "lazy" | undefined;
   /** How many subagents it announced are still running: a background one outlives the turn that started it. */
   subagentsRunning?(): number;
@@ -177,11 +184,13 @@ export interface PiClient extends EventEmitter {
    * Optional: an executor that cannot ask pi leaves it out.
    */
   getTools?(): Promise<PiTool[]>;
+  /** Switch tools off by name. Everything not named is on. */
+  setToolsOff?(names: string[]): Promise<void>;
   /**
-   * Switch tools off by name. Everything not named is on. `lazy.tools` are on but not in the list the
-   * model is offered: it finds them through the `tools` tool, and `lazy.sets` names the sets they are in.
+   * Take up what a chat froze about its lazy tools, again: by the person's say-so, the one deliberate change of what the
+   * model is sent first. The reload that follows makes it so. Optional: only the in-process client has lazy tools.
    */
-  setToolsOff?(names: string[], lazy?: { tools: string[]; sets: string[] }): Promise<void>;
+  useHead?(head: LazyHead): void;
 
   setModel(provider: string, modelId: string): Promise<void>;
   setThinkingLevel(level: string): Promise<void>;

@@ -196,7 +196,7 @@ test("what a tool declares holds as pi runs it: its pages are outside content, w
   // Switched off, nothing that declares outside content is on, and the paragraph is not said.
   script = [];
   model.requests.length = 0;
-  await run(chat(), { toolsOff: ["page_open"] });
+  await run(chat(), { toolsOff: ["page_open", "chat_read", "chat_search"] });
   assert.ok(!systemOf(model.requests[0]).includes(JSON.stringify(OUTSIDE_CONTENT_GUIDELINE).slice(1, -1)));
 
   script = [{ name: "share_note", args: { to: "team" } }];

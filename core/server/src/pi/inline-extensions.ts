@@ -18,7 +18,7 @@ export const INLINE_EXTENSIONS: readonly string[] = [
   "voice-first",
   "cross-model-thinking",
   "guard",
-  "tools-gateway",
+  "tool-search",
   SANDBOX,
   "routines",
   ASK_QUESTION_SOURCE,
@@ -26,4 +26,5 @@ export const INLINE_EXTENSIONS: readonly string[] = [
   "report",
   CODEMODE_SOURCE,
   "heartbeat",
+  "chats",
 ];

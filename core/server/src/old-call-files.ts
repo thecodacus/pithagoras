@@ -1,7 +1,7 @@
 import type Database from "better-sqlite3";
 import path from "node:path";
 import { FILES_KEY, type ShownFile } from "./file-outputs.js";
-import { calledThrough, calledToolOf } from "./pi/tools-gateway-names.js";
+import { calledThrough, calledToolOf } from "./pi/tool-search-names.js";
 import { pathBelow } from "./within.js";
 
 /**

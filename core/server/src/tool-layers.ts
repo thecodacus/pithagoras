@@ -13,10 +13,10 @@ export const isToolList = (value: unknown): value is string[] => Array.isArray(v
 
 /**
  * A tool's lazy mark as a page shows it, where the chats it is shown for work through the code tool alone (`scripted`):
- * there no tool is lazy (see lazyOf in pi/sdk-client.ts), as nothing is offered one by one and a script reaches every
+ * there no tool is lazy (see lazyMember in pi/sdk-client.ts), as nothing is offered one by one and a script reaches every
  * tool that is on, but an MCP server's tool is still behind `mcp`.
  */
-export const scriptedMark = (mark: { lazy?: true; mcp?: string }, scripted?: boolean): { lazy?: true; mcp?: string } =>
+export const scriptedMark = <T extends { mcp?: string }>(mark: T, scripted?: boolean): T | Record<string, never> =>
   scripted && mark.mcp === undefined ? {} : mark;
 
 /**

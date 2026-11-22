@@ -1,6 +1,6 @@
 {
   "name": "pithagoras-files",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "The files of a Pithagoras chat's folder beside the conversation and in voice mode: browse, read and edit them, follow what the agent reads and writes, upload, rename, delete and download",
   "type": "module",
   "keywords": ["pi-package"],

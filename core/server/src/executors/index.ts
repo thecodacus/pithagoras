@@ -8,6 +8,8 @@ import { removeStoppedRunner } from "./stale-container.js";
 import { PiRpcClient } from "../pi/rpc-client.js";
 import { SdkPiClient } from "../pi/sdk-client.js";
 import type { PiClient } from "../pi/types.js";
+import type { ModeParams } from "../chat-modes.js";
+import type { LazyHead } from "../tool-lazy.js";
 
 export type ExecutorKind = "host" | "container";
 
@@ -40,14 +42,16 @@ export interface LaunchOptions {
   toolsOff?: string[];
   /** The tools the portal has seen, for one that says it is off until switched on. */
   toolsSeen?: () => ReadonlySet<string>;
-  /** The tools that are on and lazy: found through the `tools` tool, not offered one by one. */
-  toolsLazy?: string[];
-  /** What those tools are called as sets, for the hint to the model. */
-  lazySets?: string[];
+  /** What the chat froze about its lazy tools: found through `tool_search`, not offered one by one. */
+  lazy?: LazyHead;
+  /** Told what the chat's head has taken in since it was made, to keep with it. */
+  rememberLazy?: (head: LazyHead) => void;
   /** The code tool's presentation in a chat whose mode works through it: see codemode.ts. */
   codemode?: "only";
   /** Said after the portal's rules each time the prompt is built: the chat's mode's instructions. */
   modeLines?: () => string[];
+  /** The model parameters of the chat's mode, read at each request of the chat. */
+  modeParams?: () => ModeParams | undefined;
   /** The agent whose heartbeat this session is, when it is one: gives it the note tool. */
   heartbeatAgent?: string;
   /** Told the chat's model when a spoken turn is about to run on another. */
@@ -111,10 +115,11 @@ export class HostExecutor implements Executor {
       allowlistNow: opts.allowlistNow,
       toolsOff: opts.toolsOff,
       toolsSeen: opts.toolsSeen,
-      toolsLazy: opts.toolsLazy,
-      lazySets: opts.lazySets,
+      lazy: opts.lazy,
+      rememberLazy: opts.rememberLazy,
       codemode: opts.codemode,
       modeLines: opts.modeLines,
+      modeParams: opts.modeParams,
       heartbeatAgent: opts.heartbeatAgent,
       rememberChatModel: opts.rememberChatModel,
       canReloadNow: opts.canReloadNow,

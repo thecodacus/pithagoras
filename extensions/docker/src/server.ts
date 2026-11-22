@@ -14,6 +14,7 @@ import { registerTools } from "./tools";
  *
  *   GET    /overview                      whether Docker is reached, its version, and every extension's containers and volumes
  *   POST   /containers/:name/start|stop
+ *   POST   /containers/:name/update      makes the container again on the image its extension wants, in the background (202); how it goes is in /overview
  *   DELETE /containers/:name
  *   GET    /containers/:name/logs?tail=   the end of what it wrote, as text
  *   DELETE /volumes/:name
@@ -58,6 +59,10 @@ export default function docker(portal: ServerPortal) {
       res.json({ ok: true });
     }));
   }
+  portal.router.post("/containers/:name/update", route(async (req, res) => {
+    await person.updateImage(req.params.name);
+    res.status(202).json({ ok: true });
+  }));
   portal.router.delete("/containers/:name", route(async (req, res) => {
     await person.remove(req.params.name);
     res.json({ ok: true });

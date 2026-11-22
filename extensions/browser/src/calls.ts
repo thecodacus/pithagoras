@@ -4,17 +4,17 @@ import { t } from "./portal";
 /**
  * Which of the agent's calls drive a browser, and what voice mode's card of
  * one says: its own browser tools and a Playwright MCP's alike, called
- * directly, through the gateway to the tools kept out of the model's list, or
+ * directly, through `tool_search` to the tools kept out of the model's list, or
  * through the MCP adapter's `mcp` tool.
  */
 
-/** The tool that reaches the tools kept out of the model's list, and calls them. */
-const GATEWAY_TOOL = "tools";
+/** The tool that reaches the tools kept out of the model's list, and calls them; and `tools`, what it was called, which a chat that is older has in its history. */
+const SEARCH_TOOLS = ["tool_search", "tools"];
 
 const plain = (v: unknown): v is Record<string, any> => typeof v === "object" && v !== null && !Array.isArray(v);
 const text = (v: unknown) => (typeof v === "string" ? v : "");
 
-/** What a gateway call calls: the tool, and what it gives it (an object, or the JSON text of one). Nothing for a search or a describe. */
+/** What a call of `tool_search` calls: the tool, and what it gives it (an object, or the JSON text of one). Nothing for a search or a describe. */
 function calledThrough(args: unknown): { name: string; input: Record<string, any> } | undefined {
   if (!plain(args) || args.action !== "call" || typeof args.name !== "string") return undefined;
   const name = args.name.trim();
@@ -33,12 +33,12 @@ function calledThrough(args: unknown): { name: string; input: Record<string, any
 /**
  * The call as the agent made it, from a tool event's payload: pi has spelled
  * the name `toolName` and `name`, and the arguments `input`, `args` and
- * `parameters`. A call through the gateway is a call of the tool it calls.
+ * `parameters`. A call through `tool_search` is a call of the tool it calls.
  */
 function called(payload: any): { name: string; input: Record<string, any> } {
   const name = String(payload?.toolName ?? payload?.name ?? "");
   const args = payload?.input ?? payload?.args ?? payload?.parameters;
-  return (name === GATEWAY_TOOL ? calledThrough(args) : undefined) ?? { name, input: plain(args) ? args : {} };
+  return (SEARCH_TOOLS.includes(name) ? calledThrough(args) : undefined) ?? { name, input: plain(args) ? args : {} };
 }
 
 /** A browser tool, by its name: `browser_navigate`, `browser.click`, `playwright_browser_type`. */

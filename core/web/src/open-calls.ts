@@ -9,7 +9,7 @@ import type { Item } from "./transcript";
  * there (`ChatFeed.calls`): the ones the model is writing now, with what it
  * has written of their arguments so far (`status: "writing"`), and the ones it
  * has written that are running. A call is the tool inside the one that reached
- * it, as the chat's cards show it (a lazy tool's, not the `tools` tool's).
+ * it, as the chat's cards show it (a lazy tool's, not the `tool_search` tool's).
  *
  * The arguments of a call being written come as JSON text, a piece with each
  * token (live-events.ts keeps it, `partialJson`). They are read as far as they

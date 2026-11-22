@@ -1,5 +1,5 @@
 import { debugLog, debugOn } from "./logs.js";
-import { GATEWAY_TOOL, calledThrough } from "./pi/tools-gateway-names.js";
+import { TOOL_SEARCH, calledThrough, isSearchTool } from "./pi/tool-search-names.js";
 
 /**
  * The debug lines for tool calls: which tool, how it ended, and how long it took.
@@ -17,14 +17,14 @@ const nameOf = (tool: unknown) => (typeof tool === "string" && tool ? tool : "un
 
 /**
  * A call began. `subagent` names the subagent it runs in, when it is not the chat's own. A call through the
- * gateway to the lazy tools (`args` are the call's) is filed under the tool it calls, with `via=tools`: all pi
- * says of it is `tools`, which would make every lazy tool's line the same.
+ * tool search (`args` are the call's) is filed under the tool it calls, with `via=tool_search`: all pi
+ * says of it is `tool_search`, which would make every lazy tool's line the same.
  */
 export function toolCallStarted(sessionId: string, call: string, tool: unknown, subagent?: string, args?: unknown): void {
   if (!debugOn()) return;
-  const through = tool === GATEWAY_TOOL ? calledThrough(args)?.name : undefined;
+  const through = isSearchTool(tool) ? calledThrough(args)?.name : undefined;
   const name = nameOf(through ?? tool);
-  const via = through ? GATEWAY_TOOL : undefined;
+  const via = through ? TOOL_SEARCH : undefined;
   let calls = running.get(sessionId);
   if (!calls) running.set(sessionId, (calls = new Map()));
   calls.set(call, { tool: name, at: Date.now(), subagent, via });

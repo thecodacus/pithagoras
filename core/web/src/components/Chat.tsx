@@ -1900,7 +1900,7 @@ export function Chat({
           scroller.hold(e);
         }}
         data-transcript=""
-        className="flex-1 overflow-y-auto px-4 py-6"
+        className="scroll-steady flex-1 overflow-y-auto px-4 py-6"
       >
         <div role="status" aria-live="polite" className="sr-only">{heard?.id === session.id ? heard.text : ""}</div>
         <div ref={list} className={`chat-list mx-auto w-full max-w-3xl space-y-3${opening ? " is-opening" : ""}`}>

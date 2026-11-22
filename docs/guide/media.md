@@ -8,8 +8,10 @@ agent in its chats. Nothing on it needs a model or a conversation: the page asks
 asks the endpoint you set up.
 
 Media is an extension, `pithagoras-media` from the portal's `extensions/media`,
-installed when a portal starts for the first time and listed under Settings →
-Extensions → Installed like any other: switch it off or remove it, and the page,
+which a new portal does not have: install it from Settings → Extensions →
+Discover, or pick Creative in the [setup assistant](/guide/models#setup-assistant).
+A portal that had it before keeps it. It is listed under Settings → Extensions →
+Installed like any other: switch it off or remove it, and the page,
 its settings, the agent's picture and video tools (`show_image` among them) and
 their cards in the chat go. What it keeps, its gallery and the pictures and
 videos made on the page, stays in its folder of the data folder for when it is

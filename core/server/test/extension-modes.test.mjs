@@ -194,3 +194,32 @@ test("a mode of the wrong shape, one offered twice, and one of a package called 
   assert.ok(said.includes("[extension once] cannot offer the mode other: its server half is not running"), said.join("\n"));
   assert.deepEqual(ids(providedModes()), []);
 });
+
+test("an extension's mode keeps the groups and tools it names in the model's list, in the chats started in it, as a mode of the person's does", async () => {
+  const { modeDirect } = await import("../dist/db.js");
+  await host.syncServerHalves([
+    half(
+      "pinning",
+      `globalThis.pinned = portal.modes.provide({ id: "pinned", label: "Pinned mode", description: "Keeps its tools at hand.", keepDirect: { sets: ["pithagoras-browser"], tools: ["web_search"] } });
+portal.modes.provide({ id: "loose", label: "Loose mode", description: "Keeps nothing." });`,
+    ),
+  ]);
+  assert.deepEqual(modeDirect(globalThis.pinned), ["pithagoras-browser", "<tool>web_search"]);
+  assert.deepEqual(modeDirect("pinning/loose"), []);
+  // What a chat in it starts with: what the mode keeps is direct in its head, before every mark and the threshold.
+  const id = chat();
+  await put(id, { mode: "pinning/pinned" });
+  const head = sessions.lazyHeadFor(id);
+  assert.ok(head.direct.includes("pithagoras-browser") && head.direct.includes("<tool>web_search"), JSON.stringify(head));
+  // It is not part of what the modes list says of a mode.
+  const listed = (await get(chat())).modes.find((mode) => mode.id === "pinning/pinned");
+  assert.equal("keepDirect" in listed, false);
+  // A shape that is not lists of names is refused.
+  const { modes } = globalThis.portals.pinning;
+  for (const keepDirect of [["x"], { sets: "x" }, { tools: [""] }, { sets: [3] }, null]) {
+    assert.throws(() => modes.provide({ id: "bad", label: "Bad", description: "Bad.", keepDirect }), (e) => e instanceof TypeError && /keepDirect takes/.test(e.message), JSON.stringify(keepDirect));
+  }
+  // Gone with its server half: a chat that starts in it afterwards keeps nothing by it.
+  await host.syncServerHalves([]);
+  assert.deepEqual(modeDirect(globalThis.pinned), []);
+});

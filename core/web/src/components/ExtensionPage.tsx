@@ -30,7 +30,7 @@ export function ExtensionPage({ entryKey }: { entryKey: string }) {
   }
   const Page = entry.component;
   return (
-    <div className="extension-page min-h-0 flex-1 overflow-y-auto" data-extension={entry.extension}>
+    <div className="extension-page scroll-steady min-h-0 flex-1 overflow-y-auto" data-extension={entry.extension}>
       {/* An extension's page failing to draw takes down that page, not the portal. */}
       <ErrorBoundary resetKey={entry.key} fallback={(error) => <div className="p-6"><PartFailed error={error} /></div>} onError={failedIn(entry.extension)}>
         <Page />

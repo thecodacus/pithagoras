@@ -1,10 +1,10 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, chownSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, chownSync, copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 import { getSetting, putSetting } from "../db.js";
-import { DATA_DIR as DATA_SETTING } from "../data-dir.js";
+import { DATA_DIR as DATA_SETTING, dataFolder } from "../data-dir.js";
 import { piAgentDir } from "../pi-settings.js";
 import { agentOf, agentsRoot, listAgents, type Agent } from "../agents.js";
 import { identityOf } from "./identity.js";
@@ -37,7 +37,7 @@ export const STATE_DIR = path.join(DATA_DIR, "sandbox");
 export const ON_FLAG = path.join(STATE_DIR, "enabled");
 const SUDOERS = "/etc/sudoers.d/pithagoras-sandbox";
 const WRAPPER_MARK = "# pithagoras sandbox: generated";
-const BIN_DIR = path.join(DATA_DIR, "bin");
+export const BIN_DIR = dataFolder("BIN_DIR", "bin");
 
 export interface ApplyReport {
   ok: boolean;
@@ -119,7 +119,7 @@ async function applyRule(policy: SandboxPolicy, rule: SandboxPolicy["rules"][num
     report.done.push(`${rule.path}: not there yet`);
     return;
   }
-  const dir = lstatSync(rule.path).isDirectory();
+  const dir = statSync(rule.path).isDirectory();
   if (rule.access === "none") {
     const keys = rule.path === SECRETS_DIR;
     chownSync(rule.path, 0, keys ? ids.tools : 0);
@@ -140,8 +140,10 @@ async function applyRule(policy: SandboxPolicy, rule: SandboxPolicy["rules"][num
   passable(policy, rule.path, report);
   if (rule.access === "read") {
     if (deep && dir) {
-      await recursive(["chown", "-R", "--no-dereference", ":0", rule.path], report);
-      await recursive(["chmod", "-R", "go-w,o+rX", rule.path], report);
+      // By real path: a rule on a symlink to a folder protects the folder, not the link.
+      const real = realpathSync(rule.path);
+      await recursive(["chown", "-R", "--no-dereference", ":0", real], report);
+      await recursive(["chmod", "-R", "go-w,o+rX", real], report);
     } else {
       chownSync(rule.path, statSync(rule.path).uid, 0);
       chmodSync(rule.path, (statSync(rule.path).mode & 0o7777 & ~0o022) | (dir ? 0o005 : 0o004));
@@ -149,9 +151,10 @@ async function applyRule(policy: SandboxPolicy, rule: SandboxPolicy["rules"][num
     report.done.push(`${rule.path}: read-only`);
   } else {
     if (deep && dir) {
-      await recursive(["chown", "-R", "--no-dereference", `:${ids.group}`, rule.path], report);
-      await recursive(["chmod", "-R", "g+rwX", rule.path], report);
-      await recursive(["find", rule.path, "-type", "d", "-exec", "chmod", "g+s", "{}", "+"], report);
+      const real = realpathSync(rule.path);
+      await recursive(["chown", "-R", "--no-dereference", `:${ids.group}`, real], report);
+      await recursive(["chmod", "-R", "g+rwX", real], report);
+      await recursive(["find", real, "-type", "d", "-exec", "chmod", "g+s", "{}", "+"], report);
     } else {
       chownSync(rule.path, statSync(rule.path).uid, ids.group);
       chmodSync(rule.path, (statSync(rule.path).mode & 0o7777) | (dir ? 0o2070 : 0o060));
@@ -192,8 +195,10 @@ async function applyTrusted(policy: SandboxPolicy, ids: Ids, report: ApplyReport
   for (const t of policy.trusted) {
     const onPath = path.join(BIN_DIR, t.name);
     // A command already on PATH under that name, not one of ours, is taken in: moved to the trusted folder.
+    // Copied, not renamed: the bin folder can sit on another filesystem than the data dir.
     if (!existsSync(t.script) && existsSync(onPath) && !isOurs(onPath)) {
-      renameSync(onPath, t.script);
+      copyFileSync(onPath, t.script);
+      rmSync(onPath);
       report.done.push(`${t.name}: moved from ${BIN_DIR} into ${TRUSTED_DIR}`);
     }
     if (!existsSync(t.script)) {
@@ -217,6 +222,19 @@ async function applyTrusted(policy: SandboxPolicy, ids: Ids, report: ApplyReport
     if (isOurs(file) && !policy.trusted.some((t) => t.name === name)) {
       rmSync(file);
       report.done.push(`${name}: no longer trusted, wrapper removed`);
+    }
+  }
+  // Wrappers an earlier version wrote into the data dir's bin, before the bin folder followed
+  // BIN_DIR: gone, so nothing unmanaged calls a sudo rule.
+  const legacyBin = path.join(DATA_DIR, "bin");
+  // By real path: a symlink from the data dir's bin to the bin folder is the same folder, not a legacy one.
+  if (legacyBin !== BIN_DIR && existsSync(legacyBin) && realpathSync(legacyBin) !== realpathSync(BIN_DIR)) {
+    for (const name of readdirSync(legacyBin)) {
+      const file = path.join(legacyBin, name);
+      if (isOurs(file)) {
+        rmSync(file);
+        report.done.push(`${name}: the old wrapper from ${legacyBin} removed`);
+      }
     }
   }
 

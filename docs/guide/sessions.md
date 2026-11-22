@@ -104,7 +104,7 @@ checked. Choose before the first message: from then on the chat keeps it.
   presentation): the code tool's description lists them, and a script calls
   them. Every tool that is on in the chat is in a script's reach. Lazy marks do
   not apply here, since nothing is offered one by one anyway: a script finds the
-  tools that do not fit in the description with `searchTools`, and the `tools`
+  tools that do not fit in the description with `searchTools`, and the `tool_search`
   tool is not offered. An MCP server whose tools are not registered one by one
   stays behind the adapter's `mcp` tool, which a script calls like any other.
   A script has no time limit; **Stop** ends it. The
@@ -165,6 +165,9 @@ A mode of yours has:
   chosen; left as **As the chat would have it**, nothing is written. Choosing
   another mode before the first message puts back what the mode wrote, unless
   you changed it in the chat since.
+- **Model parameters**: the **Temperature** that every request of the mode's
+  chats to the model carries, see [below](#model-parameters-of-a-mode). Left
+  empty, it sets nothing.
 - **Work through the code tool**: its chats work as in Code mode, the code tool
   alone offered to the model. Switching it on switches the code tool on in the
   mode's tools too, and switching it off takes that back: the code tool is then
@@ -175,17 +178,60 @@ A mode of yours has:
   as Settings → Tools has it is still decided by them: a mode cannot switch on,
   over a project, a tool that Settings → Tools has on. A chat's own switches are
   still the last word, but where the mode switches the code tool on, they cannot
-  switch it off, as in Code mode.
+  switch it off, as in Code mode. A **direct** button on the header of each group
+  keeps that group in the model's list for the mode's chats, whatever the marks and
+  the [threshold](/guide/extensions#the-threshold) say: a mode that exists for one group, a
+  browsing mode, should not have it left out for being the largest. It is read when a chat
+  starts.
 
-These are saved as they are changed, except the texts.
+These are saved as they are changed, except the texts. The temperature is
+saved when you leave its field, or press Enter.
 
-An edit reaches the chats already in the mode as follows: its tools and its
-instructions at once, from their next message; whether it works through the
+An edit reaches the chats already in the mode as follows: its tools, its
+instructions and its temperature at once, from their next message; whether it works through the
 code tool when each chat's pi next starts, since which tools are offered one by
 one is fixed then; its model and effort never, as they were written into each
 chat when it was put in the mode. The code tool that switch also switches is one
 of the mode's tools, so it reaches the running chats at once: where it goes off,
 a chat that worked through it works as in Standard mode from its next message.
+
+#### Model parameters of a mode
+
+A mode can set the **Temperature** of its chats, so that a *coder* mode answers
+steadily and a *creative* one more freely, without anyone changing a setting in
+each chat. It is a plain number from 0 to 2: lower is steadier, higher is more
+varied. Temperature is the one parameter every API takes, so it is the only one
+a mode sets; the others (Top P, Top K, penalties and so on) are named differently
+or refused by some services, and are left to the model's own settings.
+
+A number outside the range is refused with a message when you leave the field,
+and the field goes back to what was saved. Text that is not a number is marked
+on the field and not saved.
+
+A chat in the mode sends the temperature with every request, or nothing at all
+when the field is empty: the portal has no temperature of its own for all chats,
+so then the server's own default applies. The mode's temperature wins over a
+`temperature` in the model's own entry in `models.json` (`samplingParams`, which
+pi sends with every request to that model); the rest of that entry stays.
+
+The temperature goes to the model with every request of a chat in the mode,
+including a spoken turn and the chats of its subagents while **Subagents work in
+the chat's mode** is on (see [The mode a subagent works in](/guide/features#the-mode-a-subagent-works-in));
+with it off the subagents work in Standard mode and send none. It is read at each
+request, so an edit reaches a chat that is running from its next request, and
+deleting the mode takes it away at once. A compaction or a summary of a long chat
+is not one of them: it keeps the model's settings. A chat in Standard mode, Code
+mode or an extension's mode sends none.
+
+Some services leave it out. Anthropic takes no temperature while the model is
+thinking, nor for its newest models, and a ChatGPT sign-in takes none at all: the
+mode's value is left out there, and the request is made without it. A model that
+refuses a temperature, as some hosted reasoning models do, answers with an error:
+leave the field of a mode you use with such a model empty.
+
+The chat tells you what its mode sets: in the menu above the message box, under
+the mode's description, and in the header once the chat has started, in the line
+that shows when you point at the mode.
 
 Deleting a mode asks first. Its chats keep it, and their header says it is not
 available now; they work as in Standard mode from their next message. A new mode
@@ -489,6 +535,20 @@ routines, projects, voices and channels alike. It is kept per browser.
 Discarding unsaved changes is still asked about. The Agents page's conversations
 can be renamed and deleted the same way, from the row.
 
+### Deleting several chats at once
+
+**Sessions → Select** turns the page into a list to choose from: each chat gets
+a checkbox, and a click on a row chooses it instead of opening it. The bar under
+the search counts what is chosen and offers **Select all shown**, **Select
+none**, and **Select older than…** (7, 30 or 90 days), which chooses the chats
+not touched for that long, never a pinned one nor one that is running or waiting
+for you. **Delete** asks once, naming the first few chats, how many sub-chats go
+with them and how many of the chats are at work, and then deletes them one after
+the other. Only what the page shows counts: a search narrows what is chosen as
+well as what is listed. A chat the server refuses stays chosen, with the reason
+in an alert, and the rest are gone. The question can be turned off like any
+other delete's, in **Settings → This browser → Confirmations**.
+
 ### Sub-chats
 
 An extension can give part of a chat's work to a chat of its own, a
@@ -671,6 +731,40 @@ pi's file for the chat (`/data/sessions/<id>`, see
 [Deploying](/guide/deploying#volumes)) is what the agent remembers. When it is
 gone, the chat still shows its transcript, but the agent starts over, and a
 notice in the chat says so.
+
+## Looking back at old chats
+
+The agent can look back at its own old chats: **chat_list** shows them, newest
+first, with their id, title, kind, message count and last update; **chat_read**
+gives one of them as an account — the user's and the agent's words, a line per
+tool call, the summaries where it was compacted — whole or in a slice by message
+range; **chat_search** finds words across all of them, case-insensitively, each
+match with the chat it is in, the message it is in and a snippet of what is
+around it. The way to work is to search first and read the range the match
+names, so a long chat is read in slices, not whole. Each line of a read begins
+with the index of its message, and a read is capped at 50 KB: where it is cut,
+it says after which message and which `from` to go on with. What it reads is the
+conversation: a tool's result is what the work read, not what the chat said,
+and it is not in the account or in the search.
+
+An image in a chat is a line of its own: a read saves it to a file the agent
+can open, and the search lists the messages with images, with the file to open
+them. And where the words do not carry the answer, the search takes a question
+instead of words: with a prompt and the chat's id, the chat's own model reads
+the transcript — the summaries always, the newest messages until its context
+window is spent — and answers it, citing the message it bases its answer on.
+
+The tools work on the files, not on a context window: a chat that never
+compacts, because its model holds a billion tokens, is read the same way, and
+what a read or a search hands back is capped, not the chat.
+
+The reach is the agent's own: the chats in its home and in its projects, and in
+the projects linked to it, and nothing else — a chat of another agent's is not
+found, whatever its id, and a chat of a project no agent is linked to is no
+agent's. What the list, read and search hand back is often other people's
+words — a channel's conversation is whoever wrote it, and its title is a remote
+group's name — so it is held as [outside content](/guide/security#marking-untrusted-output): the agent
+reads it as data, not as instructions.
 
 ## The tab
 

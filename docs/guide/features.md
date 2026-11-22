@@ -13,8 +13,8 @@ writes it into pi's own configuration as an MCP server, so it can also be seen,
 and undone, from Settings → MCP. Understory is the
 `pithagoras-understory` extension, which you install first (see
 [Memory: Understory](#memory-understory)). Image and video generation are
-the tools of the [Media](/guide/media) extension, which a portal installs when
-it first starts, and keep their settings in its own store.
+the tools of the [Media](/guide/media) extension, which you install from Settings → Extensions
+(or pick Creative in the setup assistant), and keep their settings in its own store.
 
 The first two are reference implementations behind a seam the portal already
 has, so a third-party equivalent can take their place without changing the
@@ -150,12 +150,13 @@ messages, about 14 tokens more on every request, and `subagents` costs about
 
 **Subagents work in the chat's mode**, on by default: a subagent's chat is made
 in the [mode](/guide/sessions#modes) of the chat it works for, with that
-mode's tools and instructions, and on the model and effort its chat is on now
+mode's tools, instructions and
+[temperature](/guide/sessions#model-parameters-of-a-mode), and on the model and effort its chat is on now
 (not the ones the mode starts a chat on). In a chat in **Code mode** the subagent
 works through the code tool as well, in a mode you made it has the mode's tool
 layer and instructions, and in an extension's mode it is in that mode. Off, every
 subagent works in Standard mode: without the code tool, the mode's instructions
-and an extension's mode. The tools its chat's mode switched off stay off for it
+and temperature, and an extension's mode. The tools its chat's mode switched off stay off for it
 (a mode with `bash` and `write` off gives no subagent either), and so do the ones
 you switched off in the chat itself; what Standard gives beyond those it has.
 

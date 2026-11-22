@@ -672,6 +672,20 @@ function Shell({
     await api.deleteSession(id);
     await refreshSessions();
   });
+  const deleteListedMany = useStable(async (ids: string[]) => {
+    const failed: { id: string; error: string }[] = [];
+    // One after the other: each stops its chat and its sub-chats, and the server need not do many at once.
+    for (const id of ids) {
+      try {
+        await api.deleteSession(id);
+      } catch (e) {
+        failed.push({ id, error: (e as Error).message });
+      }
+    }
+    // Deleted by now, and shown so, whether or not the list then loads.
+    await refreshSessions().catch(() => {});
+    return failed;
+  });
   const renameListed = useStable(async (id: string, title: string) => {
     await api.renameSession(id, title);
     // Saved by now, and shown so, whether or not the list then loads:
@@ -738,6 +752,7 @@ function Shell({
             onSelect={openChat}
             onNewChat={startChat}
             onDelete={deleteListed}
+            onDeleteMany={deleteListedMany}
             onPin={onPin}
             onRename={renameListed}
           />

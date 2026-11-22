@@ -56,7 +56,10 @@ docker compose up -d --build
 
 Open `http://<host>:4100`, choose a password when the page asks for one, and add
 a model provider under **Settings → Providers** — the setup assistant offers to
-find a local server, or take a key. Nothing else is needed for a first chat.
+find a local server, or take a key. Nothing else is needed for a first chat. A new
+portal starts with the terminal, Files and the themes. The assistant's Extensions
+step adds Git, Docker, Media and the rest, and Settings → Extensions does so at
+any time (see [What a portal starts with](/guide/extensions#what-a-portal-starts-with)).
 
 The portal listens on `:4100`. Compose uses `network_mode: host`, so it binds
 that port directly on the host — which is also what lets pi reach a llama-server
@@ -501,7 +504,7 @@ Everything here is optional except, with the Compose files, `WORKSPACES_DIR`.
 | `PORTAL_UPDATE_RESTART` | — | From source: how the **Update** button in Settings → About restarts the portal after it has built the new version, and whether the **Restart** button may start a copy of it itself (`self`) or only stop it (`exit`, see [Restarting](#restarting)). `exit` only stops it, with status 75, for a portal that something else starts again (pm2, a restart policy); `self` starts the new one itself. Unset, a portal that is a systemd service's own process exits; one that only is in a service's control group (`npm start` under dash, a wrapper script, a cron job) starts its own copy and exits with status 75 as well; any other starts its own. A systemd unit needs `Restart=on-failure` or `Restart=always`. See [Settings](/guide/settings#update). |
 | `TZ` | UTC | The time zone of the portal's clock, such as `Europe/Berlin`. A container keeps UTC unless it is told one. The quiet hours of an [agent's heartbeat](/guide/agents#its-heartbeat) and the schedule of a repeating [routine](/guide/routines) are read on this clock. Both Compose files pass it from `.env` or the shell. |
 | `PORTAL_UPGRADE_BACKUP` | — | `skip` upgrades the database without the backup it is otherwise made first, for a volume with no room for the copy. Both Compose files pass it; see [Upgrading](/guide/upgrading#no-room-for-the-backup). |
-| `PORTAL_DEFAULT_EXTENSIONS` | — | `off` keeps the portal from installing the extensions it starts with (the terminal, Git, Files, Canvases, Media and the theme pack) on its first start: you choose every extension yourself, in Settings → Extensions. See [What a portal starts with](/guide/extensions#what-a-portal-starts-with). |
+| `PORTAL_DEFAULT_EXTENSIONS` | — | What the portal installs by itself on its first start, once each. Unset: the terminal, Files and the theme pack. `off` installs none of them: you choose every extension yourself, in the setup assistant or Settings → Extensions. A preset's name (`minimal`, `developer`, `creative`, `everything`) or a comma list of extensions that come with the portal, by folder or package name (`terminal,files,themes,git`), installs that instead, with the extensions they need (Voice needs Docker for extensions). Anything else is refused: the log says so and the portal installs the unset list. A portal that has more installed keeps it. See [What a portal starts with](/guide/extensions#what-a-portal-starts-with). |
 | `PORTAL_UPDATE_CHECK` | — | From source: `off` stops the portal from fetching `origin/main` by itself at the start and every six hours to see whether there is something new. The **Update** button in Settings → About still asks when it is pressed. See [Settings](/guide/settings#update). |
 | `EXECUTOR` | `host` | `host` or `container` — see [Architecture](/reference/architecture#executors). |
 | `WORKSPACE_ROOT` | `/workspaces` | Where workspaces live inside the container. |

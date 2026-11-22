@@ -542,6 +542,13 @@ export interface ChatMode {
    * log. It warns the person; it is no gate against code that has their login, such as a browser half.
    */
   confirm?: string;
+  /**
+   * What its chats keep in the model's list, whatever the threshold of the lazy tools says: `sets` by the names Settings →
+   * Tools gives the groups (a package's name, which is also what this extension's own tools are filed under), `tools` by
+   * a tool's name. Without it, the largest groups go behind `tool_search` once the list is long, and that can be the very
+   * group the mode is for. Read as a chat in the mode starts: a chat keeps what it started with.
+   */
+  keepDirect?: { sets?: string[]; tools?: string[] };
 }
 
 /** Where an installed extension stands: see `extensions.status`. */
@@ -906,7 +913,7 @@ export interface ServerPortal {
      */
     extend(factory: (pi: any, chat: Chat) => void): void;
     /**
-     * How a chat's model is offered a tool now: by its own name ("direct"), through the `tools` tool where the
+     * How a chat's model is offered a tool now: by its own name ("direct"), through the `tool_search` tool where the
      * tool is lazy ("lazy"), or not at all: switched off, out of reach, or the chat's pi is not running here. A
      * call of a tool by a name it is not offered under is refused and never runs. In a chat whose mode works through
      * the code tool (Code mode), "direct" means that a script calls the tool by its name, with no streamed arguments

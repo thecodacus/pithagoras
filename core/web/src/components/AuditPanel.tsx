@@ -57,7 +57,7 @@ const when = (iso: string) => sinceThen(serverTime(iso), { dateAfterDays: 1, dat
 export function AuditPage() {
   const [error, setError] = useState<string | null>(null);
   return (
-    <div className="h-full overflow-y-auto px-4 py-6">
+    <div className="scroll-steady h-full overflow-y-auto px-4 py-6">
       <div className="mx-auto w-full max-w-3xl">
         {error && <ErrorBanner className="mb-4" onClose={() => setError(null)}>{error}</ErrorBanner>}
         <AuditPanel onError={setError} />
