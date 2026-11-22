@@ -42,7 +42,8 @@ const ADAPTER_FILE = JSON.stringify({
 const listed = (packages) => writeFileSync(settingsFile, JSON.stringify({ packages }));
 const reset = () => {
   db.putSetting("mcp_adapter_moved", "");
-  db.getDb().prepare("DELETE FROM project_tools").run();
+  for (const table of ["project_tools", "agent_tools", "chat_modes", "routines"]) db.getDb().prepare(`DELETE FROM ${table}`).run();
+  db.getDb().prepare("DELETE FROM sessions WHERE id LIKE 'mig-%'").run();
   db.setToolDefaultsOff([]);
 };
 const logs = [];
@@ -171,33 +172,59 @@ test("on the first start: the file is carried over, the adapter leaves pi's pack
   assert.equal(logs.length, 1);
 });
 
-test("a list that switched off the adapter's `mcp` tool, or one of its tools, brings the servers over switched off, so that the move reaches no further than the adapter did", async () => {
-  for (const [rows, why] of [
-    ["('p', 'mcp', '')", "a project's mcp"],
-    ["('p', 'github_delete_repo', '')", "a tool of the adapter's, off in a project"],
-  ]) {
-    reset();
-    logs.length = 0;
-    writeFileSync(mcpFile, JSON.stringify({ mcpServers: { notes: { command: "node", lifecycle: "lazy" }, gh: { command: "gh", directTools: true } } }));
-    listed([{ source: ADAPTER, extensions: ["extensions/index.ts"] }]);
-    db.rememberTools([db.remembered({ name: "github_delete_repo", source: "pi-mcp-adapter", package: ADAPTER })]);
-    db.getDb().prepare(`INSERT OR REPLACE INTO project_tools (project, tools_off, tools_on) VALUES ${rows}`).run();
-    await moveFromAdapter();
-    const file = readFile();
-    assert.deepEqual(file.mcpServers.notes, { command: "node", enabled: false }, why);
-    assert.deepEqual(file.mcpServers.gh, { command: "gh", enabled: false }, why);
-    assert.equal(logs.length, 1);
-    assert.match(logs[0], /Switched off, whatever they were.*notes, gh/, why);
-    assert.deepEqual(JSON.parse(readFileSync(settingsFile, "utf8")).packages, [], "the adapter is out all the same");
-  }
-  // The portal-wide default is such a list too.
+test("a list that had the adapter's `mcp` tool off has every server's tools off by name now, the entry goes, a list that had it on only loses the entry, and the servers stay as they were", async () => {
+  const pi = await piMcp();
+  const tool = (server, name) => pi.createMcpToolName(server, name);
+  const mine = ["list_mcp_resources", "list_mcp_resource_templates", "read_mcp_resource", tool("notes", "read"), tool("notes", "write-it"), tool("gh", "list")];
   reset();
   logs.length = 0;
-  db.setToolDefaultsOff(["mcp"]);
-  writeFileSync(mcpFile, JSON.stringify({ mcpServers: { notes: { command: "node", lifecycle: "lazy" } } }));
-  listed([{ source: ADAPTER, extensions: [] }]);
+  writeFileSync(mcpFile, JSON.stringify({ mcpServers: { notes: { command: "node", lifecycle: "lazy" }, gh: { command: "gh", directTools: true }, quiet: { command: "q" }, paused: { command: "p", disabled: true } } }));
+  writeFileSync(path.join(agent, "mcp-cache.json"), JSON.stringify({ servers: { notes: { tools: [{ name: "read" }, { name: "write-it" }] }, gh: { tools: [{ name: "list" }] } } }));
+  listed([{ source: ADAPTER, extensions: ["extensions/index.ts"] }]);
+  const sql = db.getDb();
+  sql.prepare("INSERT INTO project_tools (project, tools_off, tools_on) VALUES ('off', ?, ''), ('on', 'bash', ?), ('script', 'mcp_script\nwrite', ''), ('plain', 'bash', 'read')").run("mcp\nbash", "mcp\nread");
+  sql.prepare("INSERT INTO agent_tools (agent, tools_off, tools_on) VALUES ('a', 'mcp', '')").run();
+  sql.prepare("INSERT INTO chat_modes (id, label, tools_off, tools_on) VALUES ('m', 'M', 'mcpScript', '')").run();
+  sql.prepare("INSERT INTO routines (id, slug, name, tools_off, tools_on) VALUES ('r', 'r', 'R', 'mcp', '')").run();
+  db.createSession({ id: "mig-chat", title: "c", workspace: process.env.WORKSPACE_ROOT ?? home, executor: "host", tools_off: "mcp", tools_on: "mcp" });
+  db.setToolDefaultsOff(["mcp", "web"]);
+  const project = (name) => sql.prepare("SELECT tools_off, tools_on FROM project_tools WHERE project = ?").get(name);
+  const lines = (text) => text.split("\n").filter(Boolean);
+
   await moveFromAdapter();
-  assert.equal(readFile().mcpServers.notes.enabled, false);
+  const file = readFile();
+  assert.equal(file.mcpServers.notes.enabled, undefined, "the servers are on as they were: nothing here switches a server off");
+  assert.equal(file.mcpServers.gh.enabled, undefined);
+  assert.equal(file.mcpServers.paused.enabled, false);
+  assert.deepEqual(lines(project("off").tools_off), [...mine, "bash"].sort());
+  assert.deepEqual(lines(project("script").tools_off), [...mine, "write"].sort(), "mcp_script is the same switch");
+  assert.deepEqual(lines(project("on").tools_off), ["bash"], "a list with `mcp` on switches nothing off");
+  assert.deepEqual(lines(project("on").tools_on), ["read"], "and its entry goes, the rest of the list stays");
+  assert.deepEqual(project("plain"), { tools_off: "bash", tools_on: "read" }, "a list that does not name it is not touched");
+  assert.deepEqual(lines(sql.prepare("SELECT tools_off FROM agent_tools WHERE agent = 'a'").get().tools_off), [...mine].sort());
+  assert.deepEqual(lines(sql.prepare("SELECT tools_off FROM chat_modes WHERE id = 'm'").get().tools_off), [...mine].sort());
+  assert.deepEqual(lines(sql.prepare("SELECT tools_off FROM routines WHERE id = 'r'").get().tools_off), [...mine].sort());
+  const chat = sql.prepare("SELECT tools_off, tools_on FROM sessions WHERE id = 'mig-chat'").get();
+  assert.deepEqual([lines(chat.tools_off), lines(chat.tools_on)], [[...mine].sort(), []], "a chat's own list as well; both entries go");
+  assert.deepEqual(db.toolDefaultsOff(), [...mine, "web"].sort(), "and the portal-wide default");
+  assert.equal(logs.length, 1);
+  assert.match(logs[0], /7 lists of switches/);
+  assert.match(logs[0], /never listed the tools of quiet, paused/, "a server the adapter never listed has nothing to name");
+  assert.deepEqual(JSON.parse(readFileSync(settingsFile, "utf8")).packages, [], "the adapter is out all the same");
+});
+
+test("a list that names the adapter's tools one by one is only said so in the log, and no list is touched where none had `mcp` off", async () => {
+  reset();
+  logs.length = 0;
+  writeFileSync(mcpFile, JSON.stringify({ mcpServers: { notes: { command: "node", lifecycle: "lazy" } } }));
+  listed([{ source: ADAPTER, extensions: ["extensions/index.ts"] }]);
+  db.rememberTools([db.remembered({ name: "github_delete_repo", source: "pi-mcp-adapter", package: ADAPTER })]);
+  db.getDb().prepare("INSERT INTO project_tools (project, tools_off, tools_on) VALUES ('p', 'github_delete_repo', '')").run();
+  await moveFromAdapter();
+  assert.deepEqual(readFile().mcpServers.notes, { command: "node" });
+  assert.deepEqual(db.getDb().prepare("SELECT tools_off FROM project_tools WHERE project = 'p'").get(), { tools_off: "github_delete_repo" });
+  assert.match(logs[0], /Switches that named the adapter's own tools do nothing now/);
+  assert.doesNotMatch(logs[0], /had the adapter's `mcp` tool off/);
 });
 
 test("`approveTools: []`, the adapter's \"no tool asks first\", is no gate: the server comes over on, and one that names tools is still left off", async () => {
