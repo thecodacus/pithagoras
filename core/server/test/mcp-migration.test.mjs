@@ -172,7 +172,7 @@ test("on the first start: the file is carried over, the adapter leaves pi's pack
   assert.equal(logs.length, 1);
 });
 
-test("a list that had the adapter's `mcp` tool off has every server's tools off by name now, the entry goes, a list that had it on only loses the entry, and the servers stay as they were", async () => {
+test("a list that had the adapter's `mcp` tool off has every server's tools off by name now, the entry goes, a list that had it on only loses the entry, and a server with no tool to name is switched off", async () => {
   const pi = await piMcp();
   const tool = (server, name) => pi.createMcpToolName(server, name);
   const mine = ["list_mcp_resources", "list_mcp_resource_templates", "read_mcp_resource", tool("notes", "read"), tool("notes", "write-it"), tool("gh", "list")];
@@ -193,9 +193,10 @@ test("a list that had the adapter's `mcp` tool off has every server's tools off 
 
   await moveFromAdapter();
   const file = readFile();
-  assert.equal(file.mcpServers.notes.enabled, undefined, "the servers are on as they were: nothing here switches a server off");
+  assert.equal(file.mcpServers.notes.enabled, undefined, "a server whose tools are named stays as it was");
   assert.equal(file.mcpServers.gh.enabled, undefined);
   assert.equal(file.mcpServers.paused.enabled, false);
+  assert.equal(file.mcpServers.quiet.enabled, false, "no tool of it to name where MCP was off: it comes over off, not reachable there");
   assert.deepEqual(lines(project("off").tools_off), [...mine, "bash"].sort());
   assert.deepEqual(lines(project("script").tools_off), [...mine, "write"].sort(), "mcp_script is the same switch");
   assert.deepEqual(lines(project("on").tools_off), ["bash"], "a list with `mcp` on switches nothing off");
@@ -209,22 +210,46 @@ test("a list that had the adapter's `mcp` tool off has every server's tools off 
   assert.deepEqual(db.toolDefaultsOff(), [...mine, "web"].sort(), "and the portal-wide default");
   assert.equal(logs.length, 1);
   assert.match(logs[0], /7 lists of switches/);
-  assert.match(logs[0], /never listed the tools of quiet, paused/, "a server the adapter never listed has nothing to name");
+  assert.match(logs[0], /never listed the tools of quiet, paused.*switched off, whatever they were/, "a server the adapter never listed has nothing to name, and is named");
   assert.deepEqual(JSON.parse(readFileSync(settingsFile, "utf8")).packages, [], "the adapter is out all the same");
 });
 
-test("a list that names the adapter's tools one by one is only said so in the log, and no list is touched where none had `mcp` off", async () => {
+test("a list that switched off one of the adapter's own tools is read as a list that had MCP off, and one that had it on switches nothing off", async () => {
+  const pi = await piMcp();
+  reset();
+  logs.length = 0;
+  writeFileSync(mcpFile, JSON.stringify({ mcpServers: { github: { command: "gh", directTools: true }, late: { command: "l" } } }));
+  writeFileSync(path.join(agent, "mcp-cache.json"), JSON.stringify({ servers: { github: { tools: [{ name: "delete_repo" }, { name: "list" }] } } }));
+  listed([{ source: ADAPTER, extensions: ["extensions/index.ts"] }]);
+  db.rememberTools([db.remembered({ name: "github_delete_repo", source: "pi-mcp-adapter", package: ADAPTER })]);
+  const sql = db.getDb();
+  sql.prepare("INSERT INTO project_tools (project, tools_off, tools_on) VALUES ('p', 'github_delete_repo', ''), ('q', '', 'github_delete_repo')").run();
+  db.setToolDefaultsOff(["github_delete_repo"]);
+  const gone = pi.createMcpToolName("github", "delete_repo");
+  const lines = (project, column) => sql.prepare(`SELECT ${column} AS v FROM project_tools WHERE project = ?`).get(project).v.split("\n").filter(Boolean);
+
+  await moveFromAdapter();
+  const { toolEnabled } = await import("../dist/tool-policy.js");
+  assert.ok(lines("p", "tools_off").includes(gone), "the tool comes back under pi's name and is off in the list that had it off");
+  assert.ok(db.toolDefaultsOff().includes(gone) && db.toolDefaultsOff().includes(pi.createMcpToolName("github", "list")), "the portal-wide default as well, and the server's other tools");
+  assert.equal(toolEnabled(gone, db.toolDefaultsOff(), { off: lines("p", "tools_off"), on: [] }), false);
+  assert.deepEqual(lines("q", "tools_off"), [], "a list that had it on switches nothing off");
+  assert.deepEqual(lines("q", "tools_on"), ["github_delete_repo"]);
+  assert.equal(readFile().mcpServers.late.enabled, false, "a server with no tool to name is off");
+  assert.equal(readFile().mcpServers.github.enabled, undefined);
+  assert.match(logs[0], /Switches that named the adapter's own tools in a list that had it on do nothing now/);
+});
+
+test("no list is touched where none had `mcp` or one of the adapter's tools off, and the servers stay as they were", async () => {
   reset();
   logs.length = 0;
   writeFileSync(mcpFile, JSON.stringify({ mcpServers: { notes: { command: "node", lifecycle: "lazy" } } }));
   listed([{ source: ADAPTER, extensions: ["extensions/index.ts"] }]);
-  db.rememberTools([db.remembered({ name: "github_delete_repo", source: "pi-mcp-adapter", package: ADAPTER })]);
-  db.getDb().prepare("INSERT INTO project_tools (project, tools_off, tools_on) VALUES ('p', 'github_delete_repo', '')").run();
+  db.getDb().prepare("INSERT INTO project_tools (project, tools_off, tools_on) VALUES ('p', 'bash', 'read')").run();
   await moveFromAdapter();
   assert.deepEqual(readFile().mcpServers.notes, { command: "node" });
-  assert.deepEqual(db.getDb().prepare("SELECT tools_off FROM project_tools WHERE project = 'p'").get(), { tools_off: "github_delete_repo" });
-  assert.match(logs[0], /Switches that named the adapter's own tools do nothing now/);
-  assert.doesNotMatch(logs[0], /had the adapter's `mcp` tool off/);
+  assert.deepEqual(db.getDb().prepare("SELECT tools_off, tools_on FROM project_tools WHERE project = 'p'").get(), { tools_off: "bash", tools_on: "read" });
+  assert.doesNotMatch(logs[0], /had the adapter's `mcp` tool/);
 });
 
 test("`approveTools: []`, the adapter's \"no tool asks first\", is no gate: the server comes over on, and one that names tools is still left off", async () => {

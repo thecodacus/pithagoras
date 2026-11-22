@@ -167,8 +167,9 @@ export function gateOn(value: unknown): boolean {
 }
 
 /**
- * What an entry says that pi does not read, and so does not do: the adapter's own safety keys, which are in the file of a server
- * the move from the adapter left off. A server that is on with one of them would run without the gate or the exclusion it was given.
+ * What an entry says that pi does not read, and so does not do: the adapter's own keys for a gate, an exclusion, a sign-in and
+ * variables, which are in the file of a server the move from the adapter left off. A server that is on with one of them would run without
+ * the gate or the exclusion it was given, or connect without its header.
  */
 export function ignoredByPi(entry: Record<string, unknown>): { key: string; why: string }[] {
   const out: { key: string; why: string }[] = [];
@@ -177,6 +178,10 @@ export function ignoredByPi(entry: Record<string, unknown>): { key: string; why:
   if (Array.isArray(entry.excludeTools) && entry.excludeTools.length) out.push({ key: "excludeTools", why: "a list of tools it leaves out" });
   if (entry.exposeResources === false) out.push({ key: "exposeResources", why: "its resources left out" });
   if (gateOn(entry.approveTools)) out.push({ key: "approveTools", why: "tools that ask before each call (approveTools), which pi does not do" });
+  // Left in the entry of a server the move left off: the server would connect without its header or its sign-in.
+  for (const key of ["bearerToken", "bearerTokenEnv"] as const) if (typeof entry[key] === "string" && entry[key]) out.push({ key, why: "the adapter's bearer token: pi takes an Authorization header" });
+  if (entry.oauth && typeof entry.oauth === "object") out.push({ key: "oauth", why: "the adapter's OAuth block, which pi does not read" });
+  if (/\$env:|\{env:/.test(JSON.stringify(entry))) out.push({ key: "$env:NAME", why: "the adapter's spelling of a variable: pi reads `${NAME}`" });
   return out;
 }
 

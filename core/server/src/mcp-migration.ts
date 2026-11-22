@@ -16,8 +16,10 @@ import { piAgentDir, readPiSettings, updatePiSettingsNow } from "./pi-settings.j
  *
  * The servers keep what they were, on or off, and have no mark, so they are Auto in Settings → Tools. The adapter's own keys
  * are dropped. A list of switches (portal-wide, a project, agent, routine, mode or chat) that had the adapter's `mcp` tool off
- * had MCP off: it switches off every server's tools by name now, so that nothing reaches further than it did, and the entry goes. A server with something pi has no word for is left as it was, switched off, and named in the one line the log
- * gets; nothing of it is lost, as it stays in the file. A bearer
+ * had MCP off (or one of its tools off by name): it switches off every server's tools by name now, so that nothing reaches further
+ * than it did, and the entry goes; a server the adapter never listed tools of cannot be named there, and comes over switched off.
+ * A server with something pi has no word for is left as it was, switched off, and named in the one line the log gets; nothing of it
+ * is lost, as it stays in the file. A bearer
  * token becomes the Authorization header pi takes: Understory's own entry had one. Not converted: the adapter's variables and
  * the names of its tools in the switches. Those are for the person to set again, which the docs say.
  */
@@ -81,7 +83,8 @@ function leftOff(entry: Record<string, unknown>, gate: unknown): Record<string, 
 /** One server of the adapter's file, in pi's words, or why not: then it is as it was, switched off. `off`: nothing ran under the adapter, so nothing starts now. */
 function convertEntry(pi: PiMcp, name: string, entry: Record<string, unknown>, off: boolean, gate: unknown): { entry: Record<string, unknown>; why?: string } {
   const why: string[] = [];
-  for (const one of ignoredByPi(entry)) if (one.key !== "approveTools") why.push(one.why);
+  // The keys that are carried over in another form (a bearer token, an OAuth block, variables) get their own reason below.
+  for (const one of ignoredByPi(entry)) if ((REFUSED as readonly string[]).includes(one.key) && one.key !== "approveTools") why.push(one.why);
   // The adapter asked before each call of a tool: pi's MCP support does not, and the tools would run unasked.
   if (entry.approveTools !== undefined ? gateOn(entry.approveTools) : gateOn(gate)) why.push("tools that ask before each call (approveTools), which pi does not do");
   // The adapter fell back to the old SSE transport where streamable HTTP failed; pi speaks streamable HTTP only, and cannot tell an SSE-only address from the other kind, except by its look.
@@ -177,7 +180,7 @@ function adapterCache(): Map<string, string[]> {
 export interface MovedSwitches {
   /** How many lists had the adapter's `mcp` tool off, and now have every server's tools off. */
   lists: number;
-  /** The servers the lists could not name a tool of: the adapter never listed one, so it is only switched off once a chat has seen it. */
+  /** The servers the lists could not name a tool of (the adapter never listed one): the move switches them off, so that nothing reaches them where MCP was off. */
   unnamed: string[];
   /** Whether a list still names one of the adapter's own tools, which mean nothing now. */
   tools: boolean;
@@ -187,16 +190,20 @@ export interface MovedSwitches {
  * The lists of switches, with the adapter's `mcp` tool taken out of them. Where one had it off, it has every tool of every
  * server off now (a group is a list of names, as it is for any group), pi's three resource tools included, so that the move
  * reaches no further than the adapter did; where it had it on, the entry only goes, and nothing is switched on by it.
- * `names`: the tools of each server as pi will name them.
+ * A list that switched one of the adapter's own tools off (`github_delete_repo`) is read the same way as one that had `mcp` off:
+ * the name means nothing to pi, which names the tool `mcp__github__delete_repo`, and the adapter kept such a tool off through
+ * its proxy as well, so the list switches off every server's tools. `names`: the tools of each server as pi will name them.
  */
 function moveSwitches(names: ReadonlyMap<string, string[]>, adapterTools: ReadonlySet<string>): MovedSwitches {
   const held = [...MCP_RESOURCE_TOOLS, ...[...names.values()].flat()];
   const moved: MovedSwitches = { lists: 0, unnamed: [], tools: false };
   const unnamed = [...names].filter(([, tools]) => !tools.length).map(([server]) => server);
-  /** The list as it should be, or undefined where it names no `mcp`. `off`: whether this is the list of what is off. */
+  /** The list as it should be, or undefined where it needs no change. `off`: whether this is the list of what is off. */
   const redo = (list: string[], off: boolean): string[] | undefined => {
-    if (list.some((name) => adapterTools.has(name))) moved.tools = true;
-    if (!list.some((name) => GATEWAY.includes(name))) return undefined;
+    const own = list.some((name) => adapterTools.has(name) && !GATEWAY.includes(name));
+    const gateway = list.some((name) => GATEWAY.includes(name));
+    if (own && !off) moved.tools = true;
+    if (!gateway && !(own && off)) return undefined;
     const rest = list.filter((name) => !GATEWAY.includes(name));
     return off ? [...new Set([...rest, ...held])].sort() : rest;
   };
@@ -266,6 +273,15 @@ export async function moveFromAdapter(): Promise<void> {
   const names = new Map<string, string[]>();
   for (const server of Object.keys(moved.file.mcpServers)) if (NAME_RE.test(server)) names.set(server, (cache.get(server) ?? []).map((tool) => pi.createMcpToolName(server, tool)));
   const switches = moveSwitches(names, adapterTools);
+  // A server with no tool to name (never connected, lazy and never used, or added after the cache was written) cannot be switched off in the lists that had MCP off,
+  // and under the adapter those lists could not reach it: it comes over switched off, and the person switches it on knowingly in Settings → MCP.
+  for (const name of switches.unnamed) {
+    const entry = moved.file.mcpServers[name];
+    if (entry && entry.enabled !== false) {
+      entry.enabled = false;
+      moved.changed = true;
+    }
+  }
 
   // The adapter goes first, before the file is in pi's dialect: a chat that started in between would have the adapter read
   // `enabled: false` as nothing, and start a server that is off.
@@ -288,7 +304,7 @@ export async function moveFromAdapter(): Promise<void> {
       `${adapter ? ", pi-mcp-adapter taken out of pi's packages" : ""}.` +
       `${left.length ? ` Left off, as they were, because pi cannot take them as they are: ${left.join("; ")}.` : ""}` +
       `${apart.length ? ` Not read by pi, so not there any more: ${apart.join(", ")}.` : ""}` +
-      `${switches.lists ? ` ${switches.lists} lists of switches (portal-wide, a project, agent, routine, mode or chat) had the adapter's \`mcp\` tool off: they have the tools of every server switched off by name now, and pi's resource tools too.${switches.unnamed.length ? ` The adapter never listed the tools of ${switches.unnamed.join(", ")}, so there is nothing to name for those: switch them off in Settings → Tools once a chat has seen them.` : ""}` : ""}` +
-      `${switches.tools ? " Switches that named the adapter's own tools do nothing now." : ""}`,
+      `${switches.lists ? ` ${switches.lists} lists of switches (portal-wide, a project, agent, routine, mode or chat) had the adapter's \`mcp\` tool, or one of its tools, off: they have the tools of every server switched off by name now, and pi's resource tools too.${switches.unnamed.length ? ` The adapter never listed the tools of ${switches.unnamed.join(", ")}, so there is nothing to name for those: they are switched off, whatever they were. Switching one on in Settings → MCP puts its tools on wherever they are not switched off in Settings → Tools, so set the lists where MCP was off as you do.` : ""}` : ""}` +
+      `${switches.tools ? " Switches that named the adapter's own tools in a list that had it on do nothing now." : ""}`,
   );
 }

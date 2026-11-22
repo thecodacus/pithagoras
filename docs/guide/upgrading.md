@@ -1377,16 +1377,20 @@ named in the one line the log gets (Settings → Logs). pi does not read the key
 it off, so before you switch it on, write them in pi's words (a tool to leave out is
 `"toolExposure": { "<tool>": "hidden" }`). The tools are named
 `mcp__<server>__<tool>` now: **switches you set on the adapter's own tools do nothing
-any more**. The adapter's `mcp` tool itself held MCP off in a default, project, agent,
-routine, mode or chat: where a list had it off, it has the tools of every server (and
-pi's resource tools) off by name now, as far as the adapter had listed them, and the
-entry is gone; where a list had it on, the entry goes and nothing is switched on by it.
-The servers themselves stay as they were. A server whose tools the adapter never listed
-(it never connected) has nothing to name: switch it off in Settings → Tools once a chat
-has seen its tools, and the log line names such servers. A server that
+any more**, with one exception that keeps nothing wider than before: a list that had one
+of them off (`github_delete_repo`) is read as a list that had MCP off. The adapter's `mcp`
+tool itself held MCP off in a default, project, agent, routine, mode or chat: where a list
+had it off, it has the tools of every server (and pi's resource tools) off by name now, as
+far as the adapter had listed them, and the entry is gone; where a list had it on, the
+entry goes and nothing is switched on by it. A server whose tools the adapter never listed
+(it never connected, it was lazy and never used, or it was added later) has nothing to
+name: where any list had MCP off, such a server comes over **switched off**, and the log
+line names it. Switching it on in Settings → MCP is yours to decide: its tools are on
+wherever they are not switched off in Settings → Tools, so set the lists where MCP was
+off as you switch it on. A server that
 names a safety key pi does not read (`excludeTools`, `includeTools`, `approveTools`,
 `exposeResources: false`) cannot be switched on in Settings → MCP before the key is
-gone or written in pi's words.
+gone or written in pi's words (the same goes for the adapter's `bearerToken`, an `oauth` block and `$env:NAME` variables left in an entry).
 pi does not read what the adapter did besides
 (`imports`, `~/.config/mcp/mcp.json`, `~/.agents/mcp.json`, a project's `.mcp.json`),
 so servers that came from there have to be added in Settings → MCP; the log names

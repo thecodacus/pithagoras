@@ -184,6 +184,24 @@ test("a server is not switched on with a gate or an exclusion that pi does not r
   assert.equal(view.find((server) => server.name === "other").ignored, null, "an empty list is no gate");
 });
 
+test("a server that keeps the adapter's bearer token, OAuth block or `$env:` variable is not switched on, and the row says why", async () => {
+  rmSync(mcpFile, { force: true });
+  const left = [
+    ["tok", { url: "https://x.example.test/mcp", bearerToken: "abc" }, /bearerToken/],
+    ["tokenv", { url: "https://x.example.test/mcp", bearerTokenEnv: "X_TOKEN" }, /bearerTokenEnv/],
+    ["blocked", { url: "https://x.example.test/mcp", oauth: { clientId: "x" } }, /oauth/],
+    ["envish", { command: "node", env: { KEY: "$env:KEY" } }, /\$env:NAME/],
+  ];
+  for (const [name, entry, why] of left) {
+    refused(await send(`/api/mcp/servers/${name}`, "PUT", { entry }), 400, why);
+    assert.equal((await send(`/api/mcp/servers/${name}`, "PUT", { entry: { ...entry, enabled: false } })).status, 200, "off, it is written as it is");
+  }
+  const view = (await send("/api/mcp")).body.servers;
+  for (const [name, , why] of left) assert.match(view.find((server) => server.name === name).ignored, why);
+  // `oauth: false` and pi's own `${NAME}` say nothing of the kind.
+  assert.equal((await send("/api/mcp/servers/fine", "PUT", { entry: { command: "node", env: { KEY: "${KEY}" }, oauth: false } })).status, 200);
+});
+
 test("an extension setting is written only under a key that is a name, and the file is as it was", async () => {
   const text = JSON.stringify({ packages: ["npm:pi-example"] }, null, 2) + "\n";
   writeFileSync(settingsFile, text);
