@@ -22,13 +22,23 @@ export { gateOn, ignoredByPi };
  */
 export const mcpConfigPath = (): string => path.join(piAgentDir(), "mcp.json");
 
-/** pi's rule for a server's name: letters, digits, `_` and `-`. */
-export const NAME_RE = /^[A-Za-z0-9_-]+$/;
+/**
+ * pi's rule for a server's name: letters, digits, `_` and `-`. Not `__proto__`: pi takes it, but `config.mcpServers[name] = entry` would set
+ * the object's prototype instead of a server, so a server of that name would never get into the file.
+ */
+export const NAME_RE = /^(?!__proto__$)[A-Za-z0-9_-]+$/;
 
 export interface McpFile {
   mcpServers: Record<string, Record<string, unknown>>;
   [key: string]: unknown;
 }
+
+/** An entry without its on/off switch, to tell whether two names are the same server. */
+const withoutEnabled = (entry: unknown): unknown => {
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) return entry;
+  const { enabled: _enabled, ...rest } = entry as Record<string, unknown>;
+  return rest;
+};
 
 /** The file as it is, parsed as pi parses it (plain JSON: pi skips every server of a file with a comment in it), or its raw text and what is wrong with it. */
 export function readMcpFile(): { config: McpFile; raw: string; error?: string } {
@@ -385,13 +395,14 @@ export function mcpRouter(): Router {
     }
     try {
       // A rename cannot be told from a removal and an addition, except by the entry: exactly one name gone and one new with the same
-      // entry is the same server, and its gate moves with it (the hook of the write drops the old name's patterns).
+      // entry is the same server, and its gate moves with it (the hook of the write drops the old name's patterns). `enabled` may differ:
+      // a server the migration left off for its name is renamed and switched on in one save.
       const db = await import("../db.js");
       const before = readMcpFile().config.mcpServers;
       const after = ((JSON.parse(content) as { mcpServers?: Record<string, unknown> }).mcpServers ?? {}) as Record<string, unknown>;
       const gone = Object.keys(before).filter((name) => !(name in after));
       const added = Object.keys(after).filter((name) => !(name in before));
-      if (gone.length === 1 && added.length === 1 && isDeepStrictEqual(before[gone[0]], after[added[0]])) {
+      if (gone.length === 1 && added.length === 1 && isDeepStrictEqual(withoutEnabled(before[gone[0]]), withoutEnabled(after[added[0]]))) {
         const gate = db.mcpApprove()[gone[0]];
         if (gate) db.setMcpApprove(added[0], gate);
       }

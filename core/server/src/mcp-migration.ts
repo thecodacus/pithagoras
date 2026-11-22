@@ -196,9 +196,10 @@ export function carryOver(pi: PiMcp, text: string, off: boolean, cache: Readonly
   const settings = old.settings && typeof old.settings === "object" ? (old.settings as Record<string, unknown>) : {};
 
   const file: McpFile = { mcpServers: {} };
+  // As pairs, then objects: a server named `__proto__` is a key like any other only where it is defined, not assigned.
+  const converted: [string, Record<string, unknown>][] = [];
   const carried: string[] = [];
   const left: { name: string; why: string }[] = [];
-  // As pairs, then an object: a server named `__proto__` is a key like any other only where it is defined, not assigned.
   const approved: [string, string[]][] = [];
   for (const [name, entry] of Object.entries(servers)) {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
@@ -209,7 +210,7 @@ export function carryOver(pi: PiMcp, text: string, off: boolean, cache: Readonly
     const done = NAME_RE.test(name)
       ? convertEntry(pi, name, entry as Record<string, unknown>, off)
       : { entry: leftOff(entry as Record<string, unknown>), why: "pi does not take its name (letters, digits, dash and underscore only)" };
-    file.mcpServers[name] = done.entry;
+    converted.push([name, done.entry]);
     // The server keeps what it was, on or off, and what it asked about stays asked: by the server's own `approveTools`, else the setting's.
     // A server pi does not take by its name has no tools to gate while it is off; its patterns are kept for its name all the same, so a rename
     // in Settings → MCP (which moves them) carries the gate to the name pi takes.
@@ -219,6 +220,7 @@ export function carryOver(pi: PiMcp, text: string, off: boolean, cache: Readonly
     if (done.why) left.push({ name, why: done.why });
     else carried.push(name);
   }
+  file.mcpServers = Object.fromEntries(converted);
   // What else the file had that is pi's too (autoEnableCodemode) stays; the adapter's `settings` and `imports` go.
   for (const [key, value] of Object.entries(old)) if (!["mcpServers", "settings", "imports"].includes(key)) file[key] = value;
   const imports = Array.isArray(old.imports) ? old.imports.filter((one): one is string => typeof one === "string") : [];

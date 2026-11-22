@@ -65,3 +65,15 @@ test("blanks inside the call stay as they are, so a padded recipient looks padde
   expect(await text.evaluate((el) => (el as HTMLElement).innerText)).toContain(`alice@example.org${' '.repeat(40)}attacker@evil.example`);
   expect(await text.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
 });
+
+test("a recipient padded with characters that draw as nothing is in view without scrolling, because the guard names the padding", async ({ page }) => {
+  // What the guard sends for 1500 braille blanks (see visibly in guard.ts): a run is counted, not passed on.
+  const { text } = await asked(page, question(`{\n  "to": "alice@example.org<U+2800 x1500>attacker@evil.example",\n  "subject": "Hi"\n}`));
+  expect(await text.evaluate((el) => el.scrollHeight <= el.clientHeight)).toBe(true);
+  expect(await text.evaluate((el) => (el as HTMLElement).innerText)).toContain('attacker@evil.example');
+});
+
+test("the same padding passed on as it is fills the box with nothing (why the guard names it)", async ({ page }) => {
+  const { text } = await asked(page, question(`{\n  "to": "alice@example.org${'\u2800'.repeat(1500)}attacker@evil.example"\n}`));
+  expect(await text.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
+});

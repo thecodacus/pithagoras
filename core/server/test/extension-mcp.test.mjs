@@ -101,6 +101,7 @@ test("a name or an entry pi would not take is refused, and so is a file that can
   const mcp = await start();
   await assert.rejects(mcp.set("two words", NOTES), /letters, digits, underscore or dash/);
   await assert.rejects(mcp.set("dotted.name", NOTES), /letters, digits, underscore or dash/);
+  await assert.rejects(mcp.set("__proto__", NOTES), /letters, digits, underscore or dash/);
   await assert.rejects(mcp.set("notes", { lifecycle: "lazy" }), /needs either "command" \(stdio\) or "url"/);
   await assert.rejects(mcp.set("notes", { url: "http://a/mcp", enabled: "yes" }), /enabled must be a boolean/);
   await mcp.set("kept", { command: "run" });
@@ -229,6 +230,40 @@ test("a rename in the raw editor keeps the gate when one server is gone and one 
     const swapped = await raw({ ...others, other: { url: "http://127.0.0.1:99/mcp" } });
     assert.equal(swapped.status, 200);
     assert.equal(db.mcpApprove().post, undefined);
+    assert.equal(db.mcpApprove().other, undefined);
+  } finally {
+    listener.close();
+  }
+  await mcp.set("other", undefined);
+});
+
+test("a rename in the raw editor that switches the server on in the same save keeps the gate", async () => {
+  const mcp = await start();
+  // As the migration leaves a server it cannot take by its name: off, and gated for that name.
+  const { readMcpFile, writeMcpFile } = await import("../dist/api/mcp.js");
+  const file = readMcpFile().config;
+  file.mcpServers["docs.v2"] = { url: "http://127.0.0.1:7/mcp", enabled: false };
+  writeMcpFile(file);
+  db.setMcpApprove("docs.v2", ["send_*"]);
+  const { mcpRouter } = await import("../dist/api/mcp.js");
+  const { default: express } = await import("express");
+  const app = express();
+  app.use(express.json());
+  app.use("/api", mcpRouter());
+  const listener = app.listen(0, "127.0.0.1");
+  await new Promise((resolve) => listener.once("listening", resolve));
+  const base = `http://127.0.0.1:${listener.address().port}/api`;
+  try {
+    const others = Object.fromEntries(Object.entries(readMcpFile().config.mcpServers).filter(([name]) => name !== "docs.v2"));
+    const put = (mcpServers) => fetch(`${base}/mcp/raw`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content: JSON.stringify({ mcpServers }) }) });
+    const renamed = await put({ ...others, "docs-v2": { url: "http://127.0.0.1:7/mcp" } });
+    assert.equal(renamed.status, 200, await renamed.clone().text());
+    assert.deepEqual(db.mcpApprove()["docs-v2"], ["send_*"], "the renamed server, now on, is gated as it was");
+    assert.equal(db.mcpApprove()["docs.v2"], undefined);
+    // Another address is another server, whatever its switch.
+    const swapped = await put({ ...others, other: { url: "http://127.0.0.1:8/mcp", enabled: false } });
+    assert.equal(swapped.status, 200);
+    assert.equal(db.mcpApprove()["docs-v2"], undefined);
     assert.equal(db.mcpApprove().other, undefined);
   } finally {
     listener.close();

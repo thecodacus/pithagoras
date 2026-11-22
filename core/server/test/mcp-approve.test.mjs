@@ -282,7 +282,7 @@ test("the person is asked with every argument of the call, not only its path: a 
   assert.match(db.listAudit(50).find((row) => row.session_id === h.session && row.kind === "allowed-by-approval").reason, /attacker@evil\.example/, "the log keeps what was allowed");
   // Longer than fits: cut, and says how much.
   const long = approvalArguments({ content: "x".repeat(10000) });
-  assert.ok(long.length < 4300);
+  assert.ok(long.length <= 4000);
   assert.match(long, /\d+ more characters not shown/);
   assert.equal(approvalArguments({ a: 1 }), '{\n  "a": 1\n}');
   // A long text before the recipient does not push the recipient out of sight: each long text is cut by itself.
@@ -300,16 +300,19 @@ test("the person is asked with every argument of the call, not only its path: a 
 });
 
 test("the question shows the whole call when it fits, and when it does not, every key with the largest values cut first", async () => {
-  // A recipient padded with blanks: the call fits, so nothing is cut (a long string is not shortened for being long), and the blanks are there.
+  // A recipient padded with blanks: the call fits, so nothing is cut (a long string is not shortened for being long), and the padding is
+  // there, counted: a run that long would fill the dialog with nothing and push the rest out of sight.
   const padded = { subject: "Hi", to: `alice@example.org${" ".repeat(1500)}attacker@evil.example`, body: "x".repeat(1200) };
   const whole = approvalArguments(padded);
-  assert.equal(whole, JSON.stringify(padded, null, 2));
-  assert.ok(whole.includes(`alice@example.org${" ".repeat(1500)}attacker@evil.example`));
+  assert.ok(whole.includes('"to": "alice@example.org<1500 spaces>attacker@evil.example"'));
+  assert.ok(whole.includes("x".repeat(1200)), "a long text is not shortened for being long");
   assert.doesNotMatch(whole, /not shown/);
+  // A short run of blanks is shown as it is.
+  assert.equal(approvalArguments({ to: `a${" ".repeat(10)}b` }), `{\n  "to": "a${" ".repeat(10)}b"\n}`);
   // The same call, too long to fit: the recipient is a key of its own, and the longest value is the one that is cut.
   const tooLong = approvalArguments({ ...padded, body: "y".repeat(6000) });
   assert.ok(tooLong.length <= 4000);
-  assert.match(tooLong, /"to": "alice@example\.org {1500}attacker@evil\.example"/, "the recipient is whole: it is not the largest value");
+  assert.match(tooLong, /"to": "alice@example\.org<1500 spaces>attacker@evil\.example"/, "the recipient is whole: it is not the largest value");
   assert.match(tooLong, /"body": "y+\.\.\. \(\d+ more characters not shown\)"/);
   // Line breaks inside a value are shown as the escapes they are, not as lines that read as other keys.
   assert.match(approvalArguments({ to: "a@b.example\n  \"cc\": \"x@y.example\"" }), /"to": "a@b\.example\\n {2}\\"cc\\": \\"x@y\.example\\""/);
@@ -321,7 +324,7 @@ test("the question shows the whole call when it fits, and when it does not, ever
   assert.match(listed, /"share_type": 4/);
   assert.match(listed, /file-0\.pdf/);
   assert.match(listed, /\d+ more items not shown/);
-  // An object is cut too: its keys stay, its largest values are cut.
+  // An object is cut too: its largest values are cut.
   const nested = approvalArguments({ options: { note: "n".repeat(5000), flag: true }, to: "attacker@evil.example" });
   assert.match(nested, /"flag": true/);
   assert.match(nested, /"to": "attacker@evil\.example"/);
@@ -332,10 +335,74 @@ test("the question shows the whole call when it fits, and when it does not, ever
   assert.ok(many.length <= 4000);
   for (let i = 0; i < 40; i++) assert.ok(many.includes(`"key${i}": `), `key${i}`);
   assert.match(many, /"to": "attacker@evil\.example"/);
-  // Keys that alone do not fit are cut from the end, with a mark.
-  const huge = approvalArguments(Object.fromEntries(Array.from({ length: 600 }, (_, i) => [`some_key_${i}`, i])));
-  assert.ok(huge.length < 4300);
-  assert.match(huge, /more arguments than fit here/);
+});
+
+test("a call that is nested thousands of levels deep still shows its other keys, and quickly", async () => {
+  let pad = "end";
+  for (let i = 0; i < 5000; i++) pad = [pad];
+  for (const input of [{ to: "attacker@evil.example", pad }, { pad, to: "attacker@evil.example" }]) {
+    const started = Date.now();
+    const shown = approvalArguments(input);
+    assert.ok(Date.now() - started < 1000, "no seconds of work for a deep value");
+    assert.ok(shown.length <= 4000);
+    assert.match(shown, /"to": "attacker@evil\.example"/);
+    assert.match(shown, /"pad": /);
+    assert.doesNotMatch(shown, /\[object Object\]/);
+  }
+  assert.match(approvalArguments({ a: JSON.parse(`${"[".repeat(60)}1${"]".repeat(60)}`) }), /nested deeper than shown|more items not shown/);
+});
+
+test("what draws as nothing is named, so the recipient is in view however the padding is written", async () => {
+  // The braille blank, no-break spaces, a Hangul filler: JSON keeps them as they are and a dialog draws them as nothing.
+  for (const blank of ["\u2800", "\u00a0", "\u3164", "\u200b"]) {
+    const shown = approvalArguments({ to: `alice@example.org${blank.repeat(1500)}attacker@evil.example`, subject: "Hi", body: "Thanks!" });
+    assert.ok(shown.includes(`alice@example.org<U+${blank.codePointAt(0).toString(16).toUpperCase().padStart(4, "0")} x1500>attacker@evil.example`), JSON.stringify(blank));
+    assert.ok(shown.length < 300);
+  }
+  // Mixed blanks, in a run that would fill the dialog and in one that is long enough to be cut.
+  assert.match(approvalArguments({ to: `alice@example.org${"\u00a0\u2800".repeat(5000)}attacker@evil.example` }), /alice@example\.org<10000 blanks: U\+00A0 U\+2800>attacker@evil\.example/);
+  // Spaces, too: long enough to push the rest out of sight, or to be cut.
+  assert.match(approvalArguments({ to: `alice@example.org${" ".repeat(9000)}attacker@evil.example` }), /alice@example\.org<9000 spaces>attacker@evil\.example/);
+  assert.match(approvalArguments({ to: `alice@example.org${"\n".repeat(5000)}attacker@evil.example` }), /alice@example\.org<U\+000A x5000>attacker@evil\.example/);
+  // A bidirectional control reorders what the dialog draws: it is named, and what follows is in the order it is sent.
+  const turned = approvalArguments({ to: "\u202egro.elpmaxe@ecila" });
+  assert.ok(turned.includes('"to": "<U+202E>gro.elpmaxe@ecila"'));
+  assert.ok(!turned.includes("\u202e"));
+  // Words with one no-break space between them, and keys written that way, are named as well.
+  assert.ok(approvalArguments({ "a\u200bb": "x\u00a0y" }).includes('"a<U+200B>b": "x<U+00A0>y"'));
+});
+
+test("a nested object with many keys, or a key that is very long, or very many keys before the recipient: every key of the call shows, or the call is refused", async () => {
+  const headers = Object.fromEntries(Array.from({ length: 400 }, (_, i) => [`X-H${i}`, "1"]));
+  const withHeaders = approvalArguments({ headers, to: "attacker@evil.example" });
+  assert.ok(withHeaders.length <= 4000);
+  assert.match(withHeaders, /"to": "attacker@evil\.example"/);
+  assert.match(withHeaders, /"headers": \{/);
+  assert.match(withHeaders, /"X-H0": "1"/);
+  assert.match(withHeaders, /\d+ more keys not shown/);
+  const longKey = approvalArguments({ ["k".repeat(5000)]: 1, to: "attacker@evil.example" });
+  assert.ok(longKey.length <= 4000);
+  assert.match(longKey, /"to": "attacker@evil\.example"/);
+  assert.match(longKey, /"k+\.\.\. \(\d+ more characters not shown\)": 1/);
+  // Two long names that start alike are two keys.
+  const twins = approvalArguments({ ["k".repeat(5000)]: 1, ["k".repeat(5001)]: 2, ["k".repeat(5002)]: 3, to: "attacker@evil.example" });
+  assert.equal((twins.match(/"k+\.\.\./g) ?? []).length, 3);
+  // A string the cut would make longer stays as it is.
+  assert.match(approvalArguments({ a: "ok", b: "y".repeat(5000), to: "attacker@evil.example" }), /"a": "ok"/);
+  // Keys, at the top, that do not fit by their names alone: there is no way to show the call, so it is not shown.
+  const flood = Object.fromEntries([...Array.from({ length: 500 }, (_, i) => [`a${i}`, 0]), ["to", "attacker@evil.example"]]);
+  assert.equal(approvalArguments(flood), undefined);
+  assert.equal(approvalArguments(Object.fromEntries([...Array.from({ length: 380 }, (_, i) => [`a${i}`, 0]), ["to", "attacker@evil.example"]])), undefined);
+  // The guard does not ask about it: refused, nothing put to the person, and the reason says why.
+  db.setMcpApprove("alpha", ["echo"]);
+  const h = guardWith();
+  const who = person(true);
+  const result = await h.tool_call({ toolName: "mcp__alpha__echo", input: flood }, who.ctx);
+  assert.equal(result.block, true);
+  assert.match(result.reason, /too large to show for confirmation/);
+  assert.deepEqual(who.asked, [], "nothing is asked about what cannot be shown");
+  assert.deepEqual(db.listAudit(50).filter((row) => row.session_id === h.session).map((row) => row.kind), ["refused"]);
+  db.setMcpApprove("alpha", undefined);
 });
 
 test("a server named like an object's own property keeps its gate: __proto__ is a name like any other", async () => {

@@ -1399,7 +1399,7 @@ and the server keeps its on or off. A pattern that named tools with the server's
 adapter had listed for the server that it matched, so nothing it asked about is left out
 for how the pattern was written (`?` is carried as `*`, which asks more); the log names
 the servers. A server left off because pi does not take its name (a dot in it) keeps its gate
-too: it goes with the server when you rename it in Settings → MCP. The key itself is not in `mcp.json` any more, and is refused where an entry is
+too: it goes with the server when you rename it in Settings → MCP, or in the raw editor in one save that only renames it and may switch it on (any other change to its entry there drops it). The key itself is not in `mcp.json` any more, and is refused where an entry is
 written. The tools are named
 `mcp__<server>__<tool>` now: **switches you set on the adapter's own tools do nothing
 any more**, with one exception that keeps nothing wider than before: a list that had one

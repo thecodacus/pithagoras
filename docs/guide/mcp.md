@@ -80,7 +80,8 @@ would not take, with pi's reason.
 another server has is refused, whether the server is new or renamed: it would
 replace that one, with everything the form does not show. So are two names that
 differ only by a dash and an underscore (`my-notes` and `my_notes`): pi gives
-their tools the same prefix and connects only one of them. The form keeps what
+their tools the same prefix and connects only one of them. `__proto__` is not taken as a
+name (a server of that name could not be kept in the file). The form keeps what
 it does not show, an `oauth` block or a `toolExposure` set by hand. An `auth`
 block (`"auth": { "provider": "…" }`, which makes pi send the portal's key for a
 model provider to the server as its bearer token) is not written by the form or the
@@ -155,10 +156,15 @@ any characters (`send_*`, `delete_mail`), as an option of `portal.mcp.set` (see
 [MCP servers](/guide/extension-ui#mcp-servers)). Every call of a tool that matches
 (`mcp__<server>__<tool>`) is put to you before it runs, with all its arguments as the
 agent wrote them (a recipient, a type and the content are what you confirm), as JSON, so
-the blanks and line breaks inside a value are there to see. A call that fits is shown
-whole. One that does not shows every key, with the largest values cut first (a text, a
-list or an object), each cut saying how much is gone: yes lets that one call run, no
-refuses it, and the server never gets it. It
+a line break inside a value shows as `\n` and a blank is there to see. A call that fits is
+shown whole. A character that draws as nothing (the no-break space, the braille blank, a
+zero-width character, a control that turns the text around) is named, as `<U+2800>`, and a
+long run of blanks is counted (`<1500 spaces>`, `<U+2800 x1500>`), so padding cannot push a
+recipient out of sight. One that does not fit shows every key, with the largest values cut
+first (a text, a list, an object or a key's name), each cut saying how much is gone, and
+a value nested more than 48 levels deep is not shown, and says so. A call with so many keys
+that their names alone do not fit is refused and not asked about (the agent is told why).
+Yes lets that one call run, no refuses it, and the server never gets it. It
 holds however the call is made: by name, through `tool_search`, from a script, or in a
 subagent's chat. Where nobody can answer (a chat nobody attends, a routine's run, a
 conversation on a channel, somebody who is not the primary user), the call is refused
@@ -171,7 +177,7 @@ go with the server: removing it drops them, and so does writing the server again
 without `approve`, so a server given that name later is not asked about by an old
 list. Renaming a server in Settings → MCP takes its patterns along; so does a rename in
 the raw editor where exactly one server is gone, one is new, and the two entries are the
-same. Any other change there is a removal and an addition, which drops them (ask the
+same apart from `enabled` (so a server that was off can be renamed and switched on in one save). Any other change there is a removal and an addition, which drops them (ask the
 extension to set them again). Any extension can write any server's name, and a `set`
 without `approve` drops what another one wrote; the portal logs that (`[extension <name>]
 dropped the approve patterns ...`), so give `approve` again whenever you write a server

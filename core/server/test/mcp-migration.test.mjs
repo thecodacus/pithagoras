@@ -120,6 +120,19 @@ test("a server pi does not take by its name keeps the gate the adapter gave it, 
   db.setMcpApprove("docs-v2", undefined);
 });
 
+test("a server named __proto__ is not lost: it stays in the file, off, with its gate, and is not reported as carried", async () => {
+  const pi = await piMcp();
+  const moved = carryOver(pi, '{"mcpServers":{"__proto__":{"command":"x","approveTools":true},"ok":{"command":"y"}}}', false, new Map());
+  assert.ok(!("error" in moved));
+  assert.deepEqual(Object.keys(moved.file.mcpServers).sort(), ["__proto__", "ok"], "the server is in the file");
+  assert.deepEqual(Object.getOwnPropertyDescriptor(moved.file.mcpServers, "__proto__").value, { command: "x", enabled: false });
+  assert.deepEqual(JSON.parse(JSON.stringify(moved.file)).mcpServers.ok, { command: "y" });
+  assert.deepEqual(moved.carried, ["ok"]);
+  assert.deepEqual(moved.left.map((l) => l.name), ["__proto__"]);
+  assert.match(moved.left[0].why, /name/);
+  assert.deepEqual(Object.keys(moved.approve).sort(), ["__proto__"]);
+});
+
 test("the adapter's patterns match what the adapter matched: the tool's own name or its prefixed one, `?`, dashes as underscores, and no tool it asked about is left out", async () => {
   const pi = await piMcp();
   const file = JSON.stringify({
