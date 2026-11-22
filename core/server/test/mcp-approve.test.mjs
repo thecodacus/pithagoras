@@ -299,6 +299,45 @@ test("the person is asked with every argument of the call, not only its path: a 
   db.setMcpApprove("alpha", undefined);
 });
 
+test("the question shows the whole call when it fits, and when it does not, every key with the largest values cut first", async () => {
+  // A recipient padded with blanks: the call fits, so nothing is cut (a long string is not shortened for being long), and the blanks are there.
+  const padded = { subject: "Hi", to: `alice@example.org${" ".repeat(1500)}attacker@evil.example`, body: "x".repeat(1200) };
+  const whole = approvalArguments(padded);
+  assert.equal(whole, JSON.stringify(padded, null, 2));
+  assert.ok(whole.includes(`alice@example.org${" ".repeat(1500)}attacker@evil.example`));
+  assert.doesNotMatch(whole, /not shown/);
+  // The same call, too long to fit: the recipient is a key of its own, and the longest value is the one that is cut.
+  const tooLong = approvalArguments({ ...padded, body: "y".repeat(6000) });
+  assert.ok(tooLong.length <= 4000);
+  assert.match(tooLong, /"to": "alice@example\.org {1500}attacker@evil\.example"/, "the recipient is whole: it is not the largest value");
+  assert.match(tooLong, /"body": "y+\.\.\. \(\d+ more characters not shown\)"/);
+  // Line breaks inside a value are shown as the escapes they are, not as lines that read as other keys.
+  assert.match(approvalArguments({ to: "a@b.example\n  \"cc\": \"x@y.example\"" }), /"to": "a@b\.example\\n {2}\\"cc\\": \\"x@y\.example\\""/);
+  // A long array before the recipient: the items that fit show, the rest is counted, and the recipient shows.
+  const list = { attachments: Array.from({ length: 800 }, (_, i) => `file-${i}.pdf`), to: "attacker@evil.example", share_type: 4 };
+  const listed = approvalArguments(list);
+  assert.ok(listed.length <= 4000);
+  assert.match(listed, /"to": "attacker@evil\.example"/);
+  assert.match(listed, /"share_type": 4/);
+  assert.match(listed, /file-0\.pdf/);
+  assert.match(listed, /\d+ more items not shown/);
+  // An object is cut too: its keys stay, its largest values are cut.
+  const nested = approvalArguments({ options: { note: "n".repeat(5000), flag: true }, to: "attacker@evil.example" });
+  assert.match(nested, /"flag": true/);
+  assert.match(nested, /"to": "attacker@evil\.example"/);
+  assert.match(nested, /more characters not shown/);
+  // Many short keys: every one shows, each with a shortened value.
+  const keys = Object.fromEntries(Array.from({ length: 40 }, (_, i) => [`key${i}`, `value-${i}-`.repeat(10)]));
+  const many = approvalArguments({ ...keys, to: "attacker@evil.example" });
+  assert.ok(many.length <= 4000);
+  for (let i = 0; i < 40; i++) assert.ok(many.includes(`"key${i}": `), `key${i}`);
+  assert.match(many, /"to": "attacker@evil\.example"/);
+  // Keys that alone do not fit are cut from the end, with a mark.
+  const huge = approvalArguments(Object.fromEntries(Array.from({ length: 600 }, (_, i) => [`some_key_${i}`, i])));
+  assert.ok(huge.length < 4300);
+  assert.match(huge, /more arguments than fit here/);
+});
+
 test("somebody who is not the primary user cannot be asked: the call is refused before a one-off approval is looked at, and the approval is still there", async () => {
   db.setMcpApprove("alpha", ["echo"]);
   const h = guardWith({ role: "member", key: "bob" });

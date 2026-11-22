@@ -154,9 +154,11 @@ the server gives it `approve`, patterns of the server's own tool names with `*` 
 any characters (`send_*`, `delete_mail`), as an option of `portal.mcp.set` (see
 [MCP servers](/guide/extension-ui#mcp-servers)). Every call of a tool that matches
 (`mcp__<server>__<tool>`) is put to you before it runs, with all its arguments as the
-agent wrote them (a recipient, a type and the content are what you confirm; a text too
-long to show is cut by itself and says so, so a recipient or a target is always shown): yes lets that one call run, no refuses it, and the
-server never gets it. It
+agent wrote them (a recipient, a type and the content are what you confirm), as JSON, so
+the blanks and line breaks inside a value are there to see. A call that fits is shown
+whole. One that does not shows every key, with the largest values cut first (a text, a
+list or an object), each cut saying how much is gone: yes lets that one call run, no
+refuses it, and the server never gets it. It
 holds however the call is made: by name, through `tool_search`, from a script, or in a
 subagent's chat. Where nobody can answer (a chat nobody attends, a routine's run, a
 conversation on a channel, somebody who is not the primary user), the call is refused

@@ -1852,24 +1852,56 @@ function approvalServer(origin: Origin, names: readonly string[]): string | unde
 /** The most of a call's arguments the person is shown; a longer text is cut, and says so. */
 const APPROVAL_ARGUMENTS_MAX = 4000;
 
+/** The length of a value as JSON. */
+const jsonLength = (value: unknown): number => (JSON.stringify(value) ?? "").length;
+
+/**
+ * A value cut to about `limit` characters where it is longer: a string keeps its start, an array the items that fit, an object all its
+ * keys with each value cut by itself. Every cut says how much is gone, so a cut is never taken for the whole.
+ */
+function cutValue(value: unknown, limit: number): unknown {
+  if (typeof value === "string") return value.length > limit ? `${value.slice(0, limit)}... (${value.length - limit} more characters not shown)` : value;
+  if (value === null || typeof value !== "object" || jsonLength(value) <= limit) return value;
+  if (Array.isArray(value)) {
+    const kept: unknown[] = [];
+    let size = 2;
+    for (const item of value) {
+      const cut = cutValue(item, limit);
+      size += jsonLength(cut) + 1;
+      if (size > limit) break;
+      kept.push(cut);
+    }
+    return kept.length < value.length ? [...kept, `... (${value.length - kept.length} more items not shown)`] : kept;
+  }
+  return Object.fromEntries(Object.entries(value).map(([key, one]) => [key, cutValue(one, limit)]));
+}
+
 /**
  * The whole of a call's arguments, as the agent wrote them: a call's recipient, type and content are what a person confirms, and the
- * rule subject (see subjectOf) is only the path where there is one. A text that is too long is cut with a mark, never silently.
+ * rule subject (see subjectOf) is only the path where there is one. A call that fits is shown whole, as JSON, so a blank or a line break
+ * inside a text is there to see (the dialog keeps them: see ExtensionDialog). One that does not fit shows every key, with the largest
+ * values cut first (a string, an array or an object alike, each saying how much is gone), so a long text or list before a recipient
+ * cannot push it out of sight. Only a call whose keys alone do not fit is cut from the end, with a mark.
  */
 export function approvalArguments(input: unknown, max = APPROVAL_ARGUMENTS_MAX): string {
   let text = "";
   try {
-    // The agent orders the keys, so a long text cut from the whole would push a later recipient or share target out of sight: each long
-    // text is cut by itself, with its own mark, and cut shorter while the call still does not fit, so every key and short value shows.
-    for (const each of [1000, 300, 100, 40]) {
-      text =
-        JSON.stringify(
-          input ?? {},
-          (_key, value) => (typeof value === "string" && value.length > each ? `${value.slice(0, each)}... (${value.length - each} more characters not shown)` : value),
-          2,
-        ) ?? "{}";
-      if (text.length <= max) return text;
+    const show = (limit: number) => JSON.stringify(limit === Infinity ? (input ?? {}) : cutValue(input ?? {}, limit), null, 2) ?? "{}";
+    text = show(Infinity);
+    if (text.length <= max) return text;
+    // The largest limit for each value at which the whole fits.
+    let low = 0;
+    let high = max;
+    let best = show(0);
+    while (low <= high) {
+      const middle = Math.floor((low + high) / 2);
+      const tried = show(middle);
+      if (tried.length <= max) {
+        best = tried;
+        low = middle + 1;
+      } else high = middle - 1;
     }
+    text = best;
   } catch {
     text = String(input);
   }

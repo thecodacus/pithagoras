@@ -58,3 +58,10 @@ test("a word longer than the line is broken, so the question is no wider than th
   await expect(dialog.getByRole('button', { name: 'No' })).toBeInViewport();
   await expect(dialog.getByRole('button', { name: 'Yes' })).toBeInViewport();
 });
+
+test("blanks inside the call stay as they are, so a padded recipient looks padded", async ({ page }) => {
+  const { text } = await asked(page, question(`{\n  "to": "alice@example.org${' '.repeat(40)}attacker@evil.example"\n}`));
+  // A run of blanks is not folded into one: the person sees the gap and what lies behind it.
+  expect(await text.evaluate((el) => (el as HTMLElement).innerText)).toContain(`alice@example.org${' '.repeat(40)}attacker@evil.example`);
+  expect(await text.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+});
