@@ -279,8 +279,20 @@ async function imageOf(sessionId: string, entryId: string, partIndex: number, pa
   }
 }
 
-/** An ExtensionFactory — see pi's InlineExtension. */
-export function chatTools(agentId: string, sessionId: string) {
+/**
+ * An ExtensionFactory — see pi's InlineExtension. `cwd` is the folder the chat
+ * works in: each call checks that it is still the agent's, so a chat whose
+ * project is unlinked (or linked to another agent) while it is open loses the
+ * tools' reach with it.
+ */
+export function chatTools(agentId: string, sessionId: string, cwd?: string | null) {
+  /** The agent, while the chat this runs in is still its own; else a refusal. */
+  const owner = () => {
+    const agent = getAgent(agentId);
+    if (!agent) fail("No such agent.");
+    if (cwd !== undefined && ownerOf(cwd)?.id !== agentId) fail("This chat is no longer one of yours: its project is not linked to you.");
+    return agent;
+  };
   return (pi: any): void => {
     pi.registerTool({
       name: CHAT_LIST_TOOL,
@@ -291,8 +303,7 @@ export function chatTools(agentId: string, sessionId: string) {
       guard: { outside: true },
       parameters: Type.Object({}),
       async execute() {
-        const agent = getAgent(agentId);
-        if (!agent) return fail("No such agent.");
+        const agent = owner();
         const sessions = getDb().prepare("SELECT * FROM sessions").all() as SessionRow[];
         const agents = listAgents();
         const chats = sessions
@@ -344,8 +355,7 @@ ${lines.join("\n")}${more}`);
       async execute(_id: string, p: any) {
         const id = String(p.id ?? "").trim();
         if (!id) return fail("A chat needs an id.");
-        const agent = getAgent(agentId);
-        if (!agent) return fail("No such agent.");
+        const agent = owner();
         const session = getDb().prepare("SELECT * FROM sessions WHERE id = ?").get(id) as SessionRow | undefined;
         if (!session) return fail("No chat with that id.");
         if (ownerOf(session.workspace, listAgents())?.id !== agentId) return fail("That chat is not one of yours.");
@@ -395,8 +405,7 @@ ${lines.join("\n")}${more}`);
         const query = String(p.query ?? "").trim();
         const prompt = String(p.prompt ?? "").trim();
         const limit = Math.min(50, Math.max(1, Math.trunc(Number(p.limit ?? 20)) || 20));
-        const agent = getAgent(agentId);
-        if (!agent) return fail("No such agent.");
+        const agent = owner();
         if (prompt) {
           if (query) return fail("A search is for words, or a question to a chat's context, not both.");
           const id = String(p.id ?? "").trim();

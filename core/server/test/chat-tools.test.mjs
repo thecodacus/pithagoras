@@ -228,6 +228,20 @@ test("a chat in a project linked to the agent is its own, and a blank slate's is
   assert.match(said(await run(tools[CHAT_SEARCH_TOOL], { query: "nightjar" })), /No matches/);
 });
 
+test("a chat whose project is unlinked while it is open loses the tools' reach", async () => {
+  const dir = path.join(process.env.WORKSPACE_ROOT, "unlinked-later");
+  mkdirSync(dir, { recursive: true });
+  getDb().prepare("INSERT INTO project_agent (project, agent, memory_off) VALUES (?, ?, 0)").run("unlinked-later", scout.id);
+  createSession({ id: "inproj", title: "Open in the project", workspace: dir, executor: "host" });
+  const bound = toolsOf(chatTools(scout.id, "inproj", dir));
+  assert.match(said(await run(bound[CHAT_SEARCH_TOOL], { query: "BACKUP" })), /channel/, "while linked, the agent's chats are found");
+
+  getDb().prepare("DELETE FROM project_agent WHERE project = ?").run("unlinked-later");
+  for (const [name, params] of [[CHAT_LIST_TOOL, {}], [CHAT_READ_TOOL, { id: "plan" }], [CHAT_SEARCH_TOOL, { query: "BACKUP" }]]) {
+    await assert.rejects(run(bound[name], params), /no longer one of yours/, `${name} after the unlink`);
+  }
+});
+
 test("a read carries the index of each message, as the question's transcript does", async () => {
   const read = said(await run(tools[CHAT_READ_TOOL], { id: "plan" }));
   assert.match(read, /^\[0\] \*\*User:\*\* Fix the backup script/m);

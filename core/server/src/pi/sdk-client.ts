@@ -608,7 +608,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       // first agent: a chat in a project no agent is linked to has no past of an
       // agent's to reach, and gets no tools.
       const chatOwner = chatOwnerOf(opts.cwd);
-      if (chatOwner) factories.push({ name: "chats", factory: chatTools(chatOwner.id, opts.sessionId ?? "") });
+      if (chatOwner) factories.push({ name: "chats", factory: chatTools(chatOwner.id, opts.sessionId ?? "", opts.cwd) });
       resourceLoader = new (portalLoader(pi))({
         cwd: opts.cwd,
         // One for the loader and the session, so the folder's trust the loader decides holds for both.
