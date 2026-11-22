@@ -21,7 +21,7 @@ import { loadedByLinks } from "./loaded-links.js";
 // Only the names: a heartbeat's note is registered for heartbeats alone, and is how one says what it read.
 import { HEARTBEAT_ROLE, NOTE_TOOL } from "./heartbeat-names.js";
 import { LISTED_TOOLS_KEY, TOOL_SEARCH } from "./tool-search-names.js";
-import { MCP_RESOURCE_TOOLS, isResourceTool, mcpNamespace, serverOfArgument, serversOfNamespace } from "./mcp-origin.js";
+import { MCP_RESOURCE_TOOLS, isResourceTool, serverOfArgument, serversOfNamespace } from "./mcp-origin.js";
 import { BROWSER_MCP } from "../tool-policy.js";
 import { runsAsPrimary } from "./runs-as-primary.js";
 
@@ -1973,8 +1973,6 @@ export function guardExtension(
   dialogs = false,
   /** pi's MCP namespace of a tool its MCP support registered in this session (`mcp__<server>`), from its definition: see mcp-origin.ts. */
   namespaceOf: (toolName: string) => string | undefined = () => undefined,
-  /** The namespaces of the MCP servers this conversation still has connected that the configuration no longer does (see serversWithdrawn), read at each call. */
-  serversWithdrawnNow: () => ReadonlySet<string> = () => new Set(),
 ) {
   /** Where a tool came from, as the session knows it now. */
   const originOf = (name: string, outside = guardOf(name)?.outside === true): Origin => ({ namespace: namespaceOf(name), outside });
@@ -2140,27 +2138,6 @@ export function guardExtension(
           reason: `Refused: "${event.toolName}" is switched off in this conversation, and a script does not reach it either. ` +
             "Say that it is switched off rather than looking for another way to it.",
         };
-      }
-      // A server the configuration no longer connects (switched off in Settings, or removed) stays connected in a chat that is
-      // running until its run has settled and pi reads the file again: its tools are refused meanwhile, called by their own
-      // names, through `tool_search` or by a script (all of them come through here), and so are pi's tools for resources, which
-      // reach every connected server by an argument: one that names it, and a listing of every server's while it is there.
-      const withdrawn = serversWithdrawnNow();
-      if (withdrawn.size) {
-        const space = namespaceOf(event.toolName);
-        const named = isResourceTool(event.toolName) && typeof event.input?.server === "string" ? event.input.server.trim() : "";
-        const server = space !== undefined && withdrawn.has(space);
-        const resources = isResourceTool(event.toolName) && (named ? withdrawn.has(mcpNamespace(named)) : event.toolName !== "read_mcp_resource");
-        if (server || resources) {
-          note("refused", `MCP server switched off or removed: ${named || space || "every server's resources"}`);
-          return {
-            block: true,
-            reason: resources && !named
-              ? "Refused: an MCP server was switched off or removed, and a listing of every server's resources would list its too. Name the server you want to list."
-              : "Refused: this MCP server was switched off or removed, and it is gone from this conversation once its run has settled. " +
-                "Say that it is switched off rather than looking for another way to it.",
-          };
-        }
       }
       // Where a call goes is held to the allowlist, whoever is speaking: a
       // browser call's address, and each address in the parameters a tool

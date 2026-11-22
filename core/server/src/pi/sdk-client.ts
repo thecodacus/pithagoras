@@ -27,8 +27,8 @@ import { CONTEXT_FILES, SHARED_FILES } from "./context-files.js";
 import { heartbeatTool } from "./heartbeat-tool.js";
 import { ToolSearch } from "./tool-search.js";
 import { CALLED_TOOL_KEY, TOOL_SEARCH, calledThrough } from "./tool-search-names.js";
-import { MCP_RESOURCES, isResourceTool, mcpNamespace, mcpNamespaceOf, serversWithdrawn } from "./mcp-origin.js";
-import { configForChat, connectedFromUserFile, piMcp } from "./mcp-config.js";
+import { MCP_RESOURCES, isResourceTool, mcpNamespace, mcpNamespaceOf } from "./mcp-origin.js";
+import { configForChat, piMcp } from "./mcp-config.js";
 import { NO_LAZY, headLazy, type LazyHead } from "../tool-lazy.js";
 import { askPrimaryTool } from "./ask-primary.js";
 import { ASK_QUESTION_SOURCE, askQuestionTool } from "./ask-question.js";
@@ -40,7 +40,7 @@ import { hostExtensions } from "../extension-host.js";
 import { contextWindowFor, getSkipThinkingProviders, getVoiceInstructions, getVoiceModel, lazyAllowed, questionWaitMs, toolGroupNames, voiceSpeaks } from "../db.js";
 import { configStamp, isLlamaProvider } from "../providers.js";
 import { rereadConfig } from "./model-runtime.js";
-import { browserServers, connectingServers } from "../api/mcp.js";
+import { browserServers } from "../api/mcp.js";
 import { BUILT_IN_SET, PI_BUILT_IN_TOOLS } from "../tool-policy.js";
 
 /** A message on its way into pi: see SdkPiClient.prompt(). */
@@ -548,8 +548,6 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     // chat, by their namespace, are how a tool is told to be a server's (see SdkPiClient.ownerOf).
     const mcp = await piMcp();
     const mcpServers = new Map<string, string>();
-    // The servers of the user's file that pi connected for this chat, which a change of the file can take away while it runs: see serversWithdrawn.
-    const started = new Set<string>();
     // What the tools that are on ask to be told in a spoken turn, whoever registered them: `voiceGuidelines` on a
     // tool, as pi's own promptGuidelines are for every turn. Asked once the session is there (below).
     let toolVoiceLines: () => string[] = () => [];
@@ -582,7 +580,6 @@ export class SdkPiClient extends EventEmitter implements PiClient {
             (name) => guardOf(name),
             opts.dialogs !== false,
             (name) => namespaceOf(name),
-            () => (started.size ? serversWithdrawn(started, connectingServers()) : new Set<string>()),
           ) },
         // Offered only while the conversation has a lazy tool: see applyToolsOff.
         { name: "tool-search", factory: search.extension },
@@ -593,9 +590,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
             loadConfig: (ctx: { cwd: string; isProjectTrusted(): boolean }) =>
               configForChat(mcp, ctx, pi.getAgentDir(), (servers) => {
                 mcpServers.clear();
-                started.clear();
                 for (const entry of servers) mcpServers.set(mcpNamespace(entry.name), entry.name);
-                for (const name of connectedFromUserFile(servers)) started.add(name);
               }),
           }) },
       ];

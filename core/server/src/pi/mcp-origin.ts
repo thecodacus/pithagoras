@@ -51,15 +51,3 @@ export function serverOfArgument(argument: unknown, configured: Iterable<string>
   const name = argument.trim();
   return name ? [...configured].find((server) => server === name) : undefined;
 }
-
-/**
- * The namespaces of the servers a running chat still has connected that the configuration no longer connects: switched
- * off in Settings or removed from the file. pi reads the file when a chat starts or reloads, and a chat that is busy
- * reloads when its run has settled, so until then it keeps the server and its tools; these are refused meanwhile, whichever
- * way they are called (see the guard). `started` are the servers the chat's pi was given from the user's file, `connecting`
- * those the file connects now, where it can be read.
- */
-export function serversWithdrawn(started: Iterable<string>, connecting: ReadonlySet<string> | undefined): Set<string> {
-  if (!connecting) return new Set();
-  return new Set([...started].filter((server) => !connecting.has(server)).map(mcpNamespace));
-}

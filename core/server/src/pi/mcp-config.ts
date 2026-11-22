@@ -93,12 +93,3 @@ export function configForChat(
   onServers(servers);
   return { ...config, servers, autoEnableCodemode: false };
 }
-
-/**
- * The servers of the user's file that pi connects for a chat, by name: not a project's own (that file is not the user's to
- * change in Settings) and not one that is switched off or hidden. What a chat that is running can lose when the file
- * changes under it (see serversWithdrawn in mcp-origin.ts).
- */
-export function connectedFromUserFile(servers: readonly McpServerEntry[]): string[] {
-  return servers.filter((entry) => entry.scope === "global" && entry.config.enabled !== false && entry.config.exposure !== "hidden").map((entry) => entry.name);
-}

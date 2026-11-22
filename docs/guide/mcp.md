@@ -52,11 +52,9 @@ refuses one.
 An extension can write a server of its own into the file, when you switch it on
 from the extension's page. The server is listed and switched here like any other.
 
-A change made here reaches the chats that are running when they are idle, or at
-their next step; they read the file again as they are loaded again. A server you
-switch off or delete is out of a chat that is still working at once, though: its
-tools (called by name, through `tool_search` or from a script) and its resources
-are refused, and the chat has it no more once its run has settled.
+A change made here applies when a chat starts or is loaded again: the chats
+that are idle are loaded again as you save. A chat that is working keeps its
+servers until its turn ends, a server you switched off or deleted included.
 
 ## Adding a server
 
