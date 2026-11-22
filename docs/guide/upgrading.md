@@ -201,8 +201,7 @@ when it first starts again. Old chats keep their calls of `tools` in their histo
 the tools they called.
 
 A tool is no longer counted as an MCP server's by a name that starts with `mcp_`: the guard asks pi which server a
-tool came from, and a name proves nothing, as any extension can register one. What the pi-mcp-adapter's tools hand
-back is still wrapped, by their package. A pi package of yours that hands back another server's or somebody else's
+tool came from, and a name proves nothing, as any extension can register one. A pi package of yours that hands back another server's or somebody else's
 words under such a name (another MCP bridge, say) is now trusted as the extension it is, so its tools have to say so:
 `guard: { outside: true }` on their definition ([What the guard holds a tool to](/guide/extension-ui#what-the-guard-holds-a-tool-to)).
 
@@ -1361,31 +1360,31 @@ upgraded from 0.1.0:
   on there. The `guard` field of a routine in the API still means all the rules
   or none.
 
-## MCP servers taken out of mcp.json by hand
+## MCP runs on pi's own support
 
-The portal now notices a server taken out of pi's `mcp.json` outside it, by
-hand or by a script, and forgets its tools as it does for one removed in
-Settings → MCP ([Disabling](/guide/mcp#disabling)). To tell what was taken out,
-it keeps the servers it last saw in the file, in a new setting,
-`mcp_configured`. That is filled the first time the portal looks at the file
-after the upgrade, and nothing is judged then: a tool left behind by a server
-taken out by hand before the upgrade stays listed in Settings → Tools. To be rid
-of it, add the server again under its name in Settings → MCP, with any entry,
-and remove it there.
-
-The tools of a server whose name has a dot, such as `docs.v2`, belong to it now:
-they are grouped under it, go with it when it is switched off or removed, and are
-trusted with it where it is trusted in Settings → Guard. Before, they belonged to
-no server. Those of a dotted server removed before the upgrade stay listed under
-`pi-mcp-adapter`; the same add and remove takes them out.
+The portal used `pi-mcp-adapter` for MCP servers; it runs pi's own MCP support now
+([MCP servers](/guide/mcp)). The first start after the upgrade carries over what
+the adapter's configuration had, once: the servers in `mcp.json` are put into pi's
+words (the adapter's own keys, `lifecycle`, `directTools`, `includeTools`,
+`excludeTools` and the like, go; `disabled` becomes `enabled: false`; a bearer
+token becomes an `Authorization` header), each server stays on or off as it was,
+and is **Auto** in Settings → Tools, so a server with many tools goes behind
+`tool_search` by itself: mark one **Direct** there where you had registered its
+tools directly. `pi-mcp-adapter` is taken out of pi's packages. The tools are named
+`mcp__<server>__<tool>` now, and what you switched off by the old name is switched
+off by the new one. A server that pi cannot take as it was (one reached by a Unix
+socket, one with a list of the tools it offers or leaves out, an OAuth block of the
+adapter's, a name with a dot) is left off, and named in the one line the log gets
+(Settings → Logs); the file as it was is kept as `mcp.json.adapter` beside it. What
+the adapter imported from other tools' configs is not carried over. If `mcp.json`
+cannot be read, nothing is changed and the adapter stays until it can.
 
 ## pi is 1.1
 
 The portal's pi, and the `pi` in the image, move from 0.82 to 1.1. The
 extensions and packages you installed stay at their versions; one written for an
 older pi may need an update of its own, as pi 1.0 changed parts of its extension
-and provider interfaces. `pi-mcp-adapter` 2.18.0, which the portal installs,
-works as before. pi now reads `AGENTS.override.md` before `AGENTS.md` in a
+and provider interfaces. pi now reads `AGENTS.override.md` before `AGENTS.md` in a
 folder. If you use Azure, its provider is renamed from `azure-openai-responses`
 to `azure`: rename it in pi's `auth.json`, `models.json` and `settings.json`, or
 sign in again. A portal run from a checkout needs Node 22.19 or later.

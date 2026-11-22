@@ -834,15 +834,14 @@ wrong instead of showing an empty memory.
 
 Switching it on:
 
-1. installs `pi-mcp-adapter` if it is not installed yet, which makes MCP servers
-   into tools;
-2. writes an `understory` server into `mcp.json`, with its tools directly in the
-   agent's tool list — the Understory run here with its token, or the
+1. writes an `understory` server into `mcp.json`, with its tools directly in the
+   agent's tool list (a Direct mark on the server in **Settings → Tools**, which
+   you can change) — the Understory run here with its token, or the
    address given;
-3. counts what its server says as your own words, so the guard neither marks
+2. counts what its server says as your own words, so the guard neither marks
    nor checks it: it is added to the trusted MCP servers in **Settings → Guard**,
    where you can take it out (see [Prompt injection](/guide/security#marking-untrusted-output));
-4. stops reading `MEMORY.md`.
+3. stops reading `MEMORY.md`.
 
 Switching it off removes the server, takes it out of the trusted servers again,
 and `MEMORY.md` is read again. Removing the Understory run here switches it off
