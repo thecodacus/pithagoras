@@ -297,3 +297,41 @@ test("a colleague and a heartbeat are refused the tools by the guard, the primar
   assert.equal(primary[0].isError, false, "the primary user reads its own past");
   assert.match(JSON.stringify(primary[0].result), /The backup plan/);
 });
+
+// A chat in a project no agent is linked to has no agent's past to reach: the
+// tools were once bound to the first agent for it, and a routine or subagent
+// there could list, read and search that agent's chats.
+test("a client in a project no agent is linked to has no chat tools", async () => {
+  const { SdkPiClient } = await import("../dist/pi/sdk-client.js");
+  const { mkdtempSync } = await import("node:fs");
+  const model = await fakeModel(() => "Done.");
+  writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR, "models.json"), JSON.stringify(model.models()));
+  const loose = path.join(process.env.WORKSPACE_ROOT, "unlinked-proj");
+  mkdirSync(loose, { recursive: true });
+
+  const toolNames = async (cwd) => {
+    const client = await SdkPiClient.create({
+      cwd,
+      sessionDir: mkdtempSync(path.join(process.env.SESSION_DIR, "unlinked-")),
+      provider: "fake", modelId: "m",
+      sessionId: "unlinked-" + Math.random().toString(36).slice(2),
+      whoNow: () => ({ role: "primary" }), dialogs: false,
+    });
+    try {
+      const before = model.requests.length;
+      const settled = new Promise((resolve) => client.on("event", (e) => e?.type === "agent_settled" && resolve()));
+      await client.prompt("Search the old chats");
+      await settled;
+      return model.requests[before].tools?.map((t) => t.name ?? t.function?.name) ?? [];
+    } finally {
+      client.dispose();
+    }
+  };
+
+  const unlinked = await toolNames(loose);
+  assert.ok(!unlinked.includes(CHAT_SEARCH_TOOL), "no agent owns the folder, so it has no search over any agent's chats");
+  assert.ok(!unlinked.includes(CHAT_LIST_TOOL));
+  assert.ok(!unlinked.includes(CHAT_READ_TOOL));
+  const own = await toolNames(scout.home);
+  assert.ok(own.includes(CHAT_SEARCH_TOOL), "an agent's own chat has them");
+});
