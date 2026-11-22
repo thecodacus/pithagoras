@@ -1,7 +1,7 @@
 import { type Page } from '@playwright/test';
 import { test, expect, mockPortal, reply } from './portal-mock';
 
-async function portal(page: Page, opts: { routine?: Record<string, unknown>; renameFails?: boolean; listFailsAfterRename?: boolean; /** What a save of the routine is answered with, as a 400. */ refuses?: string; /** A change to the routine that is made on the server, as the agent's routine_update does: the next list has it. */ server?: { next?: Record<string, unknown> }; /** What the saves are stamped with, one for each, where the server's clock counts seconds and two saves can be in the same one. */ stamps?: string[] } = {}) {
+async function portal(page: Page, opts: { routine?: Record<string, unknown>; renameFails?: boolean; listFailsAfterRename?: boolean; /** What a save of the routine is answered with, as a 400. */ refuses?: string; /** A change to the routine that is made on the server, as the agent's routine_update does: the next list has it; and a default saved elsewhere, which the next list brings. */ server?: { next?: Record<string, unknown>; nextDefault?: { stored: number | null; minutes: number } }; /** What the saves are stamped with, one for each, where the server's clock counts seconds and two saves can be in the same one. */ stamps?: string[] } = {}) {
   const sent: { method: string; path: string; body: any }[] = [];
   const session = { id: 's1', title: 'Old name', workspace: '/w/site', status: 'idle', kind: 'task', pinned: false, updated_at: new Date().toISOString() };
   const other = { ...session, id: 's2', title: 'Other chat', workspace: '/w/notes' };
@@ -23,6 +23,8 @@ async function portal(page: Page, opts: { routine?: Record<string, unknown>; ren
     if (p === '/api/routines' && method === 'GET') {
       if (opts.server?.next) Object.assign(routine, opts.server.next);
       if (opts.server) opts.server.next = undefined;
+      if (opts.server?.nextDefault) Object.assign(timeoutDefault, opts.server.nextDefault);
+      if (opts.server) opts.server.nextDefault = undefined;
       return { routines: [routine], timeoutDefault };
     }
     if (p === '/api/routines/timeout-default' && method === 'PUT') {
@@ -223,6 +225,23 @@ test("a routine's run time limit is empty for the portal's default, which the fi
   await limit.fill('');
   await page.getByRole('button', { name: /^Save/ }).click();
   await expect.poll(() => sent.filter((s) => s.method === 'PATCH' && s.path === '/api/routines/r1').at(-1)?.body.timeoutMin).toBe(null);
+});
+
+test("a default saved elsewhere reaches an untouched field with the next poll, and does not replace minutes being typed", async ({ page }) => {
+  const server: { next?: Record<string, unknown>; nextDefault?: { stored: number | null; minutes: number } } = {};
+  await portal(page, { server });
+  await page.goto('/routines');
+  const field = page.getByLabel('Run time limit by default (minutes)');
+  await expect(field).toHaveValue('');
+  // Nothing typed: the field takes what the next poll brings.
+  server.nextDefault = { stored: 30, minutes: 30 };
+  await expect(field).toHaveValue('30', { timeout: 10_000 });
+  // Typed over and not saved yet: the next poll keeps what is typed.
+  await field.fill('45');
+  server.nextDefault = { stored: 20, minutes: 20 };
+  await expect.poll(() => server.nextDefault, { timeout: 10_000 }).toBeUndefined();
+  await page.waitForTimeout(500);
+  await expect(field).toHaveValue('45');
 });
 
 test("the portal's default run time limit is set above the list, names what the portal started with while empty, and reaches a routine's field", async ({ page }) => {

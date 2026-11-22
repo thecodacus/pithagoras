@@ -369,11 +369,13 @@ function TimeoutDefaultField({ value, onChanged, onError }: { value: TimeoutDefa
   const [busy, setBusy] = useState(false);
   // A save under way: Enter and the blur that follows it would otherwise save twice.
   const saving = useRef(false);
-  // What the page read anew (a save elsewhere, a poll) is what the field shows, unless something is being typed.
-  const shown = useRef(value.stored);
-  if (shown.current !== value.stored) {
-    shown.current = value.stored;
-    setDraft(minutesText(value.stored));
+  // What the page read anew (a save elsewhere, a poll) is what the field shows, unless something is typed over it: a
+  // draft that is still the value read before takes the new one, an edited one stays. Kept as state, so the render
+  // stays pure (React's way to follow a prop).
+  const [shown, setShown] = useState(value.stored);
+  if (shown !== value.stored) {
+    setShown(value.stored);
+    if (draft === minutesText(shown)) setDraft(minutesText(value.stored));
   }
   const save = async () => {
     const minutes = draft.trim() ? Number(draft) : null;
