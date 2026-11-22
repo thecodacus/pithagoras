@@ -47,7 +47,7 @@ test("a server written for the portal's user alone, in pi's shape, and trusted o
   assert.equal(db.getSetting("guard_trusted_mcp_servers"), undefined);
 
   mcp = await start();
-  assert.deepEqual(mcp.get("notes"), { entry: NOTES, on: true });
+  assert.deepEqual(mcp.get("notes"), { entry: NOTES, on: true, approve: [] });
   await mcp.set("memory", { url: "http://127.0.0.1:2/mcp" }, { trusted: true });
   assert.equal(db.trustedMcpServers().has("memory"), true);
   // What else is in the file stays.
@@ -72,9 +72,9 @@ test("a server is in the model's list from the start only when it says so (direc
 
 test("its tools are the chats' while the server is in the file and not switched off (enabled: false) or hidden", async () => {
   const mcp = await start();
-  assert.deepEqual(mcp.get("notes"), { entry: NOTES, on: true });
+  assert.deepEqual(mcp.get("notes"), { entry: NOTES, on: true, approve: [] });
   await mcp.set("notes", { ...NOTES, enabled: false });
-  assert.deepEqual(mcp.get("notes"), { entry: { ...NOTES, enabled: false }, on: false }, "switched off in Settings → MCP");
+  assert.deepEqual(mcp.get("notes"), { entry: { ...NOTES, enabled: false }, on: false, approve: [] }, "switched off in Settings → MCP");
   await mcp.set("notes", { ...NOTES, exposure: "hidden" });
   assert.equal(mcp.get("notes").on, false, "hidden");
   await mcp.set("notes", NOTES);
@@ -109,5 +109,71 @@ test("a name or an entry pi would not take is refused, and so is a file that can
   assert.equal(mcp.get("kept"), undefined, "nothing can be said of it");
   await assert.rejects(mcp.set("notes", NOTES), /Fix mcp.json first/);
   assert.equal(readFileSync(mcpFile(), "utf8"), "{ not json", "left for the person to fix");
+  writeFileSync(mcpFile(), before);
+});
+
+test("the tools whose calls the person confirms first (approve) are kept by the portal, replaced by each set, and dropped by a set without them and by removing the server", async () => {
+  const mcp = await start();
+  await mcp.set("mail", { url: "http://127.0.0.1:5/mcp" }, { approve: ["send_*", " delete_mail ", "send_*"] });
+  assert.deepEqual(db.mcpApprove().mail, ["send_*", "delete_mail"], "trimmed, once each");
+  assert.deepEqual(mcp.get("mail").approve, ["send_*", "delete_mail"], "get says it");
+  assert.equal(JSON.stringify(servers().mail).includes("approve"), false, "mcp.json stays pi's alone");
+  // Each set replaces what was there.
+  await mcp.set("mail", { url: "http://127.0.0.1:5/mcp" }, { approve: ["share_*"], trusted: true });
+  assert.deepEqual(db.mcpApprove().mail, ["share_*"]);
+  // Settings -> MCP's list says them in the server's row, and none for a server without.
+  await mcp.set("plain", { url: "http://127.0.0.1:10/mcp" });
+  const { mcpRouter } = await import("../dist/api/mcp.js");
+  const { default: express } = await import("express");
+  const app = express();
+  app.use("/api", mcpRouter());
+  const listener = app.listen(0, "127.0.0.1");
+  await new Promise((resolve) => listener.once("listening", resolve));
+  try {
+    const view = await (await fetch(`http://127.0.0.1:${listener.address().port}/api/mcp`)).json();
+    assert.deepEqual(view.servers.find((one) => one.name === "mail").approve, ["share_*"]);
+    assert.deepEqual(view.servers.find((one) => one.name === "plain").approve, []);
+  } finally {
+    listener.close();
+  }
+  // Another server's list is its own.
+  await mcp.set("cal", { url: "http://127.0.0.1:6/mcp" }, { approve: ["*"] });
+  assert.deepEqual(Object.keys(db.mcpApprove()).sort(), ["cal", "mail"]);
+  // A set without approve (or with none) drops them: the server asks for nothing.
+  await mcp.set("mail", { url: "http://127.0.0.1:5/mcp" });
+  assert.equal(db.mcpApprove().mail, undefined);
+  assert.deepEqual(mcp.get("mail").approve, []);
+  await mcp.set("cal", { url: "http://127.0.0.1:6/mcp" }, { approve: [] });
+  assert.equal(db.mcpApprove().cal, undefined);
+  // Removing the server drops them too, and a server given the name later is not gated by an old list.
+  await mcp.set("mail", { url: "http://127.0.0.1:5/mcp" }, { approve: ["send_*"] });
+  await mcp.set("mail", undefined);
+  assert.equal(db.mcpApprove().mail, undefined);
+  await mcp.set("mail", { url: "http://127.0.0.1:7/mcp" });
+  assert.deepEqual(mcp.get("mail").approve, []);
+  // A server taken out of the file by someone else (Settings -> MCP) takes its patterns with it as well.
+  await mcp.set("gone", { url: "http://127.0.0.1:8/mcp" }, { approve: ["x"] });
+  const file = JSON.parse(readFileSync(mcpFile(), "utf8"));
+  delete file.mcpServers.gone;
+  const { writeMcpFile } = await import("../dist/api/mcp.js");
+  writeMcpFile(file);
+  assert.equal(db.mcpApprove().gone, undefined);
+});
+
+test("approve takes a list of texts, and the adapter's approveTools in the entry is refused with the option named; nothing is written or stored then", async () => {
+  const mcp = await start();
+  const before = readFileSync(mcpFile(), "utf8");
+  for (const approve of ["delete_*", [""], [" "], [1], [null], {}, "*"]) {
+    await assert.rejects(mcp.set("risky", { url: "http://127.0.0.1:9/mcp" }, { approve }), /approve takes a list of patterns of the server's own tool names/, JSON.stringify(approve));
+  }
+  for (const approveTools of [true, false, [], ["delete_*"]]) {
+    await assert.rejects(mcp.set("risky", { url: "http://127.0.0.1:9/mcp", approveTools }, { approve: ["x"] }), /approveTools.*`approve` option/s, JSON.stringify(approveTools));
+  }
+  assert.equal(readFileSync(mcpFile(), "utf8"), before, "the file is as it was");
+  assert.equal(db.mcpApprove().risky, undefined);
+  // Not stored while the file cannot be read either.
+  writeFileSync(mcpFile(), "{ not json");
+  await assert.rejects(mcp.set("risky", { url: "http://127.0.0.1:9/mcp" }, { approve: ["x"] }), /Fix mcp.json first/);
+  assert.equal(db.mcpApprove().risky, undefined);
   writeFileSync(mcpFile(), before);
 });

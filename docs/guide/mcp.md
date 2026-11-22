@@ -17,7 +17,8 @@ bring servers of its own and switch one of yours off (`enabled`), but not define
 one of yours again under the same name, and not switch on one you have switched
 off or hidden (it would start with your command, environment and headers). A server of
 its own that still has one of the adapter's safety keys pi does not read (`excludeTools`,
-`includeTools`, `approveTools`, `exposeResources: false`) is not connected. With the [sandbox](/guide/sandbox) on,
+`includeTools`, `approveTools`, `exposeResources: false`) is not connected (the calls
+a server asks you about first are kept for the servers of your own file only). With the [sandbox](/guide/sandbox) on,
 a project's file is not read at all.
 
 The format is the one the other MCP clients share, and pi's own:
@@ -45,9 +46,12 @@ tools ranks its tools by it), and `enabled: false` keeps an entry that is never
 connected. What pi accepts is pi's own check: an entry it does not accept is
 shown in the list with the reason, and pi skips it while the others connect. A
 server the move from `pi-mcp-adapter` left off because of a key pi does not read
-(`includeTools`, `excludeTools`, `approveTools`, `exposeResources: false`) says so in
+(`includeTools`, `excludeTools`, `exposeResources: false`) says so in
 its row, and cannot be switched on before the key is taken out or written in pi's
-words (an empty `approveTools` is no key to speak of).
+words. `approveTools` is no such key: pi has no gate, so the adapter's key is
+refused wherever an entry is written (the form, the import, the file's editor for a
+server that is on, an extension), and what it asked about is the server's
+[calls that ask you first](#calls-that-ask-you-first).
 
 The file holds the servers' keys, and the token the portal made for its own
 memory, so it is readable by the account the portal runs as and no other. It is
@@ -141,6 +145,27 @@ it wants). A server with a tool still on is read as before.
 
 A server no chat has seen a tool of (it does not start, or has none) is counted as lazy
 and is named to the model as a place to search, and is not listed in Settings → Tools.
+
+## Calls that ask you first
+
+pi runs a server's tools without asking. A server that must not do some things
+unconfirmed (sending mail, sharing a folder) can say so: the extension that writes
+the server gives it `approve`, patterns of the server's own tool names with `*` for
+any characters (`send_*`, `delete_mail`), as an option of `portal.mcp.set` (see
+[MCP servers](/guide/extension-ui#mcp-servers)). Every call of a tool that matches
+(`mcp__<server>__<tool>`) is put to you before it runs, with the call as the agent
+wrote it: yes lets that one call run, no refuses it, and the server never gets it. It
+holds however the call is made: by name, through `tool_search`, from a script, or in a
+subagent's chat. Where nobody can answer (a chat nobody attends, a routine's run, a
+conversation on a channel, somebody who is not the primary user), the call is refused
+and the agent is told so. A dash and an underscore count as one in a pattern, as they
+do in pi's names for tools.
+
+The patterns are kept by the portal, not in `mcp.json`, which stays pi's alone. They
+go with the server: removing it drops them, and so does writing the server again
+without `approve`, so a server given that name later is not asked about by an old
+list. A server's row in Settings → MCP shows its patterns (read only: the extension
+that wrote them sets them). pi's three tools for resources are not covered by it.
 
 ## What the tool lists show
 

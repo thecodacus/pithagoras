@@ -28,7 +28,7 @@ import { heartbeatTool } from "./heartbeat-tool.js";
 import { chatTools, ownerOf as chatOwnerOf } from "./chat-tools.js";
 import { ToolSearch } from "./tool-search.js";
 import { CALLED_TOOL_KEY, TOOL_SEARCH, calledThrough } from "./tool-search-names.js";
-import { MCP_RESOURCES, isResourceTool, mcpNamespace, mcpNamespaceOf, serversSwitchedOff } from "./mcp-origin.js";
+import { MCP_RESOURCES, approveNames, isResourceTool, mcpNamespace, mcpNamespaceOf, serversSwitchedOff } from "./mcp-origin.js";
 import { configForChat, piMcp } from "./mcp-config.js";
 import { NO_LAZY, headLazy, type LazyHead } from "../tool-lazy.js";
 import { askPrimaryTool } from "./ask-primary.js";
@@ -542,6 +542,8 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     let namespaceOf: (name: string) => string | undefined = () => undefined;
     // The MCP servers the chat has switched off, by namespace, once the session is there: see serversSwitchedOff.
     let serversOff: () => ReadonlySet<string> = () => new Set();
+    // The names an MCP tool goes by for its server's `approve` patterns, from its definition once the session is there: see approveNames.
+    let approveNamesOf: (name: string) => readonly string[] = () => [];
     // What a tool declares the guard is to hold it to, from its definition once the session has it: see declaredGuard.
     let guardOf: (name: string) => DeclaredGuard | undefined = () => undefined;
     // The line that outside content is data, while a tool that declares it is on or lazy: asked once the session is there (below).
@@ -584,6 +586,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
             opts.dialogs !== false,
             (name) => namespaceOf(name),
             () => serversOff(),
+            (name) => approveNamesOf(name),
           ) },
         // Offered only while the conversation has a lazy tool: see applyToolsOff.
         { name: "tool-search", factory: search.extension },
@@ -724,6 +727,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     filesOf = (name) => declaredFiles(session.getToolDefinition(name));
     guardOf = (name) => declaredGuard(session.getToolDefinition(name));
     namespaceOf = (name) => mcpNamespaceOf(session.getToolDefinition(name));
+    approveNamesOf = (name) => approveNames(name, session.getToolDefinition(name));
     serversOff = () =>
       serversSwitchedOff(((session.getAllTools?.() ?? []) as { name: string }[]).map((tool) => ({ name: tool.name, definition: session.getToolDefinition(tool.name) })), switchedOff());
 

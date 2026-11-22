@@ -36,15 +36,16 @@ export async function piMcp(): Promise<PiMcp> {
   return loaded;
 }
 
-/** Whether the adapter's `approveTools` (a boolean, or a list of tools) asks before any call: an empty list asks for none. */
+/** Whether the adapter's `approveTools` (a boolean, or a list of tools) asks before any call: an empty list asks for none. The portal keeps what a server asks about as `approve` (see mcpApprove in db.ts), not in the file. */
 export function gateOn(value: unknown): boolean {
   return Array.isArray(value) ? value.length > 0 : !!value;
 }
 
 /**
- * What an entry says that pi does not read, and so does not do: the adapter's own keys for a gate, an exclusion, a sign-in and
+ * What an entry says that pi does not read, and so does not do: the adapter's own keys for an exclusion, a sign-in and
  * variables, which are in the file of a server the move from the adapter left off. A server that is on with one of them would run without
- * the gate or the exclusion it was given, or connect without its header.
+ * the exclusion it was given, or connect without its header. (`approveTools` is not here: it is refused where it is written, see
+ * approveToolsProblem in api/mcp.ts, and the move from the adapter carries it into `approve`.)
  */
 export function ignoredByPi(entry: Record<string, unknown>): { key: string; why: string }[] {
   const out: { key: string; why: string }[] = [];
@@ -52,7 +53,6 @@ export function ignoredByPi(entry: Record<string, unknown>): { key: string; why:
   if (Array.isArray(entry.includeTools) && entry.includeTools.length) out.push({ key: "includeTools", why: "a list of the only tools it offers" });
   if (Array.isArray(entry.excludeTools) && entry.excludeTools.length) out.push({ key: "excludeTools", why: "a list of tools it leaves out" });
   if (entry.exposeResources === false) out.push({ key: "exposeResources", why: "its resources left out" });
-  if (gateOn(entry.approveTools)) out.push({ key: "approveTools", why: "tools that ask before each call (approveTools), which pi does not do" });
   // Left in the entry of a server the move left off: the server would connect without its header or its sign-in.
   for (const key of ["bearerToken", "bearerTokenEnv"] as const) if (typeof entry[key] === "string" && entry[key]) out.push({ key, why: "the adapter's bearer token: pi takes an Authorization header" });
   if (entry.oauth && typeof entry.oauth === "object") out.push({ key: "oauth", why: "the adapter's OAuth block, which pi does not read" });
@@ -115,8 +115,8 @@ export function configForChat(
       const theirs = Object.entries(entry.config.toolExposure ?? {}).filter(([tool]) => !held(tool));
       config = { ...entry.config, toolExposure: { ...Object.fromEntries(hidden), ...Object.fromEntries(theirs) } };
     }
-    // A server of the project's own file that carries one of the adapter's gates or exclusions (pi accepts the unknown key and ignores it) is not connected: it would run what the adapter held back.
-    if (kept === entry && redefined && ignoredByPi(config as unknown as Record<string, unknown>).length) config = { ...config, enabled: false };
+    // A server of the project's own file that carries one of the adapter's gates or exclusions (pi accepts the unknown key and ignores it) is not connected: it would run what the adapter held back. `approve` is kept for the servers of the person's file, by name; a project's own server has none.
+    if (kept === entry && redefined && (ignoredByPi(config as unknown as Record<string, unknown>).length || gateOn((config as unknown as Record<string, unknown>).approveTools))) config = { ...config, enabled: false };
     return { ...kept, config: forChat(config) };
   });
   onServers(servers);

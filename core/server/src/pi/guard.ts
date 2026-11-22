@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { inlineBrowserScreenshot } from "./browser-screenshot.js";
 import { cleanBrowserSnapshot, isBrowserSnapshot } from "./browser-snapshot-format.js";
 import { bareRef } from "../browser/ref.js";
-import { listToolRules, recordAudit, trustResult, trustedMcpServers, trustedResults, untrustResult, useGrant, type ToolRule } from "../db.js";
+import { listToolRules, mcpApprove, recordAudit, trustResult, trustedMcpServers, trustedResults, untrustResult, useGrant, type ToolRule } from "../db.js";
 import { mcpServerNames } from "../api/mcp.js";
 import { SIGNALS, injectionSignals, type Signal } from "./injection.js";
 import { GUARD_RULE_NAMES, type GuardRuleName } from "./guard-rule-names.js";
@@ -21,7 +21,7 @@ import { loadedByLinks } from "./loaded-links.js";
 // Only the names: a heartbeat's note is registered for heartbeats alone, and is how one says what it read.
 import { HEARTBEAT_ROLE, NOTE_TOOL } from "./heartbeat-names.js";
 import { LISTED_TOOLS_KEY, TOOL_SEARCH } from "./tool-search-names.js";
-import { MCP_RESOURCE_TOOLS, isResourceTool, mcpNamespace, serverOfArgument, serversOfNamespace } from "./mcp-origin.js";
+import { MCP_RESOURCE_TOOLS, isResourceTool, mcpNamespace, needsApproval, serverOfArgument, serversOfNamespace } from "./mcp-origin.js";
 import { BROWSER_MCP } from "../tool-policy.js";
 import { runsAsPrimary } from "./runs-as-primary.js";
 
@@ -1838,6 +1838,31 @@ function heldQuestion(toolName: string, subject: string, rule: Rule, flagged: st
 }
 
 /**
+ * The server whose `approve` patterns (see mcpApprove in db.ts) hold this call for the person's confirmation, or undefined. Told by the
+ * tool's namespace and the names it goes by (approveNames in mcp-origin.ts), so a call is held however it is made: under its own name, through
+ * `tool_search`, from a script, or in a subagent, which are all calls of this tool and come here as such. The patterns are read now, and are
+ * by the server's name as it is configured.
+ */
+function approvalServer(origin: Origin, names: readonly string[]): string | undefined {
+  if (origin.namespace === undefined) return undefined;
+  const approve = mcpApprove();
+  return Object.keys(approve).find((server) => mcpNamespace(server) === origin.namespace && needsApproval(approve[server], names));
+}
+
+/** What the person is asked where a server's `approve` holds a call. */
+function approvalQuestion(toolName: string, server: string, subject: string): { title: string; message: string } {
+  return {
+    title: `Let ${toolName} run?`,
+    message: [
+      `The MCP server "${server}" is set up so that this tool asks you before each call.`,
+      "Yes lets this one call run; No refuses it.",
+      "The call, as the agent wrote it:",
+      subject,
+    ].join("\n"),
+  };
+}
+
+/**
  * The first line of the envelope around a result that looked like a prompt
  * injection: its id and the signs it carried. Only the guard writes it, at the
  * very start of a result, and what a result carries that looks like a marker
@@ -1975,6 +2000,8 @@ export function guardExtension(
   namespaceOf: (toolName: string) => string | undefined = () => undefined,
   /** The namespaces of the MCP servers this conversation has switched off (see serversSwitchedOff), read at each call. */
   serversOffNow: () => ReadonlySet<string> = () => new Set(),
+  /** The names an MCP tool goes by for a server's `approve` patterns, from its definition at each call: see approveNames in mcp-origin.ts. */
+  approveNamesOf: (toolName: string) => readonly string[] = () => [],
 ) {
   /** Where a tool came from, as the session knows it now. */
   const originOf = (name: string, outside = guardOf(name)?.outside === true): Origin => ({ namespace: namespaceOf(name), outside });
@@ -2287,49 +2314,86 @@ export function guardExtension(
         };
       }
 
-      if (!isTainted()) return undefined;
-      const rule = heldByTaint;
-      if (!rule) {
-        // Recorded even when it does not block: "this ran with a rule off" is
-        // the thing you want to find later, and it is invisible otherwise.
-        if (matched.length) note("allowed-by-exemption", `${matched.map((one) => one.name).join(", ")} — exempt for this routine`);
-        return undefined;
-      }
+      // What the conversation has read after a suspected prompt injection holds some calls back (see taintRules).
+      const afterTaint = (): unknown => {
+        if (!isTainted()) return undefined;
+        const rule = heldByTaint;
+        if (!rule) {
+          // Recorded even when it does not block: "this ran with a rule off" is
+          // the thing you want to find later, and it is invisible otherwise.
+          if (matched.length) note("allowed-by-exemption", `${matched.map((one) => one.name).join(", ")} — exempt for this routine`);
+          return undefined;
+        }
 
-      const refuse = () => {
-        console.warn(`[guard ${sessionId}] blocked ${event.toolName}: ${rule.name}`);
-        note("refused", `${rule.name} — ${rule.why}`);
+        const refuse = () => {
+          console.warn(`[guard ${sessionId}] blocked ${event.toolName}: ${rule.name}`);
+          note("refused", `${rule.name} — ${rule.why}`);
+          return {
+            block: true,
+            reason:
+              `Refused (${rule.name}): a result this conversation read looks like a prompt injection, and this action is ` +
+              `${rule.why}. The person can look at the flagged result in the chat and trust it, or remove that turn, ` +
+              `and then ask again. Do not try to work around this — say it was refused, and which result was flagged.`,
+          };
+        };
+        // The primary user, where they are there to answer, is asked about this one call: yes lets it run. No, a dialog
+        // closed or a run stopped refuses it, as does a conversation with nobody to ask: a routine, a heartbeat, a
+        // channel's chat, or somebody else speaking. The answer is a promise, which pi awaits as it does any handler's.
+        if (role !== "primary" || !dialogs) return refuse();
+        const flaggedNow = [
+          ...[...flagged].filter(([id]) => !trusted.has(id)).map(([, what]) => what),
+          ...[...readByCalls.values()].filter((signals) => signals.length > 0).map((signals) => `what the calls of a tool still running read (it ${signals.map((s) => s.label).join("; ")})`),
+        ];
+        const { title, message } = heldQuestion(event.toolName, subject, rule, flaggedNow);
+        // Only a yes: the answer comes from a page as it was sent (see respondUi), and anything else refuses. So does a
+        // question that could not be put, or that failed on its way: pi would block the call on the error, with no
+        // refusal in the audit and no reason the agent can pass on.
+        return new Promise<unknown>((resolve) => resolve(ctx.ui.confirm(title, message))).then(
+          (yes) => {
+            if (yes !== true) return refuse();
+            note("allowed-by-approval", `${rule.name} — you allowed this one call in the chat after a suspected prompt injection`);
+            return undefined;
+          },
+          (error) => {
+            console.warn(`[guard ${sessionId}] could not ask about ${event.toolName}: ${String(error)}`);
+            return refuse();
+          },
+        );
+      };
+
+      // A server whose `approve` names this tool has every call of it confirmed by the person, in whatever way it is made.
+      const gate = approvalServer(originOf(event.toolName), approveNamesOf(event.toolName));
+      // What the conversation has read is judged first, so that a call it refuses is not put to the person as well.
+      const verdict = afterTaint();
+      if (gate === undefined) return verdict;
+      // Asked as the guard asks about a held call, and refused as it refuses one: where nobody can answer (a routine, a heartbeat, a
+      // channel's chat, somebody else speaking), and for a question that is not answered yes.
+      const refuseUnconfirmed = (why: string) => {
+        note("refused", `${event.toolName} asks before each call (approve of the MCP server ${gate}): ${why}`);
         return {
           block: true,
           reason:
-            `Refused (${rule.name}): a result this conversation read looks like a prompt injection, and this action is ` +
-            `${rule.why}. The person can look at the flagged result in the chat and trust it, or remove that turn, ` +
-            `and then ask again. Do not try to work around this — say it was refused, and which result was flagged.`,
+            `Refused: "${event.toolName}" is a tool of the MCP server "${gate}", and its calls are confirmed by the person before they run; ${why}. ` +
+            "Say that it was not run rather than looking for another way to it.",
         };
       };
-      // The primary user, where they are there to answer, is asked about this one call: yes lets it run. No, a dialog
-      // closed or a run stopped refuses it, as does a conversation with nobody to ask: a routine, a heartbeat, a
-      // channel's chat, or somebody else speaking. The answer is a promise, which pi awaits as it does any handler's.
-      if (role !== "primary" || !dialogs) return refuse();
-      const flaggedNow = [
-        ...[...flagged].filter(([id]) => !trusted.has(id)).map(([, what]) => what),
-        ...[...readByCalls.values()].filter((signals) => signals.length > 0).map((signals) => `what the calls of a tool still running read (it ${signals.map((s) => s.label).join("; ")})`),
-      ];
-      const { title, message } = heldQuestion(event.toolName, subject, rule, flaggedNow);
-      // Only a yes: the answer comes from a page as it was sent (see respondUi), and anything else refuses. So does a
-      // question that could not be put, or that failed on its way: pi would block the call on the error, with no
-      // refusal in the audit and no reason the agent can pass on.
-      return new Promise<unknown>((resolve) => resolve(ctx.ui.confirm(title, message))).then(
-        (yes) => {
-          if (yes !== true) return refuse();
-          note("allowed-by-approval", `${rule.name} — you allowed this one call in the chat after a suspected prompt injection`);
-          return undefined;
-        },
-        (error) => {
-          console.warn(`[guard ${sessionId}] could not ask about ${event.toolName}: ${String(error)}`);
-          return refuse();
-        },
-      );
+      const confirmed = () => {
+        if (role !== "primary" || !dialogs) return refuseUnconfirmed("there is nobody to ask in this conversation");
+        const { title, message } = approvalQuestion(event.toolName, gate, subject);
+        // As above: only a yes, and a question that failed refuses.
+        return new Promise<unknown>((resolve) => resolve(ctx.ui.confirm(title, message))).then(
+          (yes) => {
+            if (yes !== true) return refuseUnconfirmed("the person did not allow this call");
+            note("allowed-by-approval", `the MCP server ${gate} asks before each call of ${event.toolName}: you allowed this one in the chat`);
+            return undefined;
+          },
+          (error) => {
+            console.warn(`[guard ${sessionId}] could not ask about ${event.toolName}: ${String(error)}`);
+            return refuseUnconfirmed("the question could not be put");
+          },
+        );
+      };
+      return Promise.resolve(verdict).then((held) => (held === undefined ? confirmed() : held));
     });
   };
 }

@@ -1386,11 +1386,20 @@ big one goes behind `tool_search` by itself: mark one **Direct** where you had i
 tools registered directly. A bearer token becomes the `Authorization` header pi takes
 (Understory's entry among them). A server pi cannot take as it was (a Unix socket, a
 list of the tools it offers or leaves out, `$env:NAME` variables, a `$` or a leading
-`!!` in a value of `env` or `headers`, tools that asked before each call, a name with a
+`!!` in a value of `env` or `headers`, a name with a
 dot, an address that ends in `/sse`) stays in the file as it was, switched off, and is
 named in the one line the log gets (Settings → Logs). pi does not read the keys that kept
 it off, so before you switch it on, write them in pi's words (a tool to leave out is
-`"toolExposure": { "<tool>": "hidden" }`). The tools are named
+`"toolExposure": { "<tool>": "hidden" }`). The adapter's `approveTools` (`true` for every
+tool, or a list of patterns, its own or the setting's for every server) is not a reason to
+leave a server off: pi has no such gate, so the portal carries it over as the server's
+[calls that ask you first](/guide/mcp#calls-that-ask-you-first) (`true` is every tool),
+and the server keeps its on or off. A pattern that named tools with the server's prefix
+(`github_delete_*`) is carried as it was, with the prefix taken off, and with each tool the
+adapter had listed for the server that it matched, so nothing it asked about is left out
+for how the pattern was written (`?` is carried as `*`, which asks more); the log names
+the servers. The key itself is not in `mcp.json` any more, and is refused where an entry is
+written. The tools are named
 `mcp__<server>__<tool>` now: **switches you set on the adapter's own tools do nothing
 any more**, with one exception that keeps nothing wider than before: a list that had one
 of them off (`github_delete_repo`) is read as a list that had MCP off. The adapter's `mcp`
@@ -1407,7 +1416,7 @@ in a trusted project (the sandbox off): the tools the adapter had listed for its
 switched off by name in the lists that had MCP off, but a server of it that the adapter never
 listed is on there, and the log names the files. A server in such a file that names one of the
 safety keys below is not connected. A server that
-names a safety key pi does not read (`excludeTools`, `includeTools`, `approveTools`,
+names a safety key pi does not read (`excludeTools`, `includeTools`,
 `exposeResources: false`) cannot be switched on in Settings → MCP before the key is
 gone or written in pi's words (the same goes for the adapter's `bearerToken`, an `oauth` block and `$env:NAME` variables left in an entry).
 pi does not read what the adapter did besides

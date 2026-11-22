@@ -176,22 +176,40 @@ test("what would send a model provider's key to a server is not written by a for
 // --- settings.json ---
 
 test("a server is not switched on with a gate or an exclusion that pi does not read, and is switched off or edited without them as before", async () => {
-  const kept = { command: "gh-mcp", excludeTools: ["delete_repo"], approveTools: true, enabled: false };
+  const kept = { command: "gh-mcp", excludeTools: ["delete_repo"], enabled: false };
   // The entry a move from the adapter leaves: off, with the keys. Switching it on would run it without them.
-  for (const extra of [{ excludeTools: ["delete_repo"] }, { includeTools: ["read"] }, { approveTools: true }, { approveTools: ["delete_repo"] }, { exposeResources: false }, { socket: "/run/x.sock" }]) {
+  for (const extra of [{ excludeTools: ["delete_repo"] }, { includeTools: ["read"] }, { exposeResources: false }, { socket: "/run/x.sock" }]) {
     refused(await send("/api/mcp/servers/gh", "PUT", { entry: { command: "gh-mcp", ...extra, enabled: true } }), 400, /pi does not read/);
     refused(await send("/api/mcp/servers/gh", "PUT", { entry: { command: "gh-mcp", ...extra } }), 400, /pi does not read/);
   }
   assert.equal(existsSync(mcpFile), false, "nothing was written");
   assert.equal((await send("/api/mcp/servers/gh", "PUT", { entry: kept })).status, 200, "off, with the keys, it is written as it is");
-  // An empty list is no gate and no exclusion: the adapter's boolean | list of tools that ask, and the keys pi's own entry does not have.
-  const none = { command: "gh-mcp", approveTools: [], excludeTools: [], includeTools: [] };
+  // An empty list is no exclusion: the keys pi's own entry does not have.
+  const none = { command: "gh-mcp", excludeTools: [], includeTools: [] };
   assert.equal((await send("/api/mcp/servers/other", "PUT", { entry: none })).status, 200);
-  refused(await send("/api/mcp/servers/gh", "PUT", { entry: { ...kept, enabled: true } }), 400, /excludeTools, approveTools/);
+  refused(await send("/api/mcp/servers/gh", "PUT", { entry: { ...kept, enabled: true } }), 400, /excludeTools/);
   // Settings -> MCP says why in the row: the keys, for the server that has them and none for the other.
   const view = (await send("/api/mcp")).body.servers;
-  assert.match(view.find((server) => server.name === "gh").ignored, /excludeTools .*approveTools/);
-  assert.equal(view.find((server) => server.name === "other").ignored, null, "an empty list is no gate");
+  assert.match(view.find((server) => server.name === "gh").ignored, /excludeTools/);
+  assert.equal(view.find((server) => server.name === "other").ignored, null, "an empty list is no exclusion");
+});
+
+test("the adapter's approveTools is not written by the form, the import, the toggle or an extension, whatever it holds, and the refusal names the approve option; a raw edit keeps a server that is off", async () => {
+  rmSync(mcpFile, { force: true });
+  for (const approveTools of [true, false, [], ["delete_*"]]) {
+    for (const extra of [{}, { enabled: false }]) {
+      refused(await send("/api/mcp/servers/gh", "PUT", { entry: { command: "gh-mcp", approveTools, ...extra } }), 400, /approveTools.*`approve` option.*portal\.mcp\.set/s);
+    }
+  }
+  const imported = await send("/api/mcp/import", "POST", { text: JSON.stringify({ mcpServers: { gh: { command: "gh-mcp", approveTools: true }, fine: { command: "fine" } } }) });
+  assert.deepEqual(imported.body.added, ["fine"]);
+  assert.match(imported.body.skipped[0].reason, /`approve` option/);
+  // By hand: a server that is on with it is refused (nothing would ask), one that is off is kept as it is.
+  refused(await send("/api/mcp/raw", "PUT", { content: JSON.stringify({ mcpServers: { gh: { command: "gh-mcp", approveTools: true } } }) }), 400, /gh: approveTools.*`approve` option/s);
+  assert.equal((await send("/api/mcp/raw", "PUT", { content: JSON.stringify({ mcpServers: { gh: { command: "gh-mcp", approveTools: true, enabled: false } } }) })).status, 200);
+  // The adapter's key is no longer among the keys pi does not read: the row names none of it, and the gate the portal keeps is the row's `approve`.
+  assert.equal((await send("/api/mcp")).body.servers.find((server) => server.name === "gh").ignored, null);
+  assert.deepEqual((await send("/api/mcp")).body.servers.find((server) => server.name === "gh").approve, []);
 });
 
 test("a server that keeps the adapter's bearer token, OAuth block or `$env:` variable is not switched on, and the row says why", async () => {

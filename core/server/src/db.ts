@@ -3754,7 +3754,9 @@ export function forgetMcpTools(removed: readonly string[]): void {
 // A server taken out of the file, whoever wrote it, takes its tools with it.
 onMcpWritten((before) => {
   const after = Object.keys(readMcpFile().config.mcpServers);
-  forgetMcpTools(before.filter((name) => !after.includes(name)));
+  const gone = before.filter((name) => !after.includes(name));
+  forgetMcpTools(gone);
+  forgetMcpApprove(gone);
 });
 
 /**
@@ -3901,6 +3903,42 @@ export function setTrustedMcpServers(names: readonly string[]): void {
 export function untrustMcpServer(name: string): void {
   const trusted = trustedMcpServers();
   if (trusted.delete(name)) setTrustedMcpServers([...trusted]);
+}
+
+/**
+ * The tools of the MCP servers whose calls the person is asked to confirm before they run (`portal.mcp.set` with `approve`, or the
+ * adapter's `approveTools`, carried over): patterns of the server's own tool names by the name the server is configured under, with
+ * `*` for any characters. Kept here and not in mcp.json, which stays pi's alone. Read at each call, so a change holds at once.
+ */
+export function mcpApprove(): Record<string, string[]> {
+  try {
+    const parsed = JSON.parse(getSetting("mcp_approve") || "{}");
+    const out: Record<string, string[]> = {};
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      for (const [server, patterns] of Object.entries(parsed)) {
+        if (Array.isArray(patterns)) out[server] = patterns.filter((one): one is string => typeof one === "string" && one.trim() !== "");
+      }
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+/** Gives a server the patterns of its tools that are confirmed first, in place of any it had; none (or an empty list) drops them. */
+export function setMcpApprove(server: string, patterns: readonly string[] | undefined): void {
+  const { [server]: _before, ...rest } = mcpApprove();
+  const next = patterns?.length ? { ...rest, [server]: [...patterns] } : rest;
+  putSetting("mcp_approve", Object.keys(next).length ? JSON.stringify(next) : "");
+}
+
+/** Servers that are gone no longer have patterns: a server given the name later is another's, and is not gated by a stale list. */
+export function forgetMcpApprove(removed: readonly string[]): void {
+  const all = mcpApprove();
+  if (removed.some((server) => Object.prototype.hasOwnProperty.call(all, server))) {
+    for (const server of removed) delete all[server];
+    putSetting("mcp_approve", Object.keys(all).length ? JSON.stringify(all) : "");
+  }
 }
 
 /** A background subagent's start or end, as written: kept in open_subagents while it runs. */

@@ -1452,6 +1452,8 @@ export interface McpServerView {
   problem: string | null;
   /** The keys of the entry that pi does not read (the adapter's gates and exclusions), with what each meant; null where there are none. */
   ignored: string | null;
+  /** The patterns of the server's own tool names whose calls ask the person first (kept by the portal, not in the file); none where it has no gate. */
+  approve?: string[];
 }
 
 export interface McpConfigView {

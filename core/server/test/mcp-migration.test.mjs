@@ -29,6 +29,7 @@ const ADAPTER_FILE = JSON.stringify({
     ownAuth: { url: "https://o.example.test/mcp", auth: { provider: "someone" } },
     docs: { url: "https://docs.example.test/mcp", auth: "bearer", bearerTokenEnv: "DOCS_TOKEN" },
     gated: { command: "node", approveTools: true },
+    gatedList: { command: "node", approveTools: ["delete_*"], enabled: false },
     sock: { socket: "/run/x.sock" },
     filtered: { command: "f", excludeTools: ["delete_*"] },
     envish: { command: "node", env: { KEY: "$env:KEY" } },
@@ -62,13 +63,15 @@ test("the adapter's servers are put into pi's words: its keys go, on and off sta
   assert.deepEqual(s.plain, { url: "https://p.example.test/mcp", headers: { "X-Org": "a" } }, "pi signs in by itself where the server asks");
   assert.deepEqual(s.keepsOwnHeader, { url: "https://n.example.test/mcp", headers: { Authorization: "Bearer ${NOTION}" } }, "oauth: false is the adapter's word and loses nothing");
   assert.deepEqual(s.ownAuth.auth, { provider: "someone" }, "pi's own auth key is kept");
-  assert.deepEqual(moved.carried.sort(), ["docs", "keepsOwnHeader", "notes", "ownAuth", "paused", "plain"]);
-  assert.deepEqual(moved.left.map((l) => l.name).sort(), ["blocked", "docs.v2", "envish", "filtered", "gated", "nothing", "sock"]);
-  for (const name of ["blocked", "docs.v2", "envish", "filtered", "gated", "sock"]) assert.equal(s[name].enabled, false, `${name} is off`);
+  assert.deepEqual(moved.carried.sort(), ["docs", "gated", "gatedList", "keepsOwnHeader", "notes", "ownAuth", "paused", "plain"]);
+  assert.deepEqual(moved.left.map((l) => l.name).sort(), ["blocked", "docs.v2", "envish", "filtered", "nothing", "sock"]);
+  for (const name of ["blocked", "docs.v2", "envish", "filtered", "sock"]) assert.equal(s[name].enabled, false, `${name} is off`);
   assert.deepEqual(s.docs, { url: "https://docs.example.test/mcp", headers: { Authorization: "Bearer ${DOCS_TOKEN}" } }, "the bearer variable is an Authorization header in pi's words, and the adapter's keys are gone");
-  assert.deepEqual(s.gated, { command: "node", approveTools: true, enabled: false }, "as it was, nothing of it lost");
+  // approveTools is no reason to leave a server off: the server keeps its on/off, and what it asked about is its `approve`, not a key of the file.
+  assert.deepEqual(s.gated, { command: "node" });
+  assert.deepEqual(s.gatedList, { command: "node", enabled: false });
+  assert.deepEqual(moved.approve, { gated: ["*"], gatedList: ["delete_*"] });
   assert.equal("nothing" in s, false, "an entry that is no server is only named");
-  assert.match(moved.left.find((l) => l.name === "gated").why, /ask before each call/);
   assert.match(moved.left.find((l) => l.name === "envish").why, /\$env:NAME/);
   assert.match(moved.left.find((l) => l.name === "filtered").why, /leaves out/);
   assert.match(moved.left.find((l) => l.name === "docs.v2").why, /name/);
@@ -78,14 +81,55 @@ test("the adapter's servers are put into pi's words: its keys go, on and off sta
   assert.equal(carryOver(pi, ADAPTER_FILE, true).file.mcpServers.notes.enabled, false);
 });
 
-test("the adapter's setting that asks before every call leaves every server it covers off, with the setting written into its entry, and one server's own false takes it out", async () => {
+test("the adapter's setting that asks before every call becomes every server's approve, and one server's own false takes it out", async () => {
   const pi = await piMcp();
-  const moved = carryOver(pi, JSON.stringify({ mcpServers: { a: { command: "a" }, b: { command: "b", approveTools: false }, "c.d": { command: "c" } }, settings: { approveTools: true } }), false);
-  assert.deepEqual(moved.left.map((l) => l.name), ["a", "c.d"]);
-  assert.deepEqual(moved.carried, ["b"]);
-  // Switched on again later, the entry still says it: the page refuses to switch a server on with a key pi ignores (see config-routes).
-  assert.deepEqual(moved.file.mcpServers.a, { command: "a", approveTools: true, enabled: false });
-  assert.deepEqual(moved.file.mcpServers["c.d"], { command: "c", approveTools: true, enabled: false });
+  const moved = carryOver(pi, JSON.stringify({ mcpServers: { a: { command: "a" }, b: { command: "b", approveTools: false }, "c.d": { command: "c" }, e: { command: "e", enabled: false } }, settings: { approveTools: true } }), false);
+  // The servers keep their on/off, and none is left off for it.
+  assert.deepEqual(moved.left.map((l) => l.name), ["c.d"]);
+  assert.deepEqual(moved.carried, ["a", "b", "e"]);
+  assert.deepEqual(moved.file.mcpServers.a, { command: "a" });
+  assert.deepEqual(moved.file.mcpServers.e, { command: "e", enabled: false });
+  assert.deepEqual(moved.approve, { a: ["*"], e: ["*"] }, "b said false; a name pi does not take has no server to gate");
+  assert.deepEqual(moved.file.mcpServers["c.d"], { command: "c", enabled: false });
+});
+
+test("the adapter's patterns match what the adapter matched: the tool's own name or its prefixed one, `?`, dashes as underscores, and no tool it asked about is left out", async () => {
+  const pi = await piMcp();
+  const file = JSON.stringify({
+    mcpServers: {
+      "git-hub": { command: "g", approveTools: ["git_hub_delete_*", "merge-pull_request", "creat?_issue", "mcp__git_hub_fork"] },
+      "notes-mcp": { command: "n" },
+    },
+    settings: { approveTools: ["notes_remove*"] },
+  });
+  const cache = new Map([["git-hub", ["delete_repo", "merge-pull_request", "list_issues", "fork"]], ["notes-mcp", ["remove_note", "add_note"]]]);
+  const moved = carryOver(pi, file, false, cache);
+  const patterns = moved.approve["git-hub"];
+  // The pattern as written (`?` asking more), with its prefix taken off, and each tool it caught by its own name.
+  for (const asked of ["git_hub_delete_*", "delete_*", "merge_pull_request", "creat*_issue", "fork", "delete_repo", "merge-pull_request"]) assert.ok(patterns.includes(asked), `${asked} in ${patterns}`);
+  assert.equal(patterns.includes("list_issues"), false, "a tool nothing named is not asked about");
+  // The setting's pattern is by the short prefix of `notes-mcp` (`notes`).
+  assert.deepEqual(moved.approve["notes-mcp"].includes("remove_note"), true);
+  assert.equal(moved.approve["notes-mcp"].includes("add_note"), false);
+  // As the guard matches them, the tools of the server are all asked about by the names the server gave them.
+  const { needsApproval } = await import("../dist/pi/mcp-origin.js");
+  for (const tool of ["delete_repo", "merge-pull_request", "fork", "create_issue"]) assert.equal(needsApproval(patterns, [tool.replace(/-/g, "_")]), true, tool);
+  assert.equal(needsApproval(patterns, ["list_issues"]), false);
+});
+
+test("what a move from the adapter stores as approve is in the database, and the file has none of it", async () => {
+  reset();
+  logs.length = 0;
+  db.setMcpApprove("stale", ["x"]);
+  writeFileSync(mcpFile, JSON.stringify({ mcpServers: { gated: { command: "node", approveTools: ["delete_*"] }, open: { command: "node" } }, settings: { approveTools: false } }));
+  listed([{ source: ADAPTER, extensions: ["extensions/index.ts"] }]);
+  await moveFromAdapter();
+  assert.deepEqual(readFile().mcpServers, { gated: { command: "node" }, open: { command: "node" } });
+  assert.deepEqual(db.mcpApprove().gated, ["delete_*"]);
+  assert.equal(db.mcpApprove().open, undefined);
+  assert.match(logs[0], /still asked, by each server's `approve`: gated/);
+  db.setMcpApprove("gated", undefined);
+  db.setMcpApprove("stale", undefined);
 });
 
 test("the entry Understory's extension wrote before the move, with its bearer token, becomes pi's header, and the file is then one pi accepts", async () => {
@@ -156,10 +200,13 @@ test("on the first start: the file is carried over, the adapter leaves pi's pack
   assert.ok(db.knownTools().some((t) => t.name === "other_tool"));
 
   assert.equal(logs.length, 1, "one line");
-  assert.match(logs[0], /6 servers .*carried over/);
+  assert.match(logs[0], /8 servers .*carried over/);
   assert.match(logs[0], /pi-mcp-adapter taken out of pi's packages/);
   assert.match(logs[0], /Left off, as they were.*sock \(a Unix socket/);
-  assert.match(logs[0], /gated \(tools that ask before each call/);
+  assert.match(logs[0], /still asked, by each server's `approve`: gated, gatedList/, "what the adapter asked about before a call is asked still, and the servers are not left off for it");
+  assert.deepEqual(db.mcpApprove(), { gated: ["*"], gatedList: ["delete_*"] });
+  assert.equal(file.mcpServers.gated.enabled, undefined);
+  assert.equal(file.mcpServers.gatedList.enabled, false, "on or off as it was");
   assert.match(logs[0], /docs\.v2 \(pi does not take its name/);
   assert.match(logs[0], /nothing \(it is not a server\)/);
   assert.ok(logs[0].includes("what the adapter imported from cursor"), "the adapter's imports are named");
@@ -171,6 +218,8 @@ test("on the first start: the file is carried over, the adapter leaves pi's pack
   await moveFromAdapter();
   assert.deepEqual(readFile().mcpServers.later, { command: "x", lifecycle: "eager" });
   assert.equal(logs.length, 1);
+  db.setMcpApprove("gated", undefined);
+  db.setMcpApprove("gatedList", undefined);
 });
 
 test("a list that had the adapter's `mcp` tool off has every server's tools off by name now, the entry goes, a list that had it on only loses the entry, and a server with no tool to name is switched off", async () => {
@@ -253,11 +302,12 @@ test("no list is touched where none had `mcp` or one of the adapter's tools off,
   assert.doesNotMatch(logs[0], /had the adapter's `mcp` tool/);
 });
 
-test("`approveTools: []`, the adapter's \"no tool asks first\", is no gate: the server comes over on, and one that names tools is still left off", async () => {
+test("`approveTools: []`, the adapter's \"no tool asks first\", asks about nothing; one that names tools has them as its approve, on", async () => {
   const pi = await piMcp();
   const moved = carryOver(pi, JSON.stringify({ mcpServers: { a: { command: "npx", args: ["-y", "x"], approveTools: [] }, b: { command: "b" }, c: { command: "c", approveTools: ["delete"] } }, settings: { approveTools: [] } }), false);
-  assert.deepEqual(moved.carried, ["a", "b"]);
-  assert.deepEqual(moved.left.map((l) => l.name), ["c"]);
+  assert.deepEqual(moved.carried, ["a", "b", "c"]);
+  assert.deepEqual(moved.left, []);
+  assert.deepEqual(moved.approve, { c: ["delete"] });
   assert.equal(moved.file.mcpServers.a.enabled, undefined);
   assert.equal("approveTools" in moved.file.mcpServers.a, false, "the adapter's key that asks for nothing is not carried on");
   // A server's own `approveTools: false` outweighs the setting that covers the others, and is gone as well; `oauth: false` is the adapter's word and goes.

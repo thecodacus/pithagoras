@@ -9,7 +9,7 @@ import semver from "semver";
 import express, { type NextFunction, type Request, type RequestHandler, type Response, type Router } from "express";
 import { agentOf, defaultAgent, listAgents } from "./agents.js";
 import { dataDirOf } from "./extension-data.js";
-import { childSessions, getSession, getSetting, listSessions, putSetting, recordAudit, sessionsByWorkspace, setServerHalfOffers, setServerHalvesAsked, markMcpServerDirect, unmarkMcpServer, setTrustedMcpServers, toolExceptions, trustedMcpServers, untrustMcpServer, type SessionRow } from "./db.js";
+import { childSessions, getSession, getSetting, listSessions, putSetting, recordAudit, sessionsByWorkspace, setServerHalfOffers, setServerHalvesAsked, markMcpServerDirect, mcpApprove, unmarkMcpServer, setTrustedMcpServers, toolExceptions, trustedMcpServers, untrustMcpServer, type SessionRow } from "./db.js";
 import { EXECUTOR_KIND } from "./executor-kind.js";
 import { takes, type ServerHalf } from "./extension-ui.js";
 import { moduleAt } from "./half-modules.js";
@@ -685,13 +685,16 @@ function portalFor(ext: Running): ServerPortal {
       list: () => modelProviders(),
     },
     mcp: {
-      get: (server) => mcpServer(server),
+      get: (server) => {
+        const found = mcpServer(server);
+        return found && { ...found, approve: mcpApprove()[server] ?? [] };
+      },
       // The portal's own work, which it asks for: not its code (see scope).
       set: (server, entry, options = {}) =>
         scope.exit(async () => {
           // Imported when first asked: it installs packages through what starts and stops these halves, which imports this module.
           const { setMcpServer } = await import("./mcp-entry.js");
-          await setMcpServer(server, entry);
+          await setMcpServer(server, entry, options.approve);
           // Counted as the person's own on the extension's word, and no longer once the server is gone: Settings → Guard
           // lists only the servers there are, so a name left trusted could not be taken out, and would trust whatever
           // server is given that name next.

@@ -1921,12 +1921,12 @@ they are switched in Settings → MCP and Settings → Tools as any server's are
 ```js
 // Switched on from the extension's own page.
 await portal.mcp.set("notes", { url: "http://127.0.0.1:3900/mcp" }, { trusted: true, direct: true });
-portal.mcp.get("notes");   // { entry: { url: … }, on: true }
+portal.mcp.get("notes");   // { entry: { url: … }, on: true, approve: [] }
 // Switched off.
 await portal.mcp.set("notes", undefined);
 ```
 
-- `get(name)` is the server of that name, `{ entry, on }`, or nothing where
+- `get(name)` is the server of that name, `{ entry, on, approve }`, or nothing where
   there is none or the file cannot be read. `on` says the chats have its tools
   now: it is there, and not switched off (`enabled: false`) or hidden
   (`exposure: "hidden"`). The file is read each time, which is quick, so `get`
@@ -1951,12 +1951,27 @@ await portal.mcp.set("notes", undefined);
   Settings → Tools, which the person can change and which is not set where they
   have set a mark already. For a server whose tools the agent has to have at hand,
   such as its memory. Removing the server takes the mark away.
+- `approve` is a list of patterns of the server's own tool names, `*` for any
+  characters (`["send_*", "delete_mail"]`): every call of a tool that matches
+  (`mcp__<server>__<tool>`) is put to the person before it runs, which pi itself
+  does not do (Nextcloud asks it for what goes out to other people). It holds in
+  every path of a call: by name, through `tool_search`, from a script, in a
+  subagent's chat. The person answers in the chat; where nobody can (a chat nobody
+  attends, a routine's run, somebody who is not the primary user) the call is
+  refused. The patterns are kept by the portal and not in mcp.json, so the file stays
+  pi's alone: each `set` replaces them, `set(name, entry)` without `approve` (or with
+  `[]`) and `set(name, undefined)` drop them, and so does a server's removal from
+  Settings → MCP, so a server given that name later is not asked about by an old list.
+  `get(name).approve` says what is stored, and the server's row in Settings → MCP
+  shows it, read only (see [Calls that ask you first](/guide/mcp#calls-that-ask-you-first)).
+  An `approveTools` in the entry, the old adapter's key, which pi does not read, is
+  rejected with this option named.
 - It rejects while mcp.json cannot be read, which is the person's to fix in
   Settings → MCP (nothing is written over it), for a name that is not letters,
   digits, dashes and underscores, and for an entry pi would not take (pi's own
   check, whose message is the rejection's): one that has neither a `command` nor
   a `url`, an `args` that is not a list, a `timeout` that is not a positive
-  number, and so on.
+  number, and so on; and for an `approve` that is not a list of texts.
 
 Understory (`extensions/understory`) writes its server so, trusted, when it is
 switched on from its page in Settings.

@@ -2,8 +2,8 @@ import { existsSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
-import { NAME_RE, gateOn, ignoredByPi, mcpConfigPath, writeMcpFile, type McpFile } from "./api/mcp.js";
-import { getDb, getSetting, knownTools, packageRemoved, parseToolsOff, putSetting, setToolDefaultsOff, toolDefaultsOff } from "./db.js";
+import { NAME_RE, ignoredByPi, mcpConfigPath, writeMcpFile, type McpFile } from "./api/mcp.js";
+import { getDb, getSetting, knownTools, packageRemoved, parseToolsOff, putSetting, setMcpApprove, setToolDefaultsOff, toolDefaultsOff } from "./db.js";
 import { isSwitchedOff, sourceOf } from "./extension-switch.js";
 import { MCP_RESOURCE_TOOLS } from "./pi/mcp-origin.js";
 import { piMcp, type PiMcp } from "./pi/mcp-config.js";
@@ -17,7 +17,8 @@ import { workspaceRoot } from "./workspaces.js";
  * where the adapter's configuration is there, and takes the adapter out of the portal's pi. Nothing here runs after that.
  *
  * The servers keep what they were, on or off, and have no mark, so they are Auto in Settings → Tools. The adapter's own keys
- * are dropped. A list of switches (portal-wide, a project, agent, routine, mode or chat) that had the adapter's `mcp` tool off
+ * are dropped. Its `approveTools` (the tools that asked the person before a call) is not dropped: it becomes the server's `approve`,
+ * which the portal keeps beside the file and the guard holds the calls to (`true` is `*`), and the server keeps its on or off. A list of switches (portal-wide, a project, agent, routine, mode or chat) that had the adapter's `mcp` tool off
  * had MCP off (or one of its tools off by name): it switches off every server's tools by name now, so that nothing reaches further
  * than it did, and the entry goes; a server the adapter never listed tools of cannot be named there, and comes over switched off.
  * A project's own `.pi/mcp.json` is read by pi as it was by the adapter: the tools the adapter cached of its servers are named in those lists too.
@@ -31,7 +32,7 @@ import { workspaceRoot } from "./workspaces.js";
 const DROPPED = ["lifecycle", "idleTimeout", "requestTimeoutMs", "directTools", "debug", "trace", "toolPrefix", "disabled"] as const;
 
 /** Keys of the adapter's that pi has no word for: a server with one of them is left off, named (see ignoredByPi). */
-const REFUSED = ["socket", "includeTools", "excludeTools", "exposeResources", "approveTools"] as const;
+const REFUSED = ["socket", "includeTools", "excludeTools", "exposeResources"] as const;
 
 /** The adapter's bearer token, and the variable that holds one: they become an Authorization header (see bearerHeader). */
 const BEARER = ["bearerToken", "bearerTokenEnv"] as const;
@@ -43,7 +44,7 @@ function inAdapterDialect(old: Record<string, unknown>): boolean {
   if (old.settings !== undefined || old.imports !== undefined) return true;
   const servers = old.mcpServers && typeof old.mcpServers === "object" ? Object.values(old.mcpServers as Record<string, unknown>) : [];
   // `auth` is pi's own key too, as an object (`{ provider }`): the adapter's was a word.
-  return servers.some((entry) => entry && typeof entry === "object" && ([...DROPPED, ...REFUSED, ...BEARER].some((key) => key in (entry as object)) || typeof (entry as { auth?: unknown }).auth === "string"));
+  return servers.some((entry) => entry && typeof entry === "object" && ([...DROPPED, ...REFUSED, ...BEARER, "approveTools"].some((key) => key in (entry as object)) || typeof (entry as { auth?: unknown }).auth === "string"));
 }
 
 export interface Carried {
@@ -55,6 +56,8 @@ export interface Carried {
   left: { name: string; why: string }[];
   /** What the adapter imported from other tools' configs, which pi does not read. */
   imports: string[];
+  /** The patterns of each server's tools whose calls the person is asked about first: the adapter's `approveTools`, in the portal's words (see approvePatternsOf). */
+  approve: Record<string, string[]>;
   /** Whether the file is not what it was. */
   changed: boolean;
   /** Whether it has the adapter's keys in it. */
@@ -78,18 +81,49 @@ function bearerHeader(entry: Record<string, unknown>): { header?: string; why?: 
   return /^[A-Za-z_][A-Za-z0-9_]*$/.test(env) ? { header: `Bearer \${${env}}` } : { why: "a bearer token variable whose name pi cannot read" };
 }
 
-/** The entry as it was, switched off: what a server that cannot be carried over becomes. A gate the adapter had for every server is kept on it, so that it shows on the page and is not lost. */
-function leftOff(entry: Record<string, unknown>, gate: unknown): Record<string, unknown> {
-  return { ...entry, ...(gateOn(gate) && entry.approveTools === undefined ? { approveTools: true } : {}), enabled: false };
+/** The entry as it was, switched off: what a server that cannot be carried over becomes. Its `approveTools` is not in it: it is the server's `approve` now (see carryOver), and the file does not hold it. */
+function leftOff(entry: Record<string, unknown>): Record<string, unknown> {
+  const { approveTools: _gate, ...rest } = entry;
+  return { ...rest, enabled: false };
+}
+
+/** The prefixes the adapter gave a server's tools by `toolPrefix` (`server`, `short`, `mcp`), dashes as underscores: `approveTools` patterns were matched against the tool's name with each. */
+function adapterPrefixes(server: string): string[] {
+  const long = server.replace(/-/g, "_");
+  const short = server.replace(/-?mcp$/i, "").replace(/-/g, "_") || "mcp";
+  return [`${long}_`, `${short}_`, `mcp__${long}_`];
+}
+
+/**
+ * What the adapter's `approveTools` of a server (its own, or else the setting's for every server) asks about, as the portal's `approve`:
+ * `true` is every tool, and a list is its patterns. The adapter matched a pattern against a tool's own name and against the name with the
+ * server's prefix (`github_delete_*`, `?` for one character) with dashes and underscores alike, and the portal matches the server's own name
+ * only, so a pattern is carried as it is (`?` as `*`, which asks more, not less), with the prefix taken off where it starts with one, and with
+ * each tool the adapter had cached of the server that it matched, by its own name: nothing the adapter asked about is left out because of how
+ * the pattern was written.
+ */
+function approveOf(server: string, gate: unknown, cached: readonly string[]): string[] {
+  if (gate === true) return ["*"];
+  if (!Array.isArray(gate)) return [];
+  const patterns = gate.filter((one): one is string => typeof one === "string" && one.trim() !== "").map((one) => one.trim().replace(/-/g, "_"));
+  const regexp = (pattern: string) => new RegExp(`^${pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".")}$`);
+  const asked = new Set(patterns.map((pattern) => pattern.replace(/\?/g, "*")));
+  for (const pattern of patterns) {
+    for (const prefix of adapterPrefixes(server)) if (pattern.startsWith(prefix) && pattern.length > prefix.length) asked.add(pattern.slice(prefix.length).replace(/\?/g, "*"));
+  }
+  for (const tool of cached) {
+    const own = tool.replace(/\./g, "_").replace(/-/g, "_");
+    const names = [own, ...adapterPrefixes(server).map((prefix) => prefix + own)];
+    if (patterns.some((pattern) => names.some((name) => regexp(pattern).test(name)))) asked.add(tool);
+  }
+  return [...asked];
 }
 
 /** One server of the adapter's file, in pi's words, or why not: then it is as it was, switched off. `off`: nothing ran under the adapter, so nothing starts now. */
-function convertEntry(pi: PiMcp, name: string, entry: Record<string, unknown>, off: boolean, gate: unknown): { entry: Record<string, unknown>; why?: string } {
+function convertEntry(pi: PiMcp, name: string, entry: Record<string, unknown>, off: boolean): { entry: Record<string, unknown>; why?: string } {
   const why: string[] = [];
   // The keys that are carried over in another form (a bearer token, an OAuth block, variables) get their own reason below.
-  for (const one of ignoredByPi(entry)) if ((REFUSED as readonly string[]).includes(one.key) && one.key !== "approveTools") why.push(one.why);
-  // The adapter asked before each call of a tool: pi's MCP support does not, and the tools would run unasked.
-  if (entry.approveTools !== undefined ? gateOn(entry.approveTools) : gateOn(gate)) why.push("tools that ask before each call (approveTools), which pi does not do");
+  for (const one of ignoredByPi(entry)) if ((REFUSED as readonly string[]).includes(one.key)) why.push(one.why);
   // The adapter fell back to the old SSE transport where streamable HTTP failed; pi speaks streamable HTTP only, and cannot tell an SSE-only address from the other kind, except by its look.
   if (typeof entry.url === "string" && /\/sse\/?([?#].*)?$/i.test(entry.url.replace(/^[a-z]+:\/\/[^/]*/i, ""))) why.push("a URL that looks like the old SSE transport, which pi does not connect (it needs the server's streamable HTTP address)");
   if (entry.oauth !== undefined && entry.oauth !== false) why.push("an OAuth block of the adapter's");
@@ -109,7 +143,7 @@ function convertEntry(pi: PiMcp, name: string, entry: Record<string, unknown>, o
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(entry)) {
     // `oauth: false` and `auth: "oauth"` are the adapter's own words: pi signs in by itself where the server asks. `auth: { provider }` is pi's.
-    // `approveTools` that asks for nothing (`[]`, `false`) is gone with the adapter: one that asks left the server off above.
+    // `approveTools` is the server's `approve` now, kept by the portal and not in the file (see carryOver).
     const adapters = (DROPPED as readonly string[]).includes(key) || (BEARER as readonly string[]).includes(key) || (key === "oauth" && value === false) || (key === "auth" && typeof value !== "object") || key === "approveTools";
     if (!adapters) out[key] = value;
   }
@@ -119,14 +153,15 @@ function convertEntry(pi: PiMcp, name: string, entry: Record<string, unknown>, o
     const checked = pi.validateMcpServerConfig(name, out);
     if (typeof checked === "string") why.push(checked.replace(/^server "[^"]*": /, ""));
   }
-  return why.length ? { entry: leftOff(entry, gate), why: why.join("; ") } : { entry: out };
+  return why.length ? { entry: leftOff(entry), why: why.join("; ") } : { entry: out };
 }
 
 /**
  * The adapter's mcp.json, in pi's dialect. Pure: nothing is read or written. `off`: nothing ran under the adapter (it was
- * switched off, or is not in pi's packages while the file is in its dialect), so nothing starts now.
+ * switched off, or is not in pi's packages while the file is in its dialect), so nothing starts now. `cache`: the tools the adapter had cached
+ * of each server, by their own names, which the patterns of its `approveTools` are carried over with (see approveOf).
  */
-export function carryOver(pi: PiMcp, text: string, off: boolean): Carried | { error: string } {
+export function carryOver(pi: PiMcp, text: string, off: boolean, cache: ReadonlyMap<string, string[]> = new Map()): Carried | { error: string } {
   let parsed: unknown;
   try {
     parsed = text.trim() ? JSON.parse(text) : {};
@@ -141,6 +176,7 @@ export function carryOver(pi: PiMcp, text: string, off: boolean): Carried | { er
   const file: McpFile = { mcpServers: {} };
   const carried: string[] = [];
   const left: { name: string; why: string }[] = [];
+  const approve: Record<string, string[]> = {};
   for (const [name, entry] of Object.entries(servers)) {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
       left.push({ name, why: "it is not a server" });
@@ -148,16 +184,20 @@ export function carryOver(pi: PiMcp, text: string, off: boolean): Carried | { er
     }
     // pi names tools after a server, and takes letters, digits, `_` and `-` of it: `docs.v2` stays as it is, off, and Settings → MCP says why.
     const done = NAME_RE.test(name)
-      ? convertEntry(pi, name, entry as Record<string, unknown>, off, settings.approveTools)
-      : { entry: leftOff(entry as Record<string, unknown>, settings.approveTools), why: "pi does not take its name (letters, digits, dash and underscore only)" };
+      ? convertEntry(pi, name, entry as Record<string, unknown>, off)
+      : { entry: { ...(entry as Record<string, unknown>), enabled: false }, why: "pi does not take its name (letters, digits, dash and underscore only)" };
     file.mcpServers[name] = done.entry;
+    // The server keeps what it was, on or off, and what it asked about stays asked: by the server's own `approveTools`, else the setting's. A server pi does not take by its name is none the portal can gate.
+    const own = (entry as Record<string, unknown>).approveTools;
+    const patterns = NAME_RE.test(name) ? approveOf(name, own !== undefined ? own : settings.approveTools, cache.get(name) ?? []) : [];
+    if (patterns.length) approve[name] = patterns;
     if (done.why) left.push({ name, why: done.why });
     else carried.push(name);
   }
   // What else the file had that is pi's too (autoEnableCodemode) stays; the adapter's `settings` and `imports` go.
   for (const [key, value] of Object.entries(old)) if (!["mcpServers", "settings", "imports"].includes(key)) file[key] = value;
   const imports = Array.isArray(old.imports) ? old.imports.filter((one): one is string => typeof one === "string") : [];
-  return { file, carried, left, imports, changed: !isDeepStrictEqual(parsed, file), dialect: inAdapterDialect(old) };
+  return { file, carried, left, imports, approve, changed: !isDeepStrictEqual(parsed, file), dialect: inAdapterDialect(old) };
 }
 
 /** The adapter's own tool, which a list of switches may name: a list that switched it off meant "no MCP here". */
@@ -311,7 +351,9 @@ export async function moveFromAdapter(): Promise<void> {
   // Before the adapter's tools are forgotten: which names the switches have for them.
   const adapterTools = new Set(knownTools().filter((tool) => (typeof tool.package === "string" ? ADAPTER_PACKAGE.test(tool.package) : tool.source === "pi-mcp-adapter")).map((tool) => tool.name));
   const adapterOff = adapter === undefined || isSwitchedOff(adapter);
-  const moved = carryOver(pi, text, adapterOff);
+  // Before the adapter's cache goes: the tools of the servers it knew, by their own names, which the switches and the patterns of `approveTools` are carried over with.
+  const cache = adapterCache();
+  const moved = carryOver(pi, text, adapterOff, cache);
   if ("error" in moved) {
     console.warn(`[portal] MCP: mcp.json cannot be read (${moved.error}), so the adapter's servers are not carried over to pi's own MCP support yet: fix the file in Settings → MCP, and restart.`);
     return;
@@ -334,9 +376,8 @@ export async function moveFromAdapter(): Promise<void> {
     return;
   }
 
-  // Before the adapter's cache goes: the tools of the servers it knew, by the names pi gives them. The lists that had the adapter's `mcp` tool off
+  // The tools of the servers the adapter knew, by the names pi gives them. The lists that had the adapter's `mcp` tool off
   // switch them off by name; the move is one step, so a start after a failure finds them done.
-  const cache = adapterCache();
   const names = new Map<string, string[]>();
   for (const server of Object.keys(moved.file.mcpServers)) if (NAME_RE.test(server)) names.set(server, namesOf(pi, server, cache.get(server) ?? []));
   // A project's own servers are not the file's to switch off, but where the adapter cached their tools the lists that had MCP off name them too.
@@ -353,6 +394,9 @@ export async function moveFromAdapter(): Promise<void> {
     }
   }
 
+  // What the adapter asked about before a call is still asked, by the servers' `approve` (kept by the portal), in place before the servers can run.
+  for (const [server, patterns] of Object.entries(moved.approve)) setMcpApprove(server, patterns);
+
   // The adapter goes first, before the file is in pi's dialect: a chat that started in between would have the adapter read
   // `enabled: false` as nothing, and start a server that is off.
   if (adapter) {
@@ -368,12 +412,14 @@ export async function moveFromAdapter(): Promise<void> {
   putSetting(MOVED, "1");
   putSetting(HELD, "");
 
+  const asking = Object.keys(moved.approve);
   const left = moved.left.map(({ name, why }) => `${name} (${why})`);
   const apart = [...moved.imports.map((name) => `what the adapter imported from ${name}`), ...sharedFiles()];
   console.log(
     `[portal] MCP: pi's own MCP support runs the servers now. ${moved.carried.length} servers of pi-mcp-adapter's configuration carried over to mcp.json` +
       `${adapter ? ", pi-mcp-adapter taken out of pi's packages" : ""}.` +
       `${left.length ? ` Left off, as they were, because pi cannot take them as they are: ${left.join("; ")}.` : ""}` +
+      `${asking.length ? ` What the adapter asked about before a call (approveTools) is still asked, by each server's \`approve\`: ${asking.join(", ")}.` : ""}` +
       `${apart.length ? ` Not read by pi, so not there any more: ${apart.join(", ")}.` : ""}` +
       `${switches.lists ? ` ${switches.lists} lists of switches (portal-wide, a project, agent, routine, mode or chat) had the adapter's \`mcp\` tool, or one of its tools, off: they have the tools of every server switched off by name now, and pi's resource tools too.${switches.unnamed.length ? ` The adapter never listed the tools of ${switches.unnamed.join(", ")}, so there is nothing to name for those: they are switched off, whatever they were. Switching one on in Settings → MCP puts its tools on wherever they are not switched off in Settings → Tools, so set the lists where MCP was off as you do.` : ""}` : ""}` +
       `${projects.length ? ` pi reads a project's own .pi/mcp.json as well now: ${projects.map((one) => one.file).join(", ")}. Its servers are on in that project wherever MCP was off, unless the adapter had listed their tools (those are switched off by name in the lists that had MCP off); one with a gate or an exclusion of the adapter's is not connected.` : ""}` +

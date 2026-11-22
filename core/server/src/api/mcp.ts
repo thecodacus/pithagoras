@@ -189,7 +189,7 @@ export async function problemWith(name: string, entry: unknown): Promise<string 
 
 /**
  * What is wrong with an entry that is about to be written by a form, an import or a feature: pi's check, and two things more.
- * A server that is on with a key pi does not read (see ignoredByPi) is refused. `auth: { provider }` makes pi send the portal's key for that model provider to the server's URL as its bearer token; a pasted
+ * A server that is on with a key pi does not read (see ignoredByPi) is refused, and so is `approveTools` (see approveToolsProblem). `auth: { provider }` makes pi send the portal's key for that model provider to the server's URL as its bearer token; a pasted
  * README snippet or a feature must not do that unseen, so it is only in the file by hand (the raw editor).
  */
 export async function problemForWrite(name: string, entry: unknown): Promise<string | null> {
@@ -197,7 +197,19 @@ export async function problemForWrite(name: string, entry: unknown): Promise<str
   if (auth && typeof auth === "object" && (auth as { provider?: unknown }).provider !== undefined) {
     return "auth.provider would send the portal's key for a model provider to this server: write it in the file by hand (the raw editor) if that is meant";
   }
-  return ignoredProblem(entry) ?? problemWith(name, entry);
+  return approveToolsProblem(entry) ?? ignoredProblem(entry) ?? problemWith(name, entry);
+}
+
+/**
+ * Why an entry with the adapter's `approveTools` is not written: pi does not read it, so the file would say a server's calls are
+ * confirmed and nothing would confirm them. What asks the person first is the server's `approve` (patterns of its own tool names,
+ * `*` for any characters), which an extension gives with `portal.mcp.set(name, entry, { approve })`, and which the portal keeps beside the
+ * file, not in it. A raw edit of the file keeps its other servers: only one that is on is refused there (`onOnly`).
+ */
+function approveToolsProblem(entry: unknown, onOnly = false): string | null {
+  if (!entry || typeof entry !== "object" || (entry as { approveTools?: unknown }).approveTools === undefined) return null;
+  if (onOnly && (entry as { enabled?: unknown }).enabled === false) return null;
+  return "approveTools is the adapter's key, which pi does not read, so nothing would ask before a call: take it out. What a server's calls ask the person about is its `approve` option (patterns of the server's own tool names, `*` for any characters, as in `delete_*`), which an extension gives with portal.mcp.set(name, entry, { approve })";
 }
 
 /**
@@ -222,6 +234,8 @@ export function mcpRouter(): Router {
   router.get("/mcp", async (_req, res) => {
     try {
       const { config, raw, error } = readMcpFile();
+      // The database imports this module, so it is imported where it is needed.
+      const approved = (await import("../db.js")).mcpApprove();
       const servers = await Promise.all(
         Object.entries(config.mcpServers).map(async ([name, entry]) => ({
           name,
@@ -231,6 +245,8 @@ export function mcpRouter(): Router {
           problem: await problemWith(name, entry),
           // What the entry says that pi does not read, which keeps it off (a server with one cannot be switched on: see problemForWrite).
           ignored: ignoredText(entry as Record<string, unknown>),
+          // The tools whose calls the person is asked to confirm first (kept by the portal, not in the file): shown in the row.
+          approve: approved[name] ?? [],
         })),
       );
       res.json({
@@ -350,7 +366,7 @@ export function mcpRouter(): Router {
       const servers = (parsed as { mcpServers?: unknown }).mcpServers;
       if (servers && typeof servers === "object") {
         for (const [name, entry] of Object.entries(servers as Record<string, unknown>)) {
-          const problem = ignoredProblem(entry);
+          const problem = approveToolsProblem(entry, true) ?? ignoredProblem(entry);
           if (problem) return res.status(400).json({ error: `${name}: ${problem}` });
         }
       }

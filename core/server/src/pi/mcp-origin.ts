@@ -68,3 +68,41 @@ export function serversSwitchedOff(tools: Iterable<{ name: string; definition: u
   }
   return new Set([...seen].filter(([, allOff]) => allOff).map(([namespace]) => namespace));
 }
+
+/** A name as `approve` compares it: every character but letters, digits and `_` is `_`, as pi writes a tool's name, so `delete-repo` and `delete_repo` are one. */
+const plain = (name: string): string => name.replace(/[^A-Za-z0-9_*]/g, "_");
+
+/**
+ * The names a call of an MCP tool goes by for a server's `approve` patterns: the tool's own name as the server gave it (pi labels
+ * the definition `<server>/<tool>`), and the name pi registered it under with `mcp__<server>__` taken off (which is the same
+ * name, sanitised, and the only one left where pi has cut a long name short with a hash). Empty for a tool pi's MCP support did not register.
+ */
+export function approveNames(toolName: string, definition: unknown): string[] {
+  const namespace = mcpNamespaceOf(definition);
+  if (namespace === undefined) return [];
+  const names: string[] = [];
+  const label = (definition as { label?: unknown }).label;
+  if (typeof label === "string" && label.includes("/")) names.push(label.slice(label.indexOf("/") + 1));
+  if (toolName.startsWith(`${namespace}__`)) names.push(toolName.slice(namespace.length + 2));
+  return [...new Set(names.map(plain))];
+}
+
+/** Whether any of the patterns (`*` for any characters, as a name `plain`ed) matches any of the names. */
+export function needsApproval(patterns: readonly string[], names: readonly string[]): boolean {
+  return patterns.some((pattern) => {
+    // Only letters, digits, `_` and `*` are left of a pattern, so nothing in it is special to a regular expression but the `*`.
+    const matcher = new RegExp(`^${plain(pattern.trim()).replaceAll("*", ".*")}$`);
+    return names.some((name) => matcher.test(name));
+  });
+}
+
+/** The patterns an `approve` option may hold: texts that name at least one character, trimmed, without doubles; or the reason it is not. */
+export function approvePatterns(value: unknown): string[] | string {
+  if (!Array.isArray(value)) return "approve takes a list of patterns of the server's own tool names, `*` for any characters (`delete_*`)";
+  const patterns: string[] = [];
+  for (const one of value) {
+    if (typeof one !== "string" || !one.trim()) return "approve takes a list of patterns of the server's own tool names, `*` for any characters (`delete_*`): each one a text that is not blank";
+    patterns.push(one.trim());
+  }
+  return [...new Set(patterns)];
+}

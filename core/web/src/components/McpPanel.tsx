@@ -11,6 +11,7 @@ import {
   LuGlobe,
   LuPlus,
   LuRefreshCw,
+  LuShieldCheck,
   LuTerminal,
   LuTrash2,
   LuTriangleAlert,
@@ -258,6 +259,12 @@ function ServerRow({
         {server.problem && (
           <p className="mt-0.5 flex items-start gap-1 text-xs text-warn">
             <LuTriangleAlert className="mt-0.5 h-3 w-3 shrink-0" /> {t("pi skips this entry: {problem}", { problem: server.problem })}
+          </p>
+        )}
+        {/* Set by the extension that gave the server (portal.mcp.set), or carried over from the adapter's approveTools: read only here. */}
+        {server.approve && server.approve.length > 0 && (
+          <p className="mt-0.5 flex items-start gap-1 text-xs text-fg-subtle">
+            <LuShieldCheck className="mt-0.5 h-3 w-3 shrink-0" /> {t("Asks you before a call of: {tools}", { tools: server.approve.join(", ") })}
           </p>
         )}
         {/* The adapter's gates and exclusions, which pi does not do: the server stays off until they are taken out or written in pi's words. */}

@@ -950,6 +950,7 @@ const de: Locale = {
     "Config file": "Konfigurationsdatei",
     "Applies to every session in this portal. Chats that are running read it again when they are idle or at their next step.": "Gilt für jede Sitzung in diesem Portal. Laufende Chats lesen sie neu, sobald sie ruhen oder bei ihrem nächsten Schritt.",
     "pi skips this entry: {problem}": "pi überspringt diesen Eintrag: {problem}",
+    "Asks you before a call of: {tools}": "Fragt dich vor einem Aufruf von: {tools}",
     "pi does not read this: {ignored}. A server with it cannot be switched on: take it out of the entry, or write it in pi's words.":
       "pi liest das nicht: {ignored}. Ein Server damit lässt sich nicht einschalten: nimm es aus dem Eintrag heraus oder schreibe es in pis Worten.",
     "Letters, digits, dash and underscore. Its tools are named mcp__name__tool": "Buchstaben, Ziffern, Bindestrich und Unterstrich. Seine Tools heißen mcp__name__tool",
