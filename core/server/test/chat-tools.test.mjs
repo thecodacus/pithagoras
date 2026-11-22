@@ -142,10 +142,12 @@ test("a compaction is in the account as its summary, and the list counts what is
   assert.match(list, /long "A long one" \(task, 4 messages/);
 });
 
-test("read and search say their result is outside content, the list does not", () => {
+// The list holds no message, but a channel chat's title comes from outside: the
+// name of a remote group, up to 120 characters of what a sender called it.
+test("list, read and search all say their result is outside content", () => {
+  assert.deepEqual(tools[CHAT_LIST_TOOL].guard, { outside: true });
   assert.deepEqual(tools[CHAT_READ_TOOL].guard, { outside: true });
   assert.deepEqual(tools[CHAT_SEARCH_TOOL].guard, { outside: true });
-  assert.equal(tools[CHAT_LIST_TOOL].guard, undefined);
 });
 
 // A 1x1 png, the smallest image the record may hold.

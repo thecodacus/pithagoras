@@ -759,9 +759,9 @@ what a read or a search hands back is capped, not the chat.
 The reach is the agent's own: the chats in its home and in its projects, and in
 the projects linked to it, and nothing else — a chat of another agent's is not
 found, whatever its id, and a chat of a project no agent is linked to is no
-agent's. The list is metadata alone. What read and search hand back is often
-other people's words — a channel's conversation is whoever wrote it — so it is
-held as [outside content](/guide/security#marking-untrusted-output): the agent
+agent's. What the list, read and search hand back is often other people's
+words — a channel's conversation is whoever wrote it, and its title is a remote
+group's name — so it is held as [outside content](/guide/security#marking-untrusted-output): the agent
 reads it as data, not as instructions.
 
 ## The tab

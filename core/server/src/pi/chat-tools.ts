@@ -25,8 +25,9 @@ import { fail, say } from "./tool-result.js";
  * What read and search return is other people's words as often as the agent's
  * own: a channel's conversation is whoever wrote it. So they say their result
  * is outside content, and the guard holds the conversation to it as it holds
- * one that read a page or a mail. The list is metadata alone, and says nothing
- * of what is in the chats.
+ * one that read a page or a mail. The list does too: it holds no message, but a
+ * channel chat's title comes from outside, the name of a remote group or what
+ * a sender called it.
  *
  * The tools work on the files, not on a context window: a chat that never
  * compacts, because its model holds a billion tokens, is read the same way,
@@ -234,6 +235,7 @@ export function chatTools(agentId: string, sessionId: string) {
       description:
         "Your old chats, newest first: id, title, kind, message count and last update. The id is what chat_read takes, and the search names.",
       promptSnippet: "see the chats you have had before",
+      guard: { outside: true },
       parameters: Type.Object({}),
       async execute() {
         const agent = getAgent(agentId);
