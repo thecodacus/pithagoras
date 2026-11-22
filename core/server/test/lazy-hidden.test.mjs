@@ -113,7 +113,8 @@ const declared = (request) => names(request).join(",");
 test("the group is out of every request, in the active tools and in what pi lists in the prompt; it runs by name and through the search, both through the guard", async () => {
   const r = await run([search("call", { name: "lz_note", args: { note: "a" } }), { name: "lz_note", args: { note: "b" } }, { name: "lz_page", args: {} }, push]);
   assert.equal(new Set(r.requests.map(declared)).size, 1, "the same tools array in every request");
-  assert.equal(declared(r.requests[0]), "read,bash,edit,write,codemode,plain_x,tool_search,chat_list,chat_read,chat_search");
+  // The chat is in a folder no agent owns, so it has no chat tools (#376).
+  assert.equal(declared(r.requests[0]), "read,bash,edit,write,codemode,plain_x,tool_search");
   assert.deepEqual(r.active.filter((name) => name.startsWith("lz_")), ["lz_page", "lz_note"], "active, and so callable");
   assert.doesNotMatch(JSON.stringify(r.requests[0]), /lz_page|lz_note|LZ-PAGE-RULE|Read a web page/, "not in the tools, the system prompt, or its rules");
   const [viaSearch, byName, page, held] = r.results.filter((e) => !e.parentToolCallId);
