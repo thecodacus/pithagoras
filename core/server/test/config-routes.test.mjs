@@ -178,6 +178,10 @@ test("a server is not switched on with a gate or an exclusion that pi does not r
   const none = { command: "gh-mcp", approveTools: [], excludeTools: [], includeTools: [] };
   assert.equal((await send("/api/mcp/servers/other", "PUT", { entry: none })).status, 200);
   refused(await send("/api/mcp/servers/gh", "PUT", { entry: { ...kept, enabled: true } }), 400, /excludeTools, approveTools/);
+  // Settings -> MCP says why in the row: the keys, for the server that has them and none for the other.
+  const view = (await send("/api/mcp")).body.servers;
+  assert.match(view.find((server) => server.name === "gh").ignored, /excludeTools .*approveTools/);
+  assert.equal(view.find((server) => server.name === "other").ignored, null, "an empty list is no gate");
 });
 
 test("an extension setting is written only under a key that is a name, and the file is as it was", async () => {

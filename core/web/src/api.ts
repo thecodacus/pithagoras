@@ -1434,6 +1434,8 @@ export interface McpServerView {
   enabled: boolean;
   /** What pi says is wrong with the entry, which it skips; null where it takes it. */
   problem: string | null;
+  /** The keys of the entry that pi does not read (the adapter's gates and exclusions), with what each meant; null where there are none. */
+  ignored: string | null;
 }
 
 export interface McpConfigView {

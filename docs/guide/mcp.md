@@ -41,7 +41,11 @@ A server is a local process (`command`, `args`, `env`, `cwd`) or a URL
 seconds, `description` says in a sentence what the server offers (the search for
 tools ranks its tools by it), and `enabled: false` keeps an entry that is never
 connected. What pi accepts is pi's own check: an entry it does not accept is
-shown in the list with the reason, and pi skips it while the others connect.
+shown in the list with the reason, and pi skips it while the others connect. A
+server the move from `pi-mcp-adapter` left off because of a key pi does not read
+(`includeTools`, `excludeTools`, `approveTools`, `exposeResources: false`) says so in
+its row, and cannot be switched on before the key is taken out or written in pi's
+words (an empty `approveTools` is no key to speak of).
 
 The file holds the servers' keys, and the token the portal made for its own
 memory, so it is readable by the account the portal runs as and no other. It is
@@ -119,7 +123,11 @@ seconds; a server slower than that is found through `tool_search` once it has
 connected. `exposure: "hidden"` is kept: the
 server's tools are not reachable. `toolExposure` in an entry, which pi reads to
 give single tools another exposure, is kept as written; a tool it calls `deferred`
-is direct for pi, and behind `tool_search` where the server is lazy.
+is direct for pi, and behind `tool_search` where the server is lazy. pi takes
+an exact tool name in `toolExposure` before a pattern, and the first pattern that
+matches; where a trusted project's own `.pi/mcp.json` overrides a server of yours,
+only the tools you hid are kept of your `toolExposure`, so one you hid by a
+pattern and showed by its exact name is hidden there.
 
 pi's three tools for a server's resources (`list_mcp_resources`,
 `list_mcp_resource_templates`, `read_mcp_resource`) are a group of their own, "MCP

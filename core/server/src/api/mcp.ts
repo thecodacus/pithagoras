@@ -180,6 +180,12 @@ export function ignoredByPi(entry: Record<string, unknown>): { key: string; why:
   return out;
 }
 
+/** What an entry says that pi does not read, in a sentence for the page's row, or null where it says nothing of the kind. */
+function ignoredText(entry: Record<string, unknown>): string | null {
+  const ignored = ignoredByPi(entry);
+  return ignored.length ? ignored.map((one) => `${one.key} (${one.why})`).join("; ") : null;
+}
+
 /** What an entry connects with, as pi's file gives it: a command, or a URL. */
 function transportOf(entry: Record<string, unknown>): "stdio" | "http" | "unknown" {
   if (typeof entry.command === "string" && entry.command) return "stdio";
@@ -235,6 +241,8 @@ export function mcpRouter(): Router {
           transport: transportOf(entry as Record<string, unknown>),
           enabled: (entry as Record<string, unknown>).enabled !== false,
           problem: await problemWith(name, entry),
+          // What the entry says that pi does not read, which keeps it off (a server with one cannot be switched on: see problemForWrite).
+          ignored: ignoredText(entry as Record<string, unknown>),
         })),
       );
       res.json({
