@@ -17,6 +17,8 @@ export interface PiMcp {
   validateMcpServerConfig(name: string, raw: unknown): McpServerConfig | string;
   /** The name pi gives a server's tool, `mcp__<server>__<tool>` with every character but letters, digits and `_` as `_`. */
   createMcpToolName(server: string, tool: string): string;
+  /** Whether a tool name matches any of the entries, each an exact name or a pattern where `*` matches any characters (as `toolExposure`'s keys). */
+  createToolNameMatcher(entries: readonly string[]): (name: string) => boolean;
 }
 
 let loaded: PiMcp | undefined;
@@ -30,7 +32,7 @@ export async function piMcp(): Promise<PiMcp> {
     import(new URL("./core/mcp-servers.js", root).href),
     import(new URL("./extensions/mcp/tools.js", root).href),
   ]);
-  loaded = { loadMcpConfig: config.loadMcpConfig, validateMcpServerConfig: servers.validateMcpServerConfig, createMcpToolName: tools.createMcpToolName };
+  loaded = { loadMcpConfig: config.loadMcpConfig, validateMcpServerConfig: servers.validateMcpServerConfig, createMcpToolName: tools.createMcpToolName, createToolNameMatcher: servers.createToolNameMatcher };
   return loaded;
 }
 
@@ -78,9 +80,14 @@ export function configForChat(
     const user = own.get(entry.name);
     const redefined = entry.scope === "project" && entry.override === undefined;
     const kept = user && (redefined || (user.config.enabled === false || user.config.exposure === "hidden")) ? user : entry;
-    // pi's merge of a project's override replaces `toolExposure` whole: a tool the person hid stays hidden.
+    // pi's merge of a project's override replaces `toolExposure` whole: a tool the person hid stays hidden. pi takes an exact name before any pattern, and the first pattern that matches, so the person's entries go first and a project's entry that names what theirs match (a tool or a pattern) is dropped.
     const hidden = Object.entries(user?.config.toolExposure ?? {}).filter(([, how]) => how === "hidden");
-    const config = kept === entry && hidden.length ? { ...entry.config, toolExposure: { ...entry.config.toolExposure, ...Object.fromEntries(hidden) } } : kept.config;
+    let config = kept.config;
+    if (kept === entry && hidden.length) {
+      const held = pi.createToolNameMatcher(hidden.map(([tool]) => tool));
+      const theirs = Object.entries(entry.config.toolExposure ?? {}).filter(([tool]) => !held(tool));
+      config = { ...entry.config, toolExposure: { ...Object.fromEntries(hidden), ...Object.fromEntries(theirs) } };
+    }
     return { ...kept, config: forChat(config) };
   });
   onServers(servers);

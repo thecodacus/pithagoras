@@ -1377,11 +1377,17 @@ named in the one line the log gets (Settings → Logs). pi does not read the key
 it off, so before you switch it on, write them in pi's words (a tool to leave out is
 `"toolExposure": { "<tool>": "hidden" }`). The tools are named
 `mcp__<server>__<tool>` now: **switches you set on the adapter's own tools do nothing
-any more**, so set them again in Settings → Tools. That includes the adapter's `mcp`
-tool itself: a default, project, agent, routine, mode or chat that had it off **does
-not hold MCP off any more**, and the servers' tools follow its switches like any other
-tool. Switch off in Settings → Tools what must stay off there. The log line says when
-there are some. pi does not read what the adapter did besides
+any more**, and neither does the adapter's `mcp` tool itself, which held MCP off in a
+default, project, agent, routine, mode or chat. So that the move reaches no further than
+the adapter did, a portal where any list of switches still names one of them carries
+**all its servers over switched off** (the log line names them): set those lists again
+in Settings → Tools, then switch the servers on in Settings → MCP. A server that
+names a safety key pi does not read (`excludeTools`, `includeTools`, `approveTools`,
+`exposeResources: false`) cannot be switched on in Settings → MCP before the key is
+gone or written in pi's words. A server's resources are read by pi's resource tools,
+a group of their own, whatever is switched off of the server's tools
+([MCP servers](/guide/mcp)).
+pi does not read what the adapter did besides
 (`imports`, `~/.config/mcp/mcp.json`, `~/.agents/mcp.json`, a project's `.mcp.json`),
 so servers that came from there have to be added in Settings → MCP; the log names
 the ones it finds. If `mcp.json` cannot be read (a comment in it, a comma too many),

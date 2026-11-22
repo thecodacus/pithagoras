@@ -136,7 +136,6 @@ test("on the first start: the file is carried over, the adapter leaves pi's pack
   writeFileSync(mcpFile, ADAPTER_FILE);
   listed([{ source: ADAPTER, extensions: ["extensions/index.ts"] }, "npm:pi-other"]);
   db.rememberTools([db.remembered({ name: "notes_read", source: "pi-mcp-adapter", package: ADAPTER }), db.remembered({ name: "other_tool", source: "pi-other", package: "npm:pi-other" })]);
-  db.getDb().prepare("INSERT OR REPLACE INTO project_tools (project, tools_off, tools_on) VALUES ('p', 'mcp', ''), ('q', 'notes_read', '')").run();
   mkdirSync(path.join(home, ".config", "mcp"), { recursive: true });
   writeFileSync(path.join(home, ".config", "mcp", "mcp.json"), "{}");
   writeFileSync(path.join(agent, "mcp-cache.json"), "{}");
@@ -163,14 +162,50 @@ test("on the first start: the file is carried over, the adapter leaves pi's pack
   assert.match(logs[0], /nothing \(it is not a server\)/);
   assert.ok(logs[0].includes("what the adapter imported from cursor"), "the adapter's imports are named");
   assert.ok(logs[0].includes(path.join(home, ".config", "mcp", "mcp.json")), "and so is a shared file it read, which pi does not");
-  assert.match(logs[0], /had the adapter's `mcp` tool off does not hold MCP off any more/, "a project that had the adapter's mcp tool off is told that the servers' tools follow its switches now");
-  assert.match(logs[0], /Switches that named the adapter's own tools do nothing now/);
+  assert.doesNotMatch(logs[0], /Switched off, whatever they were/, "no list names the adapter's tools: the servers are as they were");
 
   // Once: another start does nothing, and a file edited since is not touched.
   writeFileSync(mcpFile, JSON.stringify({ mcpServers: { later: { command: "x", lifecycle: "eager" } } }));
   await moveFromAdapter();
   assert.deepEqual(readFile().mcpServers.later, { command: "x", lifecycle: "eager" });
   assert.equal(logs.length, 1);
+});
+
+test("a list that switched off the adapter's `mcp` tool, or one of its tools, brings the servers over switched off, so that the move reaches no further than the adapter did", async () => {
+  for (const [rows, why] of [
+    ["('p', 'mcp', '')", "a project's mcp"],
+    ["('p', 'github_delete_repo', '')", "a tool of the adapter's, off in a project"],
+  ]) {
+    reset();
+    logs.length = 0;
+    writeFileSync(mcpFile, JSON.stringify({ mcpServers: { notes: { command: "node", lifecycle: "lazy" }, gh: { command: "gh", directTools: true } } }));
+    listed([{ source: ADAPTER, extensions: ["extensions/index.ts"] }]);
+    db.rememberTools([db.remembered({ name: "github_delete_repo", source: "pi-mcp-adapter", package: ADAPTER })]);
+    db.getDb().prepare(`INSERT OR REPLACE INTO project_tools (project, tools_off, tools_on) VALUES ${rows}`).run();
+    await moveFromAdapter();
+    const file = readFile();
+    assert.deepEqual(file.mcpServers.notes, { command: "node", enabled: false }, why);
+    assert.deepEqual(file.mcpServers.gh, { command: "gh", enabled: false }, why);
+    assert.equal(logs.length, 1);
+    assert.match(logs[0], /Switched off, whatever they were.*notes, gh/, why);
+    assert.deepEqual(JSON.parse(readFileSync(settingsFile, "utf8")).packages, [], "the adapter is out all the same");
+  }
+  // The portal-wide default is such a list too.
+  reset();
+  logs.length = 0;
+  db.setToolDefaultsOff(["mcp"]);
+  writeFileSync(mcpFile, JSON.stringify({ mcpServers: { notes: { command: "node", lifecycle: "lazy" } } }));
+  listed([{ source: ADAPTER, extensions: [] }]);
+  await moveFromAdapter();
+  assert.equal(readFile().mcpServers.notes.enabled, false);
+});
+
+test("`approveTools: []`, the adapter's \"no tool asks first\", is no gate: the server comes over on, and one that names tools is still left off", async () => {
+  const pi = await piMcp();
+  const moved = carryOver(pi, JSON.stringify({ mcpServers: { a: { command: "npx", args: ["-y", "x"], approveTools: [] }, b: { command: "b" }, c: { command: "c", approveTools: ["delete"] } }, settings: { approveTools: [] } }), false);
+  assert.deepEqual(moved.carried, ["a", "b"]);
+  assert.deepEqual(moved.left.map((l) => l.name), ["c"]);
+  assert.equal(moved.file.mcpServers.a.enabled, undefined);
 });
 
 test("an adapter that was switched off, or never installed, leaves its servers off: nothing ran, and nothing starts", async () => {

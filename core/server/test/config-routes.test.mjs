@@ -165,6 +165,21 @@ test("what would send a model provider's key to a server is not written by a for
 
 // --- settings.json ---
 
+test("a server is not switched on with a gate or an exclusion that pi does not read, and is switched off or edited without them as before", async () => {
+  const kept = { command: "gh-mcp", excludeTools: ["delete_repo"], approveTools: true, enabled: false };
+  // The entry a move from the adapter leaves: off, with the keys. Switching it on would run it without them.
+  for (const extra of [{ excludeTools: ["delete_repo"] }, { includeTools: ["read"] }, { approveTools: true }, { approveTools: ["delete_repo"] }, { exposeResources: false }, { socket: "/run/x.sock" }]) {
+    refused(await send("/api/mcp/servers/gh", "PUT", { entry: { command: "gh-mcp", ...extra, enabled: true } }), 400, /pi does not read/);
+    refused(await send("/api/mcp/servers/gh", "PUT", { entry: { command: "gh-mcp", ...extra } }), 400, /pi does not read/);
+  }
+  assert.equal(existsSync(mcpFile), false, "nothing was written");
+  assert.equal((await send("/api/mcp/servers/gh", "PUT", { entry: kept })).status, 200, "off, with the keys, it is written as it is");
+  // An empty list is no gate and no exclusion: the adapter's boolean | list of tools that ask, and the keys pi's own entry does not have.
+  const none = { command: "gh-mcp", approveTools: [], excludeTools: [], includeTools: [] };
+  assert.equal((await send("/api/mcp/servers/other", "PUT", { entry: none })).status, 200);
+  refused(await send("/api/mcp/servers/gh", "PUT", { entry: { ...kept, enabled: true } }), 400, /excludeTools, approveTools/);
+});
+
 test("an extension setting is written only under a key that is a name, and the file is as it was", async () => {
   const text = JSON.stringify({ packages: ["npm:pi-example"] }, null, 2) + "\n";
   writeFileSync(settingsFile, text);

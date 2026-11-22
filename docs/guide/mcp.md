@@ -126,7 +126,9 @@ is direct for pi, and behind `tool_search` where the server is lazy.
 pi's three tools for a server's resources (`list_mcp_resources`,
 `list_mcp_resource_templates`, `read_mcp_resource`) are a group of their own, "MCP
 resources". They are switched on and off like any tool, and reach every connected
-server by an argument.
+server by an argument. **Switching a server's tools off does not switch off its
+resources**: they stay readable through these three tools until you switch the group
+"MCP resources" off as well, or the server itself off in Settings → MCP.
 
 A server no chat has seen a tool of (it does not start, or has none) is counted as lazy
 and is named to the model as a place to search, and is not listed in Settings → Tools.

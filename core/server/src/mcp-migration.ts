@@ -2,7 +2,7 @@ import { existsSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
-import { NAME_RE, mcpConfigPath, writeMcpFile, type McpFile } from "./api/mcp.js";
+import { NAME_RE, gateOn, ignoredByPi, mcpConfigPath, writeMcpFile, type McpFile } from "./api/mcp.js";
 import { getDb, getSetting, knownTools, packageRemoved, putSetting, toolDefaultsOff } from "./db.js";
 import { isSwitchedOff, sourceOf } from "./extension-switch.js";
 import { piMcp, type PiMcp } from "./pi/mcp-config.js";
@@ -13,7 +13,8 @@ import { piAgentDir, readPiSettings, updatePiSettingsNow } from "./pi-settings.j
  * file with other words, and the portal runs that: `moveFromAdapter` carries the servers over once, as the portal starts,
  * where the adapter's configuration is there, and takes the adapter out of the portal's pi. Nothing here runs after that.
  *
- * The servers keep what they were, on or off, and have no mark, so they are Auto in Settings → Tools. The adapter's own keys
+ * The servers keep what they were, on or off (all off where a list of switches still names the adapter's `mcp` tool or its tools,
+ * which held something off that pi's tools, with other names, are not held by), and have no mark, so they are Auto in Settings → Tools. The adapter's own keys
  * are dropped. A server with something pi has no word for is left as it was, switched off, and named in the one line the log
  * gets; nothing of it is lost, as it stays in the file. A bearer
  * token becomes the Authorization header pi takes: Understory's own entry had one. Not converted: the adapter's variables and
@@ -23,7 +24,7 @@ import { piAgentDir, readPiSettings, updatePiSettingsNow } from "./pi-settings.j
 /** Keys of the adapter's that say nothing pi needs: dropped where a server is carried over. */
 const DROPPED = ["lifecycle", "idleTimeout", "requestTimeoutMs", "directTools", "debug", "trace", "toolPrefix", "disabled"] as const;
 
-/** Keys of the adapter's that pi has no word for: a server with one of them is left off, named. */
+/** Keys of the adapter's that pi has no word for: a server with one of them is left off, named (see ignoredByPi). */
 const REFUSED = ["socket", "includeTools", "excludeTools", "exposeResources", "approveTools"] as const;
 
 /** The adapter's bearer token, and the variable that holds one: they become an Authorization header (see bearerHeader). */
@@ -73,18 +74,15 @@ function bearerHeader(entry: Record<string, unknown>): { header?: string; why?: 
 
 /** The entry as it was, switched off: what a server that cannot be carried over becomes. A gate the adapter had for every server is kept on it, so that it shows on the page and is not lost. */
 function leftOff(entry: Record<string, unknown>, gate: unknown): Record<string, unknown> {
-  return { ...entry, ...(gate && entry.approveTools === undefined ? { approveTools: true } : {}), enabled: false };
+  return { ...entry, ...(gateOn(gate) && entry.approveTools === undefined ? { approveTools: true } : {}), enabled: false };
 }
 
 /** One server of the adapter's file, in pi's words, or why not: then it is as it was, switched off. `off`: nothing ran under the adapter, so nothing starts now. */
 function convertEntry(pi: PiMcp, name: string, entry: Record<string, unknown>, off: boolean, gate: unknown): { entry: Record<string, unknown>; why?: string } {
   const why: string[] = [];
-  if (typeof entry.socket === "string" && entry.socket) why.push("a Unix socket, which pi does not connect");
-  if (Array.isArray(entry.includeTools) && entry.includeTools.length) why.push("a list of the only tools it offers");
-  if (Array.isArray(entry.excludeTools) && entry.excludeTools.length) why.push("a list of tools it leaves out");
-  if (entry.exposeResources === false) why.push("its resources left out");
+  for (const one of ignoredByPi(entry)) if (one.key !== "approveTools") why.push(one.why);
   // The adapter asked before each call of a tool: pi's MCP support does not, and the tools would run unasked.
-  if (entry.approveTools !== undefined ? entry.approveTools : gate) why.push("tools that ask before each call (approveTools), which pi does not do");
+  if (entry.approveTools !== undefined ? gateOn(entry.approveTools) : gateOn(gate)) why.push("tools that ask before each call (approveTools), which pi does not do");
   // The adapter fell back to the old SSE transport where streamable HTTP failed; pi speaks streamable HTTP only, and cannot tell an SSE-only address from the other kind, except by its look.
   if (typeof entry.url === "string" && /\/sse\/?([?#].*)?$/i.test(entry.url.replace(/^[a-z]+:\/\/[^/]*/i, ""))) why.push("a URL that looks like the old SSE transport, which pi does not connect (it needs the server's streamable HTTP address)");
   if (entry.oauth !== undefined && entry.oauth !== false) why.push("an OAuth block of the adapter's");
@@ -192,7 +190,14 @@ export async function moveFromAdapter(): Promise<void> {
   const file = mcpConfigPath();
   const text = existsSync(file) ? readFileSync(file, "utf8") : "";
   const pi = await piMcp();
-  const moved = carryOver(pi, text, adapter === undefined || isSwitchedOff(adapter));
+  // Before the adapter's tools are forgotten: which names the switches have for them.
+  const adapterTools = new Set(knownTools().filter((tool) => (typeof tool.package === "string" ? ADAPTER_PACKAGE.test(tool.package) : tool.source === "pi-mcp-adapter")).map((tool) => tool.name));
+  const switches = switchesNameTheAdapter(adapterTools);
+  const adapterOff = adapter === undefined || isSwitchedOff(adapter);
+  // A list that switched off the adapter's `mcp` tool, or one of its tools, held that off: pi's tools have other names, so the switch holds nothing now.
+  // The servers come over switched off then, so that the move reaches no further than the adapter did, and the person switches them on knowingly.
+  const closed = !adapterOff && (switches.gateway || switches.tools);
+  const moved = carryOver(pi, text, adapterOff || closed);
   if ("error" in moved) {
     console.warn(`[portal] MCP: mcp.json cannot be read (${moved.error}), so the adapter's servers are not carried over to pi's own MCP support yet: fix the file in Settings → MCP, and restart.`);
     return;
@@ -203,9 +208,6 @@ export async function moveFromAdapter(): Promise<void> {
     return;
   }
 
-  // Before the adapter's tools are forgotten: which names the switches have for them.
-  const adapterTools = new Set(knownTools().filter((tool) => (typeof tool.package === "string" ? ADAPTER_PACKAGE.test(tool.package) : tool.source === "pi-mcp-adapter")).map((tool) => tool.name));
-  const switches = switchesNameTheAdapter(adapterTools);
   // The adapter goes first, before the file is in pi's dialect: a chat that started in between would have the adapter read
   // `enabled: false` as nothing, and start a server that is off.
   if (adapter) {
@@ -227,7 +229,7 @@ export async function moveFromAdapter(): Promise<void> {
       `${adapter ? ", pi-mcp-adapter taken out of pi's packages" : ""}.` +
       `${left.length ? ` Left off, as they were, because pi cannot take them as they are: ${left.join("; ")}.` : ""}` +
       `${apart.length ? ` Not read by pi, so not there any more: ${apart.join(", ")}.` : ""}` +
-      `${switches.gateway ? " A project, agent, routine, mode or chat that had the adapter's `mcp` tool off does not hold MCP off any more: the servers' tools follow its switches like any other tool, so switch the ones that must stay off in Settings → Tools." : ""}` +
-      `${switches.tools ? " Switches that named the adapter's own tools do nothing now: set them again in Settings → Tools." : ""}`,
+      `${closed && moved.carried.length ? ` Switched off, whatever they were: a list of switches (portal-wide, a project, agent, routine, mode or chat) still names the adapter's \`mcp\` tool or its tools, which hold nothing off now, so the servers would reach where they did not before. Set those lists again in Settings → Tools, then switch the servers on in Settings → MCP: ${moved.carried.join(", ")}.` : ""}` +
+      `${switches.tools ? " Switches that named the adapter's own tools do nothing now." : ""}`,
   );
 }

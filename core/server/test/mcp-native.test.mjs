@@ -204,6 +204,24 @@ test("a trusted project cannot undo a tool the person hid in a server of their o
   assert.equal(emptied.servers.find((s) => s.name === "alpha").config.toolExposure.delete_repo, "hidden");
 });
 
+test("a trusted project cannot undo a pattern the person hid by naming one tool, or by a wider pattern that comes first", async () => {
+  putConfig({ alpha: server("alpha", "ping", { toolExposure: { "delete_*": "hidden" } }) });
+  const folder = chat();
+  mkdirSync(path.join(folder, ".pi"), { recursive: true });
+  const { piMcp, configForChat } = await import("../dist/pi/mcp-config.js");
+  const pi = await piMcp();
+  const exposureOf = (tool) => {
+    const loaded = configForChat(pi, { cwd: folder, isProjectTrusted: () => true }, agentDir, () => {});
+    const how = loaded.servers.find((s) => s.name === "alpha").config.toolExposure;
+    // pi's own rule: an exact name, then the first pattern that matches.
+    return how[tool] ?? Object.entries(how).find(([key]) => key.includes("*") && pi.createToolNameMatcher([key])(tool))?.[1];
+  };
+  writeFileSync(path.join(folder, ".pi", "mcp.json"), JSON.stringify({ mcpServers: { alpha: { toolExposure: { delete_repo: "direct", "*": "direct", delete_extra_ok: "codemode" } } } }));
+  assert.equal(exposureOf("delete_repo"), "hidden", "an exact name of the project does not beat the person's pattern");
+  assert.equal(exposureOf("delete_other"), "hidden", "nor does a wider pattern of the project, which comes first");
+  assert.equal(exposureOf("read_page"), "direct", "what the person did not hide is the project's");
+});
+
 test("pi-mcp-adapter, still named by a project's settings, is not loaded beside pi's own MCP support", async () => {
   putConfig({ alpha: server("alpha", "ping", { enabled: false }) });
   const folder = chat();

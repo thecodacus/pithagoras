@@ -161,6 +161,25 @@ export function mcpServer(name: string): { entry: Record<string, unknown>; on: b
   }
 }
 
+/** Whether the adapter's `approveTools` (a boolean, or a list of tools) asks before any call: an empty list asks for none. */
+export function gateOn(value: unknown): boolean {
+  return Array.isArray(value) ? value.length > 0 : !!value;
+}
+
+/**
+ * What an entry says that pi does not read, and so does not do: the adapter's own safety keys, which are in the file of a server
+ * the move from the adapter left off. A server that is on with one of them would run without the gate or the exclusion it was given.
+ */
+export function ignoredByPi(entry: Record<string, unknown>): { key: string; why: string }[] {
+  const out: { key: string; why: string }[] = [];
+  if (typeof entry.socket === "string" && entry.socket) out.push({ key: "socket", why: "a Unix socket, which pi does not connect" });
+  if (Array.isArray(entry.includeTools) && entry.includeTools.length) out.push({ key: "includeTools", why: "a list of the only tools it offers" });
+  if (Array.isArray(entry.excludeTools) && entry.excludeTools.length) out.push({ key: "excludeTools", why: "a list of tools it leaves out" });
+  if (entry.exposeResources === false) out.push({ key: "exposeResources", why: "its resources left out" });
+  if (gateOn(entry.approveTools)) out.push({ key: "approveTools", why: "tools that ask before each call (approveTools), which pi does not do" });
+  return out;
+}
+
 /** What an entry connects with, as pi's file gives it: a command, or a URL. */
 function transportOf(entry: Record<string, unknown>): "stdio" | "http" | "unknown" {
   if (typeof entry.command === "string" && entry.command) return "stdio";
@@ -179,14 +198,21 @@ export async function problemWith(name: string, entry: unknown): Promise<string 
 }
 
 /**
- * What is wrong with an entry that is about to be written by a form, an import or a feature: pi's check, and one thing more.
- * `auth: { provider }` makes pi send the portal's key for that model provider to the server's URL as its bearer token; a pasted
+ * What is wrong with an entry that is about to be written by a form, an import or a feature: pi's check, and two things more.
+ * A server that is on with a key pi does not read (see ignoredByPi) is refused. `auth: { provider }` makes pi send the portal's key for that model provider to the server's URL as its bearer token; a pasted
  * README snippet or a feature must not do that unseen, so it is only in the file by hand (the raw editor).
  */
 export async function problemForWrite(name: string, entry: unknown): Promise<string | null> {
   const auth = entry && typeof entry === "object" ? (entry as { auth?: unknown }).auth : undefined;
   if (auth && typeof auth === "object" && (auth as { provider?: unknown }).provider !== undefined) {
     return "auth.provider would send the portal's key for a model provider to this server: write it in the file by hand (the raw editor) if that is meant";
+  }
+  // The adapter's keys for a gate or an exclusion are not read by pi: switched on with them, the tools would run unasked or be there after all.
+  if (entry && typeof entry === "object" && (entry as { enabled?: unknown }).enabled !== false) {
+    const ignored = ignoredByPi(entry as Record<string, unknown>);
+    if (ignored.length) {
+      return `pi does not read ${ignored.map((one) => one.key).join(", ")} (${ignored.map((one) => one.why).join("; ")}), so a server that is on would run without it: take the key out, or write it in pi's words (a tool to leave out is "toolExposure": { "<tool>": "hidden" }), before switching it on`;
+    }
   }
   return problemWith(name, entry);
 }
