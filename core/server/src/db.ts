@@ -7,7 +7,7 @@ import { BUILT_IN_SET, PI_BUILT_IN_TOOLS, defaultsFor, lazyToolEntry, toolEnable
 import { DEFAULT_LIMITS, guessTokens, isLazy, parseMarks, resolveThreshold, type LazyHead, type Limits, type Mark, type Marks, type Resolution, type SizedTool } from "./tool-lazy.js";
 import { projectOf } from "./workspaces.js";
 import { connectingServers, onMcpWritten, readMcpFile, serversAndBrowsers } from "./api/mcp.js";
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, rmdirSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, rmdirSync } from "node:fs";
 import path from "node:path";
 import { isWithinText } from "./within.js";
 import { baseDir, fitBytes, makeFolder, saveNewFile } from "./workspace-files.js";

@@ -1288,16 +1288,20 @@ class SessionManager extends EventEmitter {
     // What this session registered, written down as soon as it exists. The
     // settings page offers a default per tool, and needing to open a chat
     // before you can say "off everywhere" would be the wrong way round.
-    void client
-      .getTools?.()
-      .then((tools) => {
-        // A tool that this chat was started with, because nobody had seen it before, and that is off by default, is taken out of its list again.
-        if (rememberTools(tools.map(remembered)).length) return this.applyToolDefaults();
-      })
-      .catch(() => {
-        // A session that cannot list its tools still works; the catalogue
-        // simply stays as it was.
-      });
+    // Again when a run has settled: an MCP server's tools are registered once pi has connected it, which is after the chat
+    // started, and what a chat last saw of a server is what the threshold counts.
+    const rememberRegistered = () =>
+      void client
+        .getTools?.()
+        .then((tools) => {
+          // A tool that this chat was started with, because nobody had seen it before, and that is off by default, is taken out of its list again.
+          if (rememberTools(tools.map(remembered)).length) return this.applyToolDefaults();
+        })
+        .catch(() => {
+          // A session that cannot list its tools still works; the catalogue
+          // simply stays as it was.
+        });
+    rememberRegistered();
 
     // A new pi process knows nothing of what the last one was retrying.
     this.modelErrors.forget(sessionId);
@@ -1445,6 +1449,7 @@ class SessionManager extends EventEmitter {
         if (!this.failed.delete(sessionId) && !stoppedHere) this.mark(sessionId, "idle");
         for (const woken of this.settleWaiters.get(sessionId) ?? []) woken();
         this.settleWaiters.delete(sessionId);
+        rememberRegistered();
         if (client.reloadDue) void this.reloadSettled(sessionId, client);
       }
     });

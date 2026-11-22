@@ -93,8 +93,11 @@ test("on the first start: the file is carried over and kept as it was, the adapt
   sql.prepare("UPDATE sessions SET tools_off = ?, tools_on = ? WHERE id = ?").run("notes_write\nbash", "docs_search", "moved-chat");
   sql.prepare("INSERT OR REPLACE INTO project_tools (project, tools_off, tools_on) VALUES ('p', 'mcp', '')").run();
   db.setToolMarks({ "<tool>notes_read": "direct", notes: "lazy" });
+  writeFileSync(path.join(agent, "mcp-cache.json"), "{}");
+  writeFileSync(path.join(agent, "mcp-npx-cache.json"), "{}");
 
   await moveFromAdapter();
+  assert.equal(existsSync(path.join(agent, "mcp-cache.json")) || existsSync(path.join(agent, "mcp-npx-cache.json")), false, "the adapter's own cache files go");
 
   const file = JSON.parse(readFileSync(mcpFile, "utf8"));
   assert.deepEqual(Object.keys(file.mcpServers).sort(), ["docs", "filtered", "keyed", "notes", "paused", "signed-in", "sock"], "what pi can read is in the file, the two it cannot (a name it does not take, no server at all) only in the copy");

@@ -1,10 +1,11 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
+import path from "node:path";
 import { writeFileAtomic } from "./atomic-write.js";
 import { NAME_RE, mcpConfigPath, writeMcpFile, type McpFile } from "./api/mcp.js";
 import { adapterServerOf, getDb, getSetting, knownTools, packageRemoved, putSetting, toolDefaultsOff, setToolDefaultsOff, toolMarks, setToolMarks } from "./db.js";
 import { isSwitchedOff, sourceOf } from "./extension-switch.js";
 import { piMcp, type PiMcp } from "./pi/mcp-config.js";
-import { readPiSettings, updatePiSettingsNow } from "./pi-settings.js";
+import { piAgentDir, readPiSettings, updatePiSettingsNow } from "./pi-settings.js";
 
 /**
  * Pithagoras ran MCP through `pi-mcp-adapter`, in its own dialect of mcp.json. pi has MCP support of its own now, in the same
@@ -250,8 +251,10 @@ export async function moveFromAdapter(): Promise<void> {
   }
   if (moved.changed) writeMcpFile(moved.file, "extension");
   const renamed = renameSwitches(names);
-  // What the portal kept to tell the adapter's tools of a removed server from another's: nothing reads it now.
+  // What the portal kept to tell the adapter's tools of a removed server from another's: nothing reads it now. Nor the adapter's own
+  // files of what each server offered and of how `npx` resolved a package, which pi's MCP support does not use.
   for (const key of ["mcp_removed", "mcp_configured"]) putSetting(key, "");
+  for (const leftover of ["mcp-cache.json", "mcp-npx-cache.json"]) rmSync(path.join(piAgentDir(), leftover), { force: true });
   putSetting(MOVED, "1");
 
   const left = moved.left.map(({ name, why }) => `${name} (${why})`);
