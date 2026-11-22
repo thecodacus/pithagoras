@@ -77,7 +77,7 @@ test('the "Run at" field follows the theme, and is not forced to the dark colour
   const routine = { id: 'r1', slug: 'once', name: 'Once', enabled: true, schedule: '', runAt: '2026-10-10T10:00', mode: 'once', done: false, instructions: 'Say hello', freshSession: true, guard: true, exempt: [], workspace: null, reportChannel: null, reportTarget: null, lastReportAt: null, lastRun: null, lastStatus: null, lastOutput: null, lastMs: null, nextRun: null, createdAt: '' };
   await mockPortal(page, ({ path: p, method }) => {
     if (method !== 'GET') return;
-    if (p === '/api/routines') return { routines: [routine] };
+    if (p === '/api/routines') return { routines: [routine], timeoutDefault: { minutes: 60, stored: null, fallback: 60 } };
     if (p === '/api/routines/preview') return { runs: [] };
     if (p === '/api/workspaces') return { root: '/w', workspaces: [] };
     if (p === '/api/projects') return { root: '/w', home: '/h', projects: [] };
