@@ -16,7 +16,7 @@ export interface PiMcp {
   /** One entry of `mcpServers`: a copy of it, or the message that says what is wrong with it. */
   validateMcpServerConfig(name: string, raw: unknown): McpServerConfig | string;
   /** The name pi gives a server's tool, `mcp__<server>__<tool>` with every character but letters, digits and `_` as `_`. */
-  createMcpToolName(server: string, tool: string): string;
+  createMcpToolName(server: string, tool: string, isTaken?: (candidate: string) => boolean): string;
   /** Whether a tool name matches any of the entries, each an exact name or a pattern where `*` matches any characters (as `toolExposure`'s keys). */
   createToolNameMatcher(entries: readonly string[]): (name: string) => boolean;
 }
@@ -34,6 +34,30 @@ export async function piMcp(): Promise<PiMcp> {
   ]);
   loaded = { loadMcpConfig: config.loadMcpConfig, validateMcpServerConfig: servers.validateMcpServerConfig, createMcpToolName: tools.createMcpToolName, createToolNameMatcher: servers.createToolNameMatcher };
   return loaded;
+}
+
+/** Whether the adapter's `approveTools` (a boolean, or a list of tools) asks before any call: an empty list asks for none. */
+export function gateOn(value: unknown): boolean {
+  return Array.isArray(value) ? value.length > 0 : !!value;
+}
+
+/**
+ * What an entry says that pi does not read, and so does not do: the adapter's own keys for a gate, an exclusion, a sign-in and
+ * variables, which are in the file of a server the move from the adapter left off. A server that is on with one of them would run without
+ * the gate or the exclusion it was given, or connect without its header.
+ */
+export function ignoredByPi(entry: Record<string, unknown>): { key: string; why: string }[] {
+  const out: { key: string; why: string }[] = [];
+  if (typeof entry.socket === "string" && entry.socket) out.push({ key: "socket", why: "a Unix socket, which pi does not connect" });
+  if (Array.isArray(entry.includeTools) && entry.includeTools.length) out.push({ key: "includeTools", why: "a list of the only tools it offers" });
+  if (Array.isArray(entry.excludeTools) && entry.excludeTools.length) out.push({ key: "excludeTools", why: "a list of tools it leaves out" });
+  if (entry.exposeResources === false) out.push({ key: "exposeResources", why: "its resources left out" });
+  if (gateOn(entry.approveTools)) out.push({ key: "approveTools", why: "tools that ask before each call (approveTools), which pi does not do" });
+  // Left in the entry of a server the move left off: the server would connect without its header or its sign-in.
+  for (const key of ["bearerToken", "bearerTokenEnv"] as const) if (typeof entry[key] === "string" && entry[key]) out.push({ key, why: "the adapter's bearer token: pi takes an Authorization header" });
+  if (entry.oauth && typeof entry.oauth === "object") out.push({ key: "oauth", why: "the adapter's OAuth block, which pi does not read" });
+  if (/\$env:|\{env:/.test(JSON.stringify(entry))) out.push({ key: "$env:NAME", why: "the adapter's spelling of a variable: pi reads `${NAME}`" });
+  return out;
 }
 
 /**
@@ -56,6 +80,9 @@ export function forChat(config: McpServerConfig): McpServerConfig {
  * pi's configuration for a chat, as `createMcpExtension` is asked for it at each start and reload of the chat: every
  * server of the file as pi reads it, each given the exposure the portal decides (see forChat). `onServers` is told the
  * servers, by which their tools are told apart (see SdkPiClient.serverOf).
+ *
+ * A project's own server with a key of the adapter's that pi does not read (a gate or an exclusion, see ignoredByPi) is switched
+ * off: pi would connect it and run the tools the key held back.
  *
  * A server the user's file defines stays what the user's file says: pi lets a trusted project's `.pi/mcp.json` define a server
  * of the same name anew, with another command, and its tools would carry the namespace of the user's server, which the guard
@@ -88,6 +115,8 @@ export function configForChat(
       const theirs = Object.entries(entry.config.toolExposure ?? {}).filter(([tool]) => !held(tool));
       config = { ...entry.config, toolExposure: { ...Object.fromEntries(hidden), ...Object.fromEntries(theirs) } };
     }
+    // A server of the project's own file that carries one of the adapter's gates or exclusions (pi accepts the unknown key and ignores it) is not connected: it would run what the adapter held back.
+    if (kept === entry && redefined && ignoredByPi(config as unknown as Record<string, unknown>).length) config = { ...config, enabled: false };
     return { ...kept, config: forChat(config) };
   });
   onServers(servers);

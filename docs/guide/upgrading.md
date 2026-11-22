@@ -1387,7 +1387,11 @@ entry goes and nothing is switched on by it. A server whose tools the adapter ne
 name: where any list had MCP off, such a server comes over **switched off**, and the log
 line names it. Switching it on in Settings → MCP is yours to decide: its tools are on
 wherever they are not switched off in Settings → Tools, so set the lists where MCP was
-off as you switch it on. A server that
+off as you switch it on. A project's own `.pi/mcp.json`, which the adapter read, is read by pi now
+in a trusted project (the sandbox off): the tools the adapter had listed for its servers are
+switched off by name in the lists that had MCP off, but a server of it that the adapter never
+listed is on there, and the log names the files. A server in such a file that names one of the
+safety keys below is not connected. A server that
 names a safety key pi does not read (`excludeTools`, `includeTools`, `approveTools`,
 `exposeResources: false`) cannot be switched on in Settings → MCP before the key is
 gone or written in pi's words (the same goes for the adapter's `bearerToken`, an `oauth` block and `$env:NAME` variables left in an entry).

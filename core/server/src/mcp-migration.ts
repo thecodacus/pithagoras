@@ -8,6 +8,8 @@ import { isSwitchedOff, sourceOf } from "./extension-switch.js";
 import { MCP_RESOURCE_TOOLS } from "./pi/mcp-origin.js";
 import { piMcp, type PiMcp } from "./pi/mcp-config.js";
 import { piAgentDir, readPiSettings, updatePiSettingsNow } from "./pi-settings.js";
+import { listProjects } from "./projects.js";
+import { workspaceRoot } from "./workspaces.js";
 
 /**
  * Pithagoras ran MCP through `pi-mcp-adapter`, in its own dialect of mcp.json. pi has MCP support of its own now, in the same
@@ -18,6 +20,7 @@ import { piAgentDir, readPiSettings, updatePiSettingsNow } from "./pi-settings.j
  * are dropped. A list of switches (portal-wide, a project, agent, routine, mode or chat) that had the adapter's `mcp` tool off
  * had MCP off (or one of its tools off by name): it switches off every server's tools by name now, so that nothing reaches further
  * than it did, and the entry goes; a server the adapter never listed tools of cannot be named there, and comes over switched off.
+ * A project's own `.pi/mcp.json` is read by pi as it was by the adapter: the tools the adapter cached of its servers are named in those lists too.
  * A server with something pi has no word for is left as it was, switched off, and named in the one line the log gets; nothing of it
  * is lost, as it stays in the file. A bearer
  * token becomes the Authorization header pi takes: Understory's own entry had one. Not converted: the adapter's variables and
@@ -177,6 +180,43 @@ function adapterCache(): Map<string, string[]> {
   return out;
 }
 
+/** A server's tools as pi names them: where two sanitize to one name, every one of them gets pi's hash suffix (see assignName in pi's mcp extension). */
+function namesOf(pi: PiMcp, server: string, tools: string[]): string[] {
+  const unique = [...new Set(tools)];
+  const plain = unique.map((tool) => pi.createMcpToolName(server, tool));
+  return unique.map((tool) => pi.createMcpToolName(server, tool, (candidate) => plain.indexOf(candidate) !== plain.lastIndexOf(candidate)));
+}
+
+/**
+ * The servers of the projects' own `.pi/mcp.json` (the adapter read them as well, and pi reads them now in a trusted project):
+ * the projects of the workspace folder and the folders the chats work in.
+ */
+function projectServers(): { file: string; servers: string[] }[] {
+  const folders = new Set<string>();
+  try {
+    for (const project of listProjects(workspaceRoot())) folders.add(project.path);
+  } catch {
+    /* no workspace folder yet */
+  }
+  try {
+    for (const row of getDb().prepare("SELECT DISTINCT workspace FROM sessions WHERE workspace IS NOT NULL").all() as { workspace: string }[]) folders.add(row.workspace);
+  } catch {
+    /* as above */
+  }
+  const found: { file: string; servers: string[] }[] = [];
+  for (const folder of [...folders].sort()) {
+    const file = path.join(folder, ".pi", "mcp.json");
+    try {
+      const parsed = JSON.parse(readFileSync(file, "utf8")) as { mcpServers?: unknown };
+      const servers = parsed.mcpServers && typeof parsed.mcpServers === "object" && !Array.isArray(parsed.mcpServers) ? Object.keys(parsed.mcpServers) : [];
+      if (servers.length) found.push({ file, servers });
+    } catch {
+      /* none, or not readable: not ours to say anything of */
+    }
+  }
+  return found;
+}
+
 export interface MovedSwitches {
   /** How many lists had the adapter's `mcp` tool off, and now have every server's tools off. */
   lists: number;
@@ -207,6 +247,8 @@ function moveSwitches(names: ReadonlyMap<string, string[]>, adapterTools: Readon
     const rest = list.filter((name) => !GATEWAY.includes(name));
     return off ? [...new Set([...rest, ...held])].sort() : rest;
   };
+  // What a start before this one did, where it failed after the lists were rewritten: their entries are gone, so only this says which servers cannot be named.
+  const before = heldBefore();
   const db = getDb();
   db.transaction(() => {
     const defaults = toolDefaultsOff();
@@ -227,9 +269,22 @@ function moveSwitches(names: ReadonlyMap<string, string[]>, adapterTools: Readon
         if (offNow) moved.lists++;
       }
     }
+    if (moved.lists) moved.unnamed = unnamed;
+    // In the same transaction as the lists: a start after a failure finds them done, and reads from here what they meant.
+    if (moved.lists || moved.tools) putSetting(HELD, JSON.stringify(moved));
   })();
-  if (moved.lists) moved.unnamed = unnamed;
-  return moved;
+  return moved.lists || moved.tools ? moved : (before ?? moved);
+}
+
+/** The setting that keeps what the lists were rewritten for until the move is done (see moveSwitches). */
+const HELD = "mcp_adapter_held";
+
+function heldBefore(): MovedSwitches | undefined {
+  try {
+    return getSetting(HELD) ? (JSON.parse(getSetting(HELD)!) as MovedSwitches) : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** The files the adapter also read servers from, which pi does not: shared ones of other tools. */
@@ -271,7 +326,10 @@ export async function moveFromAdapter(): Promise<void> {
   // switch them off by name; the move is one step, so a start after a failure finds them done.
   const cache = adapterCache();
   const names = new Map<string, string[]>();
-  for (const server of Object.keys(moved.file.mcpServers)) if (NAME_RE.test(server)) names.set(server, (cache.get(server) ?? []).map((tool) => pi.createMcpToolName(server, tool)));
+  for (const server of Object.keys(moved.file.mcpServers)) if (NAME_RE.test(server)) names.set(server, namesOf(pi, server, cache.get(server) ?? []));
+  // A project's own servers are not the file's to switch off, but where the adapter cached their tools the lists that had MCP off name them too.
+  const projects = projectServers();
+  for (const server of projects.flatMap((one) => one.servers)) if (NAME_RE.test(server) && !names.has(server) && cache.get(server)?.length) names.set(server, namesOf(pi, server, cache.get(server)!));
   const switches = moveSwitches(names, adapterTools);
   // A server with no tool to name (never connected, lazy and never used, or added after the cache was written) cannot be switched off in the lists that had MCP off,
   // and under the adapter those lists could not reach it: it comes over switched off, and the person switches it on knowingly in Settings → MCP.
@@ -296,6 +354,7 @@ export async function moveFromAdapter(): Promise<void> {
   // What the adapter kept beside the file, which pi's MCP support does not use.
   for (const leftover of ["mcp-cache.json", "mcp-npx-cache.json"]) rmSync(path.join(piAgentDir(), leftover), { force: true });
   putSetting(MOVED, "1");
+  putSetting(HELD, "");
 
   const left = moved.left.map(({ name, why }) => `${name} (${why})`);
   const apart = [...moved.imports.map((name) => `what the adapter imported from ${name}`), ...sharedFiles()];
@@ -305,6 +364,7 @@ export async function moveFromAdapter(): Promise<void> {
       `${left.length ? ` Left off, as they were, because pi cannot take them as they are: ${left.join("; ")}.` : ""}` +
       `${apart.length ? ` Not read by pi, so not there any more: ${apart.join(", ")}.` : ""}` +
       `${switches.lists ? ` ${switches.lists} lists of switches (portal-wide, a project, agent, routine, mode or chat) had the adapter's \`mcp\` tool, or one of its tools, off: they have the tools of every server switched off by name now, and pi's resource tools too.${switches.unnamed.length ? ` The adapter never listed the tools of ${switches.unnamed.join(", ")}, so there is nothing to name for those: they are switched off, whatever they were. Switching one on in Settings → MCP puts its tools on wherever they are not switched off in Settings → Tools, so set the lists where MCP was off as you do.` : ""}` : ""}` +
+      `${projects.length ? ` pi reads a project's own .pi/mcp.json as well now: ${projects.map((one) => one.file).join(", ")}. Its servers are on in that project wherever MCP was off, unless the adapter had listed their tools (those are switched off by name in the lists that had MCP off); one with a gate or an exclusion of the adapter's is not connected.` : ""}` +
       `${switches.tools ? " Switches that named the adapter's own tools in a list that had it on do nothing now." : ""}`,
   );
 }

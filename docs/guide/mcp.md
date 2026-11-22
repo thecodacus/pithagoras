@@ -15,7 +15,9 @@ the user-level file pi reads for every session in the portal. A trusted
 project's own `.pi/mcp.json` is read as well, for that project's chats: it can
 bring servers of its own and switch one of yours off (`enabled`), but not define
 one of yours again under the same name, and not switch on one you have switched
-off or hidden (it would start with your command, environment and headers). With the [sandbox](/guide/sandbox) on,
+off or hidden (it would start with your command, environment and headers). A server of
+its own that still has one of the adapter's safety keys pi does not read (`excludeTools`,
+`includeTools`, `approveTools`, `exposeResources: false`) is not connected. With the [sandbox](/guide/sandbox) on,
 a project's file is not read at all.
 
 The format is the one the other MCP clients share, and pi's own:

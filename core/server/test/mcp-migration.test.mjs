@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { inProcessHome } from "./server-harness.mjs";
 
@@ -42,6 +42,7 @@ const ADAPTER_FILE = JSON.stringify({
 const listed = (packages) => writeFileSync(settingsFile, JSON.stringify({ packages }));
 const reset = () => {
   db.putSetting("mcp_adapter_moved", "");
+  db.putSetting("mcp_adapter_held", "");
   for (const table of ["project_tools", "agent_tools", "chat_modes", "routines"]) db.getDb().prepare(`DELETE FROM ${table}`).run();
   db.getDb().prepare("DELETE FROM sessions WHERE id LIKE 'mig-%'").run();
   db.setToolDefaultsOff([]);
@@ -321,4 +322,69 @@ test("a server at an address that looks like the old SSE transport is left off a
   assert.deepEqual(moved.left.map((l) => l.name).sort(), ["query", "sse"]);
   assert.match(moved.left[0].why, /SSE/);
   assert.equal(moved.file.mcpServers.sse.enabled, false);
+});
+
+test("tools of a server that sanitize to one name are switched off under the hashed names pi gives them, not the plain one", async () => {
+  const pi = await piMcp();
+  reset();
+  writeFileSync(mcpFile, JSON.stringify({ mcpServers: { notes: { command: "node", lifecycle: "lazy" } } }));
+  writeFileSync(path.join(agent, "mcp-cache.json"), JSON.stringify({ servers: { notes: { tools: [{ name: "get-item" }, { name: "get_item" }, { name: "read" }] } } }));
+  listed([{ source: ADAPTER, extensions: ["extensions/index.ts"] }]);
+  db.getDb().prepare("INSERT INTO project_tools (project, tools_off, tools_on) VALUES ('p', 'mcp', '')").run();
+  await moveFromAdapter();
+  const off = db.getDb().prepare("SELECT tools_off FROM project_tools WHERE project = 'p'").get().tools_off.split("\n");
+  // What pi registers: both tools get the hash suffix (see assignName in pi's mcp extension), `read` keeps its plain name.
+  const hashed = ["get-item", "get_item"].map((tool) => pi.createMcpToolName("notes", tool, () => true));
+  assert.notEqual(hashed[0], hashed[1]);
+  for (const name of [...hashed, "mcp__notes__read"]) assert.ok(off.includes(name), `${name} is off`);
+  assert.equal(off.includes("mcp__notes__get_item"), false, "the plain name is no tool of pi's here");
+});
+
+test("a start that fails after the lists were rewritten still switches off the servers it could not name, on the start after", { skip: process.getuid?.() === 0 }, async () => {
+  reset();
+  logs.length = 0;
+  writeFileSync(mcpFile, JSON.stringify({ mcpServers: { notes: { command: "node" }, quiet: { command: "q", lifecycle: "lazy" } } }));
+  writeFileSync(path.join(agent, "mcp-cache.json"), JSON.stringify({ servers: { notes: { tools: [{ name: "read" }] } } }));
+  listed([{ source: ADAPTER, extensions: ["extensions/index.ts"] }]);
+  db.getDb().prepare("INSERT INTO project_tools (project, tools_off, tools_on) VALUES ('p', 'mcp', '')").run();
+  // The adapter cannot be taken out of pi's settings: the failure comes after the lists were written.
+  chmodSync(agent, 0o500);
+  try {
+    await assert.rejects(moveFromAdapter());
+  } finally {
+    chmodSync(agent, 0o700);
+  }
+  assert.equal(db.getSetting("mcp_adapter_moved"), undefined, "not done");
+  const projectOff = () => db.getDb().prepare("SELECT tools_off FROM project_tools WHERE project = 'p'").get().tools_off.split("\n");
+  assert.equal(projectOff().includes("mcp"), false, "the entry is gone: the lists are done");
+  await moveFromAdapter();
+  assert.equal(readFile().mcpServers.quiet.enabled, false, "no tool of it to name: off, as it would have been without the failure");
+  assert.equal(readFile().mcpServers.notes.enabled, undefined);
+  assert.match(logs.at(-1), /never listed the tools of quiet/);
+  assert.equal(db.getSetting("mcp_adapter_held"), undefined, "what was kept for the retry is gone with the move");
+});
+
+test("a project's own .pi/mcp.json: where the adapter cached its servers' tools, a list that had MCP off has them off by name, and the log names the file", async () => {
+  const pi = await piMcp();
+  reset();
+  logs.length = 0;
+  const folder = path.join(home, "mig-project");
+  mkdirSync(path.join(folder, ".pi"), { recursive: true });
+  writeFileSync(path.join(folder, ".pi", "mcp.json"), JSON.stringify({ mcpServers: { projsrv: { command: "node", lifecycle: "lazy", excludeTools: ["drop_db"] }, uncached: { command: "u" } } }));
+  writeFileSync(mcpFile, JSON.stringify({ mcpServers: { notes: { command: "node" } } }));
+  writeFileSync(path.join(agent, "mcp-cache.json"), JSON.stringify({ servers: { notes: { tools: [{ name: "read" }] }, projsrv: { tools: [{ name: "drop_db" }, { name: "ok" }] } } }));
+  listed([{ source: ADAPTER, extensions: ["extensions/index.ts"] }]);
+  db.getDb().prepare("INSERT INTO project_tools (project, tools_off, tools_on) VALUES ('mig-project', 'mcp', '')").run();
+  db.createSession({ id: "mig-proj-chat", title: "c", workspace: folder, executor: "host", tools_off: "", tools_on: "" });
+  await moveFromAdapter();
+  const off = db.getDb().prepare("SELECT tools_off FROM project_tools WHERE project = 'mig-project'").get().tools_off.split("\n");
+  const { toolEnabled } = await import("../dist/tool-policy.js");
+  for (const tool of ["drop_db", "ok"]) {
+    const name = pi.createMcpToolName("projsrv", tool);
+    assert.ok(off.includes(name), `${name} is off where MCP was`);
+    assert.equal(toolEnabled(name, db.toolDefaultsOff(), { off, on: [] }), false);
+  }
+  assert.equal(readFile().mcpServers.projsrv, undefined, "the project's file is not the portal's to write");
+  assert.match(logs[0], /pi reads a project's own \.pi\/mcp\.json as well now: .*mig-project\/\.pi\/mcp\.json/);
+  assert.doesNotMatch(logs[0], /never listed the tools of[^.]*(projsrv|uncached)/, "a project's server is not switched off by the move: it is not in the file");
 });

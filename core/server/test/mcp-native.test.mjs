@@ -142,6 +142,20 @@ test("a trusted project's own mcp.json cannot define a server of the user's file
   assert.equal(forced.servers.find((s) => s.name === "beta").config.exposure, "hidden", "still hidden");
 });
 
+test("a server of a trusted project's own mcp.json with a gate or an exclusion of the adapter's, which pi does not read, is not connected", async () => {
+  putConfig({ alpha: server("alpha") });
+  const folder = chat();
+  mkdirSync(path.join(folder, ".pi"), { recursive: true });
+  writeFileSync(path.join(folder, ".pi", "mcp.json"), JSON.stringify({ mcpServers: { excl: server("excl", "ping", { excludeTools: ["drop_db"] }), gated: server("gated", "ping", { approveTools: true }), fine: server("fine", "ping", { approveTools: [] }) } }));
+  const { piMcp, configForChat } = await import("../dist/pi/mcp-config.js");
+  const loaded = configForChat(await piMcp(), { cwd: folder, isProjectTrusted: () => true }, agentDir, () => {});
+  const enabled = (name) => loaded.servers.find((s) => s.name === name).config.enabled;
+  assert.equal(enabled("excl"), false);
+  assert.equal(enabled("gated"), false);
+  assert.notEqual(enabled("fine"), false, "an empty gate asks for nothing");
+  assert.notEqual(enabled("alpha"), false);
+});
+
 test("what a chat's head makes of servers: one nothing has been seen of is lazy until it has been, one marked direct is not", async () => {
   const db = await import("../dist/db.js");
   putConfig({ alpha: server("alpha"), beta: server("beta", "other"), gamma: server("gamma", "third") });
