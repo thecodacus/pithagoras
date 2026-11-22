@@ -28,6 +28,7 @@ import { flaggedResult, forgetTaint, sessionTainted, taintSession } from "./pi/g
 import { neutralise } from "./channels/framing.js";
 import { textOf } from "./pi/entries.js";
 import { removeSessionFiles } from "./session-files.js";
+import { CONTAINER_SESSION_DIR, SESSION_ROOT } from "./pi/session-file.js";
 import { dropImages, forLog, forPi, loadImages, removeImages, storedIn, type Attached } from "./prompt-images.js";
 import { BACKGROUND_SUPPORTED, listJobs, startedWhen, type BackgroundJob } from "./background.js";
 import { forgetSession as forgetLlamaProxy } from "./llama-progress.js";
@@ -172,9 +173,6 @@ function rewrite(file: string, text: string): void {
   renameSync(tmp, file);
 }
 
-const SESSION_ROOT = path.resolve(process.env.SESSION_DIR || "./data/sessions");
-/** Where a container's pi finds a session's folder: see ContainerExecutor. */
-const CONTAINER_SESSION_DIR = "/sessions/";
 /** What can go with a message besides its text. */
 export interface PromptOptions {
   voice?: boolean;

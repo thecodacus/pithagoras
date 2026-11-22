@@ -26,4 +26,5 @@ export const INLINE_EXTENSIONS: readonly string[] = [
   "report",
   CODEMODE_SOURCE,
   "heartbeat",
+  "chats",
 ];

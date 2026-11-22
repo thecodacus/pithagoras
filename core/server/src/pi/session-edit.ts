@@ -41,7 +41,7 @@ export class SessionEditError extends Error {
  */
 export type Scope = "turn" | "tail";
 
-interface Entry {
+export interface Entry {
   type: string;
   id?: string;
   parentId?: string | null;
@@ -51,7 +51,7 @@ interface Entry {
 }
 
 /** Root to leaf, following parent links from the last entry. */
-function pathTo(byId: Map<string, Entry>, leaf: string): Entry[] {
+export function pathTo(byId: Map<string, Entry>, leaf: string): Entry[] {
   const out: Entry[] = [];
   const seen = new Set<string>();
   for (let id: string | null | undefined = leaf; id && !seen.has(id); ) {
