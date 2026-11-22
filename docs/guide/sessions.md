@@ -731,6 +731,40 @@ pi's file for the chat (`/data/sessions/<id>`, see
 gone, the chat still shows its transcript, but the agent starts over, and a
 notice in the chat says so.
 
+## Looking back at old chats
+
+The agent can look back at its own old chats: **chat_list** shows them, newest
+first, with their id, title, kind, message count and last update; **chat_read**
+gives one of them as an account — the user's and the agent's words, a line per
+tool call, the summaries where it was compacted — whole or in a slice by message
+range; **chat_search** finds words across all of them, case-insensitively, each
+match with the chat it is in, the message it is in and a snippet of what is
+around it. The way to work is to search first and read the range the match
+names, so a long chat is read in slices, not whole. Each line of a read begins
+with the index of its message, and a read is capped at 50 KB: where it is cut,
+it says after which message and which `from` to go on with. What it reads is the
+conversation: a tool's result is what the work read, not what the chat said,
+and it is not in the account or in the search.
+
+An image in a chat is a line of its own: a read saves it to a file the agent
+can open, and the search lists the messages with images, with the file to open
+them. And where the words do not carry the answer, the search takes a question
+instead of words: with a prompt and the chat's id, the chat's own model reads
+the transcript — the summaries always, the newest messages until its context
+window is spent — and answers it, citing the message it bases its answer on.
+
+The tools work on the files, not on a context window: a chat that never
+compacts, because its model holds a billion tokens, is read the same way, and
+what a read or a search hands back is capped, not the chat.
+
+The reach is the agent's own: the chats in its home and in its projects, and in
+the projects linked to it, and nothing else — a chat of another agent's is not
+found, whatever its id, and a chat of a project no agent is linked to is no
+agent's. What the list, read and search hand back is often other people's
+words — a channel's conversation is whoever wrote it, and its title is a remote
+group's name — so it is held as [outside content](/guide/security#marking-untrusted-output): the agent
+reads it as data, not as instructions.
+
 ## The tab
 
 The browser tab's title follows the chat you have open: `● Fix login · working`

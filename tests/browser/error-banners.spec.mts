@@ -34,7 +34,7 @@ test('the portal-wide alert can be put away by hand', async ({ page }) => {
 test('the routines page forgets a failed poll when the next one works', async ({ page }) => {
   let down = false;
   await mockPortal(page, ({ path, method }) => {
-    if (path === '/api/routines' && method === 'GET') return down ? reply(500, { error: 'The scheduler is busy' }) : { routines: [] };
+    if (path === '/api/routines' && method === 'GET') return down ? reply(500, { error: 'The scheduler is busy' }) : { routines: [], timeoutDefault: { minutes: 60, stored: null, fallback: 60 } };
     if (path === '/api/workspaces') return { root: '/w', workspaces: [] };
     if (path === '/api/agents') return { agents: [] };
     if (path === '/api/routines/report-targets') return { targets: [], default: null };

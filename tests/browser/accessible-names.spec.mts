@@ -31,7 +31,7 @@ async function portal(page: Page) {
     if (p === '/api/tool-rules') return { rules: [] };
     if (p === '/api/mcp') return mcp;
     if (p === '/api/extensions') return { settingsPath: '/a/settings.json', extensions: [extension] };
-    if (p === '/api/routines') return { routines: [routine] };
+    if (p === '/api/routines') return { routines: [routine], timeoutDefault: { minutes: 60, stored: null, fallback: 60 } };
     if (p === '/api/guard') return { running: true, sandbox: 'on', primary: true, approvalsTo: true, rules: [], servers: [], routines: [], allowlist: 'github.com', approvals: [], trusted: [] };
     if (p === '/api/routines/preview') return { runs: [] };
     // A routine's and an agent's own tool switches: the list of checkboxes the page draws, which have to be named too.

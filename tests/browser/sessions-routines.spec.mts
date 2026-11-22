@@ -1,16 +1,18 @@
 import { type Page } from '@playwright/test';
 import { test, expect, mockPortal, reply } from './portal-mock';
 
-async function portal(page: Page, opts: { routine?: Record<string, unknown>; renameFails?: boolean; listFailsAfterRename?: boolean; /** What a save of the routine is answered with, as a 400. */ refuses?: string; /** A change to the routine that is made on the server, as the agent's routine_update does: the next list has it. */ server?: { next?: Record<string, unknown> }; /** What the saves are stamped with, one for each, where the server's clock counts seconds and two saves can be in the same one. */ stamps?: string[] } = {}) {
+async function portal(page: Page, opts: { routine?: Record<string, unknown>; renameFails?: boolean; listFailsAfterRename?: boolean; /** What a save of the routine is answered with, as a 400. */ refuses?: string; /** A change to the routine that is made on the server, as the agent's routine_update does: the next list has it; and a default saved elsewhere, which the next list brings. */ server?: { next?: Record<string, unknown>; nextDefault?: { stored: number | null; minutes: number } }; /** What the saves are stamped with, one for each, where the server's clock counts seconds and two saves can be in the same one. */ stamps?: string[] } = {}) {
   const sent: { method: string; path: string; body: any }[] = [];
   const session = { id: 's1', title: 'Old name', workspace: '/w/site', status: 'idle', kind: 'task', pinned: false, updated_at: new Date().toISOString() };
   const other = { ...session, id: 's2', title: 'Other chat', workspace: '/w/notes' };
   const routine = {
     id: 'r1', slug: 'build', name: 'Nightly build', enabled: true, schedule: '0 2 * * *', runAt: null, mode: 'repeats', done: false,
-    instructions: 'Build it', freshSession: false, guard: true, exempt: [], workspace: null, reportChannel: null, reportTarget: null,
+    instructions: 'Build it', freshSession: false, timeoutMin: null, guard: true, exempt: [], workspace: null, reportChannel: null, reportTarget: null,
     lastReportAt: null, lastRun: null, lastStatus: null, lastOutput: null, lastMs: null, nextRun: null, createdAt: '', updatedAt: '1',
     workspaceProblem: null, ...opts.routine,
   };
+  // The minutes a run may take unless its routine says: nothing stored, the hour the portal started with.
+  const timeoutDefault = { minutes: 60, stored: null as number | null, fallback: 60 };
   await mockPortal(page, async ({ path: p, method, json }) => {
     const body = json();
     if (method !== 'GET') sent.push({ method, path: p, body });
@@ -21,7 +23,14 @@ async function portal(page: Page, opts: { routine?: Record<string, unknown>; ren
     if (p === '/api/routines' && method === 'GET') {
       if (opts.server?.next) Object.assign(routine, opts.server.next);
       if (opts.server) opts.server.next = undefined;
-      return { routines: [routine] };
+      if (opts.server?.nextDefault) Object.assign(timeoutDefault, opts.server.nextDefault);
+      if (opts.server) opts.server.nextDefault = undefined;
+      return { routines: [routine], timeoutDefault };
+    }
+    if (p === '/api/routines/timeout-default' && method === 'PUT') {
+      // As the server answers: null or 0 clears it, and what the portal started with stands.
+      Object.assign(timeoutDefault, { stored: body.minutes || null, minutes: body.minutes || timeoutDefault.fallback });
+      return { timeoutDefault };
     }
     if (p === '/api/routines/r1' && method === 'PATCH' && opts.refuses) return reply(400, { error: opts.refuses });
     if (p === '/api/routines/r1' && method === 'PATCH') { Object.assign(routine, body, { updatedAt: opts.stamps?.shift() ?? String(Date.now()) }); return routine; }
@@ -199,6 +208,78 @@ test('a routine\'s switches say what they switch and whether they are on, and it
   await expect(timing.getByRole('radio', { name: 'Once' })).toHaveAttribute('aria-checked', 'false');
   await timing.getByRole('radio', { name: 'Once' }).click();
   await expect(timing.getByRole('radio', { name: 'Once' })).toHaveAttribute('aria-checked', 'true');
+});
+
+test("a routine's run time limit is empty for the portal's default, which the field names, and minutes typed are saved as a number", async ({ page }) => {
+  const sent = await portal(page);
+  await page.goto('/routines');
+  await page.getByRole('button', { name: /Nightly build/ }).click();
+  const limit = page.getByLabel('Run time limit (minutes)');
+  await expect(limit).toHaveValue('');
+  await expect(limit).toHaveAttribute('placeholder', '60 (portal default)');
+  await limit.fill('180');
+  await page.getByRole('button', { name: /^Save/ }).click();
+  await expect.poll(() => sent.find((s) => s.method === 'PATCH' && s.path === '/api/routines/r1')?.body.timeoutMin).toBe(180);
+  await expect(limit).toHaveValue('180');
+  // Cleared, it is the default again: said as null, not as nothing.
+  await limit.fill('');
+  await page.getByRole('button', { name: /^Save/ }).click();
+  await expect.poll(() => sent.filter((s) => s.method === 'PATCH' && s.path === '/api/routines/r1').at(-1)?.body.timeoutMin).toBe(null);
+});
+
+test("a default saved elsewhere reaches an untouched field with the next poll, and does not replace minutes being typed", async ({ page }) => {
+  const server: { next?: Record<string, unknown>; nextDefault?: { stored: number | null; minutes: number } } = {};
+  await portal(page, { server });
+  await page.goto('/routines');
+  const field = page.getByLabel('Run time limit by default (minutes)');
+  await expect(field).toHaveValue('');
+  // Nothing typed: the field takes what the next poll brings.
+  server.nextDefault = { stored: 30, minutes: 30 };
+  await expect(field).toHaveValue('30', { timeout: 10_000 });
+  // Typed over and not saved yet: the next poll keeps what is typed.
+  await field.fill('45');
+  server.nextDefault = { stored: 20, minutes: 20 };
+  await expect.poll(() => server.nextDefault, { timeout: 10_000 }).toBeUndefined();
+  await page.waitForTimeout(500);
+  await expect(field).toHaveValue('45');
+});
+
+test("the portal's default run time limit is set above the list, names what the portal started with while empty, and reaches a routine's field", async ({ page }) => {
+  const sent = await portal(page);
+  await page.goto('/routines');
+  const field = page.getByLabel('Run time limit by default (minutes)');
+  await expect(field).toHaveValue('');
+  await expect(field).toHaveAttribute('placeholder', '60');
+  await field.fill('120');
+  await field.press('Enter');
+  await expect.poll(() => sent.find((s) => s.method === 'PUT' && s.path === '/api/routines/timeout-default')?.body).toEqual({ minutes: 120 });
+  await expect(field).toHaveValue('120');
+  // A routine without a limit of its own now says so.
+  await page.getByRole('button', { name: /Nightly build/ }).click();
+  await expect(page.getByLabel('Run time limit (minutes)')).toHaveAttribute('placeholder', '120 (portal default)');
+  await page.getByRole('main').getByRole('button', { name: 'Routines', exact: true }).click();
+  // Emptied, nothing is stored, and the hour stands again.
+  await field.fill('');
+  await field.press('Enter');
+  await expect.poll(() => sent.filter((s) => s.method === 'PUT' && s.path === '/api/routines/timeout-default').at(-1)?.body).toEqual({ minutes: null });
+  await expect(field).toHaveAttribute('placeholder', '60');
+  // A 0 typed clears it too, and the field shows the cleared default, not the 0.
+  await field.fill('45');
+  await field.press('Enter');
+  await expect(field).toHaveValue('45');
+  await field.fill('0');
+  await field.press('Enter');
+  await expect.poll(() => sent.filter((s) => s.method === 'PUT' && s.path === '/api/routines/timeout-default').at(-1)?.body).toEqual({ minutes: 0 });
+  await expect(field).toHaveValue('');
+  // And a 0 with nothing stored already: the answer changes nothing, so only the save itself can empty the field.
+  const puts = () => sent.filter((s) => s.method === 'PUT' && s.path === '/api/routines/timeout-default');
+  const before = puts().length;
+  await field.fill('0');
+  await field.press('Enter');
+  await expect.poll(() => puts().length > before && puts().at(-1)?.body.minutes).toBe(0);
+  await expect(field).toHaveValue('');
+  // Each save went once: Enter and the blur after it are one save, not two.
+  expect(puts().length).toBe(5);
 });
 
 test('a second save soon after the first keeps its "Saved" for as long as the first had', async ({ page }) => {

@@ -11,6 +11,7 @@ import {
   type RoutineRow,
 } from "../routines/supervisor.js";
 import { insertRoutine, readTiming, timingSets } from "../routines/store.js";
+import { readTimeout } from "../routines/timeout.js";
 
 /**
  * Routine management, as tools the agent can call.
@@ -62,6 +63,7 @@ const describe = (r: RoutineRow) => ({
   lastStatus: r.last_status,
   instructions: r.instructions,
   runsIn: r.workspace ?? "Home",
+  runTimeLimit: r.timeout_min ? `${r.timeout_min} minutes` : "the portal's default",
   ...problem(r.workspace),
 });
 
@@ -84,6 +86,8 @@ function place(raw: unknown, sessionId?: string): { workspace: string | null } |
 }
 
 const WORKSPACE_PARAM = Type.Optional(Type.String({ description: "Project name or path to run in, or home (the default: the folder of the agent you are, not a project)" }));
+const TIMEOUT_PARAM = Type.Optional(Type.Number({ description: "Minutes a run may take; 0 or unset: the portal's default" }));
+const TIMEOUT_CHANGE_PARAM = Type.Optional(Type.Number({ description: "Minutes a run may take; 0: the portal's default; leave out to keep it" }));
 
 /**
  * Where a routine created from a conversation should report.
@@ -143,6 +147,7 @@ export function routineTools(sessionId?: string) {
         schedule: Type.Optional(Type.String({ description: "5-field cron or @shorthand, e.g. 0 9 * * 1-5 or @daily" })),
         runAt: Type.Optional(Type.String({ description: "ISO 8601 time, e.g. 2026-08-01T09:00:00Z" })),
         freshSession: Type.Optional(Type.Boolean({ description: "Each run starts without memory of the last; default false" })),
+        timeoutMin: TIMEOUT_PARAM,
         workspace: WORKSPACE_PARAM,
       }),
       async execute(_id: string, p: any) {
@@ -151,6 +156,8 @@ export function routineTools(sessionId?: string) {
         if ("error" in t) return bad(t.error);
         const where = place(p.workspace, sessionId);
         if ("error" in where) return bad(where.error);
+        const limit = p.timeoutMin === undefined ? { timeoutMin: null } : readTimeout(p.timeoutMin);
+        if ("error" in limit) return bad(limit.error);
 
         const back = reportBackTo(sessionId);
         const { id, slug } = insertRoutine({
@@ -158,6 +165,7 @@ export function routineTools(sessionId?: string) {
           timing: t,
           instructions: p.instructions ?? "",
           freshSession: Boolean(p.freshSession),
+          timeoutMin: limit.timeoutMin,
           reportChannel: back.channel,
           reportTarget: back.target,
           workspace: where.workspace,
@@ -185,6 +193,7 @@ export function routineTools(sessionId?: string) {
         schedule: Type.Optional(Type.String({ description: "Cron; clears runAt" })),
         runAt: Type.Optional(Type.String({ description: "ISO time; clears schedule" })),
         enabled: Type.Optional(Type.Boolean({ description: "false pauses it and keeps it: how to cancel one" })),
+        timeoutMin: TIMEOUT_CHANGE_PARAM,
         workspace: WORKSPACE_PARAM,
       }),
       async execute(_id: string, p: any) {
@@ -193,6 +202,13 @@ export function routineTools(sessionId?: string) {
 
         const sets: string[] = [];
         const values: unknown[] = [];
+
+        if (p.timeoutMin !== undefined) {
+          const limit = readTimeout(p.timeoutMin);
+          if ("error" in limit) return bad(limit.error);
+          sets.push("timeout_min = ?");
+          values.push(limit.timeoutMin);
+        }
 
         if (typeof p.name === "string" && p.name.trim()) {
           sets.push("name = ?");

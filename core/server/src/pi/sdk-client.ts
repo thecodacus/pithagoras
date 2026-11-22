@@ -25,6 +25,7 @@ import { withModeParams } from "./request-params.js";
 import type { ModeParams } from "../chat-modes.js";
 import { CONTEXT_FILES, SHARED_FILES } from "./context-files.js";
 import { heartbeatTool } from "./heartbeat-tool.js";
+import { chatTools, ownerOf as chatOwnerOf } from "./chat-tools.js";
 import { ToolSearch } from "./tool-search.js";
 import { CALLED_TOOL_KEY, TOOL_SEARCH, calledThrough } from "./tool-search-names.js";
 import { MCP_RESOURCES, isResourceTool, mcpNamespace, mcpNamespaceOf, serversSwitchedOff } from "./mcp-origin.js";
@@ -617,6 +618,12 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       if (opts.heartbeatAgent && opts.sessionId) {
         factories.push({ name: "heartbeat", factory: heartbeatTool(opts.heartbeatAgent, opts.sessionId) });
       }
+      // The agent's own past: its chats, to list, read and search. See chat-tools.ts.
+      // Bound to the agent the chat belongs to, not to agentFor's fallback to the
+      // first agent: a chat in a project no agent is linked to has no past of an
+      // agent's to reach, and gets no tools.
+      const chatOwner = chatOwnerOf(opts.cwd);
+      if (chatOwner) factories.push({ name: "chats", factory: chatTools(chatOwner.id, opts.sessionId ?? "", opts.cwd) });
       resourceLoader = new (portalLoader(pi))({
         cwd: opts.cwd,
         // One for the loader and the session, so the folder's trust the loader decides holds for both.
