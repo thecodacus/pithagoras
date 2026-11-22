@@ -169,6 +169,10 @@ test("approve takes a list of texts, and the adapter's approveTools in the entry
   for (const approveTools of [true, false, [], ["delete_*"]]) {
     await assert.rejects(mcp.set("risky", { url: "http://127.0.0.1:9/mcp", approveTools }, { approve: ["x"] }), /approveTools.*`approve` option/s, JSON.stringify(approveTools));
   }
+  // `approve` inside the entry is no gate either: the file would say it, and nothing would ask.
+  for (const approve of [["send_*"], true, []]) {
+    await assert.rejects(mcp.set("risky", { url: "http://127.0.0.1:9/mcp", approve }), /approve is not a key of pi's.*`approve` option.*beside the entry/s, JSON.stringify(approve));
+  }
   assert.equal(readFileSync(mcpFile(), "utf8"), before, "the file is as it was");
   assert.equal(db.mcpApprove().risky, undefined);
   // Not stored while the file cannot be read either.
@@ -176,4 +180,29 @@ test("approve takes a list of texts, and the adapter's approveTools in the entry
   await assert.rejects(mcp.set("risky", { url: "http://127.0.0.1:9/mcp" }, { approve: ["x"] }), /Fix mcp.json first/);
   assert.equal(db.mcpApprove().risky, undefined);
   writeFileSync(mcpFile(), before);
+});
+
+test("a rename in Settings keeps the server's gate under its new name, and the old name has none left", async () => {
+  const mcp = await start();
+  await mcp.set("mail", { url: "http://127.0.0.1:5/mcp" }, { approve: ["send_*", "delete_*"] });
+  const { mcpRouter } = await import("../dist/api/mcp.js");
+  const { default: express } = await import("express");
+  const app = express();
+  app.use(express.json());
+  app.use("/api", mcpRouter());
+  const listener = app.listen(0, "127.0.0.1");
+  await new Promise((resolve) => listener.once("listening", resolve));
+  const base = `http://127.0.0.1:${listener.address().port}/api`;
+  try {
+    const put = await fetch(`${base}/mcp/servers/post`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ from: "mail", entry: { url: "http://127.0.0.1:5/mcp" } }) });
+    assert.equal(put.status, 200, await put.clone().text());
+    const view = (await (await fetch(`${base}/mcp`)).json()).servers;
+    assert.deepEqual(view.find((one) => one.name === "post").approve, ["send_*", "delete_*"], "the same server under another name is gated as it was");
+    assert.equal(view.some((one) => one.name === "mail"), false);
+    assert.equal(db.mcpApprove().mail, undefined, "a server given the old name later is not gated by a stale list");
+    assert.deepEqual(db.mcpApprove().post, ["send_*", "delete_*"]);
+  } finally {
+    listener.close();
+  }
+  await mcp.set("post", undefined);
 });

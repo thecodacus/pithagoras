@@ -95,10 +95,32 @@ function adapterPrefixes(server: string): string[] {
 }
 
 /**
+ * The patterns of a tool's own name that `prefix` + the name matches `pattern` (`*` any characters, `?` one) by: what is left of the
+ * pattern once the prefix has been matched against its start, wherever a `*` may take any part of it (`*_delete_*` for `github_` leaves
+ * `delete_*` and `*_delete_*`). Without a cached tool to try the pattern on, this is how a pattern that matched only across the prefix is
+ * kept, whatever it starts with.
+ */
+function throughPrefix(pattern: string, prefix: string): string[] {
+  const seen = new Map<string, string[]>();
+  const walk = (i: number, j: number): string[] => {
+    if (j === prefix.length) return i < pattern.length ? [pattern.slice(i)] : [];
+    if (i === pattern.length) return [];
+    const key = `${i}:${j}`;
+    const known = seen.get(key);
+    if (known) return known;
+    const c = pattern[i];
+    const found = c === "*" ? [...walk(i + 1, j), ...walk(i, j + 1)] : c === "?" || c === prefix[j] ? walk(i + 1, j + 1) : [];
+    seen.set(key, found);
+    return found;
+  };
+  return [...new Set(walk(0, 0))];
+}
+
+/**
  * What the adapter's `approveTools` of a server (its own, or else the setting's for every server) asks about, as the portal's `approve`:
  * `true` is every tool, and a list is its patterns. The adapter matched a pattern against a tool's own name and against the name with the
  * server's prefix (`github_delete_*`, `?` for one character) with dashes and underscores alike, and the portal matches the server's own name
- * only, so a pattern is carried as it is (`?` as `*`, which asks more, not less), with the prefix taken off where it starts with one, and with
+ * only, so a pattern is carried as it is (`?` as `*`, which asks more, not less), with the prefix taken off where it starts with one or a `*` takes it (see throughPrefix), and with
  * each tool the adapter had cached of the server that it matched, by its own name: nothing the adapter asked about is left out because of how
  * the pattern was written.
  */
@@ -109,7 +131,7 @@ function approveOf(server: string, gate: unknown, cached: readonly string[]): st
   const regexp = (pattern: string) => new RegExp(`^${pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".")}$`);
   const asked = new Set(patterns.map((pattern) => pattern.replace(/\?/g, "*")));
   for (const pattern of patterns) {
-    for (const prefix of adapterPrefixes(server)) if (pattern.startsWith(prefix) && pattern.length > prefix.length) asked.add(pattern.slice(prefix.length).replace(/\?/g, "*"));
+    for (const prefix of adapterPrefixes(server)) for (const own of throughPrefix(pattern, prefix)) asked.add(own.replace(/\?/g, "*"));
   }
   for (const tool of cached) {
     const own = tool.replace(/\./g, "_").replace(/-/g, "_");

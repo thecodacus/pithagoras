@@ -1849,15 +1849,32 @@ function approvalServer(origin: Origin, names: readonly string[]): string | unde
   return Object.keys(approve).find((server) => mcpNamespace(server) === origin.namespace && needsApproval(approve[server], names));
 }
 
+/** The most of a call's arguments the person is shown; a longer text is cut, and says so. */
+const APPROVAL_ARGUMENTS_MAX = 4000;
+
+/**
+ * The whole of a call's arguments, as the agent wrote them: a call's recipient, type and content are what a person confirms, and the
+ * rule subject (see subjectOf) is only the path where there is one. A text that is too long is cut with a mark, never silently.
+ */
+export function approvalArguments(input: unknown, max = APPROVAL_ARGUMENTS_MAX): string {
+  let text: string;
+  try {
+    text = JSON.stringify(input ?? {}, null, 2) ?? "{}";
+  } catch {
+    text = String(input);
+  }
+  return text.length > max ? `${text.slice(0, max)}\n... (${text.length - max} more characters not shown: the call has more arguments than fit here)` : text;
+}
+
 /** What the person is asked where a server's `approve` holds a call. */
-function approvalQuestion(toolName: string, server: string, subject: string): { title: string; message: string } {
+function approvalQuestion(toolName: string, server: string, input: unknown): { title: string; message: string } {
   return {
     title: `Let ${toolName} run?`,
     message: [
       `The MCP server "${server}" is set up so that this tool asks you before each call.`,
       "Yes lets this one call run; No refuses it.",
-      "The call, as the agent wrote it:",
-      subject,
+      "The call, with all its arguments as the agent wrote them:",
+      approvalArguments(input),
     ].join("\n"),
   };
 }
@@ -2225,6 +2242,19 @@ export function guardExtension(
       const matched = isTainted() ? taintRules(event.toolName, event.input ?? {}, { workspace, files, acts: declared?.acts }) : [];
       const exempt = matched.length ? exemptNow() : new Set<string>();
       const heldByTaint = matched.find((rule) => !exempt.has(rule.name));
+      // A server whose `approve` names this tool has every call of it confirmed by the person, in whatever way it is made.
+      const gate = approvalServer(originOf(event.toolName), approveNamesOf(event.toolName));
+      // Asked as the guard asks about a held call, and refused as it refuses one: where nobody can answer (a routine, a heartbeat, a
+      // channel's chat, somebody else speaking), and for a question that is not answered yes.
+      const refuseUnconfirmed = (why: string) => {
+        note("refused", `${event.toolName} asks before each call (approve of the MCP server ${gate}): ${why}`);
+        return {
+          block: true,
+          reason:
+            `Refused: "${event.toolName}" is a tool of the MCP server "${gate}", and its calls are confirmed by the person before they run; ${why}. ` +
+            "Say that it was not run rather than looking for another way to it.",
+        };
+      };
       // A one-off approval, spent here. Checked last, after the standing rules,
       // because it is the expensive kind of permission: somebody was asked.
       const granted = () => {
@@ -2282,6 +2312,10 @@ export function guardExtension(
           };
         }
       }
+
+      // Where nobody can answer, a call the server's `approve` holds is refused before a rule or a one-off approval is looked at:
+      // neither could let it run, so a grant is not spent on it.
+      if (gate !== undefined && (role !== "primary" || !dialogs)) return refuseUnconfirmed("there is nobody to ask in this conversation");
 
       if (
         role !== "primary" &&
@@ -2361,30 +2395,17 @@ export function guardExtension(
         );
       };
 
-      // A server whose `approve` names this tool has every call of it confirmed by the person, in whatever way it is made.
-      const gate = approvalServer(originOf(event.toolName), approveNamesOf(event.toolName));
       // What the conversation has read is judged first, so that a call it refuses is not put to the person as well.
       const verdict = afterTaint();
       if (gate === undefined) return verdict;
-      // Asked as the guard asks about a held call, and refused as it refuses one: where nobody can answer (a routine, a heartbeat, a
-      // channel's chat, somebody else speaking), and for a question that is not answered yes.
-      const refuseUnconfirmed = (why: string) => {
-        note("refused", `${event.toolName} asks before each call (approve of the MCP server ${gate}): ${why}`);
-        return {
-          block: true,
-          reason:
-            `Refused: "${event.toolName}" is a tool of the MCP server "${gate}", and its calls are confirmed by the person before they run; ${why}. ` +
-            "Say that it was not run rather than looking for another way to it.",
-        };
-      };
       const confirmed = () => {
         if (role !== "primary" || !dialogs) return refuseUnconfirmed("there is nobody to ask in this conversation");
-        const { title, message } = approvalQuestion(event.toolName, gate, subject);
+        const { title, message } = approvalQuestion(event.toolName, gate, event.input);
         // As above: only a yes, and a question that failed refuses.
         return new Promise<unknown>((resolve) => resolve(ctx.ui.confirm(title, message))).then(
           (yes) => {
             if (yes !== true) return refuseUnconfirmed("the person did not allow this call");
-            note("allowed-by-approval", `the MCP server ${gate} asks before each call of ${event.toolName}: you allowed this one in the chat`);
+            note("allowed-by-approval", `the MCP server ${gate} asks before each call of ${event.toolName}: you allowed this one in the chat, with ${approvalArguments(event.input, 500).replace(/\s+/g, " ")}`);
             return undefined;
           },
           (error) => {

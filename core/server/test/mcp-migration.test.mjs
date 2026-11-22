@@ -117,6 +117,18 @@ test("the adapter's patterns match what the adapter matched: the tool's own name
   assert.equal(needsApproval(patterns, ["list_issues"]), false);
 });
 
+test("a pattern that matched only across the server's prefix is carried whatever it starts with, with no tool cached to try it on", async () => {
+  const pi = await piMcp();
+  const { needsApproval } = await import("../dist/pi/mcp-origin.js");
+  // The adapter matched `*_delete_*` against `github_delete_repo`: the own name `delete_repo` does not match it, the prefixed one does.
+  const moved = carryOver(pi, JSON.stringify({ settings: { approveTools: ["*_delete_*"] }, mcpServers: { github: { command: "x", lifecycle: "lazy" }, "my-mcp": { command: "y", approveTools: ["my_*_drop?"] } } }), false, new Map());
+  assert.equal(moved.file.mcpServers.github.enabled, undefined, "the server is on, as it was");
+  assert.equal(needsApproval(moved.approve.github, ["delete_repo"]), true, moved.approve.github.join());
+  assert.equal(needsApproval(moved.approve.github, ["list_repos"]), false, "no wider than the pattern was");
+  assert.equal(needsApproval(moved.approve["my-mcp"], ["x_drop1"]), true, moved.approve["my-mcp"].join());
+  assert.equal(needsApproval(moved.approve["my-mcp"], ["x_keep"]), false);
+});
+
 test("what a move from the adapter stores as approve is in the database, and the file has none of it", async () => {
   reset();
   logs.length = 0;

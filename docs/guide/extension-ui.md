@@ -1965,7 +1965,8 @@ await portal.mcp.set("notes", undefined);
   `get(name).approve` says what is stored, and the server's row in Settings → MCP
   shows it, read only (see [Calls that ask you first](/guide/mcp#calls-that-ask-you-first)).
   An `approveTools` in the entry, the old adapter's key, which pi does not read, is
-  rejected with this option named.
+  rejected with this option named, and so is an `approve` in the entry (the option is
+  beside the entry, not in it). The question shows the call with all its arguments.
 - It rejects while mcp.json cannot be read, which is the person's to fix in
   Settings → MCP (nothing is written over it), for a name that is not letters,
   digits, dashes and underscores, and for an entry pi would not take (pi's own

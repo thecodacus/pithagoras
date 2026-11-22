@@ -212,6 +212,13 @@ test("the adapter's approveTools is not written by the form, the import, the tog
   assert.deepEqual((await send("/api/mcp")).body.servers.find((server) => server.name === "gh").approve, []);
 });
 
+test("an `approve` inside an entry is refused where approveTools is: nothing would ask, and the refusal names the option", async () => {
+  rmSync(mcpFile, { force: true });
+  refused(await send("/api/mcp/servers/mail", "PUT", { entry: { command: "mail-mcp", approve: ["send_*"] } }), 400, /approve is not a key of pi's.*`approve` option/s);
+  refused(await send("/api/mcp/raw", "PUT", { content: JSON.stringify({ mcpServers: { mail: { command: "mail-mcp", approve: ["send_*"] } } }) }), 400, /mail: approve is not a key of pi's/);
+  assert.equal((await send("/api/mcp/raw", "PUT", { content: JSON.stringify({ mcpServers: { mail: { command: "mail-mcp", approve: ["send_*"], enabled: false } } }) })).status, 200, "a server that is off is kept as it is");
+});
+
 test("a server that keeps the adapter's bearer token, OAuth block or `$env:` variable is not switched on, and the row says why", async () => {
   rmSync(mcpFile, { force: true });
   const left = [

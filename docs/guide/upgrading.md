@@ -1395,7 +1395,7 @@ tool, or a list of patterns, its own or the setting's for every server) is not a
 leave a server off: pi has no such gate, so the portal carries it over as the server's
 [calls that ask you first](/guide/mcp#calls-that-ask-you-first) (`true` is every tool),
 and the server keeps its on or off. A pattern that named tools with the server's prefix
-(`github_delete_*`) is carried as it was, with the prefix taken off, and with each tool the
+(`github_delete_*`), or a `*` that took it (`*_delete_*`), is carried as it was, with the prefix taken off (`delete_*`), and with each tool the
 adapter had listed for the server that it matched, so nothing it asked about is left out
 for how the pattern was written (`?` is carried as `*`, which asks more); the log names
 the servers. The key itself is not in `mcp.json` any more, and is refused where an entry is

@@ -153,8 +153,10 @@ unconfirmed (sending mail, sharing a folder) can say so: the extension that writ
 the server gives it `approve`, patterns of the server's own tool names with `*` for
 any characters (`send_*`, `delete_mail`), as an option of `portal.mcp.set` (see
 [MCP servers](/guide/extension-ui#mcp-servers)). Every call of a tool that matches
-(`mcp__<server>__<tool>`) is put to you before it runs, with the call as the agent
-wrote it: yes lets that one call run, no refuses it, and the server never gets it. It
+(`mcp__<server>__<tool>`) is put to you before it runs, with all its arguments as the
+agent wrote them (a recipient, a type and the content are what you confirm; a text too
+long to show is cut, and says so): yes lets that one call run, no refuses it, and the
+server never gets it. It
 holds however the call is made: by name, through `tool_search`, from a script, or in a
 subagent's chat. Where nobody can answer (a chat nobody attends, a routine's run, a
 conversation on a channel, somebody who is not the primary user), the call is refused
@@ -164,7 +166,10 @@ do in pi's names for tools.
 The patterns are kept by the portal, not in `mcp.json`, which stays pi's alone. They
 go with the server: removing it drops them, and so does writing the server again
 without `approve`, so a server given that name later is not asked about by an old
-list. A server's row in Settings → MCP shows its patterns (read only: the extension
+list. Renaming a server in Settings → MCP takes its patterns along; a rename in the raw
+editor cannot be told from removing a server and adding another, so it drops them (rename
+in the server's form, or ask the extension to set them again). An `approve` inside the
+entry in `mcp.json` is no gate and is refused like `approveTools`. A server's row in Settings → MCP shows its patterns (read only: the extension
 that wrote them sets them). pi's three tools for resources are not covered by it.
 
 ## What the tool lists show

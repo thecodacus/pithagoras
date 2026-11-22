@@ -207,9 +207,12 @@ export async function problemForWrite(name: string, entry: unknown): Promise<str
  * file, not in it. A raw edit of the file keeps its other servers: only one that is on is refused there (`onOnly`).
  */
 function approveToolsProblem(entry: unknown, onOnly = false): string | null {
-  if (!entry || typeof entry !== "object" || (entry as { approveTools?: unknown }).approveTools === undefined) return null;
+  if (!entry || typeof entry !== "object") return null;
+  const key = (["approveTools", "approve"] as const).find((one) => (entry as Record<string, unknown>)[one] !== undefined);
+  if (key === undefined) return null;
   if (onOnly && (entry as { enabled?: unknown }).enabled === false) return null;
-  return "approveTools is the adapter's key, which pi does not read, so nothing would ask before a call: take it out. What a server's calls ask the person about is its `approve` option (patterns of the server's own tool names, `*` for any characters, as in `delete_*`), which an extension gives with portal.mcp.set(name, entry, { approve })";
+  // `approve` inside the entry is the same silent failure: pi accepts the unknown key, the file would say a server asks, and nothing would.
+  return `${key} is ${key === "approve" ? "not a key of pi's, which keeps it" : "the adapter's key, which pi does not read"}, so nothing would ask before a call: take it out. What a server's calls ask the person about is its \`approve\` option (patterns of the server's own tool names, \`*\` for any characters, as in \`delete_*\`), which an extension gives with portal.mcp.set(name, entry, { approve }), beside the entry and not in it`;
 }
 
 /**
@@ -277,8 +280,14 @@ export function mcpRouter(): Router {
       }
       const clash = sameNamespace(config, name, from ?? undefined);
       if (clash) return res.status(409).json({ error: `${clash} already has the tools' prefix ${mcpNamespace(name)}: pi connects only one of two names that differ by a dash and an underscore`, code: "exists" });
-      // A rename removes the old name, and its tools are not the new one's.
-      if (from && from !== name) delete config.mcpServers[from];
+      // A rename removes the old name, and its tools are not the new one's. The server is the same one, though, so its gate moves with it:
+      // the hook of the write drops the old name's patterns, and a rename must not leave its calls unasked.
+      if (from && from !== name) {
+        const db = await import("../db.js");
+        const gate = db.mcpApprove()[from];
+        if (gate) db.setMcpApprove(name, gate);
+        delete config.mcpServers[from];
+      }
       config.mcpServers[name] = req.body.entry;
       writeMcpFile(config);
       res.json({ ok: true });
