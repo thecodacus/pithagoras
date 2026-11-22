@@ -27,8 +27,8 @@ import { CONTEXT_FILES, SHARED_FILES } from "./context-files.js";
 import { heartbeatTool } from "./heartbeat-tool.js";
 import { ToolSearch } from "./tool-search.js";
 import { CALLED_TOOL_KEY, TOOL_SEARCH, calledThrough } from "./tool-search-names.js";
-import { MCP_RESOURCES, isResourceTool, mcpNamespace, mcpNamespaceOf, serversSwitchedOff } from "./mcp-origin.js";
-import { configForChat, piMcp } from "./mcp-config.js";
+import { MCP_RESOURCES, isResourceTool, mcpNamespace, mcpNamespaceOf, serversWithdrawn } from "./mcp-origin.js";
+import { configForChat, connectedFromUserFile, piMcp } from "./mcp-config.js";
 import { NO_LAZY, headLazy, type LazyHead } from "../tool-lazy.js";
 import { askPrimaryTool } from "./ask-primary.js";
 import { ASK_QUESTION_SOURCE, askQuestionTool } from "./ask-question.js";
@@ -40,8 +40,8 @@ import { hostExtensions } from "../extension-host.js";
 import { contextWindowFor, getSkipThinkingProviders, getVoiceInstructions, getVoiceModel, lazyAllowed, questionWaitMs, toolGroupNames, voiceSpeaks } from "../db.js";
 import { configStamp, isLlamaProvider } from "../providers.js";
 import { rereadConfig } from "./model-runtime.js";
-import { browserServers } from "../api/mcp.js";
-import { BUILT_IN_SET, MCP_GATEWAY, PI_BUILT_IN_TOOLS } from "../tool-policy.js";
+import { browserServers, connectingServers } from "../api/mcp.js";
+import { BUILT_IN_SET, PI_BUILT_IN_TOOLS } from "../tool-policy.js";
 
 /** A message on its way into pi: see SdkPiClient.prompt(). */
 interface Handoff {
@@ -494,8 +494,6 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     toolsOff?: string[];
     /** The tools the portal has seen, for one that says it is off until switched on: see `unseenOff`. */
     toolsSeen?: () => ReadonlySet<string>;
-    /** The tools the portal knew when `toolsOff` was worked out: see `unseenMcpOff`. */
-    toolsKnown?: ReadonlySet<string>;
     /** What the chat froze about its lazy tools when it started, which stays as it is for as long as the chat lasts: see LazyHead. */
     lazy?: LazyHead;
     /** Told what the chat's head has taken in since it was made (a lazy tool that declares outside content), to keep with it. */
@@ -541,8 +539,6 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     let filesOf: (name: string) => readonly string[] | undefined = () => undefined;
     // The namespace pi's MCP support registered a tool under, from its definition once the session has it: see mcp-origin.ts.
     let namespaceOf: (name: string) => string | undefined = () => undefined;
-    // The MCP servers the chat has switched off, by namespace, once the session is there: see serversSwitchedOff.
-    let serversOff: () => ReadonlySet<string> = () => new Set();
     // What a tool declares the guard is to hold it to, from its definition once the session has it: see declaredGuard.
     let guardOf: (name: string) => DeclaredGuard | undefined = () => undefined;
     // The line that outside content is data, while a tool that declares it is on or lazy: asked once the session is there (below).
@@ -552,6 +548,8 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     // chat, by their namespace, are how a tool is told to be a server's (see SdkPiClient.ownerOf).
     const mcp = await piMcp();
     const mcpServers = new Map<string, string>();
+    // The servers of the user's file that pi connected for this chat, which a change of the file can take away while it runs: see serversWithdrawn.
+    const started = new Set<string>();
     // What the tools that are on ask to be told in a spoken turn, whoever registered them: `voiceGuidelines` on a
     // tool, as pi's own promptGuidelines are for every turn. Asked once the session is there (below).
     let toolVoiceLines: () => string[] = () => [];
@@ -584,7 +582,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
             (name) => guardOf(name),
             opts.dialogs !== false,
             (name) => namespaceOf(name),
-            () => serversOff(),
+            () => (started.size ? serversWithdrawn(started, connectingServers()) : new Set<string>()),
           ) },
         // Offered only while the conversation has a lazy tool: see applyToolsOff.
         { name: "tool-search", factory: search.extension },
@@ -595,7 +593,9 @@ export class SdkPiClient extends EventEmitter implements PiClient {
             loadConfig: (ctx: { cwd: string; isProjectTrusted(): boolean }) =>
               configForChat(mcp, ctx, pi.getAgentDir(), (servers) => {
                 mcpServers.clear();
+                started.clear();
                 for (const entry of servers) mcpServers.set(mcpNamespace(entry.name), entry.name);
+                for (const name of connectedFromUserFile(servers)) started.add(name);
               }),
           }) },
       ];
@@ -719,8 +719,6 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     filesOf = (name) => declaredFiles(session.getToolDefinition(name));
     guardOf = (name) => declaredGuard(session.getToolDefinition(name));
     namespaceOf = (name) => mcpNamespaceOf(session.getToolDefinition(name));
-    serversOff = () =>
-      serversSwitchedOff(((session.getAllTools?.() ?? []) as { name: string }[]).map((tool) => ({ name: tool.name, definition: session.getToolDefinition(tool.name) })), switchedOff());
 
     const client = new SdkPiClient(session, modelRuntime, () => {});
     client.mcpServers = mcpServers;
@@ -806,7 +804,6 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     client.toolsSeen = opts.toolsSeen;
     client.codemodeOnly = opts.codemode === "only";
     client.switchedOff = new Set([...(opts.toolsOff ?? []), ...client.unseenOff()]);
-    client.switchesKnown = opts.toolsKnown ?? new Set(opts.toolsSeen?.() ?? []);
     client.search = search;
     try {
       await session.bindExtensions({
@@ -1471,16 +1468,11 @@ export class SdkPiClient extends EventEmitter implements PiClient {
    * sandbox is on, which are off whatever the switches say: see `taken`.
    */
   get switchedOff(): Set<string> {
-    const unseen = this.unseenMcpOff();
-    return this.taken.size || unseen.length ? new Set([...this.switches, ...this.taken, ...unseen]) : this.switches;
+    return this.taken.size ? new Set([...this.switches, ...this.taken]) : this.switches;
   }
   set switchedOff(names: Set<string>) {
     this.switches = names;
-    this.gatewayOff = [...names].some((name) => MCP_GATEWAY.includes(name));
   }
-  private gatewayOff = false;
-  /** The tools the portal knew when the switches were last worked out. */
-  private switchesKnown?: ReadonlySet<string>;
   /** The switches alone. */
   private switches = new Set<string>();
 
@@ -1496,19 +1488,6 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     const seen = this.toolsSeen?.();
     if (!seen) return [];
     return (this.session.getAllTools?.() ?? []).map((tool: { name: unknown }) => String(tool.name)).filter((name: string) => !seen.has(name) && this.offByDefault(name));
-  }
-
-  /**
-   * The tools of MCP servers that the portal did not know when the switches were worked out, while the switches still have
-   * pi-mcp-adapter's `mcp` tool off (see MCP_GATEWAY): that list meant no MCP, and a server's tool that appears later (they
-   * connect after the chat starts, and a server changes its tools) is not named in it. Not the tools the portal has seen
-   * since: a reload of the chat brings them back, and they are held until the switches are worked out again, which names them.
-   * Live, as the tools are registered when the servers have connected.
-   */
-  private unseenMcpOff(): string[] {
-    const seen = this.switchesKnown;
-    if (!seen || !this.gatewayOff) return [];
-    return (this.session.getAllTools?.() ?? []).map((tool: { name: unknown }) => String(tool.name)).filter((name: string) => !seen.has(name) && (mcpNamespaceOf(this.session.getToolDefinition(name)) !== undefined || isResourceTool(name)));
   }
 
   /** A field of the tool's own definition, which pi keeps as it was registered. */
@@ -1857,7 +1836,6 @@ export class SdkPiClient extends EventEmitter implements PiClient {
    * active set is computed from what pi wants right now, every time.
    */
   async setToolsOff(names: string[]): Promise<void> {
-    this.switchesKnown = new Set(this.toolsSeen?.() ?? []);
     // The portal's switches name a tool that is off until switched on only once it has seen it: until then it stays off.
     this.switchedOff = new Set([...names, ...this.unseenOff()]);
     this.applyToolsOff();

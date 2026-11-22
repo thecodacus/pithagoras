@@ -102,7 +102,6 @@ test("a name or an entry pi would not take is refused, and so is a file that can
   await assert.rejects(mcp.set("two words", NOTES), /letters, digits, underscore or dash/);
   await assert.rejects(mcp.set("dotted.name", NOTES), /letters, digits, underscore or dash/);
   await assert.rejects(mcp.set("notes", { lifecycle: "lazy" }), /needs either "command" \(stdio\) or "url"/);
-  await assert.rejects(mcp.set("notes", { socket: "/run/mcp.sock" }), /pi does not read socket/);
   await assert.rejects(mcp.set("notes", { url: "http://a/mcp", enabled: "yes" }), /enabled must be a boolean/);
   await mcp.set("kept", { command: "run" });
   const before = readFileSync(mcpFile(), "utf8");

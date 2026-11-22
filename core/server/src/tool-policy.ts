@@ -14,8 +14,6 @@
  * layers exist.
  */
 
-import { MCP_RESOURCE_TOOLS } from "./pi/mcp-origin.js";
-
 /**
  * The name the portal gave the MCP it attached the agent's browser as.
  *
@@ -52,49 +50,6 @@ export interface ToolExceptions {
   on: string[];
 }
 
-/**
- * What pi-mcp-adapter's gateway tool was called, and its script tool. A list that switched one off meant "no MCP here", and
- * the lists still hold the name after the move to pi's own MCP support (nothing renames them). A leftover one keeps every
- * MCP server's tools, and pi's tools for their resources, off in that list, as it did: failing open would give a project, an agent or an unattended routine that
- * had MCP off a server it never had. A tool switched on by name in the same list is on.
- */
-export const MCP_GATEWAY = ["mcp", "mcp_script", "mcpScript"];
-
-/** Whether a name is a tool of an MCP server, as pi names them (`mcp__<server>__<tool>`). By name: an error here only switches more off. */
-export const isMcpToolName = (name: string): boolean => name.startsWith("mcp__");
-
-/** The tools a leftover gateway entry holds off: those of the servers, and pi's three for their resources, which reach every server. */
-export const heldByGateway = (name: string): boolean => isMcpToolName(name) || MCP_RESOURCE_TOOLS.includes(name);
-
-/** Whether a layer's lists say the adapter's `mcp` tool is off: in its own exceptions, or by the layers under it unless it switches it on again. */
-export function gatewayOff(defaultsOff: readonly string[], exceptions: ToolExceptions): boolean {
-  const named = (list: readonly string[]): boolean => list.some((name) => MCP_GATEWAY.includes(name));
-  return named(exceptions.off) || (named(defaultsOff) && !named(exceptions.on));
-}
-
-/**
- * What the portal-wide default is to say about the tools the Tools page lists. The default is a plain off list with no `on`
- * list, so a leftover gateway entry in it is spelled out as the MCP tools off, one by one, which the page can switch on.
- */
-export function defaultsAsShown(names: Iterable<string>, defaultsOff: string[]): string[] {
-  return effectiveOff(names, defaultsOff, { off: [], on: [] });
-}
-
-/**
- * The default to store, given the one the page sends back (see defaultsAsShown). Where the page has switched an MCP tool
- * on (one it lists is not in what it sent) the leftover gateway entry goes: the other tools are named off, one by one, and
- * the default has no `on` list that could say it otherwise. Where it has switched none on, the entry stays, as it holds
- * off the tools of servers nobody has seen yet too.
- */
-export function defaultsToStore(wantedOff: string[], mcpTools: Iterable<string>): string[] {
-  if (!wantedOff.some((name) => MCP_GATEWAY.includes(name))) return wantedOff;
-  if ([...mcpTools].every((name) => wantedOff.includes(name))) return wantedOff;
-  return wantedOff.filter((name) => !MCP_GATEWAY.includes(name));
-}
-
-/** Is this tool on by default, which is by the lists below a layer: it holds no exceptions of its own to look at. */
-export const onByDefault = (name: string, defaultsOff: readonly string[]): boolean => toolEnabled(name, defaultsOff, { off: [], on: [] });
-
 /** Is this tool on, for a conversation holding these exceptions? */
 export function toolEnabled(
   name: string,
@@ -103,9 +58,7 @@ export function toolEnabled(
 ): boolean {
   if (exceptions.off.includes(name)) return false;
   if (exceptions.on.includes(name)) return true;
-  const off = [...defaultsOff];
-  if (heldByGateway(name) && gatewayOff(off, exceptions)) return false;
-  return !off.includes(name);
+  return ![...defaultsOff].includes(name);
 }
 
 /**
@@ -124,8 +77,8 @@ export const lazyToolEntry = (name: string): string => `<tool>${name}`;
  * whatever the default under it becomes — while a tool it never mentioned
  * follows the project.
  */
-export function defaultsFor(defaultsOff: string[], projectExceptions: ToolExceptions, names: Iterable<string> = []): string[] {
-  return effectiveOff(names, defaultsOff, projectExceptions);
+export function defaultsFor(defaultsOff: string[], projectExceptions: ToolExceptions): string[] {
+  return effectiveOff([], defaultsOff, projectExceptions);
 }
 
 /** Everything off for this conversation, which is what pi has to be told. */
@@ -169,16 +122,15 @@ export function exceptionsFor(
   held: ToolExceptions = { off: [], on: [] }
 ): ToolExceptions {
   const off = new Set(wantedOff);
-  // Off by default as the tool itself finds it, which a leftover gateway entry in the lists below makes of every MCP tool.
-  const defaultOff = (name: string): boolean => !toolEnabled(name, defaultsOff, { off: [], on: [] });
+  const defaults = new Set(defaultsOff);
   const exceptions: ToolExceptions = { off: [], on: [] };
   // Only the tools the caller answered about. Walking the defaults as well
   // would write an "on" exception for every default-off tool the caller never
   // saw — an extension that failed to load, a server that is not attached —
   // and that exception outlives the default it was silently cancelling.
   for (const name of new Set([...known, ...off])) {
-    if (off.has(name) && (!defaultOff(name) || held.off.includes(name))) exceptions.off.push(name);
-    if (!off.has(name) && (defaultOff(name) || held.on.includes(name))) exceptions.on.push(name);
+    if (off.has(name) && (!defaults.has(name) || held.off.includes(name))) exceptions.off.push(name);
+    if (!off.has(name) && (defaults.has(name) || held.on.includes(name))) exceptions.on.push(name);
   }
   exceptions.off.sort();
   exceptions.on.sort();

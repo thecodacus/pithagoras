@@ -179,33 +179,11 @@ export async function problemWith(name: string, entry: unknown): Promise<string 
 }
 
 /**
- * The keys of pi-mcp-adapter's that restrict what a server may do and that pi does not read: left in an entry that is switched
- * on, they would quietly do nothing (a tool the person left out is offered, one that asked before each call runs unasked).
- * The migration leaves such a server off (mcp-migration.ts); this is what keeps it from being switched on with them in.
- */
-export function ignoredKeys(entry: unknown): string[] {
-  if (!entry || typeof entry !== "object") return [];
-  const e = entry as Record<string, unknown>;
-  const keys: string[] = [];
-  if (typeof e.socket === "string" && e.socket) keys.push("socket");
-  if (Array.isArray(e.includeTools) && e.includeTools.length) keys.push("includeTools");
-  if (Array.isArray(e.excludeTools) && e.excludeTools.length) keys.push("excludeTools");
-  if (e.exposeResources === false) keys.push("exposeResources");
-  if (e.approveTools) keys.push("approveTools");
-  return keys;
-}
-
-/**
  * What is wrong with an entry that is about to be written by a form, an import or a feature: pi's check, and one thing more.
  * `auth: { provider }` makes pi send the portal's key for that model provider to the server's URL as its bearer token; a pasted
- * README snippet or a feature must not do that unseen, so it is only in the file by hand (the raw editor). And a server that
- * is switched on with keys of the adapter's that pi does not read (see ignoredKeys).
+ * README snippet or a feature must not do that unseen, so it is only in the file by hand (the raw editor).
  */
 export async function problemForWrite(name: string, entry: unknown): Promise<string | null> {
-  const ignored = isOn(entry) ? ignoredKeys(entry) : [];
-  if (ignored.length) {
-    return `pi does not read ${ignored.join(", ")}, so they would do nothing: remove them to switch this server on (a tool to leave out is marked "hidden" in toolExposure)`;
-  }
   const auth = entry && typeof entry === "object" ? (entry as { auth?: unknown }).auth : undefined;
   if (auth && typeof auth === "object" && (auth as { provider?: unknown }).provider !== undefined) {
     return "auth.provider would send the portal's key for a model provider to this server: write it in the file by hand (the raw editor) if that is meant";
@@ -231,7 +209,6 @@ export function mcpRouter(): Router {
           transport: transportOf(entry as Record<string, unknown>),
           enabled: (entry as Record<string, unknown>).enabled !== false,
           problem: await problemWith(name, entry),
-          ignored: ignoredKeys(entry),
         })),
       );
       res.json({

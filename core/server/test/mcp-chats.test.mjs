@@ -159,3 +159,35 @@ test("a server that does not start stays unseen: it is named as a place to searc
   delete config.mcpServers.mute;
   writeFileSync(file, JSON.stringify(config));
 });
+
+test("a server switched off or removed in Settings -> MCP is off at once in a chat that is running, not only after its next reload", async () => {
+  const file = path.join(process.env.PI_CODING_AGENT_DIR, "mcp.json");
+  const entry = JSON.parse(readFileSync(file, "utf8")).mcpServers.notes;
+  const run = async (change) => {
+    let release;
+    const gate = new Promise((resolve) => { release = resolve; });
+    script = [{ name: "mcp__notes__ping", args: {} }, gate.then(() => ({ name: "mcp__notes__echo", args: { text: "after-change" } }))];
+    const { id } = await json("/api/sessions", "POST", {});
+    const first = model.requests.length;
+    await json(`/api/sessions/${id}/prompt`, "POST", { message: "Go on" });
+    // The run is waiting for the model's second answer, with the server connected: the file changes now.
+    for (let i = 0; i < 200 && model.requests.length < first + 2; i++) await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.ok(model.requests.length >= first + 2, "the run is under way");
+    await change();
+    release();
+    for (let i = 0; i < 600; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      if (model.requests.length > first + 2 && db.getSession(id).status !== "running") break;
+    }
+    return toolText(model.requests.at(-1));
+  };
+  const off = await run(async () => assert.equal((await send("/api/mcp/servers/notes", "PUT", { entry: { ...entry, enabled: false }, from: "notes" })).status, 200));
+  assert.match(off, /notes\/ping says/, "the call before the change ran");
+  assert.match(off, /switched off or removed/);
+  assert.doesNotMatch(off, /after-change/);
+  assert.equal((await send("/api/mcp/servers/notes", "PUT", { entry, from: "notes" })).status, 200);
+  const removed = await run(async () => assert.equal((await send("/api/mcp/servers/notes", "DELETE")).status, 200));
+  assert.match(removed, /switched off or removed/);
+  assert.doesNotMatch(removed, /after-change/);
+  assert.equal((await send("/api/mcp/servers/notes", "PUT", { entry })).status, 200);
+});

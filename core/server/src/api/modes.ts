@@ -21,8 +21,8 @@ import {
 import { EXECUTOR_KIND } from "../executor-kind.js";
 import { SessionEditError } from "../pi/session-edit.js";
 import { sessions } from "../session-manager.js";
-import { isToolList, layerExceptions, layerOff, layerTools, toolsUnsupported } from "../tool-layers.js";
-import { toolEnabled } from "../tool-policy.js";
+import { isToolList, layerExceptions, layerTools, toolsUnsupported } from "../tool-layers.js";
+import { defaultsFor, toolEnabled } from "../tool-policy.js";
 import { CODEMODE_TOOL } from "../pi/codemode.js";
 
 const STARTED = "This chat has started, and its mode is fixed: start a new chat for another one.";
@@ -149,7 +149,7 @@ export function modesRouter(): Router {
     const below = toolDefaultsOff();
     const stored = setCustomModeTools(id, layerExceptions(undefined, below, customModeTools(id), off));
     const applied = await sessions.applyToolDefaults({ mode: CUSTOM + id });
-    res.json({ off: layerOff(undefined, below, stored), applied });
+    res.json({ off: defaultsFor(below, stored), applied });
   });
 
   return router;

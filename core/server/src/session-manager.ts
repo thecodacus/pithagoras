@@ -11,7 +11,7 @@ import { agentAt } from "./agents.js";
 import { HEARTBEAT_ROLE } from "./pi/heartbeat-names.js";
 import path from "node:path";
 import type { Draft, LoadError, PiClient, PiTool, PromptTaken } from "./pi/types.js";
-import { effectiveOff, exceptionsFor, heldOffUnshown, onByDefault, toolEnabled, toolSetOf } from "./tool-policy.js";
+import { effectiveOff, exceptionsFor, heldOffUnshown, toolEnabled, toolSetOf } from "./tool-policy.js";
 import { scriptedMark } from "./tool-layers.js";
 import { headLazy, parseHead, ruleTag, type LazyHead } from "./tool-lazy.js";
 import { buildLazyHead } from "./lazy-head.js";
@@ -2814,13 +2814,10 @@ class SessionManager extends EventEmitter {
   }
 
   /** What pi is told about the tools when a conversation starts: the ones that are off, and what the chat froze about the lazy ones. */
-  private toolsFor(sessionId: string): { toolsOff: string[]; toolsKnown: ReadonlySet<string>; lazy: LazyHead; rememberLazy: (head: LazyHead) => void; toolsSeen: () => ReadonlySet<string> } {
-    // The tools the switches were worked out from: what the chat's pi has of an MCP server that is not among them is off until they are worked out again.
-    const known = knownTools().map((t) => t.name);
-    const toolsOff = this.offFor(sessionId, [], known);
+  private toolsFor(sessionId: string): { toolsOff: string[]; lazy: LazyHead; rememberLazy: (head: LazyHead) => void; toolsSeen: () => ReadonlySet<string> } {
+    const toolsOff = this.offFor(sessionId);
     return {
       toolsOff,
-      toolsKnown: new Set(known),
       lazy: this.lazyHeadFor(sessionId),
       rememberLazy: (head) => setLazyHead(sessionId, head),
       toolsSeen: () => new Set(knownTools().map((t) => t.name)),
@@ -2920,7 +2917,7 @@ class SessionManager extends EventEmitter {
           ...(inline ? { inline: true as const } : {}),
           enabled: toolEnabled(name, defaults, exceptions),
           ...(held && name === CODEMODE_TOOL ? { byMode: true as const } : {}),
-          defaultOn: onByDefault(name, defaults),
+          defaultOn: !defaults.includes(name),
           // Not offered one by one but found through `tool_search`: the page says so beside the switch.
           // In a chat that is running it is what the chat froze that says so, which the marks may have left behind.
           ...scriptedMark(client?.offers || frozen ? { ...mark, lazy: lazyHere(name, source, inline) ? (true as const) : undefined } : mark, scripted),

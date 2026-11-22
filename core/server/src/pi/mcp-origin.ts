@@ -53,18 +53,13 @@ export function serverOfArgument(argument: unknown, configured: Iterable<string>
 }
 
 /**
- * The namespaces of the servers a chat has switched off: every tool of the server that the chat has registered is off. A
- * server stays connected whatever a chat has off of it (so a switch can be undone), and pi's resource tools reach every
- * connected server by an argument, so the guard holds them to this. A server with no tool registered cannot be told as off.
- * A tool pi registered as `hidden` (the file hides it, or the server dropped it) is not one a chat can switch, so it does not
- * count: a server with every tool that can be switched off is off.
+ * The namespaces of the servers a running chat still has connected that the configuration no longer connects: switched
+ * off in Settings or removed from the file. pi reads the file when a chat starts or reloads, and a chat that is busy
+ * reloads when its run has settled, so until then it keeps the server and its tools; these are refused meanwhile, whichever
+ * way they are called (see the guard). `started` are the servers the chat's pi was given from the user's file, `connecting`
+ * those the file connects now, where it can be read.
  */
-export function serversSwitchedOff(tools: Iterable<{ name: string; definition: unknown }>, off: ReadonlySet<string>): Set<string> {
-  const seen = new Map<string, boolean>();
-  for (const tool of tools) {
-    if ((tool.definition as { exposure?: unknown } | undefined)?.exposure === "hidden") continue;
-    const namespace = mcpNamespaceOf(tool.definition);
-    if (namespace !== undefined) seen.set(namespace, (seen.get(namespace) ?? true) && off.has(tool.name));
-  }
-  return new Set([...seen].filter(([, allOff]) => allOff).map(([namespace]) => namespace));
+export function serversWithdrawn(started: Iterable<string>, connecting: ReadonlySet<string> | undefined): Set<string> {
+  if (!connecting) return new Set();
+  return new Set([...started].filter((server) => !connecting.has(server)).map(mcpNamespace));
 }

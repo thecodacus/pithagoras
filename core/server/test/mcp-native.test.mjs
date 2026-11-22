@@ -181,40 +181,6 @@ test("an installed extension that brings its own /mcp does not take the portal's
   }
 });
 
-const withResources = (name, tools) => ({ command: process.execPath, args: [FIXTURE, name, "--tools", tools, "--resources"] });
-
-test("a server whose every tool the chat has switched off is not reached through pi's resource tools either, and the others still are", async () => {
-  putConfig({ secret: withResources("secret", "other"), open: withResources("open", "tool,second") });
-  const read = (server, uri) => ({ name: "read_mcp_resource", args: { server, uri } });
-  const r = await run(
-    [read("secret", "file:///secret/one.txt"), read(" secret ", "file:///secret/one.txt"), { name: "list_mcp_resource_templates", args: { server: "secret" } }, { name: "list_mcp_resources", args: {} }, read("open", "file:///open/one.txt"), { name: "list_mcp_resources", args: { server: "open" } }],
-    { toolsOff: ["mcp__secret__other"] },
-  );
-  const text = r.results.map(textOf);
-  assert.match(text[0], /switched off in this conversation/);
-  assert.match(text[1], /switched off in this conversation/, "the blanks around a name make no difference: pi trims them");
-  assert.match(text[2], /switched off in this conversation/);
-  assert.match(text[3], /Name the server you want to list/, "a listing of every server's would list the switched-off one's");
-  assert.doesNotMatch(text.slice(0, 4).join(" "), /contents of file:\/\/\/secret/);
-  assert.match(text[4], /contents of file:\/\/\/open\/one\.txt/, "a server with a tool still on is read as before");
-  assert.match(text[5], /file:\/\/\/open\/one\.txt/);
-  // One tool of a server off is not the server off.
-  const some = await run([read("open", "file:///open/one.txt"), { name: "list_mcp_resources", args: {} }], { toolsOff: ["mcp__open__second"] });
-  assert.match(textOf(some.results[0]), /contents of file:\/\/\/open/);
-  assert.match(textOf(some.results[1]), /file:\/\/\/open\/one\.txt/);
-  // A server with no tool registered, which cannot have been switched off by its tools, is judged by what it has.
-  assert.doesNotMatch(textOf(some.results[1]), /switched off/);
-});
-
-test("a tool the file hides is not one a chat can switch off: a server whose every other tool is off is off, for pi's resource tools too", async () => {
-  putConfig({ secret: { ...withResources("secret", "other,gone"), toolExposure: { gone: "hidden" } } });
-  const read = (server, uri) => ({ name: "read_mcp_resource", args: { server, uri } });
-  const r = await run([read("secret", "file:///secret/one.txt"), { name: "list_mcp_resources", args: {} }], { toolsOff: ["mcp__secret__other"] });
-  assert.match(textOf(r.results[0]), /switched off in this conversation/);
-  assert.match(textOf(r.results[1]), /Name the server you want to list/);
-  assert.doesNotMatch(textOf(r.results[0]), /contents of file/);
-});
-
 test("a tool pi calls deferred in the file is direct for pi, so the portal's own tool_search covers it and pi's cannot", async () => {
   putConfig({ x: server("x", "search,other", { toolExposure: { search: "deferred" } }) });
   const r = await run([]);
@@ -223,16 +189,6 @@ test("a tool pi calls deferred in the file is direct for pi, so the portal's own
   const lazy = await run([search("search", { query: "search" })], { lazy: lazyHead("x") });
   assert.ok(!names(lazy.requests[0]).includes("mcp__x__search"), "and behind the portal's tool_search where the server is lazy");
   assert.match(textOf(lazy.results[0]), /mcp__x__search/);
-});
-
-test("a chat whose lists still have pi-mcp-adapter's `mcp` tool off has the tools of a server it has not seen off, and the ones it has by their own switches", async () => {
-  putConfig({ alpha: server("alpha", "ping,echo") });
-  const seen = new Set(["mcp__alpha__ping"]);
-  const r = await run([], { toolsOff: ["mcp"], toolsSeen: () => seen });
-  assert.ok(!names(r.requests[0]).includes("mcp__alpha__echo"), "not seen yet: off with the list");
-  assert.ok(names(r.requests[0]).includes("mcp__alpha__ping"), "seen: as the portal's switches say, which are by name");
-  const plain = await run([], { toolsOff: [], toolsSeen: () => seen });
-  assert.ok(names(plain.requests[0]).includes("mcp__alpha__echo"), "nothing off in the list: on");
 });
 
 test("a trusted project cannot undo a tool the person hid in a server of their own", async () => {
@@ -265,12 +221,13 @@ test("pi-mcp-adapter, still named by a project's settings, is not loaded beside 
   assert.doesNotMatch(textOf(r.results[0] ?? {}), /adapter ran/);
 });
 
-test("a chat whose lists still have pi-mcp-adapter's `mcp` tool off keeps a server's tools off when the portal has seen them since and the chat's pi is reloaded, until its switches are worked out again", async () => {
-  putConfig({ alpha: server("alpha", "ping,echo") });
+const withResources = (name, tools) => ({ command: process.execPath, args: [FIXTURE, name, "--tools", tools, "--resources"] });
+
+/** A chat that stays, to be talked to turn by turn while the file changes under it: the results of a turn's calls. */
+async function stays(options = {}) {
   script = [];
-  const seen = new Set();
   const client = await SdkPiClient.create({
-    cwd: chat(), sessionDir: mkdtempSync(path.join(home, "chat-")), provider: "fake", modelId: "m", sessionId: `mcp-native-${n++}`, dialogs: false, toolsOff: ["mcp"], toolsSeen: () => seen,
+    cwd: chat(), sessionDir: mkdtempSync(path.join(home, "chat-")), provider: "fake", modelId: "m", sessionId: `mcp-native-${n++}`, dialogs: false, ...options,
   });
   const turn = async (calls) => {
     script = calls;
@@ -283,18 +240,72 @@ test("a chat whose lists still have pi-mcp-adapter's `mcp` tool off keeps a serv
     await settled;
     return results;
   };
+  return { client, turn, done: async () => { await client.shutdown(); client.dispose(); } };
+}
+
+test("a server the file no longer connects is refused in a chat that still has it, however it is called, and the servers that are connected are not", async () => {
+  const read = (server, uri) => ({ name: "read_mcp_resource", args: { server, uri } });
+  const files = { secret: withResources("secret", "other"), open: withResources("open", "tool,second") };
+  putConfig(files);
+  const chatWith = await stays({ lazy: lazyHead("open") });
   try {
-    assert.match((await turn([{ name: "mcp__alpha__echo", args: { text: "a" } }]))[0], /not found/);
-    // Another chat ran, and the portal remembered the server's tools; this chat's switches were not worked out again.
-    seen.add("mcp__alpha__echo").add("mcp__alpha__ping");
-    await client.reload();
-    assert.match((await turn([{ name: "mcp__alpha__echo", args: { text: "b" } }]))[0], /not found/, "still off after the reload");
-    // Worked out again, as the portal does when a default or a switch changes: now the switches name the tools, and a tool switched on is on.
-    await client.setToolsOff(["mcp", "mcp__alpha__ping"]);
-    await client.reload();
-    assert.match((await turn([{ name: "mcp__alpha__echo", args: { text: "c" } }]))[0], /alpha\/echo says .*c/);
+    // While the file connects it, the server is reached by name, by resource and through the search.
+    const before = await chatWith.turn([{ name: "mcp__secret__other", args: { text: "a" } }, read("secret", "file:///secret/one.txt"), { name: "list_mcp_resources", args: {} }]);
+    assert.match(before[0], /secret\/other says/);
+    assert.match(before[1], /contents of file:\/\/\/secret/);
+    // Switched off in Settings (the file now says so) while the chat runs: its pi has not read the file again.
+    putConfig({ ...files, secret: { ...files.secret, enabled: false } });
+    const after = await chatWith.turn([
+      { name: "mcp__secret__other", args: { text: "b" } },
+      read("secret", "file:///secret/one.txt"),
+      read(" secret ", "file:///secret/one.txt"),
+      { name: "list_mcp_resource_templates", args: { server: "secret" } },
+      { name: "list_mcp_resources", args: {} },
+      read("open", "file:///open/one.txt"),
+      { name: "list_mcp_resources", args: { server: "open" } },
+      { name: "mcp__open__tool", args: { text: "c" } },
+    ]);
+    assert.match(after[0], /switched off or removed/, "by its own name");
+    assert.match(after[1], /switched off or removed/, "its resources");
+    assert.match(after[2], /switched off or removed/, "pi trims the blanks of a name, so does the guard");
+    assert.match(after[3], /switched off or removed/);
+    assert.match(after[4], /Name the server you want to list/, "a listing of every server's would list its too");
+    assert.doesNotMatch(after.slice(0, 4).join(" "), /contents of file:\/\/\/secret|secret\/other says/);
+    assert.match(after[5], /contents of file:\/\/\/open\/one\.txt/, "a server the file still connects is read as before");
+    assert.match(after[6], /file:\/\/\/open\/one\.txt/);
+    assert.match(after[7], /open\/tool says/);
+    // Removed from the file altogether: the same.
+    putConfig({ open: files.open });
+    assert.match((await chatWith.turn([{ name: "mcp__secret__other", args: { text: "d" } }]))[0], /switched off or removed/);
+    // And back on, the chat has its server again (it never lost it).
+    putConfig(files);
+    assert.match((await chatWith.turn([{ name: "mcp__secret__other", args: { text: "e" } }]))[0], /secret\/other says/);
   } finally {
-    await client.shutdown();
-    client.dispose();
+    await chatWith.done();
   }
+});
+
+test("a lazy server the file no longer connects is refused through the search of a chat that still has it", async () => {
+  putConfig({ alpha: server("alpha", "ping,echo") });
+  const chatWith = await stays({ lazy: lazyHead("alpha") });
+  try {
+    assert.match((await chatWith.turn([search("call", { name: "mcp__alpha__ping", args: { text: "a" } })]))[0], /alpha\/ping says/);
+    putConfig({ alpha: server("alpha", "ping,echo", { enabled: false }) });
+    const refused = await chatWith.turn([search("call", { name: "mcp__alpha__ping", args: { text: "b" } })]);
+    assert.match(refused[0], /switched off or removed/);
+    assert.doesNotMatch(refused[0], /alpha\/ping says/);
+  } finally {
+    await chatWith.done();
+  }
+});
+
+test("what a chat can lose when the file changes under it is the user's file's servers that connect, not a project's own", async () => {
+  putConfig({ alpha: server("alpha", "ping"), off: server("off", "ping", { enabled: false }), hid: server("hid", "ping", { exposure: "hidden" }) });
+  const folder = chat();
+  mkdirSync(path.join(folder, ".pi"), { recursive: true });
+  writeFileSync(path.join(folder, ".pi", "mcp.json"), JSON.stringify({ mcpServers: { own: server("own", "ping") } }));
+  const { piMcp, configForChat, connectedFromUserFile } = await import("../dist/pi/mcp-config.js");
+  const loaded = configForChat(await piMcp(), { cwd: folder, isProjectTrusted: () => true }, agentDir, () => {});
+  assert.ok(loaded.servers.some((entry) => entry.name === "own"), "the project's server is there");
+  assert.deepEqual(connectedFromUserFile(loaded.servers), ["alpha"]);
 });

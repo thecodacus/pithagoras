@@ -201,3 +201,26 @@ test("a change to a project reaches the chats running in it, and only those", as
     for (const id of [inAlpha, inBeta, inHome]) sessions.live.delete(id);
   }
 });
+
+test("an `mcp` entry left in a list by pi-mcp-adapter holds nothing off: an MCP tool is switched on and off there like any tool, in the project and in its chats", async () => {
+  reset();
+  db.rememberTools([
+    { name: "mcp__browser__a", source: "browser", mcp: "browser" },
+    { name: "mcp__browser__b", source: "browser", mcp: "browser" },
+  ]);
+  // The adapter's gateway tool off in the portal-wide default and in the project's own list, as a portal that was upgraded has them.
+  db.setToolDefaultsOff(["mcp"]);
+  db.setProjectTools("alpha", { off: ["mcp", "mcp__browser__b"], on: [] });
+  const id = chat(path.join(ws, "alpha"));
+  assert.deepEqual(sessions.offFor(id), ["mcp", "mcp__browser__b"], "only the tool the project names is off");
+  // The project's page switches the other on and the first off: the tool the person switched on stays on in the project and in the chat.
+  db.setProjectTools("alpha", { off: ["mcp", "mcp__browser__a"], on: ["mcp__browser__b"] });
+  assert.deepEqual(sessions.offFor(id), ["mcp", "mcp__browser__a"]);
+  // The chat flips a tool on: written against what the project starts it with, and the project's other tool is off for it still.
+  await sessions.setTools(id, ["mcp", "mcp__browser__a"]);
+  assert.deepEqual(db.sessionTools(id), { off: [], on: [] });
+  await sessions.setTools(id, ["mcp"]);
+  assert.deepEqual(sessions.offFor(id), ["mcp"], "a tool switched on in the chat is on");
+  assert.deepEqual(db.sessionTools(id), { off: [], on: ["mcp__browser__a"] });
+  reset();
+});

@@ -7,7 +7,6 @@ import { getDb, getSetting, knownTools, packageRemoved, putSetting, toolDefaults
 import { isSwitchedOff, sourceOf } from "./extension-switch.js";
 import { piMcp, type PiMcp } from "./pi/mcp-config.js";
 import { piAgentDir, readPiSettings, updatePiSettingsNow } from "./pi-settings.js";
-import { MCP_GATEWAY } from "./tool-policy.js";
 
 /**
  * Pithagoras ran MCP through `pi-mcp-adapter`, in its own dialect of mcp.json. pi has MCP support of its own now, in the same
@@ -16,7 +15,7 @@ import { MCP_GATEWAY } from "./tool-policy.js";
  *
  * The servers keep what they were, on or off, and have no mark, so they are Auto in Settings → Tools. The adapter's own keys
  * are dropped. A server with something pi has no word for is left as it was, switched off, and named in the one line the log
- * gets; nothing of it is lost, as it stays in the file, and Settings → MCP says why it is off (see ignoredKeys). A bearer
+ * gets; nothing of it is lost, as it stays in the file. A bearer
  * token becomes the Authorization header pi takes: Understory's own entry had one. Not converted: the adapter's variables and
  * the names of its tools in the switches. Those are for the person to set again, which the docs say.
  */
@@ -155,9 +154,12 @@ export function carryOver(pi: PiMcp, text: string, off: boolean): Carried | { er
   return { file, carried, left, imports, changed: !isDeepStrictEqual(parsed, file), dialect: inAdapterDialect(old) };
 }
 
+/** The adapter's own tool, which a list of switches may name: a list that switched it off meant "no MCP here". */
+const GATEWAY = ["mcp", "mcp_script", "mcpScript"];
+
 /**
- * What the lists of switches still name of the adapter's: its own `mcp` tool (`gateway`, which keeps every server off in that
- * list, see MCP_GATEWAY) and its tools one by one (`tools`, which mean nothing now).
+ * What the lists of switches still name of the adapter's: its own `mcp` tool (`gateway`, which kept every server off in that
+ * list and means nothing now: the servers' tools are switched like any other) and its tools one by one (`tools`, which mean nothing now).
  */
 function switchesNameTheAdapter(adapterTools: Set<string>): { gateway: boolean; tools: boolean } {
   const db = getDb();
@@ -166,7 +168,7 @@ function switchesNameTheAdapter(adapterTools: Set<string>): { gateway: boolean; 
     for (const row of db.prepare(`SELECT tools_off, tools_on FROM ${table}`).all() as { tools_off: string; tools_on: string }[]) lists.push(row.tools_off ?? "", row.tools_on ?? "");
   }
   const names = lists.flatMap((list) => list.split("\n").map((name) => name.trim()));
-  return { gateway: names.some((name) => MCP_GATEWAY.includes(name)), tools: names.some((name) => adapterTools.has(name)) };
+  return { gateway: names.some((name) => GATEWAY.includes(name)), tools: names.some((name) => adapterTools.has(name)) };
 }
 
 /** The files the adapter also read servers from, which pi does not: shared ones of other tools. */
@@ -225,7 +227,7 @@ export async function moveFromAdapter(): Promise<void> {
       `${adapter ? ", pi-mcp-adapter taken out of pi's packages" : ""}.` +
       `${left.length ? ` Left off, as they were, because pi cannot take them as they are: ${left.join("; ")}.` : ""}` +
       `${apart.length ? ` Not read by pi, so not there any more: ${apart.join(", ")}.` : ""}` +
-      `${switches.gateway ? " A project, agent, routine or chat that had the adapter's `mcp` tool off keeps every MCP server off: switch a server's tools on there to use it." : ""}` +
+      `${switches.gateway ? " A project, agent, routine, mode or chat that had the adapter's `mcp` tool off does not hold MCP off any more: the servers' tools follow its switches like any other tool, so switch the ones that must stay off in Settings → Tools." : ""}` +
       `${switches.tools ? " Switches that named the adapter's own tools do nothing now: set them again in Settings → Tools." : ""}`,
   );
 }

@@ -163,7 +163,7 @@ test("on the first start: the file is carried over, the adapter leaves pi's pack
   assert.match(logs[0], /nothing \(it is not a server\)/);
   assert.ok(logs[0].includes("what the adapter imported from cursor"), "the adapter's imports are named");
   assert.ok(logs[0].includes(path.join(home, ".config", "mcp", "mcp.json")), "and so is a shared file it read, which pi does not");
-  assert.match(logs[0], /had the adapter's `mcp` tool off keeps every MCP server off/, "a project that had the adapter's mcp tool off is told");
+  assert.match(logs[0], /had the adapter's `mcp` tool off does not hold MCP off any more/, "a project that had the adapter's mcp tool off is told that the servers' tools follow its switches now");
   assert.match(logs[0], /Switches that named the adapter's own tools do nothing now/);
 
   // Once: another start does nothing, and a file edited since is not touched.

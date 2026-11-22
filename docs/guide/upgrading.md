@@ -1373,17 +1373,15 @@ tools registered directly. A bearer token becomes the `Authorization` header pi 
 list of the tools it offers or leaves out, `$env:NAME` variables, a `$` or a leading
 `!!` in a value of `env` or `headers`, tools that asked before each call, a name with a
 dot, an address that ends in `/sse`) stays in the file as it was, switched off, and is
-named in the one line the log gets (Settings → Logs). Settings → MCP shows which keys keep such a server off and does
-not switch it on while they are in it: write them in pi's words (a tool to leave out is
-`"toolExposure": { "<tool>": "hidden" }`) and switch it on. The tools are named
+named in the one line the log gets (Settings → Logs). pi does not read the keys that kept
+it off, so before you switch it on, write them in pi's words (a tool to leave out is
+`"toolExposure": { "<tool>": "hidden" }`). The tools are named
 `mcp__<server>__<tool>` now: **switches you set on the adapter's own tools do nothing
-any more**, so set them again in Settings → Tools. A project, agent, routine or chat
-that had the adapter's `mcp` tool off keeps every MCP server off, including servers
-the portal has not seen yet (pi's three tools for the resources of the servers are held
-off too): switch the tools you want on there. In the portal-wide default (Settings →
-Tools) the MCP tools show as off, one by one, and switching one on takes the old entry
-out of that default; the tools of servers the portal has not seen by then are on from
-then. The log line says when there are some. pi does not read what the adapter did besides
+any more**, so set them again in Settings → Tools. That includes the adapter's `mcp`
+tool itself: a default, project, agent, routine, mode or chat that had it off **does
+not hold MCP off any more**, and the servers' tools follow its switches like any other
+tool. Switch off in Settings → Tools what must stay off there. The log line says when
+there are some. pi does not read what the adapter did besides
 (`imports`, `~/.config/mcp/mcp.json`, `~/.agents/mcp.json`, a project's `.mcp.json`),
 so servers that came from there have to be added in Settings → MCP; the log names
 the ones it finds. If `mcp.json` cannot be read (a comment in it, a comma too many),

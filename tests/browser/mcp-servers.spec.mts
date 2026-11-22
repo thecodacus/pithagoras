@@ -53,9 +53,3 @@ test('a server cannot be renamed onto another, and keeps its own name for an edi
   await dialog.getByRole('button', { name: 'Save' }).click();
   await expect.poll(() => saves).toEqual(['notes from notes']);
 });
-
-test('a server left off for keys pi does not read says which, so that switching it on is not a surprise', async ({ page }) => {
-  const { dialog } = await portal(page, [{ name: 'gh', entry: { command: 'gh', excludeTools: ['delete_repo'], enabled: false }, transport: 'stdio', enabled: false, problem: null, ignored: ['excludeTools'] }]);
-  await expect(dialog.getByText('pi does not read excludeTools, so they would do nothing: remove them to switch this server on.')).toBeVisible();
-  await expect(dialog.getByText(/pi does not read/)).toHaveCount(1);
-});

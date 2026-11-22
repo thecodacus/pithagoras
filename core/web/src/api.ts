@@ -1434,8 +1434,6 @@ export interface McpServerView {
   enabled: boolean;
   /** What pi says is wrong with the entry, which it skips; null where it takes it. */
   problem: string | null;
-  /** Keys of pi-mcp-adapter's that restrict the server and that pi does not read: it cannot be switched on with them. */
-  ignored: string[];
 }
 
 export interface McpConfigView {

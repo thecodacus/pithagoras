@@ -53,7 +53,10 @@ An extension can write a server of its own into the file, when you switch it on
 from the extension's page. The server is listed and switched here like any other.
 
 A change made here reaches the chats that are running when they are idle, or at
-their next step; they read the file again as they are loaded again.
+their next step; they read the file again as they are loaded again. A server you
+switch off or delete is out of a chat that is still working at once, though: its
+tools (called by name, through `tool_search` or from a script) and its resources
+are refused, and the chat has it no more once its run has settled.
 
 ## Adding a server
 
@@ -118,14 +121,12 @@ seconds; a server slower than that is found through `tool_search` once it has
 connected. `exposure: "hidden"` is kept: the
 server's tools are not reachable. `toolExposure` in an entry, which pi reads to
 give single tools another exposure, is kept as written; a tool it calls `deferred`
-is direct for pi, and behind `tool_search` where the server is lazy. A tool it calls
-`hidden` cannot be switched, so it does not count in the next paragraph.
+is direct for pi, and behind `tool_search` where the server is lazy.
 
 pi's three tools for a server's resources (`list_mcp_resources`,
 `list_mcp_resource_templates`, `read_mcp_resource`) are a group of their own, "MCP
-resources". They reach every connected server by an argument, so a server whose tools
-a chat has all switched off (the ones it can switch) is held to it: the resource tools refuse a call that names it,
-and a listing of every server's, until you name the server you want.
+resources". They are switched on and off like any tool, and reach every connected
+server by an argument.
 
 A server no chat has seen a tool of (it does not start, or has none) is counted as lazy
 and is named to the model as a place to search, and is not listed in Settings → Tools.
@@ -135,9 +136,9 @@ and is named to the model as a place to search, and is not listed in Settings �
 Switching a server's tools off as a group in a list (a project's, an agent's, a
 routine's) writes down the tools the portal knows of it then. A tool the server offers
 later is on there, behind `tool_search` where the server is lazy, as it is for any
-group; and a server that is all off is held off from pi's resource tools only while
-every tool of it that the chat has is off. Switch off the server itself in Settings →
-MCP where a server must not be reached at all.
+group. A server stays connected whatever a chat has switched off of its tools, so that
+they can be switched on again: switch off the server itself in Settings → MCP where it
+must not be reached at all.
 
 In the Tools lists (Settings → Tools, an agent's, a project's, a routine's, a
 chat's) an MCP server is a group like any other. Every tool a chat has seen of it
@@ -147,13 +148,6 @@ when it comes back. A server a project's own `.pi/mcp.json` brings is listed in
 the chats that have it, and in no other list.
 
 ## Disabling
-
-A server that was switched off when the adapter's configuration was carried over because
-of a key pi does not read (`excludeTools`, `includeTools`, `approveTools`, `socket`,
-`exposeResources: false`) shows in Settings → MCP which keys those are, and is not
-switched on while they are in the entry: pi would not leave the tools out or ask before
-a call, and says nothing. Take the key out (write a tool to leave out as
-`"toolExposure": { "<tool>": "hidden" }`), then switch the server on.
 
 The toggle on each row sets `enabled: false` — the server stays configured and
 visible but is never connected. Better than deleting a server you are debugging.

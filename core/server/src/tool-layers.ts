@@ -1,6 +1,6 @@
 import { ASK_QUESTION_TOOL } from "./pi/ask-question.js";
 import { lazyMarks, shownTools, toolGroupNames } from "./db.js";
-import { defaultsFor, exceptionsFor, heldOffUnshown, onByDefault, toolEnabled } from "./tool-policy.js";
+import { defaultsFor, exceptionsFor, heldOffUnshown, toolEnabled } from "./tool-policy.js";
 
 /**
  * What the routes of the tool layers under a chat share — a project's, an agent's, a routine's, a mode's: reading a
@@ -33,22 +33,13 @@ export function layerTools(folder: string | undefined, below: string[], exceptio
     tools: shownTools(folder).filter((tool) => !(unwatched && tool.name === ASK_QUESTION_TOOL && tool.inline)).map((tool) => ({
       ...tool,
       enabled: toolEnabled(tool.name, below, exceptions),
-      defaultOn: onByDefault(tool.name, below),
+      defaultOn: !below.includes(tool.name),
       ...scriptedMark(lazy(tool), scripted),
     })),
     live: false,
     names: toolGroupNames(),
-    off: layerOff(folder, below, exceptions),
+    off: defaultsFor(below, exceptions),
   };
-}
-
-/**
- * What a layer's page holds as off: the tools it lists, with each one that is off named, so that a leftover gateway entry
- * in the lists below (see MCP_GATEWAY) is not the only thing that says an MCP tool is off, and switching one on does not
- * switch the others on with it.
- */
-export function layerOff(folder: string | undefined, below: string[], exceptions: { off: string[]; on: string[] }): string[] {
-  return defaultsFor(below, exceptions, shownTools(folder).map((tool) => tool.name));
 }
 
 /** The exceptions to store for a layer, given what it wants off: as for a project. */
