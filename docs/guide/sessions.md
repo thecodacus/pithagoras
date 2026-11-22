@@ -741,7 +741,9 @@ tool call, the summaries where it was compacted — whole or in a slice by messa
 range; **chat_search** finds words across all of them, case-insensitively, each
 match with the chat it is in, the message it is in and a snippet of what is
 around it. The way to work is to search first and read the range the match
-names, so a long chat is read in slices, not whole. What it reads is the
+names, so a long chat is read in slices, not whole. Each line of a read begins
+with the index of its message, and a read is capped at 50 KB: where it is cut,
+it says after which message and which `from` to go on with. What it reads is the
 conversation: a tool's result is what the work read, not what the chat said,
 and it is not in the account or in the search.
 

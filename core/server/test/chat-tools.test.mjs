@@ -228,13 +228,42 @@ test("a chat in a project linked to the agent is its own, and a blank slate's is
   assert.match(said(await run(tools[CHAT_SEARCH_TOOL], { query: "nightjar" })), /No matches/);
 });
 
-test("a read is capped at 50 KB of UTF-8, at a character boundary, the note reserved", async () => {
+test("a read carries the index of each message, as the question's transcript does", async () => {
+  const read = said(await run(tools[CHAT_READ_TOOL], { id: "plan" }));
+  assert.match(read, /^\[0\] \*\*User:\*\* Fix the backup script/m);
+  assert.match(read, /^\[1\] \*\*Agent:\*\* Let me look\./m);
+  assert.match(read, /^\[1\] → bash/m, "a tool call is a line of the message it is in");
+  assert.match(read, /^\[2\] \*\*Agent:\*\* The cron entry is wrong/m);
+});
+
+test("a read is capped at 50 KB of UTF-8, at a character boundary, and a first message too long is said to be cut", async () => {
   createSession({ id: "big", title: "A big one", workspace: scout.home, executor: "host" });
   writeChatFile("big", [user("\u00e9".repeat(60_000))]);
   const read = said(await run(tools[CHAT_READ_TOOL], { id: "big" }));
   assert.ok(Buffer.byteLength(read, "utf8") <= 50_000, "the cap is in bytes, not characters");
-  assert.match(read, /\u2026truncated; read a slice with from and to\.$/);
+  assert.match(read, /\u2026message 0 is longer than a read holds and is cut here$/);
   assert.doesNotMatch(read, /\uFFFD/, "it cuts at a character boundary");
+});
+
+test("a read cut at the cap says after which message, where to go on, and what the header shows", async () => {
+  createSession({ id: "long-read", title: "Many messages", workspace: scout.home, executor: "host" });
+  // 100 messages of 1 KB each is about 100 KB: the cap falls inside the account.
+  const entries = [];
+  for (let i = 0; i < 50; i++) entries.push(user(`question ${i} ${"q".repeat(1000)}`), agent(`answer ${i} ${"a".repeat(1000)}`));
+  writeChatFile("long-read", entries);
+  const read = said(await run(tools[CHAT_READ_TOOL], { id: "long-read" }));
+  assert.ok(Buffer.byteLength(read, "utf8") <= 50_000);
+  const note = /\u2026truncated after message (\d+); go on with from: (\d+)$/.exec(read);
+  assert.ok(note, "the note names where the cut fell");
+  const last = Number(note[1]);
+  assert.equal(Number(note[2]), last + 1, "and the message to go on with");
+  assert.ok(last > 0 && last < 99, "inside the chat");
+  assert.match(read, new RegExp(`^"Many messages" \\(chat long-read, task \u2014 messages 0 to ${last} of 100\\)`), "the header says what is shown, not the whole range");
+  assert.match(read, new RegExp(`^\\[${last}\\] `, "m"), "the last message named is in the read");
+  assert.doesNotMatch(read, new RegExp(`^\\[${last + 1}\\] `, "m"), "and the next one is not");
+
+  const next = said(await run(tools[CHAT_READ_TOOL], { id: "long-read", from: last + 1 }));
+  assert.match(next, new RegExp(`^\\[${last + 1}\\] `, "m"), "going on with from picks up where it stopped");
 });
 
 test("summaries count against the question's budget, and the note says what is left out", async () => {

@@ -44,8 +44,8 @@ export const CHAT_SEARCH_TOOL = "chat_search";
 const LIST_CAP = 100;
 /** What one read may hand back, in UTF-8 bytes; more is a slice, not a wall of text. */
 const MAX_OUTPUT = 50_000;
-/** The note a capped read ends with, reserved for in the cap. */
-const TRUNCATION_NOTE = "\n…truncated; read a slice with from and to.";
+/** What a capped read keeps free for its closing note, in bytes: the note names a message index and where to go on. */
+const NOTE_RESERVE = 200;
 /** The folder of a chat's images, where the portal keeps them: see session-manager. */
 const IMAGE_ROOT = path.resolve(DATA_DIR, "images");
 /** What a question to a chat's context may take the model. */
@@ -199,13 +199,55 @@ function snippet(text: string, at: number): string {
   return (start > 0 ? "…" : "") + text.slice(start, end).replace(/\s+/g, " ").trim() + (end < text.length ? "…" : "");
 }
 
-/** `text` at `max` UTF-8 bytes, at a character boundary, the note reserved for; shorter text is kept as it is. */
-function capAt(text: string, max: number): string {
-  if (Buffer.byteLength(text, "utf8") <= max) return text;
+/** `text` at `max` UTF-8 bytes, at a character boundary. */
+function cutAt(text: string, max: number): string {
   const bytes = Buffer.from(text, "utf8");
-  let cut = max - Buffer.byteLength(TRUNCATION_NOTE, "utf8");
+  if (bytes.length <= max) return text;
+  let cut = Math.max(0, max);
   while (cut > 0 && (bytes[cut] & 0xc0) === 0x80) cut--;
-  return bytes.subarray(0, cut).toString("utf8") + TRUNCATION_NOTE;
+  return bytes.subarray(0, cut).toString("utf8");
+}
+
+const bytesOf = (text: string): number => Buffer.byteLength(text, "utf8");
+
+/**
+ * The lines of a read, each with the index of its message, held to MAX_OUTPUT
+ * bytes with the header and a closing note. The cut falls between two
+ * messages, so that what is shown is whole messages and the note can say where
+ * to go on: `from` is the next message. A first message longer than the cap is
+ * cut inside, since nothing else would show, and says so.
+ */
+function fitRead(title: string, from: number, to: number, count: number, slice: Block[]): string {
+  const head = (last: number) => `${title}${from === 0 && last === count - 1 ? "" : ` — messages ${from} to ${last} of ${count}`})`;
+  // The widest header the read can have: the whole range.
+  const budget = MAX_OUTPUT - bytesOf(head(to)) - 2 - NOTE_RESERVE;
+  const groups: { index: number; lines: string[] }[] = [];
+  for (const b of slice) {
+    const line = `[${b.index}] ${b.text}`;
+    const last = groups.at(-1);
+    if (last && last.index === b.index) last.lines.push(line);
+    else groups.push({ index: b.index, lines: [line] });
+  }
+  const whole = groups.map((g) => g.lines.join("\n")).join("\n");
+  if (bytesOf(whole) <= budget) return `${head(to)}\n\n${whole}`;
+  const kept: string[] = [];
+  let used = 0;
+  let shown = from - 1;
+  for (const g of groups) {
+    const text = g.lines.join("\n");
+    const size = bytesOf(text) + (kept.length ? 1 : 0);
+    if (used + size > budget) break;
+    kept.push(text);
+    used += size;
+    shown = g.index;
+  }
+  if (kept.length) {
+    return `${head(shown)}\n\n${kept.join("\n")}\n…truncated after message ${shown}; go on with from: ${shown + 1}`;
+  }
+  // Even the first message does not fit: what fits of it, and where the next begins.
+  const first = groups[0];
+  const more = groups.length > 1 ? `; go on with from: ${first.index + 1}` : "";
+  return `${head(first.index)}\n\n${cutAt(first.lines.join("\n"), budget)}\n…message ${first.index} is longer than a read holds and is cut here${more}`;
 }
 
 /** One image of a message, out of the record and into the chat's image folder, where it can be opened: its file, or nothing. */
@@ -315,12 +357,7 @@ ${lines.join("\n")}${more}`);
           const image = await imageOf(session.id, block.image.entryId, block.image.partIndex, block.image.part);
           if (image) block.text = `→ [image: ${image}]`;
         }
-        const text = slice.map((b) => b.text).join("\n");
-        const range = from === 0 && to === count - 1 ? "" : ` — messages ${from} to ${to} of ${count}`;
-        const out = capAt(`"${session.title}" (chat ${session.id}, ${session.kind}${range})
-
-${text}`, MAX_OUTPUT);
-        return say(out);
+        return say(fitRead(`"${session.title}" (chat ${session.id}, ${session.kind}`, from, to, count, slice));
       },
     });
 
