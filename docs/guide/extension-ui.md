@@ -1966,7 +1966,12 @@ await portal.mcp.set("notes", undefined);
   shows it, read only (see [Calls that ask you first](/guide/mcp#calls-that-ask-you-first)).
   An `approveTools` in the entry, the old adapter's key, which pi does not read, is
   rejected with this option named, and so is an `approve` in the entry (the option is
-  beside the entry, not in it). The question shows the call with all its arguments.
+  beside the entry, not in it). The question shows the call with all its arguments (a
+  long text is cut by itself, so every key shows). A pattern is the server's own tool
+  name: `mcp__<server>__send_mail` and `<server>/send_mail` are rejected, they would never
+  match. Any extension can write any server's name, so a `set` that leaves `approve` out
+  drops what another wrote: pass it again whenever you write a server that has it (the
+  portal logs a change or drop of patterns that were there).
 - It rejects while mcp.json cannot be read, which is the person's to fix in
   Settings → MCP (nothing is written over it), for a name that is not letters,
   digits, dashes and underscores, and for an entry pi would not take (pi's own

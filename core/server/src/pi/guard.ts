@@ -1857,9 +1857,19 @@ const APPROVAL_ARGUMENTS_MAX = 4000;
  * rule subject (see subjectOf) is only the path where there is one. A text that is too long is cut with a mark, never silently.
  */
 export function approvalArguments(input: unknown, max = APPROVAL_ARGUMENTS_MAX): string {
-  let text: string;
+  let text = "";
   try {
-    text = JSON.stringify(input ?? {}, null, 2) ?? "{}";
+    // The agent orders the keys, so a long text cut from the whole would push a later recipient or share target out of sight: each long
+    // text is cut by itself, with its own mark, and cut shorter while the call still does not fit, so every key and short value shows.
+    for (const each of [1000, 300, 100, 40]) {
+      text =
+        JSON.stringify(
+          input ?? {},
+          (_key, value) => (typeof value === "string" && value.length > each ? `${value.slice(0, each)}... (${value.length - each} more characters not shown)` : value),
+          2,
+        ) ?? "{}";
+      if (text.length <= max) return text;
+    }
   } catch {
     text = String(input);
   }

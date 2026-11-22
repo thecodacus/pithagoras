@@ -754,7 +754,9 @@ export interface ServerPortal {
      * as for what the guard cannot ask. pi has no such gate, so the patterns are kept by the portal and not in mcp.json;
      * they replace what the server had, and a `set` without `approve` or with `undefined` as the entry drops them, so a
      * server given that name later is not gated by an old list. Settings → MCP shows them in the server's row, read
-     * only. An `approveTools` in the entry (the old adapter's key, which pi does not read) is refused, and so is an `approve` in the entry (it is an option, beside the entry). The person is shown the call with all its arguments. Then the open chats
+     * only. A pattern is the tool's own name as the server gives it: `mcp__<server>__send_mail` and `<server>/send_mail` are
+     * rejected, they would never match. Any extension can write any server's name, so pass `approve` again whenever you write a
+     * server that has it; a `set` that changes or drops patterns that were there is logged. An `approveTools` in the entry (the old adapter's key, which pi does not read) is refused, and so is an `approve` in the entry (it is an option, beside the entry). The person is shown the call with all its arguments. Then the open chats
      * are loaded again, as `chats.reload` does, and what
      * that answers is answered. Rejects while the file cannot be read, which is the person's to fix in Settings → MCP,
      * and for a name or an entry pi would not take.

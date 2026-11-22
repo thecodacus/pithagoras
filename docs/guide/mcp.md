@@ -155,21 +155,26 @@ any characters (`send_*`, `delete_mail`), as an option of `portal.mcp.set` (see
 [MCP servers](/guide/extension-ui#mcp-servers)). Every call of a tool that matches
 (`mcp__<server>__<tool>`) is put to you before it runs, with all its arguments as the
 agent wrote them (a recipient, a type and the content are what you confirm; a text too
-long to show is cut, and says so): yes lets that one call run, no refuses it, and the
+long to show is cut by itself and says so, so a recipient or a target is always shown): yes lets that one call run, no refuses it, and the
 server never gets it. It
 holds however the call is made: by name, through `tool_search`, from a script, or in a
 subagent's chat. Where nobody can answer (a chat nobody attends, a routine's run, a
 conversation on a channel, somebody who is not the primary user), the call is refused
 and the agent is told so. A dash and an underscore count as one in a pattern, as they
-do in pi's names for tools.
+do in pi's names for tools. A pattern is a tool's own name as the server gives it:
+`mcp__<server>__send_mail` and `<server>/send_mail` would never match, so they are refused.
 
 The patterns are kept by the portal, not in `mcp.json`, which stays pi's alone. They
 go with the server: removing it drops them, and so does writing the server again
 without `approve`, so a server given that name later is not asked about by an old
-list. Renaming a server in Settings → MCP takes its patterns along; a rename in the raw
-editor cannot be told from removing a server and adding another, so it drops them (rename
-in the server's form, or ask the extension to set them again). An `approve` inside the
-entry in `mcp.json` is no gate and is refused like `approveTools`. A server's row in Settings → MCP shows its patterns (read only: the extension
+list. Renaming a server in Settings → MCP takes its patterns along; so does a rename in
+the raw editor where exactly one server is gone, one is new, and the two entries are the
+same. Any other change there is a removal and an addition, which drops them (ask the
+extension to set them again). Any extension can write any server's name, and a `set`
+without `approve` drops what another one wrote; the portal logs that (`[extension <name>]
+dropped the approve patterns ...`), so give `approve` again whenever you write a server
+that has it. An `approve` inside the entry in `mcp.json` is no gate and is refused like
+`approveTools`; in a trusted project's own `.pi/mcp.json` the server is not connected. A server's row in Settings → MCP shows its patterns (read only: the extension
 that wrote them sets them). pi's three tools for resources are not covered by it.
 
 ## What the tool lists show

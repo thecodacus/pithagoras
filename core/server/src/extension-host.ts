@@ -694,7 +694,13 @@ function portalFor(ext: Running): ServerPortal {
         scope.exit(async () => {
           // Imported when first asked: it installs packages through what starts and stops these halves, which imports this module.
           const { setMcpServer } = await import("./mcp-entry.js");
+          const had = mcpApprove()[server] ?? [];
           await setMcpServer(server, entry, options.approve);
+          // Any extension can write any server's name, and a set that leaves `approve` out drops the gate: said in the log, never silent.
+          const now = mcpApprove()[server] ?? [];
+          if (had.length && JSON.stringify(now) !== JSON.stringify(had)) {
+            say(name, `${entry === undefined ? "removed" : now.length ? "changed" : "dropped"} the approve patterns of the MCP server ${server} (${had.join(", ")})${now.length ? `, now ${now.join(", ")}` : ""}`);
+          }
           // Counted as the person's own on the extension's word, and no longer once the server is gone: Settings → Guard
           // lists only the servers there are, so a name left trusted could not be taken out, and would trust whatever
           // server is given that name next.

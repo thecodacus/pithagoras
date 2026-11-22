@@ -115,8 +115,8 @@ export function configForChat(
       const theirs = Object.entries(entry.config.toolExposure ?? {}).filter(([tool]) => !held(tool));
       config = { ...entry.config, toolExposure: { ...Object.fromEntries(hidden), ...Object.fromEntries(theirs) } };
     }
-    // A server of the project's own file that carries one of the adapter's gates or exclusions (pi accepts the unknown key and ignores it) is not connected: it would run what the adapter held back. `approve` is kept for the servers of the person's file, by name; a project's own server has none.
-    if (kept === entry && redefined && (ignoredByPi(config as unknown as Record<string, unknown>).length || gateOn((config as unknown as Record<string, unknown>).approveTools))) config = { ...config, enabled: false };
+    // A server of the project's own file that carries one of the adapter's gates or exclusions (pi accepts the unknown key and ignores it) is not connected: it would run what the adapter held back. `approve` is kept for the servers of the person's file, by name; a project's own server has none, so an `approve` in its entry is no gate either.
+    if (kept === entry && redefined && (ignoredByPi(config as unknown as Record<string, unknown>).length || gateOn((config as unknown as Record<string, unknown>).approveTools) || (config as unknown as Record<string, unknown>).approve !== undefined)) config = { ...config, enabled: false };
     return { ...kept, config: forChat(config) };
   });
   onServers(servers);

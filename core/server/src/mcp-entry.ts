@@ -15,7 +15,7 @@ import { approvePatterns } from "./pi/mcp-origin.js";
  */
 export async function setMcpServer(name: string, entry: Record<string, unknown> | undefined, approve?: unknown): Promise<void> {
   if (!NAME_RE.test(name)) throw new TypeError("An MCP server's name is letters, digits, underscore or dash");
-  const patterns = approve === undefined || entry === undefined ? [] : approvePatterns(approve);
+  const patterns = approve === undefined || entry === undefined ? [] : approvePatterns(approve, name);
   if (typeof patterns === "string") throw new TypeError(patterns);
   const problem = entry === undefined ? null : await problemForWrite(name, entry);
   if (problem) throw new TypeError(problem);

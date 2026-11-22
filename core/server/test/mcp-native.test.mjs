@@ -146,12 +146,13 @@ test("a server of a trusted project's own mcp.json with a gate or an exclusion o
   putConfig({ alpha: server("alpha") });
   const folder = chat();
   mkdirSync(path.join(folder, ".pi"), { recursive: true });
-  writeFileSync(path.join(folder, ".pi", "mcp.json"), JSON.stringify({ mcpServers: { excl: server("excl", "ping", { excludeTools: ["drop_db"] }), gated: server("gated", "ping", { approveTools: true }), fine: server("fine", "ping", { approveTools: [] }) } }));
+  writeFileSync(path.join(folder, ".pi", "mcp.json"), JSON.stringify({ mcpServers: { excl: server("excl", "ping", { excludeTools: ["drop_db"] }), gated: server("gated", "ping", { approveTools: true }), choosy: server("choosy", "ping", { approve: ["*"] }), fine: server("fine", "ping", { approveTools: [] }) } }));
   const { piMcp, configForChat } = await import("../dist/pi/mcp-config.js");
   const loaded = configForChat(await piMcp(), { cwd: folder, isProjectTrusted: () => true }, agentDir, () => {});
   const enabled = (name) => loaded.servers.find((s) => s.name === name).config.enabled;
   assert.equal(enabled("excl"), false);
   assert.equal(enabled("gated"), false);
+  assert.equal(enabled("choosy"), false, "an approve in its entry is no gate: pi keeps it and nothing asks");
   assert.notEqual(enabled("fine"), false, "an empty gate asks for nothing");
   assert.notEqual(enabled("alpha"), false);
 });

@@ -285,6 +285,17 @@ test("the person is asked with every argument of the call, not only its path: a 
   assert.ok(long.length < 4300);
   assert.match(long, /\d+ more characters not shown/);
   assert.equal(approvalArguments({ a: 1 }), '{\n  "a": 1\n}');
+  // A long text before the recipient does not push the recipient out of sight: each long text is cut by itself.
+  const mail = { subject: "Quarterly report", body: "Dear team,\n" + "lorem ipsum ".repeat(400), to: "attacker@evil.example", shareType: 3 };
+  const shown = approvalArguments(mail);
+  assert.match(shown, /attacker@evil\.example/);
+  assert.match(shown, /"shareType": 3/);
+  assert.match(shown, /"subject": "Quarterly report"/);
+  assert.match(shown, /\d+ more characters not shown/, "the body says it is cut");
+  // Several long texts share what room there is, and every key still shows.
+  const many = approvalArguments({ a: "x".repeat(3000), b: "y".repeat(3000), c: "z".repeat(3000), to: "attacker@evil.example" });
+  assert.match(many, /attacker@evil\.example/);
+  assert.ok(many.length <= 4000);
   db.setMcpApprove("alpha", undefined);
 });
 

@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import express, { type Router } from "express";
 import { writeFileAtomic } from "../atomic-write.js";
 import { gateOn, ignoredByPi, piMcp } from "../pi/mcp-config.js";
@@ -365,7 +366,7 @@ export function mcpRouter(): Router {
   });
 
   /** The escape hatch: the file itself, for anything the forms do not cover. */
-  router.put("/mcp/raw", (req, res) => {
+  router.put("/mcp/raw", async (req, res) => {
     const content = req.body?.content;
     if (typeof content !== "string") return res.status(400).json({ error: "content required" });
     try {
@@ -383,6 +384,17 @@ export function mcpRouter(): Router {
       return res.status(400).json({ error: `Not valid JSON: ${(e as Error).message}` });
     }
     try {
+      // A rename cannot be told from a removal and an addition, except by the entry: exactly one name gone and one new with the same
+      // entry is the same server, and its gate moves with it (the hook of the write drops the old name's patterns).
+      const db = await import("../db.js");
+      const before = readMcpFile().config.mcpServers;
+      const after = ((JSON.parse(content) as { mcpServers?: Record<string, unknown> }).mcpServers ?? {}) as Record<string, unknown>;
+      const gone = Object.keys(before).filter((name) => !(name in after));
+      const added = Object.keys(after).filter((name) => !(name in before));
+      if (gone.length === 1 && added.length === 1 && isDeepStrictEqual(before[gone[0]], after[added[0]])) {
+        const gate = db.mcpApprove()[gone[0]];
+        if (gate) db.setMcpApprove(added[0], gate);
+      }
       writeMcpText(content);
       res.json({ ok: true });
     } catch (e) {

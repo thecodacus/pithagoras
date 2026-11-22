@@ -206,3 +206,57 @@ test("a rename in Settings keeps the server's gate under its new name, and the o
   }
   await mcp.set("post", undefined);
 });
+
+test("a rename in the raw editor keeps the gate when one server is gone and one new has the same entry; any other change drops it", async () => {
+  const mcp = await start();
+  await mcp.set("mail", { url: "http://127.0.0.1:5/mcp" }, { approve: ["send_*"] });
+  const { mcpRouter } = await import("../dist/api/mcp.js");
+  const { default: express } = await import("express");
+  const app = express();
+  app.use(express.json());
+  app.use("/api", mcpRouter());
+  const listener = app.listen(0, "127.0.0.1");
+  await new Promise((resolve) => listener.once("listening", resolve));
+  const base = `http://127.0.0.1:${listener.address().port}/api`;
+  const raw = (mcpServers) => fetch(`${base}/mcp/raw`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content: JSON.stringify({ mcpServers }) }) });
+  try {
+    const others = Object.fromEntries(Object.entries(servers()).filter(([name]) => name !== "mail"));
+    const renamed = await raw({ ...others, post: { url: "http://127.0.0.1:5/mcp" } });
+    assert.equal(renamed.status, 200, await renamed.clone().text());
+    assert.deepEqual(db.mcpApprove().post, ["send_*"], "the same server under another name is gated as it was");
+    assert.equal(db.mcpApprove().mail, undefined);
+    // Removed, and another server added with another entry: not the same server.
+    const swapped = await raw({ ...others, other: { url: "http://127.0.0.1:99/mcp" } });
+    assert.equal(swapped.status, 200);
+    assert.equal(db.mcpApprove().post, undefined);
+    assert.equal(db.mcpApprove().other, undefined);
+  } finally {
+    listener.close();
+  }
+  await mcp.set("other", undefined);
+});
+
+test("approve takes the server's own tool names: pi's full name and the label form are refused, as they would never match", async () => {
+  const mcp = await start();
+  for (const approve of [["mcp__nextcloud__send_*"], ["nextcloud/send_mail"], ["send_*", "mcp__nextcloud__send_mail"]]) {
+    await assert.rejects(mcp.set("nextcloud", { url: "http://127.0.0.1:11/mcp" }, { approve }), /own tool names.*mcp__nextcloud__send_mail.*would never match/s, JSON.stringify(approve));
+  }
+  assert.equal(db.mcpApprove().nextcloud, undefined);
+});
+
+test("a set that changes or drops the patterns another set wrote says so in the log", async () => {
+  const mcp = await start();
+  const lines = [];
+  const log = console.log;
+  console.log = (...args) => lines.push(args.join(" "));
+  try {
+    await mcp.set("nextcloud", { url: "http://127.0.0.1:12/mcp" }, { approve: ["send_*"] });
+    assert.equal(lines.some((line) => /approve patterns/.test(line)), false, "nothing was there to lose");
+    await mcp.set("nextcloud", mcp.get("nextcloud").entry);
+    assert.match(lines.join("\n"), /\[extension notes\] dropped the approve patterns of the MCP server nextcloud \(send_\*\)/);
+    assert.deepEqual(mcp.get("nextcloud").approve, []);
+  } finally {
+    console.log = log;
+  }
+  await mcp.set("nextcloud", undefined);
+});

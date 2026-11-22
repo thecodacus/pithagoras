@@ -97,11 +97,15 @@ export function needsApproval(patterns: readonly string[], names: readonly strin
 }
 
 /** The patterns an `approve` option may hold: texts that name at least one character, trimmed, without doubles; or the reason it is not. */
-export function approvePatterns(value: unknown): string[] | string {
+export function approvePatterns(value: unknown, server = "<server>"): string[] | string {
   if (!Array.isArray(value)) return "approve takes a list of patterns of the server's own tool names, `*` for any characters (`delete_*`)";
   const patterns: string[] = [];
   for (const one of value) {
     if (typeof one !== "string" || !one.trim()) return "approve takes a list of patterns of the server's own tool names, `*` for any characters (`delete_*`): each one a text that is not blank";
+    // A pattern is matched against the tool's own name only: pi's full name or the label form would never match, and the server would run ungated.
+    if (one.trim().startsWith("mcp__") || one.includes("/")) {
+      return `approve takes the server's own tool names (\`send_*\`, \`delete_mail\`), not pi's name (\`mcp__${server}__send_mail\`) or \`${server}/send_mail\`: "${one.trim()}" would never match, and the server's calls would run unconfirmed`;
+    }
     patterns.push(one.trim());
   }
   return [...new Set(patterns)];
