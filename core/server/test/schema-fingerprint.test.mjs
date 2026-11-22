@@ -18,7 +18,9 @@ import { freePort, inProcessHome } from "./server-harness.mjs";
 // src/schema-version.ts (once for the release, not once for each change),
 // pin the new version and fingerprint here, and have an upgrade test for what
 // changed (below) that starts from a database made before it.
-const PINNED = { version: 16, fingerprint: "a62e9d26db4cbd874add924a1ccb9f5a32d4a5cd20aa0ebb002d66ff4a3d2785" };
+const PINNED = { version: 16, fingerprint: "883e02458ea38ea3ed30a993b1c3c14e1cc53d88406409b15cdcc7f2a465ed3c" };
+/** The schema 16 had before a routine could set a limit of its own on a run: a portal built from it is at version 16, and gets the column when it starts. */
+const V16_WITHOUT_ROUTINE_TIMEOUT = "a62e9d26db4cbd874add924a1ccb9f5a32d4a5cd20aa0ebb002d66ff4a3d2785";
 /** The schema 16 had before a chat froze what is lazy in it, and a mode or an agent could keep tools in the model's list: a portal built from it is at version 16, and gets the columns when it starts. */
 const V16_WITHOUT_LAZY_HEAD = "4881a2f81ac22f97f43990ab83a069821ebf03e86ec21bb7c9603d5a7bc4a0db";
 /** The schema 16 had before a mode could set a temperature: a portal built from it is at version 16, and gets the column when it starts. */
@@ -43,10 +45,17 @@ const home = inProcessHome("pithagoras-schema-");
 const { SCHEMA_VERSION } = await import("../dist/schema-version.js");
 const { getDb } = await import("../dist/db.js");
 
-/** A database of the schema 16 had before a chat froze its lazy tools, at `file`, open: a fresh one without those columns. */
-function freshWithoutLazyHead(file) {
+/** A database of the schema 16 had before a routine could set a limit of its own on a run, at `file`, open: a fresh one without that column. */
+function freshWithoutRoutineTimeout(file) {
   getDb().exec(`VACUUM INTO '${file}'`);
   const d = new Database(file);
+  d.exec("ALTER TABLE routines DROP COLUMN timeout_min");
+  return d;
+}
+
+/** A database of the schema 16 had before a chat froze its lazy tools, at `file`, open: one without a routine's limit, and without those columns. */
+function freshWithoutLazyHead(file) {
+  const d = freshWithoutRoutineTimeout(file);
   d.exec("ALTER TABLE sessions DROP COLUMN lazy_head; ALTER TABLE chat_modes DROP COLUMN keep_direct; ALTER TABLE agent_tools DROP COLUMN keep_direct");
   return d;
 }
@@ -1819,4 +1828,25 @@ test("a data folder of v0.1.0 that used every part is brought to this version in
     whisperUrl: OWN.whisper, sttModel: "", breezeUrl: OWN.speech, runtime: "kokoro", dictationUrl: null, dictationModel: null, language: "en", kokoroVoice: "af_heart",
   });
   assert.deepEqual(understoryLeft(dir, "settings.json"), UNDERSTORY_KEPT);
+});
+
+test("a portal built before a routine could set a limit of its own on a run, already at version 16, gets the column when it starts, each routine on the default", async () => {
+  const dir = path.join(home, "routine-timeout-at-16");
+  mkdirSync(dir, { recursive: true });
+  const d = freshWithoutRoutineTimeout(path.join(dir, "portal.db"));
+  d.pragma("user_version = 16");
+  assert.equal(schemaFingerprint(d), V16_WITHOUT_ROUTINE_TIMEOUT, "the schema 16 had before");
+  d.prepare("INSERT INTO routines (id, slug, name, schedule, instructions) VALUES ('r1', 'nightly', 'Nightly build', '@daily', 'build it')").run();
+  d.close();
+  // Not an upgrade: the version is the one pinned, so nothing is backed up, and migrate() adds the column at the start.
+  assert.deepEqual(upgradeCheck(path.join(dir, "portal.db")), { needed: false, from: 16 });
+  await upgraded(dir);
+  assert.equal(existsSync(path.join(dir, "backups")), false);
+  const now = new Database(path.join(dir, "portal.db"), { readonly: true });
+  try {
+    assert.equal(schemaFingerprint(now), PINNED.fingerprint);
+    assert.deepEqual(now.prepare("SELECT slug, timeout_min FROM routines").all(), [{ slug: "nightly", timeout_min: null }]);
+  } finally {
+    now.close();
+  }
 });

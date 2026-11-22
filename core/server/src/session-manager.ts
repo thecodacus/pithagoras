@@ -377,6 +377,22 @@ interface LiveSession {
  * request. Once a prompt is accepted the browser can disappear — output keeps
  * streaming into the event log, and a later reconnect replays it.
  */
+/**
+ * Waits for `p` at most `ms`: rejects with `late()` when the time runs out
+ * first. `p` goes on; only the wait for it ends.
+ */
+async function untilDeadline<T>(p: Promise<T>, ms: number, late: () => Error): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(late()), ms);
+  });
+  try {
+    return await Promise.race([p, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 class SessionManager extends EventEmitter {
   private live = new Map<string, LiveSession>();
   private stopping = new WeakSet<PiClient>();
@@ -2388,27 +2404,36 @@ class SessionManager extends EventEmitter {
       onVideo?: (video: SentFile) => void | Promise<void>;
     } = {}
   ): Promise<string> {
-    const previous = this.asking.get(sessionId) ?? Promise.resolve("");
-    const next = previous
-      .catch(() => "")
-      .then(async () => {
-        await this.waitForIdle(sessionId, opts.timeoutMs ?? 15 * 60_000);
-        await opts.beforeTurn?.();
-        return this.askNow(
-          sessionId,
-          message,
-          opts.timeoutMs ?? 15 * 60_000,
-          opts.onReply,
-          opts.streamText,
-          opts.onUi,
-          opts.onStopped,
-          { picture: opts.onPicture, video: opts.onVideo }
-        );
-      });
+    const behind = (this.asking.get(sessionId) ?? Promise.resolve("")).catch(() => "");
+    // One deadline for the whole of it: waiting behind an earlier ask, waiting
+    // for a turn still running, and the run itself share it, so a routine's
+    // limit is the most its run can take, not the most each wait can.
+    const limitMs = opts.timeoutMs ?? 15 * 60_000;
+    const deadline = Date.now() + limitMs;
+    const left = () => Math.max(0, deadline - Date.now());
+    const next = (async () => {
+      // An ask still queued at its deadline gives up there, and sends nothing.
+      await untilDeadline(behind, left(), () => new Error(`The agent did not finish within ${Math.round(limitMs / 1000)}s`));
+      await this.waitForIdle(sessionId, left());
+      await opts.beforeTurn?.();
+      return this.askNow(
+        sessionId,
+        message,
+        { deadline, limitMs },
+        opts.onReply,
+        opts.streamText,
+        opts.onUi,
+        opts.onStopped,
+        { picture: opts.onPicture, video: opts.onVideo }
+      );
+    })();
+    // The queue waits for the earlier ask as well, also when this one gave up
+    // first: the next ask never runs beside one still running.
+    const tail = Promise.allSettled([behind, next]).then(() => "");
     // Kept only while it is the newest, so a finished chain is not held forever.
-    this.asking.set(sessionId, next);
-    void next.catch(() => {}).finally(() => {
-      if (this.asking.get(sessionId) === next) this.asking.delete(sessionId);
+    this.asking.set(sessionId, tail);
+    void tail.finally(() => {
+      if (this.asking.get(sessionId) === tail) this.asking.delete(sessionId);
     });
     return next;
   }
@@ -2428,7 +2453,7 @@ class SessionManager extends EventEmitter {
   private async askNow(
     sessionId: string,
     message: AskMessage,
-    timeoutMs: number,
+    { deadline, limitMs }: { deadline: number; limitMs: number },
     onReply?: (text: string) => void | Promise<void>,
     streamText = true,
     onUi?: (request: any) => void,
@@ -2441,6 +2466,10 @@ class SessionManager extends EventEmitter {
     const stopsBefore = this.stops.get(sessionId) ?? 0;
     const abortsBefore = this.aborts.get(sessionId) ?? 0;
     await this.ensureClient(sessionId);
+    // What is left of the deadline once pi is up: starting it counts against
+    // the limit too, and a run with nothing left sends nothing.
+    const timeoutMs = deadline - Date.now();
+    if (timeoutMs <= 0) throw new Error(`The agent did not finish within ${Math.round(limitMs / 1000)}s`);
     const prepared: PreparedPrompt = typeof message === "function" ? message() : { message };
 
     // pi emits one assistant message per stretch of talking, broken up by tool
@@ -2578,7 +2607,7 @@ class SessionManager extends EventEmitter {
     // anyone was listening.
     this.on(`session:${sessionId}`, onEvent);
     const timer = setTimeout(
-      () => fail?.(new Error(`The agent did not finish within ${Math.round(timeoutMs / 1000)}s`)),
+      () => fail?.(new Error(`The agent did not finish within ${Math.round(limitMs / 1000)}s`)),
       timeoutMs
     );
 

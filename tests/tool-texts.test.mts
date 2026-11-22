@@ -77,8 +77,9 @@ const AGREED: Record<string, number> = {
   chat_read: 168,
   chat_search: 244,
   routines_list: 43,
-  routine_create: 209,
-  routine_update: 142,
+  // Each takes a routine's own run time limit (timeoutMin), 33 tokens, since the review.
+  routine_create: 242,
+  routine_update: 175,
   routine_run: 41,
   subagent: 118,
   "subagent#background": 150,
