@@ -1849,52 +1849,48 @@ function approvalServer(origin: Origin, names: readonly string[]): string | unde
   return Object.keys(approve).find((server) => mcpNamespace(server) === origin.namespace && needsApproval(approve[server], names));
 }
 
-/** The most of a call's arguments the person is shown. */
-const APPROVAL_ARGUMENTS_MAX = 4000;
-
-/** Deeper than this a value is not shown: a call that fits whole is never as deep (the indentation alone would not fit). */
-const APPROVAL_DEPTH_MAX = 48;
-
-/** A run of ASCII blanks up to this long is shown as it is; a longer one is counted (see visibly). */
-const BLANKS_SHOWN = 16;
+/** The longest a call's arguments may be as the person is shown them: a longer call is not asked about. A long mail fits; the dialog scrolls. */
+const APPROVAL_ARGUMENTS_MAX = 16000;
 
 /**
- * Characters that print as nothing or cannot be told from nothing: every Unicode separator (the no-break space, the ideographic and the
- * braille blank), format character (zero-width characters, the bidirectional controls that reorder text), private-use and unassigned
- * code point, the controls JSON does not escape, and the letters that are drawn blank (Hangul fillers, the braille blank). The newline,
- * return and tab are not among them: JSON shows those as escapes. A run of eight or more of one of those is counted too.
+ * What a dialog draws as nothing, or as something it is not: every character that is not a letter, number, punctuation or symbol (every
+ * separator but the ASCII space, every control, format character such as the zero-width ones and the bidirectional controls that turn
+ * text around, private-use, unassigned and surrogate code point, and every mark, such as U+034F and the variation selectors), and the
+ * letters and symbols that are drawn blank (the braille blank, the Hangul fillers). The newline, return and tab are left to JSON, which
+ * shows them as escapes. A run of four or more ASCII spaces is matched whole.
  */
-const BLANKISH = /[\p{Z}\p{Cf}\p{Co}\p{Cn}\p{Cs}\u007F-\u009F⠀ㅤᅟᅠﾠ]+|([\n\r\t])\1{7,}/gu;
+const UNSEEN = / {4,}|[^\p{L}\p{N}\p{P}\p{S} \n\r\t]|[\u2800\u3164\u1160\u115F\uFFA0]/gu;
 
-const pointOf = (char: string): string => `U+${char.codePointAt(0)!.toString(16).toUpperCase().padStart(4, "0")}`;
-
-/**
- * A text as the person reads it in a dialog that keeps its blanks: what is drawn as nothing is named (`<U+2800>`, `<U+202E>`) instead of
- * passed on, so that a recipient padded with blank characters or turned around by a bidirectional control shows what it is, and a long
- * run is one count (`<U+2800 x1500>`, `<1500 spaces>`) instead of a screen of nothing that pushes the rest out of sight. Short runs of
- * ASCII blanks stay as they are: JSON keeps them, and so does the dialog.
- */
-export function visibly(text: string): string {
-  return text.replace(BLANKISH, (run) => {
-    const chars = [...run];
-    const kinds = [...new Set(chars)];
-    if (kinds.length === 1) {
-      if (chars[0] === " ") return chars.length <= BLANKS_SHOWN ? run : `<${chars.length} spaces>`;
-      return chars.length === 1 ? `<${pointOf(chars[0])}>` : `<${pointOf(chars[0])} x${chars.length}>`;
-    }
-    return `<${chars.length} blanks: ${kinds.slice(0, 4).map(pointOf).join(" ")}${kinds.length > 4 ? " ..." : ""}>`;
-  });
+/** A text as the person is shown it: what draws as nothing is named (`<U+2800>`, `<U+202E>`), and a run of spaces is counted (`<9000 spaces>`). */
+function visibly(text: string): string {
+  return text.replace(UNSEEN, (found) =>
+    found[0] === " " ? `<${found.length} spaces>` : `<U+${found.codePointAt(0)!.toString(16).toUpperCase().padStart(4, "0")}>`,
+  );
 }
 
-/** What a value takes at the least once it is cut: a short mark or a short number. */
-const SHORTEST_VALUE = 6;
+/** A value with every text and every key passed through visibly. Two keys that come out alike are both kept, the later one numbered. */
+function visibleValue(value: unknown): unknown {
+  if (typeof value === "string") return visibly(value);
+  if (value === null || typeof value !== "object") return value;
+  if (Array.isArray(value)) return value.map((item) => visibleValue(item));
+  const names = new Set<string>();
+  return Object.fromEntries(
+    Object.entries(value).map(([key, item]) => {
+      let name = visibly(key);
+      for (let n = 2; names.has(name); n++) name = `${visibly(key)} (#${n})`;
+      names.add(name);
+      return [name, visibleValue(item)];
+    }),
+  );
+}
 
 /** The room a line takes before its value: the line break and the indentation of JSON.stringify(value, null, 2). */
 const lineOf = (depth: number): number => 1 + 2 * depth;
 
 /**
  * About how long a value is as indented JSON (escapes are not counted), but it gives up once that is over `left`, so that a huge or a
- * deeply nested value costs no more than what fits. A value that is over `left` comes back as `left + 1`.
+ * deeply nested value costs no more than what fits: the indentation of each level counts, so a value nested a few hundred levels deep is
+ * over the limit long before its end. A value that is over `left` comes back as `left + 1`.
  */
 function measure(value: unknown, depth: number, left = Infinity): number {
   if (typeof value === "string") return value.length + 2;
@@ -1914,92 +1910,22 @@ function measure(value: unknown, depth: number, left = Infinity): number {
   return total;
 }
 
-/** A text kept to `limit` characters, with what is gone counted; one the cut would not make shorter is kept whole. */
-function cutText(text: string, limit: number): string {
-  if (text.length <= limit) return text;
-  const cut = `${text.slice(0, limit)}... (${text.length - limit} more characters not shown)`;
-  return cut.length < text.length ? cut : text;
-}
-
-/**
- * A value cut to about `limit` characters where it is larger: a text keeps its start, a list the items that fit, an object the keys that
- * fit (all of them at the top, where every key is what the person is asked about), and a key name is cut like a text. Every cut says how
- * much is gone, so a cut is never taken for the whole. Every text goes through `visibly`. A value nested deeper than the cap is not shown, and
- * says so: the calls of a model can be thousands of levels deep, and each level of those would cost its share of the work.
- */
-function cutValue(value: unknown, limit: number, depth = 0): unknown {
-  if (typeof value === "string") return cutText(visibly(value), limit);
-  if (value === null || typeof value !== "object") return value;
-  if (depth >= APPROVAL_DEPTH_MAX) return "... (nested deeper than shown)";
-  // What a list or an object has taken so far, counting only what each item needs at the least: its line and a short value. The values
-  // are cut to the same limit each, so that one big value does not take the place of the items after it (a flag beside a long note).
-  let size = 2 + lineOf(depth);
-  if (Array.isArray(value)) {
-    const kept: unknown[] = [];
-    for (const item of value) {
-      if (size >= limit) break;
-      const cut = cutValue(item, limit, depth + 1);
-      size += lineOf(depth + 1) + SHORTEST_VALUE + 1;
-      kept.push(cut);
-    }
-    return kept.length < value.length ? [...kept, `... (${value.length - kept.length} more items not shown)`] : kept;
-  }
-  const entries: [string, unknown][] = [];
-  const names = new Set<string>();
-  const keys = Object.keys(value);
-  for (const key of keys) {
-    if (depth > 0 && size >= limit) break;
-    // Two long names that are cut to the same start would be one key.
-    let name = cutText(visibly(key), limit);
-    for (let n = 2; names.has(name); n++) name = `${cutText(visibly(key), limit)} (#${n})`;
-    names.add(name);
-    const cut = cutValue((value as Record<string, unknown>)[key], limit, depth + 1);
-    size += lineOf(depth + 1) + name.length + 4 + SHORTEST_VALUE + 1;
-    entries.push([name, cut]);
-  }
-  if (entries.length < keys.length) entries.push([`... (${keys.length - entries.length} more keys not shown)`, "..."]);
-  return Object.fromEntries(entries);
-}
-
 /**
  * The whole of a call's arguments, as the agent wrote them: a call's recipient, type and content are what a person confirms, and the
- * rule subject (see subjectOf) is only the path where there is one. A call that fits is shown whole, as indented JSON, so a line break
- * inside a text is there to see as the escape it is, and a blank is there (the dialog keeps them: see ExtensionDialog); what draws as
- * nothing is named instead, and a long run of blanks is counted (see visibly), so a recipient cannot be pushed out of sight by padding it.
- * One that does not fit shows every key, with the largest values cut first (a text, a list or an object alike, each saying how much is
- * gone), and a long list or object before a recipient cannot push it out of sight either. Undefined where even that is not possible
- * (so many keys that their names alone do not fit): a call the person cannot see is not asked about, and its caller refuses it.
+ * rule subject (see subjectOf) is only the path where there is one. Indented JSON, so a line break inside a text is there to see as the
+ * escape it is, and what draws as nothing is named (see visibly), so padding cannot hide a recipient. Nothing is cut: a call longer than
+ * `max` as shown is undefined, and its caller refuses it, since the person would be saying yes to something they cannot see whole. Its
+ * size is looked at first, so a huge or deeply nested call is turned away without the work of showing it.
  */
 export function approvalArguments(input: unknown, max = APPROVAL_ARGUMENTS_MAX): string | undefined {
   const value = input ?? {};
-  // The text for a limit on every value, or undefined where it cannot be made.
-  const show = (limit: number): string | undefined => {
-    try {
-      return JSON.stringify(cutValue(value, limit), null, 2) ?? "{}";
-    } catch {
-      return undefined;
-    }
-  };
-  if (measure(value, 0, max) <= max) {
-    const whole = show(Infinity);
-    if (whole !== undefined && whole.length <= max) return whole;
+  if (measure(value, 0, max) > max) return undefined;
+  try {
+    const shown: string | undefined = JSON.stringify(visibleValue(value), null, 2);
+    return shown !== undefined && shown.length <= max ? shown : undefined;
+  } catch {
+    return undefined;
   }
-  // Every key of an object is shown, so it needs at least a line each.
-  if (value && typeof value === "object" && !Array.isArray(value) && Object.keys(value).length * 9 > max) return undefined;
-  // The largest limit for each value at which the whole fits.
-  let best = show(0);
-  if (best === undefined || best.length > max) return undefined;
-  let low = 1;
-  let high = max;
-  while (low <= high) {
-    const middle = Math.floor((low + high) / 2);
-    const tried = show(middle);
-    if (tried !== undefined && tried.length <= max) {
-      best = tried;
-      low = middle + 1;
-    } else high = middle - 1;
-  }
-  return best;
 }
 
 /** What the person is asked where a server's `approve` holds a call; undefined where the call cannot be shown. */
@@ -2546,7 +2472,7 @@ export function guardExtension(
         return new Promise<unknown>((resolve) => resolve(ctx.ui.confirm(title, message))).then(
           (yes) => {
             if (yes !== true) return refuseUnconfirmed("the person did not allow this call");
-            note("allowed-by-approval", `the MCP server ${gate} asks before each call of ${event.toolName}: you allowed this one in the chat, with ${(approvalArguments(event.input, 500) ?? "arguments too large to list here").replace(/\s+/g, " ")}`);
+            note("allowed-by-approval", `the MCP server ${gate} asks before each call of ${event.toolName}: you allowed this one in the chat, with ${approvalArguments(event.input, 500)?.replace(/\n */g, " ") ?? "arguments too long to list here"}`);
             return undefined;
           },
           (error) => {

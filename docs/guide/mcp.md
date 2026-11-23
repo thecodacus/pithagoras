@@ -154,19 +154,20 @@ unconfirmed (sending mail, sharing a folder) can say so: the extension that writ
 the server gives it `approve`, patterns of the server's own tool names with `*` for
 any characters (`send_*`, `delete_mail`), as an option of `portal.mcp.set` (see
 [MCP servers](/guide/extension-ui#mcp-servers)). Every call of a tool that matches
-(`mcp__<server>__<tool>`) is put to you before it runs, with all its arguments as the
-agent wrote them (a recipient, a type and the content are what you confirm), as JSON, so
-a line break inside a value shows as `\n` and a blank is there to see. A call that fits is
-shown whole. A character that draws as nothing (the no-break space, the braille blank, a
-zero-width character, a control that turns the text around) is named, as `<U+2800>`, and a
-long run of blanks is counted (`<1500 spaces>`, `<U+2800 x1500>`), so padding cannot push a
-recipient out of sight. One that does not fit shows every key, with the largest values cut
-first (a text, a list, an object or a key's name), each cut saying how much is gone, and
-a value nested more than 48 levels deep is not shown, and says so. A call with so many keys
-that their names alone do not fit is refused and not asked about (the agent is told why).
-Yes lets that one call run, no refuses it, and the server never gets it. It
-holds however the call is made: by name, through `tool_search`, from a script, or in a
-subagent's chat. Where nobody can answer (a chat nobody attends, a routine's run, a
+(`mcp__<server>__<tool>`) is put to you before it runs, with the whole call: all its
+arguments as the agent wrote them (a recipient, a type and the content are what you
+confirm), as indented JSON, so a line break inside a value shows as `\n`. Nothing is cut.
+What draws as nothing is named, in values and in keys alike: every character that is not a
+letter, digit, punctuation mark, symbol or plain space (the no-break space, a zero-width
+character, a control that turns the text around, a combining mark, a variation selector),
+and the characters drawn blank (the braille blank, the Hangul fillers), each as its code,
+such as `<U+2800>`. Four or more spaces in a row are counted (`<9000 spaces>`). So padding
+cannot hide a recipient. A long call scrolls in the question: scroll to read it all before
+you answer. A call too long to show (over 16,000 characters as shown) is refused and not
+asked about (the agent is told why). Yes lets that one call run, no refuses it, and the
+server never gets it. It holds however the call is made: by name, through
+`tool_search`, from a script, or in a subagent's chat. Where nobody can answer (a
+chat nobody attends, a routine's run, a
 conversation on a channel, somebody who is not the primary user), the call is refused
 and the agent is told so. A dash and an underscore count as one in a pattern, as they
 do in pi's names for tools. A pattern is a tool's own name as the server gives it:

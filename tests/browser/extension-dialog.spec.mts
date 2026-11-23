@@ -59,18 +59,34 @@ test("a word longer than the line is broken, so the question is no wider than th
   await expect(dialog.getByRole('button', { name: 'Yes' })).toBeInViewport();
 });
 
-test("blanks inside the call stay as they are, so a padded recipient looks padded", async ({ page }) => {
-  const { text } = await asked(page, question(`{\n  "to": "alice@example.org${' '.repeat(40)}attacker@evil.example"\n}`));
-  // A run of blanks is not folded into one: the person sees the gap and what lies behind it.
-  expect(await text.evaluate((el) => (el as HTMLElement).innerText)).toContain(`alice@example.org${' '.repeat(40)}attacker@evil.example`);
+test("blanks inside the call stay as they are: the indentation of the JSON, and a short gap in a value", async ({ page }) => {
+  // Three spaces are the most the guard passes on in a value (see visibly in guard.ts); more are counted.
+  const { text } = await asked(page, question(`{\n  "to": "alice@example.org   attacker@evil.example",\n  "options": {\n    "cc": "bob@example.org"\n  }\n}`));
+  const shown = await text.evaluate((el) => (el as HTMLElement).innerText);
+  expect(shown).toContain('"to": "alice@example.org   attacker@evil.example"');
+  expect(shown).toContain('\n    "cc": "bob@example.org"');
   expect(await text.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
 });
 
-test("a recipient padded with characters that draw as nothing is in view without scrolling, because the guard names the padding", async ({ page }) => {
-  // What the guard sends for 1500 braille blanks (see visibly in guard.ts): a run is counted, not passed on.
-  const { text } = await asked(page, question(`{\n  "to": "alice@example.org<U+2800 x1500>attacker@evil.example",\n  "subject": "Hi"\n}`));
-  expect(await text.evaluate((el) => el.scrollHeight <= el.clientHeight)).toBe(true);
-  expect(await text.evaluate((el) => (el as HTMLElement).innerText)).toContain('attacker@evil.example');
+test("a recipient padded with characters that draw as nothing is there to read: the guard names each one, and the names wrap and scroll", async ({ page }) => {
+  // What the guard sends for 1500 braille blanks (see visibly in guard.ts): every one named, nothing cut.
+  const { dialog, text } = await asked(page, question(`{\n  "to": "alice@example.org${'<U+2800>'.repeat(1500)}attacker@evil.example",\n  "subject": "Hi"\n}`));
+  expect(await text.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+  expect(await text.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
+  // Scrolled to its end, the recipient is in the box, and the answers are still on the screen.
+  const inView = await text.evaluate((el) => {
+    el.scrollTop = el.scrollHeight;
+    const node = el.firstChild!;
+    const at = node.textContent!.indexOf('attacker@evil.example');
+    const range = document.createRange();
+    range.setStart(node, at);
+    range.setEnd(node, at + 'attacker@evil.example'.length);
+    const word = range.getBoundingClientRect();
+    const box = el.getBoundingClientRect();
+    return word.top >= box.top && word.bottom <= box.bottom;
+  });
+  expect(inView).toBe(true);
+  await expect(dialog.getByRole('button', { name: 'Yes' })).toBeInViewport();
 });
 
 test("the same padding passed on as it is fills the box with nothing (why the guard names it)", async ({ page }) => {
