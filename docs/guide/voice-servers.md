@@ -27,6 +27,7 @@ it: see [Upgrading](/guide/upgrading#voice-s-service-is-an-extension).
 | **Dictation endpoint** and **Dictation model** | Where the message box's microphone sends its recordings, and with which model, where they should differ from voice mode's: a conversation wants the quick model, while a message you dictate can wait for a more accurate one. Empty, dictation uses the speech recognition URL and model above; a model alone goes to the speech recognition URL, so that server has to serve both. |
 | **Speech synthesis URL** | Where a reply is sent to be spoken: an OpenAI-style `…/v1/audio/speech`. Empty: recognition alone, so dictation works and replies are not spoken. |
 | **Speech synthesis model** | Sent as `model` where it is set, such as `kokoro`. |
+| **Sample rate of raw audio** | In Hz, 8000 to 192000; empty is 24000. The rate of the raw PCM the speech server streams, such as Breeze's, which has no header to say it. Used only where the server's answer does not say its own rate (see [What it sends](#what-it-sends)). A WAV says its own rate, whatever is set here. |
 | **Voices** | The voices the speech server has, one per line: its id, or `id = Name`. These are what an agent's voice is chosen from on the Agents page. |
 | **Read voices from the server** | Fills **Voices** from the list the speech server gives at `…/audio/voices`, beside a speech synthesis URL that ends in `/audio/speech` (the shape Kokoro-FastAPI answers, `{ voices: [...] }`). The list is shown, not saved, until you save. A server that has not answered within 10 seconds is said to have failed. |
 | **Voice** | Its own choice: what an agent speaks with that has no voice of its own, or one this list no longer has. **The server's own** sends no voice, and the server picks. |
@@ -66,10 +67,14 @@ out where they are empty. The voice is the agent's own where it is one of
 while custom voices are off and for a server with fixed voices; for Breeze and
 Chatterbox see [Custom voices](#custom-voices).
 
-The answer has to be a WAV of **mono 24 kHz 16-bit** audio. The portal reads it
-whole, checks it and plays it as one piece; anything else is refused, and voice
-mode shows *Expected mono 24 kHz 16-bit audio from Voice servers*. Nothing is
-resampled. A WAV says its own rate, so only WAV is asked for.
+The answer has to be a WAV of **mono or stereo** audio, as **16-bit integers or
+32-bit floats**, at **8 to 192 kHz**. The portal reads it whole, checks it and
+plays it as one piece at the rate its header gives (a stereo phrase is mixed to
+mono); anything else is refused, and voice mode names what it got, as in
+*Expected mono or stereo 16-bit integer or 32-bit float audio from Voice
+servers, got mono 24-bit integer audio at 44100 Hz*. A WAV says its own rate, so
+only WAV is asked for. A server that answers raw `audio/pcm` instead is played
+as raw audio (below).
 
 It sends no key and no `Authorization` header: the servers are expected on your
 own network, as a speech server you run yourself is.
@@ -207,10 +212,15 @@ yours are left out.
 | `ref_audio` | A clone's recording, as `reference.wav`, `audio/wav` |
 | `ref_text` | The words said in it |
 
-Both Breeze forms are answered with raw PCM (mono, 24 kHz, signed 16-bit
-little-endian; audio.cpp labels it `application/octet-stream`, Breeze-TTS
-`audio/pcm`), passed on to voice mode as it streams; an answer of another type,
-or with an `x-sample-rate` other than 24000, is refused. A Breeze that audio.cpp
+Both Breeze forms are answered with raw PCM (mono, signed 16-bit little-endian;
+audio.cpp labels it `application/octet-stream`, Breeze-TTS `audio/pcm`), passed
+on to voice mode as it streams; an answer of another type is refused. Raw audio
+has no header to say its rate, so the rate is the server's `x-sample-rate`
+header, else a `rate=` parameter of its content type, else the setting **Sample
+rate of raw audio** under the speech synthesis fields (8000 to 192000 Hz, 24000
+when it is empty). Breeze speaks at 24 kHz, so it needs none. A speech server
+that streams at another rate and does not say so, 44.1 kHz say, is set there.
+The setting does not touch WAV, which says its own rate. A Breeze that audio.cpp
 loads offline refuses the streamed request.
 
 **Chatterbox through audio.cpp**, JSON:
@@ -234,8 +244,7 @@ loads offline refuses the streamed request.
 
 `language` where an input language is set; the server uses its own otherwise.
 
-Both Chatterbox forms ask for a WAV, which has to be mono 24 kHz 16-bit, as
-above. The two audio.cpp forms and Breeze-TTS's ask again every 0.75 seconds
+Both Chatterbox forms ask for a WAV, which is read as above. The two audio.cpp forms and Breeze-TTS's ask again every 0.75 seconds
 while the server answers 409, busy with a phrase before, until it answers
 otherwise or voice mode gives up on the phrase; the others ask once.
 
@@ -244,7 +253,7 @@ otherwise or voice mode gives up on the phrase; the others ask once.
 - **whisper.cpp's server**: the speech recognition URL is its `/inference`
   (for example `http://127.0.0.1:8178/inference`), with no model.
 - **audio.cpp** with Qwen3-ASR: `…/v1/audio/transcriptions` with the model
-  `qwen3-asr`. Its Kokoro speaks the OpenAI request and answers 24 kHz WAV:
+  `qwen3-asr`. Its Kokoro speaks the OpenAI request and answers WAV:
   `…/v1/audio/speech` with the model `kokoro`, and Kokoro's voice ids, such as
   `af_heart`, as the voices.
 - **audio.cpp with Breeze-TTS-2 or Chatterbox**, with

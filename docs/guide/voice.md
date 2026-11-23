@@ -553,10 +553,28 @@ speaks.
 ## Playback and troubleshooting
 
 Audio is not stored by the portal. The browser encodes detected speech as mono
-16 kHz WAV for recognition. Spoken replies reach the browser as 24 kHz mono
-PCM: a source that streams, as the voice service's Breeze does, is passed on as
-it arrives, and a phrase that comes back as one WAV (Chatterbox, Kokoro, Voice
-servers) is checked and sent on as PCM in one piece.
+16 kHz WAV for recognition. Spoken replies reach the browser as mono 16-bit PCM
+at the rate the speech server speaks at, which is played as it is (the browser
+resamples to its output, and Repeat and the playback speed work at that rate
+too): a source that streams, as the voice service's Breeze does, is passed on
+as it arrives, and a phrase that comes back as one WAV (Chatterbox, Kokoro,
+Voice servers) is checked and sent on as PCM in one piece.
+
+These are the formats a speech server may answer in:
+
+- **WAV**, at 8 to 192 kHz, with the rate from its header. The samples may be
+  16-bit integers or 32-bit floats, mono or stereo (a stereo phrase is mixed
+  to mono), also in the extensible form. Anything else, 24-bit or 8-bit
+  samples or more than two channels say, is refused, and voice mode names what
+  the server sent, as in *Expected mono or stereo 16-bit integer or 32-bit
+  float audio from Voice servers, got mono 24-bit integer audio at 44100 Hz*.
+  A WAV is read whole, up to 64 MB; a server that sends more is let go of.
+- **Raw PCM** (mono, signed 16-bit little-endian), streamed. It has no header,
+  so its rate is the one the server says, in an `x-sample-rate` header or a
+  `rate=` parameter of its content type (`audio/pcm;rate=44100`). A server that
+  says nothing is taken to be at 24 kHz. With
+  [Voice servers](/guide/voice-servers) that default is the setting **Sample rate
+  of raw audio**.
 
 Long responses are split into chunks of at most 600 characters and
 played sequentially. Fragments under 20 spoken characters are grouped with the
@@ -568,6 +586,13 @@ buffer.
 This avoids interruptions within
 words when speech is generated slower than playback. The full text response does
 not need to finish.
+
+A reply is cut at sentence ends, not at common abbreviations such as "z. B.",
+"bzw.", "ca.", "e.g." or "Dr.", and not after a day or ordinal number as in "am
+3. November" or "im 3. Stock" (after a word like "am", "im" or "der", or when a
+lower-case word, a number or a month follows). A sentence that runs past about 220
+characters without an end is cut at its last comma, semicolon or colon, or at a
+space if it has none, so the pause falls where a reader would pause.
 
 Text, synthesis and playback have independent queues: the source
 generates the next phrase while the current one plays, and newly arriving text

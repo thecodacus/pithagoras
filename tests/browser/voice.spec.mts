@@ -193,6 +193,52 @@ for (const pipelineMode of ['parallel', 'sequential'] as const) {
   });
 }
 
+for (const pipelineMode of ['parallel', 'sequential'] as const) {
+  test(`a phrase the portal answers at 44.1 kHz is buffered and stretched at 44.1 kHz in the ${pipelineMode} pipeline, and one that names no usable rate is refused`, async ({ page }) => {
+    // One second of a 220 Hz tone at 44.1 kHz, spoken 1.5 times as fast; every buffer made is counted with its rate.
+    const pcm = Buffer.alloc(44100 * 2);
+    for (let i = 0; i < pcm.length / 2; i++) pcm.writeInt16LE(Math.round(Math.sin(i * 2 * Math.PI * 220 / 44100) * 5000), i * 2);
+    await page.addInitScript(() => {
+      localStorage.setItem('voiceRate', '1.5');
+      const w = window as any;
+      w.buffers = [] as [number, number][];
+      const create = BaseAudioContext.prototype.createBuffer;
+      BaseAudioContext.prototype.createBuffer = function (channels: number, length: number, sampleRate: number) { w.buffers.push([length, sampleRate]); return create.call(this, channels, length, sampleRate); };
+    });
+    let rate: string | undefined = '44100';
+    await page.route('**/api/voice', route => route.fulfill({ json: { enabled: true, pipelineMode } }));
+    await page.route('**/voice/speech', route => {
+      // The spoken error line, asked for as voice mode starts, is not a phrase of the reply.
+      const body = route.request().postDataJSON().text === 'An error occurred.' ? Buffer.alloc(4800) : pcm;
+      return route.fulfill({ body, headers: { 'content-type': 'audio/pcm', ...(rate ? { 'x-sample-rate': rate } : {}) } });
+    });
+    await page.goto('/tests/voice.html');
+    await page.getByRole('button', { name: 'Turn on hands-free voice' }).click();
+    await expect(page.getByRole('status')).toHaveText('Listening', { timeout: 25000 });
+    await page.getByRole('button', { name: 'Stream reply', exact: true }).click();
+    await page.getByRole('button', { name: 'Finish reply', exact: true }).click();
+    await expect(page.locator('.voice-orb')).toHaveAttribute('data-mode', 'output');
+    // The reply is two phrases. All the buffers are made at the phrase's rate, and together as long as the phrases made faster.
+    const phrases = () => page.evaluate(() => ((window as any).buffers as [number, number][]).filter(([length]) => length > 1000));
+    const seconds = async () => (await phrases()).reduce((n, [length, sampleRate]) => n + length / sampleRate, 0);
+    await expect.poll(seconds, { timeout: 10000 }).toBeGreaterThan(2 / 1.5 - 0.01);
+    expect(await seconds()).toBeLessThan(2 / 1.5 + 0.01);
+    expect((await phrases()).map(([, sampleRate]) => sampleRate)).toEqual((await phrases()).map(() => 44100));
+    await page.getByRole('button', { name: 'End voice mode' }).click();
+    // No rate said, or one that is not played, is no speech to play.
+    for (rate of [undefined, '300000', 'fast']) {
+      await page.evaluate(() => { (window as any).buffers = []; });
+      await page.getByRole('button', { name: 'Turn on hands-free voice' }).click();
+      await expect(page.getByRole('status')).toHaveText('Listening', { timeout: 25000 });
+      await page.getByRole('button', { name: 'Stream reply', exact: true }).click();
+      await page.getByRole('button', { name: 'Finish reply', exact: true }).click();
+      await expect(page.getByText('Unsupported speech stream')).toBeVisible();
+      expect((await page.evaluate(() => (window as any).buffers as [number, number][])).filter(([length]) => length > 1000)).toEqual([]);
+      await page.getByRole('button', { name: 'End voice mode' }).click();
+    }
+  });
+}
+
 test('slow PCM chunks become one uninterrupted buffer, including split samples', async ({ page }) => {
   await page.goto('/tests/voice.html');
   const result = await page.evaluate(async () => {

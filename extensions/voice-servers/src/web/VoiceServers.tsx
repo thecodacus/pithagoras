@@ -12,6 +12,7 @@ interface Form {
   dictationModel: string;
   ttsUrl: string;
   ttsModel: string;
+  rawSampleRate: string;
   /** One voice per line: its id, or `id = Name`. */
   voices: string;
   voice: string;
@@ -66,6 +67,7 @@ const formOf = (saved: ServerSettings): Form => ({
   dictationModel: saved.dictationModel ?? "",
   ttsUrl: saved.ttsUrl ?? "",
   ttsModel: saved.ttsModel ?? "",
+  rawSampleRate: String(saved.rawSampleRate ?? ""),
   voices: (saved.voices ?? []).map(lineOf).join("\n"),
   voice: saved.voice ?? "",
 });
@@ -165,7 +167,7 @@ export function VoiceServers() {
     <div className="space-y-4">
       {failure && <ui.ErrorBanner onClose={() => setFailure(null)}>{failure}</ui.ErrorBanner>}
       {/* The page's head, drawn by Settings, has the extension's name and mark already. */}
-      <p className="text-xs text-fg-faint">{t("Speech recognition and speech synthesis on servers you run, spoken to as OpenAI's audio API is. The speech server has to answer 24 kHz mono WAV.")}</p>
+      <p className="text-xs text-fg-faint">{t("Speech recognition and speech synthesis on servers you run, spoken to as OpenAI's audio API is. The speech server answers a WAV file, mono or stereo, at 8 to 192 kHz, or raw PCM.")}</p>
       <div className="flex flex-wrap items-center gap-2">
         {saved.chosen ? (
           <>
@@ -191,6 +193,7 @@ export function VoiceServers() {
         {field("dictationModel", t("Dictation model"), t("Empty uses the speech recognition model above"), t("The model the microphone button of the message box transcribes with. Voice mode keeps using the one above, so a conversation can have the quick model and dictation the accurate one."), true)}
         {field("ttsUrl", t("Speech synthesis URL"), "http://127.0.0.1:8880/v1/audio/speech", undefined, true)}
         {field("ttsModel", t("Speech synthesis model"), "kokoro")}
+        {field("rawSampleRate", t("Sample rate of raw audio"), "24000", t("In Hz, from 8000 to 192000. Used when the speech server streams raw audio, as Breeze does, and does not say its rate. Audio in a WAV file says its own."), true)}
         <div className="text-xs text-fg-muted">
           {t("Voice")}
           <Select<string>
