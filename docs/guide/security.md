@@ -34,8 +34,8 @@ A tool that declares that what it returns is outside content carries a shorter
 envelope: the same random closing id, with the warning above said once in the
 agent's instructions instead of on every result. The [Browser](/guide/browser)
 extension's tools declare it, as they read a page after nearly every click. The portal says the warning while
-any such tool is on, whichever of the others are switched off, and through the
-`tools` tool while they are lazy.
+any such tool is on, whichever of the others are switched off, and while they are lazy
+(reached through the `tool_search` tool), from the chat's first request: the chat keeps it once it has said it.
 
 What a tool declares is in `guard` on its definition, which a tool of the portal
 or of an [extension](/guide/extension-ui#what-the-guard-holds-a-tool-to) may
@@ -58,9 +58,25 @@ any tool.
 What is wrapped: mail and the web read through a command (`curl`, `wget`, `ssh`,
 `git clone` and the like), the tools of an MCP server, the browser, and a tool
 that declares outside content. A
-server's tools count however they are called: through the adapter's `mcp` tool,
-under their own names (`jira_get_issue`) where its tools are direct, and through
-the `tools` tool where they are lazy. An issue comment or a mail body a server
+server's tools count however they are called: under their own names
+(`mcp__jira__get_issue`) where its tools are direct, and through
+the `tool_search` tool where they are lazy. A tool pi's MCP support registers
+(`mcp__<server>__<tool>`) belongs to the server pi recorded for it, never to the
+server its name looks like: a tool called `mcp_page` that an extension brought is that
+extension's, and is trusted as it is. So an extension that hands back what a server or anyone
+else wrote, such as an MCP bridge of its own, declares `outside` on its tools; without it,
+its results are not wrapped. pi's resource tools
+(`list_mcp_resources`, `list_mcp_resource_templates`, `read_mcp_resource`) belong to
+the server they are asked for, and a listing of every server's counts as outside
+content. What `tool_search` shows when you search or describe is the tools' own
+descriptions and parameters, which the server wrote: such a result is wrapped when it
+shows a tool of a server you have not counted as your own, and left as it is when every
+tool it shows is the portal's, an extension's, or a trusted server's. The usage rules such a result
+carries start with a random tag of the chat's that a page, a file or a server has no way to know, and the tag is taken out of
+the text of every result of every tool but the portal's own search and describe, in the usual ways to write it (twice in a row, with the
+look-alike Latin, Greek and Cyrillic letters, zero-width characters or other separators between its letters), so a line
+written to look like a rule is not one. A tag that has leaked from the chat's own text, written in a way no table of look-alikes
+has, is a risk this line cannot rule out alone, and so is a tag drawn in a picture a tool returns, which is not read: the guard's other checks do not depend on it ([Lazy tools](/guide/extensions#lazy-tools)). An issue comment or a mail body a server
 hands back is whoever wrote it, and so is what a server from a config other than
 the portal's hands back, or one whose tools are named without the server. A
 server you run yourself can be counted as your own, and its output is then
@@ -81,8 +97,7 @@ model's own would be, and a tool switched off in the chat is refused to a script
 too. What a script's calls read goes to the script, not to the model. So the
 script's own result is wrapped whenever one of its calls read something from
 outside, and flagged with the signs those calls carried, even when the script
-keeps what it read to itself, and also when the call reached a lazy tool through
-the `tools` tool. Until the script ends, what its calls read holds the
+keeps what it read to itself, and also when the call reached a lazy tool, which a script calls by its name. Until the script ends, what its calls read holds the
 conversation back as a flagged result would. A call that is still running when
 the script ends is read by nobody, and holds nothing back.
 
@@ -322,8 +337,8 @@ What it does not do:
 
 The guard also enforces what a teammate may do, checked per tool call so it
 follows whoever is speaking. That is documented under [People](/people/). What
-a colleague or a guest may write stops short of everything that the portal, pi,
-its MCP adapter or an agent's heartbeat load on their own, which would put their
+a colleague or a guest may write stops short of everything that the portal, pi
+or an agent's heartbeat load on their own, which would put their
 words, their tools or a process into your next conversation, and nothing opens
 the tools that would run what they write with your rights (a subagent, a
 routine): the list is under

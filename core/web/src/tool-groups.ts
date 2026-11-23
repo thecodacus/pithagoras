@@ -1,4 +1,4 @@
-import type { PortalTool } from "./api";
+import type { PortalTool, ToolMark } from "./api";
 import { formatNumber, msg, t, tp } from "./i18n";
 
 /**
@@ -125,3 +125,26 @@ export function displayName(source: string, names: Record<string, string> = {}):
   if (source === BUILT_IN || source === CODEMODE) return sourceName(source);
   return source.replace(/^@[^/]+\//, "") || source;
 }
+
+/**
+ * What the three values of a mark are, said where one is drawn: always behind `tool_search` (lazy), always in the model's
+ * list (direct), or left to the threshold (auto), which takes whole groups out of the list when it is long.
+ */
+export const MARK_TITLE = msg("Lazy: the model finds and calls this tool through tool_search and it is not in its list. Direct: it is always in the list. Auto: the threshold decides, by how long the list is. Click to change: auto, lazy, direct. It reaches the chats that start from now on.");
+
+/** The words a mark is drawn as: what was set, else auto, with where the threshold put it. */
+export function markName(tool: Pick<PortalTool, "mark" | "lazy">): string {
+  if (tool.mark === "lazy") return t("lazy");
+  if (tool.mark === "direct") return t("direct");
+  return tool.lazy ? t("auto, lazy") : t("auto");
+}
+
+/** The look of a mark: what is set stands out, what the threshold decides is shown quietly. */
+export function markCls(tool: Pick<PortalTool, "mark" | "lazy">): string {
+  if (tool.mark === "lazy") return "border-accent/40 bg-accent/15 text-accent";
+  if (tool.mark === "direct") return "border-line bg-fg/5 text-fg-muted";
+  return tool.lazy ? "border-accent/20 text-accent/80 hover:text-accent" : "border-transparent text-fg-faint hover:text-fg";
+}
+
+/** The next value of a mark when it is clicked: auto, lazy, direct, and round again. */
+export const nextMark = (mark: ToolMark | undefined): ToolMark | undefined => (mark === undefined ? "lazy" : mark === "lazy" ? "direct" : undefined);

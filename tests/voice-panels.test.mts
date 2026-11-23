@@ -20,11 +20,11 @@ test('terminal follows cumulative streamed output and final tool errors by call 
   assert.deepEqual(terminalRuns(events), [{ id: 'a', command: 'npm test', output: 'Starting\nFailed', running: false, error: true }]);
 });
 
-test('a shell tool called through MCP is a run, and one its run left open is settled, not spinning', () => {
+test('a shell tool called through tool_search is a run, and one its run left open is settled, not spinning', () => {
   const events = [
-    { seq: 1, type: 'tool_execution_start', payload: { toolName: 'mcp', toolCallId: 'm', input: { tool: 'shell', args: { command: 'ls' } } } },
+    { seq: 1, type: 'tool_execution_start', payload: { toolName: 'tool_search', toolCallId: 'm', input: { action: 'call', name: 'shell', args: { command: 'ls' } } } },
     { seq: 2, type: 'tool_execution_start', payload: { toolName: 'bash', toolCallId: 'b', input: { command: 'sleep 99' } } },
-    { seq: 3, type: 'tool_execution_end', payload: { toolName: 'mcp', toolCallId: 'm', result: { content: [{ type: 'text', text: 'a\nb' }] } } },
+    { seq: 3, type: 'tool_execution_end', payload: { toolName: 'tool_search', toolCallId: 'm', result: { content: [{ type: 'text', text: 'a\nb' }] } } },
     { seq: 4, type: 'agent_end', payload: {} },
   ];
   assert.deepEqual(terminalRuns(events), [

@@ -34,7 +34,7 @@ test('the portal-wide alert can be put away by hand', async ({ page }) => {
 test('the routines page forgets a failed poll when the next one works', async ({ page }) => {
   let down = false;
   await mockPortal(page, ({ path, method }) => {
-    if (path === '/api/routines' && method === 'GET') return down ? reply(500, { error: 'The scheduler is busy' }) : { routines: [] };
+    if (path === '/api/routines' && method === 'GET') return down ? reply(500, { error: 'The scheduler is busy' }) : { routines: [], timeoutDefault: { minutes: 60, stored: null, fallback: 60 } };
     if (path === '/api/workspaces') return { root: '/w', workspaces: [] };
     if (path === '/api/agents') return { agents: [] };
     if (path === '/api/routines/report-targets') return { targets: [], default: null };
@@ -54,7 +54,7 @@ test('the routines page forgets a failed poll when the next one works', async ({
 test('a failed save in Settings is scrolled into view, and is not there any more in the next section', async ({ page }) => {
   await page.setViewportSize({ width: 1100, height: 420 });
   await mockPortal(page, ({ path }) => {
-    if (path === '/api/mcp') return { path: '/a/mcp.json', exists: true, adapterInstalled: true, adapterSpec: 'npm:pi-mcp-adapter', settings: {}, raw: '{}', parseError: null, servers: [] };
+    if (path === '/api/mcp') return { path: '/a/mcp.json', exists: true, raw: '{}', parseError: null, servers: [] };
     if (path === '/api/channels') return { channels: [], kinds: [], broken: [], agentHome: '/a', channelsDir: '/c' };
   }, { settings: true });
   await page.goto('/settings/mcp');

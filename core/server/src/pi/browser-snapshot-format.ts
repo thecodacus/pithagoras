@@ -19,5 +19,5 @@ export function cleanBrowserSnapshot(text: string): string {
 }
 
 export function isBrowserSnapshot(toolName: string, input: Record<string, unknown>): boolean {
-  return /(^|[_.])browser_snapshot$/.test(toolName === 'mcp' ? String(input.tool ?? '') : toolName);
+  return /(^|[_.])browser_snapshot$/.test(toolName);
 }

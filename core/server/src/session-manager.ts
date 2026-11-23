@@ -11,9 +11,10 @@ import { agentAt } from "./agents.js";
 import { HEARTBEAT_ROLE } from "./pi/heartbeat-names.js";
 import path from "node:path";
 import type { Draft, LoadError, PiClient, PiTool, PromptTaken } from "./pi/types.js";
-import { effectiveOff, exceptionsFor, heldOffUnshown, toolEnabled, toolSource } from "./tool-policy.js";
+import { effectiveOff, exceptionsFor, heldOffUnshown, toolEnabled, toolSetOf } from "./tool-policy.js";
 import { scriptedMark } from "./tool-layers.js";
-import { unlisted } from "./mcp-offer.js";
+import { headLazy, parseHead, ruleTag, type LazyHead } from "./tool-lazy.js";
+import { buildLazyHead } from "./lazy-head.js";
 import { projectOf } from "./workspaces.js";
 import { findServerBuiltin, picturesRefused, runBuiltin } from "./pi/builtins.js";
 import { dropMessage, SessionEditError, userTexts, type Scope } from "./pi/session-edit.js";
@@ -26,6 +27,7 @@ import { flaggedResult, forgetTaint, sessionTainted, taintSession } from "./pi/g
 import { neutralise } from "./channels/framing.js";
 import { textOf } from "./pi/entries.js";
 import { removeSessionFiles } from "./session-files.js";
+import { CONTAINER_SESSION_DIR, SESSION_ROOT } from "./pi/session-file.js";
 import { dropImages, forLog, forPi, loadImages, removeImages, storedIn, type Attached } from "./prompt-images.js";
 import { BACKGROUND_SUPPORTED, listJobs, startedWhen, type BackgroundJob } from "./background.js";
 import { forgetSession as forgetLlamaProxy } from "./llama-progress.js";
@@ -84,10 +86,6 @@ import {
   knownTools,
   recordAudit,
   shownTools,
-  mcpCatalogueFor,
-  mcpView,
-  withdrawnMcpTools,
-  type McpView,
   browserAllowlist,
   routineExemptions,
   updateSession,
@@ -96,9 +94,11 @@ import {
   anySessionRunning,
   onChannel,
   dialogHost,
+  lazyAllowed,
   lazyMarks,
-  lazyToolNames,
-  lazySetLabels,
+  setLazyHead,
+  agentDirect,
+  modeDirect,
   childSessions,
   deleteSession,
   lastRunEvents,
@@ -168,9 +168,6 @@ function rewrite(file: string, text: string): void {
   renameSync(tmp, file);
 }
 
-const SESSION_ROOT = path.resolve(process.env.SESSION_DIR || "./data/sessions");
-/** Where a container's pi finds a session's folder: see ContainerExecutor. */
-const CONTAINER_SESSION_DIR = "/sessions/";
 /** What can go with a message besides its text. */
 export interface PromptOptions {
   voice?: boolean;
@@ -375,6 +372,22 @@ interface LiveSession {
  * request. Once a prompt is accepted the browser can disappear — output keeps
  * streaming into the event log, and a later reconnect replays it.
  */
+/**
+ * Waits for `p` at most `ms`: rejects with `late()` when the time runs out
+ * first. `p` goes on; only the wait for it ends.
+ */
+async function untilDeadline<T>(p: Promise<T>, ms: number, late: () => Error): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(late()), ms);
+  });
+  try {
+    return await Promise.race([p, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 class SessionManager extends EventEmitter {
   private live = new Map<string, LiveSession>();
   private stopping = new WeakSet<PiClient>();
@@ -972,6 +985,10 @@ class SessionManager extends EventEmitter {
    */
   private inRun = new Set<string>();
 
+  /** Stops under way per session, and who waits for the run they stop to settle: see abort. */
+  private abortsUnderWay = new Map<string, number>();
+  private settleWaiters = new Map<string, Array<() => void>>();
+
   /** The extensions whose failure has been said since the last run began, per session. */
   private failuresSaid = new Map<string, Set<string>>();
 
@@ -1244,6 +1261,9 @@ class SessionManager extends EventEmitter {
         const mode = modeOf(getSession(sessionId)?.mode);
         return mode?.instructions ? [mode.instructions] : [];
       },
+      // The model parameters of the mode, read at each request like its instructions: an edit reaches a running chat at
+      // its next request, and a deleted mode sets none.
+      modeParams: () => modeOf(getSession(sessionId)?.mode)?.params,
       // A chat that names no model is reopened on the model of its last answer,
       // and after a spoken turn on the voice model that would be the voice's.
       rememberChatModel: (provider, model) => keepChatModel(sessionId, provider, model),
@@ -1282,16 +1302,20 @@ class SessionManager extends EventEmitter {
     // What this session registered, written down as soon as it exists. The
     // settings page offers a default per tool, and needing to open a chat
     // before you can say "off everywhere" would be the wrong way round.
-    void client
-      .getTools?.()
-      .then((tools) => {
-        // A lazy tool that this chat was started with, because nobody had seen it before, is taken out of its list again.
-        if (rememberTools(tools.map(remembered)).length) return this.applyToolDefaults();
-      })
-      .catch(() => {
-        // A session that cannot list its tools still works; the catalogue
-        // simply stays as it was.
-      });
+    // Again when a run has settled: an MCP server's tools are registered once pi has connected it, which is after the chat
+    // started, and what a chat last saw of a server is what the threshold counts.
+    const rememberRegistered = () =>
+      void client
+        .getTools?.()
+        .then((tools) => {
+          // A tool that this chat was started with, because nobody had seen it before, and that is off by default, is taken out of its list again.
+          if (rememberTools(tools.map(remembered)).length) return this.applyToolDefaults();
+        })
+        .catch(() => {
+          // A session that cannot list its tools still works; the catalogue
+          // simply stays as it was.
+        });
+    rememberRegistered();
 
     // A new pi process knows nothing of what the last one was retrying.
     this.modelErrors.forget(sessionId);
@@ -1434,7 +1458,12 @@ class SessionManager extends EventEmitter {
       if (msg.type === "agent_settled") {
         this.inRun.delete(sessionId);
         this.settleWaiting(sessionId);
-        if (!this.failed.delete(sessionId)) this.mark(sessionId, "idle");
+        // A stop that waits for this settle records the chat idle itself, as stopped: see abort.
+        const stoppedHere = (this.abortsUnderWay.get(sessionId) ?? 0) > 0;
+        if (!this.failed.delete(sessionId) && !stoppedHere) this.mark(sessionId, "idle");
+        for (const woken of this.settleWaiters.get(sessionId) ?? []) woken();
+        this.settleWaiters.delete(sessionId);
+        rememberRegistered();
         if (client.reloadDue) void this.reloadSettled(sessionId, client);
       }
     });
@@ -2308,7 +2337,8 @@ class SessionManager extends EventEmitter {
         } else if (row.type === "portal_status" && p.status === "error") done(String(p.error ?? error ?? "The run failed"));
         // Stopped by the person: the edit is what they stopped, not undid.
         else if (row.type === "portal_status" && p.status === "idle" && p.aborted) done();
-        else if (row.type === "agent_settled") done(error ?? "The run ended without an answer");
+        // A Stop records the stopped run's settle before its own idle (see abort), so the settle says it too.
+        else if (row.type === "agent_settled") p.aborted ? done() : done(error ?? "The run ended without an answer");
         // Idle with no run begun: an extension took it, and that is all.
         else if (row.type === "portal_status" && p.status === "idle") done(started ? (error ?? "The run ended without an answer") : undefined);
       };
@@ -2374,27 +2404,36 @@ class SessionManager extends EventEmitter {
       onVideo?: (video: SentFile) => void | Promise<void>;
     } = {}
   ): Promise<string> {
-    const previous = this.asking.get(sessionId) ?? Promise.resolve("");
-    const next = previous
-      .catch(() => "")
-      .then(async () => {
-        await this.waitForIdle(sessionId, opts.timeoutMs ?? 15 * 60_000);
-        await opts.beforeTurn?.();
-        return this.askNow(
-          sessionId,
-          message,
-          opts.timeoutMs ?? 15 * 60_000,
-          opts.onReply,
-          opts.streamText,
-          opts.onUi,
-          opts.onStopped,
-          { picture: opts.onPicture, video: opts.onVideo }
-        );
-      });
+    const behind = (this.asking.get(sessionId) ?? Promise.resolve("")).catch(() => "");
+    // One deadline for the whole of it: waiting behind an earlier ask, waiting
+    // for a turn still running, and the run itself share it, so a routine's
+    // limit is the most its run can take, not the most each wait can.
+    const limitMs = opts.timeoutMs ?? 15 * 60_000;
+    const deadline = Date.now() + limitMs;
+    const left = () => Math.max(0, deadline - Date.now());
+    const next = (async () => {
+      // An ask still queued at its deadline gives up there, and sends nothing.
+      await untilDeadline(behind, left(), () => new Error(`The agent did not finish within ${Math.round(limitMs / 1000)}s`));
+      await this.waitForIdle(sessionId, left());
+      await opts.beforeTurn?.();
+      return this.askNow(
+        sessionId,
+        message,
+        { deadline, limitMs },
+        opts.onReply,
+        opts.streamText,
+        opts.onUi,
+        opts.onStopped,
+        { picture: opts.onPicture, video: opts.onVideo }
+      );
+    })();
+    // The queue waits for the earlier ask as well, also when this one gave up
+    // first: the next ask never runs beside one still running.
+    const tail = Promise.allSettled([behind, next]).then(() => "");
     // Kept only while it is the newest, so a finished chain is not held forever.
-    this.asking.set(sessionId, next);
-    void next.catch(() => {}).finally(() => {
-      if (this.asking.get(sessionId) === next) this.asking.delete(sessionId);
+    this.asking.set(sessionId, tail);
+    void tail.finally(() => {
+      if (this.asking.get(sessionId) === tail) this.asking.delete(sessionId);
     });
     return next;
   }
@@ -2414,7 +2453,7 @@ class SessionManager extends EventEmitter {
   private async askNow(
     sessionId: string,
     message: AskMessage,
-    timeoutMs: number,
+    { deadline, limitMs }: { deadline: number; limitMs: number },
     onReply?: (text: string) => void | Promise<void>,
     streamText = true,
     onUi?: (request: any) => void,
@@ -2427,6 +2466,10 @@ class SessionManager extends EventEmitter {
     const stopsBefore = this.stops.get(sessionId) ?? 0;
     const abortsBefore = this.aborts.get(sessionId) ?? 0;
     await this.ensureClient(sessionId);
+    // What is left of the deadline once pi is up: starting it counts against
+    // the limit too, and a run with nothing left sends nothing.
+    const timeoutMs = deadline - Date.now();
+    if (timeoutMs <= 0) throw new Error(`The agent did not finish within ${Math.round(limitMs / 1000)}s`);
     const prepared: PreparedPrompt = typeof message === "function" ? message() : { message };
 
     // pi emits one assistant message per stretch of talking, broken up by tool
@@ -2564,7 +2607,7 @@ class SessionManager extends EventEmitter {
     // anyone was listening.
     this.on(`session:${sessionId}`, onEvent);
     const timer = setTimeout(
-      () => fail?.(new Error(`The agent did not finish within ${Math.round(timeoutMs / 1000)}s`)),
+      () => fail?.(new Error(`The agent did not finish within ${Math.round(limitMs / 1000)}s`)),
       timeoutMs
     );
 
@@ -2767,51 +2810,87 @@ class SessionManager extends EventEmitter {
   }
 
   /**
-   * What pi is told to have off: the switches (offFor), and the MCP servers'
-   * tools that the adapter's configuration no longer registers. Those are not
-   * the switches' — they are listed nowhere, and nothing is written down for
-   * them — but a chat that loaded one before the configuration changed still
-   * has it, and the configuration is what has the last word over it.
+   * What the chat's pi is told about its lazy tools: which sets are lazy in it, and the line that names them. Made when
+   * the chat first starts, from the marks, the threshold's resolution and what its mode and agent keep in the model's
+   * list, and kept with the chat (`sessions.lazy_head`) from then on: reused when it is reopened after a restart and when
+   * it is reloaded, so that the tools array and the system prompt, which the model's provider caches, do not change while
+   * the chat lasts. Made again only by `readToolsAgain`, which the person asks for.
    */
-  piOff(sessionId: string, reported: Pick<PiTool, "name" | "inline">[] = [], view: McpView = mcpView(), homes?: AgentHome[]): string[] {
-    const names = reported.map((t) => t.name);
-    return [...new Set([...this.offFor(sessionId, names, view.known().keys(), homes), ...withdrawnMcpTools(reported, view)])].sort();
+  lazyHeadFor(sessionId: string): LazyHead {
+    const session = getSession(sessionId);
+    const kept = parseHead(session?.lazy_head);
+    if (kept?.tag) return kept;
+    // Stored before a head had a tag: given one, once, and kept with it from then on.
+    if (kept) {
+      const tagged = { ...kept, tag: ruleTag() };
+      setLazyHead(sessionId, tagged);
+      return tagged;
+    }
+    const head = this.freshLazyHead(sessionId);
+    if (session) setLazyHead(sessionId, head);
+    return head;
   }
 
   /**
-   * Of the tools marked lazy, the ones this conversation has on: not offered one by one, and reached
-   * through the `tools` tool. What is off (piOff) is off for good and so not among them. `sets` names
-   * what they are, for the hint to the model.
+   * The head the chat would have if it started now: what a mode of the person's and the agent's it works with keep in the
+   * list stays there. Where every lazy tool starts switched off nothing is lazy (`off`), as nothing is to be reached.
    */
-  piLazy(off: string[]): { tools: string[]; sets: string[] } {
-    const gone = new Set(off);
-    const tools = [...lazyToolNames()].filter((name) => !gone.has(name)).sort();
-    return { tools, sets: lazySetLabels(tools) };
+  private freshLazyHead(sessionId: string, off: ReadonlySet<string> = new Set(this.offFor(sessionId))): LazyHead {
+    const session = getSession(sessionId);
+    return buildLazyHead([...modeDirect(session?.mode), ...agentDirect(agentIdOf(session?.workspace))], off);
   }
 
-  /** What pi is told about the tools when a conversation starts: the ones that are off, and the lazy ones that are on. */
-  private toolsFor(sessionId: string): { toolsOff: string[]; toolsLazy: string[]; lazySets: string[]; toolsSeen: () => ReadonlySet<string> } {
-    const toolsOff = this.piOff(sessionId);
-    const lazy = this.piLazy(toolsOff);
-    return { toolsOff, toolsLazy: lazy.tools, lazySets: lazy.sets, toolsSeen: () => new Set(knownTools().map((t) => t.name)) };
+  /** What pi is told about the tools when a conversation starts: the ones that are off, and what the chat froze about the lazy ones. */
+  private toolsFor(sessionId: string): { toolsOff: string[]; lazy: LazyHead; rememberLazy: (head: LazyHead) => void; toolsSeen: () => ReadonlySet<string> } {
+    const toolsOff = this.offFor(sessionId);
+    return {
+      toolsOff,
+      lazy: this.lazyHeadFor(sessionId),
+      rememberLazy: (head) => setLazyHead(sessionId, head),
+      toolsSeen: () => new Set(knownTools().map((t) => t.name)),
+    };
   }
 
   /**
-   * What a running chat reported, less the MCP servers' tools the adapter's
-   * configuration says no to — still loaded from before it changed, and off
-   * (piOff) — with those it lists from its cache marked. And the servers' tools
-   * the chat has not registered one by one, which it reaches through `mcp`: a
-   * server is a group like any other, switched whole or tool by tool.
+   * Read the tools again, as the person asks: what is lazy in the chat is decided afresh from the marks and the threshold as
+   * they are now, and kept as the chat's from then on. The one deliberate change of what the model is sent first, which
+   * costs the prompt cache from the start of it. The chat is reloaded for it, now or, where it is working, once it can be.
+   * True when the head changed.
    */
-  private offered(reported: PiTool[], workspace: string | null | undefined, view: McpView): Omit<PiTool, "enabled">[] {
-    if (!reported.length) return [];
-    const listed = reported.flatMap(({ enabled: _enabled, ...tool }) => {
-      const offer = view.offers(tool);
-      if (unlisted(offer)) return [];
-      return [offer === "cached" ? { ...tool, cached: true as const } : tool];
-    });
-    const have = new Set(listed.map((t) => t.name));
-    return [...listed, ...mcpCatalogueFor(workspace ?? undefined, view).filter((t) => !have.has(t.name))];
+  async readToolsAgain(sessionId: string): Promise<boolean> {
+    if (!getSession(sessionId)) return false;
+    // A pi that is starting has read the head already, and is not live yet to be given the new one: it is let finish, and
+    // is then read again as any running chat is. A start that fails leaves nothing to tell.
+    await this.starting.get(sessionId)?.catch(() => undefined);
+    const was = parseHead(getSession(sessionId)?.lazy_head);
+    // The tag stays the chat's: it says nothing of the tools, and changing it would change the prompt for nothing.
+    const fresh = this.freshLazyHead(sessionId);
+    const head = { ...fresh, tag: was?.tag || fresh.tag };
+    const same = was && JSON.stringify(was) === JSON.stringify({ ...head, outside: was.outside || head.outside, voice: was.voice });
+    if (same) return false;
+    setLazyHead(sessionId, head);
+    const client = this.live.get(sessionId)?.client;
+    if (client) {
+      client.useHead?.(head);
+      // A pi that takes the head (useHead) has it due after the run already: marking it due now as well would reload it
+      // between two steps, which keeps the old head, and then once more.
+      if (this.isBusy(sessionId) || this.reloadCutsOff(sessionId)) {
+        if (!client.useHead) client.reloadDue = true;
+      }
+      // Held like every reload: another reload or an edit on the same pi, meanwhile, would run under this one.
+      else await this.withEdit(sessionId, () => client.reload());
+    }
+    return true;
+  }
+
+  /** Whether what the chat froze about its lazy tools differs from what it would be now: the page offers to read the tools again. */
+  lazyHeadStale(sessionId: string): boolean {
+    const was = parseHead(getSession(sessionId)?.lazy_head);
+    if (!was) return false;
+    // As it would be with the tools the chat has on now and as with every tool on: a chat that has switched its lazy tools
+    // off since it started is no more out of date than one that started with them on, and one that started with them off is not.
+    const same = (head: LazyHead) => JSON.stringify(was.lazy) === JSON.stringify(head.lazy) && JSON.stringify(was.direct) === JSON.stringify(head.direct);
+    return !same(this.freshLazyHead(sessionId)) && !same(this.freshLazyHead(sessionId, new Set()));
   }
 
   /**
@@ -2832,38 +2911,43 @@ class SessionManager extends EventEmitter {
     if (reported.length && rememberTools(reported.map(remembered)).length) await this.applyToolDefaults();
     const session = getSession(sessionId);
     const workspace = session?.workspace;
-    const view = mcpView();
-    const listed = this.offered(reported, workspace, view);
+    const listed = reported.map(({ enabled: _enabled, ...tool }) => tool);
     // What the chat's agent, project and routine start it with, which is what it is "default" against.
     const defaults = toolDefaultsForSession(session);
     const exceptions = sessionTools(sessionId);
-    const lazy = lazyMarks(view);
-    const servers = view.servers;
-    // Where the chat works through the code tool and has it on, no tool is lazy (see lazyOf in pi/sdk-client.ts), but an
-    // MCP server's is still behind `mcp`. Read from the running pi where there is one: its presentation was fixed as it started.
+    const lazy = lazyMarks();
+    // Where the chat works through the code tool and has it on, no tool is lazy (see lazyMember in pi/sdk-client.ts).
+    // Read from the running pi where there is one: its presentation was fixed as it started.
     const scripted = (client ? client.codemodeOnly : modeOf(session?.mode)?.codemode) && toolEnabled(CODEMODE_TOOL, defaults, exceptions);
     // Its switch cannot turn it off here (setTools): the page shows it on and says why.
     const held = modeHoldsCodemode(session?.mode);
     // An idle chat is shown what the portal has seen registered; the tool is not there for every kind of chat (see asksQuestions).
     const asks = session ? canAsk(session) : true;
-    const shown: { name: string; source: string; package?: string | null; description?: string; inline?: true; cached?: true }[] = listed.length
+    const shown: { name: string; source: string; description?: string; inline?: true }[] = listed.length
       ? listed
-      : shownTools(workspace, view).filter((tool) => asks || !(tool.name === ASK_QUESTION_TOOL && tool.inline));
+      : shownTools(workspace).filter((tool) => asks || !(tool.name === ASK_QUESTION_TOOL && tool.inline));
+    // What the chat froze about its lazy tools is what is lazy in it, not what the marks say now: a running chat's own pi says
+    // which, a chat that has started and is idle its stored head.
+    const frozen = parseHead(session?.lazy_head);
+    const lazyHere = (name: string, source: string, inline?: true): boolean =>
+      client?.offers
+        ? client.offers(name) === "lazy"
+        : frozen !== undefined && lazyAllowed({ name, source, inline: inline === true }) && headLazy(frozen, { name, set: toolSetOf({ source }) });
     return {
-      tools: shown.map(({ name, source, package: pkg, description, inline, cached }) => {
-        const mark = lazy({ name, source, package: pkg });
+      tools: shown.map(({ name, source, description, inline }) => {
+        const mark = lazy({ name, source, inline });
         return {
           name,
           ...(description !== undefined ? { description } : {}),
-          source: toolSource(name, source, servers),
+          source,
           // The portal's own tools are told from an extension's of the same name, so the page can group its code mode apart.
           ...(inline ? { inline: true as const } : {}),
-          ...(cached ? { cached: true as const } : {}),
           enabled: toolEnabled(name, defaults, exceptions),
           ...(held && name === CODEMODE_TOOL ? { byMode: true as const } : {}),
           defaultOn: !defaults.includes(name),
-          // Not offered one by one but found through the `tools` tool, or an MCP server's through `mcp`: the page says so beside the switch.
-          ...scriptedMark(mark, scripted),
+          // Not offered one by one but found through `tool_search`: the page says so beside the switch.
+          // In a chat that is running it is what the chat froze that says so, which the marks may have left behind.
+          ...scriptedMark(client?.offers || frozen ? { ...mark, lazy: lazyHere(name, source, inline) ? (true as const) : undefined } : mark, scripted),
         };
       }),
       live: Boolean(listed.length),
@@ -2889,9 +2973,7 @@ class SessionManager extends EventEmitter {
     const holds = modeHoldsCodemode(session?.mode);
     if (wantedOff.includes(CODEMODE_TOOL) && holds) throw new CodemodeHeld();
     const workspace = session?.workspace;
-    const view = mcpView();
-    // Not what the adapter no longer registers: the page did not show it, so it said nothing about it.
-    const listed = this.offered(reported, workspace, view);
+    const listed = reported;
     // What this call is answering about: the tools this session registered,
     // plus the ones it already holds an exception for. Not the portal-wide
     // catalogue — a tool that is merely not loaded in this run was not on the
@@ -2904,7 +2986,7 @@ class SessionManager extends EventEmitter {
     // chat). Without them a tool switched *on* would be in neither list, no
     // exception would be written, and the write would answer 200 while the
     // tool went on following the default.
-    const shown = (listed.length ? listed : shownTools(workspace, view)).map((t) => t.name);
+    const shown = (listed.length ? listed : shownTools(workspace)).map((t) => t.name);
     const answered = [...shown, ...held.off, ...held.on];
     // Against the project's default: an exception here is to what the chat would
     // otherwise have, so a project that switches a tool off needs no entry for it
@@ -2914,9 +2996,8 @@ class SessionManager extends EventEmitter {
     // kept for when the mode no longer does: this list said nothing about it.
     const kept = holds && parseToolsOff(session?.tools_off).includes(CODEMODE_TOOL) ? [CODEMODE_TOOL] : [];
     setSessionTools(sessionId, { off: [...own.off, ...kept], on: own.on });
-    const off = this.offFor(sessionId, listed.map((t) => t.name), view.known().keys());
-    const piOff = this.piOff(sessionId, reported, view);
-    await client?.setToolsOff?.(piOff, this.piLazy(piOff));
+    const off = this.offFor(sessionId, listed.map((t) => t.name));
+    await client?.setToolsOff?.(off);
     return off;
   }
 
@@ -2943,7 +3024,6 @@ class SessionManager extends EventEmitter {
       if (only.mode !== undefined) return session?.mode === only.mode;
       return true;
     });
-    const view = mcpView();
     const done = await Promise.all(
       affected.map(async ([sessionId, { client }]) => {
         // Per session, like refreshSettings: the default is already stored, so
@@ -2951,8 +3031,8 @@ class SessionManager extends EventEmitter {
         // page showing the opposite of what the database now holds.
         try {
           const listed = client.getTools ? await client.getTools() : [];
-          const off = this.piOff(sessionId, listed, view, homes);
-          await client.setToolsOff?.(off, this.piLazy(off));
+          const off = this.offFor(sessionId, listed.map((t) => t.name), undefined, homes);
+          await client.setToolsOff?.(off);
           return true;
         } catch (e) {
           console.error(`[portal] could not apply the tool defaults to ${sessionId}: ${(e as Error).message}`);
@@ -3035,6 +3115,29 @@ class SessionManager extends EventEmitter {
     }
   }
 
+  /**
+   * Resolves when the run that is going settles, at once when none is, and after `timeoutMs` at the latest: pi
+   * settles a run a moment after its abort() has returned (the extensions' handlers are awaited first), so a Stop that
+   * did not wait would record the chat idle ahead of the run's own settling.
+   */
+  private whenSettled(sessionId: string, timeoutMs = 10_000): Promise<void> {
+    if (!this.inRun.has(sessionId)) return Promise.resolve();
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        // Not left behind for the next settle to call.
+        const rest = (this.settleWaiters.get(sessionId) ?? []).filter((w) => w !== done);
+        if (rest.length) this.settleWaiters.set(sessionId, rest);
+        else this.settleWaiters.delete(sessionId);
+        done();
+      }, timeoutMs);
+      const done = () => {
+        clearTimeout(timer);
+        resolve();
+      };
+      this.settleWaiters.set(sessionId, [...(this.settleWaiters.get(sessionId) ?? []), done]);
+    });
+  }
+
   async abort(sessionId: string): Promise<void> {
     this.aborts.set(sessionId, (this.aborts.get(sessionId) ?? 0) + 1);
     const live = this.live.get(sessionId);
@@ -3060,6 +3163,7 @@ class SessionManager extends EventEmitter {
     const before = this.sending.get(sessionId);
     const tail = before ? before.then(() => gate) : gate;
     this.sending.set(sessionId, tail);
+    this.abortsUnderWay.set(sessionId, (this.abortsUnderWay.get(sessionId) ?? 0) + 1);
     try {
       const sentBefore = new Set(this.waiting.get(sessionId) ?? []);
       // Before the abort, which waits for the run to settle and would find them
@@ -3068,6 +3172,9 @@ class SessionManager extends EventEmitter {
       await this.whenHanded(sessionId);
       this.dropWaiting(sessionId, live.client, sentBefore);
       await live.client.abort().catch(() => {});
+      // The stopped run's settling comes after this: it is waited for, or it would be recorded behind the message
+      // that is sent next, and be taken for the end of the run that message starts.
+      await this.whenSettled(sessionId);
       // Cancelling a compaction does not end it. pi detaches the session from
       // agent events for the whole of compact() and reattaches in its own
       // finally, so between abortCompaction() returning and that finally running
@@ -3078,6 +3185,9 @@ class SessionManager extends EventEmitter {
       updateSession(sessionId, { status: "idle" });
       this.record(sessionId, "portal_status", { status: "idle", aborted: true });
     } finally {
+      const left = (this.abortsUnderWay.get(sessionId) ?? 1) - 1;
+      if (left > 0) this.abortsUnderWay.set(sessionId, left);
+      else this.abortsUnderWay.delete(sessionId);
       stopped();
       if (this.sending.get(sessionId) === tail) this.sending.delete(sessionId);
     }
@@ -3205,6 +3315,9 @@ class SessionManager extends EventEmitter {
     this.extensionUi.delete(sessionId);
     this.failuresSaid.delete(sessionId);
     this.inRun.delete(sessionId);
+    // A run that went with its pi settles no more: a Stop that waits for it is let go.
+    for (const woken of this.settleWaiters.get(sessionId) ?? []) woken();
+    this.settleWaiters.delete(sessionId);
     this.calls.delete(sessionId);
     toolCallsCutOff(sessionId);
     this.callWindows.delete(sessionId);
@@ -3351,8 +3464,7 @@ class SessionManager extends EventEmitter {
     const client = this.live.get(childId)?.client;
     if (!client?.setToolsOff) return;
     const reported = client.getTools ? await client.getTools() : [];
-    const piOff = this.piOff(childId, reported);
-    await client.setToolsOff(piOff, this.piLazy(piOff));
+    await client.setToolsOff(this.offFor(childId, reported.map((t) => t.name)));
   }
 
   /**

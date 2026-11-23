@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import type { ContainerInfo, PullState } from "../../../docker/src/api";
+import type { ContainerInfo, PullState, WantedImage } from "../../../docker/src/api";
 import { docker, portal } from "./host";
 import { modelServer } from "./llm";
 import { putSettings, setting } from "./store";
@@ -26,6 +26,12 @@ import { putSettings, setting } from "./store";
 
 export const IMAGE = "ghcr.io/thecodacus/understory:latest";
 export const CONTAINER = "pithagoras-understory";
+/**
+ * The image Docker's page (Settings → Docker) should find Understory's container running (`containers.wantImage`). It is
+ * `latest` today, which Docker never warns of; whoever pins `IMAGE` to a version gets the warning, and the Update button,
+ * for the containers made on the version before, with no more work here.
+ */
+export const wantedImage = (container: ContainerInfo): WantedImage | undefined => (container.name === CONTAINER ? { image: IMAGE } : undefined);
 export const VOLUME = process.env.UNDERSTORY_VOLUME || "pithagoras_understory-memory";
 export const port = (): number => Number(process.env.UNDERSTORY_PORT) || 3800;
 export const managedUrl = (): string => `http://127.0.0.1:${port()}/mcp`;

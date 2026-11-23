@@ -1,9 +1,9 @@
 import type { ServerPortal } from "@pithagoras/extension-api/server";
 import { takeHandoff } from "./server/handoff";
-import { setPortal } from "./server/host";
+import { docker, setPortal } from "./server/host";
 import { maintain, provider } from "./server/provider";
 import { voiceRoutes } from "./server/routes";
-import { adoptKept } from "./server/service";
+import { adoptKept, wantedImage } from "./server/service";
 import { openStore } from "./server/store";
 import { openLibrary } from "./server/voices";
 
@@ -25,6 +25,12 @@ export default function voice(portal: ServerPortal) {
   openLibrary(portal.dataDir());
   takeHandoff();
   portal.voice.provide(provider());
+  // Docker's page tells when the container runs another image than the one the engines run in now, and updates it.
+  try {
+    docker().containers.wantImage(wantedImage);
+  } catch (e) {
+    portal.log(`could not tell Docker which image the voice container should run: ${(e as Error).message}`);
+  }
   voiceRoutes(portal.router);
 
   let stopped = false;

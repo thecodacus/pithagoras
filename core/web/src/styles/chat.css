@@ -180,9 +180,12 @@ button.chat-compaction-pill:disabled { cursor: default; }
 .chat-tool-badge.is-ok { color: rgb(var(--ok)); background: rgb(var(--ok) / .1); }
 .chat-tool-badge.is-error { color: rgb(var(--danger)); background: rgb(var(--danger) / .1); }
 .chat-tool-badge.is-warn { color: rgb(var(--warn)); background: rgb(var(--warn) / .12); }
-/* A running command's last lines, the same way: the newest at the bottom,
-   each line cut at the edge, nothing redrawn as output streams in. */
-.chat-tool-stream { display: flex; flex-direction: column; justify-content: flex-end; height: 54px; overflow: hidden; margin: 0 0 2px 27px; font: 11px/18px ui-monospace, SFMono-Regular, Menlo, monospace; color: rgb(var(--fg-faint)); -webkit-mask-image: linear-gradient(to bottom, transparent, #000 65%); mask-image: linear-gradient(to bottom, transparent, #000 65%); }
+/* A running command's last lines, the same way: a window of three lines that
+   stays that high, filled from the top so the first line sits right under the
+   header, each line cut at the edge, nothing redrawn as output streams in. The
+   oldest line fades out only once there are more than the window holds. */
+.chat-tool-stream { display: flex; flex-direction: column; justify-content: flex-start; height: 54px; overflow: hidden; margin: 0 0 2px 27px; font: 11px/18px ui-monospace, SFMono-Regular, Menlo, monospace; color: rgb(var(--fg-faint)); }
+.chat-tool-stream.is-clipped { -webkit-mask-image: linear-gradient(to bottom, transparent, #000 65%); mask-image: linear-gradient(to bottom, transparent, #000 65%); }
 .chat-tool-stream > span { display: block; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; white-space: pre; }
 @media (prefers-reduced-motion: reduce) { .chat-tool-badge { animation: none; } }
 /* ── Running beside the conversation: the tray in the composer ── */

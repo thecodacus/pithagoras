@@ -15,6 +15,7 @@ import { bundledPath } from "../bundled.js";
 import { isServing, serverFailure, serverHalfStatus, serverHalvesStanding, serversSettled, syncServerHalves } from "../extension-host.js";
 import { logFileLine } from "../logs.js";
 import { planInstall, type InstalledExtension } from "../install-plan.js";
+import { extensionPresets } from "../default-extensions.js";
 
 const run = promisify(execFile);
 
@@ -86,6 +87,42 @@ export function shippedExtensions(dir = bundledPath("extensions")): ShippedExten
     });
   }
   return out.sort((x, y) => x.name.localeCompare(y.name));
+}
+
+/** The repositories the official extensions that do not ship with the portal live in. */
+export const OFFICIAL_REPOSITORIES = ["prometheion/pithagoras-extensions", "prometheion/pithagoras-flair"] as const;
+
+/** An official extension that does not ship with the portal, listed in extensions/official.json and installed from npm. */
+export interface OfficialExtension {
+  name: string;
+  description: string;
+  kinds: PackageKind[];
+  /** The GitHub repository its folder is in. */
+  repository: (typeof OFFICIAL_REPOSITORIES)[number];
+  /** What it is installed by: not a git spec, as pi installs a git repository from its root and these are folders of one. */
+  spec: string;
+}
+
+/** The entries of extensions/official.json; one that is not whole is left out, as a list is not worth losing over it. */
+export function officialExtensions(dir = bundledPath("extensions")): OfficialExtension[] {
+  if (!dir) return [];
+  let listed: unknown;
+  try {
+    listed = JSON.parse(readFileSync(path.join(dir, "official.json"), "utf8"));
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(listed)) return [];
+  const kinds: string[] = ["pi", "pithagoras", "themes"];
+  return listed.filter(
+    (e): e is OfficialExtension =>
+      typeof e?.name === "string" &&
+      typeof e.description === "string" &&
+      typeof e.spec === "string" &&
+      (OFFICIAL_REPOSITORIES as readonly string[]).includes(e.repository) &&
+      Array.isArray(e.kinds) &&
+      e.kinds.every((kind: unknown) => typeof kind === "string" && kinds.includes(kind)),
+  );
 }
 
 /**
@@ -411,6 +448,17 @@ export const preparingExtensions = <T>(work: Promise<T>): Promise<T> => {
 };
 
 /**
+ * What a portal starts with is being installed (see installDefaultExtensions): an install asked for meanwhile waits for
+ * it, or two `pi install` would write pi's settings at the same time and one entry could be lost.
+ */
+let startingWith: Promise<unknown> = Promise.resolve();
+export const installingDefaults = <T>(work: Promise<T>): Promise<T> => {
+  startingWith = work.catch(() => {});
+  return work;
+};
+export const afterDefaultsInstalled = (): Promise<unknown> => startingWith;
+
+/**
  * Where a page fetches a file of a package's web folder from: under the half's revision, as a folder of its own, so
  * that what the module imports by a relative address is fetched under that revision too, and another revision is
  * other files to the page, every one of them.
@@ -586,11 +634,7 @@ export function extensionsRouter(): Router {
           } catch {
             // metadata is a nicety; keep going without it
           }
-          // The MCP adapter keeps its settings in mcp.json, not pi's
-          // settings.json. The key scanner finds them all the same, and a form
-          // built from them would write keys the adapter never reads — so it
-          // gets no config page here. Settings → MCP edits the real file.
-          const keys = info.name === "pi-mcp-adapter" ? [] : settingKeysOf(pkg.path, /^(npm|git):/.test(pkg.spec));
+          const keys = settingKeysOf(pkg.path, /^(npm|git):/.test(pkg.spec));
           for (const key of keys) {
             info.settings.push({
               key,
@@ -612,6 +656,27 @@ export function extensionsRouter(): Router {
   router.get("/extensions/shipped", (_req, res) => {
     try {
       res.json({ extensions: shippedExtensions() });
+    } catch (e) {
+      res.status(500).json({ error: (e as Error).message });
+    }
+  });
+
+  /**
+   * The official extensions that do not ship with the portal (extensions/official.json). A list in the portal, not one
+   * fetched from GitHub: it is there offline and at once, and the repositories' own pages say more.
+   */
+  router.get("/extensions/official", (_req, res) => {
+    res.json({ extensions: officialExtensions() });
+  });
+
+  /**
+   * The sets the setup assistant's extension step offers (default-extensions.ts), by the packages each holds. The page
+   * installs what a set holds that is missing through the same calls Settings does (the plan, then POST /packages), so
+   * the rule for who may is the same: anyone signed in.
+   */
+  router.get("/extensions/presets", (_req, res) => {
+    try {
+      res.json({ presets: extensionPresets().map(({ id, extensions }) => ({ id, extensions })) });
     } catch (e) {
       res.status(500).json({ error: (e as Error).message });
     }

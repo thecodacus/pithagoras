@@ -13,8 +13,8 @@ writes it into pi's own configuration as an MCP server, so it can also be seen,
 and undone, from Settings → MCP. Understory is the
 `pithagoras-understory` extension, which you install first (see
 [Memory: Understory](#memory-understory)). Image and video generation are
-the tools of the [Media](/guide/media) extension, which a portal installs when
-it first starts, and keep their settings in its own store.
+the tools of the [Media](/guide/media) extension, which you install from Settings → Extensions
+(or pick Creative in the setup assistant), and keep their settings in its own store.
 
 The first two are reference implementations behind a seam the portal already
 has, so a third-party equivalent can take their place without changing the
@@ -150,12 +150,13 @@ messages, about 14 tokens more on every request, and `subagents` costs about
 
 **Subagents work in the chat's mode**, on by default: a subagent's chat is made
 in the [mode](/guide/sessions#modes) of the chat it works for, with that
-mode's tools and instructions, and on the model and effort its chat is on now
+mode's tools, instructions and
+[temperature](/guide/sessions#model-parameters-of-a-mode), and on the model and effort its chat is on now
 (not the ones the mode starts a chat on). In a chat in **Code mode** the subagent
 works through the code tool as well, in a mode you made it has the mode's tool
 layer and instructions, and in an extension's mode it is in that mode. Off, every
 subagent works in Standard mode: without the code tool, the mode's instructions
-and an extension's mode. The tools its chat's mode switched off stay off for it
+and temperature, and an extension's mode. The tools its chat's mode switched off stay off for it
 (a mode with `bash` and `write` off gives no subagent either), and so do the ones
 you switched off in the chat itself; what Standard gives beyond those it has.
 
@@ -678,7 +679,7 @@ always costs minutes of its model.
 gives the agent [Understory](https://github.com/thecodacus/understory) as its
 memory: a memory that grows, plain markdown on disk, cross-linked and
 maintained, which the agent looks things up in and adds to through its tools
-(`understory_memory_query`, `…_add`, `…_update`, `…_status`, `…_maintain`).
+(`mcp__understory__memory_query`, `…_add`, `…_update`, `…_status`, `…_maintain`).
 The bundle is human-readable and git-diffable.
 
 Neither Understory nor [Docker](/guide/docker), which it requires, is installed
@@ -833,15 +834,14 @@ wrong instead of showing an empty memory.
 
 Switching it on:
 
-1. installs `pi-mcp-adapter` if it is not installed yet, which makes MCP servers
-   into tools;
-2. writes an `understory` server into `mcp.json`, with its tools directly in the
-   agent's tool list — the Understory run here with its token, or the
+1. writes an `understory` server into `mcp.json`, with its tools directly in the
+   agent's tool list (a Direct mark on the server in **Settings → Tools**, which
+   you can change) — the Understory run here with its token, or the
    address given;
-3. counts what its server says as your own words, so the guard neither marks
+2. counts what its server says as your own words, so the guard neither marks
    nor checks it: it is added to the trusted MCP servers in **Settings → Guard**,
    where you can take it out (see [Prompt injection](/guide/security#marking-untrusted-output));
-4. stops reading `MEMORY.md`.
+3. stops reading `MEMORY.md`.
 
 Switching it off removes the server, takes it out of the trusted servers again,
 and `MEMORY.md` is read again. Removing the Understory run here switches it off
@@ -894,4 +894,4 @@ a shared Docker network. It can be changed on Understory's page in Settings.
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `MEMORY_UNDERSTORY_URL` | `http://localhost:3800/mcp` | The address Understory's page in Settings starts from. |
-| `MEMORY_UNDERSTORY_AUTH_TOKEN` | — | Sent as `Authorization: Bearer …` when Understory has an `AUTH_TOKEN`. Named in `mcp.json` (`bearerTokenEnv`), never copied into it. |
+| `MEMORY_UNDERSTORY_AUTH_TOKEN` | — | Sent as `Authorization: Bearer …` when Understory has an `AUTH_TOKEN`. Named in `mcp.json` as `headers: { Authorization: "Bearer ${MEMORY_UNDERSTORY_AUTH_TOKEN}" }`, never copied into it. |

@@ -43,7 +43,7 @@ test('the portal settings the voice service reads reach a portal run with the sh
 test('a choice with nothing on the GPU asks for none and runs in the small image; the rest is as it was',()=>{
  // The CUDA image is many gigabytes, and a host without a GPU has no use for it.
  assert.equal(BASE_IMAGE,'ubuntu:22.04');
- assert.equal(IMAGE,'nvidia/cuda:12.4.1-devel-ubuntu22.04');
+ assert.equal(IMAGE,'nvidia/cuda:12.9.1-devel-ubuntu22.04');
  for(const [choice,image,gpu] of [
   [{tts:'breeze',asr:'whisper',asrModel:'base'},IMAGE,true],
   [{tts:'chatterbox',asr:'qwen3-asr',asrModel:'1.7b'},IMAGE,true],

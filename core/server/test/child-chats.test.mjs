@@ -210,6 +210,23 @@ test("abort stops a child's run, and its prompt resolves as stopped", async () =
   letGo();
 });
 
+test("a prompt sent right after an abort of the same child is answered by its own run, not ended by the stopped run's settling", async () => {
+  const parent = chat();
+  const child = helper.chats.create({ parent, title: "Stop and send" });
+  const first = helper.chats.prompt(child.id, "Hold this");
+  await until(() => held.length === 1, "the child's run to be held at the model");
+  await helper.chats.abort(child.id);
+  const second = helper.chats.prompt(child.id, "Answer the question");
+  assert.equal((await first).status, "stopped");
+  assert.deepEqual(await second, { status: "done", answer: "The answer is 42." });
+  // The stopped run settled before the Stop was over, so nothing of it is recorded behind the new message.
+  const lines = eventsSince(child.id);
+  const sent = lines.findIndex((e) => e.type === "portal_prompt" && JSON.parse(e.payload).message === "Answer the question");
+  assert.equal(lines.slice(0, sent).filter((e) => e.type === "agent_settled").length, 1, "the stopped run settled before it");
+  assert.equal(lines.slice(sent).filter((e) => e.type === "agent_settled").length, 1, "only its own run settles after it");
+  letGo();
+});
+
 test("deleting the parent deletes its children, their transcripts and files, and the server halves hear each deleted", async () => {
   const parent = chat();
   const child = helper.chats.create({ parent, title: "Goes with it", listed: false });

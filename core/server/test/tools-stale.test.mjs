@@ -71,14 +71,13 @@ test("uninstalling forgets whatever is no longer listed, however the request wro
   assert.deepEqual(names(), ["bash", "other", "todo_mine"]);
 });
 
-test("an MCP server's tools are kept when the adapter is uninstalled", () => {
-  listPackages(["npm:pi-mcp-adapter", "npm:pi-other"]);
-  rememberTools([{ name: "jira_search", source: "pi-mcp-adapter", package: "npm:pi-mcp-adapter" }]);
+test("an MCP server's tools are no package's: uninstalling a package named like the server leaves them", () => {
   listPackages(["npm:pi-other"]);
-  forgetPackageTools("npm:pi-mcp-adapter");
-  assert.deepEqual(names(), ["bash", "jira_search", "other", "todo_mine"]);
-  // Hidden all the same, since nothing registers them while the adapter is gone.
-  assert.equal(shownTools().some((t) => t.name === "jira_search"), false);
+  // Filed under the server, as a package would be under its label; the report says it is the server's.
+  rememberTools([{ name: "mcp__jira__search", source: "jira", mcp: "jira" }]);
+  forgetPackageTools("npm:jira");
+  assert.deepEqual(names(), ["bash", "mcp__jira__search", "other", "todo_mine"]);
+  assert.equal(shownTools().some((t) => t.name === "mcp__jira__search"), true, "listed: its server is in mcp.json");
 });
 
 test("a project bringing the user's package in its own settings does not take its tools from it", () => {

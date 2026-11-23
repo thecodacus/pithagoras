@@ -123,7 +123,7 @@ sudo systemctl restart docker
 Run the same CUDA image used by the installer:
 
 ```sh
-docker run --rm --gpus all nvidia/cuda:12.4.1-devel-ubuntu22.04 nvidia-smi
+docker run --rm --gpus all nvidia/cuda:12.9.1-devel-ubuntu22.04 nvidia-smi
 ```
 
 Continue only when this lists your GPU.
@@ -464,6 +464,10 @@ The voice service needs no other speech server. One you run yourself on the same
 ## Updates and removal
 
 Rebuilding the portal does not recreate the voice container, except to put a running one on the portal's new network.
+
+### When the CUDA image changes
+
+An update of Voice may move its container to a newer CUDA image (for a newer GPU, say). The container you already have keeps running the old one, because Docker does not change the image of a container that exists. [Settings → Docker](/guide/docker#outdated-images-and-update) shows a warning under it, with an **Update** button: it downloads the new image, makes the container again on it with the same engines, GPU, settings and volumes (the models and builds in `pithagoras_voice-models` stay), and starts it again. The button is refused while Voice's setup is running. It changes the image only; a newer installer still needs the steps below.
 
 ### Recreate Voice after a portal update
 

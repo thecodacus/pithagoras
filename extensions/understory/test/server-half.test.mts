@@ -15,7 +15,7 @@ import { CONTAINER, VOLUME, envOf, startUnderstory } from "./portal.mts";
  */
 
 const home = inProcessHome("pithagoras-understory-half-");
-const { host, halves, docker, machine, adapterOn, putServers } = await startUnderstory();
+const { host, halves, docker, machine, putServers } = await startUnderstory();
 const both = [halves.docker, halves.understory];
 const store = await import("../src/server/store.ts");
 const service = await import("../src/server/service.ts");
@@ -75,24 +75,28 @@ const OLD = {
 test("Understory's server half does not start without Docker, which it requires, and starts after it", async () => {
   await host.syncServerHalves([halves.understory]);
   assert.equal(host.isServing("pithagoras-understory"), false);
-  assert.match(host.serverFailure("pithagoras-understory") ?? "", /It needs pithagoras-docker \(\^1\.1\.0\), which is not installed, or is switched off/);
+  assert.match(host.serverFailure("pithagoras-understory") ?? "", /It needs pithagoras-docker \(\^1\.4\.0\), which is not installed, or is switched off/);
 
   await host.syncServerHalves(both);
   assert.equal(host.serverFailure("pithagoras-understory"), undefined);
   assert.deepEqual([host.isServing("pithagoras-docker"), host.isServing("pithagoras-understory")], [true, true]);
 });
 
-test("it holds the agent's memory while its server is the chats': there, not switched off, and pi-mcp-adapter on", async () => {
+test("it tells Docker which image its container should run, so that pinning the image is enough for a warning on the containers made on the version before", async () => {
+  const { IMAGE, wantedImage } = await import("../src/server/service.ts");
+  assert.deepEqual(wantedImage({ name: "pithagoras-understory" } as never), { image: IMAGE });
+  assert.equal(wantedImage({ name: "pithagoras-understory-other" } as never), undefined);
+});
+
+test("it holds the agent's memory while its server is the chats': there, and not switched off", async () => {
   const agentHome = process.env.AGENT_HOME!;
   putServers({});
   assert.equal(memoryHolder(), undefined);
   assert.deepEqual(memoryRule(agentHome), []);
   putServers({ understory: { url: "http://127.0.0.1:1/mcp" } });
-  assert.equal(memoryHolder(), undefined, "without the adapter its tools are no one's");
-  adapterOn();
   assert.equal(memoryHolder()?.label, "Understory");
-  assert.match(memoryRule(agentHome)[0], /understory_memory_query/);
-  putServers({ understory: { url: "http://127.0.0.1:1/mcp", disabled: true } });
+  assert.match(memoryRule(agentHome)[0], /mcp__understory__memory_query/);
+  putServers({ understory: { url: "http://127.0.0.1:1/mcp", enabled: false } });
   assert.equal(memoryHolder(), undefined, "switched off in Settings → MCP");
   // Let go when the half stops.
   putServers({ understory: { url: "http://127.0.0.1:1/mcp" } });

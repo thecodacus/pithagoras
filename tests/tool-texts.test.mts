@@ -7,10 +7,12 @@ import { inProcessHome } from "./helpers.mts";
 // back fails here. The caps are the lengths agreed for each tool (about a quarter of a token to the character is
 // the measure, as in the review of issue #183), with a little room for a word to be changed.
 inProcessHome("pitha-tool-texts-");
-const { ToolsGateway } = await import("../core/server/src/pi/tools-gateway.ts");
+const { ToolSearch } = await import("../core/server/src/pi/tool-search.ts");
+const { lazyHintOf } = await import("../core/server/src/lazy-head.ts");
 const { askPrimaryTool } = await import("../core/server/src/pi/ask-primary.ts");
 const { askQuestionTool } = await import("../core/server/src/pi/ask-question.ts");
 const { heartbeatTool } = await import("../core/server/src/pi/heartbeat-tool.ts");
+const { chatTools } = await import("../core/server/src/pi/chat-tools.ts");
 const { reportTool } = await import("../core/server/src/pi/report-tool.ts");
 const { routineTools } = await import("../core/server/src/pi/routine-tools.ts");
 const { default: subagentTool } = await import("../extensions/subagent/src/pi.ts");
@@ -42,10 +44,13 @@ const cost = (tool: Registered) =>
   tokens(tool.description) + tokens(JSON.stringify(tool.parameters)) + (tool.promptSnippet ? tokens(`- ${tool.name}: ${tool.promptSnippet}`) : 0);
 
 const all: Registered[] = [];
-load(new ToolsGateway(["browser", "media"]).extension, all);
+// With the line that names what is behind it, as a chat that has two groups lazy says it.
+const head = { v: 1 as const, lazy: ["browser", "media"], direct: [], hint: lazyHintOf([{ label: "Browser", tools: ["browser_click", "browser_navigate", "browser_snapshot", "browser_type"] }, { label: "Media", tools: ["generate_image", "edit_image", "show_image"] }]), outside: false, voice: [], tag: "0a1b2c3d" };
+load(new ToolSearch(head).extension, all);
 load(askPrimaryTool("s"), all);
 load(askQuestionTool(), all);
 load(heartbeatTool("a", "s"), all);
+load(chatTools("a", "s"), all);
 load(reportTool(null), all);
 load(routineTools("s"), all);
 // What the subagent tool is given of the portal: none of it is asked for as the tool is registered.
@@ -63,14 +68,18 @@ load(subagentIn({ mode: "background", keep: true }), subagentBackgroundKept);
 /** The most each tool may cost, in tokens: what was agreed, as the review of issue #183 measured it, and 10 for a changed word. */
 const ROOM = 10;
 const AGREED: Record<string, number> = {
-  tools: 154,
+  tool_search: 167,
   ask_primary: 218,
   ask_question: 393,
   activity_note: 131,
   report: 88,
+  chat_list: 54,
+  chat_read: 168,
+  chat_search: 244,
   routines_list: 43,
-  routine_create: 209,
-  routine_update: 142,
+  // Each takes a routine's own run time limit (timeoutMin), 33 tokens, since the review.
+  routine_create: 242,
+  routine_update: 175,
   routine_run: 41,
   subagent: 118,
   "subagent#background": 150,
@@ -97,10 +106,10 @@ test("every tool of the portal's own is within the length agreed for it", () => 
 test("all of them together stay near the length agreed", () => {
   // The review measured 6,880 tokens for these texts and proposed 4,550, of which the 988 of the picture and video tools are
   // the Media extension's now, and the 1,426 of the browser tools and their rules the Browser extension's; the rules are
-  // counted once, as pi prints each once.
+  // counted once, as pi prints each once. The 466 of the chat tools (#376) came with them.
   const rules = new Set(all.flatMap((tool) => (tool.promptGuidelines ?? []).map((line) => line.trim())));
   const total = all.reduce((sum, tool) => sum + cost(tool), 0) + [...rules].reduce((sum, line) => sum + tokens(`- ${line}`), 0);
-  assert.ok(total <= 2286, `${total} tokens, where 2,136 were agreed`);
+  assert.ok(total <= 2752, `${total} tokens, where 2,416 were agreed`);
 });
 
 test("a tool's snippet does not begin with its own name again, as pi lists it as `- name: snippet`", () => {
@@ -117,8 +126,9 @@ test("a value outside the list of an enum is refused before the tool runs, as it
     validateToolArguments(find(name), { type: "toolCall", id: "1", name, arguments: args });
   const refused = (name: string, args: Record<string, unknown>) => assert.throws(() => check(name, args), /Validation failed/, `${name} ${JSON.stringify(args)}`);
 
-  assert.equal(check("tools", { action: "describe", name: "x" }).action, "describe");
-  refused("tools", { action: "destroy" });
+  assert.equal(check("tool_search", { action: "describe", name: "x" }).action, "describe");
+  // Not refused by pi's check: its failure text prints every argument, which no result hook sees. execute refuses it instead.
+  assert.equal(check("tool_search", { action: "destroy", query: "x" }).action, "destroy");
   assert.equal(check("ask_question", { questions: [{ question: "Q?", kind: "ranking", options: ["a", "b"] }] }).questions[0].kind, "ranking");
   refused("ask_question", { questions: [{ question: "Q?", kind: "sorting" }] });
 });

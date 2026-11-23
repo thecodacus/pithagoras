@@ -216,6 +216,13 @@ test('a chat that has started has no chip, and its mode in the header; Standard 
   await expect(pill).toHaveAttribute('title', MODES[1].description);
 });
 
+test('the header names the temperature a started chat\'s mode sets, beside what the mode does', async ({ page }) => {
+  const mine = { id: 'custom/cool', label: 'Cool', description: 'Steady answers', params: { temperature: 0.2 } };
+  await portal(page, { mode: 'custom/cool', said: true, modes: [...MODES, mine] });
+  await expect(page.getByText('Hello there')).toBeVisible();
+  await expect(page.locator('.chat-header').getByText('Cool', { exact: true })).toHaveAttribute('title', 'Steady answers\nTemperature 0.2');
+});
+
 test('a started chat in Standard has no mode in its header', async ({ page }) => {
   await portal(page, { said: true });
   await expect(page.getByText('Hello there')).toBeVisible();

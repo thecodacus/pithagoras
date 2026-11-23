@@ -15,7 +15,7 @@ import { inProcessHome } from "./server-harness.mjs";
  */
 inProcessHome("pithagoras-chat-modes-");
 mkdirSync(path.join(process.env.PI_CODING_AGENT_DIR, "extensions"), { recursive: true });
-// A tool the portal marks lazy (below): not offered one by one, and reached through the `tools` tool in a Standard chat.
+// A tool the portal marks lazy (below): not offered one by one, and reached through the `tool_search` tool in a Standard chat.
 writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR, "extensions", "lazy.ts"), `
 export default function (pi) {
   pi.registerTool({
@@ -41,14 +41,14 @@ const model = await fakeModel((request) => {
 });
 writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR, "models.json"), JSON.stringify(model.models()));
 
-const { appendEvent, createSession, getDb, getSession, getSettings, rememberTools, sessionTools, setLazyToolSets, setSessionTools, setSettings, toolExceptions, updateSession } = await import("../dist/db.js");
+const { appendEvent, createSession, getDb, getSession, getSettings, rememberTools, sessionTools, setToolMarks, setSessionTools, setSettings, toolExceptions, updateSession } = await import("../dist/db.js");
 const { lazyToolEntry } = await import("../dist/tool-policy.js");
 const { SdkPiClient } = await import("../dist/pi/sdk-client.js");
 const { CodemodeHeld, sessions } = await import("../dist/session-manager.js");
 const { modesRouter } = await import("../dist/api/modes.js");
 setSettings({ ...getSettings(), provider: "fake", model: "m" });
 rememberTools([{ name: "lazy_one", source: "lazy", package: null }]);
-setLazyToolSets([lazyToolEntry("lazy_one")]);
+setToolMarks({ [lazyToolEntry("lazy_one")]: "lazy" });
 
 /** What each pi was started with; `hold()` keeps the next launch back until it is released. */
 const launches = [];
@@ -255,15 +255,15 @@ test("in Code mode the code tool is on as the mode's layer, the chat is listed a
   await assert.rejects(sessions.setTools(id, ["codemode"]), CodemodeHeld);
   assert.deepEqual(sessionTools(id), { off: [], on: [] });
   assert.equal((await codemodeOf(id)).enabled, true);
-  assert.ok(!sessions.piOff(id).includes("codemode"), "pi still has it");
+  assert.ok(!sessions.offFor(id).includes("codemode"), "pi still has it");
 });
 
-test("in Code mode only the code tool is declared, and a script reaches a lazy tool, also after a reload; in Standard the lazy tool is behind the tools tool", async () => {
+test("in Code mode only the code tool is declared, and a script reaches a lazy tool, also after a reload; in Standard the lazy tool is behind the tool_search tool", async () => {
   const id = chat();
   await put(id, "code");
   const ran = globalThis.lazyOneRan ?? 0;
   const { requests, results } = await say(id, SCRIPT);
-  for (const name of ["bash", "read", "lazy_one", "tools"]) assert.ok(!declared(requests[0]).includes(name), name);
+  for (const name of ["bash", "read", "lazy_one", "tool_search"]) assert.ok(!declared(requests[0]).includes(name), name);
   assert.ok(declared(requests[0]).includes("codemode"));
   assert.match(described(requests[0]), /lazy_one/, "the code tool's description lists it");
   const call = results.find((r) => r.toolName === "lazy_one");
@@ -281,7 +281,7 @@ test("in Code mode only the code tool is declared, and a script reaches a lazy t
 
   const plain = chat();
   const standard = await say(plain, "Hello");
-  assert.ok(declared(standard.requests[0]).includes("tools"), "the way to the lazy tools");
+  assert.ok(declared(standard.requests[0]).includes("tool_search"), "the way to the lazy tools");
   assert.ok(!declared(standard.requests[0]).includes("lazy_one"));
   assert.ok(declared(standard.requests[0]).includes("bash"));
   assert.equal((await lazyOf(plain)).lazy, true);
@@ -296,7 +296,7 @@ test("a chat whose own switches had the code tool off before Code mode was chose
   assert.deepEqual([codemode.enabled, codemode.byMode], [true, true]);
   assert.deepEqual(sessionTools(id), { off: [], on: [] }, "the chat's own off does not count");
   assert.ok(toolExceptions(["codemode"]).chats.some((row) => row.id === id), "listed with the code tool on");
-  assert.ok(!sessions.piOff(id).includes("codemode"));
+  assert.ok(!sessions.offFor(id).includes("codemode"));
   await assert.rejects(sessions.setTools(id, ["codemode", "bash"]), CodemodeHeld);
   assert.equal(getDb().prepare("SELECT tools_off FROM sessions WHERE id = ?").get(id).tools_off, "codemode", "kept, and nothing of the list written");
   // Another switch saved while the mode holds the code tool: the page's list says nothing of it, and the stored off stays.

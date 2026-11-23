@@ -15,6 +15,7 @@ interface Mode {
   provider: string | null;
   model: string | null;
   thinkingLevel: string | null;
+  temperature: number | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -40,6 +41,7 @@ const mode = (label: string, more: Partial<Mode> = {}): Mode => ({
   provider: null,
   model: null,
   thinkingLevel: null,
+  temperature: null,
   createdAt: '',
   updatedAt: '',
   ...more,
@@ -53,12 +55,16 @@ interface Portal {
   writes: { what: string; body: unknown }[];
   /** How often a mode's tools were read. */
   toolReads: number;
+  /** What each mode keeps in the model's list, by its id. */
+  keepDirect: Record<string, string[]>;
   /** The chat, `a`: its mode and its model. */
   chat: { mode: string | null; model: string | null };
+  /** What a save of a mode's direct groups waits for before it is answered, where a test holds it. */
+  holdDirect?: Promise<void>;
 }
 
 async function portal(page: Page, { modes = [] as Mode[], refuse = false } = {}): Promise<Portal> {
-  const state: Portal = { modes: [...modes], off: {}, writes: [], toolReads: 0, chat: { mode: null, model: null } };
+  const state: Portal = { modes: [...modes], off: {}, writes: [], toolReads: 0, keepDirect: {}, chat: { mode: null, model: null } };
   const offOf = (id: string) => (state.off[id] ??= ['codemode']);
   const at = new Date().toISOString();
   const session = () => ({ id: 'a', title: 'A chat', workspace: '/w/site', status: 'idle', kind: 'task', pinned: false, updated_at: at, provider: null, model: state.chat.model, thinking_level: null, mode: state.chat.mode });
@@ -77,6 +83,8 @@ async function portal(page: Page, { modes = [] as Mode[], refuse = false } = {})
     }
     const one = /^\/api\/chat-modes\/([^/]+)$/.exec(p);
     if (one && method === 'PUT') {
+      // As the server refuses a number out of range.
+      if (typeof json().temperature === 'number' && json().temperature > 2) return reply(400, { error: 'Temperature must be between 0 and 2.' });
       const i = state.modes.findIndex((m) => m.id === one[1]);
       state.modes[i] = { ...state.modes[i], ...json() };
       // As the server does: the mode works through the code tool, so it has it on; and not, it has it as the default (off).
@@ -95,11 +103,18 @@ async function portal(page: Page, { modes = [] as Mode[], refuse = false } = {})
         live: false,
         off,
         names: {},
+        keepDirect: state.keepDirect[tools[1]] ?? [],
         tools: [
           { name: 'codemode', source: 'pithagoras', inline: true, enabled: !off.includes('codemode'), defaultOn: false },
-          { name: 'web_search', source: 'pi-web-access', enabled: !off.includes('web_search'), defaultOn: true },
+          { name: 'web_search', source: 'pi-web-access', enabled: !off.includes('web_search'), defaultOn: true, auto: true },
         ],
       };
+    }
+    const direct = /^\/api\/chat-modes\/([^/]+)\/direct$/.exec(p);
+    if (direct && method === 'PUT') {
+      await state.holdDirect;
+      state.keepDirect[direct[1]] = json().entries;
+      return { entries: json().entries };
     }
     if (tools && method === 'PUT') {
       state.off[tools[1]] = json().off;
@@ -109,7 +124,7 @@ async function portal(page: Page, { modes = [] as Mode[], refuse = false } = {})
     if (p === '/api/sessions') return { sessions: [session()], executor: 'host' };
     if (p === '/api/sessions/a') return session();
     if (p === '/api/sessions/a/modes' && method === 'GET') {
-      return { modes: [...CORE, ...[...state.modes].sort((x, y) => x.label.localeCompare(y.label)).map((m) => ({ id: `custom/${m.id}`, label: m.label, description: m.description }))] };
+      return { modes: [...CORE, ...[...state.modes].sort((x, y) => x.label.localeCompare(y.label)).map((m) => ({ id: `custom/${m.id}`, label: m.label, description: m.description, ...paramsOf(m) }))] };
     }
     if (p === '/api/sessions/a/modes' && method === 'PUT') {
       const chosen = state.modes.find((m) => `custom/${m.id}` === json().mode);
@@ -127,6 +142,9 @@ async function portal(page: Page, { modes = [] as Mode[], refuse = false } = {})
   await page.addInitScript(() => localStorage.removeItem('toolGroupsOpen'));
   return state;
 }
+
+/** What the server lists of a mode that sets a temperature. */
+const paramsOf = (m: Mode) => (m.temperature === null ? {} : { params: { temperature: m.temperature } });
 
 const dialog = (page: Page) => page.getByRole('dialog', { name: 'Settings' });
 const writes = (state: Portal) => state.writes.map(({ what, body }) => (body === undefined ? what : `${what} ${JSON.stringify(body)}`));
@@ -187,6 +205,65 @@ test('a mode is made, its texts saved, its code tool, model and tools switched a
   expect(writes(state).at(-1)).toBe('DELETE /api/chat-modes/focus');
 });
 
+test('a mode\'s temperature is saved as the field is left, cleared when emptied, and a text that is no number or a number the server refuses is not kept', async ({ page }) => {
+  const state = await portal(page, { modes: [mode('Research')] });
+  await page.goto('/settings/modes');
+  await dialog(page).getByRole('button', { name: /^Research/ }).click();
+  const field = dialog(page).getByLabel('Temperature', { exact: true });
+  await expect(field).toHaveValue('');
+  await expect(field).toHaveAttribute('placeholder', "server's default");
+  // Only the temperature: the other sampling parameters are not offered.
+  for (const name of ['Top P', 'Top K', 'Min P', 'Max tokens']) await expect(dialog(page).getByLabel(name, { exact: true })).toHaveCount(0);
+
+  // Saved when the field is left or Enter is pressed; a comma is a decimal point.
+  await field.fill('0,2');
+  await field.press('Enter');
+  await expect.poll(() => writes(state).at(-1)).toBe('PUT /api/chat-modes/research {"temperature":0.2}');
+  expect(state.modes[0].temperature).toBe(0.2);
+  // The write is recorded before the page has the answer: typing the next text before it does would be overwritten by it.
+  await expect(field).toHaveValue('0.2');
+
+  // A number typed without the digit before or after the point is still a number, and the field shows it as the server keeps it.
+  await field.fill('.9');
+  await field.press('Enter');
+  await expect.poll(() => writes(state).at(-1)).toBe('PUT /api/chat-modes/research {"temperature":0.9}');
+  await expect(dialog(page).getByText('Enter a number, or leave the field empty.')).toHaveCount(0);
+  await expect(field).toHaveValue('0.9');
+  await field.fill('1.');
+  await field.press('Enter');
+  await expect.poll(() => writes(state).at(-1)).toBe('PUT /api/chat-modes/research {"temperature":1}');
+  await expect(field).toHaveValue('1');
+  await field.fill('0.2');
+  await field.blur();
+  await expect.poll(() => writes(state).at(-1)).toBe('PUT /api/chat-modes/research {"temperature":0.2}');
+  await expect(field).toHaveValue('0.2');
+
+  // The same text again is no write.
+  const count = state.writes.length;
+  await field.click();
+  await field.press('Enter');
+  expect(state.writes.length).toBe(count);
+
+  // Not a number: said on the field, nothing sent. A number the server refuses: its message in the banner, and the field as it was.
+  await field.fill('warm');
+  await field.press('Enter');
+  await expect(dialog(page).getByText('Enter a number, or leave the field empty.')).toBeVisible();
+  await expect(field).toHaveAttribute('aria-invalid', 'true');
+  expect(state.writes.length).toBe(count);
+  await field.fill('3');
+  await field.press('Enter');
+  await expect(dialog(page).getByRole('alert')).toContainText('Temperature must be between 0 and 2.');
+  await expect(field).toHaveValue('0.2');
+  await expect(dialog(page).getByText('Enter a number, or leave the field empty.')).toHaveCount(0);
+  expect(state.modes[0].temperature).toBe(0.2);
+
+  // Emptied, it is the server's default again.
+  await field.fill('');
+  await field.press('Enter');
+  await expect.poll(() => writes(state).at(-1)).toBe('PUT /api/chat-modes/research {"temperature":null}');
+  expect(state.modes[0].temperature).toBeNull();
+});
+
 test('a provider chosen without a model says that a model is needed too, until one is chosen', async ({ page }) => {
   const state = await portal(page, { modes: [mode('Research')] });
   await page.goto('/settings/modes');
@@ -239,10 +316,11 @@ test('Settings → Modes speaks German, and is found by the search', async ({ pa
   await expect(german.getByRole('switch', { name: 'Über das Code-Tool arbeiten' })).toBeVisible();
   await expect(german.getByRole('combobox', { name: 'Modell für diesen Modus' })).toContainText('Wie der Chat es ohnehin hätte');
   await expect(german.getByText('Wird in einen Chat übernommen, wenn er diesen Modus bekommt', { exact: false })).toBeVisible();
+  await expect(german.getByLabel('Temperatur', { exact: true })).toHaveAttribute('placeholder', 'vom Server');
 });
 
 test('a chat offers your modes after the portal\'s, leads to Settings → Modes, lists one made there, and a mode with a model puts the chat on it', async ({ page }) => {
-  const state = await portal(page, { modes: [mode('Research', { description: 'Reads first' })] });
+  const state = await portal(page, { modes: [mode('Research', { description: 'Reads first', temperature: 0.2 })] });
   await page.addInitScript(() => localStorage.setItem('sidebarCollapsed', 'true'));
   await page.goto('/s/a');
   await expect.poll(() => page.evaluate(() => (window as any).streams.some((s: any) => !s.closed))).toBe(true);
@@ -252,6 +330,10 @@ test('a chat offers your modes after the portal\'s, leads to Settings → Modes,
   const menu = page.getByRole('menu', { name: 'Modes' });
   await chip.click();
   await expect(menu.getByRole('menuitemradio')).toHaveText([/^Standard mode/, /^Code mode/, /^Research/]);
+  // A mode that sets a temperature says so, under what it does; one that sets none says nothing more.
+  await expect(menu.getByRole('menuitemradio', { name: /^Research/ })).toContainText('Reads first');
+  await expect(menu.getByRole('menuitemradio', { name: /^Research/ })).toContainText('Temperature 0.2');
+  await expect(menu.getByRole('menuitemradio', { name: /^Code mode/ })).not.toContainText('Temperature');
   await menu.getByRole('menuitem', { name: 'New mode…' }).click();
   await expect(page).toHaveURL(/\/s\/a\/settings\/modes$/);
 
@@ -271,4 +353,35 @@ test('a chat offers your modes after the portal\'s, leads to Settings → Modes,
   await expect(chip).toHaveText('Brief');
   // The mode wrote its model into the chat: the pill under the box says so.
   await expect(page.getByRole('button', { name: 'Model: Model B' })).toBeVisible();
+});
+
+test('a mode keeps a group of tools in the model\'s list from its tools, and lets the marks and the threshold decide again', async ({ page }) => {
+  const state = await portal(page, { modes: [mode('Browsing')] });
+  await page.goto('/settings/modes');
+  await dialog(page).getByRole('button', { name: /^Browsing/ }).click();
+  const keep = dialog(page).getByRole('button', { name: "Keep pi-web-access in the model's list" });
+  await expect(keep).toHaveAttribute('aria-pressed', 'false');
+  // The portal's own code tool has no mark, so no button.
+  await expect(dialog(page).getByRole('button', { name: /^Keep pithagoras/ })).toHaveCount(0);
+  await keep.click();
+  await expect(keep).toHaveAttribute('aria-pressed', 'true');
+  await expect.poll(() => writes(state).at(-1)).toBe('PUT /api/chat-modes/browsing/direct {"entries":["pi-web-access"]}');
+  await keep.click();
+  await expect(keep).toHaveAttribute('aria-pressed', 'false');
+  await expect.poll(() => writes(state).at(-1)).toBe('PUT /api/chat-modes/browsing/direct {"entries":[]}');
+});
+
+test('a mode\'s direct groups are saved one at a time: the button waits for the save before it, which sends the whole list', async ({ page }) => {
+  const state = await portal(page, { modes: [mode('Browsing')] });
+  let release!: () => void;
+  state.holdDirect = new Promise<void>((resolve) => (release = resolve));
+  await page.goto('/settings/modes');
+  await dialog(page).getByRole('button', { name: /^Browsing/ }).click();
+  const keep = dialog(page).getByRole('button', { name: "Keep pi-web-access in the model's list" });
+  await keep.click();
+  await expect(keep).toHaveAttribute('aria-pressed', 'true');
+  await expect(keep).toBeDisabled();
+  release();
+  await expect(keep).toBeEnabled();
+  expect(state.keepDirect.browsing).toEqual(['pi-web-access']);
 });

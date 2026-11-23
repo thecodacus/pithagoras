@@ -184,7 +184,7 @@ each has a section below:
 | 10 | Understory's settings are left for Understory, and its MCP server is trusted where no list was set | [Understory is an extension](#understory-is-an-extension) |
 | 11 | Every chat is in Standard mode, and there is a table for the modes you make | [Chats have a mode](#chats-have-a-mode) |
 
-The same start moves the password into the database, installs the six
+The same start moves the password into the database, installs the
 [extensions a portal starts with](#the-extensions-a-portal-starts-with), puts
 code mode in the tool defaults as off, and removes the rules that no longer
 apply. The rest of the sections say what else is different.
@@ -245,7 +245,7 @@ and every six hours (`PORTAL_UPDATE_CHECK=off` stops that). See
 | Variable | What it sets |
 | --- | --- |
 | `BROWSER_BIND` | The address the browser's own ports listen on: `127.0.0.1` unless set; 0.1.0 opened them on every interface ([Browser is an extension](#browser-is-an-extension)) |
-| `PORTAL_DEFAULT_EXTENSIONS` | `off` installs none of the extensions a portal starts with |
+| `PORTAL_DEFAULT_EXTENSIONS` | `off` installs none of the extensions a portal starts with; a preset's name (`developer`) or a list (`terminal,files,git`) installs that instead |
 | `UNDERSTORY_LLM_PORT` | The loopback port through which Understory reaches the chat's model, `3801` |
 | `UNDERSTORY_LLM_HEADERS_TIMEOUT_MS`, `UNDERSTORY_LLM_BODY_TIMEOUT_MS` | How long the model Understory thinks with may take |
 | `PORTAL_FETCH_HEADERS_TIMEOUT_MS`, `PORTAL_FETCH_BODY_TIMEOUT_MS` | How long a fetch of the portal's process, an MCP call among them, may wait: 30 minutes, where Node cut one off after five |
@@ -290,6 +290,24 @@ default of Settings → Tools as off, beside what you had switched off there, so
 no chat has it until it is switched on for a chat, a project, an agent or every
 chat. A later start does not undo what you choose.
 
+## Lazy tools have three values and a threshold
+
+A tool or a group of tools is **auto**, **lazy** or **direct** now, and a limit decides what is **auto**
+([Lazy tools](/guide/extensions#lazy-tools)). The tool that reaches the lazy tools is called `tool_search`
+and no longer `tools`. On the first start with it, what you had marked lazy stays **lazy**, and everything else is
+**auto**: the model's list is measured, and when it holds more than 3,000 tokens or 20 tools, the largest groups
+that nobody marked are taken out of it, as a lazy group would be. A portal with the browser and the subagent tool
+is over the limit. Settings → Tools says which groups that is, once, and a **direct** mark keeps a group in the
+list; **Lazy above** there changes the limits, and `0` turns them off. A chat that has started keeps the tools it
+started with, and a chat that was running before the upgrade takes its list from what is marked and measured
+when it first starts again. Old chats keep their calls of `tools` in their history, and they are still drawn as
+the tools they called.
+
+A tool is no longer counted as an MCP server's by a name that starts with `mcp_`: the guard asks pi which server a
+tool came from, and a name proves nothing, as any extension can register one. A pi package of yours that hands back another server's or somebody else's
+words under such a name (another MCP bridge, say) is now trusted as the extension it is, so its tools have to say so:
+`guard: { outside: true }` on their definition ([What the guard holds a tool to](/guide/extension-ui#what-the-guard-holds-a-tool-to)).
+
 ## The password moves into the database
 
 A portal used to take its password from `PORTAL_PASSWORD`. It now keeps it, hashed, in its database, chosen in the browser and changed under Settings → Authentication (see [The password](/guide/deploying#the-password)). What the first start after the upgrade does:
@@ -322,18 +340,27 @@ Installed then lists:
 | Package | What it brings |
 | --- | --- |
 | `pithagoras-terminal` | The [terminal](/guide/terminal) panel beside a chat, and its window in voice mode |
-| `pithagoras-git` | The [Git](/guide/git) panel |
 | `pithagoras-files` | The [Files](/guide/files) panel, and its window in voice mode |
-| `pithagoras-canvas` | [Canvases](/guide/canvases) and the agent's canvas tools |
-| `pithagoras-media` | [Media](/guide/media): the agent's picture and video tools, the Media page and its settings |
 | `pithagoras-themes` | Seven colour themes, chosen under Settings → This browser |
 
 They are ordinary packages from then on
 ([What a portal starts with](/guide/extensions#what-a-portal-starts-with)): one
 you switch off or remove stays so, and a later start does not put it back. With
 `PORTAL_DEFAULT_EXTENSIONS=off` none of them is installed: the portal then has
-no terminal, Git or Files panel, no canvases and no picture tools until you
-install them, and what 0.1.0 kept of the Images page waits for Media.
+no terminal or Files panel until you install them. The rest is chosen, in the
+setup assistant's Extensions step or in Settings → Extensions → Discover, and
+what the portal installs by itself can be set (`PORTAL_DEFAULT_EXTENSIONS`, see
+[Deploying](/guide/deploying#environment)).
+
+Git, Canvases and Media were on this list in 0.2.0, and are opt-in now. A portal
+that has them keeps them: the list names what a new portal installs, and
+shrinking it takes nothing out of one that has more. A portal that comes from
+0.1.0 without having run 0.2.0 starts with the three above and no Git panel, no
+canvases and no picture tools: install Git (`pithagoras-git`), Canvases
+(`pithagoras-canvas`) and Media (`pithagoras-media`) from Settings → Extensions →
+Discover → Comes with Pithagoras, or pick Developer or Creative in the setup
+assistant (**Setup assistant** on Settings → Providers). What 0.1.0 kept of the
+Images page waits for Media until then ([Media is an extension](#media-is-an-extension)).
 
 The others that come with the portal are not installed by the upgrade. They are
 listed under Settings → Extensions → Discover → Comes with Pithagoras: Browser
@@ -367,8 +394,8 @@ same. Background jobs and subagents stay the portal's own.
 
 ## Git is an extension
 
-Git is the `pithagoras-git` extension now ([Git](/guide/git)), installed on
-the first start. The button in a chat's header and the panel are the same, and
+Git is the `pithagoras-git` extension now ([Git](/guide/git)), installed by
+choice (on the first start in 0.2.0). The button in a chat's header and the panel are the same, and
 it has a picker for the repositories inside a chat's folder. A commit message or
 a pull request's text that was being written is kept under the same name in the
 tab's session storage, so a tab that stays open through the upgrade still has it
@@ -384,8 +411,8 @@ after the reload.
 
 ## Canvases are an extension
 
-Canvases are the `pithagoras-canvas` extension now, installed on the first
-start, with a database of their own. The canvases a portal stored before are
+Canvases are the `pithagoras-canvas` extension now, installed by choice
+(on the first start in 0.2.0), with a database of their own. The canvases a portal stored before are
 not carried into it: the first start after the upgrade writes each of them out
 as a Markdown file in its chat's folder, `canvases/<title>.md` (a taken name
 gets a number, as an upload's does), and drops the table they were in. A chat
@@ -406,7 +433,7 @@ the place the panels have by default, and keeps what it is given from then on.
 ## Files is an extension
 
 Files is the `pithagoras-files` extension now, installed on the first start
-like the terminal and Git: the button in a chat's header, the panel, its
+like the terminal: the button in a chat's header, the panel, its
 window in voice mode and <kbd>F</kbd> there are the same. An edit that was not
 saved when the portal was upgraded comes back as it was. Where a panel's place
 or size was set by hand, Files starts at the place the panels have by default
@@ -440,8 +467,8 @@ in older chats are shown as they were. Nothing else in a conversation is changed
 
 ## Media is an extension
 
-Media is the `pithagoras-media` extension now, installed on the first start
-like Canvases and Files, with a store of its own. The page, its settings, the
+Media is the `pithagoras-media` extension now, installed by choice (on the
+first start in 0.2.0), with a store of its own. The page, its settings, the
 agent's picture and video tools and their cards in the chat do what they did,
 under new names and addresses:
 
@@ -502,7 +529,8 @@ everything into its place there, with the same ids and file names, and says in
 the log how many pictures and videos it took up. `extension-data/pithagoras-media/`
 then holds `media.db` (the gallery's rows and the settings), `images/`,
 `videos/`, `image-thumbs/`, `video-posters/` and `video-copies/`. A portal that
-runs with `PORTAL_DEFAULT_EXTENSIONS=off` does not install Media: the hand-off
+has not installed Media (a new one starts without it, and so does one with
+`PORTAL_DEFAULT_EXTENSIONS=off`): the hand-off
 waits, nothing of it lost, until Media is installed from Settings →
 Extensions → Discover → Comes with Pithagoras. Removing Media later keeps its
 folder, and Media installed again has all of it.
@@ -1374,6 +1402,10 @@ chat. Every chat there was is one a person attends, and every child chat keeps
 its parent's switches, as before; nothing is left for an extension, and nothing
 needs doing.
 
+The same step adds the temperature a [mode you made](/guide/sessions#model-parameters-of-a-mode)
+can set for its chats. Every mode there is keeps setting none, so its chats send
+what they sent before.
+
 **Going back.** From `portal-v15-….db` it is only putting the backup in as
 under [Going back](#going-back), and an older backup needs what
 [Sub-chats in the chat list](#sub-chats-in-the-chat-list) says for it.
@@ -1401,6 +1433,19 @@ mode where you switch it off. Gone:
 `PI_SUBAGENT_BIN` and `PI_SUBAGENT_GRACE_MS`, which nothing reads any more. The
 database is not changed, so going back needs nothing but the older version; the
 subagents' chats it made stay, as chats of their own.
+
+## A routine's own run time limit
+
+A routine's page sets how many minutes its runs may take
+([Routines](/guide/routines#scheduling)), where every run had the portal's hour.
+The upgrade to schema 16 adds the column that holds it; a portal already at 16
+gets it when it starts. It is empty for every routine there is, so each keeps
+the portal's default. It changes no data; nothing is left for an extension, and
+nothing needs doing.
+
+**Going back.** As for
+[Chats an extension makes for nobody to attend](#chats-an-extension-makes-for-nobody-to-attend);
+a portal at 16 that goes back to a build without the column keeps it, unused.
 
 ## The guard
 
@@ -1431,31 +1476,80 @@ upgraded from 0.1.0:
   on there. The `guard` field of a routine in the API still means all the rules
   or none.
 
-## MCP servers taken out of mcp.json by hand
+## MCP runs on pi's own support
 
-The portal now notices a server taken out of pi's `mcp.json` outside it, by
-hand or by a script, and forgets its tools as it does for one removed in
-Settings → MCP ([Disabling](/guide/mcp#disabling)). To tell what was taken out,
-it keeps the servers it last saw in the file, in a new setting,
-`mcp_configured`. That is filled the first time the portal looks at the file
-after the upgrade, and nothing is judged then: a tool left behind by a server
-taken out by hand before the upgrade stays listed in Settings → Tools. To be rid
-of it, add the server again under its name in Settings → MCP, with any entry,
-and remove it there.
-
-The tools of a server whose name has a dot, such as `docs.v2`, belong to it now:
-they are grouped under it, go with it when it is switched off or removed, and are
-trusted with it where it is trusted in Settings → Guard. Before, they belonged to
-no server. Those of a dotted server removed before the upgrade stay listed under
-`pi-mcp-adapter`; the same add and remove takes them out.
+The portal used `pi-mcp-adapter` for MCP servers; it runs pi's own MCP support now
+([MCP servers](/guide/mcp)). The first start after the upgrade carries the servers
+in `mcp.json` over once, each on or off as it was, with the adapter's own keys
+(`lifecycle`, `directTools`, `toolPrefix` and the like) dropped, and takes the
+adapter out of pi's packages. The file as it was is kept beside it as `mcp.json.adapter`
+(`mcp.json.adapter-2` where an older copy is there), readable only by you, as the file
+is. Where the adapter was not installed, nothing read
+`mcp.json` before, so its servers come over switched off: switch on in Settings → MCP
+the ones you want. Every server is **Auto** in Settings → Tools, so a
+big one goes behind `tool_search` by itself: mark one **Direct** where you had its
+tools registered directly. A bearer token becomes the `Authorization` header pi takes
+(Understory's entry among them). A list of the tools a server offers or leaves out
+(`includeTools`, `excludeTools`) becomes pi's `toolExposure`, with the tools it left
+out `hidden`, and the server stays on. The tools the adapter had listed for a server
+are in Settings → Tools at once, under pi's names (`mcp__<server>__<tool>`), so you can
+switch them before a chat has connected the server; the first chat that does puts what
+the server offers now in their place. A server pi cannot take as it was (a Unix socket,
+`$env:NAME` variables, a `$` or a leading
+`!!` in a value of `env` or `headers`, a name with a
+dot, an address that ends in `/sse`) stays in the file as it was, switched off, and is
+named in the one line the log gets (Settings → Logs). pi does not read the keys that kept
+it off, so before you switch it on, write them in pi's words (a tool to leave out is
+`"toolExposure": { "<tool>": "hidden" }`). The adapter's `approveTools` (`true` for every
+tool, or a list of patterns, its own or the setting's for every server) is not a reason to
+leave a server off: pi has no such gate, so the portal carries it over as the server's
+[calls that ask you first](/guide/mcp#calls-that-ask-you-first) (`true` is every tool),
+and the server keeps its on or off. A pattern that named tools with the server's prefix
+(`github_delete_*`), or a `*` that took it (`*_delete_*`), is carried as it was, with the prefix taken off (`delete_*`), and with each tool the
+adapter had listed for the server that it matched, so nothing it asked about is left out
+for how the pattern was written (`?` is carried as `*`, which asks more); the log names
+the servers. A server left off because pi does not take its name (a dot in it) keeps its gate
+too: it goes with the server when you rename it in Settings → MCP, or in the raw editor in one save that only renames it and may switch it on (any other change to its entry there drops it). The key itself is not in `mcp.json` any more, and is refused where an entry is
+written. The tools are named
+`mcp__<server>__<tool>` now: a switch you set on one of the adapter's own tools
+(`github_delete_repo`) is carried over to pi's name of it (`mcp__github__delete_repo`),
+off or on as it was, by the server's prefix the adapter put in front. One that fits no
+server in the file is read, in a list of what is off, as a list that had MCP off. The adapter's `mcp`
+tool itself held MCP off in a default, project, agent, routine, mode or chat: where a list
+had it off, it has the tools of every server (and pi's resource tools) off by name now, as
+far as the adapter had listed them, and the entry is gone; where a list had it on, the
+entry goes and nothing is switched on by it. A server whose tools the adapter never listed
+(it never connected, it was lazy and never used, or it was added later) has nothing to
+name: where any list had MCP off, such a server comes over **switched off**, and the log
+line names it. Switching it on in Settings → MCP is yours to decide: its tools are on
+wherever they are not switched off in Settings → Tools, so set the lists where MCP was
+off as you switch it on. A project's own `.pi/mcp.json`, which the adapter read, is read by pi now
+in a trusted project (the sandbox off): the tools the adapter had listed for its servers are
+switched off by name in the lists that had MCP off, but a server of it that the adapter never
+listed is on there, and the log names the files. A server in such a file that names one of the
+safety keys below is not connected. A server that
+names a safety key pi does not read (`excludeTools`, `includeTools`,
+`exposeResources: false`) cannot be switched on in Settings → MCP before the key is
+gone or written in pi's words (the same goes for the adapter's `bearerToken`, an `oauth` block and `$env:NAME` variables left in an entry).
+pi does not read what the adapter did besides
+(`imports`, `~/.config/mcp/mcp.json`, `~/.agents/mcp.json`, a project's `.mcp.json`),
+so servers that came from there have to be added in Settings → MCP; the log names
+the ones it finds. If `mcp.json` cannot be read (a comment in it, a comma too many),
+nothing is changed and the adapter stays until it can. pi speaks the streamable HTTP
+transport only: a server that spoke only the old SSE transport, which the adapter fell
+back to, does not connect any more and needs its streamable HTTP address (an address
+that ends in `/sse` is carried over switched off for that reason). `pi-mcp-adapter` is
+not installed by the portal any more: leave it out. A settings file that still names it
+(a project's `.pi/settings.json` with the sandbox off, or one edited by hand) does not
+get it loaded: next to pi's own support it would read the same `mcp.json` by its own
+rules, and reach servers and tools that are switched off.
 
 ## pi is 1.1
 
 The portal's pi, and the `pi` in the image, move from 0.82 to 1.1. The
 extensions and packages you installed stay at their versions; one written for an
 older pi may need an update of its own, as pi 1.0 changed parts of its extension
-and provider interfaces. `pi-mcp-adapter` 2.18.0, which the portal installs,
-works as before. pi now reads `AGENTS.override.md` before `AGENTS.md` in a
+and provider interfaces. pi now reads `AGENTS.override.md` before `AGENTS.md` in a
 folder. If you use Azure, its provider is renamed from `azure-openai-responses`
 to `azure`: rename it in pi's `auth.json`, `models.json` and `settings.json`, or
 sign in again. A portal run from a checkout needs Node 22.19 or later.

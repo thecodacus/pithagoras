@@ -151,6 +151,24 @@ test("an edit that gets no answer is undone, and leaves no version behind", asyn
   await until(() => reloaded.count === 1);
 });
 
+test("an edit whose run is stopped before it answered stays, as the settle of a stopped run says", async () => {
+  const { file, seqs } = chat("stopped-edit", ["hi"]);
+  const before = readFileSync(file, "utf8");
+  const client = await sessions.ensureClient();
+  client.isIdle = () => false;
+  // The run starts, and is stopped: pi settles it as aborted, with no answer.
+  client.prompt = async () =>
+    void setImmediate(() => {
+      sessions.record("stopped-edit", "agent_start", {});
+      sessions.record("stopped-edit", "agent_settled", { aborted: true });
+    });
+  await sessions.editMessage("stopped-edit", seqs[0], "hi again");
+  await until(() => eventsSince("stopped-edit").some((e) => e.type === "agent_settled"));
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.notEqual(readFileSync(file, "utf8"), before, "the edit was not undone");
+  assert.equal(eventsSince("stopped-edit").some((e) => e.type === "portal_notice"), false, "and no notice says it got no answer");
+});
+
 test("taking a message out forgets the versions of the ones after it", async () => {
   const { seqs } = chat("taken", ["a", "b", "c"]);
   await sessions.editMessage("taken", seqs[2], "c again");

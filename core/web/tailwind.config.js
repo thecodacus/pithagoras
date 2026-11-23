@@ -8,8 +8,9 @@ export default {
   presets: [portal],
   content: [
     // Streamdown ships its own utility classes; without this they are purged.
+    // npm hoists it to the repo root, two folders up from here; the first is where a workspace install would put it.
     "./node_modules/streamdown/dist/*.js",
-    "../node_modules/streamdown/dist/*.js",
+    "../../node_modules/streamdown/dist/*.js",
     "./index.html",
     "./src/**/*.{ts,tsx}",
   ],

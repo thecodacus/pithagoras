@@ -10,6 +10,7 @@ import {
   getSession,
   modeOf,
   modesFor,
+  parseToolsOff,
   recordAudit,
   setCustomModeTools,
   toolDefaultsOff,
@@ -38,7 +39,9 @@ export function modesRouter(): Router {
     const session = getSession(req.params.id);
     if (!session) return res.status(404).json({ error: "Not found" });
     res.json({
-      modes: modesFor(session).map(({ id, label, description, confirm, extension }) => ({ id, label, description, ...(confirm ? { confirm } : {}), ...(extension ? { extension } : {}) })),
+      modes: modesFor(session).map(({ id, label, description, confirm, extension, params }) => ({
+        id, label, description, ...(confirm ? { confirm } : {}), ...(extension ? { extension } : {}), ...(params ? { params } : {}),
+      })),
     });
   });
 
@@ -68,6 +71,9 @@ export function modesRouter(): Router {
         else if (before?.model && session.provider === (before.provider ?? null) && session.model === before.model) Object.assign(fields, { provider: null, model: null });
         if (entry.thinkingLevel) fields.thinking_level = entry.thinkingLevel;
         else if (before?.thinkingLevel && session.thinking_level === before.thinkingLevel) fields.thinking_level = null;
+        // What the chat froze about its lazy tools was made for the mode it had, and nothing was said under it: the next
+        // start makes it afresh, with what the new mode keeps in the model's list.
+        fields.lazy_head = null;
         updateSession(session.id, fields);
       });
       if (!done) return res.status(409).json({ error: STARTED });
@@ -121,7 +127,17 @@ export function modesRouter(): Router {
     const below = toolDefaultsOff();
     const tools = customModeTools(row.id);
     // The lazy marks as a chat in the mode shows them (see getTools): none where it works through the code tool.
-    res.json(layerTools(undefined, below, tools, false, row.codemode === 1 && toolEnabled(CODEMODE_TOOL, below, tools)));
+    res.json({ ...layerTools(undefined, below, tools, false, row.codemode === 1 && toolEnabled(CODEMODE_TOOL, below, tools)), keepDirect: parseToolsOff(row.keep_direct) });
+  });
+
+  /** The sets and tools the mode's chats keep in the model's list whatever the marks and the threshold say; a chat reads it when it starts. */
+  router.put("/chat-modes/:id/direct", (req, res) => {
+    const entries = req.body?.entries;
+    if (!isToolList(entries)) return res.status(400).json({ error: "entries must be a list of tool sets or `<tool>name`" });
+    if (!customMode(req.params.id)) return res.status(404).json({ error: "Not found" });
+    const stored = [...new Set(entries.map((entry: string) => entry.trim()).filter(Boolean))].sort();
+    updateCustomMode(req.params.id, { keep_direct: stored.join("\n") });
+    res.json({ entries: stored });
   });
 
   /** Says which tools the mode's chats start with: what is not named is on. Chats running in it are told at once. */
@@ -149,6 +165,7 @@ const modeToApi = (row: ChatModeRow) => ({
   provider: row.provider,
   model: row.model,
   thinkingLevel: row.thinking_level,
+  temperature: row.temperature,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 });
@@ -196,6 +213,15 @@ function modeFields(body: Record<string, unknown>): ModeFields | { error: string
     if (value === undefined) continue;
     if (value !== null && typeof value !== "string") return { error: `${key} must be text or null.` };
     fields[column] = value?.trim() || null;
+  }
+  // A number to set, or null to leave it to the model: a string that is a number is not one, so a form's text is refused.
+  // The bounds are the widest any API takes (Anthropic's temperature stops at 1, and says so itself).
+  const temperature = body.temperature;
+  if (temperature === null) fields.temperature = null;
+  else if (temperature !== undefined) {
+    if (typeof temperature !== "number" || !Number.isFinite(temperature)) return { error: "Temperature must be a number, or null to leave it to the model." };
+    if (temperature < 0 || temperature > 2) return { error: "Temperature must be between 0 and 2." };
+    fields.temperature = temperature;
   }
   return fields;
 }

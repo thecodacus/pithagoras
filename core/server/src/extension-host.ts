@@ -9,7 +9,7 @@ import semver from "semver";
 import express, { type NextFunction, type Request, type RequestHandler, type Response, type Router } from "express";
 import { agentOf, defaultAgent, listAgents } from "./agents.js";
 import { dataDirOf } from "./extension-data.js";
-import { childSessions, getSession, getSetting, listSessions, putSetting, recordAudit, sessionsByWorkspace, setServerHalfOffers, setServerHalvesAsked, setTrustedMcpServers, toolExceptions, trustedMcpServers, untrustMcpServer, type SessionRow } from "./db.js";
+import { childSessions, getSession, getSetting, listSessions, putSetting, recordAudit, sessionsByWorkspace, setServerHalfOffers, setServerHalvesAsked, markMcpServerDirect, mcpApprove, unmarkMcpServer, setTrustedMcpServers, toolExceptions, trustedMcpServers, untrustMcpServer, type SessionRow } from "./db.js";
 import { EXECUTOR_KIND } from "./executor-kind.js";
 import { takes, type ServerHalf } from "./extension-ui.js";
 import { moduleAt } from "./half-modules.js";
@@ -685,18 +685,33 @@ function portalFor(ext: Running): ServerPortal {
       list: () => modelProviders(),
     },
     mcp: {
-      get: (server) => mcpServer(server),
+      get: (server) => {
+        const found = mcpServer(server);
+        return found && { ...found, approve: mcpApprove()[server] ?? [] };
+      },
       // The portal's own work, which it asks for: not its code (see scope).
       set: (server, entry, options = {}) =>
         scope.exit(async () => {
           // Imported when first asked: it installs packages through what starts and stops these halves, which imports this module.
           const { setMcpServer } = await import("./mcp-entry.js");
-          await setMcpServer(server, entry);
+          const had = mcpApprove()[server] ?? [];
+          await setMcpServer(server, entry, options.approve);
+          // Any extension can write any server's name, and a set that leaves `approve` out drops the gate: said in the log, never silent.
+          const now = mcpApprove()[server] ?? [];
+          if (had.length && JSON.stringify(now) !== JSON.stringify(had)) {
+            say(name, `${entry === undefined ? "removed" : now.length ? "changed" : "dropped"} the approve patterns of the MCP server ${server} (${had.join(", ")})${now.length ? `, now ${now.join(", ")}` : ""}`);
+          }
           // Counted as the person's own on the extension's word, and no longer once the server is gone: Settings → Guard
           // lists only the servers there are, so a name left trusted could not be taken out, and would trust whatever
           // server is given that name next.
-          if (entry === undefined) untrustMcpServer(server);
-          else if (options.trusted === true) setTrustedMcpServers([...trustedMcpServers(), server]);
+          if (entry === undefined) {
+            untrustMcpServer(server);
+            // Nor does a server given that name later start with its mark: it is another server's.
+            unmarkMcpServer(server);
+          } else {
+            if (options.trusted === true) setTrustedMcpServers([...trustedMcpServers(), server]);
+            if (options.direct === true) markMcpServerDirect(server);
+          }
           return reloadChats();
         }),
     },
@@ -717,11 +732,18 @@ function portalFor(ext: Running): ServerPortal {
     },
     modes: {
       provide(mode) {
-        const { id, label, description, confirm } = mode ?? {};
+        const { id, label, description, confirm, keepDirect } = mode ?? {};
         const text = (value: unknown) => typeof value === "string" && value.trim() !== "";
+        const texts = (value: unknown) => value === undefined || (Array.isArray(value) && value.every(text));
+        const direct = keepDirect as { sets?: unknown; tools?: unknown } | undefined;
         if (typeof id !== "string" || !/^[a-z0-9][a-z0-9-]*$/.test(id) || !text(label) || !text(description) || (confirm !== undefined && !text(confirm))) {
           throw new TypeError('provide takes { id, label, description, confirm? }: an id of lower-case letters, digits and "-", and texts');
         }
+        if (direct !== undefined && (typeof direct !== "object" || direct === null || Array.isArray(direct) || !texts(direct.sets) || !texts(direct.tools))) {
+          throw new TypeError("keepDirect takes { sets?, tools? }: lists of names");
+        }
+        // As the marks name them: a set by its name, a single tool as `<tool>name`.
+        const kept = direct ? [...((direct.sets as string[] | undefined) ?? []).map((set) => set.trim()), ...((direct.tools as string[] | undefined) ?? []).map((tool) => `<tool>${tool.trim()}`)] : [];
         // "custom/<id>" is what a chat stores for a mode the person made.
         if (name === "custom") throw new TypeError('A package called "custom" cannot offer modes: its modes would be taken for the person\'s own');
         const stored = `${name}/${id}`;
@@ -730,7 +752,7 @@ function portalFor(ext: Running): ServerPortal {
           say(name, `cannot offer the mode ${id}: its server half is not running`);
           return stored;
         }
-        ext.stops.push(provideMode(name, { id, label, description, ...(confirm !== undefined ? { confirm } : {}) }));
+        ext.stops.push(provideMode(name, { id, label, description, ...(confirm !== undefined ? { confirm } : {}), ...(kept.length ? { keepDirect: [...new Set(kept)] } : {}) }));
         return stored;
       },
     },

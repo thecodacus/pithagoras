@@ -26,12 +26,28 @@ are a portal concept with a separate format and a separate install directory.
 ## Installing
 
 Settings → Extensions has two views. **Installed** is what you have; **Discover**
-is what there is to install, in three parts: **Comes with Pithagoras**, **Find
-packages** and **Install by name**.
+is what there is to install, in four parts: **Comes with Pithagoras**, **Official
+extensions**, **Find packages** and **Install by name**.
 
 **Comes with Pithagoras** lists the extensions shipped with the portal itself
 (a pack of seven themes, the terminal, Git, Files, Canvases, [Media](/guide/media), [Documents](/guide/documents),
 [Docker for extensions](/guide/docker), [Kanban](/guide/kanban), the agent's [Browser](/guide/browser), the [voice service](/guide/voice-service), [Voice servers](/guide/voice-servers), [Understory](/guide/features#memory-understory), the agent's memory, and [Creator mode](/guide/creator-mode), a chat mode in which the agent writes and installs extensions), each installed from the portal's own folder with one click.
+
+**Official extensions** lists the extensions that are made for Pithagoras but do not
+come with it. They live in two repositories of the project's organization:
+[pithagoras-extensions](https://github.com/prometheion/pithagoras-extensions)
+(Office, Blender, Godot, Inline UI and Nextcloud: more for the agent to work with)
+and [pithagoras-flair](https://github.com/prometheion/pithagoras-flair) (cosmetic
+and opinionated ones, such as the 3D avatar for voice mode). Each card has the
+same look as the ones above it, with a small label that names its repository and
+links to it, and **Install** puts the package in from npm, with what it needs. One
+that is installed already says so. The list is part of the portal, not fetched
+from GitHub, so it is there offline; a newer extension shows up in it with the
+next version of the portal, and can be installed by its npm name (below) before.
+
+A description that does not fit on a card is cut after two lines and has **More**
+under it, which opens all of it (and **Less** closes it again), on the cards of
+Discover and of Installed alike.
 
 **Find packages** searches the npm registry for packages published for pi — by
 keyword, with a separate search for packages that bring a model provider — and
@@ -68,11 +84,48 @@ only once it is installed, so nothing is installed with it.
 ## What a portal starts with
 
 A fresh portal installs the extensions its own `extensions/defaults.json` names,
-once: today the [terminal](/guide/terminal), [Git](/guide/git), [Files](/guide/files), [Canvases](/guide/canvases), [Media](/guide/media) and the theme pack (Forest, Ocean,
-Rose, Amber, Mono, Dusk and Warm, chosen under Settings → This browser → Colours). They are ordinary packages from then on: listed under **Installed**,
-switched off or removed like any other, and one you removed is not put back
-when the portal starts again. To use your own in place of one of them, remove
-it and install yours. `PORTAL_DEFAULT_EXTENSIONS=off` installs none of them.
+once: the [terminal](/guide/terminal), [Files](/guide/files) and the theme pack
+(Forest, Ocean, Rose, Amber, Mono, Dusk and Warm, chosen under Settings → This
+browser → Colours). The rest that comes with Pithagoras ([Git](/guide/git),
+[Canvases](/guide/canvases), [Media](/guide/media), Browser, Voice, Understory
+and the others under **Comes with Pithagoras**) is yours to choose. These are
+ordinary packages from then on: listed under **Installed**, switched off or
+removed like any other, and one you removed is not put back when the portal
+starts again. To use your own in place of one of them, remove it and install
+yours. A portal that was started with more than this (Git, Canvases and Media
+were on the list once) keeps what it has: a smaller list uninstalls nothing.
+
+The first-run [setup assistant](/guide/models#setup-assistant) has a step for
+the rest, **Extensions**, after the provider and the model. It offers a set to
+start from:
+
+| Set | What it installs, besides what a portal starts with |
+| --- | --- |
+| **Minimal** | Nothing: Terminal, Files and the themes. The set the step starts on |
+| **Developer** | [Git](/guide/git), [Docker for extensions](/guide/docker) and [Documents](/guide/documents) |
+| **Creative** | [Media](/guide/media), [Canvases](/guide/canvases) and [Voice](/guide/voice-service) |
+| **Everything** | Every extension that comes with Pithagoras |
+
+or the extensions by hand: **Choose by hand** lists each one with a line on what
+it does and what it needs (Browser, Voice and Understory need Docker for
+extensions). What is installed is ticked and stays so; the others are yours to
+tick, and the step then says it is your own choice. **Install** adds what is
+missing of it, one extension after another, each the way **Install** in
+**Discover** does, with what it needs installed first, which the step says
+before it begins: a choice with Voice installs Docker for extensions first. Each
+extension's progress and each error is shown in the step. One that fails does not
+stop the others; **Try again** repeats what is left, and **Skip** goes on without
+it. Everything the step offers can be changed later in Settings → Extensions,
+and the step is for whoever may install an extension there: whoever is signed in.
+
+`PORTAL_DEFAULT_EXTENSIONS` sets what a portal installs by itself, for one that
+is not set up with the assistant. `off` installs none of them: you choose every
+extension yourself. A set's name (`minimal`, `developer`, `creative` or
+`everything`) installs that set in place of the list, and so does a list of
+extensions, by folder or package name, such as `terminal,files,themes,git`; an
+extension that needs another (Voice needs Docker for extensions) brings it. A
+value that is none of these is refused: the portal says so in its log and
+installs the list above instead. See [Deploying](/guide/deploying#environment).
 
 ## What is installed
 
@@ -116,12 +169,6 @@ once; ones in the middle of a run take it at their next step, and the page says
 how many they were. Packages a project brings in are that project's to decide
 and have no switch here.
 
-::: warning Some packages carry others with them
-`pi-mcp-adapter` is what makes MCP servers into tools. Switching it off takes
-every MCP server with it. The agent's [browser](/guide/browser) is not one of them:
-its tools are the Browser extension's.
-:::
-
 ## A chat that is working
 
 A chat whose agent is in the middle of a run when the open chats are reloaded
@@ -139,8 +186,8 @@ once neither does any more, at a later step, as its run ends, or before the
 next message starts a run. A chat whose pi runs in a container of its own
 (`EXECUTOR=container`) is reloaded once its run is over. A reload keeps the
 conversation and the chat's tool switches; what it loads again is the
-extensions, skills, prompts and pi's settings, and an MCP server the adapter
-keeps connected is started again.
+extensions, skills, prompts and pi's settings, and the MCP servers pi connects are
+started again.
 
 What a chat whose pi runs in the portal's own process could not load (an
 extension that throws as it loads, a tool of a name another extension took
@@ -256,9 +303,9 @@ this conversation**. "Look this up for me" and "do not go online, just read the
 repo" are both reasonable in the same week.
 
 Tools are grouped by what installed them, so a package can be switched off in
-one go. An MCP server is its own group rather than a share of the adapter that
-attached it — three servers used to arrive as one pile of forty tools called
-`pi-mcp-adapter`, and nobody thinks of them that way.
+one go. An MCP server is its own group, filed under the server's name — three
+servers would otherwise be one pile of forty tools, and nobody thinks of them
+that way.
 [Media](/guide/media)'s picture tools, `show_image`, `generate_image` and `edit_image`,
 and its video tools, `generate_video` and `show_video`, are together in its group, `pithagoras-media`,
 whichever of them is on offer.
@@ -319,10 +366,10 @@ with it; an uninstalled one's are forgotten. The tools an extension's
 [server half](/guide/extension-ui#tools-that-share-the-server-half-s-state) adds
 to every chat are left out while its package is switched off or uninstalled, and
 come back with it, with what was switched for them; while it is switched on
-they are listed, even when its server half has crashed or could not start. MCP
-servers' tools go with `pi-mcp-adapter` when it is off or gone, but are
-remembered even when it is uninstalled, since the servers are configured apart
-from it. A package is the same package at any version, so updating one keeps its
+they are listed, even when its server half has crashed or could not start. An
+MCP server's tools are listed while the server is in `mcp.json` and not switched off
+there, and are kept when it is: the servers are configured apart from any package.
+A package is the same package at any version, so updating one keeps its
 tools. One narrowed to some of its extensions keeps all its tools listed here; a
 started chat shows only what is loaded. Before a chat in a project starts, a package the project
 lists and loads itself counts, whatever the user's entry says.
@@ -390,48 +437,81 @@ extension does not quietly bring back something you turned off.
 A tool that is switched on costs the model its schema, description and rules in **every** request,
 whether or not the conversation ever uses it. For a large set such as the [browser](/guide/browser)'s
 eleven tools that is more than a thousand tokens in each chat. A tool that is **lazy** costs none of that until
-it is needed: it is not in the model's list, and the model finds it through a single tool, `tools`.
+it is needed: it is not in the model's list, and the model finds it through a single tool, `tool_search`.
 
-**Nothing is lazy by default,** but for an MCP server's tools, which are lazy by the adapter's default (see
-below). The portal marks no other tool and no other set on its own, so a portal behaves as it always did until
-you choose.
+**Three values.** Each group of tools (a package, such as `pithagoras-media` or `pithagoras-browser`) and each single tool is marked:
 
-**Settings → Tools** has a **lazy** button on the header of each group (a package, such as
-`pithagoras-media`, `pithagoras-browser`, an MCP server) and one beside each tool. Marking a group makes every tool of it lazy,
-including tools that turn up in it later; marking a tool makes that one lazy. Taking the mark away offers
-the tool one by one again. The button of a tool that is switched off by default is greyed out, and so is a
-group's while every tool in it is off: a tool that is off is not offered to the model, lazy or not, so
-a mark on it changes nothing in the chats where it stays off. The mark is the portal's and not one of an
-agent's, project's, routine's or chat's, so where one of those switches the tool on, the mark still
-applies. In a chat in Code mode, or in a [mode of yours](/guide/sessions#modes-you-make) that works
-through the code tool, the marks do not apply: every tool that is on is in a script's reach, found with
-`searchTools`, and the `tools` tool is not offered. An MCP server's tools still stay behind `mcp`, which
-a script calls like any other tool (see [Modes](/guide/sessions#modes)). To set or take away such a
-mark, switch the tool on by default for a moment. A mark that was set stays as it is.
+| Mark | What it means |
+| --- | --- |
+| **auto** | The default. The [threshold](#the-threshold) decides, by how long the model's list is |
+| **lazy** | Always behind `tool_search`, whatever the length of the list |
+| **direct** | Always in the model's list, so that it is never found through a search |
+
+A tool's own mark is before its group's: a group that is lazy can have a tool that is direct, and the other way
+round. The marks are the portal's, not an agent's, project's, routine's or chat's, so where one of those switches
+a tool on, the mark still applies. Marks are kept in the portal and reach the chats that start after the change;
+see [A chat keeps its list](#a-chat-keeps-its-list).
+
+### The threshold
+
+A long list costs the model's context and a local server's cache, and a model picks less reliably from a long
+list. **Settings → Tools** has **Lazy above**, two limits: **3,000 tokens** of tool declarations, or **20 tools**,
+whichever the list reaches first. `0` turns a limit off. When the list has more than that, whole groups that are
+**auto** are taken out of it, the largest by tokens first, until both numbers are within the limits. What is
+counted is what the model would be offered with the default switches: tools that are off by default cost the list
+nothing, and pi's own tools, the portal's own small ones (such as `ask_question`) and every group marked **direct**
+count in full and are never taken out. If the list is over the limits all the same, every group that may be taken out
+is, because each makes the list shorter, and the page says that the rest cannot be taken out.
+
+The result is worked out once and kept, not for each chat. It changes when a group comes or goes, a group's size
+changes, a mark changes or the limits do, and a group that went lazy stays lazy until the list would fit within
+80 % of the limits with the group back in the list, so that a group does not flip when another one grows a little. The page shows one
+state for a group in every chat: **auto, lazy** is a group the threshold took out, **auto** one it left in. The
+tokens are what a tool's name, description, parameters and the line the prompt lists it by cost, as measured
+the last time a chat registered it; a tool no chat has registered yet is guessed from its description.
+
+The threshold applies to a portal that is upgraded as well. A group that was in the list before can be lazy after:
+a portal that has the [browser](/guide/browser) and the subagent tool is over 3,000 tokens. **Settings → Tools**
+says which groups the threshold took out since you last looked, and puts a **direct** mark on the group to keep it
+in the list. Where a group exists for one purpose, a [mode of yours](/guide/sessions#modes-you-make) or an
+[agent](/guide/agents#tools) can keep it in the list for its chats: the **direct** button on the group's header on
+the mode's or the agent's tools page. Without it the largest-first rule could leave out exactly the group the mode is for.
+A mode an extension offers says the same with `keepDirect` (see [Chat modes](/guide/extension-ui#chat-modes)).
+
+An MCP server is a group like any other: its tools are counted, and the threshold can leave it out of the list.
+
+### Setting the marks
+
+**Settings → Tools** has a button on the header of each group and one beside each tool that shows the mark: **auto**,
+**lazy** or **direct**. Clicking it goes from auto to lazy to direct and back. Marking a group makes every tool of
+it lazy or direct, including tools that turn up in it later. A tool of a group that is marked shows the group's mark
+until it has one of its own, and its button goes between the group's mark and the other one: a tool of a direct group
+from direct to lazy and back to the group's. A mark is no switch: the tools stay on or off as
+they were, and a mark on a tool that is off changes nothing in the chats where it stays off. In a chat in Code mode, or in a
+[mode of yours](/guide/sessions#modes-you-make) that works through the code tool, the marks do not apply: every
+tool that is on is in a script's reach, found with `searchTools`, and `tool_search` is not offered. An MCP server's
+tools are in a script's reach like the rest (see [Modes](/guide/sessions#modes)).
 
 Any tool can be made lazy except pi's own built-in ones (`read`, `bash`, `edit`, `write`, `grep`, `find`
-and `ls`), which every conversation works with and which are always offered. They have no lazy button, and
-the portal refuses a mark that names them, in whichever group they are listed: with the
+and `ls`), which every conversation works with and which are always offered. They have no button, and
+the portal refuses a lazy mark that names them, in whichever group they are listed: with the
 [sandbox](/guide/sandbox) on they are listed under **sandbox**, and an extension that brings a tool of one
 of these names does not make it lazy either. The [Canvases](/guide/canvases) tools can be lazy, `canvas_write` too: a document
-written through `tools` fills the canvas while the model writes it, and what has come is kept if the turn
+written through `tool_search` fills the canvas while the model writes it, and what has come is kept if the turn
 is cut off, as for a direct call. Text is written only for a `canvas_write` the model can call: one offered
-by its own name, or a lazy one called through `tools`. A lazy or switched-off one called by its own name is
-answered "not found", and writes nothing. If a call through `tools` turns out to be another tool's (a key
+by its own name, or a lazy one called through `tool_search`. A switched-off one called by its own name is
+answered "not found", and writes nothing. If a call through `tool_search` turns out to be another tool's (a key
 given twice, the last one counts), only known when the call is whole, the text that came is taken out again.
 
-**An MCP server's tools** are lazy by the server's own setting, which is the same thing as **Register tools
-directly** in [Settings → MCP](/guide/mcp), turned off: the adapter then leaves the tools to its `mcp` tool,
-which the model uses to search for them, describe them and call them. So there is one switch, and the
-lazy button of an MCP server in Settings → Tools is that setting (a tool of the server cannot differ from it;
-a list of tools in `directTools` is shown as it is). **MCP servers are lazy unless they register their
-tools directly**, as the adapter does by default; a server an extension writes with its tools registered
-directly, Understory's for one, stays so. A change reaches the chats that start after it. The portal's own
-`tools` tool has no part in this, and a mark that names an MCP server is refused. The [guard](/guide/security)
-reads a call through `mcp` by the tool it reaches and what it is given, as it reads that tool called
-directly: the rules after a result that looks like a prompt injection, and what is kept from somebody who is
-not the primary user, such as the places secrets are kept. (A standing approval for a colleague is matched on
-the `mcp` call itself.)
+**An MCP server's tools** are a group like any other, and are marked as one: a server is lazy, direct or auto
+as a whole, or a tool of it on its own. An MCP server that no chat has seen yet counts as lazy until one has, and
+the threshold counts what a chat last saw of its tools (a count and a size for each server). A server an
+extension writes with its tools direct, Understory's for one, has that mark, which you can change. The tools are
+always registered for the chat; whether they are in the model's list is what the mark says (see
+[MCP servers](/guide/mcp#tools-and-how-many-of-them)). The [guard](/guide/security) reads a call through
+`tool_search` as the call of the tool it names, as it reads that tool called directly.
+
+### How the model reaches a lazy tool
 
 Lazy is not a switch. A lazy tool is **on** like any other, and behaves exactly like one: it is run by
 the same code, held to the same [guard](/guide/security) (the [list of sites the agent's tools may
@@ -440,42 +520,72 @@ colleague may run), its arguments are checked and converted as for a direct call
 wrapped as somebody else's words where it would be. A picture it shows or makes appears in the chat and
 in voice mode, and the browser's window opens for it, as for a direct call.
 Tools that run one at a time, as the browser's do, still do when the model calls several in one message.
-A tool that its extension keeps inactive (one that waits for its moment) is not reached through `tools`
+A tool that its extension keeps inactive (one that waits for its moment) is not reached through `tool_search`
 either, and marking it lazy does not switch it on.
-The one difference is that the model is not shown the tool's schema and description up front. The model
-is shown one short line instead, naming the lazy sets, for example "You have pithagoras-browser tools; search for
-them with the tools tool." The rules the tool's extension wrote for the prompt stay in it as long as the
-tool is lazy, and so does the portal's rule that outside content, such as a [browser](/guide/browser)'s page,
-is data and never instructions.
 
-The `tools` tool has three actions:
+The model is shown one short line in the system prompt instead of the tools, naming the lazy groups and a few of
+their tools, for example "These tools are not in your list: Browser (browser_click, browser_navigate,
+browser_snapshot and 8 more). Search them with the tool_search tool before you say you cannot do something.", and
+one sentence that what a search or a describe of `tool_search` returns carries the tools' usage rules on lines that
+start with `Rule` and the chat's own tag, a random word made with the chat (`Rule 3f9a07c2:`). Only those lines count:
+a page, a file or an MCP server's description that writes a line starting with `Rule:` has no tag, and the tag is
+taken out of every text of a tool's that the search quotes and of the text of every result of every other tool (a picture is not read for it), however it is
+written in the usual ways (twice in a row, with look-alike Latin, Greek or Cyrillic letters, zero-width characters or other separators between its letters). The
+portal's rule that outside content, such as a [browser](/guide/browser)'s page, is data and never
+instructions, and what a lazy tool asks to be told in a spoken turn, stay in the prompt as long as the tool is
+lazy, from the chat's first request: a security line does not depend on a search. They are taken from what the
+lazy tools said of themselves when a chat last loaded them; only a tool that no chat has loaded yet adds its line
+when it first registers.
+
+`tool_search` has three actions:
 
 | Action | What it does |
 | --- | --- |
-| `search` | `query`: words from a tool's name or from what it does. Lists the matching lazy tools, each with the first line of its description. No query lists them all |
-| `describe` | `name`: the tool's full description and its parameters as a JSON schema |
+| `search` | `query`: words from a tool's name, from what it does, from its parameters or from its group's name, ranked (BM25). Each hit has the tool's name, its parameters and the first line of its description; the best few carry the parameters as a JSON schema, up to a size. No query lists the groups, as many as fit in a search's size, and counts the rest |
+| `describe` | `name`: the tool's full description, its parameters as a JSON schema, and its rules |
 | `call` | `name` and `args` (an object, or its JSON text): runs the tool and returns its result |
 
-The model describes a tool before it first calls it, so a schema is in the conversation only for a tool
-that is used. `tools` is offered only to a conversation that has at least one lazy tool that is on, so
-with nothing lazy there is no extra tool, and no hint, in any prompt. A tool the portal sees for the very
-first time is offered one by one in the chat that registers it only until that chat has listed its tools,
-a moment after it starts.
+**The rules of the tools** (what an extension wrote for the system prompt, such as the browser's rules for reading a
+page) are not in the prompt for a lazy tool: they would cost what the group's being lazy saves. They come with the
+results of a search or a describe, at the end of the context, each on a line of its own that starts with `Rule` and
+the chat's tag: the rules the tools of a group share once for the group, and a tool's own with its best hits and its
+`describe`. A search that is cut to its size cuts its hits, never the rules. A tool's own text (a description, a
+parameter's name) never starts a line of a result: a description is indented, and a line break in a name is a space.
+An MCP server's tool gives no rule lines.
 
-`tools` is a name an extension may use too. If an installed extension has a tool called `tools`, pi keeps
+A call is the same call as a direct one: `tool_search` runs it through pi's own `executeTool`, which checks and
+converts the arguments, puts it through the extensions' hooks, the guard's among them, and queues the calls of tools that run one at
+a time. The page shows it as a call of the tool it called. Names are met halfway for `search` and `describe`: a name with
+other case, hyphens or dots for underscores finds the tool. A `call` takes the tool's own name, and one by another
+spelling is refused with that name, which the model then calls it by: the call's name is what the page, the browser's
+view and the canvas follow. A lazy tool is also active, so a model that calls it by its own name after finding it runs it, through the
+guard. `tool_search` is offered only to a chat that has a lazy tool, so with nothing lazy there is no extra tool, and
+no line, in any prompt. A group whose every tool is off when the chat starts is not lazy in that chat.
+
+**A tool that is off is off for good.** `search` and `describe` do not find a tool that is switched off, and do not name it in their answers;
+`call` refuses it shortly. The portal-wide default, an [agent](/guide/agents#tools), a [project](/guide/projects#tools), a
+[routine](/guide/routines#tools) and a single chat each switch tools as they do for any tool, and what is switched
+off in the middle of a chat is refused at once by the same check. Switched on again, a tool is lazy again, because the
+mark is the tool's and the switch is the conversation's.
+
+`tool_search` is a name an extension may use too. If an installed extension has a tool called `tool_search`, pi keeps
 that one, because it loads before the portal's, and the portal's is not there. The extension's tool is then
 a tool like any other: the guard asks for a rule or an approval before a colleague may use it, it is not
 hidden while nothing is lazy, and it can be switched off in **Settings → Tools**. With no way to reach them,
-the tools marked lazy are offered one by one in a chat it is in, and the portal logs a warning. That holds when
+the tools marked lazy are offered one by one in a chat it is in. That holds when
 the tool registers after the chat has started too, as an MCP server's does once it has connected.
 
-All the switches above a tool still apply, and a tool that is switched **off** is off for good, lazy or
-not. The portal-wide default, an [agent](/guide/agents#tools), a [project](/guide/projects#tools), a
-[routine](/guide/routines#tools) and a single chat each switch tools as they do for any tool, and the
-[guard](/guide/security) refuses `call` and `describe` for a switched-off tool; `search` does not list
-it. A tool switched off at any of them is therefore unreachable there, and switched on again it is lazy
-again, because the mark is the tool's and the switch is the conversation's. There is no per-chat way to
-offer a lazy tool one by one: for that, take the mark away in **Settings → Tools**.
+### A chat keeps its list
+
+What is in the model's list and in the system prompt is the start of every request, and a provider caches it, as a local
+llama.cpp server does with its prompt: a change there makes the next request read the whole prompt again. So **what is lazy in a chat is
+decided when the chat first starts and is the chat's own from then on**: after a restart, a reload, an installed package or a changed mark the
+chat is as it was. A switch that turns a tool off is the exception that costs nothing, because the tool is simply not offered; a tool
+that registers later in a lazy group is lazy at once and never shows up in the list.
+
+Marks, limits and the threshold reach the chats that start afterwards. In a chat that started earlier, the tools menu above the
+message box says when they would make other tools lazy now, and offers **Read the tools again**, the one deliberate change of what the chat
+is sent first. It costs the prompt cache from the start, so it is never done on its own.
 
 ::: tip Not the same as uninstalling
 The extension is still loaded, its commands still work, and other chats are

@@ -55,7 +55,8 @@ async function ask() {
 
 test("the rules for a Playwright browser are sent only where there is one", async () => {
   const mcp = path.join(process.env.PI_CODING_AGENT_DIR, "mcp.json");
-  const playwright = { command: "npx", args: ["-y", "@playwright/mcp@0.0.79", "--cdp-endpoint", "http://127.0.0.1:9222"] };
+  // `enabled: false`: pi's MCP support would start these, and the rule is about the file, not about a server that runs.
+  const playwright = { enabled: false, command: "npx", args: ["-y", "@playwright/mcp@0.0.79", "--cdp-endpoint", "http://127.0.0.1:9222"] };
   const said = async () => {
     const system = systemOf(await ask());
     return { reading: system.includes(BROWSER_READING_RULE), screenshot: system.includes(BROWSER_SCREENSHOT_RULE) };
@@ -64,10 +65,10 @@ test("the rules for a Playwright browser are sent only where there is one", asyn
     // A fresh install: no browser server.
     assert.deepEqual(await said(), { reading: false, screenshot: false }, "no browser server");
     // Another server is no browser.
-    writeFileSync(mcp, JSON.stringify({ mcpServers: { files: { command: "npx", args: ["-y", "some-other-server"] } } }));
+    writeFileSync(mcp, JSON.stringify({ mcpServers: { files: { enabled: false, command: "npx", args: ["-y", "some-other-server"] } } }));
     assert.deepEqual(await said(), { reading: false, screenshot: false }, "a server that is not a browser");
     // A Playwright server that starts a Chromium of its own is not the agent's browser either.
-    writeFileSync(mcp, JSON.stringify({ mcpServers: { playwright: { command: "npx", args: ["-y", "@playwright/mcp@0.0.79"] } } }));
+    writeFileSync(mcp, JSON.stringify({ mcpServers: { playwright: { enabled: false, command: "npx", args: ["-y", "@playwright/mcp@0.0.79"] } } }));
     assert.deepEqual(await said(), { reading: false, screenshot: false }, "a Playwright server with a browser of its own");
     // A Playwright server pointed at a running browser, whatever it is called, and wherever that browser is.
     writeFileSync(mcp, JSON.stringify({ mcpServers: { chrome: playwright } }));

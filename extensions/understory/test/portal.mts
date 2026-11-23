@@ -173,8 +173,6 @@ export async function startUnderstory() {
     halves,
     /** pi's own folder: its mcp.json and its settings. */
     agentDir,
-    /** pi-mcp-adapter installed and on, as pi's settings say: the agent's MCP servers are its tools. */
-    adapterOn: () => writeFileSync(path.join(agentDir, "settings.json"), JSON.stringify({ packages: ["npm:pi-mcp-adapter"] })),
     /** The servers in pi's mcp.json. */
     servers: (): Record<string, any> => JSON.parse(readFileSync(path.join(agentDir, "mcp.json"), "utf8")).mcpServers,
     /** pi's mcp.json with these servers. */

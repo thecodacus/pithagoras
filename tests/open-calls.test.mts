@@ -59,7 +59,7 @@ test('the calls being written are read as far as they have come, a few times a s
   forgetOpenCalls('chat');
 });
 
-test('a call through the tools tool is the call of the tool it calls, and the calls that are running are open too, until they end', () => {
+test('a call through the tool_search tool (here by its old name, tools, as an old chat has it) is the call of the tool it calls, and the calls that are running are open too, until they end', () => {
   const at = 2_000_000;
   const events = [
     { seq: 1, type: 'tool_execution_start', payload: { toolCallId: 'r1', toolName: 'doc_edit', args: { id: 'a', edits: [] } } },

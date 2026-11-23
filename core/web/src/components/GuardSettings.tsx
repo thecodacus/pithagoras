@@ -46,7 +46,7 @@ const ALWAYS: { title: string; why: string }[] = [
   },
   {
     title: msg("A tool switched off is off every way"),
-    why: msg("Through the mcp tool, a script or the tools gateway as well as by its name."),
+    why: msg("Through the mcp tool, a script or tool_search as well as by its name."),
   },
 ];
 

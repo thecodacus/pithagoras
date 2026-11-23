@@ -605,10 +605,12 @@ const API_LABELS: Record<string, string> = {
 };
 
 function ProbeMark({ state }: { state: "idle" | "asking" | "ok" | "failed" }) {
-  const cls = "pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2";
-  if (state === "asking") return <LuRefreshCw className={`${cls} animate-spin text-fg-faint`} aria-label={t("Asking the server")} />;
-  if (state === "ok") return <LuCheck className={`${cls} pop-in text-ok`} aria-label={t("The server answered")} />;
-  if (state === "failed") return <LuX className={`${cls} pop-in text-danger`} aria-label={t("The server did not answer")} />;
+  // The position sits on a wrapper: the spin and pop-in keyframes write transform themselves,
+  // and on the icon they would clobber the -translate-y-1/2 that keeps it centred.
+  const wrap = "pointer-events-none absolute right-3 top-1/2 -translate-y-1/2";
+  if (state === "asking") return <span className={wrap}><LuRefreshCw className="h-4 w-4 animate-spin text-fg-faint" aria-label={t("Asking the server")} /></span>;
+  if (state === "ok") return <span className={wrap}><LuCheck className="h-4 w-4 pop-in text-ok" aria-label={t("The server answered")} /></span>;
+  if (state === "failed") return <span className={wrap}><LuX className="h-4 w-4 pop-in text-danger" aria-label={t("The server did not answer")} /></span>;
   return null;
 }
 

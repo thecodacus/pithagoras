@@ -87,23 +87,23 @@ test("a tool call has a line when it begins and one when it ends, with the outco
   });
 });
 
-test("a call through the tools tool is filed under the lazy tool it calls, and a search through it under tools", async () => {
+test("a call through the tool_search tool is filed under the lazy tool it calls, and a search through it under tool_search", async () => {
   await atDebug(async () => {
     resetLogs();
     const pi = await chat("calls-lazy");
     await withClock(async (tick) => {
-      pi.emit("event", { type: "tool_execution_start", toolCallId: "t1", toolName: "tools", args: { action: "call", name: "browser_click", args: { ref: "e1" } } });
+      pi.emit("event", { type: "tool_execution_start", toolCallId: "t1", toolName: "tool_search", args: { action: "call", name: "browser_click", args: { ref: "e1" } } });
       tick(40);
-      pi.emit("event", { type: "tool_execution_end", toolCallId: "t1", toolName: "tools", isError: false });
-      pi.emit("event", { type: "tool_execution_start", toolCallId: "t2", toolName: "tools", args: { action: "search", query: "browser" } });
+      pi.emit("event", { type: "tool_execution_end", toolCallId: "t1", toolName: "tool_search", isError: false });
+      pi.emit("event", { type: "tool_execution_start", toolCallId: "t2", toolName: "tool_search", args: { action: "search", query: "browser" } });
       tick(3);
-      pi.emit("event", { type: "tool_execution_end", toolCallId: "t2", toolName: "tools", isError: false });
+      pi.emit("event", { type: "tool_execution_end", toolCallId: "t2", toolName: "tool_search", isError: false });
     });
     assert.deepEqual(lines("tool"), [
-      "[tool] start tool=browser_click via=tools session=calls-lazy",
-      "[tool] end tool=browser_click via=tools outcome=ok ms=40 session=calls-lazy",
-      "[tool] start tool=tools session=calls-lazy",
-      "[tool] end tool=tools outcome=ok ms=3 session=calls-lazy",
+      "[tool] start tool=browser_click via=tool_search session=calls-lazy",
+      "[tool] end tool=browser_click via=tool_search outcome=ok ms=40 session=calls-lazy",
+      "[tool] start tool=tool_search session=calls-lazy",
+      "[tool] end tool=tool_search outcome=ok ms=3 session=calls-lazy",
     ]);
   });
 });

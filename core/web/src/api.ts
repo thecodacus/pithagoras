@@ -41,6 +41,8 @@ export interface ChatMode {
   confirm?: string;
   /** The package that offers it, whose translations its texts are shown through. */
   extension?: string;
+  /** The model parameters it sets, where it sets any (a mode of the person's). */
+  params?: { temperature?: number };
 }
 
 /** A set of instructions the agent pulls in when the description matches. */
@@ -91,6 +93,16 @@ export interface SkillDiagnostic {
   path?: string;
 }
 
+/**
+ * The minutes a routine's run may take unless the routine says: `minutes` is what a run gets now, `stored` what the
+ * Routines page set (null for what the portal started with: `fallback`, ROUTINE_RUN_TIMEOUT_MIN or an hour).
+ */
+export interface TimeoutDefault {
+  minutes: number;
+  stored: number | null;
+  fallback: number;
+}
+
 /** Work the agent does on a schedule. */
 export interface Routine {
   id: string;
@@ -106,6 +118,8 @@ export interface Routine {
   done: boolean;
   instructions: string;
   freshSession: boolean;
+  /** How many minutes a run may take; null takes the portal's default, `timeoutDefault` on the list. */
+  timeoutMin: number | null;
   /** False lets this routine act on what it read against at least one of the guard's rules — see `exempt`. */
   guard: boolean;
   /** The guard's rules its runs are exempt from, by name: set in Settings → Guard. */
@@ -267,6 +281,15 @@ export interface CompactionSettings {
   keepRecentTokens: number;
 }
 
+/** What a tool set or a single tool is marked: always behind `tool_search`, or always in the model's list. Without a mark the threshold decides. */
+export type ToolMark = "lazy" | "direct";
+
+/** What the model's list may hold before groups that have no mark go lazy: tokens of declarations and number of tools; 0 turns a part off. */
+export interface LazyLimits {
+  tokens: number;
+  tools: number;
+}
+
 /** A tool a conversation could use, and whether it is switched on for it. */
 export interface PortalTool {
   name: string;
@@ -280,13 +303,15 @@ export interface PortalTool {
   byMode?: true;
   /** One of the portal's own, not an extension's of the same name: the list groups code mode by it. */
   inline?: true;
-  /** An MCP server's tool listed from the adapter's cache: the server starts when one of its tools is first used. */
-  cached?: true;
-  /** Not in the list the model is given one by one but found through the `tools` tool, or an MCP server's through `mcp`: on or off like any other. */
+  /** Not in the list the model is given one by one but found through `tool_search`: on or off like any other. */
   lazy?: true;
-  /** An MCP server's tool: the server, whose setting "Register tools directly" says whether the tool is lazy. */
+  /** What was set on the tool or its set: `lazy` or `direct`. Settings → Tools only. */
+  mark?: ToolMark;
+  /** Nothing is set on the tool or its set, so the threshold decides. Settings → Tools only. */
+  auto?: true;
+  /** The MCP server that brought it: `source` is the same. */
   mcp?: string;
-  /** Settings → Tools only: one of pi's own tools or the adapter's `mcp`, which cannot be made lazy. */
+  /** Settings → Tools only: one of pi's own tools, which cannot be made lazy. */
   noLazy?: true;
 }
 
@@ -369,6 +394,8 @@ export interface CustomMode {
   provider: string | null;
   model: string | null;
   thinkingLevel: string | null;
+  /** The temperature its chats' requests to the model carry; none leaves it to the server's own default. */
+  temperature: number | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -629,9 +656,12 @@ export const api = {
     }),
   /** What an agent's chats and own runs start with: its exceptions to the portal-wide default, `live` always false. */
   agentTools: (id: string) =>
-    json<{ tools: PortalTool[]; live: boolean; off: string[]; names: Record<string, string> }>(
+    json<{ tools: PortalTool[]; live: boolean; off: string[]; names: Record<string, string>; keepDirect?: string[] }>(
       `/api/agents/${encodeURIComponent(id)}/tools`
     ),
+  /** The sets and tools the agent's chats keep in the model's list whatever the marks and the threshold say. */
+  setAgentDirect: (id: string, entries: string[]) =>
+    json<{ entries: string[] }>(`/api/agents/${encodeURIComponent(id)}/direct`, { method: "PUT", body: JSON.stringify({ entries }) }),
   setAgentTools: (id: string, off: string[]) =>
     json<{ off: string[]; applied: number }>(`/api/agents/${encodeURIComponent(id)}/tools`, {
       method: "PUT",
@@ -669,7 +699,10 @@ export const api = {
   deleteMode: (id: string) => changesModes(json<{ ok: true }>(`/api/chat-modes/${encodeURIComponent(id)}`, { method: "DELETE" })),
   /** What every chat in a mode starts with: its exceptions to Settings → Tools, `live` always false. */
   modeTools: (id: string) =>
-    json<{ tools: PortalTool[]; live: boolean; off: string[]; names: Record<string, string> }>(`/api/chat-modes/${encodeURIComponent(id)}/tools`),
+    json<{ tools: PortalTool[]; live: boolean; off: string[]; names: Record<string, string>; keepDirect?: string[] }>(`/api/chat-modes/${encodeURIComponent(id)}/tools`),
+  /** The sets and tools the mode's chats keep in the model's list whatever the marks and the threshold say. */
+  setModeDirect: (id: string, entries: string[]) =>
+    json<{ entries: string[] }>(`/api/chat-modes/${encodeURIComponent(id)}/direct`, { method: "PUT", body: JSON.stringify({ entries }) }),
   setModeTools: (id: string, off: string[]) =>
     changesModes(json<{ off: string[]; applied: number }>(`/api/chat-modes/${encodeURIComponent(id)}/tools`, { method: "PUT", body: JSON.stringify({ off }) })),
   deleteSession: (id: string) => json<{ ok: true }>(`/api/sessions/${id}`, { method: "DELETE" }),
@@ -724,17 +757,32 @@ export const api = {
   /** Every tool the portal has seen, for setting a default without opening a chat. */
   toolDefaults: () =>
     json<{
-      tools: { name: string; source: string; defaultOn: boolean; inline?: true; lazy?: true; mcp?: string; noLazy?: true }[];
+      tools: { name: string; source: string; defaultOn: boolean; inline?: true; lazy?: true; mark?: ToolMark; auto?: true; mcp?: string; noLazy?: true }[];
       off: string[];
       names: Record<string, string>;
-      /** What is marked lazy: tool sets, and single tools as `<tool>name`. Opt-in; nothing is lazy until somebody marks it. */
-      lazy?: string[];
+      /** What is marked, on tool sets and on single tools as `<tool>name`: lazy, or direct. What has no mark is auto: the threshold decides. */
+      marks?: Record<string, ToolMark>;
+      /** The sets the threshold made lazy, and whether the list is over its limits with every set it may take out taken out. */
+      resolved?: { lazy: string[]; over: boolean };
+      /** What the model's list holds now, with what is lazy taken out of it. */
+      listed?: { tokens: number; tools: number };
+      limits?: LazyLimits;
+      defaultLimits?: LazyLimits;
+      /** The sets the threshold made lazy since the person last looked. */
+      lazyNotice?: string[];
       /** How long ask_question waits for an answer; 0 is until it is answered. */
       questionWaitMinutes?: number;
     }>("/api/tools"),
-  /** Which tool sets and single tools (`<tool>name`) are lazy: not in the model's list one by one, found through the `tools` tool. */
-  setLazyToolSets: (lazy: string[]) =>
-    json<{ lazy: string[]; applied: number }>("/api/tools/lazy", { method: "PUT", body: JSON.stringify({ lazy }) }),
+  /** What is marked lazy (not in the model's list one by one, found through `tool_search`) or direct, by tool set or `<tool>name`. */
+  setToolMarks: (marks: Record<string, ToolMark>) =>
+    json<{ marks: Record<string, ToolMark>; resolved: { lazy: string[]; over: boolean } }>("/api/tools/marks", { method: "PUT", body: JSON.stringify({ marks }) }),
+  /** How big the model's list may get before groups with no mark go lazy. */
+  setLazyLimits: (limits: LazyLimits) =>
+    json<{ limits: LazyLimits; resolved: { lazy: string[]; over: boolean } }>("/api/tools/lazy-limits", { method: "PUT", body: JSON.stringify(limits) }),
+  /** The person has read what the threshold made lazy. */
+  dismissLazyNotice: () => json<{ ok: true }>("/api/tools/lazy-notice", { method: "DELETE" }),
+  /** Read a chat's tools again: what is lazy in it is decided afresh, which costs the prompt cache from its start. */
+  readToolsAgain: (sessionId: string) => json<{ changed: boolean }>(`/api/sessions/${sessionId}/tools/read-again`, { method: "POST" }),
   /** How long the agent's ask_question waits for an answer, in minutes; 0 is until it is answered. */
   setQuestionWait: (waitMinutes: number) =>
     json<{ waitMinutes: number }>("/api/ask-question", { method: "PUT", body: JSON.stringify({ waitMinutes }) }),
@@ -743,7 +791,7 @@ export const api = {
     json<{ off: string[]; applied: number }>("/api/tools", { method: "PUT", body: JSON.stringify({ off }) }),
   /** What this conversation could use. `live` is false when pi is not running to ask. */
   tools: (sessionId: string) =>
-    json<{ tools: PortalTool[]; live: boolean; off: string[]; names: Record<string, string> }>(
+    json<{ tools: PortalTool[]; live: boolean; off: string[]; names: Record<string, string>; lazyStale?: boolean }>(
       `/api/sessions/${sessionId}/tools`
     ),
   /** What each package is called here; everything unnamed keeps its own name. */
@@ -783,16 +831,8 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ entry, from }),
     }),
-  /** An MCP server's setting "Register tools directly" on its own; off, the server's tools are lazy. */
-  setMcpDirect: (name: string, direct: boolean) =>
-    json<{ ok: true; direct: boolean }>(`/api/mcp/servers/${encodeURIComponent(name)}/direct`, { method: "PUT", body: JSON.stringify({ direct }) }),
   deleteMcpServer: (name: string) =>
     json<{ ok: true }>(`/api/mcp/servers/${encodeURIComponent(name)}`, { method: "DELETE" }),
-  saveMcpSettings: (settings: Record<string, unknown>) =>
-    json<{ ok: true }>("/api/mcp/settings", {
-      method: "PUT",
-      body: JSON.stringify({ settings }),
-    }),
   importMcp: (text: string) =>
     json<{ ok: true; added: string[]; skipped: { name: string; reason: string }[] }>(
       "/api/mcp/import",
@@ -902,7 +942,10 @@ export const api = {
   forgetPerson: (key: string, force = false) =>
     json<{ ok: true }>(`/api/people/${encodeURIComponent(key)}${force ? "?force=1" : ""}`, { method: "DELETE" }),
 
-  routines: () => json<{ routines: Routine[] }>("/api/routines"),
+  routines: () => json<{ routines: Routine[]; timeoutDefault: TimeoutDefault }>("/api/routines"),
+  /** The minutes a run may take unless its routine says: a number stores it, null clears it to what the portal started with. */
+  setTimeoutDefault: (minutes: number | null) =>
+    json<{ timeoutDefault: TimeoutDefault }>("/api/routines/timeout-default", { method: "PUT", body: JSON.stringify({ minutes }) }),
   reportTargets: () =>
     json<{ targets: ReportTarget[]; default: ReportTo | null }>("/api/routines/report-targets"),
   setReportDefault: (to: ReportTo | null) =>
@@ -930,6 +973,7 @@ export const api = {
       instructions?: string;
       enabled?: boolean;
       freshSession?: boolean;
+      timeoutMin?: number | null;
       guard?: boolean;
       reportChannel?: string | null;
       reportTarget?: string | null;
@@ -1126,6 +1170,9 @@ export const api = {
     json<{ extensions: ExtensionInfo[]; settingsPath: string }>("/api/extensions"),
   /** What comes with the portal and can be installed with a click. */
   shippedExtensions: () => json<{ extensions: ShippedExtension[] }>("/api/extensions/shipped"),
+  officialExtensions: () => json<{ extensions: OfficialExtension[] }>("/api/extensions/official"),
+  /** The sets the setup assistant offers, by the packages each holds. */
+  extensionPresets: () => json<{ presets: ExtensionPreset[] }>("/api/extensions/presets"),
   /** What installing `spec` brings with it: the extensions it requires that are not there as it needs them. */
   installPlan: (spec: string) => json<InstallPlan>(`/api/extensions/plan?${new URLSearchParams({ spec })}`),
   setExtensionSetting: (key: string, value: unknown) =>
@@ -1322,12 +1369,27 @@ export interface ShippedExtension {
   requires?: Record<string, string>;
 }
 
+/** An official extension that does not come with the portal, installed from npm (`spec`) and kept in `repository` on GitHub. */
+export interface OfficialExtension {
+  name: string;
+  description: string;
+  kinds: PackageKind[];
+  repository: string;
+  spec: string;
+}
+
 /**
  * Something an extension being installed needs that is not there as it is needed (see install-plan.ts on the
  * server): installed first by `spec`, from the portal's own folder or npm, or switched on; or said, where it is
  * nowhere in a version taken (`missing`, with `error` where npm could not be asked) or is there in a `version` not
  * taken (installed, or, with `from`, the one in the portal's own folder or the one installed from npm for another).
  */
+/** A set of the portal's own extensions (Minimal, Developer…), by package name. */
+export interface ExtensionPreset {
+  id: string;
+  extensions: string[];
+}
+
 export interface InstallNeed {
   name: string;
   range: string;
@@ -1364,7 +1426,7 @@ export interface PiCommand {
   sourceInfo?: { path?: string; scope?: string; origin?: string };
 }
 
-/** One MCP server as pi-mcp-adapter reads it. Unlisted keys are kept verbatim. */
+/** One MCP server as pi reads it from `mcp.json`. Unlisted keys are kept verbatim. */
 export interface McpServerEntry {
   command?: string;
   args?: string[];
@@ -1372,37 +1434,32 @@ export interface McpServerEntry {
   cwd?: string;
   url?: string;
   headers?: Record<string, string>;
-  socket?: string;
-  auth?: "oauth" | "bearer" | false;
-  bearerToken?: string;
-  bearerTokenEnv?: string;
-  lifecycle?: "lazy" | "eager" | "keep-alive" | "lazy-keep-alive";
-  idleTimeout?: number;
-  requestTimeoutMs?: number;
-  exposeResources?: boolean;
-  directTools?: boolean | string[];
-  includeTools?: string[];
-  excludeTools?: string[];
-  debug?: boolean;
-  disabled?: boolean;
+  /** What the server offers, in a sentence: the search for tools ranks its tools by it. */
+  description?: string;
+  /** The request timeout in seconds. */
+  timeout?: number;
+  /** False: kept in the file, never connected. */
+  enabled?: boolean;
   [key: string]: unknown;
 }
 
 export interface McpServerView {
   name: string;
   entry: McpServerEntry;
-  transport: "stdio" | "http" | "socket" | "unknown";
-  disabled: boolean;
+  transport: "stdio" | "http" | "unknown";
+  enabled: boolean;
+  /** What pi says is wrong with the entry, which it skips; null where it takes it. */
+  problem: string | null;
+  /** The keys of the entry that pi does not read (the adapter's gates and exclusions), with what each meant; null where there are none. */
+  ignored: string | null;
+  /** The patterns of the server's own tool names whose calls ask the person first (kept by the portal, not in the file); none where it has no gate. */
+  approve?: string[];
 }
 
 export interface McpConfigView {
   path: string;
   exists: boolean;
-  /** Without the adapter installed, nothing here is read by anything. */
-  adapterInstalled: boolean;
-  adapterSpec: string;
   servers: McpServerView[];
-  settings: Record<string, unknown>;
   raw: string;
   parseError: string | null;
 }
@@ -1573,6 +1630,8 @@ export interface SandboxState {
   reason: string | null;
   trustedDir: string;
   secretsDir: string;
+  /** The portal's bin folder, on PATH: where a trusted command's wrapper goes. */
+  binDir: string;
   lastReport: SandboxReport | null;
 }
 

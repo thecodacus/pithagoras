@@ -17,7 +17,7 @@ const channels = {
 const agent = { id: 'home', name: 'Home', home: '/a', first: true, initialised: true, chats: 0, channels: [], orb: DEFAULT_ORB, voice: '', heartbeat: { minutes: 0, quietStart: '', quietEnd: '', timeZone: 'UTC', last: null, status: null, running: false, watching: false, available: true }, unread: 0 };
 const skill = { name: 'review', description: 'Reviews', path: '/s/review', scope: 'user', editable: true, manualOnly: false, broken: false, enabled: true, source: null, content: '---\nname: review\n---\nBody' };
 const person = (key: string, name: string, role: string) => ({ key, name, role, notes: '', first_seen: '', last_seen: null, announced_at: null, renamed: 0 });
-const mcp = { path: '/a/mcp.json', exists: true, adapterInstalled: true, adapterSpec: 'npm:pi-mcp-adapter', settings: {}, raw: '{}', parseError: null, servers: [{ name: 'notes', entry: { command: 'notes-mcp' }, transport: 'stdio', disabled: false }] };
+const mcp = { path: '/a/mcp.json', exists: true, raw: '{}', parseError: null, servers: [{ name: 'notes', entry: { command: 'notes-mcp' }, transport: 'stdio', enabled: true, problem: null }] };
 const extension = { spec: 'npm:ext', name: 'Ext', version: '1', description: '', enabled: true, settings: [{ key: 'apiKey', value: '', configured: false }], skills: [], tools: [] };
 const routine = { id: 'r1', slug: 'morning', name: 'Morning', enabled: true, schedule: '0 9 * * *', runAt: null, mode: 'repeats', done: false, instructions: 'Say hello', freshSession: true, guard: true, exempt: [], workspace: null, reportChannel: null, reportTarget: null, lastReportAt: null, lastRun: null, lastStatus: null, lastOutput: null, lastMs: null, nextRun: null, createdAt: '' };
 
@@ -31,7 +31,7 @@ async function portal(page: Page) {
     if (p === '/api/tool-rules') return { rules: [] };
     if (p === '/api/mcp') return mcp;
     if (p === '/api/extensions') return { settingsPath: '/a/settings.json', extensions: [extension] };
-    if (p === '/api/routines') return { routines: [routine] };
+    if (p === '/api/routines') return { routines: [routine], timeoutDefault: { minutes: 60, stored: null, fallback: 60 } };
     if (p === '/api/guard') return { running: true, sandbox: 'on', primary: true, approvalsTo: true, rules: [], servers: [], routines: [], allowlist: 'github.com', approvals: [], trusted: [] };
     if (p === '/api/routines/preview') return { runs: [] };
     // A routine's and an agent's own tool switches: the list of checkboxes the page draws, which have to be named too.

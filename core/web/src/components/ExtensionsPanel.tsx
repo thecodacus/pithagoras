@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { LuCheck, LuCompass, LuDownload, LuPackageCheck, LuPalette, LuPanelsTopLeft, LuPuzzle, LuRefreshCw, LuTrash2 } from "react-icons/lu";
-import { api, type ExtensionInfo, type PackageKind, type ShippedExtension } from "../api";
+import { api, type ExtensionInfo, type OfficialExtension, type PackageKind, type ShippedExtension } from "../api";
 import { displayName } from "../tool-groups";
 import { packageName } from "../package-names";
 import { useExtensions } from "../extensions/loader";
@@ -12,7 +12,7 @@ import { formatDateTime, msg, t, tp } from "../i18n";
 import { confirmDialog } from "./ConfirmDialog";
 import { InstallProgress, installExtension, type InstallStep } from "./ExtensionInstall";
 import { PackageCatalog } from "./PackageCatalog";
-import { Empty, LoadFailed, Section, Switch, btnCls, gridCls, inputCls, primaryCls } from "./SettingsUi";
+import { Clamped, Empty, LoadFailed, Section, Switch, btnCls, gridCls, inputCls, primaryCls } from "./SettingsUi";
 import { SkeletonGroup } from "./Skeleton";
 
 /**
@@ -30,7 +30,7 @@ const SOURCES = [
 type View = "installed" | "discover";
 
 /** The headings of the second view, as written: a search that names one opens that view. */
-const DISCOVER_SECTIONS = [msg("Comes with Pithagoras"), msg("Find packages"), msg("Install by name")];
+const DISCOVER_SECTIONS = [msg("Comes with Pithagoras"), msg("Official extensions"), msg("Find packages"), msg("Install by name")];
 
 /** What a package brings. The first two are names, and stay as they are in every language. */
 const KINDS: { id: PackageKind; label: () => string; hint: string }[] = [
@@ -83,7 +83,7 @@ function Card({ kinds, name, title, version, description, off, action, children,
             <p title={title ?? name} className={`truncate text-sm font-medium ${off ? "text-fg-subtle" : "text-fg"}`}>{name}</p>
             {version && <span className="shrink-0 font-mono text-[10px] text-fg-faint">v{version}</span>}
           </div>
-          {description && <p className="mt-0.5 line-clamp-2 text-xs text-fg-subtle">{description}</p>}
+          {description && <Clamped className="mt-0.5">{description}</Clamped>}
           <div className="mt-1.5 flex flex-wrap items-center gap-1">{children}</div>
         </div>
         <div className="flex shrink-0 items-center gap-1">{action}</div>
@@ -151,6 +151,7 @@ export function ExtensionsPanel({
       .catch(() => setNames({}));
   }, []);
   const shipped = useCached("extensions-shipped", api.shippedExtensions, { freshMs: 30_000 });
+  const official = useCached("extensions-official", api.officialExtensions, { freshMs: 30_000 });
 
   /** Runs `fn`, one at a time; one the person said no to (false) changes nothing. */
   const act = async (label: string, fn: () => Promise<unknown>) => {
@@ -197,6 +198,25 @@ export function ExtensionsPanel({
   const installed = useMemo(() => new Set(extensions.flatMap((e) => [e.name, packageName(e.spec)])), [extensions]);
   const counts = useMemo(() => Object.fromEntries(KINDS.map((kind) => [kind.id, extensions.filter((e) => kindsOf(e).includes(kind.id)).length])), [extensions]);
   const shown = filter === "all" ? extensions : extensions.filter((e) => kindsOf(e).includes(filter));
+
+  /** What a card of something to install has where its action is: that it is installed, or the button that installs it. */
+  const installButton = (ext: { name: string; spec: string }) =>
+    installed.has(ext.name) ? (
+      <span className="pop-in inline-flex shrink-0 items-center gap-1 rounded-lg bg-ok/10 px-2 py-1 text-[11px] text-ok">
+        <LuCheck className="h-3.5 w-3.5" /> {t("Installed")}
+      </span>
+    ) : (
+      <button
+        type="button"
+        onClick={() => act(ext.spec, () => installExtension(ext.spec, { progress: setStep }))}
+        disabled={busy !== null}
+        aria-label={t("Install {name}", { name: ext.name })}
+        className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-accent/12 px-2 py-1 text-[11px] text-accent ring-1 ring-inset ring-accent/25 transition hover:bg-accent/20 disabled:opacity-40"
+      >
+        {busy === ext.spec ? <LuRefreshCw className="h-3.5 w-3.5 animate-spin" /> : <LuDownload className="h-3.5 w-3.5" />}
+        {busy === ext.spec ? t("Installing…") : t("Install")}
+      </button>
+    );
 
   const tab = (which: View, label: string, Icon: typeof LuCompass, count?: number) => (
     <button
@@ -403,24 +423,7 @@ export function ExtensionsPanel({
                           name={ext.name}
                           version={ext.version}
                           description={ext.description}
-                          action={
-                            installed.has(ext.name) ? (
-                              <span className="pop-in inline-flex shrink-0 items-center gap-1 rounded-lg bg-ok/10 px-2 py-1 text-[11px] text-ok">
-                                <LuCheck className="h-3.5 w-3.5" /> {t("Installed")}
-                              </span>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={() => act(ext.spec, () => installExtension(ext.spec, { progress: setStep }))}
-                                disabled={busy !== null}
-                                aria-label={t("Install {name}", { name: ext.name })}
-                                className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-accent/12 px-2 py-1 text-[11px] text-accent ring-1 ring-inset ring-accent/25 transition hover:bg-accent/20 disabled:opacity-40"
-                              >
-                                {busy === ext.spec ? <LuRefreshCw className="h-3.5 w-3.5 animate-spin" /> : <LuDownload className="h-3.5 w-3.5" />}
-                                {busy === ext.spec ? t("Installing…") : t("Install")}
-                              </button>
-                            )
-                          }
+                          action={installButton(ext)}
                         >
                           <KindPills kinds={ext.kinds} />
                           {ext.requires && (
@@ -435,6 +438,34 @@ export function ExtensionsPanel({
                   </>
                 ) : (
                   <LoadFailed error={shipped.failed!} onRetry={shipped.reload} />
+                )}
+              </Section>
+            )}
+
+            {(official.failed || (official.value?.extensions.length ?? 0) > 0) && (
+              <Section title={t("Official extensions")} hint={t("Made for Pithagoras and kept in its organization's repositories. They do not come with the portal, and are installed from npm.")}>
+                {official.value ? (
+                  <>
+                    <ul className={gridCls}>
+                      {official.value.extensions.map((ext: OfficialExtension) => (
+                        <Card key={ext.name} kinds={ext.kinds} name={ext.name} description={ext.description} action={installButton(ext)}>
+                          <KindPills kinds={ext.kinds} />
+                          <a
+                            href={`https://github.com/${ext.repository}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            title={t("Open {repository} on GitHub", { repository: ext.repository })}
+                            className={`${pillCls} hover:text-fg`}
+                          >
+                            {ext.repository.split("/").pop()}
+                          </a>
+                        </Card>
+                      ))}
+                    </ul>
+                    {official.value.extensions.some((ext) => ext.spec === busy) && <InstallProgress step={step} />}
+                  </>
+                ) : (
+                  <LoadFailed error={official.failed!} onRetry={official.reload} />
                 )}
               </Section>
             )}

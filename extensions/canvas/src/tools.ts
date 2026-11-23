@@ -7,16 +7,16 @@ import type { CanvasStore } from "./store";
  *
  * The text arrives in the chat's events (`portal.chats.onEvent`), as the
  * model writes the call's arguments: `observe` follows them, for a call of
- * canvas_write by its own name, or one through the `tools` tool where it is
+ * canvas_write by its own name, or one through the `tool_search` tool where it is
  * lazy. Which of the two the model can make now is asked of the portal
  * (`portal.chats.offers`), because a call by a name the tool is not offered
  * under is refused and never runs, and its text is nobody's to write.
  */
 
 /** The portal's tool that searches, describes and calls the tools a chat has as lazy. */
-const GATEWAY_TOOL = "tools";
+const SEARCH_TOOL = "tool_search";
 
-/** The call a call of the `tools` tool makes: the tool it calls, and its arguments. Nothing for a search or a describe. */
+/** The call a call of the `tool_search` tool makes: the tool it calls, and its arguments. Nothing for a search or a describe. */
 function calledThrough(args: unknown): { name: string; args: Record<string, unknown> } | undefined {
   const plain = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
   if (!plain(args) || args.action !== "call" || typeof args.name !== "string") return undefined;
@@ -119,7 +119,7 @@ export class WriteStream {
     if(this.closed){this.text+=this.high;this.high='';}
   }
 }
-/** How far the start of a call through the `tools` tool is read: what is before its `args`. */
+/** How far the start of a call through the `tool_search` tool is read: what is before its `args`. */
 type GatewayHead={at:number;text:boolean} | 'more' | 'dead';
 /**
  * The start of `{"action":"call","name":"canvas_write","args":…`: the strings before `args`, and where the
@@ -144,7 +144,7 @@ function readGatewayHead(raw: string): GatewayHead {
   }
 }
 /**
- * A canvas_write that is called through the `tools` tool, as it streams in: the same write as WriteStream follows,
+ * A canvas_write that is called through the `tool_search` tool, as it streams in: the same write as WriteStream follows,
  * with its arguments nested in `args` — an object, or the JSON text of one, which is then in a string that is
  * decoded as it comes. Followed only when `name` comes before `args`, as the tool's schema has them: else
  * nothing is known of the call until its text is all there, and it is written when the tool runs.
@@ -212,7 +212,7 @@ export class CanvasTools {
   private errors = new Map<string, string>();
   /**
    * `offered`: how canvas_write is offered to the model now. By its own name a call of it is a write to follow; a
-   * call of the `tools` tool is one where it is lazy, and a call through it of a tool that is not lazy is refused.
+   * call of the `tool_search` tool is one where it is lazy, and a call through it of a tool that is not lazy is refused.
    */
   constructor(private store: CanvasStore, private session: string, private offered: () => "direct" | "lazy" | undefined) {}
   private apply(call: string, p: any) {
@@ -235,10 +235,10 @@ export class CanvasTools {
       if (!tool?.id) return;
       let stream = this.streams.get(tool.id);
       if (!stream) {
-        // Called as it is, or through the `tools` tool where it is lazy: the same text, one level further in.
+        // Called as it is, or through the `tool_search` tool where it is lazy: the same text, one level further in.
         const how = this.offered();
         if (tool.name === "canvas_write" && how === "direct") stream = new WriteStream();
-        else if (tool.name === GATEWAY_TOOL && how === "lazy") stream = new GatewayWriteStream();
+        else if (tool.name === SEARCH_TOOL && how === "lazy") stream = new GatewayWriteStream();
         else return;
         this.streams.set(tool.id, stream);
       }
@@ -251,15 +251,26 @@ export class CanvasTools {
         this.finish(tool.id, true);
       }
     }
-    // The call is whole now, and what runs is what JSON makes of it: the last of a key given twice. A call of the `tools` tool
+    // The call is whole now, and what runs is what JSON makes of it: the last of a key given twice. A call of the `tool_search` tool
     // that is not a canvas_write after all leaves the text that was written on its way out of the document.
-    if (event.type === "tool_execution_start" && event.toolName === GATEWAY_TOOL && calledThrough(event.args)?.name !== "canvas_write") this.discard(event.toolCallId);
+    if (event.type === "tool_execution_start" && event.toolName === SEARCH_TOOL && calledThrough(event.args)?.name !== "canvas_write") this.discard(event.toolCallId);
     if (event.type === "tool_execution_end") {
       if (event.isError) this.finish(event.toolCallId, true);
-      // A call through the `tools` tool that was no write leaves its stream behind.
+      // A call through the `tool_search` tool that was no write leaves its stream behind.
       this.streams.delete(event.toolCallId);
     }
     if (event.type === "agent_end" || event.type === "agent_settled" || (event.type === "message_end" && ["aborted", "error"].includes(event.message?.stopReason))) this.interrupt();
+  }
+  /**
+   * The call a run of canvas_write finishes. Through the `tool_search` tool pi runs it as a call of its own, with the id
+   * `<id of the tool_search call>/<n>` (pi's nested calls), while its text streamed under the outer call's id: that
+   * write is the one it ends. A call by its own name, and one through the search that nothing was streamed for, are their own.
+   */
+  private callOf(id: string): string {
+    const cut = id.lastIndexOf("/");
+    if (cut <= 0 || this.writes.has(id) || this.errors.has(id)) return id;
+    const outer = id.slice(0, cut);
+    return this.writes.has(outer) || this.errors.has(outer) ? outer : id;
   }
   /** A write that turned out to be no canvas_write: the document is as it was before it, and nothing is left open. */
   private discard(call: string) {
@@ -316,7 +327,8 @@ export class CanvasTools {
       "canvas_write",
       "Write a canvas live: text is saved as it streams, so an interrupted write keeps what came. Arguments in this order, content last: canvas_id, revision, operation, content. revision: from your last canvas result; read first only for an unread canvas or after the person edited it. operation: replace the document or append to it. Markdown, with pictures from the chat's folder: ![caption](relative/path.png).",
       object({ canvas_id: string(), revision: integer, operation: { type: "string", enum: ["replace", "append"] }, content: string() }),
-      (id, p) => {
+      (ran, p) => {
+        const id = this.callOf(ran);
         try {
           this.apply(id, p);
           const row = store.read(session, p.canvas_id);

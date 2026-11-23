@@ -608,6 +608,27 @@ test('the setup shows what the daemon says of an image on its way, and starts th
   assert.deepEqual(daemon.pulls, [CUDA]);
 });
 
+test('Docker is told which image the voice container should run, by the engines it was made for: the CUDA one where the GPU is used, the small one where it is not; and that it is not to be made again while its setup runs', async () => {
+  reset(); v.hostGpus(GPU(0, 12288, 11000));
+  const wanted = (recipe?: string, name = CONTAINER) => voice.wantedImage({ name, labels: recipe ? { 'pithagoras.voice-recipe': recipe } : {} } as never);
+  assert.deepEqual(wanted('breeze+qwen3-asr:1.7b'), { image: voice.IMAGE });
+  assert.deepEqual(wanted(), { image: voice.IMAGE }, 'one made before engines could be chosen is the original combination');
+  assert.deepEqual(wanted('kokoro@cpu+qwen3-asr:0.6b'), { image: voice.BASE_IMAGE });
+  assert.equal(wanted('breeze+qwen3-asr:1.7b', PROBE), undefined, 'the GPU check\'s container is none of its concern');
+
+  earlier({ 'pithagoras.voice-network': 'shared-v1' }, { NetworkMode: 'container:portal-one' });
+  daemon.images.delete(CUDA);
+  let release!: () => void;
+  daemon.hold.pull = new Promise<void>(resolve => { release = resolve; });
+  try {
+    await voice.start();
+    for (let n = 0; n < 300 && !(await voice.status()).busy; n++) await new Promise(r => setTimeout(r, 10));
+    assert.deepEqual(wanted(), { image: voice.IMAGE, busy: 'its setup is running' });
+  } finally { release(); }
+  await settle();
+  assert.deepEqual(wanted(), { image: voice.IMAGE });
+});
+
 test('a download that fails ends the setup with what Docker said', async () => {
   reset(); v.hostGpus(GPU(0, 12288, 11000));
   earlier({ 'pithagoras.voice-network': 'shared-v1' }, { NetworkMode: 'container:portal-one' });

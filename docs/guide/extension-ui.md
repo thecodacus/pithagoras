@@ -268,6 +268,21 @@ ground and text. A stylesheet written with them follows the theme, the
 portal's own or [one an extension brought](#themes). Give your class names a
 prefix of your own: the stylesheet is the page's.
 
+A box of your own that scrolls (an editor, a board's column) should have an
+opaque ground, or the class `scroll-steady`, which gives it one: on a screen at
+125 % Chromium draws the text of a scrolling box without a ground again at every
+fraction of a pixel it is moved by, and the lines of a paragraph step apart
+from each other as it moves. The ground is `--canvas`; where the box is on
+`--surface`, say so with `--ground` on the box, a whole colour:
+
+```css
+.my-editor { overflow-y: auto; background-color: rgb(var(--surface)); }
+```
+
+```jsx
+<div className="scroll-steady overflow-y-auto" style={{ "--ground": "rgb(var(--surface))" }}>…</div>
+```
+
 While the portal's [animations](/guide/interface#animations) play (the switch in
 Settings → This browser is on, and the system does not ask for less motion),
 `<html>` has `data-motion="fancy"`, and it has none while they do not. Put a
@@ -832,7 +847,7 @@ come to, read again a few times a second rather than with each token, so that a
 long one costs no more as it grows. It has not run yet, and may never (a call
 the chat refuses ends at once). Once the model has written it, it is `"running"`
 with all of its arguments, and it leaves `calls` when it ends, with what it
-answered in `call(callId)`. A call through the lazy tools' gateway is the call of
+answered in `call(callId)`. A call through `tool_search`, which reaches the lazy tools, is the call of
 the tool it calls.
 
 That is all it takes to show what the agent is writing before the tool runs, as
@@ -982,7 +997,7 @@ restart the portal.
 | `chats.extend(factory)` | [Tools that share this module's state](#tools-that-share-the-server-half-s-state) |
 | `tools.offer(fn)`, `chats.reload()` | [Tools that follow the settings](#tools-that-follow-the-settings): which of them it offers now, and the open chats given the change |
 | `tools.exceptions(names)` | [Who has its tools](#who-has-its-tools): the chats and routines where those tools are not what the default says |
-| `chats.offers(chatId, tool)` | How the chat's model is offered a tool now: `"direct"`, `"lazy"` (through the `tools` tool) or nothing (switched off, out of reach, or the chat's pi not running here). In a chat whose mode works through the code tool ([Code mode](/guide/sessions#modes)), `"direct"` means that a script calls the tool by its name, with no streamed arguments of its own |
+| `chats.offers(chatId, tool)` | How the chat's model is offered a tool now: `"direct"`, `"lazy"` (through the `tool_search` tool) or nothing (switched off, out of reach, or the chat's pi not running here). In a chat whose mode works through the code tool ([Code mode](/guide/sessions#modes)), `"direct"` means that a script calls the tool by its name, with no streamed arguments of its own |
 | `chats.hold(chatId)` | Keeps the chat's pi from being let go for being idle, or reloaded, while work goes on; returns what lets it go |
 | `chats.create(options)`, `chats.children(parent)`, `chats.start(options)`, `chats.prompt(chatId, message, options?)`, `chats.lastAnswer(chatId)`, `chats.abort(chatId)`, `chats.remove(chatId)` | [Child chats](#child-chats): a chat of a chat, to give part of its work to, or a chat of an agent's or a project's folder; run until it answers, stopped and deleted |
 | `sandbox.run(chatId, argv, options?)`, `sandbox.spawnAs(chatId)`, `sandbox.on()` | [Running things as the chat's agent](#running-things-as-the-chat-s-agent) |
@@ -1639,7 +1654,7 @@ To follow a call of your tool as the model writes its arguments (Canvases
 shows a document being written), ask `portal.chats.offers(chatId, tool)` how
 the tool is offered first: a call by a name it is not offered under is refused
 and never runs, so its text is nobody's. A call of a lazy tool comes as a call
-of the `tools` tool, with yours in its arguments. In a chat in
+of the `tool_search` tool, with yours in its arguments. In a chat in
 [Code mode](/guide/sessions#modes) a call of your tool comes inside the code
 tool's: a script makes it, and nothing of its arguments is streamed.
 
@@ -1685,7 +1700,7 @@ anything (see below).
   like it tries to instruct the agent is flagged and holds the conversation to
   the rules after a suspected prompt injection. The paragraph saying that such
   content is data and never instructions is the portal's, said once in the
-  prompt while any tool that declares `outside` is on or lazy, so the tool does
+  prompt while any tool that declares `outside` is on, lazy or not, so the tool does
   not carry it.
 - `reaches`: the names of its parameters that hold an address the agent chose,
   a URL or a host. Each value a call has in them, text or each text of a list,
@@ -1709,7 +1724,7 @@ anything (see below).
   allows the call when it allows every file, and the action asked for is each
   file's path, one to a line. Every other tool is approved on its command, its
   path or its arguments whole, and a command, a tool server's tools and the
-  `tools` tool never are on files. `approvalFiles` beside `guard` is the older
+  `tool_search` tool never are on files. `approvalFiles` beside `guard` is the older
   spelling, and is still read.
 
 ```js
@@ -1900,35 +1915,29 @@ container.
 
 An extension whose tools are an MCP server's (a service of its own that speaks
 MCP, say) writes the server into pi's mcp.json with `portal.mcp.set`.
-pi-mcp-adapter then makes its tools the chats', named `<server>_<tool>`, and
+pi then makes its tools the chats', named `mcp__<server>__<tool>`, and
 they are switched in Settings → MCP and Settings → Tools as any server's are.
 
 ```js
 // Switched on from the extension's own page.
-await portal.mcp.set("notes", { url: "http://127.0.0.1:3900/mcp", lifecycle: "lazy", directTools: true }, { trusted: true });
-portal.mcp.get("notes");   // { entry: { url: …, lifecycle: "lazy", directTools: true }, on: true }
+await portal.mcp.set("notes", { url: "http://127.0.0.1:3900/mcp" }, { trusted: true, direct: true });
+portal.mcp.get("notes");   // { entry: { url: … }, on: true, approve: [] }
 // Switched off.
 await portal.mcp.set("notes", undefined);
 ```
 
-- `get(name)` is the server of that name, `{ entry, on }`, or nothing where
+- `get(name)` is the server of that name, `{ entry, on, approve }`, or nothing where
   there is none or the file cannot be read. `on` says the chats have its tools
-  now: it is there, not switched off (`disabled`), and pi-mcp-adapter is
-  installed and on. The file is read again only when it, or pi's settings,
-  changed, so `get` can be asked each time a prompt is built. `entry` is a
-  copy.
+  now: it is there, and not switched off (`enabled: false`) or hidden
+  (`exposure: "hidden"`). The file is read each time, which is quick, so `get`
+  can be asked each time a prompt is built. `entry` is a copy.
 - `set(name, entry)` writes the entry in place of what is there under that
   name; to keep what the person added to it by hand, read it with `get` first.
   The file is for the portal's user alone (mode 0600), as an entry may hold a
-  token. Writing an entry installs pi-mcp-adapter, in the version the portal
-  pins, where it is not installed, and switches it on where it is off.
-  `set(name, undefined)` removes the server. Either way the open chats are
-  loaded again, as `chats.reload` does, to have the change, and `set` answers
-  what that does: `{ reloaded, waiting }`, for a page that says how many chats
-  have it now and how many at their next step. Installing the
-  adapter waits for the server halves to follow what is installed, this one's
-  start among them: call `set` when the person switches the server on, not
-  while the half starts.
+  token. `set(name, undefined)` removes the server. Either way the open chats
+  are loaded again, as `chats.reload` does, to have the change, and `set`
+  answers what that does: `{ reloaded, waiting }`, for a page that says how many
+  chats have it now and how many at their next step.
 - `trusted: true` says the person counts what its tools return as their own
   words, which the guard then neither wraps nor checks (see
   [Prompt injection](/guide/security#marking-untrusted-output)). The name is
@@ -1937,10 +1946,38 @@ await portal.mcp.set("notes", undefined);
   person's word on its page. `set(name, undefined)` takes the name out of the
   trusted servers again: Settings → Guard lists only the servers there are, and
   a server given that name later has to be trusted anew.
+- `direct: true` says the server's tools are to be in the model's list from the
+  start, not found through `tool_search`: a `direct` mark on the server in
+  Settings → Tools, which the person can change and which is not set where they
+  have set a mark already. For a server whose tools the agent has to have at hand,
+  such as its memory. Removing the server takes the mark away.
+- `approve` is a list of patterns of the server's own tool names, `*` for any
+  characters (`["send_*", "delete_mail"]`): every call of a tool that matches
+  (`mcp__<server>__<tool>`) is put to the person before it runs, which pi itself
+  does not do (Nextcloud asks it for what goes out to other people). It holds in
+  every path of a call: by name, through `tool_search`, from a script, in a
+  subagent's chat. The person answers in the chat; where nobody can (a chat nobody
+  attends, a routine's run, somebody who is not the primary user) the call is
+  refused. The patterns are kept by the portal and not in mcp.json, so the file stays
+  pi's alone: each `set` replaces them, `set(name, entry)` without `approve` (or with
+  `[]`) and `set(name, undefined)` drop them, and so does a server's removal from
+  Settings → MCP, so a server given that name later is not asked about by an old list.
+  `get(name).approve` says what is stored, and the server's row in Settings → MCP
+  shows it, read only (see [Calls that ask you first](/guide/mcp#calls-that-ask-you-first)).
+  An `approveTools` in the entry, the old adapter's key, which pi does not read, is
+  rejected with this option named, and so is an `approve` in the entry (the option is
+  beside the entry, not in it). The question shows the call with all its arguments (a
+  long text is cut by itself, so every key shows). A pattern is the server's own tool
+  name: `mcp__<server>__send_mail` and `<server>/send_mail` are rejected, they would never
+  match. Any extension can write any server's name, so a `set` that leaves `approve` out
+  drops what another wrote: pass it again whenever you write a server that has it (the
+  portal logs a change or drop of patterns that were there).
 - It rejects while mcp.json cannot be read, which is the person's to fix in
   Settings → MCP (nothing is written over it), for a name that is not letters,
-  digits, dots, dashes and underscores, and for an entry the adapter would not
-  take: one with none, or more than one, of `url`, `command` and `socket`.
+  digits, dashes and underscores, and for an entry pi would not take (pi's own
+  check, whose message is the rejection's): one that has neither a `command` nor
+  a `url`, an `args` that is not a list, a `timeout` that is not a positive
+  number, and so on; and for an `approve` that is not a list of texts.
 
 Understory (`extensions/understory`) writes its server so, trusted, when it is
 switched on from its page in Settings.
@@ -2042,6 +2079,12 @@ container an extension runs through it uses Docker's `unless-stopped` restart
 policy, as Browser's, Voice's and Understory's do, so that it comes back after
 the host restarts and stays stopped when the person stops it
 ([When the machine restarts](/guide/docker#when-the-machine-restarts)).
+If your container runs a pinned image (a version tag or a digest), state it with
+`containers.wantImage` as your server half starts (it needs `pithagoras-docker`
+`^1.4.0`): when an update of your extension changes the version, Docker's page
+then warns that the container still runs the old one and offers to update it
+([An image that is not the one wanted](/guide/docker#an-image-that-is-not-the-one-wanted)).
+An image with no tag or with `latest` never warns.
 
 - **`requires`**: the extensions it cannot work without, each with the versions
   it takes (a semver range). Without one of them, or with one in a version it
@@ -2104,6 +2147,101 @@ installed with it, and it waits as above until what it requires is there.
 Before anything is installed, Discover says what one that comes with the portal
 requires ("Needs pithagoras-docker").
 
+### Showing a file tree in Files
+
+[Files](/guide/files) can show a file tree of your extension — a cloud drive, a
+wiki, a bucket — as a root of its own beside the chat's folder, with the same
+file view: browsing, reading, downloading, and saving where you let it. Files
+(`pithagoras-files`) is an extension that [gives others something to build
+on](#building-on-another-extension), so yours names it in its package.json and
+registers a source with what `portal.extensions.use` gives it:
+
+```json
+"pithagoras": { "server": "./server.js", "requires": { "pithagoras-files": "^0.2.0" } }
+```
+
+(`"optional"` in place of `"requires"` if your extension is useful without
+Files: `use` then gives nothing when Files is not there.)
+
+```js
+export default function (portal) {
+  const files = portal.extensions.use("pithagoras-files");
+  files.sources.register({
+    id: "cloud",
+    label: "Nextcloud",
+    // Which chats and people see it: asked each time Files lists its sources.
+    visible: ({ chatId, owner, person }) => owner?.kind === "agent" && person?.role === "primary",
+    // The folder at `path` ("" is the root), in the source's own paths.
+    list: async (path) => (await client.propfind(path)).map((f) => ({ name: f.name, type: f.isDir ? "dir" : "file", size: f.size, mtime: f.modified })),
+    // Text is shown; bytes are only offered as a download.
+    read: async (path) => {
+      const body = await client.get(path);
+      return isText(body) ? { content: body.toString("utf8"), mtime: body.modified } : { bytes: body, mtime: body.modified };
+    },
+    // Optional. A link to open or download with (http or https); without it the file is sent through Files.
+    url: (path) => `https://cloud.example/index.php/apps/files/?dir=${encodeURIComponent(path)}`,
+    // Optional. Without it the source is read-only. Throw an error with code "conflict" if `expected` (the mtime it was read with) is stale.
+    write: async (path, content, { expected }) => ({ mtime: await client.put(path, content, expected) }),
+  });
+  // A server half's stop function: a source is not taken away by itself when your extension is switched off.
+  return () => files.sources.unregister("cloud");
+}
+```
+
+- **`id`** is letters, digits, `.`, `_` and `-` (64 at most, starting with a
+  letter or digit); no two sources share one, and registering the same id again
+  from your extension replaces the earlier one. **`label`** is the tab's name:
+  it is shown as you give it, so translate it yourself if you want it translated.
+  `register` throws a `TypeError` for a source that is not shaped as above, or
+  whose id another extension has; `unregister(id)` takes away your own and does
+  nothing for another's.
+- **Paths are the source's own**: `""` is the root, and `a/b` is a file or folder
+  in `a`. The page builds them from names you listed, so Files refuses what it
+  never sends (a `..` or `.` part, an empty part such as `a//b`, a leading `/`, a
+  `\`, a NUL, more than 4,096 characters) before you are called. It does not
+  resolve or clean the rest: a source over a file system or a URL still joins
+  and checks the path against its own base folder, and a source that keeps each
+  chat's files apart (by `chatId`) must put the path under that chat's folder
+  itself, not take it from `path` alone.
+- **`list`** gives `{ name, type: "file" | "dir", size?, mtime? }` for each thing
+  directly in the folder. Names with a `/` or `\`, `.` or `..` or no name, and a type other than
+  these, are left out; Files sorts them (folders first) and shows 2,000 at most.
+- **`read`** gives `{ content, mtime? }` (text, shown up to 1 MB, over that it is
+  offered as a download) or `{ bytes, mtime? }` (offered as a download). Give
+  `mtime` when you can: a save is checked against it. Files does not watch a
+  source's open file, as it does the chat folder's (that would fetch the whole file
+  again every few seconds); Refresh reads it again.
+- **`write`** present makes the source writable: the file view lets the person
+  edit text and save it. It is called with the file's new text and, beside the
+  context, `expected` when the person read the file with an `mtime`. It may return
+  `{ mtime }` for the file as saved. Creating, renaming, deleting and uploading
+  are not part of it; the source is only saved to.
+- **Every call is given a context** as its last argument: `chatId`, `owner` (whose
+  chat it is: an agent's or a project's, as `chats.owner` has it, without its `path`) and `person` (who is at the page, as `http.person`). It is how a source
+  follows the chat's owner. `visible` gets the same, and a source it says no to is
+  not listed and its routes answer "no such source". A `visible` that throws or
+  does not answer in 5 seconds counts as no. The context never has the chat's
+  folder, nor where the owner's folder is on the machine, and the chat's folder
+  is never given a source's path.
+- **Errors.** A call that throws is shown in the source's own tab. An error with a
+  `code` of `missing`, `conflict`, `invalid`, `exists`, `too_large` or `failed`
+  keeps the meaning it has for the chat's folder (404, 409, 400, 409, 413, 500)
+  and its message is shown as it is; any other error is shown as
+  "Label: message". A call that has not answered in 30 seconds is cut off and
+  reported as that source not answering. Nothing a source does holds up the chat's
+  folder.
+- **Download.** With `url`, the download buttons go to that address (Files
+  redirects to it; an address that is not `http:` or `https:` is refused).
+  Without it Files sends what `read` gives as a file. There is no archive of a
+  source's folder.
+- **Pictures** in a source are offered as downloads: Files shows pictures through
+  the portal's picture route for the chat's folder.
+- This is written for a server half in the portal's process. A half in a
+  [process of its own](#a-server-half-in-a-process-of-its-own) gets Files'
+  functions as promises and its callbacks are called across, but a source is an
+  object made of callbacks, and registering one from there is not something the
+  portal tests.
+
 ### Extensions it installs
 
 An extension can install a package it wrote itself, load it again after a
@@ -2137,7 +2275,7 @@ await portal.extensions.remove("moon");
   so is one that a package installed from another folder has. Of two packages of
   one name, the portal loads the first: the second would be installed and never
   run. A name the portal gives one of its own extensions in a chat's pi
-  (`sandbox`, `guard`, `voice-first`, `cross-model-thinking`, `tools-gateway`,
+  (`sandbox`, `guard`, `voice-first`, `cross-model-thinking`, `tool-search`,
   `routines`, `ask-question`, `ask-primary`, `report`, `codemode`,
   `heartbeat`) is refused too: pi files what a server half adds to a chat under
   its package's name, as it files those, and the package would pass for the
@@ -2323,6 +2461,13 @@ portal.chats.extend((pi, chat) => {
   `label`, `description` and `confirm`, where there is one, are texts. Anything
   else throws a `TypeError`, and so does a package called `custom`, whose modes
   would be taken for the person's own.
+- **`keepDirect`** (`{ sets?, tools? }`, lists of names) keeps groups and tools
+  in the model's list in the mode's chats, whatever the threshold of the
+  [lazy tools](/guide/extensions#the-threshold) says, as a mode the person makes
+  can: `sets` by the names Settings → Tools gives the groups (a package's name;
+  this extension's own tools are filed under its own), `tools` by a tool's name.
+  Without it, a long list puts its largest groups behind `tool_search`, and that
+  can be the group the mode is for. A chat takes it as it starts and keeps it.
 - **What the mode does is the extension's.** A mode has no tools of its own:
   the factory registers what the mode's chats have, and can add to their prompt
   as any pi extension can; it leaves the other chats as they are. It is called
@@ -2867,7 +3012,10 @@ other. `extensions/defaults.json` names those a portal starts with: each is
 installed once, as Discover installs one, and is an installed package from then
 on, switched off or removed the same way. One removed stays removed, and one
 already installed under its name, from anywhere, is left as it is, so your own
-can take its place. A portal that is updated installs what the list adds, once.
+can take its place. A portal that is updated installs what the list adds, once, and
+one that has more than the list (it was shorter once) keeps it. The list is short on
+purpose, and the setup assistant offers the rest in sets (`PORTAL_DEFAULT_EXTENSIONS`
+names one for a portal set up without it).
 
 Nothing in the portal's own code imports them, and none of them imports the
 portal's code: `npm run check:boundaries` holds that line, and CI runs it.

@@ -1,12 +1,13 @@
 import express, { type Router } from "express";
-import { forgetRoutineExemptions, getDb, getDefaultReportTo, listRoutineSessions, routineExemptions, setDefaultReportTo, setRoutineExemptions } from "../db.js";
+import { forgetRoutineExemptions, getDb, getDefaultReportTo, getDefaultTimeoutMin, listRoutineSessions, routineExemptions, setDefaultReportTo, setDefaultTimeoutMin, setRoutineExemptions } from "../db.js";
 import { GUARD_RULE_NAMES } from "../pi/guard-rule-names.js";
 import { channelSupervisor } from "../channels/supervisor.js";
 import { unscopeKey } from "../agent.js";
 import { isValidSlug, slugify } from "../slug.js";
 import { isValidCron, nextRun, parseCron } from "../routines/cron.js";
-import { isOneOff, oneOffDone, routineSupervisor, type RoutineRow } from "../routines/supervisor.js";
+import { defaultTimeoutMin, ENV_TIMEOUT_MIN, isOneOff, oneOffDone, routineSupervisor, type RoutineRow } from "../routines/supervisor.js";
 import { insertRoutine, readTiming, timingSets } from "../routines/store.js";
+import { readTimeout } from "../routines/timeout.js";
 import { placeProblem, routinePlace } from "../workspaces.js";
 import { insideReal } from "../within.js";
 
@@ -28,6 +29,8 @@ const toApi = (row: RoutineRow) => ({
   done: oneOffDone(row) && row.last_status !== "interrupted" && row.last_status !== "stopped",
   instructions: row.instructions,
   freshSession: Boolean(row.fresh_session),
+  /** How many minutes a run may take; null takes the portal's default, `timeoutDefault` on the list. */
+  timeoutMin: row.timeout_min,
   guard: row.guard === 1,
   /** The guard's rules its runs are exempt from, by name: set on the Guard page. */
   exempt: [...routineExemptions(row.slug)],
@@ -150,12 +153,32 @@ function reportTargets() {
   return out;
 }
 
+/**
+ * The minutes a run may take unless its routine says, for the page to say
+ * beside a routine's own: `minutes` is what a run gets now, `stored` what the
+ * page set (null for what the portal started with: `fallback`, the environment's
+ * or the hour).
+ */
+const timeoutDefault = () => ({ minutes: defaultTimeoutMin(), stored: getDefaultTimeoutMin(), fallback: ENV_TIMEOUT_MIN });
+
 export function routinesRouter(): Router {
   const router = express.Router();
 
   /** Destinations a routine can report to, and the portal-wide default. */
   router.get("/routines/report-targets", (_req, res) => {
     res.json({ targets: reportTargets(), default: getDefaultReportTo() });
+  });
+
+  /**
+   * The minutes a run may take unless its routine says: `minutes` stores one,
+   * read as a run starts; null, "" or 0 clears it, and what the portal started
+   * with stands again. Answers as the list says it.
+   */
+  router.put("/routines/timeout-default", (req, res) => {
+    const limit = readTimeout(req.body?.minutes);
+    if ("error" in limit) return res.status(400).json({ error: limit.error.replace("timeoutMin", "minutes") });
+    setDefaultTimeoutMin(limit.timeoutMin);
+    res.json({ timeoutDefault: timeoutDefault() });
   });
 
   router.put("/routines/report-default", (req, res) => {
@@ -178,11 +201,11 @@ export function routinesRouter(): Router {
     const rows = getDb()
       .prepare("SELECT * FROM routines ORDER BY created_at ASC")
       .all() as RoutineRow[];
-    res.json({ routines: rows.map(toApi) });
+    res.json({ routines: rows.map(toApi), timeoutDefault: timeoutDefault() });
   });
 
   router.post("/routines", (req, res) => {
-    const { name, schedule, runAt, instructions, freshSession } = req.body ?? {};
+    const { name, schedule, runAt, instructions, freshSession, timeoutMin } = req.body ?? {};
     const report = readReport(req.body);
     if (typeof name !== "string" || !name.trim()) {
       return res.status(400).json({ error: "name required" });
@@ -192,6 +215,8 @@ export function routinesRouter(): Router {
     if ("error" in timing) return res.status(400).json({ error: timing.error });
     const place = readWorkspace(req.body);
     if (place && "error" in place) return res.status(400).json({ error: place.error });
+    const limit = timeoutMin === undefined ? { timeoutMin: null } : readTimeout(timeoutMin);
+    if ("error" in limit) return res.status(400).json({ error: limit.error });
 
     const { id } = insertRoutine({
       name,
@@ -199,6 +224,7 @@ export function routinesRouter(): Router {
       timing,
       instructions: typeof instructions === "string" ? instructions : "",
       freshSession: Boolean(freshSession),
+      timeoutMin: limit.timeoutMin,
       reportChannel: report.channel,
       reportTarget: report.target,
       workspace: place?.workspace ?? null,
@@ -210,9 +236,16 @@ export function routinesRouter(): Router {
     const row = rowById(req.params.id);
     if (!row) return res.status(404).json({ error: "Not found" });
 
-    const { name, slug, schedule, runAt, instructions, enabled, freshSession } = req.body ?? {};
+    const { name, slug, schedule, runAt, instructions, enabled, freshSession, timeoutMin } = req.body ?? {};
     const sets: string[] = [];
     const values: unknown[] = [];
+
+    if (timeoutMin !== undefined) {
+      const limit = readTimeout(timeoutMin);
+      if ("error" in limit) return res.status(400).json({ error: limit.error });
+      sets.push("timeout_min = ?");
+      values.push(limit.timeoutMin);
+    }
 
     if (typeof slug === "string" && slug.trim() && slug.trim() !== row.slug) {
       const next = slugify(slug);

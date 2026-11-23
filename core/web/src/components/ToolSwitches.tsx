@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { api, ApiError, type PortalTool } from "../api";
-import { LoadFailed } from "./SettingsUi";
+import { LoadFailed, ghostCls } from "./SettingsUi";
 import { ToolGroupList } from "./ToolGroupList";
-import { CODEMODE_HELD, nextOff } from "../tool-groups";
+import { CODEMODE_HELD, displayName, nextOff } from "../tool-groups";
 import { t, tp } from "../i18n";
 
 /**
@@ -15,8 +15,8 @@ import { t, tp } from "../i18n";
  *
  * Grouped by what installed them, because that is how somebody thinks about
  * it — "turn the web search one off" means four tools that arrived together.
- * An MCP server is a group of its own rather than a share of the adapter, for
- * the same reason: nobody thinks "the adapter", they think "the browser one".
+ * An MCP server is a group of its own rather than a share of pi's MCP support, for
+ * the same reason: nobody thinks "the MCP extension", they think "the browser one".
  * The browser is one of those servers and nothing more — having its tools is
  * having the browser, which is why the switch it used to have of its own is
  * gone. Nothing here knows what any of them are.
@@ -71,6 +71,10 @@ export function ToolSwitches(
   // Why the last switch did not take, which the page put back.
   const [flipError, setFlipError] = useState("");
   const [names, setNames] = useState<Record<string, string>>({});
+  /** A chat's: what the marks and the threshold would make lazy now differs from what it froze when it started. */
+  const [stale, setStale] = useState(false);
+  /** A mode's and an agent's: the sets and tools its chats keep in the model's list whatever the marks and the threshold say. */
+  const [keepDirect, setKeepDirect] = useState<string[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -91,6 +95,8 @@ export function ToolSwitches(
         setOff(r.off);
         setLive(r.live);
         setNames(r.names ?? {});
+        setStale((r as { lazyStale?: boolean }).lazyStale === true);
+        setKeepDirect((r as { keepDirect?: string[] }).keepDirect ?? []);
       })
       .catch((e) => {
         if (cancelled) return;
@@ -126,6 +132,39 @@ export function ToolSwitches(
       setOff(before.off);
       setTools(before.tools);
       setFlipError(e instanceof ApiError && e.body.code === "codemode-held" ? t(CODEMODE_HELD) : (e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** Keep a set in the model's list for a mode's or an agent's chats, or let the marks and the threshold decide again. */
+  const keep = async (source: string) => {
+    const wanted = keepDirect.includes(source) ? keepDirect.filter((entry) => entry !== source) : [...keepDirect, source];
+    const before = keepDirect;
+    setKeepDirect(wanted);
+    // One save at a time: each sends the whole list, and one that came in after the next would have the last word.
+    setBusy(true);
+    try {
+      const r = await (mode !== undefined ? api.setModeDirect(mode, wanted) : api.setAgentDirect(agent!, wanted));
+      setKeepDirect(r.entries);
+    } catch (e) {
+      setKeepDirect(before);
+      setFlipError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** Read the chat's tools again, which costs the prompt cache from the start of the chat: asked for, never done on its own. */
+  const readAgain = async () => {
+    setBusy(true);
+    setFlipError("");
+    try {
+      await api.readToolsAgain(sessionId);
+      setStale(false);
+      setTries((n) => n + 1);
+    } catch (e) {
+      setFlipError((e as Error).message);
     } finally {
       setBusy(false);
     }
@@ -185,7 +224,40 @@ export function ToolSwitches(
                   : t("Not started yet — these are the tools earlier chats had. What you switch here holds for this chat from its first message; the defaults stay as they are.")}
         </p>
       )}
-      <ToolGroupList tools={tools} names={names} busy={busy} onFlip={flip} />
+      <ToolGroupList
+        tools={tools}
+        names={names}
+        busy={busy}
+        onFlip={flip}
+        beside={
+          mode !== undefined || agent !== undefined
+            ? (group) =>
+                group.tools.some((tool) => tool.auto || tool.mark) && (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    aria-pressed={keepDirect.includes(group.source)}
+                    aria-label={t("Keep {name} in the model's list", { name: displayName(group.source, names) })}
+                    title={t("Keep this group in the model's list for these chats, whatever the marks in Settings → Tools and the threshold say: a group a mode or an agent exists for should not be left out of the list for being the largest.")}
+                    onClick={() => void keep(group.source)}
+                    className={`shrink-0 rounded px-1.5 py-0.5 text-[11px] transition hover:bg-fg/5 disabled:opacity-50 ${keepDirect.includes(group.source) ? "bg-accent/15 text-accent" : "text-fg-subtle hover:text-fg"}`}
+                  >
+                    {t("direct")}
+                  </button>
+                )
+            : undefined
+        }
+      />
+      {stale && (
+        <div className="flex flex-wrap items-center gap-2 px-3 py-1.5 text-[11px] text-fg-subtle">
+          <span className="min-w-0 flex-1">
+            {t("The marks or the threshold of Settings → Tools would make other tools lazy in a chat that started now. This chat keeps what it started with, so that what the model is sent first does not change.")}
+          </span>
+          <button type="button" disabled={busy} onClick={() => void readAgain()} className={ghostCls} title={t("The model's provider caches the start of every request, and this changes it: the chat's next message is read in full again.")}>
+            {t("Read the tools again")}
+          </button>
+        </div>
+      )}
       {live && (
         <p className="px-3 py-1.5 text-[10px] text-fg-faint">
           {t("Applies from the next message, for this conversation. Settings → Tools sets what every conversation starts with.")}

@@ -4,17 +4,16 @@ import { t } from "./portal";
 /**
  * Which of the agent's calls drive a browser, and what voice mode's card of
  * one says: its own browser tools and a Playwright MCP's alike, called
- * directly, through the gateway to the tools kept out of the model's list, or
- * through the MCP adapter's `mcp` tool.
+ * directly or through `tool_search` to the tools kept out of the model's list.
  */
 
-/** The tool that reaches the tools kept out of the model's list, and calls them. */
-const GATEWAY_TOOL = "tools";
+/** The tool that reaches the tools kept out of the model's list, and calls them; and `tools`, what it was called, which a chat that is older has in its history. */
+const SEARCH_TOOLS = ["tool_search", "tools"];
 
 const plain = (v: unknown): v is Record<string, any> => typeof v === "object" && v !== null && !Array.isArray(v);
 const text = (v: unknown) => (typeof v === "string" ? v : "");
 
-/** What a gateway call calls: the tool, and what it gives it (an object, or the JSON text of one). Nothing for a search or a describe. */
+/** What a call of `tool_search` calls: the tool, and what it gives it (an object, or the JSON text of one). Nothing for a search or a describe. */
 function calledThrough(args: unknown): { name: string; input: Record<string, any> } | undefined {
   if (!plain(args) || args.action !== "call" || typeof args.name !== "string") return undefined;
   const name = args.name.trim();
@@ -33,22 +32,20 @@ function calledThrough(args: unknown): { name: string; input: Record<string, any
 /**
  * The call as the agent made it, from a tool event's payload: pi has spelled
  * the name `toolName` and `name`, and the arguments `input`, `args` and
- * `parameters`. A call through the gateway is a call of the tool it calls.
+ * `parameters`. A call through `tool_search` is a call of the tool it calls.
  */
 function called(payload: any): { name: string; input: Record<string, any> } {
   const name = String(payload?.toolName ?? payload?.name ?? "");
   const args = payload?.input ?? payload?.args ?? payload?.parameters;
-  return (name === GATEWAY_TOOL ? calledThrough(args) : undefined) ?? { name, input: plain(args) ? args : {} };
+  return (SEARCH_TOOLS.includes(name) ? calledThrough(args) : undefined) ?? { name, input: plain(args) ? args : {} };
 }
 
 /** A browser tool, by its name: `browser_navigate`, `browser.click`, `playwright_browser_type`. */
 const BROWSER_TOOL = /(?:^|[_.])browser[_.](.*)$/i;
-/** What of an `mcp` call names the server or the tool it is for. */
-const WRAPPED = ["server", "connect", "tool", "describe"];
 
-/** Whether a call drives a browser: a browser tool, or an `mcp` call whose server or tool is one. */
-export function isBrowserCall(name: string, input: Record<string, unknown>): boolean {
-  return BROWSER_TOOL.test(name) || (name === "mcp" && WRAPPED.some((key) => /browser/i.test(text(input[key]))));
+/** Whether a call drives a browser: a browser tool, by its name. */
+export function isBrowserCall(name: string): boolean {
+  return BROWSER_TOOL.test(name);
 }
 
 /** The latest call that drove a browser in a chat, by its place among the chat's events: it grows with each new one. */
@@ -56,8 +53,8 @@ export function latestBrowserCall(events: readonly PortalEvent[]): number {
   for (let i = events.length - 1; i >= 0; i--) {
     const event = events[i];
     if (event.type !== "tool_execution_start") continue;
-    const { name, input } = called(event.payload);
-    if (isBrowserCall(name, input)) return event.seq;
+    const { name } = called(event.payload);
+    if (isBrowserCall(name)) return event.seq;
   }
   return 0;
 }
@@ -70,10 +67,10 @@ const hostOf = (url: string) => {
   }
 };
 
-/** What the card of a browser call says in voice mode: by what it does, the part of its name after `browser_`, or the tool an `mcp` call names. */
+/** What the card of a browser call says in voice mode: by what it does, the part of its name after `browser_`. */
 export function describeBrowserCall(call: ToolCallView): { label: string; detail: string } {
   const { input } = call;
-  const action = BROWSER_TOOL.exec(call.name)?.[1] ?? text(input.tool);
+  const action = BROWSER_TOOL.exec(call.name)?.[1] ?? "";
   const url = text(input.url);
   if (/navigate|open|goto/.test(action)) return { label: t("Opening a page"), detail: url ? hostOf(url) : "" };
   if (/screenshot/.test(action)) return { label: t("Taking a screenshot"), detail: "" };
