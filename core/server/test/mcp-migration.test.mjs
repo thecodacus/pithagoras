@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { inProcessHome } from "./server-harness.mjs";
 
@@ -47,6 +47,8 @@ const reset = () => {
   for (const table of ["project_tools", "agent_tools", "chat_modes", "routines"]) db.getDb().prepare(`DELETE FROM ${table}`).run();
   db.getDb().prepare("DELETE FROM sessions WHERE id LIKE 'mig-%'").run();
   db.setToolDefaultsOff([]);
+  // The copies of the file a move keeps beside it.
+  for (const name of readdirSync(agent)) if (name.startsWith("mcp.json.adapter")) rmSync(path.join(agent, name));
 };
 const logs = [];
 const original = console.log;
@@ -285,7 +287,8 @@ test("on the first start: the file is carried over, the adapter leaves pi's pack
   assert.deepEqual(file.mcpServers.docs.headers, { Authorization: "Bearer ${DOCS_TOKEN}" });
   assert.equal(file.mcpServers["docs.v2"].enabled, false, "what pi cannot take stays in the file, off");
   assert.equal(statSync(mcpFile).mode & 0o777, 0o600);
-  assert.equal(existsSync(`${mcpFile}.adapter`), false, "no copy beside it");
+  assert.equal(readFileSync(`${mcpFile}.adapter`, "utf8"), ADAPTER_FILE, "the file as it was is kept beside it");
+  assert.equal(statSync(`${mcpFile}.adapter`).mode & 0o777, 0o600, "and is the person's alone, as the file is");
   assert.deepEqual(JSON.parse(readFileSync(settingsFile, "utf8")).packages, ["npm:pi-other"], "the adapter is out of pi's packages, and the rest is as it was");
   assert.equal(db.knownTools().some((t) => t.name === "notes_read"), false, "what the adapter registered is forgotten");
   assert.ok(db.knownTools().some((t) => t.name === "other_tool"));
@@ -293,6 +296,7 @@ test("on the first start: the file is carried over, the adapter leaves pi's pack
   assert.equal(logs.length, 1, "one line");
   assert.match(logs[0], /9 servers .*carried over/);
   assert.match(logs[0], /pi-mcp-adapter taken out of pi's packages/);
+  assert.ok(logs[0].includes(`The file as it was is kept as ${mcpFile}.adapter.`), "the log says where the copy is");
   assert.match(logs[0], /Left off, as they were.*sock \(a Unix socket/);
   assert.match(logs[0], /still asked, by each server's `approve`: gated, gatedList/, "what the adapter asked about before a call is asked still, and the servers are not left off for it");
   assert.deepEqual({ ...db.mcpApprove() }, { gated: ["*"], gatedList: ["delete_*"] });
@@ -355,7 +359,7 @@ test("a list that had the adapter's `mcp` tool off has every server's tools off 
   assert.deepEqual(JSON.parse(readFileSync(settingsFile, "utf8")).packages, [], "the adapter is out all the same");
 });
 
-test("a list that switched off one of the adapter's own tools is read as a list that had MCP off, and one that had it on switches nothing off", async () => {
+test("a list that named one of the adapter's own tools names it as pi does, off or on as it was, and nothing else is switched", async () => {
   const pi = await piMcp();
   reset();
   logs.length = 0;
@@ -364,21 +368,42 @@ test("a list that switched off one of the adapter's own tools is read as a list 
   listed([{ source: ADAPTER, extensions: ["extensions/index.ts"] }]);
   db.rememberTools([db.remembered({ name: "github_delete_repo", source: "pi-mcp-adapter", package: ADAPTER })]);
   const sql = db.getDb();
-  sql.prepare("INSERT INTO project_tools (project, tools_off, tools_on) VALUES ('p', 'github_delete_repo', ''), ('q', '', 'github_delete_repo')").run();
+  sql.prepare("INSERT INTO project_tools (project, tools_off, tools_on) VALUES ('p', 'bash\ngithub_delete_repo', ''), ('q', '', 'github_delete_repo')").run();
   db.setToolDefaultsOff(["github_delete_repo"]);
   const gone = pi.createMcpToolName("github", "delete_repo");
   const lines = (project, column) => sql.prepare(`SELECT ${column} AS v FROM project_tools WHERE project = ?`).get(project).v.split("\n").filter(Boolean);
 
   await moveFromAdapter();
   const { toolEnabled } = await import("../dist/tool-policy.js");
-  assert.ok(lines("p", "tools_off").includes(gone), "the tool comes back under pi's name and is off in the list that had it off");
-  assert.ok(db.toolDefaultsOff().includes(gone) && db.toolDefaultsOff().includes(pi.createMcpToolName("github", "list")), "the portal-wide default as well, and the server's other tools");
+  assert.deepEqual(lines("p", "tools_off"), ["bash", gone], "the tool is off under pi's name, and no other server's tools are");
+  assert.deepEqual(db.toolDefaultsOff(), [gone], "the portal-wide default as well: the server's other tools stay on");
   assert.equal(toolEnabled(gone, db.toolDefaultsOff(), { off: lines("p", "tools_off"), on: [] }), false);
+  assert.equal(toolEnabled(pi.createMcpToolName("github", "list"), db.toolDefaultsOff(), { off: lines("p", "tools_off"), on: [] }), true);
   assert.deepEqual(lines("q", "tools_off"), [], "a list that had it on switches nothing off");
-  assert.deepEqual(lines("q", "tools_on"), ["github_delete_repo"]);
-  assert.equal(readFile().mcpServers.late.enabled, false, "a server with no tool to name is off");
-  assert.equal(readFile().mcpServers.github.enabled, undefined);
-  assert.match(logs[0], /Switches that named the adapter's own tools in a list that had it on do nothing now/);
+  assert.deepEqual(lines("q", "tools_on"), [gone], "and has it on under pi's name, where the portal-wide default has it off");
+  assert.equal(toolEnabled(gone, db.toolDefaultsOff(), { off: [], on: lines("q", "tools_on") }), true);
+  assert.equal(readFile().mcpServers.late.enabled, undefined, "no list has MCP off: a server with no tool to name stays as it was");
+  assert.match(logs[0], /3 lists of switches .*named single tools of the adapter's: they name them as pi does now/);
+  assert.doesNotMatch(logs[0], /every server switched off/);
+});
+
+test("without the adapter's cache a tool's name is read as the server's prefix and the tool's own name; one no server here has is read as MCP off", async () => {
+  const pi = await piMcp();
+  reset();
+  logs.length = 0;
+  writeFileSync(mcpFile, JSON.stringify({ mcpServers: { understory: { url: "http://127.0.0.1:3800/mcp", directTools: true }, "my-mcp": { command: "m" }, quiet: { command: "q" } } }));
+  listed([{ source: ADAPTER, extensions: ["extensions/index.ts"] }]);
+  db.rememberTools(["understory_memory_add", "my_search", "gone_tool"].map((name) => db.remembered({ name, source: "pi-mcp-adapter", package: ADAPTER })));
+  const sql = db.getDb();
+  sql.prepare("INSERT INTO project_tools (project, tools_off, tools_on) VALUES ('named', 'understory_memory_add\nmy_search', ''), ('lost', 'gone_tool', '')").run();
+  const off = (project) => sql.prepare("SELECT tools_off AS v FROM project_tools WHERE project = ?").get(project).v.split("\n").filter(Boolean);
+
+  await moveFromAdapter();
+  assert.deepEqual(off("named"), [pi.createMcpToolName("my-mcp", "search"), pi.createMcpToolName("understory", "memory_add")].sort(), "the server's prefix, the short one as well, and the tool's name after it");
+  assert.ok(off("lost").includes("list_mcp_resources") && off("lost").includes("gone_tool"), "a tool of no server here: the list is read as one that had MCP off");
+  assert.equal(readFile().mcpServers.quiet.enabled, false, "and a server with no tool to name comes over off");
+  assert.match(logs[0], /1 lists of switches .*named single tools/);
+  assert.match(logs[0], /1 lists of switches had the adapter's `mcp` tool off, or one of its tools that no server here has/);
 });
 
 test("no list is touched where none had `mcp` or one of the adapter's tools off, and the servers stay as they were", async () => {
@@ -490,6 +515,27 @@ test("tools of a server that sanitize to one name are switched off under the has
   assert.equal(off.includes("mcp__notes__get_item"), false, "the plain name is no tool of pi's here");
 });
 
+test("a copy an earlier start kept is not written over, and a file the move does not change gets none", async () => {
+  reset();
+  logs.length = 0;
+  const text = JSON.stringify({ mcpServers: { notes: { command: "node", lifecycle: "lazy" } } });
+  writeFileSync(mcpFile, text);
+  writeFileSync(`${mcpFile}.adapter`, "an older copy");
+  listed([{ source: ADAPTER, extensions: ["extensions/index.ts"] }]);
+  await moveFromAdapter();
+  assert.equal(readFileSync(`${mcpFile}.adapter`, "utf8"), "an older copy");
+  assert.equal(readFileSync(`${mcpFile}.adapter-2`, "utf8"), text);
+  assert.ok(logs[0].includes(`kept as ${mcpFile}.adapter-2.`));
+
+  reset();
+  logs.length = 0;
+  writeFileSync(mcpFile, JSON.stringify({ mcpServers: { notes: { command: "node" } } }));
+  listed([{ source: ADAPTER, extensions: ["extensions/index.ts"] }]);
+  await moveFromAdapter();
+  assert.deepEqual(readdirSync(agent).filter((name) => name.startsWith("mcp.json.adapter")), [], "nothing to keep: the file is as it was");
+  assert.doesNotMatch(logs[0], /kept as/);
+});
+
 test("a start that fails after the lists were rewritten still switches off the servers it could not name, on the start after", { skip: process.getuid?.() === 0 }, async () => {
   reset();
   logs.length = 0;
@@ -497,13 +543,20 @@ test("a start that fails after the lists were rewritten still switches off the s
   writeFileSync(path.join(agent, "mcp-cache.json"), JSON.stringify({ servers: { notes: { tools: [{ name: "read" }] } } }));
   listed([{ source: ADAPTER, extensions: ["extensions/index.ts"] }]);
   db.getDb().prepare("INSERT INTO project_tools (project, tools_off, tools_on) VALUES ('p', 'mcp', '')").run();
-  // The adapter cannot be taken out of pi's settings: the failure comes after the lists were written.
+  // No copy of the file can be kept beside it, nor the adapter taken out of pi's settings: the failure comes after the lists were written.
   chmodSync(agent, 0o500);
+  const warned = [];
+  const warn = console.warn;
+  console.warn = (...args) => warned.push(String(args[0]));
   try {
-    await assert.rejects(moveFromAdapter());
+    await moveFromAdapter();
   } finally {
     chmodSync(agent, 0o700);
+    console.warn = warn;
   }
+  assert.ok(warned.some((line) => /no copy of mcp\.json could be kept beside it/.test(line)), "the log says why nothing was moved");
+  assert.equal(readFile().mcpServers.quiet.lifecycle, "lazy", "the file is not written without its copy");
+  assert.deepEqual(JSON.parse(readFileSync(settingsFile, "utf8")).packages.length, 1, "and the adapter stays");
   assert.equal(db.getSetting("mcp_adapter_moved"), undefined, "not done");
   const projectOff = () => db.getDb().prepare("SELECT tools_off FROM project_tools WHERE project = 'p'").get().tools_off.split("\n");
   assert.equal(projectOff().includes("mcp"), false, "the entry is gone: the lists are done");

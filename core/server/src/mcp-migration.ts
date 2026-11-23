@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
@@ -19,13 +19,14 @@ import { workspaceRoot } from "./workspaces.js";
  * The servers keep what they were, on or off, and have no mark, so they are Auto in Settings → Tools. The adapter's own keys
  * are dropped. Its `approveTools` (the tools that asked the person before a call) is not dropped: it becomes the server's `approve`,
  * which the portal keeps beside the file and the guard holds the calls to (`true` is `*`), and the server keeps its on or off. A list of switches (portal-wide, a project, agent, routine, mode or chat) that had the adapter's `mcp` tool off
- * had MCP off (or one of its tools off by name): it switches off every server's tools by name now, so that nothing reaches further
- * than it did, and the entry goes; a server the adapter never listed tools of cannot be named there, and comes over switched off.
+ * had MCP off: it switches off every server's tools by name now, so that nothing reaches further than it did, and the entry goes; a
+ * server the adapter never listed tools of cannot be named there, and comes over switched off. A list that named one of the adapter's
+ * own tools (`github_delete_repo`) names it as pi does (`mcp__github__delete_repo`). The file as it was is kept beside it (keepCopy).
  * A project's own `.pi/mcp.json` is read by pi as it was by the adapter: the tools the adapter cached of its servers are named in those lists too.
  * A server with something pi has no word for is left as it was, switched off, and named in the one line the log gets; nothing of it
  * is lost, as it stays in the file. A bearer
- * token becomes the Authorization header pi takes: Understory's own entry had one. Not converted: the adapter's variables and
- * the names of its tools in the switches. Those are for the person to set again, which the docs say.
+ * token becomes the Authorization header pi takes: Understory's own entry had one. Not converted: the adapter's variables, which
+ * are for the person to set again, as the docs say.
  */
 
 /** Keys of the adapter's that say nothing pi needs: dropped where a server is carried over. */
@@ -324,34 +325,71 @@ function projectServers(): { file: string; servers: string[] }[] {
 }
 
 export interface MovedSwitches {
-  /** How many lists had the adapter's `mcp` tool off, and now have every server's tools off. */
+  /** How many lists had the adapter's `mcp` tool off (or one of its tools no server here has), and now have every server's tools off. */
   lists: number;
+  /** How many lists named single tools of the adapter's, and name them as pi does now. */
+  named: number;
   /** The servers the lists could not name a tool of (the adapter never listed one): the move switches them off, so that nothing reaches them where MCP was off. */
   unnamed: string[];
-  /** Whether a list still names one of the adapter's own tools, which mean nothing now. */
+  /** Whether a list that had it on still names one of the adapter's own tools that no server here has, which means nothing now. */
   tools: boolean;
+}
+
+/**
+ * pi's names of one of the adapter's own tools (`github_delete_repo`): the adapter named a server's tool with the server's prefix
+ * (see adapterPrefixes), or with none, and with dots as underscores. A tool the adapter had cached is found by that name; else the
+ * name is read as a prefix and the tool's own name after it, for each server whose prefix it starts with (a name that two servers'
+ * prefixes fit is the tool of both, so that nothing stays on that was off). None where no server's prefix fits.
+ */
+function placeOf(pi: PiMcp, name: string, known: ReadonlyMap<string, ReadonlyMap<string, string>>): string[] {
+  const cached: string[] = [];
+  const read: string[] = [];
+  for (const [server, tools] of known) {
+    const own = (tool: string) => tool.replace(/\./g, "_");
+    for (const [tool, piName] of tools) if (own(tool) === name) cached.push(piName);
+    for (const prefix of adapterPrefixes(server)) {
+      if (!name.startsWith(prefix) || name.length === prefix.length) continue;
+      const rest = name.slice(prefix.length);
+      read.push(pi.createMcpToolName(server, rest));
+      for (const [tool, piName] of tools) if (own(tool) === rest) cached.push(piName);
+    }
+  }
+  return [...new Set(cached.length ? cached : read)];
 }
 
 /**
  * The lists of switches, with the adapter's `mcp` tool taken out of them. Where one had it off, it has every tool of every
  * server off now (a group is a list of names, as it is for any group), pi's three resource tools included, so that the move
  * reaches no further than the adapter did; where it had it on, the entry only goes, and nothing is switched on by it.
- * A list that switched one of the adapter's own tools off (`github_delete_repo`) is read the same way as one that had `mcp` off:
- * the name means nothing to pi, which names the tool `mcp__github__delete_repo`, and the adapter kept such a tool off through
- * its proxy as well, so the list switches off every server's tools. `names`: the tools of each server as pi will name them.
+ * A list that named one of the adapter's own tools (`github_delete_repo`, which the adapter kept off through its proxy as well)
+ * names it as pi does now (`mcp__github__delete_repo`, see placeOf), off or on as it was. One that no server here has a name for
+ * is read, in a list of what is off, as `mcp` off: the list switches off every server's tools. `known`: the tools the adapter had
+ * cached of each server, by their own names, with pi's names of them.
  */
-function moveSwitches(names: ReadonlyMap<string, string[]>, adapterTools: ReadonlySet<string>): MovedSwitches {
-  const held = [...MCP_RESOURCE_TOOLS, ...[...names.values()].flat()];
-  const moved: MovedSwitches = { lists: 0, unnamed: [], tools: false };
-  const unnamed = [...names].filter(([, tools]) => !tools.length).map(([server]) => server);
-  /** The list as it should be, or undefined where it needs no change. `off`: whether this is the list of what is off. */
-  const redo = (list: string[], off: boolean): string[] | undefined => {
-    const own = list.some((name) => adapterTools.has(name) && !GATEWAY.includes(name));
+function moveSwitches(pi: PiMcp, known: ReadonlyMap<string, ReadonlyMap<string, string>>, adapterTools: ReadonlySet<string>): MovedSwitches {
+  const held = [...MCP_RESOURCE_TOOLS, ...[...known.values()].flatMap((tools) => [...tools.values()])];
+  const moved: MovedSwitches = { lists: 0, named: 0, unnamed: [], tools: false };
+  const unnamed = [...known].filter(([, tools]) => !tools.size).map(([server]) => server);
+  /**
+   * The list as it should be, or undefined where it needs no change. `off`: whether this is the list of what is off. `whole`: the list
+   * has every server's tools off now. `named`: it names tools of the adapter's as pi does.
+   */
+  const redo = (list: string[], off: boolean): { list: string[]; whole: boolean; named: boolean } | undefined => {
     const gateway = list.some((name) => GATEWAY.includes(name));
-    if (own && !off) moved.tools = true;
-    if (!gateway && !(own && off)) return undefined;
-    const rest = list.filter((name) => !GATEWAY.includes(name));
-    return off ? [...new Set([...rest, ...held])].sort() : rest;
+    const own = new Map(list.filter((name) => adapterTools.has(name) && !GATEWAY.includes(name)).map((name) => [name, placeOf(pi, name, known)]));
+    if (!gateway && !own.size) return undefined;
+    const lost = [...own].some(([, names]) => !names.length);
+    if (lost && !off) moved.tools = true;
+    // A name pi has for it takes the adapter's place; one it has none for stays, and means nothing now.
+    const rest = list.filter((name) => !GATEWAY.includes(name) && !own.get(name)?.length);
+    const placed = [...own.values()].flat();
+    const whole = off && (gateway || lost);
+    const next = [...new Set([...rest, ...placed, ...(whole ? held : [])])];
+    return { list: off ? next.sort() : next, whole, named: placed.length > 0 };
+  };
+  const count = (...lists: ({ whole: boolean; named: boolean } | undefined)[]) => {
+    if (lists.some((one) => one?.whole)) moved.lists++;
+    else if (lists.some((one) => one?.named)) moved.named++;
   };
   // What a start before this one did, where it failed after the lists were rewritten: their entries are gone, so only this says which servers cannot be named.
   const before = heldBefore();
@@ -360,8 +398,8 @@ function moveSwitches(names: ReadonlyMap<string, string[]>, adapterTools: Readon
     const defaults = toolDefaultsOff();
     const next = redo(defaults, true);
     if (next) {
-      setToolDefaultsOff(next);
-      moved.lists++;
+      setToolDefaultsOff(next.list);
+      count(next);
     }
     for (const table of SWITCH_TABLES) {
       const put = db.prepare(`UPDATE ${table} SET tools_off = ?, tools_on = ? WHERE rowid = ?`);
@@ -371,15 +409,15 @@ function moveSwitches(names: ReadonlyMap<string, string[]>, adapterTools: Readon
         const offNow = redo(off, true);
         const onNow = redo(on, false);
         if (!offNow && !onNow) continue;
-        put.run((offNow ?? off).join("\n"), (onNow ?? on).join("\n"), row.id);
-        if (offNow) moved.lists++;
+        put.run((offNow?.list ?? off).join("\n"), (onNow?.list ?? on).join("\n"), row.id);
+        count(offNow, onNow);
       }
     }
     if (moved.lists) moved.unnamed = unnamed;
     // In the same transaction as the lists: a start after a failure finds them done, and reads from here what they meant.
-    if (moved.lists || moved.tools) putSetting(HELD, JSON.stringify(moved));
+    if (moved.lists || moved.named || moved.tools) putSetting(HELD, JSON.stringify(moved));
   })();
-  return moved.lists || moved.tools ? moved : (before ?? moved);
+  return moved.lists || moved.named || moved.tools ? moved : (before ?? moved);
 }
 
 /** The setting that keeps what the lists were rewritten for until the move is done (see moveSwitches). */
@@ -397,6 +435,28 @@ function heldBefore(): MovedSwitches | undefined {
 function sharedFiles(): string[] {
   const home = os.homedir();
   return [path.join(home, ".config", "mcp", "mcp.json"), path.join(home, ".agents", "mcp.json")].filter((file) => existsSync(file));
+}
+
+/**
+ * The file as it was before the move, kept beside it: `mcp.json.adapter`, or `mcp.json.adapter-2` and on where that is taken (a copy
+ * of an earlier start, or of a move tried before, is not written over). Undefined where none can be written, which the log says: then
+ * nothing is moved, and the move is tried again on a start after.
+ */
+function keepCopy(file: string, text: string): string | undefined {
+  let why = "";
+  for (let n = 1; n < 100; n++) {
+    const copy = `${file}.adapter${n > 1 ? `-${n}` : ""}`;
+    try {
+      // The file may hold tokens: the copy is the person's alone, as the file is.
+      writeFileSync(copy, text, { mode: 0o600, flag: "wx" });
+      return copy;
+    } catch (e) {
+      why = (e as Error).message;
+      if ((e as NodeJS.ErrnoException).code !== "EEXIST") break;
+    }
+  }
+  console.warn(`[portal] MCP: no copy of mcp.json could be kept beside it (${why}), so the adapter's servers are not carried over to pi's own MCP support yet.`);
+  return undefined;
 }
 
 /** The setting that says the move was made, or that there was none to make: it is made once. */
@@ -431,25 +491,31 @@ export async function moveFromAdapter(): Promise<void> {
     // carryOver, with no adapter, gave every server `enabled: false`: written where the file had one on.
     const before = (text.trim() ? JSON.parse(text) : {}).mcpServers ?? {};
     const woken = Object.keys(moved.file.mcpServers).filter((name) => before[name]?.enabled !== false);
+    const copy = woken.length ? keepCopy(file, text) : undefined;
+    if (woken.length && !copy) return;
     for (const name of woken) moved.file.mcpServers[name].enabled = false;
     if (woken.length) writeMcpFile(moved.file, "extension");
     putSetting(MOVED, "1");
     if (woken.length) {
       console.log(
-        `[portal] MCP: pi's own MCP support reads mcp.json now. Nothing read it before (pi-mcp-adapter was not installed), so its servers stay as they were, off: ${woken.join(", ")}. Switch on the ones you want in Settings → MCP.`,
+        `[portal] MCP: pi's own MCP support reads mcp.json now. Nothing read it before (pi-mcp-adapter was not installed), so its servers stay as they were, off: ${woken.join(", ")}. Switch on the ones you want in Settings → MCP. The file as it was is kept as ${copy}.`,
       );
     }
     return;
   }
-
-  // The tools of the servers the adapter knew, by the names pi gives them. The lists that had the adapter's `mcp` tool off
-  // switch them off by name; the move is one step, so a start after a failure finds them done.
-  const names = new Map<string, string[]>();
-  for (const server of Object.keys(moved.file.mcpServers)) if (NAME_RE.test(server)) names.set(server, namesOf(pi, server, cache.get(server) ?? []));
+  // The tools of the servers the adapter knew, by their own names and the names pi gives them. The lists of switches name them
+  // (see moveSwitches); the move is one step, so a start after a failure finds them done.
+  const known = new Map<string, Map<string, string>>();
+  const know = (server: string, tools: string[]) => {
+    const own = [...new Set(tools)];
+    const piNames = namesOf(pi, server, own);
+    known.set(server, new Map(own.map((tool, i) => [tool, piNames[i]])));
+  };
+  for (const server of Object.keys(moved.file.mcpServers)) if (NAME_RE.test(server)) know(server, cache.get(server) ?? []);
   // A project's own servers are not the file's to switch off, but where the adapter cached their tools the lists that had MCP off name them too.
   const projects = projectServers();
-  for (const server of projects.flatMap((one) => one.servers)) if (NAME_RE.test(server) && !names.has(server) && cache.get(server)?.length) names.set(server, namesOf(pi, server, cache.get(server)!));
-  const switches = moveSwitches(names, adapterTools);
+  for (const server of projects.flatMap((one) => one.servers)) if (NAME_RE.test(server) && !known.has(server) && cache.get(server)?.length) know(server, cache.get(server)!);
+  const switches = moveSwitches(pi, known, adapterTools);
   // A server with no tool to name (never connected, lazy and never used, or added after the cache was written) cannot be switched off in the lists that had MCP off,
   // and under the adapter those lists could not reach it: it comes over switched off, and the person switches it on knowingly in Settings → MCP.
   for (const name of switches.unnamed) {
@@ -459,6 +525,10 @@ export async function moveFromAdapter(): Promise<void> {
       moved.changed = true;
     }
   }
+  // Before the file is written and the adapter goes: what the move drops of the file is the person's to look up. Where no copy can be
+  // written the move waits for a start after, as after any failure from here on (the lists are done, and moveSwitches says what they meant).
+  const copy = moved.changed ? keepCopy(file, text) : undefined;
+  if (moved.changed && !copy) return;
 
   // What the adapter asked about before a call is still asked, by the servers' `approve` (kept by the portal), in place before the servers can run.
   for (const [server, patterns] of Object.entries(moved.approve)) setMcpApprove(server, patterns);
@@ -487,8 +557,10 @@ export async function moveFromAdapter(): Promise<void> {
       `${left.length ? ` Left off, as they were, because pi cannot take them as they are: ${left.join("; ")}.` : ""}` +
       `${asking.length ? ` What the adapter asked about before a call (approveTools) is still asked, by each server's \`approve\`: ${asking.join(", ")}.` : ""}` +
       `${apart.length ? ` Not read by pi, so not there any more: ${apart.join(", ")}.` : ""}` +
-      `${switches.lists ? ` ${switches.lists} lists of switches (portal-wide, a project, agent, routine, mode or chat) had the adapter's \`mcp\` tool, or one of its tools, off: they have the tools of every server switched off by name now, and pi's resource tools too.${switches.unnamed.length ? ` The adapter never listed the tools of ${switches.unnamed.join(", ")}, so there is nothing to name for those: they are switched off, whatever they were. Switching one on in Settings → MCP puts its tools on wherever they are not switched off in Settings → Tools, so set the lists where MCP was off as you do.` : ""}` : ""}` +
+      `${copy ? ` The file as it was is kept as ${copy}.` : ""}` +
+      `${switches.named ? ` ${switches.named} lists of switches (portal-wide, a project, agent, routine, mode or chat) named single tools of the adapter's: they name them as pi does now (mcp__<server>__<tool>), off or on as they were.` : ""}` +
+      `${switches.lists ? ` ${switches.lists} lists of switches had the adapter's \`mcp\` tool off, or one of its tools that no server here has: they have the tools of every server switched off by name now, and pi's resource tools too.${switches.unnamed.length ? ` The adapter never listed the tools of ${switches.unnamed.join(", ")}, so there is nothing to name for those: they are switched off, whatever they were. Switching one on in Settings → MCP puts its tools on wherever they are not switched off in Settings → Tools, so set the lists where MCP was off as you do.` : ""}` : ""}` +
       `${projects.length ? ` pi reads a project's own .pi/mcp.json as well now: ${projects.map((one) => one.file).join(", ")}. Its servers are on in that project wherever MCP was off, unless the adapter had listed their tools (those are switched off by name in the lists that had MCP off); one with a gate or an exclusion of the adapter's is not connected.` : ""}` +
-      `${switches.tools ? " Switches that named the adapter's own tools in a list that had it on do nothing now." : ""}`,
+      `${switches.tools ? " Switches that named a tool of the adapter's that no server here has, in a list that had it on, do nothing now." : ""}`,
   );
 }

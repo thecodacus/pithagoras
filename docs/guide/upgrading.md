@@ -1379,7 +1379,9 @@ The portal used `pi-mcp-adapter` for MCP servers; it runs pi's own MCP support n
 ([MCP servers](/guide/mcp)). The first start after the upgrade carries the servers
 in `mcp.json` over once, each on or off as it was, with the adapter's own keys
 (`lifecycle`, `directTools`, `toolPrefix` and the like) dropped, and takes the
-adapter out of pi's packages. Where the adapter was not installed, nothing read
+adapter out of pi's packages. The file as it was is kept beside it as `mcp.json.adapter`
+(`mcp.json.adapter-2` where an older copy is there), readable only by you, as the file
+is. Where the adapter was not installed, nothing read
 `mcp.json` before, so its servers come over switched off: switch on in Settings → MCP
 the ones you want. Every server is **Auto** in Settings → Tools, so a
 big one goes behind `tool_search` by itself: mark one **Direct** where you had its
@@ -1403,9 +1405,10 @@ for how the pattern was written (`?` is carried as `*`, which asks more); the lo
 the servers. A server left off because pi does not take its name (a dot in it) keeps its gate
 too: it goes with the server when you rename it in Settings → MCP, or in the raw editor in one save that only renames it and may switch it on (any other change to its entry there drops it). The key itself is not in `mcp.json` any more, and is refused where an entry is
 written. The tools are named
-`mcp__<server>__<tool>` now: **switches you set on the adapter's own tools do nothing
-any more**, with one exception that keeps nothing wider than before: a list that had one
-of them off (`github_delete_repo`) is read as a list that had MCP off. The adapter's `mcp`
+`mcp__<server>__<tool>` now: a switch you set on one of the adapter's own tools
+(`github_delete_repo`) is carried over to pi's name of it (`mcp__github__delete_repo`),
+off or on as it was, by the server's prefix the adapter put in front. One that fits no
+server in the file is read, in a list of what is off, as a list that had MCP off. The adapter's `mcp`
 tool itself held MCP off in a default, project, agent, routine, mode or chat: where a list
 had it off, it has the tools of every server (and pi's resource tools) off by name now, as
 far as the adapter had listed them, and the entry is gone; where a list had it on, the
