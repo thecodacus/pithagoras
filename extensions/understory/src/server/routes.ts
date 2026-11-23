@@ -11,7 +11,7 @@ import * as service from "./service";
  *
  *   GET    /state              whether Understory is the agent's memory, where, and the Understory the portal runs
  *   PUT    /use                {enabled, url?}: Understory as the agent's memory, or not
- *   PUT    /config             {llm, dreamInterval?, dreamAt?}: the model that keeps the memory, and when it tidies up
+ *   PUT    /config             {llm, dreamInterval?, dreamAt?, agentMaxSteps?}: the model that keeps the memory, when it tidies up, and how far one pass may go
  *   POST   /dream              tidies the memory up now
  *   POST   /install            runs Understory here, and makes it the agent's memory
  *   DELETE /install            stops running it here; `?memory=forget` forgets the memory too
@@ -30,10 +30,10 @@ async function reachable(url: string): Promise<boolean> {
 
 /** What the page is told of the saved settings: never the key itself. */
 function shownConfig() {
-  const { llm, dreamInterval, dreamAt } = service.config();
-  if (llm?.source !== "custom") return { llm, dreamInterval, dreamAt };
+  const { llm, dreamInterval, dreamAt, agentMaxSteps } = service.config();
+  if (llm?.source !== "custom") return { llm, dreamInterval, dreamAt, agentMaxSteps };
   const { apiKey, ...rest } = llm;
-  return { llm: { ...rest, hasKey: Boolean(apiKey) }, dreamInterval, dreamAt };
+  return { llm: { ...rest, hasKey: Boolean(apiKey) }, dreamInterval, dreamAt, agentMaxSteps };
 }
 
 /** Providers set up here that have an address Understory can be pointed at, with their models. */
@@ -181,10 +181,14 @@ export function understoryRoutes(router: Router): void {
     if (!service.validInterval(dreamInterval)) return res.status(400).json({ error: "Tidying up takes an interval like 30m, 6h or 1d, of at least 5 minutes" });
     const dreamAt = typeof req.body?.dreamAt === "string" ? req.body.dreamAt.trim() : "";
     if (!service.validTime(dreamAt)) return res.status(400).json({ error: "Tidying up at a time takes one like 03:00" });
+    // Absent from the request means unchanged, so saving the schedule alone cannot drop a step limit.
+    const agentMaxSteps =
+      typeof req.body?.agentMaxSteps === "string" ? req.body.agentMaxSteps.trim() : service.config().agentMaxSteps;
+    if (!service.validSteps(agentMaxSteps)) return res.status(400).json({ error: "The step limit takes a whole number from 12 to 200, or nothing for the default" });
     // What Understory would be started with, worked out first: a choice it
     // could not be started with is refused, not saved.
     try {
-      await service.spec({ ...service.config(), llm: service.withSavedKey(llm), dreamInterval, dreamAt }, "check");
+      await service.spec({ ...service.config(), llm: service.withSavedKey(llm), dreamInterval, dreamAt, agentMaxSteps }, "check");
     } catch (e) {
       return res.status(400).json({ error: (e as Error).message });
     }
@@ -193,7 +197,7 @@ export function understoryRoutes(router: Router): void {
     // Made anew as it was: one stopped stays stopped, and runs no pass meanwhile.
     const wasRunning = wasInstalled && (await service.status()).container === "running";
     try {
-      service.saveConfig({ llm, dreamInterval, dreamAt });
+      service.saveConfig({ llm, dreamInterval, dreamAt, agentMaxSteps });
       if (wasInstalled) await service.install({ start: wasRunning });
       res.json({ understory: await understoryState() });
     } catch (e) {

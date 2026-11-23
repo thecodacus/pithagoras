@@ -38,7 +38,7 @@ test("without Docker the page is told so, and what it is told otherwise of the m
     const now = await state();
     assert.deepEqual([now.enabled, now.url, now.tokenSet], [false, "http://localhost:3800/mcp", false]);
     assert.deepEqual([now.managed.available, now.managed.image, now.managed.container], [false, false, "absent"]);
-    assert.deepEqual([now.managed.url, now.managed.autoPossible, now.managed.config], [MANAGED, true, { llm: { source: "auto" }, dreamInterval: "", dreamAt: "" }]);
+    assert.deepEqual([now.managed.url, now.managed.autoPossible, now.managed.config], [MANAGED, true, { llm: { source: "auto" }, dreamInterval: "", dreamAt: "", agentMaxSteps: "" }]);
     assert.equal(now.managed.timeZone, Intl.DateTimeFormat().resolvedOptions().timeZone.replace("Etc/Unknown", "UTC"));
   } finally {
     process.env.DOCKER_SOCKET = socket;
@@ -151,7 +151,7 @@ test("its model: a provider's with its key, a command's key refused, an address 
   assert.deepEqual((await call("PUT", "/config", { llm: { source: "provider", provider: "gone", model: "x" } })).status, 400);
 
   const custom = await call("PUT", "/config", { llm: { source: "custom", baseUrl: "https://api.deepseek.com/v1", model: "deepseek-chat", format: "openai", apiKey: "sk-1" }, dreamAt: "03:00", dreamInterval: "1d" });
-  assert.deepEqual(custom.body.understory.managed.config, { llm: { source: "custom", baseUrl: "https://api.deepseek.com/v1", model: "deepseek-chat", format: "openai", hasKey: true }, dreamInterval: "", dreamAt: "03:00" });
+  assert.deepEqual(custom.body.understory.managed.config, { llm: { source: "custom", baseUrl: "https://api.deepseek.com/v1", model: "deepseek-chat", format: "openai", hasKey: true }, dreamInterval: "", dreamAt: "03:00", agentMaxSteps: "" });
   assert.doesNotMatch(JSON.stringify(custom.body), /sk-1/);
   assert.equal(envOf(machine.understory()!).DREAM_INTERVAL, undefined, "a set time wins over Understory's own timer");
   assert.ok(custom.body.understory.managed.nextDream);
@@ -163,6 +163,7 @@ test("its model: a provider's with its key, a command's key refused, an address 
     [{ llm: { source: "sometimes" } }, "Choose the chat's model, a provider and model, or an http(s) address, a model and a format"],
     [{ llm: { source: "auto" }, dreamInterval: "2m" }, "Tidying up takes an interval like 30m, 6h or 1d, of at least 5 minutes"],
     [{ llm: { source: "auto" }, dreamAt: "3am" }, "Tidying up at a time takes one like 03:00"],
+    [{ llm: { source: "auto" }, agentMaxSteps: "6" }, "The step limit takes a whole number from 12 to 200, or nothing for the default"],
   ] as const) {
     assert.deepEqual(await call("PUT", "/config", body), { status: 400, body: { error } });
   }

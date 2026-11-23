@@ -14,6 +14,7 @@ import { openStore } from "../src/server/store.ts";
 delete process.env.MEMORY_UNDERSTORY_URL;
 setPortal({ extension: "pithagoras-understory", log: () => {} } as any);
 openStore(realpathSync(scratch("understory-service-")));
+const store = await import("../src/server/store.ts");
 const service = await import("../src/server/service.ts");
 const { understoryDefaultUrl, understoryEntry, understoryTokenOf, UNDERSTORY_RULE } = await import("../src/server/entry.ts");
 
@@ -46,7 +47,7 @@ test("saved, a set time wins over Understory's own timer and is armed; a key the
 
   service.saveConfig({ llm: { source: "custom", baseUrl: "https://api.deepseek.com/v1", model: "deepseek-chat", format: "openai", apiKey: "sk-1" }, dreamInterval: "1d", dreamAt: "" });
   service.saveConfig({ llm: { source: "custom", baseUrl: "https://api.deepseek.com/v1", model: "deepseek-reasoner", format: "openai" }, dreamInterval: "1d", dreamAt: "" });
-  assert.deepEqual(service.config(), { llm: { source: "custom", baseUrl: "https://api.deepseek.com/v1", model: "deepseek-reasoner", format: "openai", apiKey: "sk-1" }, dreamInterval: "1d", dreamAt: "" });
+  assert.deepEqual(service.config(), { llm: { source: "custom", baseUrl: "https://api.deepseek.com/v1", model: "deepseek-reasoner", format: "openai", apiKey: "sk-1" }, dreamInterval: "1d", dreamAt: "", agentMaxSteps: "" });
   // Another address does not get the key the last one had.
   assert.equal((service.withSavedKey({ source: "custom", baseUrl: "http://other:8080/v1", model: "m", format: "openai" }) as { apiKey?: string }).apiKey, undefined, "a key is its server's");
   service.saveConfig({ llm: { source: "custom", baseUrl: "https://api.deepseek.com/v1", model: "deepseek-reasoner", format: "openai", apiKey: "" }, dreamInterval: "", dreamAt: "" });
@@ -60,6 +61,22 @@ test("saved, a set time wins over Understory's own timer and is armed; a key the
   service.stopDreams();
 });
 
+test("the step limit: nothing is Understory's own 12, a number is kept, a nonsense one is dropped", () => {
+  assert.deepEqual([service.validSteps(""), service.validSteps("12"), service.validSteps("200")], [true, true, true]);
+  assert.deepEqual([service.validSteps("11"), service.validSteps("201"), service.validSteps("many")], [false, false, false], "under the default and over the ceiling are both refusals");
+
+  service.saveConfig({ llm, dreamInterval: "", dreamAt: "", agentMaxSteps: "60" });
+  assert.equal(service.config().agentMaxSteps, "60", "saved as written");
+  // A later save of the schedule alone keeps it: the field is only what the page sends.
+  service.saveConfig({ llm, dreamInterval: "6h", dreamAt: "", agentMaxSteps: service.config().agentMaxSteps });
+  assert.equal(service.config().agentMaxSteps, "60");
+  service.saveConfig({ llm, dreamInterval: "", dreamAt: "", agentMaxSteps: "" });
+  assert.equal(service.config().agentMaxSteps, "", "and empty again once the page says empty");
+  // A limit saved out of band cannot survive reading at all if it is nonsense.
+  store.putSettings({ config: { llm, dreamInterval: "", dreamAt: "", agentMaxSteps: "nonsense" } });
+  assert.equal(service.config().agentMaxSteps, "", "not read back as a step count the container would reject");
+});
+
 test("the container is made with its token, on the network it is given, with the label a portal that goes back knows it by", async () => {
   const token = service.token();
   assert.equal(service.token(), token, "made once");
@@ -67,6 +84,10 @@ test("the container is made with its token, on the network it is given, with the
   for (const line of ["BUNDLE_ROOT=/bundle", "PORT=3800", `AUTH_TOKEN=${token}`, "LLM_API_BASE_URL=http://gpu:8080/v1", "LLM_API_KEY=none", "LLM_API_FORMAT=openai", "LLM_MODEL=m", "DREAM_INTERVAL=6h"]) assert.ok(made.Env.includes(line), line);
   assert.ok(!(await service.spec({ llm, dreamInterval: "", dreamAt: "" }, token)).Env.some((l) => l.startsWith("DREAM_INTERVAL")), "never is no interval at all");
   assert.ok(!(await service.spec({ llm, dreamInterval: "6h", dreamAt: "03:00" }, token)).Env.some((l) => l.startsWith("DREAM_INTERVAL")), "a set time wins");
+  // Nothing said is Understory's own 12: the container is left to answer for it, so it says what was chosen.
+  assert.ok(!(await service.spec({ llm, dreamInterval: "", dreamAt: "", agentMaxSteps: "" }, token)).Env.some((l) => l.startsWith("AGENT_MAX_STEPS")), "no step limit means no line");
+  const roomier = await service.spec({ llm, dreamInterval: "", dreamAt: "", agentMaxSteps: "60" }, token);
+  assert.ok(roomier.Env.includes("AGENT_MAX_STEPS=60"), "a number is handed over as it was written");
   assert.deepEqual(made.Labels, { "pithagoras.addon": "understory" });
   assert.deepEqual(made.HostConfig, { NetworkMode: "container:abc", RestartPolicy: { Name: "unless-stopped" }, Binds: ["pithagoras_understory-memory:/bundle"] });
 });

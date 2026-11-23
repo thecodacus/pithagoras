@@ -58,6 +58,13 @@ export interface UnderstoryConfig {
    * start. Wins over the interval.
    */
   dreamAt: string;
+  /**
+   * How far one pass of the model may go, handed to Understory as AGENT_MAX_STEPS.
+   * Empty is Understory's own default, 12 steps, which reads a memory but cannot
+   * tidy one: a pass stopped at the limit leaves half-written files behind, and
+   * until recently said nothing was wrong. Say a number to give it more room.
+   */
+  agentMaxSteps: string;
 }
 
 /** Understory's own reading of an interval, and its floor: five minutes. */
@@ -76,6 +83,25 @@ export function validInterval(raw: string): boolean {
   return ms !== null && ms >= 5 * 60_000;
 }
 
+/** The floor is Understory's own default: below it a pass cannot even finish a tidy-up. */
+export const MIN_AGENT_MAX_STEPS = 12;
+/** A generous ceiling, not a measured one: a pass is long before it is near this. */
+export const MAX_AGENT_MAX_STEPS = 200;
+
+/** A step count, or empty for Understory's own default of 12. */
+export const validSteps = (raw: string): boolean =>
+  !raw || (/^\d+$/.test(raw) && Number(raw) >= MIN_AGENT_MAX_STEPS && Number(raw) <= MAX_AGENT_MAX_STEPS);
+
+/** What to hand the container, or empty to hand it nothing and let Understory answer for itself. */
+export const agentMaxSteps = (cfg: Pick<UnderstoryConfig, "agentMaxSteps">): string =>
+  String(cfg.agentMaxSteps ?? "").trim();
+
+/** The environment line that carries it: none at all when nothing was said, so the container holds what was chosen. */
+const agentMaxStepsEnv = (cfg: Pick<UnderstoryConfig, "agentMaxSteps">): string[] => {
+  const steps = agentMaxSteps(cfg);
+  return steps ? [`AGENT_MAX_STEPS=${steps}`] : [];
+};
+
 export function config(): UnderstoryConfig {
   const saved = setting("config");
   const raw = (saved && typeof saved === "object" ? saved : {}) as Record<string, unknown>;
@@ -84,6 +110,7 @@ export function config(): UnderstoryConfig {
     llm: raw.llm && typeof raw.llm === "object" ? (raw.llm as LlmChoice) : { source: "auto" },
     dreamInterval: typeof raw.dreamInterval === "string" && validInterval(raw.dreamInterval) ? raw.dreamInterval : "",
     dreamAt: typeof raw.dreamAt === "string" && validTime(raw.dreamAt) ? raw.dreamAt : "",
+    agentMaxSteps: typeof raw.agentMaxSteps === "string" && validSteps(raw.agentMaxSteps) ? raw.agentMaxSteps : "",
   };
 }
 
@@ -102,7 +129,7 @@ export function withSavedKey(llm: LlmChoice): LlmChoice {
 export function saveConfig(next: UnderstoryConfig): UnderstoryConfig {
   const llm = withSavedKey(next.llm);
   // A set time wins, and Understory's own timer is left off: two passes a day would be one too many.
-  putSettings({ config: { llm, dreamInterval: next.dreamAt ? "" : next.dreamInterval, dreamAt: next.dreamAt } });
+  putSettings({ config: { llm, dreamInterval: next.dreamAt ? "" : next.dreamInterval, dreamAt: next.dreamAt, agentMaxSteps: next.agentMaxSteps || "" } });
   scheduleDreams();
   return config();
 }
@@ -199,6 +226,8 @@ export async function spec(cfg: UnderstoryConfig, auth: string, networkMode = "h
       `LLM_API_KEY=${llm.apiKey}`,
       `LLM_API_FORMAT=${llm.format}`,
       `LLM_MODEL=${llm.model}`,
+      // A tidy-up stopped at Understory's own 12 steps leaves half-written files: this is the room to give it.
+      ...agentMaxStepsEnv(cfg),
       // At a set time the portal starts the pass itself: Understory's timer stays off.
       ...(cfg.dreamInterval && !cfg.dreamAt ? [`DREAM_INTERVAL=${cfg.dreamInterval}`] : []),
     ],
@@ -331,7 +360,16 @@ async function stale(): Promise<boolean> {
   const made = (await docker().containers.inspect(CONTAINER)) as Inspected | undefined;
   if (!made) return false;
   const base = made.Config?.Env?.find((line) => line.startsWith("LLM_API_BASE_URL="));
-  return (config().llm.source === "auto" && base !== `LLM_API_BASE_URL=${modelServerUrl()}`) || made.HostConfig?.NetworkMode !== (await docker().sharedNetwork());
+  // The step limit reaches Understory only as part of its environment, so a container made before it
+  // was said runs with Understory's own 12 however the portal is configured. Without this, `spec`
+  // says one thing and the running container does another, quietly, until something else remakes it.
+  const steps = made.Config?.Env?.find((line) => line.startsWith("AGENT_MAX_STEPS="));
+  const wanted = agentMaxStepsEnv(config())[0] ?? "";
+  return (
+    (config().llm.source === "auto" && base !== `LLM_API_BASE_URL=${modelServerUrl()}`) ||
+    (steps ?? "") !== wanted ||
+    made.HostConfig?.NetworkMode !== (await docker().sharedNetwork())
+  );
 }
 
 /**
@@ -718,13 +756,26 @@ export async function dreamNow(): Promise<DreamRun> {
   try {
     if (!(await runningHere())) throw new Error("Understory is not running");
     const report = await run("dream");
+    // A run that failed comes back as a result, not a throw: Understory reports the failure only
+    // inside the summary, prefixed "dream run failed:". Read that as a pass that went fine and a
+    // nightly tidy-up can be failing for weeks without a sign of it - it ran, it changed nothing,
+    // and Settings still shows a green tick. Ran out of steps is one such failure worth naming
+    // apart, because the remedy (raise AGENT_MAX_STEPS) is a number the operator can change.
+    const summary = String(report.summary ?? "");
+    const failed = summary.startsWith("dream run failed:");
+    const outOfSteps = /used all \d+ steps/.test(summary);
+    const files = `${report.filesChanged?.length ?? 0} ${report.filesChanged?.length === 1 ? "file" : "files"}`;
     result = {
       at: new Date().toISOString(),
-      ok: true,
+      ok: !failed,
       ran: report.ran === true,
-      said: report.ran
-        ? `${report.filesChanged?.length ?? 0} ${report.filesChanged?.length === 1 ? "file" : "files"} changed${report.summary ? ` — ${firstLine(report.summary)}` : ""}`
-        : report.reason || "Nothing to do",
+      said: outOfSteps
+        ? `Stopped short at ${agentMaxSteps(config()) || MIN_AGENT_MAX_STEPS} steps — ${files} changed, possibly half written. Raise the step limit in Understory's settings if this repeats.`
+        : failed
+          ? `${files} changed — ${summary}`
+          : report.ran
+          ? `${files} changed${report.summary ? ` — ${firstLine(report.summary)}` : ""}`
+          : report.reason || "Nothing to do",
     };
   } catch (e) {
     result = { at: new Date().toISOString(), ok: false, said: (e as Error).message };

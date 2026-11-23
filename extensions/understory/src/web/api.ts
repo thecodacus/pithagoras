@@ -34,7 +34,7 @@ export interface ManagedUnderstory {
   pulling: { active: boolean; line: string; error?: string };
   url: string;
   /** `dreamAt`: once a day at this time ("03:00"), started by the portal; wins over the interval. */
-  config: { llm: UnderstoryLlm; dreamInterval: string; dreamAt: string };
+  config: { llm: UnderstoryLlm; dreamInterval: string; dreamAt: string; agentMaxSteps?: string };
   /** "The chat's model" can be offered: the server half listens for Understory on its port. */
   autoPossible: boolean;
   /** Providers set up here that Understory can be pointed at. */
@@ -142,7 +142,7 @@ export interface MemoryValidation {
 export const api = {
   state: () => call<UnderstoryState>("/state"),
   setUse: (patch: { enabled: boolean; url?: string }) => call<Changed>("/use", { method: "PUT", body: JSON.stringify(patch) }),
-  setConfig: (config: { llm: UnderstoryLlmChoice; dreamInterval: string; dreamAt: string }) => call<Changed>("/config", { method: "PUT", body: JSON.stringify(config) }),
+  setConfig: (config: { llm: UnderstoryLlmChoice; dreamInterval: string; dreamAt: string; agentMaxSteps?: string }) => call<Changed>("/config", { method: "PUT", body: JSON.stringify(config) }),
   dream: () => call<Changed>("/dream", { method: "POST" }),
   install: () => call<Changed>("/install", { method: "POST" }),
   /** The container goes; with `forgetMemory`, its volume too, with every note in it. */
