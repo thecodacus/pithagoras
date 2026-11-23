@@ -96,7 +96,10 @@ What you do:
   other routes answer with a 307 to their new place (the table in
   [Subagents are an extension](#subagents-are-an-extension)).
 - **Take `PI_SUBAGENT_BIN` and `PI_SUBAGENT_GRACE_MS` out** of your
-  environment if you set them: nothing reads them any more. No variable is new.
+  environment if you set them: nothing reads them any more. One is new and
+  optional: `ROUTINE_RUN_TIMEOUT_MIN`, a routine run's time limit where neither
+  the routine nor the default on the Routines page sets one (an hour without
+  it; see [Routines](/guide/routines)).
 - **An extension of your own** that depends on `@pithagoras/extension-api`
   `^0.2.0` keeps working. To use what 0.3.0 adds, depend on `^0.3.0`
   ([Extensions in their own repository](/guide/extension-ui#extensions-in-their-own-repository)).
@@ -1601,7 +1604,7 @@ Going back to a version from before Browser was an extension needs Browser remov
 Going back to a version from before Voice's service was an extension needs Voice and Voice servers removed first, and what is left of their hand-offs and their folders moved aside, before step 3: see [Voice's service is an extension](#going-back-to-a-version-before-voice-was-an-extension).
 Going back to a version from before Understory was an extension needs Understory removed first, and what is left of its hand-off and its folder out of the way, before step 3, and its container made again from the older version afterwards: see [Understory is an extension](#going-back-to-a-version-before-understory-was-an-extension).
 Going back from 0.2.0 to 0.1.0 needs all of these at once, in one order: see [Going back to 0.1.0](#going-back-to-0-1-0).
-Going back from 0.3.0 to 0.2.0 needs the subagent's settings put back in pi's `settings.json`, and what 0.2.0 cannot run removed first: see [Going back to 0.2.0](#going-back-to-0-2-0).
+Going back from 0.3.0 to 0.2.0 needs the subagent's settings put back in pi's `settings.json`, the adapter's `mcp.json` and the adapter back, and what 0.2.0 cannot run removed first: see [Going back to 0.2.0](#going-back-to-0-2-0).
 
 From this version on, an older version does not start on a newer database: it stops at the page described above, because a newer version may have renamed or dropped columns, not only added them. Versions before this one open it anyway and run against it, so put the backup back before you start one of them. The backup from `backups/` is the database as it was before the newer version changed it, which is why going back means putting it back.
 
@@ -1626,13 +1629,18 @@ sub-chats, the subagents' chats and the chats extensions made.
 3. **Stop the portal.**
 4. **Put the backup back:** `backups/portal-v11-….db` as `portal.db`, with
    `portal.db-wal` and `portal.db-shm` beside it removed.
-5. **Put the subagent's settings back**, where you used the tool:
+5. **Put the MCP configuration back** for `pi-mcp-adapter`, which 0.2.0 runs
+   MCP servers through and 0.3.0 took out of pi's packages: `mcp.json.adapter`
+   (beside `mcp.json` in pi's agent folder) as `mcp.json`, and the adapter
+   installed again (`pi install npm:pi-mcp-adapter`). A server added or changed
+   in Settings → MCP since the upgrade is not in that copy.
+6. **Put the subagent's settings back**, where you used the tool:
    `subagentMode`, `subagentMaxParallel` and `subagentModel` in pi's
    `settings.json`, from `extension-data/pithagoras-subagent/settings.json`
    (`mode`, `maxParallel` and `model`), as
    [Subagents' section](#going-back-to-a-version-before-subagents-were-an-extension)
    says. Each chat's choice of model is in the backup as it was at the upgrade.
-6. **Start 0.2.0:** `PITHAGORAS_VERSION=0.2.0` in the Portainer stack, or the
+7. **Start 0.2.0:** `PITHAGORAS_VERSION=0.2.0` in the Portainer stack, or the
    image you kept (see [Going back](#going-back)).
 
 What the backup cannot hold stays where it is, and 0.2.0 does not read it:
