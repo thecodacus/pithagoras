@@ -55,7 +55,7 @@ async function understoryState() {
   const url = typeof server?.entry.url === "string" && server.entry.url ? server.entry.url : understoryDefaultUrl();
   const [reached, runtime] = await Promise.all([reachable(url), service.status()]);
   return {
-    // As the chats see it: on only with the adapter its tools come through.
+    // As the chats see it: in the file, and not switched off there.
     enabled: server?.on === true,
     url,
     tokenSet: Boolean(understoryTokenOf(server?.entry) ?? process.env[UNDERSTORY_TOKEN_ENV]),
@@ -87,20 +87,25 @@ async function understoryState() {
 async function switchUnderstory(enabled: boolean, url?: string): Promise<{ reloaded: number; waiting: number }> {
   const { mcp } = portal();
   if (!enabled) return mcp.set(UNDERSTORY, undefined);
-  // Kept: whatever else somebody put in the entry by hand, except how it signs in, which is said anew.
-  const { disabled: _off, auth: _a, bearerToken: _t, bearerTokenEnv: _e, ...had } = mcp.get(UNDERSTORY)?.entry ?? {};
+  // Kept: whatever else somebody put in the entry by hand (other headers among it), except how it signs in, which is said anew, and whether it is switched off, which switching it on undoes.
+  // The keys pi-mcp-adapter had in it (the entry an older portal wrote) are not pi's: its sign-in is the header said anew.
+  const { enabled: _off, headers: hadHeaders, lifecycle: _lifecycle, directTools: _directTools, bearerToken: _token, bearerTokenEnv: _tokenEnv, ...hadAll } = mcp.get(UNDERSTORY)?.entry ?? {};
+  const had = typeof hadAll.auth === "string" ? Object.fromEntries(Object.entries(hadAll).filter(([key]) => key !== "auth")) : hadAll;
+  const others = Object.entries(hadHeaders && typeof hadHeaders === "object" ? hadHeaders : {}).filter(([name]) => name.toLowerCase() !== "authorization");
+  const keeping = (entry: Record<string, unknown>): Record<string, unknown> =>
+    others.length ? { ...entry, headers: { ...Object.fromEntries(others), ...(entry.headers as Record<string, unknown> | undefined) } } : entry;
   // An address given is the one meant; without one, the portal's own Understory where it runs one.
   return mcp.set(
     UNDERSTORY,
     url === undefined && (await service.installed())
-      ? { ...had, ...understoryEntry(service.managedUrl(), { token: await service.heldToken() }) }
-      : {
+      ? keeping({ ...had, ...understoryEntry(service.managedUrl(), { token: await service.heldToken() }) })
+      : keeping({
           ...had,
           ...understoryEntry(url ?? (typeof had.url === "string" && had.url ? had.url : understoryDefaultUrl()), {
             ...(process.env[UNDERSTORY_TOKEN_ENV] ? { tokenEnv: UNDERSTORY_TOKEN_ENV } : {}),
           }),
-        },
-    { trusted: true },
+        }),
+    { trusted: true, direct: true },
   );
 }
 

@@ -30,7 +30,7 @@ let lastAsked: string | undefined;
 // A count, not a clock: two calls in the same millisecond are still one after the other.
 let order = 0;
 
-const isMemoryTool = (name: unknown) => typeof name === "string" && name.startsWith(`${UNDERSTORY}_`);
+const isMemoryTool = (name: unknown) => typeof name === "string" && name.startsWith(`mcp__${UNDERSTORY}__`);
 
 /**
  * A tool call in a chat, starting or ending — its subagents' included, which

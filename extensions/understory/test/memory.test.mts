@@ -10,7 +10,7 @@ import { serveUnderstory, sse } from "./portal.mts";
  */
 
 inProcessHome("pithagoras-understory-memory-");
-const { at, understory, docker, machine, scripts, adapterOn, putServers } = await serveUnderstory();
+const { at, understory, docker, machine, scripts, putServers } = await serveUnderstory();
 const { chatMessages, notePath } = await import("../src/server/memory.ts");
 const { understoryEntry } = await import("../src/server/entry.ts");
 const service = await import("../src/server/service.ts");
@@ -32,7 +32,6 @@ const handed = () => {
   const line = docker.execs.at(-1)!.Env.find((e) => e.startsWith("PORTAL_INPUT="));
   return line && JSON.parse(Buffer.from(line.slice("PORTAL_INPUT=".length), "base64").toString("utf8"));
 };
-adapterOn();
 
 test("the memory is read through the portal: only Understory's read API, with its token, and only while it is the agent's memory", async () => {
   understory.state.reads = {
@@ -59,8 +58,8 @@ test("the memory is read through the portal: only Understory's read API, with it
     const before = understory.seen.length;
     assert.deepEqual(await get("/trace"), { status: 400, body: { error: "id is required" } });
     assert.equal(understory.seen.length, before);
-    // Its server switched off in Settings → MCP: it is not the agent's memory, whatever the adapter.
-    putServers({ understory: { ...understoryEntry(`http://127.0.0.1:${port}/mcp`), disabled: true } });
+    // Its server switched off in Settings → MCP: it is not the agent's memory.
+    putServers({ understory: { ...understoryEntry(`http://127.0.0.1:${port}/mcp`), enabled: false } });
     assert.equal((await get("/tree")).status, 409);
     elsewhere();
   } finally {

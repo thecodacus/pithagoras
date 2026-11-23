@@ -213,9 +213,9 @@ test("a mode's tools are its chats' layer, and a change of them reaches its live
   assert.equal((await call("GET", `/chat-modes/${mode}/tools`)).body.tools.find((t) => t.name === "bash").enabled, false);
   const bash = await tool(id, "bash");
   assert.deepEqual([bash.enabled, bash.defaultOn], [false, false], "off by the mode's layer");
-  assert.ok(sessions.piOff(id).includes("bash"));
+  assert.ok(sessions.offFor(id).includes("bash"));
   assert.ok(sessions.live.get(id).client.switchedOff.has("bash"), "the running chat was told");
-  assert.ok(!sessions.piOff(elsewhere).includes("bash"));
+  assert.ok(!sessions.offFor(elsewhere).includes("bash"));
   assert.ok(!sessions.live.get(elsewhere).client.switchedOff.has("bash"), "a chat in another mode was not");
   const { requests } = await say(id, "Hello");
   assert.ok(!declared(requests[0]).includes("bash"));

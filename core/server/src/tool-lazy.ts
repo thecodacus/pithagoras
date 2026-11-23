@@ -41,7 +41,7 @@ export interface SizedTool {
   set: string;
   /** What its declaration costs the model's list, in tokens. */
   tokens: number;
-  /** Whether a mark may make it lazy (lazyAllowed in db.ts): pi's own tools, an MCP server's and code mode cannot. */
+  /** Whether a mark may make it lazy (lazyAllowed in db.ts): pi's own tools and code mode cannot. */
   allowed: boolean;
   /** Whether the threshold may: the portal's own small tools that the agent needs at once are never taken out by size. */
   auto: boolean;

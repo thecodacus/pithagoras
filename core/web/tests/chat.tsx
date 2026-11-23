@@ -109,8 +109,8 @@ if (phase === 'args') events.push(
   ev('tool_execution_end', { toolCallId: 'ws', toolName: 'web_search', result: { content: [{ type: 'text', text: 'Found 10 results.' }] } }, 18),
   ev('tool_execution_start', { toolCallId: 'ed', toolName: 'edit', args: { path: 'web/src/main.tsx', edits: [{ oldText: 'const a = 1;', newText: 'const a = 2;' }, { oldText: 'render(<App />);', newText: 'render(\n  <App />\n);' }] } }, 17),
   ev('tool_execution_end', { toolCallId: 'ed', toolName: 'edit', result: { content: [{ type: 'text', text: 'Applied 2 edits.' }] } }, 16.5),
-  ev('tool_execution_start', { toolCallId: 'mc', toolName: 'mcp', args: { tool: 'github_list_issues', args: { owner: 'octo-org', repo: 'pithagoras', state: 'open', labels: ['bug', 'ui'] } } }, 16),
-  ev('tool_execution_end', { toolCallId: 'mc', toolName: 'mcp', result: { content: [{ type: 'text', text: JSON.stringify([{ number: 21, title: 'Jump button over the tools menu', labels: ['bug', 'ui'] }, { number: 23, title: 'Copy beside the reply', labels: ['ui'] }]) }] } }, 15.5),
+  ev('tool_execution_start', { toolCallId: 'mc', toolName: 'mcp__github__list_issues', args: { owner: 'octo-org', repo: 'pithagoras', state: 'open', labels: ['bug', 'ui'] } }, 16),
+  ev('tool_execution_end', { toolCallId: 'mc', toolName: 'mcp__github__list_issues', result: { content: [{ type: 'text', text: JSON.stringify([{ number: 21, title: 'Jump button over the tools menu', labels: ['bug', 'ui'] }, { number: 23, title: 'Copy beside the reply', labels: ['ui'] }]) }] } }, 15.5),
   // Numbers as they were written, spaces as they were given, and an id too long for JavaScript's numbers.
   ev('tool_execution_start', { toolCallId: 'cf', toolName: 'configure', args: { port: 8080, threshold: 0.0001, old_string: '    return x;' } }, 15),
   ev('tool_execution_end', { toolCallId: 'cf', toolName: 'configure', result: { content: [{ type: 'text', text: '{"id": 12345678901234567890, "ok": true}' }] } }, 14.5),

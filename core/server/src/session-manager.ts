@@ -11,11 +11,10 @@ import { agentAt } from "./agents.js";
 import { HEARTBEAT_ROLE } from "./pi/heartbeat-names.js";
 import path from "node:path";
 import type { Draft, LoadError, PiClient, PiTool, PromptTaken } from "./pi/types.js";
-import { effectiveOff, exceptionsFor, heldOffUnshown, toolEnabled, toolSetOf, toolSource } from "./tool-policy.js";
+import { effectiveOff, exceptionsFor, heldOffUnshown, toolEnabled, toolSetOf } from "./tool-policy.js";
 import { scriptedMark } from "./tool-layers.js";
 import { headLazy, parseHead, ruleTag, type LazyHead } from "./tool-lazy.js";
 import { buildLazyHead } from "./lazy-head.js";
-import { unlisted } from "./mcp-offer.js";
 import { projectOf } from "./workspaces.js";
 import { findServerBuiltin, picturesRefused, runBuiltin } from "./pi/builtins.js";
 import { dropMessage, SessionEditError, userTexts, type Scope } from "./pi/session-edit.js";
@@ -87,10 +86,6 @@ import {
   knownTools,
   recordAudit,
   shownTools,
-  mcpCatalogueFor,
-  mcpView,
-  withdrawnMcpTools,
-  type McpView,
   browserAllowlist,
   routineExemptions,
   updateSession,
@@ -1307,16 +1302,20 @@ class SessionManager extends EventEmitter {
     // What this session registered, written down as soon as it exists. The
     // settings page offers a default per tool, and needing to open a chat
     // before you can say "off everywhere" would be the wrong way round.
-    void client
-      .getTools?.()
-      .then((tools) => {
-        // A tool that this chat was started with, because nobody had seen it before, and that is off by default, is taken out of its list again.
-        if (rememberTools(tools.map(remembered)).length) return this.applyToolDefaults();
-      })
-      .catch(() => {
-        // A session that cannot list its tools still works; the catalogue
-        // simply stays as it was.
-      });
+    // Again when a run has settled: an MCP server's tools are registered once pi has connected it, which is after the chat
+    // started, and what a chat last saw of a server is what the threshold counts.
+    const rememberRegistered = () =>
+      void client
+        .getTools?.()
+        .then((tools) => {
+          // A tool that this chat was started with, because nobody had seen it before, and that is off by default, is taken out of its list again.
+          if (rememberTools(tools.map(remembered)).length) return this.applyToolDefaults();
+        })
+        .catch(() => {
+          // A session that cannot list its tools still works; the catalogue
+          // simply stays as it was.
+        });
+    rememberRegistered();
 
     // A new pi process knows nothing of what the last one was retrying.
     this.modelErrors.forget(sessionId);
@@ -1464,6 +1463,7 @@ class SessionManager extends EventEmitter {
         if (!this.failed.delete(sessionId) && !stoppedHere) this.mark(sessionId, "idle");
         for (const woken of this.settleWaiters.get(sessionId) ?? []) woken();
         this.settleWaiters.delete(sessionId);
+        rememberRegistered();
         if (client.reloadDue) void this.reloadSettled(sessionId, client);
       }
     });
@@ -2810,18 +2810,6 @@ class SessionManager extends EventEmitter {
   }
 
   /**
-   * What pi is told to have off: the switches (offFor), and the MCP servers'
-   * tools that the adapter's configuration no longer registers. Those are not
-   * the switches' — they are listed nowhere, and nothing is written down for
-   * them — but a chat that loaded one before the configuration changed still
-   * has it, and the configuration is what has the last word over it.
-   */
-  piOff(sessionId: string, reported: Pick<PiTool, "name" | "inline">[] = [], view: McpView = mcpView(), homes?: AgentHome[]): string[] {
-    const names = reported.map((t) => t.name);
-    return [...new Set([...this.offFor(sessionId, names, view.known().keys(), homes), ...withdrawnMcpTools(reported, view)])].sort();
-  }
-
-  /**
    * What the chat's pi is told about its lazy tools: which sets are lazy in it, and the line that names them. Made when
    * the chat first starts, from the marks, the threshold's resolution and what its mode and agent keep in the model's
    * list, and kept with the chat (`sessions.lazy_head`) from then on: reused when it is reopened after a restart and when
@@ -2847,14 +2835,14 @@ class SessionManager extends EventEmitter {
    * The head the chat would have if it started now: what a mode of the person's and the agent's it works with keep in the
    * list stays there. Where every lazy tool starts switched off nothing is lazy (`off`), as nothing is to be reached.
    */
-  private freshLazyHead(sessionId: string, off: ReadonlySet<string> = new Set(this.piOff(sessionId))): LazyHead {
+  private freshLazyHead(sessionId: string, off: ReadonlySet<string> = new Set(this.offFor(sessionId))): LazyHead {
     const session = getSession(sessionId);
     return buildLazyHead([...modeDirect(session?.mode), ...agentDirect(agentIdOf(session?.workspace))], off);
   }
 
   /** What pi is told about the tools when a conversation starts: the ones that are off, and what the chat froze about the lazy ones. */
   private toolsFor(sessionId: string): { toolsOff: string[]; lazy: LazyHead; rememberLazy: (head: LazyHead) => void; toolsSeen: () => ReadonlySet<string> } {
-    const toolsOff = this.piOff(sessionId);
+    const toolsOff = this.offFor(sessionId);
     return {
       toolsOff,
       lazy: this.lazyHeadFor(sessionId),
@@ -2906,24 +2894,6 @@ class SessionManager extends EventEmitter {
   }
 
   /**
-   * What a running chat reported, less the MCP servers' tools the adapter's
-   * configuration says no to — still loaded from before it changed, and off
-   * (piOff) — with those it lists from its cache marked. And the servers' tools
-   * the chat has not registered one by one, which it reaches through `mcp`: a
-   * server is a group like any other, switched whole or tool by tool.
-   */
-  private offered(reported: PiTool[], workspace: string | null | undefined, view: McpView): Omit<PiTool, "enabled">[] {
-    if (!reported.length) return [];
-    const listed = reported.flatMap(({ enabled: _enabled, ...tool }) => {
-      const offer = view.offers(tool);
-      if (unlisted(offer)) return [];
-      return [offer === "cached" ? { ...tool, cached: true as const } : tool];
-    });
-    const have = new Set(listed.map((t) => t.name));
-    return [...listed, ...mcpCatalogueFor(workspace ?? undefined, view).filter((t) => !have.has(t.name))];
-  }
-
-  /**
    * Every tool this conversation could use, and whether it is on.
    *
    * A running session lists its own: pi builds the registry when it starts.
@@ -2941,46 +2911,43 @@ class SessionManager extends EventEmitter {
     if (reported.length && rememberTools(reported.map(remembered)).length) await this.applyToolDefaults();
     const session = getSession(sessionId);
     const workspace = session?.workspace;
-    const view = mcpView();
-    const listed = this.offered(reported, workspace, view);
+    const listed = reported.map(({ enabled: _enabled, ...tool }) => tool);
     // What the chat's agent, project and routine start it with, which is what it is "default" against.
     const defaults = toolDefaultsForSession(session);
     const exceptions = sessionTools(sessionId);
-    const lazy = lazyMarks(view);
-    const servers = view.servers;
-    // Where the chat works through the code tool and has it on, no tool is lazy (see lazyOf in pi/sdk-client.ts), but an
-    // MCP server's is still behind `mcp`. Read from the running pi where there is one: its presentation was fixed as it started.
+    const lazy = lazyMarks();
+    // Where the chat works through the code tool and has it on, no tool is lazy (see lazyMember in pi/sdk-client.ts).
+    // Read from the running pi where there is one: its presentation was fixed as it started.
     const scripted = (client ? client.codemodeOnly : modeOf(session?.mode)?.codemode) && toolEnabled(CODEMODE_TOOL, defaults, exceptions);
     // Its switch cannot turn it off here (setTools): the page shows it on and says why.
     const held = modeHoldsCodemode(session?.mode);
     // An idle chat is shown what the portal has seen registered; the tool is not there for every kind of chat (see asksQuestions).
     const asks = session ? canAsk(session) : true;
-    const shown: { name: string; source: string; package?: string | null; description?: string; inline?: true; cached?: true }[] = listed.length
+    const shown: { name: string; source: string; description?: string; inline?: true }[] = listed.length
       ? listed
-      : shownTools(workspace, view).filter((tool) => asks || !(tool.name === ASK_QUESTION_TOOL && tool.inline));
+      : shownTools(workspace).filter((tool) => asks || !(tool.name === ASK_QUESTION_TOOL && tool.inline));
     // What the chat froze about its lazy tools is what is lazy in it, not what the marks say now: a running chat's own pi says
     // which, a chat that has started and is idle its stored head.
     const frozen = parseHead(session?.lazy_head);
-    const lazyHere = (name: string, source: string, pkg: string | null | undefined, inline?: true): boolean =>
+    const lazyHere = (name: string, source: string, inline?: true): boolean =>
       client?.offers
         ? client.offers(name) === "lazy"
-        : frozen !== undefined && lazyAllowed({ name, source, package: pkg, inline: inline === true }, servers) && headLazy(frozen, { name, set: toolSetOf({ name, source }, servers) });
+        : frozen !== undefined && lazyAllowed({ name, source, inline: inline === true }) && headLazy(frozen, { name, set: toolSetOf({ source }) });
     return {
-      tools: shown.map(({ name, source, package: pkg, description, inline, cached }) => {
-        const mark = lazy({ name, source, package: pkg });
+      tools: shown.map(({ name, source, description, inline }) => {
+        const mark = lazy({ name, source, inline });
         return {
           name,
           ...(description !== undefined ? { description } : {}),
-          source: toolSource(name, source, servers),
+          source,
           // The portal's own tools are told from an extension's of the same name, so the page can group its code mode apart.
           ...(inline ? { inline: true as const } : {}),
-          ...(cached ? { cached: true as const } : {}),
           enabled: toolEnabled(name, defaults, exceptions),
           ...(held && name === CODEMODE_TOOL ? { byMode: true as const } : {}),
           defaultOn: !defaults.includes(name),
-          // Not offered one by one but found through `tool_search`, or an MCP server's through `mcp`: the page says so beside the switch.
+          // Not offered one by one but found through `tool_search`: the page says so beside the switch.
           // In a chat that is running it is what the chat froze that says so, which the marks may have left behind.
-          ...scriptedMark(mark.mcp === undefined && (client?.offers || frozen) ? { ...mark, lazy: lazyHere(name, source, pkg, inline) ? (true as const) : undefined } : mark, scripted),
+          ...scriptedMark(client?.offers || frozen ? { ...mark, lazy: lazyHere(name, source, inline) ? (true as const) : undefined } : mark, scripted),
         };
       }),
       live: Boolean(listed.length),
@@ -3006,9 +2973,7 @@ class SessionManager extends EventEmitter {
     const holds = modeHoldsCodemode(session?.mode);
     if (wantedOff.includes(CODEMODE_TOOL) && holds) throw new CodemodeHeld();
     const workspace = session?.workspace;
-    const view = mcpView();
-    // Not what the adapter no longer registers: the page did not show it, so it said nothing about it.
-    const listed = this.offered(reported, workspace, view);
+    const listed = reported;
     // What this call is answering about: the tools this session registered,
     // plus the ones it already holds an exception for. Not the portal-wide
     // catalogue — a tool that is merely not loaded in this run was not on the
@@ -3021,7 +2986,7 @@ class SessionManager extends EventEmitter {
     // chat). Without them a tool switched *on* would be in neither list, no
     // exception would be written, and the write would answer 200 while the
     // tool went on following the default.
-    const shown = (listed.length ? listed : shownTools(workspace, view)).map((t) => t.name);
+    const shown = (listed.length ? listed : shownTools(workspace)).map((t) => t.name);
     const answered = [...shown, ...held.off, ...held.on];
     // Against the project's default: an exception here is to what the chat would
     // otherwise have, so a project that switches a tool off needs no entry for it
@@ -3031,9 +2996,8 @@ class SessionManager extends EventEmitter {
     // kept for when the mode no longer does: this list said nothing about it.
     const kept = holds && parseToolsOff(session?.tools_off).includes(CODEMODE_TOOL) ? [CODEMODE_TOOL] : [];
     setSessionTools(sessionId, { off: [...own.off, ...kept], on: own.on });
-    const off = this.offFor(sessionId, listed.map((t) => t.name), view.known().keys());
-    const piOff = this.piOff(sessionId, reported, view);
-    await client?.setToolsOff?.(piOff);
+    const off = this.offFor(sessionId, listed.map((t) => t.name));
+    await client?.setToolsOff?.(off);
     return off;
   }
 
@@ -3060,7 +3024,6 @@ class SessionManager extends EventEmitter {
       if (only.mode !== undefined) return session?.mode === only.mode;
       return true;
     });
-    const view = mcpView();
     const done = await Promise.all(
       affected.map(async ([sessionId, { client }]) => {
         // Per session, like refreshSettings: the default is already stored, so
@@ -3068,7 +3031,7 @@ class SessionManager extends EventEmitter {
         // page showing the opposite of what the database now holds.
         try {
           const listed = client.getTools ? await client.getTools() : [];
-          const off = this.piOff(sessionId, listed, view, homes);
+          const off = this.offFor(sessionId, listed.map((t) => t.name), undefined, homes);
           await client.setToolsOff?.(off);
           return true;
         } catch (e) {
@@ -3501,8 +3464,7 @@ class SessionManager extends EventEmitter {
     const client = this.live.get(childId)?.client;
     if (!client?.setToolsOff) return;
     const reported = client.getTools ? await client.getTools() : [];
-    const piOff = this.piOff(childId, reported);
-    await client.setToolsOff(piOff);
+    await client.setToolsOff(this.offFor(childId, reported.map((t) => t.name)));
   }
 
   /**

@@ -5,7 +5,7 @@ import { test, expect, mockPortal, reply, type Answer } from './portal-mock';
  * Lazy tools in Settings → Tools: a set or a single tool marked lazy is not in the model's list one by
  * one, and the model reaches it through `tool_search`; direct keeps it in the list; and what has no mark is auto, which
  * the threshold decides by how long the list is. No switch: a mark changes nothing about whether a tool is on. The
- * marking is the server's; the page shows the mark and sends it.
+ * marking is the same as for any set; the page shows the mark and sends it.
  */
 const tools: { name: string; source: string; noLazy?: true; lazy?: true; mcp?: string }[] = [
   { name: 'heavy_open', source: 'pi-heavy' },
@@ -14,11 +14,11 @@ const tools: { name: string; source: string; noLazy?: true; lazy?: true; mcp?: s
 ];
 /** What cannot be lazy: one of pi's own, which the portal marks so. */
 const fixed: typeof tools = [{ name: 'bash', source: 'built in', noLazy: true }];
-/** An MCP server's tools: lazy as the server's "Register tools directly" says, which the portal tells each tool by. */
+/** An MCP server's tools, as pi names them: a set like any other, filed under the server. */
 const servers: typeof tools = [
-  { name: 'notes_read', source: 'notes', mcp: 'notes', lazy: true },
-  { name: 'notes_write', source: 'notes', mcp: 'notes', lazy: true },
-  { name: 'memory_recall', source: 'memory', mcp: 'memory' },
+  { name: 'mcp__notes__read', source: 'notes', mcp: 'notes' },
+  { name: 'mcp__notes__write', source: 'notes', mcp: 'notes' },
+  { name: 'mcp__memory__recall', source: 'memory', mcp: 'memory' },
 ];
 
 type Mark = 'lazy' | 'direct';
@@ -29,18 +29,16 @@ async function portal(page: Page, { marks: start = {} as Record<string, Mark>, r
   const puts: Record<string, Mark>[] = [];
   const limitPuts: { tokens: number; tools: number }[] = [];
   const dismissed: number[] = [];
-  /** The servers' "Register tools directly" as the page set it: [server, direct]. */
-  const directs: [string, boolean][] = [];
   let marks = { ...start };
   let limits = { tokens: 3000, tools: 20 };
   await mockPortal(page, async ({ path: p, method, json }) => {
     if (p === '/api/tools' && method === 'GET') {
       return {
         tools: [...tools, ...more].map((tool) => {
-          // An MCP server's tool says for itself (`lazy` above); a tool of pi's own has no mark; the others are as marked, else as the threshold has it.
-          const own = tool.mcp || tool.noLazy ? undefined : marks[`<tool>${tool.name}`] ?? marks[tool.source];
-          const lazy = tool.mcp ? tool.lazy : tool.noLazy ? undefined : own ? own === 'lazy' : byThreshold.includes(tool.source);
-          return { ...tool, defaultOn: !off.includes(tool.name), ...(own ? { mark: own } : tool.mcp || tool.noLazy ? {} : { auto: true }), ...(lazy ? { lazy: true } : {}) };
+          // A tool of pi's own has no mark; the others are as marked, else as the threshold has it, an MCP server's among them.
+          const own = tool.noLazy ? undefined : marks[`<tool>${tool.name}`] ?? marks[tool.source];
+          const lazy = tool.noLazy ? undefined : own ? own === 'lazy' : byThreshold.includes(tool.source);
+          return { ...tool, defaultOn: !off.includes(tool.name), ...(own ? { mark: own } : tool.noLazy ? {} : { auto: true }), ...(lazy ? { lazy: true } : {}) };
         }),
         off,
         names: {},
@@ -74,15 +72,10 @@ async function portal(page: Page, { marks: start = {} as Record<string, Mark>, r
       notice.splice(0);
       return { ok: true };
     }
-    const direct = /^\/api\/mcp\/servers\/([^/]+)\/direct$/.exec(p);
-    if (direct && method === 'PUT') {
-      directs.push([decodeURIComponent(direct[1]), json().direct]);
-      return { ok: true, direct: json().direct };
-    }
   }, { settings: true });
   await page.addInitScript(() => localStorage.removeItem('toolGroupsOpen'));
   await page.goto('/settings/tools');
-  return { puts, directs, limitPuts, dismissed };
+  return { puts, limitPuts, dismissed };
 }
 
 test('nothing is marked at first: every group and tool is auto, and every tool on', async ({ page }) => {
@@ -248,37 +241,30 @@ test('pi\'s own tools have no mark to set, and the groups that can be lazy have 
   await expect(page.getByRole('button', { name: 'Lazy or direct bash' })).toHaveCount(0);
 });
 
-test('an MCP server\'s group has the lazy button, and it is the server\'s Register tools directly: lazy is off, and a tool cannot differ from its server', async ({ page }) => {
-  const { puts, directs } = await portal(page, { more: servers });
-  const notes = page.getByRole('button', { name: 'Lazy or direct notes', exact: true });
-  const memory = page.getByRole('button', { name: 'Lazy or direct memory', exact: true });
-  // Lazy is the adapter's default; a server that registers its tools directly (Understory, for one) is not.
-  await expect(notes).toHaveAttribute('aria-pressed', 'true');
-  await expect(memory).toHaveAttribute('aria-pressed', 'false');
-  await expect(notes).toHaveAttribute('title', /through the `mcp` tool/);
-  await expect(notes).toHaveAttribute('title', /Register tools directly/);
+test('an MCP server is a group like any other: auto at first, and its mark goes round from its header, its tools on throughout', async ({ page }) => {
+  const { puts } = await portal(page, { more: servers, resolved: ['notes'] });
+  const notes = page.getByRole('button', { name: 'Lazy or direct notes' });
+  const memory = page.getByRole('button', { name: 'Lazy or direct memory' });
+  // Auto, as for any group: by size, which put notes behind the search and left memory in the list.
+  await expect(notes).toHaveText('auto, lazy');
+  await expect(memory).toHaveText('auto');
   await page.getByRole('button', { name: /^notes/ }).click();
-  const read = page.getByRole('button', { name: 'Lazy or direct notes_read' });
-  await expect(read).toHaveText('lazy');
-  await expect(read).toBeDisabled();
-  await expect(read).toHaveAttribute('title', /Set for the whole server/);
-
-  // Registering the tools directly: the setting of the server, and no mark of the portal's.
+  const read = page.getByRole('button', { name: 'Lazy or direct mcp__notes__read' });
+  await expect(read).toBeEnabled();
+  await expect(read).toHaveText('auto, lazy');
   await notes.click();
-  await expect.poll(() => directs).toEqual([['notes', true]]);
-  await expect(notes).toHaveAttribute('aria-pressed', 'false');
-  await expect(read).toHaveText('lazy');
+  await expect.poll(() => puts.at(-1)).toEqual({ notes: 'lazy' });
+  await expect(notes).toHaveText('lazy');
+  await notes.click();
+  await expect.poll(() => puts.at(-1)).toEqual({ notes: 'direct' });
+  await expect(notes).toHaveText('direct');
+  await notes.click();
+  await expect.poll(() => puts.at(-1)).toEqual({});
   // The server's tools are on as they were.
   await expect(page.getByRole('button', { name: /^notes/ })).toContainText('2 on');
-  // And lazy again.
-  await notes.click();
-  await expect.poll(() => directs).toEqual([['notes', true], ['notes', false]]);
-  await expect(notes).toHaveAttribute('aria-pressed', 'true');
-  // A server that registers its tools directly can be lazy too, from its own button.
   await memory.click();
-  await expect.poll(() => directs.at(-1)).toEqual(['memory', false]);
-  await expect(memory).toHaveAttribute('aria-pressed', 'true');
-  expect(puts).toEqual([]);
+  await expect.poll(() => puts.at(-1)).toEqual({ memory: 'lazy' });
+  await expect(memory).toHaveText('lazy');
 });
 
 test('a lazy tool carries its label in a project\'s switches, and keeps it as the switch is flipped off and on', async ({ page }) => {

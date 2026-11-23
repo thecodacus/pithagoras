@@ -18,7 +18,7 @@ test('compacts metadata while retaining deep content, refs, state and URLs', () 
 test('does not rewrite other sections or non-snapshot tools', () => {
  const text='### Result\n```yaml\n- generic [ref=e1]: hello\n```';
  assert.equal(cleanBrowserSnapshot(text),text);
- assert.ok(isBrowserSnapshot('browser_browser_snapshot',{}));
- assert.ok(isBrowserSnapshot('mcp',{tool:'browser_browser_snapshot'}));
+ assert.ok(isBrowserSnapshot('mcp__browser__browser_snapshot',{}));
+ assert.equal(isBrowserSnapshot('mcp',{tool:'browser_snapshot'}),false);
  assert.equal(isBrowserSnapshot('browser_take_screenshot',{}),false);
 });

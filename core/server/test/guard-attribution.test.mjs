@@ -10,7 +10,7 @@ import { inProcessHome } from "./server-harness.mjs";
  * namespace it was registered under, the resource tools by their `server` argument, and what the portal's search and
  * describe show of the tools by the names they say they quoted. A name that merely looks like a server's tool is no server's.
  * The tools here are fakes registered the way pi's MCP support registers a server's (name and namespace), so this does
- * not depend on the adapter being there.
+ * not depend on a server being there.
  */
 const home = inProcessHome("pithagoras-guard-attribution-");
 const agent = process.env.PI_CODING_AGENT_DIR;
@@ -42,14 +42,13 @@ const NAMESPACES = {
   mcp__ghost__find: "mcp__ghost", // a server that is not configured
   mcp__browser__browser_open: "mcp__browser",
 };
-const adapterTools = ["old_jira_get_issue"];
 
 /** A guard for one conversation, its handlers by name, with the tools of the portal's own search told as such. */
 function guard({ searchNow = () => false, session = "attribution" } = {}) {
   const h = {};
   guardExtension(
     "t", () => ({ role: "primary" }), session, () => new Set(), () => ({ allowed: true, allowlist: [] }), undefined, [], () => new Set(),
-    searchNow, () => undefined, (name) => adapterTools.includes(name), () => undefined, false, (name) => NAMESPACES[name],
+    searchNow, () => undefined, () => undefined, false, (name) => NAMESPACES[name],
   )({ on: (k, f) => (h[k] = f) });
   return h;
 }
@@ -77,15 +76,13 @@ test("a tool pi's MCP support registered is its server's by the namespace, whate
   }
 });
 
-test("a name that looks like a server's tool is no server's: no pattern of names stands for the adapter's tools or for pi's", () => {
+test("a name that looks like a server's tool is no server's: no pattern of names stands for pi's", () => {
   const h = guard();
   for (const name of ["mcp_page", "mcp__pages__page", "mcp_anything", "mcp__not__registered"]) {
     assert.equal(wrapped(read(h, name)), false, `${name} is registered under no server`);
   }
-  // The adapter's script is the one name of that kind that stands for every server, and is the adapter's.
-  for (const name of ["mcp_script", "mcpScript", "mcp"]) assert.equal(wrapped(read(h, name, { tool: "x" })), true, name);
-  // And what the adapter registered is still a server's: the adapter is not gone yet.
-  assert.equal(wrapped(read(h, "old_jira_get_issue")), true);
+  // Nor is a tool of the old adapter's names, which stood for every server: none is registered any more.
+  for (const name of ["mcp_script", "mcpScript", "mcp"]) assert.equal(wrapped(read(h, name, { tool: "x" })), false, name);
 });
 
 test("the resource tools are judged by the server they name: a listing of every server's, and a server that is not trusted, are somebody else's words", () => {
@@ -120,7 +117,6 @@ test("a result of the portal's search or describe is outside content when it sho
       assert.equal(shows(action, []), false, `${action}: nothing shown`);
       assert.equal(shows(action, ["mcp__jira__get_issue", "mcp__pages__read_page"]), true, `${action}: one of them is not trusted`);
       assert.equal(shows(action, ["docs_open", "mcp__ghost__find"]), true, `${action}: a server that is not configured`);
-      assert.equal(shows(action, ["old_jira_get_issue"]), true, `${action}: an adapter tool of a server that is not trusted`);
     }
     // A result that does not say which tools it quoted is held for outside content, and a failure has no words of a server's.
     assert.equal(wrapped(read(h, "tool_search", { action: "search" }, { details: {} })), true, "it does not say");
@@ -145,7 +141,7 @@ test("a flagged search result holds the conversation back like any other flagged
 test("the resource tools and the ways to other tools are never approved on files", () => {
   const files = (name) => declaredFiles({ name, guard: { files: ["uri"] }, parameters: { properties: { uri: { type: "string" } } } });
   assert.deepEqual(files("show_file"), ["uri"], "a tool that declares its files");
-  for (const name of ["read_mcp_resource", "list_mcp_resources", "list_mcp_resource_templates", "tool_search", "codemode", "mcp", "bash"]) {
+  for (const name of ["read_mcp_resource", "list_mcp_resources", "list_mcp_resource_templates", "tool_search", "codemode", "bash"]) {
     assert.equal(files(name), undefined, name);
   }
 });

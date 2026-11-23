@@ -59,15 +59,11 @@ export function argsSummary(input: unknown, max = 160): string | undefined {
 
 /**
  * A tool call as a channel says it: its name and what it was given. Through
- * the MCP adapter, or the `tool_search` tool that reaches the lazy ones, the tool
- * inside and what that was given.
+ * the `tool_search` tool that reaches the lazy ones, the tool inside and what that was given.
  */
 export function describeToolCall(payload: any): { name: string; detail?: string } {
   const name = String(payload?.toolName ?? payload?.name ?? "tool");
   const input = payload?.input ?? payload?.args ?? payload?.parameters;
-  if (name === "mcp" && input && typeof input === "object" && typeof input.tool === "string" && input.tool) {
-    return { name: input.tool, detail: argsSummary(input.args && typeof input.args === "object" ? input.args : undefined, 80) };
-  }
   const lazy = isSearchTool(name) ? calledThrough(input) : undefined;
   if (lazy) return { name: lazy.name, detail: argsSummary(lazy.args, 80) };
   return { name, detail: argsSummary(input, 80) };

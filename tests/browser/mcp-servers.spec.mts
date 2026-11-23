@@ -1,20 +1,23 @@
 import { type Page } from '@playwright/test';
-import { test, expect, mockPortal } from './portal-mock';
+import { test, expect, mockPortal, reply } from './portal-mock';
 
 /** Settings → MCP over canned answers, with every save that was sent. */
-async function portal(page: Page) {
+async function portal(page: Page, extra: object[] = []) {
   const saves: string[] = [];
   const mcp = {
-    path: '/a/mcp.json', exists: true, adapterInstalled: true, adapterSpec: 'npm:pi-mcp-adapter', settings: {}, raw: '{}', parseError: null,
+    path: '/a/mcp.json', exists: true, raw: '{}', parseError: null,
     servers: [
-      { name: 'github', entry: { url: 'https://mcp.example.test', auth: 'oauth', headers: { 'X-Org': 'a' } }, transport: 'http', disabled: false },
-      { name: 'notes', entry: { command: 'notes-mcp' }, transport: 'stdio', disabled: false },
+      { name: 'github', entry: { url: 'https://mcp.example.test', auth: 'oauth', headers: { 'X-Org': 'a' } }, transport: 'http', enabled: true, problem: null, ignored: null },
+      { name: 'notes', entry: { command: 'notes-mcp' }, transport: 'stdio', enabled: true, problem: null, ignored: null },
+      ...extra,
     ],
   };
   await mockPortal(page, ({ path, method, json }) => {
     if (path === '/api/mcp') return mcp;
     if (path.startsWith('/api/mcp/servers/') && method === 'PUT') {
       saves.push(`${path.slice('/api/mcp/servers/'.length)} from ${json().from}`);
+      // What the server answers to a server that is on with a key pi does not read.
+      if (path.endsWith('/gated') && json().entry?.enabled !== false) return reply(400, { error: 'pi does not read excludeTools (a list of tools it leaves out), so a server that is on would run without it' });
       return { ok: true };
     }
   }, { settings: true });
@@ -51,4 +54,25 @@ test('a server cannot be renamed onto another, and keeps its own name for an edi
   await name.fill('notes');
   await dialog.getByRole('button', { name: 'Save' }).click();
   await expect.poll(() => saves).toEqual(['notes from notes']);
+});
+
+test('a server the move left off for a key pi does not read says why in its row, and switching it on shows the refusal', async ({ page }) => {
+  const gated = { name: 'gated', entry: { command: 'gated-mcp', excludeTools: ['drop_db'], enabled: false }, transport: 'stdio', enabled: false, problem: null, ignored: 'excludeTools (a list of tools it leaves out)' };
+  const { saves, dialog } = await portal(page, [gated]);
+  const row = dialog.getByRole('listitem').filter({ hasText: 'gated' });
+  await expect(row).toContainText('pi does not read this: excludeTools');
+  await expect(row).toContainText('cannot be switched on');
+  await expect(dialog.getByRole('listitem').filter({ hasText: 'notes' })).not.toContainText('pi does not read');
+  await row.getByRole('checkbox').click();
+  await expect(dialog.getByRole('alert')).toContainText('pi does not read excludeTools');
+  expect(saves).toEqual(['gated from gated']);
+});
+
+
+test('a server whose calls ask the person first shows which tools in its row; one without a gate says nothing of it', async ({ page }) => {
+  const mail = { name: 'mail', entry: { url: 'https://mail.example.test/mcp' }, transport: 'http', enabled: true, problem: null, ignored: null, approve: ['send_*', 'delete_mail'] };
+  const { dialog } = await portal(page, [mail]);
+  const row = dialog.getByRole('listitem').filter({ hasText: 'mail.example' });
+  await expect(row).toContainText('Asks you before a call of: send_*, delete_mail');
+  await expect(dialog.getByRole('listitem').filter({ hasText: 'notes' })).not.toContainText('Asks you before');
 });

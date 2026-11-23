@@ -115,29 +115,29 @@ test("the chat asking is the one whose memory tool runs, the newest first, its s
   llm.forgetAsking();
   call("chat-a", "r1", "read", "start");
   assert.equal(llm.askingChat(), undefined, "only the memory's tools count");
-  call("chat-a", "a1", "understory_memory_add", "start");
-  call("chat-b", "b1", "understory_memory_query", "start");
+  call("chat-a", "a1", "mcp__understory__memory_add", "start");
+  call("chat-b", "b1", "mcp__understory__memory_query", "start");
   assert.equal(llm.askingChat(), "chat-b", "the newest asking");
-  call("chat-b", "b1", "understory_memory_query", "end");
+  call("chat-b", "b1", "mcp__understory__memory_query", "end");
   assert.equal(llm.askingChat(), "chat-a");
-  call("chat-a", "a1", "understory_memory_add", "end");
+  call("chat-a", "a1", "mcp__understory__memory_add", "end");
   assert.equal(llm.askingChat(), "chat-b", "none asking now: the last that started asking");
 
   // A chat whose pi is gone asks nothing any more.
-  call("chat-gone", "g1", "understory_memory_add", "start");
+  call("chat-gone", "g1", "mcp__understory__memory_add", "start");
   assert.equal(llm.askingChat(), "chat-gone");
   host.chatLife("stopped", "chat-gone");
   assert.equal(llm.askingChat(), undefined, "nobody asking: the model new chats start on");
   // A subagent's calls are its chat's, under its own name; one killed mid-call asks no more.
   llm.forgetAsking();
-  host.chatEvent("chat-s", { type: "portal_subagent", op: "event", id: "sub-1", event: { type: "tool_execution_start", toolCallId: "c1", toolName: "understory_memory_query" } });
+  host.chatEvent("chat-s", { type: "portal_subagent", op: "event", id: "sub-1", event: { type: "tool_execution_start", toolCallId: "c1", toolName: "mcp__understory__memory_query" } });
   assert.equal(llm.askingChat(), "chat-s");
   host.chatEvent("chat-s", { type: "portal_subagent", op: "end", id: "sub-1" });
-  call("chat-t", "t1", "understory_memory_query", "start");
-  call("chat-t", "t1", "understory_memory_query", "end");
+  call("chat-t", "t1", "mcp__understory__memory_query", "start");
+  call("chat-t", "t1", "mcp__understory__memory_query", "end");
   assert.equal(llm.askingChat(), "chat-t", "chat-s is not held asking by a call that never ended");
   for (const life of ["deleted", "finished"] as const) {
-    call("chat-x", "x1", "understory_memory_query", "start");
+    call("chat-x", "x1", "mcp__understory__memory_query", "start");
     host.chatLife(life, "chat-x");
     assert.equal(llm.askingChat(), undefined, life);
   }
@@ -146,7 +146,7 @@ test("the chat asking is the one whose memory tool runs, the newest first, its s
 test("the asking chat's model is asked with its key, and its whole answer passes through", async () => {
   llm.forgetAsking();
   live = { "asking-chat": { provider: "fake", id: "m" } };
-  call("asking-chat", "call-1", "understory_memory_add", "start");
+  call("asking-chat", "call-1", "mcp__understory__memory_add", "start");
   mode = "answer";
   delay = 30;
   const r = await ask("test-key");

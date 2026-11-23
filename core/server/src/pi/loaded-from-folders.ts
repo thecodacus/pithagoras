@@ -6,14 +6,14 @@ import { piAgentDir } from "../pi-settings.js";
 import { AGENT_NAME_FILE, CONTEXT_FILES, WATCH_FILE } from "./context-files.js";
 
 /**
- * What the portal, pi, the MCP adapter and the agent's heartbeat load out of a
+ * What the portal, pi and the agent's heartbeat load out of a
  * folder on their own, with nobody asked: the one place that says it.
  *
  * What somebody who is not the primary user may write is held to this list (see
  * writesInstructions in guard.ts), and so is the page on roles in the guide, which
  * a test compares with it. A file here becomes the agent's instructions or its
  * config, or a process of the portal, in the primary user's next conversation or
- * the agent's next look, whoever wrote it. Anything pi, the adapter or the portal
+ * the agent's next look, whoever wrote it. Anything pi or the portal
  * learns to load is added here and nowhere else; the guard then holds it, and a
  * test fails until the page names it.
  *
@@ -23,7 +23,7 @@ import { AGENT_NAME_FILE, CONTEXT_FILES, WATCH_FILE } from "./context-files.js";
  */
 
 /** Who reads it. */
-export type LoadedBy = "portal" | "heartbeat" | "pi" | "mcp";
+export type LoadedBy = "portal" | "heartbeat" | "pi";
 
 /** What a write there becomes, which is what the refusal says. */
 export type LoadedAs = "context" | "watch" | "agent-name" | "instructions" | "tools" | "code";
@@ -52,18 +52,13 @@ export const LOADED_IN_FOLDERS: LoadedEntry[] = [
   { name: WATCH_FILE, by: "heartbeat", as: "watch" },
   // pi: the project's instructions, from the folder and from every one above it, and the folders it loads
   // its settings, system prompt, extensions, skills, prompts and themes from, and its packages.
-  // The MCP adapter's `.pi/mcp.json` and `.agents/mcp.json` are in them.
+  // pi's MCP support reads a trusted project's `.pi/mcp.json`, which is in them: the servers it names are processes of the portal.
   // pi reads the first of these a folder has, AGENTS.override.md before AGENTS.md (pi 1.x).
   { name: "AGENTS.override.md", by: "pi", as: "instructions", above: true },
   { name: "AGENTS.md", by: "pi", as: "instructions", above: true },
   { name: "CLAUDE.md", by: "pi", as: "instructions", above: true },
   { name: ".pi", by: "pi", as: "instructions", folder: true },
   { name: ".agents", by: "pi", as: "instructions", folder: true },
-  // The MCP adapter: the tool servers it starts, each a process of the portal, from the folder's own config
-  // and from the ones it imports (`.vscode/mcp.json`, and an `opencode.json` found from here up to the git root).
-  { name: ".mcp.json", by: "mcp", as: "tools" },
-  { name: ".vscode/mcp.json", by: "mcp", as: "tools" },
-  { name: "opencode.json", by: "mcp", as: "tools", above: true },
 ];
 
 export interface LoadedPlace {
@@ -74,37 +69,21 @@ export interface LoadedPlace {
 }
 
 /**
- * What is read from a place of its own: pi's agent folder, the folders that ship
- * with the portal and are handed to pi or loaded by it, the folder channel
- * packages are installed in, and the MCP adapter's configs in the home of the
- * user the portal runs as and in the folder the portal itself runs in (it reads
- * that one for every conversation, as it starts). Asked each time, as they can be
- * moved by the environment.
+ * What is read from a place of its own: pi's agent folder (its `mcp.json` among the files, whose servers are processes
+ * of the portal), the folders that ship with the portal and are handed to pi or loaded by it, and the folder channel
+ * packages are installed in. Asked each time, as they can be moved by the environment.
  */
 export function loadedPlaces(): LoadedPlace[] {
   const home = os.homedir();
   const places: (LoadedPlace | undefined)[] = [
     { path: piAgentDir(), by: "pi", as: "instructions" },
-    // pi's user skills (`~/.agents/skills`) and the adapter's user-wide config (`~/.agents/mcp.json`), for every conversation.
+    // The tool servers every conversation starts, each a process of the portal.
+    { path: path.join(piAgentDir(), "mcp.json"), by: "pi", as: "tools" },
+    // pi's user skills (`~/.agents/skills`), for every conversation.
     { path: path.join(home, ".agents"), by: "pi", as: "instructions" },
     ...["skills", "extensions"].map((name) => ofBundled(name, "pi", "instructions")),
     ofBundled("channels", "portal", "code"),
     { path: channelsPath(), by: "portal", as: "code" },
-    // pi-mcp-adapter's config.ts: the shared config, and the ones it can import from other tools.
-    ...[
-      path.join(".config", "mcp", "mcp.json"),
-      path.join(".cursor", "mcp.json"),
-      path.join(".claude", "mcp.json"),
-      ".claude.json",
-      path.join(".claude", "claude_desktop_config.json"),
-      path.join("Library", "Application Support", "Claude", "claude_desktop_config.json"),
-      path.join(".codex", "config.toml"),
-      path.join(".codex", "config.json"),
-      path.join(".config", "opencode", "opencode.json"),
-      path.join(".windsurf", "mcp.json"),
-    ].map((file): LoadedPlace => ({ path: path.join(home, file), by: "mcp", as: "tools" })),
-    // Its project config, from the folder the portal runs in: the same names it reads from a conversation's folder.
-    ...LOADED_IN_FOLDERS.filter((entry) => entry.by === "mcp").map((entry): LoadedPlace => ({ path: path.join(process.cwd(), ...entry.name.split("/")), by: entry.by, as: entry.as })),
   ];
   return places.filter((place): place is LoadedPlace => place !== undefined);
 }

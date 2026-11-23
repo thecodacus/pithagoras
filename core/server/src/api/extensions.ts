@@ -634,11 +634,7 @@ export function extensionsRouter(): Router {
           } catch {
             // metadata is a nicety; keep going without it
           }
-          // The MCP adapter keeps its settings in mcp.json, not pi's
-          // settings.json. The key scanner finds them all the same, and a form
-          // built from them would write keys the adapter never reads — so it
-          // gets no config page here. Settings → MCP edits the real file.
-          const keys = info.name === "pi-mcp-adapter" ? [] : settingKeysOf(pkg.path, /^(npm|git):/.test(pkg.spec));
+          const keys = settingKeysOf(pkg.path, /^(npm|git):/.test(pkg.spec));
           for (const key of keys) {
             info.settings.push({
               key,

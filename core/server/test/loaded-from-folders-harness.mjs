@@ -4,7 +4,7 @@ import { mkdirSync, rmSync, symlinkSync } from "node:fs";
 import path from "node:path";
 import { inProcessHome, scratch } from "./server-harness.mjs";
 
-// What pi, the MCP adapter, the heartbeat and the portal load out of a folder is said once, in
+// What pi, the heartbeat and the portal load out of a folder is said once, in
 // pi/loaded-from-folders.ts. What a colleague or a guest may write is held to that list, and a
 // test that walks it fails for a name that is on it and not held, wherever a conversation runs.
 

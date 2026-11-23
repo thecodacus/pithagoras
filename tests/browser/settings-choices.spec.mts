@@ -24,7 +24,7 @@ test('the audit page\'s filter is a radio group, and the one that holds is check
 });
 
 test('the transport of an MCP server is a radio group', async ({ page }) => {
-  await portal(page, { '/api/mcp': { path: '/a/mcp.json', exists: true, adapterInstalled: true, adapterSpec: 'npm:pi-mcp-adapter', servers: [], settings: {}, raw: '{}', parseError: null } });
+  await portal(page, { '/api/mcp': { path: '/a/mcp.json', exists: true, servers: [], raw: '{}', parseError: null } });
   await page.goto('/settings/mcp');
   await page.getByRole('dialog', { name: 'Settings' }).getByRole('button', { name: 'Add server' }).click();
   const transport = page.getByRole('radiogroup', { name: 'Transport' });
@@ -193,7 +193,7 @@ test('switching a channel on or off does not take back what was typed in it and 
 
 test('removing an MCP server or an installed package asks first, and names it', async ({ page }) => {
   const deleted: string[] = [];
-  const mcp = { path: '/a/mcp.json', exists: true, adapterInstalled: true, adapterSpec: 'npm:pi-mcp-adapter', servers: [{ name: 'files', entry: { command: 'npx' }, transport: 'stdio', disabled: false }], settings: {}, raw: '{}', parseError: null };
+  const mcp = { path: '/a/mcp.json', exists: true, servers: [{ name: 'files', entry: { command: 'npx' }, transport: 'stdio', enabled: true, problem: null }], raw: '{}', parseError: null };
   await portal(page, {
     '/api/mcp': mcp,
     '/api/extensions': { settingsPath: '/a/settings.json', extensions: [{ spec: 'npm:pi-notes', name: 'pi-notes', settings: [], enabled: true, scope: 'user' }] },
@@ -227,49 +227,29 @@ test('removing an MCP server or an installed package asks first, and names it', 
   await expect.poll(() => deleted).toEqual(['DELETE mcp files', 'DELETE package npm:pi-notes']);
 });
 
-/** The MCP file as the page reads it: the servers, the adapter's settings and the text of the file, which a change of either rewrites. */
-function mcpFile(servers: { name: string; disabled: boolean }[], settings: Record<string, unknown> = {}) {
-  const raw = () => JSON.stringify({ mcpServers: Object.fromEntries(servers.map((s) => [s.name, { command: 'npx', ...(s.disabled ? { disabled: true } : {}) }])), settings }, null, 2) + '\n';
+/** The MCP file as the page reads it: the servers and the text of the file, which a change of either rewrites. */
+function mcpFile(servers: { name: string; enabled: boolean }[]) {
+  const raw = () => JSON.stringify({ mcpServers: Object.fromEntries(servers.map((s) => [s.name, { command: 'npx', ...(s.enabled ? {} : { enabled: false }) }])) }, null, 2) + '\n';
   return {
-    servers, settings,
-    view: () => ({ path: '/a/mcp.json', exists: true, adapterInstalled: true, adapterSpec: 'npm:pi-mcp-adapter', settings, raw: raw(), parseError: null, servers: servers.map((s) => ({ name: s.name, entry: { command: 'npx' }, transport: 'stdio', disabled: s.disabled })) }),
+    servers,
+    view: () => ({ path: '/a/mcp.json', exists: true, raw: raw(), parseError: null, servers: servers.map((s) => ({ name: s.name, entry: { command: 'npx' }, transport: 'stdio', enabled: s.enabled, problem: null })) }),
   };
 }
 
 test('the raw editor follows the file when the list above rewrites it, so saving it does not undo that', async ({ page }) => {
-  const file = mcpFile([{ name: 'files', disabled: false }]);
+  const file = mcpFile([{ name: 'files', enabled: true }]);
   await portal(page, {});
   await page.route('**/api/mcp', (route) => route.fulfill({ json: file.view() }));
   await page.route('**/api/mcp/servers/files', (route) => {
-    file.servers[0].disabled = route.request().postDataJSON().entry.disabled === true;
+    file.servers[0].enabled = route.request().postDataJSON().entry.enabled !== false;
     return route.fulfill({ json: { ok: true } });
   });
   await page.goto('/settings/mcp');
   const dialog = page.getByRole('dialog', { name: 'Settings' });
   await dialog.getByRole('button', { name: 'Edit the file directly' }).click();
   const raw = dialog.getByRole('textbox').last();
-  await expect(raw).not.toHaveValue(/disabled/);
+  await expect(raw).not.toHaveValue(/enabled/);
   // The server is switched off in the list: the file says so, and so does the editor.
   await dialog.getByRole('checkbox', { name: 'On' }).click();
-  await expect(raw).toHaveValue(/"disabled": true/);
-});
-
-test('adapter settings that could not be saved stay to be saved again', async ({ page }) => {
-  const file = mcpFile([]);
-  const saves: unknown[] = [];
-  await portal(page, {});
-  await page.route('**/api/mcp', (route) => route.fulfill({ json: file.view() }));
-  await page.route('**/api/mcp/settings', (route) => {
-    saves.push(route.request().postDataJSON());
-    return route.fulfill({ status: 500, json: { error: 'The file is read-only' } });
-  });
-  await page.goto('/settings/mcp');
-  const dialog = page.getByRole('dialog', { name: 'Settings' });
-  await dialog.getByPlaceholder('10').fill('5');
-  await dialog.getByRole('button', { name: 'Save', exact: true }).click();
-  await expect.poll(() => saves.length).toBe(1);
-  await expect(dialog.getByRole('alert')).toContainText('The file is read-only');
-  // Still there to be tried again, with what was typed.
-  await expect(dialog.getByRole('button', { name: 'Save', exact: true })).toBeVisible();
-  await expect(dialog.getByPlaceholder('10')).toHaveValue('5');
+  await expect(raw).toHaveValue(/"enabled": false/);
 });

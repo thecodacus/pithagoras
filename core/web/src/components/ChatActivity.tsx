@@ -296,8 +296,8 @@ export function ToolCall({
 }) {
   const [open, setOpen] = useState(false);
   // Whatever extension it came from: nothing below is keyed to one tool but
-  // the shell, which is shown as a terminal would show it. Called through the
-  // MCP adapter, it is the tool inside, with what that was given.
+  // the shell, which is shown as a terminal would show it. Called through
+  // `tool_search`, it is the tool inside, with what that was given.
   const call = unwrapCall(item.name, item.args);
   const name = call.name;
   const wrapped = name !== item.name;

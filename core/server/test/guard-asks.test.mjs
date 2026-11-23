@@ -54,7 +54,7 @@ let n = 0;
 /** A guard as a chat has it, its handlers by name: who is speaking, and whether the chat shows dialogs. */
 function guardAs({ role = "primary", key, dialogs = true } = {}) {
   const h = { session: `guard-asks-${n++}` };
-  guardExtension("t", () => ({ role, key }), h.session, () => new Set(), () => [], undefined, [], () => new Set(), () => false, () => undefined, () => false, declared, dialogs)({
+  guardExtension("t", () => ({ role, key }), h.session, () => new Set(), () => [], undefined, [], () => new Set(), () => false, () => undefined, declared, dialogs)({
     on: (k, f) => (h[k] = f),
   });
   return h;
