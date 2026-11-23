@@ -1384,8 +1384,10 @@ adapter out of pi's packages. Where the adapter was not installed, nothing read
 the ones you want. Every server is **Auto** in Settings → Tools, so a
 big one goes behind `tool_search` by itself: mark one **Direct** where you had its
 tools registered directly. A bearer token becomes the `Authorization` header pi takes
-(Understory's entry among them). A server pi cannot take as it was (a Unix socket, a
-list of the tools it offers or leaves out, `$env:NAME` variables, a `$` or a leading
+(Understory's entry among them). A list of the tools a server offers or leaves out
+(`includeTools`, `excludeTools`) becomes pi's `toolExposure`, with the tools it left
+out `hidden`, and the server stays on. A server pi cannot take as it was (a Unix socket,
+`$env:NAME` variables, a `$` or a leading
 `!!` in a value of `env` or `headers`, a name with a
 dot, an address that ends in `/sse`) stays in the file as it was, switched off, and is
 named in the one line the log gets (Settings → Logs). pi does not read the keys that kept

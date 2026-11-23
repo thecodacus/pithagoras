@@ -46,7 +46,8 @@ tools ranks its tools by it), and `enabled: false` keeps an entry that is never
 connected. What pi accepts is pi's own check: an entry it does not accept is
 shown in the list with the reason, and pi skips it while the others connect. A
 server the move from `pi-mcp-adapter` left off because of a key pi does not read
-(`includeTools`, `excludeTools`, `exposeResources: false`) says so in
+(`exposeResources: false`, or `includeTools` and `excludeTools` written in an entry
+since: the move itself turns those into `toolExposure`) says so in
 its row, and cannot be switched on before the key is taken out or written in pi's
 words. `approveTools` is no such key: pi has no gate, so the adapter's key is
 refused wherever an entry is written (the form, the import, the file's editor for a

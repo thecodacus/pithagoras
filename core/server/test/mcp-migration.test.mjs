@@ -63,9 +63,11 @@ test("the adapter's servers are put into pi's words: its keys go, on and off sta
   assert.deepEqual(s.plain, { url: "https://p.example.test/mcp", headers: { "X-Org": "a" } }, "pi signs in by itself where the server asks");
   assert.deepEqual(s.keepsOwnHeader, { url: "https://n.example.test/mcp", headers: { Authorization: "Bearer ${NOTION}" } }, "oauth: false is the adapter's word and loses nothing");
   assert.deepEqual(s.ownAuth.auth, { provider: "someone" }, "pi's own auth key is kept");
-  assert.deepEqual(moved.carried.sort(), ["docs", "gated", "gatedList", "keepsOwnHeader", "notes", "ownAuth", "paused", "plain"]);
-  assert.deepEqual(moved.left.map((l) => l.name).sort(), ["blocked", "docs.v2", "envish", "filtered", "nothing", "sock"]);
-  for (const name of ["blocked", "docs.v2", "envish", "filtered", "sock"]) assert.equal(s[name].enabled, false, `${name} is off`);
+  assert.deepEqual(moved.carried.sort(), ["docs", "filtered", "gated", "gatedList", "keepsOwnHeader", "notes", "ownAuth", "paused", "plain"]);
+  assert.deepEqual(moved.left.map((l) => l.name).sort(), ["blocked", "docs.v2", "envish", "nothing", "sock"]);
+  for (const name of ["blocked", "docs.v2", "envish", "sock"]) assert.equal(s[name].enabled, false, `${name} is off`);
+  // What a server left out is pi's toolExposure now, and the server stays on.
+  assert.deepEqual(s.filtered, { command: "f", toolExposure: { "delete_*": "hidden" } });
   assert.deepEqual(s.docs, { url: "https://docs.example.test/mcp", headers: { Authorization: "Bearer ${DOCS_TOKEN}" } }, "the bearer variable is an Authorization header in pi's words, and the adapter's keys are gone");
   // approveTools is no reason to leave a server off: the server keeps its on/off, and what it asked about is its `approve`, not a key of the file.
   assert.deepEqual(s.gated, { command: "node" });
@@ -73,12 +75,49 @@ test("the adapter's servers are put into pi's words: its keys go, on and off sta
   assert.deepEqual(moved.approve, { gated: ["*"], gatedList: ["delete_*"] });
   assert.equal("nothing" in s, false, "an entry that is no server is only named");
   assert.match(moved.left.find((l) => l.name === "envish").why, /\$env:NAME/);
-  assert.match(moved.left.find((l) => l.name === "filtered").why, /leaves out/);
   assert.match(moved.left.find((l) => l.name === "docs.v2").why, /name/);
   assert.equal("settings" in moved.file || "imports" in moved.file, false);
   assert.deepEqual(moved.imports, ["cursor", "claude-code"]);
   // Where nothing ran under the adapter, nothing starts now.
   assert.equal(carryOver(pi, ADAPTER_FILE, true).file.mcpServers.notes.enabled, false);
+});
+
+test("the adapter's lists of the tools a server offers or leaves out are pi's toolExposure, in the order pi reads it, with the server on", async () => {
+  const pi = await piMcp();
+  const file = JSON.stringify({
+    mcpServers: {
+      // As a production file has them: the adapter's names, the server's prefix and the tool's own name.
+      pangolin: { url: "https://p.example.test/mcp", excludeTools: ["pangolin_admin_orgs", "pangolin_org_by_orgId_users"] },
+      // A pattern across the prefix, and a tool whose own name has a dash, which the adapter's name has as an underscore.
+      kube: { command: "k", excludeTools: ["kube_Delete*", "kube_get_thing"] },
+      // Only some tools: the rest hidden, what is offered direct, and what both lists name left out.
+      narrow: { command: "n", includeTools: ["narrow_read", "narrow_list_*", "narrow_drop"], excludeTools: ["narrow_drop"], toolExposure: { read: "deferred" } },
+    },
+  });
+  const moved = carryOver(pi, file, false, new Map([["kube", ["get-thing", "DeleteNamespace", "list"]]]));
+  const s = moved.file.mcpServers;
+  assert.deepEqual(moved.left, []);
+  // The tool's own name is hidden; the name as written stays hidden too, as the adapter matched a list against both.
+  assert.equal(s.pangolin.url, "https://p.example.test/mcp");
+  assert.equal(s.pangolin.toolExposure.admin_orgs, "hidden");
+  assert.equal(s.pangolin.toolExposure.org_by_orgId_users, "hidden");
+  assert.equal(Object.values(s.pangolin.toolExposure).every((value) => value === "hidden"), true);
+  assert.equal(s.kube.toolExposure["Delete*"], "hidden");
+  assert.equal(s.kube.toolExposure["get-thing"], "hidden", "the cached tool by its own name, which the adapter's name has with an underscore");
+  assert.equal(s.kube.toolExposure.DeleteNamespace, "hidden");
+  assert.equal(s.kube.toolExposure.list, undefined, "what neither list names is offered");
+  assert.equal("excludeTools" in s.kube || "includeTools" in s.narrow, false, "the adapter's keys are gone");
+  // pi's own reading: an exact name, else the first pattern in order, else the server's exposure.
+  const exposure = (entry, tool) => {
+    const own = entry.toolExposure ?? {};
+    if (own[tool] !== undefined) return own[tool];
+    for (const [pattern, value] of Object.entries(own)) if (pattern.includes("*") && new RegExp(`^${pattern.replace(/\*/g, ".*")}$`).test(tool)) return value;
+    return "direct";
+  };
+  assert.equal(exposure(s.narrow, "read"), "deferred", "what the entry said itself stays");
+  assert.equal(exposure(s.narrow, "list_files"), "direct");
+  assert.equal(exposure(s.narrow, "drop"), "hidden", "named by both lists: left out, as under the adapter");
+  assert.equal(exposure(s.narrow, "write"), "hidden", "named by neither, where only some are offered");
 });
 
 test("the adapter's setting that asks before every call becomes every server's approve, and one server's own false takes it out", async () => {
@@ -252,7 +291,7 @@ test("on the first start: the file is carried over, the adapter leaves pi's pack
   assert.ok(db.knownTools().some((t) => t.name === "other_tool"));
 
   assert.equal(logs.length, 1, "one line");
-  assert.match(logs[0], /8 servers .*carried over/);
+  assert.match(logs[0], /9 servers .*carried over/);
   assert.match(logs[0], /pi-mcp-adapter taken out of pi's packages/);
   assert.match(logs[0], /Left off, as they were.*sock \(a Unix socket/);
   assert.match(logs[0], /still asked, by each server's `approve`: gated, gatedList/, "what the adapter asked about before a call is asked still, and the servers are not left off for it");

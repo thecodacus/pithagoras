@@ -31,8 +31,12 @@ import { workspaceRoot } from "./workspaces.js";
 /** Keys of the adapter's that say nothing pi needs: dropped where a server is carried over. */
 const DROPPED = ["lifecycle", "idleTimeout", "requestTimeoutMs", "directTools", "debug", "trace", "toolPrefix", "disabled"] as const;
 
-/** Keys of the adapter's that pi has no word for: a server with one of them is left off, named (see ignoredByPi). */
-const REFUSED = ["socket", "includeTools", "excludeTools", "exposeResources"] as const;
+/** Keys of the adapter's that pi has no word for: a server with one of them is left off, named (see ignoredByPi). Its lists of the tools a
+ * server offers or leaves out are pi's `toolExposure` now (see exposureOf). */
+const REFUSED = ["socket", "exposeResources"] as const;
+
+/** The adapter's lists of the tools a server offers or leaves out, which become pi's `toolExposure` (see exposureOf). */
+const LISTS = ["includeTools", "excludeTools"] as const;
 
 /** The adapter's bearer token, and the variable that holds one: they become an Authorization header (see bearerHeader). */
 const BEARER = ["bearerToken", "bearerTokenEnv"] as const;
@@ -44,7 +48,7 @@ function inAdapterDialect(old: Record<string, unknown>): boolean {
   if (old.settings !== undefined || old.imports !== undefined) return true;
   const servers = old.mcpServers && typeof old.mcpServers === "object" ? Object.values(old.mcpServers as Record<string, unknown>) : [];
   // `auth` is pi's own key too, as an object (`{ provider }`): the adapter's was a word.
-  return servers.some((entry) => entry && typeof entry === "object" && ([...DROPPED, ...REFUSED, ...BEARER, "approveTools"].some((key) => key in (entry as object)) || typeof (entry as { auth?: unknown }).auth === "string"));
+  return servers.some((entry) => entry && typeof entry === "object" && ([...DROPPED, ...REFUSED, ...LISTS, ...BEARER, "approveTools"].some((key) => key in (entry as object)) || typeof (entry as { auth?: unknown }).auth === "string"));
 }
 
 export interface Carried {
@@ -127,7 +131,16 @@ function throughPrefix(pattern: string, prefix: string): string[] {
 function approveOf(server: string, gate: unknown, cached: readonly string[]): string[] {
   if (gate === true) return ["*"];
   if (!Array.isArray(gate)) return [];
-  const patterns = gate.filter((one): one is string => typeof one === "string" && one.trim() !== "").map((one) => one.trim().replace(/-/g, "_"));
+  return ownPatterns(server, gate, cached);
+}
+
+/**
+ * A list of the adapter's patterns of a server's tools (`approveTools`, `includeTools`, `excludeTools`), matched against a tool's own name and
+ * against the name with the server's prefix, as patterns of the tools' own names: each pattern as it is (`?` as `*`), with the prefix taken off
+ * (see throughPrefix), and each tool the adapter had cached of the server that it matched, by its own name.
+ */
+function ownPatterns(server: string, list: unknown[], cached: readonly string[]): string[] {
+  const patterns = list.filter((one): one is string => typeof one === "string" && one.trim() !== "").map((one) => one.trim().replace(/-/g, "_"));
   const regexp = (pattern: string) => new RegExp(`^${pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".")}$`);
   const asked = new Set(patterns.map((pattern) => pattern.replace(/\?/g, "*")));
   for (const pattern of patterns) {
@@ -141,8 +154,31 @@ function approveOf(server: string, gate: unknown, cached: readonly string[]): st
   return [...asked];
 }
 
+/**
+ * The adapter's `includeTools` and `excludeTools` of a server as pi's `toolExposure`, after what the entry has of that already. pi takes an exact
+ * name first, else the first pattern in order that matches (getMcpToolExposure), else the server's exposure. So what is left out comes first,
+ * hidden, then what is offered, direct, then `*` hidden where there is a list of what is offered: a tool left out stays out, as under the
+ * adapter, and one neither list names is offered only where there is no list of what is offered.
+ */
+function exposureOf(name: string, entry: Record<string, unknown>, cached: readonly string[]): Record<string, string> | undefined {
+  const list = (key: (typeof LISTS)[number]) => (Array.isArray(entry[key]) ? ownPatterns(name, entry[key] as unknown[], cached) : []);
+  const excluded = list("excludeTools");
+  const included = list("includeTools");
+  if (!excluded.length && !included.length) return undefined;
+  const exact = (pattern: string) => !pattern.includes("*");
+  const had = entry.toolExposure && typeof entry.toolExposure === "object" && !Array.isArray(entry.toolExposure) ? (entry.toolExposure as Record<string, string>) : {};
+  const out: Record<string, string> = {};
+  for (const pattern of excluded.filter((one) => !exact(one))) out[pattern] ??= "hidden";
+  for (const pattern of included.filter((one) => !exact(one))) out[pattern] ??= "direct";
+  if (included.length) out["*"] ??= "hidden";
+  for (const tool of included.filter(exact)) out[tool] = "direct";
+  for (const tool of excluded.filter(exact)) out[tool] = "hidden";
+  // What the entry said itself goes first: it is pi's own word for the tool.
+  return { ...had, ...Object.fromEntries(Object.entries(out).filter(([key]) => !(key in had))) };
+}
+
 /** One server of the adapter's file, in pi's words, or why not: then it is as it was, switched off. `off`: nothing ran under the adapter, so nothing starts now. */
-function convertEntry(pi: PiMcp, name: string, entry: Record<string, unknown>, off: boolean): { entry: Record<string, unknown>; why?: string } {
+function convertEntry(pi: PiMcp, name: string, entry: Record<string, unknown>, off: boolean, cached: readonly string[] = []): { entry: Record<string, unknown>; why?: string } {
   const why: string[] = [];
   // The keys that are carried over in another form (a bearer token, an OAuth block, variables) get their own reason below.
   for (const one of ignoredByPi(entry)) if ((REFUSED as readonly string[]).includes(one.key)) why.push(one.why);
@@ -166,10 +202,12 @@ function convertEntry(pi: PiMcp, name: string, entry: Record<string, unknown>, o
   for (const [key, value] of Object.entries(entry)) {
     // `oauth: false` and `auth: "oauth"` are the adapter's own words: pi signs in by itself where the server asks. `auth: { provider }` is pi's.
     // `approveTools` is the server's `approve` now, kept by the portal and not in the file (see carryOver).
-    const adapters = (DROPPED as readonly string[]).includes(key) || (BEARER as readonly string[]).includes(key) || (key === "oauth" && value === false) || (key === "auth" && typeof value !== "object") || key === "approveTools";
+    const adapters = (DROPPED as readonly string[]).includes(key) || (BEARER as readonly string[]).includes(key) || (LISTS as readonly string[]).includes(key) || (key === "oauth" && value === false) || (key === "auth" && typeof value !== "object") || key === "approveTools";
     if (!adapters) out[key] = value;
   }
   if (bearer.header) out.headers = { ...headers, Authorization: bearer.header };
+  const exposure = exposureOf(name, entry, cached);
+  if (exposure) out.toolExposure = exposure;
   if (entry.disabled === true || off) out.enabled = false;
   if (!why.length) {
     const checked = pi.validateMcpServerConfig(name, out);
@@ -208,7 +246,7 @@ export function carryOver(pi: PiMcp, text: string, off: boolean, cache: Readonly
     }
     // pi names tools after a server, and takes letters, digits, `_` and `-` of it: `docs.v2` stays as it is, off, and Settings → MCP says why.
     const done = NAME_RE.test(name)
-      ? convertEntry(pi, name, entry as Record<string, unknown>, off)
+      ? convertEntry(pi, name, entry as Record<string, unknown>, off, cache.get(name) ?? [])
       : { entry: leftOff(entry as Record<string, unknown>), why: "pi does not take its name (letters, digits, dash and underscore only)" };
     converted.push([name, done.entry]);
     // The server keeps what it was, on or off, and what it asked about stays asked: by the server's own `approveTools`, else the setting's.
