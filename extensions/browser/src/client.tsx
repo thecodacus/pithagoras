@@ -94,7 +94,7 @@ export default function browser(given: Portal) {
     useButton,
     // Each time the agent drives a browser, its own or a Playwright MCP's.
     useAutoOpen: ({ chat }) => portal.chats.use(chat.id, (feed) => latestBrowserCall(feed.events)),
-    opensFor: (call) => isBrowserCall(call.name, call.input),
+    opensFor: (call) => isBrowserCall(call.name),
     describe: describeBrowserCall,
     component: BrowserWindow,
   });

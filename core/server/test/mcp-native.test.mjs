@@ -1,0 +1,309 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { fakeModel, resultsIn } from "./fake-model.mjs";
+import { inProcessHome } from "./server-harness.mjs";
+
+/**
+ * pi's own MCP support under the portal's client: mcp.json is read and its servers connected by pi, each tool arrives as
+ * `mcp__<server>__<tool>` and is a tool like any other, in the model's list or, where the chat's head says its server is lazy,
+ * behind `tool_search`. Real pi, the portal's own client, a real MCP server over stdio and a model that asks for what the
+ * script says.
+ */
+const home = inProcessHome("pithagoras-mcp-native-");
+mkdirSync(process.env.WORKSPACE_ROOT, { recursive: true });
+const FIXTURE = fileURLToPath(new URL("./fixtures/mcp-server.mjs", import.meta.url));
+const agentDir = process.env.PI_CODING_AGENT_DIR;
+
+const server = (name, tools = "ping,echo", extra = {}) => ({ command: process.execPath, args: [FIXTURE, name, "--tools", tools], ...extra });
+const putConfig = (servers) => writeFileSync(path.join(agentDir, "mcp.json"), JSON.stringify({ mcpServers: servers }));
+
+let script = [];
+const resultsOfTurn = (request) => resultsIn({ messages: request.messages.slice(request.messages.findLastIndex((m) => m.role === "user") + 1) });
+const model = await fakeModel((request) => script[resultsOfTurn(request)] ?? "Done.");
+writeFileSync(path.join(agentDir, "models.json"), JSON.stringify(model.models()));
+
+const { SdkPiClient } = await import("../dist/pi/sdk-client.js");
+const { buildLazyHead } = await import("../dist/lazy-head.js");
+
+let n = 0;
+const chat = () => mkdtempSync(path.join(process.env.WORKSPACE_ROOT, "chat-"));
+const names = (request) => (request.tools ?? []).map((t) => t.function.name);
+const textOf = (result) => JSON.stringify(result.result);
+const search = (action, rest = {}) => ({ name: "tool_search", args: { action, ...rest } });
+/** A head in which these sets are lazy, as a chat freezes it. */
+const lazyHead = (...sets) => ({ v: 1, lazy: sets, direct: [], hint: `These tools are not in your list: ${sets.join(", ")}. Search them with the tool_search tool.`, outside: false, voice: [], tag: "0123456789abcdef" });
+
+/** One message to a chat, and what came of it. */
+async function run(calls, options = {}) {
+  script = calls;
+  model.requests.length = 0;
+  const client = await SdkPiClient.create({
+    cwd: chat(), sessionDir: mkdtempSync(path.join(home, "chat-")), provider: "fake", modelId: "m", sessionId: `mcp-native-${n++}`, dialogs: false, ...options,
+  });
+  const results = [];
+  const settled = new Promise((resolve) => client.on("event", (e) => {
+    if (e?.type === "tool_execution_end") results.push(e);
+    if (e?.type === "agent_settled") resolve();
+  }));
+  try {
+    await client.prompt("Go on");
+    await settled;
+    return { results, requests: [...model.requests], client, tools: await client.getTools(), active: client.session.getActiveToolNames() };
+  } finally {
+    // As the session manager lets a chat go: pi's MCP support stops the servers it started when it is told the session ends.
+    await client.shutdown();
+    client.dispose();
+  }
+}
+
+test("a server in mcp.json is connected by pi, and its tools are in the model's list under pi's names, as any tool is", async () => {
+  putConfig({ alpha: server("alpha") });
+  const r = await run([{ name: "mcp__alpha__echo", args: { text: "hi" } }]);
+  assert.match(names(r.requests[0]).join(","), /mcp__alpha__ping,mcp__alpha__echo|mcp__alpha__echo,mcp__alpha__ping/);
+  assert.match(textOf(r.results[0]), /alpha\/echo says .*hi/);
+  const mine = r.tools.filter((t) => t.name.startsWith("mcp__alpha__"));
+  assert.deepEqual(mine.map((t) => [t.source, t.mcp, t.inline ?? false]).sort()[0], ["alpha", "alpha", false], "filed under the server, which brought it");
+  assert.ok(mine.every((t) => t.tokens > 0), "each tool says what its declaration costs, for the threshold");
+});
+
+test("a server whose chat's head says it is lazy has its tools active and out of every request, and the search finds and calls them", async () => {
+  putConfig({ alpha: server("alpha") });
+  const r = await run([search("search", { query: "echo" }), search("call", { name: "mcp__alpha__echo", args: { text: "found" } })], { lazy: lazyHead("alpha") });
+  assert.doesNotMatch(names(r.requests[0]).join(","), /mcp__alpha/, "not in the tools array");
+  assert.ok(names(r.requests[0]).includes("tool_search"));
+  assert.ok(r.active.includes("mcp__alpha__echo"), "active, and so callable");
+  assert.equal(new Set(r.requests.map((q) => names(q).join(","))).size, 1, "the same tools array in every request");
+  assert.match(textOf(r.results[0]), /mcp__alpha__echo/);
+  // The call of the tool it names is told as the search's own result, to the pages: that is what the search returns.
+  assert.match(textOf(r.results[1]), /alpha\/echo says .*found/);
+});
+
+test("a server in the head's direct list stays in the model's list beside a lazy one", async () => {
+  putConfig({ alpha: server("alpha"), beta: server("beta", "other") });
+  const r = await run([], { lazy: { ...lazyHead("beta"), direct: ["alpha"] } });
+  const listed = names(r.requests[0]).join(",");
+  assert.match(listed, /mcp__alpha__ping/);
+  assert.doesNotMatch(listed, /mcp__beta/);
+});
+
+test("a server the file switches off (enabled: false) is not connected, and one it hides is unreachable", async () => {
+  putConfig({ alpha: server("alpha", "ping", { enabled: false }), beta: server("beta", "other", { exposure: "hidden" }), gamma: server("gamma", "third") });
+  const r = await run([]);
+  const listed = names(r.requests[0]).join(",");
+  assert.doesNotMatch(listed, /mcp__alpha|mcp__beta/);
+  assert.match(listed, /mcp__gamma__third/);
+});
+
+test("a tool that is switched off is out of the list and not callable, whatever pi's exposure is", async () => {
+  putConfig({ alpha: server("alpha") });
+  const r = await run([{ name: "mcp__alpha__echo", args: {} }], { toolsOff: ["mcp__alpha__echo"] });
+  assert.doesNotMatch(names(r.requests[0]).join(","), /mcp__alpha__echo/);
+  assert.match(textOf(r.results[0]), /not found/);
+});
+
+test("the file's exposure does not decide what the model is given: a server the file puts behind codemode is in the list all the same", async () => {
+  putConfig({ alpha: server("alpha", "ping", { exposure: "codemode" }), beta: server("beta", "other", { exposure: "deferred" }) });
+  const r = await run([]);
+  const listed = names(r.requests[0]).join(",");
+  assert.match(listed, /mcp__alpha__ping/);
+  assert.match(listed, /mcp__beta__other/);
+  assert.doesNotMatch(listed, /mcp_servers/, "no section of pi's about servers whose tools are not declared");
+  assert.doesNotMatch(JSON.stringify(r.requests[0].messages), /mcp_servers/);
+});
+
+test("a trusted project's own mcp.json cannot define a server of the user's file again, and keeps the right to turn it off", async () => {
+  putConfig({ alpha: server("alpha") });
+  const folder = chat();
+  mkdirSync(path.join(folder, ".pi"), { recursive: true });
+  // Trusted as pi decides it: the setting the portal's loader reads; the sandbox is off in a test.
+  writeFileSync(path.join(folder, ".pi", "mcp.json"), JSON.stringify({ mcpServers: { alpha: server("alpha", "stolen"), mine: server("mine", "own") } }));
+  const { piMcp } = await import("../dist/pi/mcp-config.js");
+  const { configForChat } = await import("../dist/pi/mcp-config.js");
+  const pi = await piMcp();
+  const seen = [];
+  const loaded = configForChat(pi, { cwd: folder, isProjectTrusted: () => true }, agentDir, (servers) => seen.push(...servers));
+  const alpha = loaded.servers.find((s) => s.name === "alpha");
+  assert.deepEqual(alpha.config.args.slice(-2), ["--tools", "ping,echo"], "the user's own definition, not the project's");
+  assert.equal(alpha.scope, "global");
+  assert.ok(loaded.servers.some((s) => s.name === "mine" && s.scope === "project"), "a server of its own is its own");
+  assert.equal(loaded.autoEnableCodemode, false);
+  // An override that turns a server off is pi's own rule and stays.
+  writeFileSync(path.join(folder, ".pi", "mcp.json"), JSON.stringify({ mcpServers: { alpha: { enabled: false } } }));
+  const overridden = configForChat(pi, { cwd: folder, isProjectTrusted: () => true }, agentDir, () => {});
+  assert.equal(overridden.servers.find((s) => s.name === "alpha").config.enabled, false);
+  // One that turns on what the person switched off, or hides, does not: that server would start with the person's own command, environment and headers.
+  putConfig({ alpha: server("alpha", "ping", { enabled: false, env: { TOKEN: "secret" } }), beta: server("beta", "other", { exposure: "hidden" }) });
+  writeFileSync(path.join(folder, ".pi", "mcp.json"), JSON.stringify({ mcpServers: { alpha: { enabled: true }, beta: { exposure: "direct" } } }));
+  const forced = configForChat(pi, { cwd: folder, isProjectTrusted: () => true }, agentDir, () => {});
+  assert.equal(forced.servers.find((s) => s.name === "alpha").config.enabled, false, "still off");
+  assert.equal(forced.servers.find((s) => s.name === "beta").config.exposure, "hidden", "still hidden");
+});
+
+test("a server of a trusted project's own mcp.json with a gate or an exclusion of the adapter's, which pi does not read, is not connected", async () => {
+  putConfig({ alpha: server("alpha") });
+  const folder = chat();
+  mkdirSync(path.join(folder, ".pi"), { recursive: true });
+  writeFileSync(path.join(folder, ".pi", "mcp.json"), JSON.stringify({ mcpServers: { excl: server("excl", "ping", { excludeTools: ["drop_db"] }), gated: server("gated", "ping", { approveTools: true }), choosy: server("choosy", "ping", { approve: ["*"] }), fine: server("fine", "ping", { approveTools: [] }) } }));
+  const { piMcp, configForChat } = await import("../dist/pi/mcp-config.js");
+  const loaded = configForChat(await piMcp(), { cwd: folder, isProjectTrusted: () => true }, agentDir, () => {});
+  const enabled = (name) => loaded.servers.find((s) => s.name === name).config.enabled;
+  assert.equal(enabled("excl"), false);
+  assert.equal(enabled("gated"), false);
+  assert.equal(enabled("choosy"), false, "an approve in its entry is no gate: pi keeps it and nothing asks");
+  assert.notEqual(enabled("fine"), false, "an empty gate asks for nothing");
+  assert.notEqual(enabled("alpha"), false);
+});
+
+test("what a chat's head makes of servers: one nothing has been seen of is lazy until it has been, one marked direct is not", async () => {
+  const db = await import("../dist/db.js");
+  putConfig({ alpha: server("alpha"), beta: server("beta", "other"), gamma: server("gamma", "third") });
+  db.setToolMarks({ beta: "direct" });
+  const head = buildLazyHead();
+  assert.deepEqual(head.lazy, ["alpha", "gamma"].sort(), "alpha and gamma were never seen: lazy; beta is marked direct");
+  assert.deepEqual(head.direct, ["beta"]);
+  assert.match(head.hint, /alpha; gamma|alpha.*gamma/);
+  // Once a chat has seen a server's tools, the threshold decides: a small server is in the list.
+  db.rememberTools([db.remembered({ name: "mcp__alpha__ping", source: "alpha", mcp: "alpha", tokens: 50 }), db.remembered({ name: "mcp__alpha__echo", source: "alpha", mcp: "alpha", tokens: 50 })]);
+  assert.deepEqual(buildLazyHead().lazy, ["gamma"]);
+  db.setToolMarks({});
+});
+
+test("pi's three tools for a server's resources are a group of their own, filed under no server and not as the portal's own; the sandbox's rebinding finds pi's MCP support by the name it is registered under", async () => {
+  putConfig({ alpha: server("alpha", "ping"), beta: { command: process.execPath, args: [FIXTURE, "beta", "--tools", "other", "--resources"] } });
+  const r = await run([]);
+  const resources = r.tools.filter((t) => ["list_mcp_resources", "list_mcp_resource_templates", "read_mcp_resource"].includes(t.name));
+  assert.equal(resources.length, 3);
+  assert.ok(resources.every((t) => t.source === "MCP resources" && t.mcp === undefined && !t.inline));
+  assert.ok(r.client.session.extensionRunner.extensions.some((e) => e.resolvedPath === "<inline:mcp>"), "an inline extension called mcp");
+});
+
+test("an installed extension that brings its own /mcp does not take the portal's MCP support from it", async () => {
+  putConfig({ alpha: server("alpha") });
+  const extension = path.join(home, "other-mcp.mjs");
+  writeFileSync(extension, 'export default (pi) => pi.registerCommand("mcp", { description: "another", handler: async () => {} });');
+  const settings = path.join(agentDir, "settings.json");
+  writeFileSync(settings, JSON.stringify({ extensions: [extension] }));
+  try {
+    const r = await run([]);
+    assert.ok(r.client.session.extensionRunner.extensions.some((e) => e.resolvedPath === "<inline:mcp>"), "the inline mcp is still there");
+    assert.ok(r.client.session.extensionRunner.extensions.some((e) => e.resolvedPath === extension), "and the extension was loaded (the test would say nothing otherwise)");
+    assert.match(names(r.requests[0]).join(","), /mcp__alpha__ping/);
+  } finally {
+    writeFileSync(settings, "{}");
+  }
+});
+
+test("a tool pi calls deferred in the file is direct for pi, so the portal's own tool_search covers it and pi's cannot", async () => {
+  putConfig({ x: server("x", "search,other", { toolExposure: { search: "deferred" } }) });
+  const r = await run([]);
+  assert.ok(names(r.requests[0]).includes("mcp__x__search"), "in the model's list, not stranded behind a search tool that is not there");
+  assert.ok(r.active.includes("mcp__x__search"));
+  const lazy = await run([search("search", { query: "search" })], { lazy: lazyHead("x") });
+  assert.ok(!names(lazy.requests[0]).includes("mcp__x__search"), "and behind the portal's tool_search where the server is lazy");
+  assert.match(textOf(lazy.results[0]), /mcp__x__search/);
+});
+
+test("a trusted project cannot undo a tool the person hid in a server of their own", async () => {
+  putConfig({ alpha: server("alpha", "ping", { toolExposure: { delete_repo: "hidden" } }) });
+  const folder = chat();
+  mkdirSync(path.join(folder, ".pi"), { recursive: true });
+  writeFileSync(path.join(folder, ".pi", "mcp.json"), JSON.stringify({ mcpServers: { alpha: { toolExposure: { other: "codemode" } } } }));
+  const { piMcp, configForChat } = await import("../dist/pi/mcp-config.js");
+  const loaded = configForChat(await piMcp(), { cwd: folder, isProjectTrusted: () => true }, agentDir, () => {});
+  assert.deepEqual(loaded.servers.find((s) => s.name === "alpha").config.toolExposure, { other: "codemode", delete_repo: "hidden" });
+  writeFileSync(path.join(folder, ".pi", "mcp.json"), JSON.stringify({ mcpServers: { alpha: { toolExposure: {} } } }));
+  const emptied = configForChat(await piMcp(), { cwd: folder, isProjectTrusted: () => true }, agentDir, () => {});
+  assert.equal(emptied.servers.find((s) => s.name === "alpha").config.toolExposure.delete_repo, "hidden");
+});
+
+test("a trusted project cannot undo a pattern the person hid by naming one tool, or by a wider pattern that comes first", async () => {
+  putConfig({ alpha: server("alpha", "ping", { toolExposure: { "delete_*": "hidden" } }) });
+  const folder = chat();
+  mkdirSync(path.join(folder, ".pi"), { recursive: true });
+  const { piMcp, configForChat } = await import("../dist/pi/mcp-config.js");
+  const pi = await piMcp();
+  const exposureOf = (tool) => {
+    const loaded = configForChat(pi, { cwd: folder, isProjectTrusted: () => true }, agentDir, () => {});
+    const how = loaded.servers.find((s) => s.name === "alpha").config.toolExposure;
+    // pi's own rule: an exact name, then the first pattern that matches.
+    return how[tool] ?? Object.entries(how).find(([key]) => key.includes("*") && pi.createToolNameMatcher([key])(tool))?.[1];
+  };
+  writeFileSync(path.join(folder, ".pi", "mcp.json"), JSON.stringify({ mcpServers: { alpha: { toolExposure: { delete_repo: "direct", "*": "direct", delete_extra_ok: "codemode" } } } }));
+  assert.equal(exposureOf("delete_repo"), "hidden", "an exact name of the project does not beat the person's pattern");
+  assert.equal(exposureOf("delete_other"), "hidden", "nor does a wider pattern of the project, which comes first");
+  assert.equal(exposureOf("read_page"), "direct", "what the person did not hide is the project's");
+});
+
+test("pi-mcp-adapter, still named by a project's settings, is not loaded beside pi's own MCP support", async () => {
+  putConfig({ alpha: server("alpha", "ping", { enabled: false }) });
+  const folder = chat();
+  const adapter = path.join(folder, "pi-mcp-adapter");
+  mkdirSync(adapter, { recursive: true });
+  writeFileSync(path.join(adapter, "package.json"), JSON.stringify({ name: "pi-mcp-adapter", pi: { extensions: ["./index.mjs"] } }));
+  writeFileSync(
+    path.join(adapter, "index.mjs"),
+    `export default (pi) => pi.registerTool({ name: "mcp", label: "mcp", description: "the adapter's proxy", parameters: { type: "object", properties: {} }, execute: async () => ({ content: [{ type: "text", text: "adapter ran" }], details: {} }) });`
+  );
+  mkdirSync(path.join(folder, ".pi"), { recursive: true });
+  writeFileSync(path.join(folder, ".pi", "settings.json"), JSON.stringify({ packages: [adapter] }));
+  const r = await run([{ name: "mcp", args: {} }], { cwd: folder });
+  assert.ok(!names(r.requests[0]).includes("mcp"), "its tool is not offered");
+  assert.doesNotMatch(textOf(r.results[0] ?? {}), /adapter ran/);
+});
+
+const withResources = (name, tools) => ({ command: process.execPath, args: [FIXTURE, name, "--tools", tools, "--resources"] });
+
+/** A chat that stays, to be talked to turn by turn while the file changes under it: the results of a turn's calls. */
+async function stays(options = {}) {
+  script = [];
+  const client = await SdkPiClient.create({
+    cwd: chat(), sessionDir: mkdtempSync(path.join(home, "chat-")), provider: "fake", modelId: "m", sessionId: `mcp-native-${n++}`, dialogs: false, ...options,
+  });
+  const turn = async (calls) => {
+    script = calls;
+    const results = [];
+    const settled = new Promise((resolve) => client.on("event", (e) => {
+      if (e?.type === "tool_execution_end") results.push(textOf(e));
+      if (e?.type === "agent_settled") resolve();
+    }));
+    await client.prompt("Go on");
+    await settled;
+    return results;
+  };
+  return { client, turn, done: async () => { await client.shutdown(); client.dispose(); } };
+}
+
+test("a server whose every tool the chat has switched off is not reached through pi's resource tools either, and the others still are", async () => {
+  putConfig({ secret: withResources("secret", "other"), open: withResources("open", "tool,second") });
+  const read = (server, uri) => ({ name: "read_mcp_resource", args: { server, uri } });
+  const r = await run(
+    [read("secret", "file:///secret/one.txt"), read(" secret ", "file:///secret/one.txt"), { name: "list_mcp_resource_templates", args: { server: "secret" } }, { name: "list_mcp_resources", args: {} }, read("open", "file:///open/one.txt"), { name: "list_mcp_resources", args: { server: "open" } }],
+    { toolsOff: ["mcp__secret__other"] },
+  );
+  const text = r.results.map(textOf);
+  assert.match(text[0], /switched off in this conversation/);
+  assert.match(text[1], /switched off in this conversation/, "the blanks around a name make no difference: pi trims them");
+  assert.match(text[2], /switched off in this conversation/);
+  assert.match(text[3], /Name the server you want to list/, "a listing of every server's would list the switched-off one's");
+  assert.doesNotMatch(text.slice(0, 4).join(" "), /contents of file:\/\/\/secret/);
+  assert.match(text[4], /contents of file:\/\/\/open\/one\.txt/, "a server with a tool still on is read as before");
+  assert.match(text[5], /file:\/\/\/open\/one\.txt/);
+  // One tool of a server off is not the server off, and nothing off lists as before.
+  const some = await run([read("open", "file:///open/one.txt"), { name: "list_mcp_resources", args: {} }], { toolsOff: ["mcp__open__second"] });
+  assert.match(textOf(some.results[0]), /contents of file:\/\/\/open/);
+  assert.match(textOf(some.results[1]), /file:\/\/\/open\/one\.txt/);
+  assert.doesNotMatch(textOf(some.results[1]), /switched off/);
+});
+
+test("a tool the file hides is not one a chat can switch off: a server whose every other tool is off is off, for pi's resource tools too", async () => {
+  putConfig({ secret: { ...withResources("secret", "other,gone"), toolExposure: { gone: "hidden" } } });
+  const read = (server, uri) => ({ name: "read_mcp_resource", args: { server, uri } });
+  const r = await run([read("secret", "file:///secret/one.txt"), { name: "list_mcp_resources", args: {} }], { toolsOff: ["mcp__secret__other"] });
+  assert.match(textOf(r.results[0]), /switched off in this conversation/);
+  assert.match(textOf(r.results[1]), /Name the server you want to list/);
+  assert.doesNotMatch(textOf(r.results[0]), /contents of file/);
+});
+

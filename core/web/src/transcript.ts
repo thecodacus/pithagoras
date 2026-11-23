@@ -699,7 +699,7 @@ function findRunningTool(items: Item[], p: any): Extract<Item, { kind: "tool" }>
 function summarizeToolInput(p: any): string | undefined {
   const raw = toolArgsOf(p);
   const call = unwrapCall(toolNameOf(p), raw);
-  // Through the MCP adapter, what the tool inside was given.
+  // Through `tool_search`, what the tool inside was given.
   return argsSummary(call.name !== toolNameOf(p) ? call.input : raw);
 }
 

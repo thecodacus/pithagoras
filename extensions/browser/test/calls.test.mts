@@ -26,7 +26,7 @@ test('only browser tool calls count as driving the browser; plain mentions and o
   const events = [
     { seq: 1, type: 'message_update', payload: { text: 'browser' } },
     { seq: 2, type: 'tool_execution_start', payload: { toolName: 'bash', input: { command: 'echo browser' } } },
-    { seq: 3, type: 'tool_execution_start', payload: { toolName: 'mcp', input: { tool: 'browser_navigate' } } },
+    { seq: 3, type: 'tool_execution_start', payload: { toolName: 'mcp__playwright__browser_navigate', input: { url: 'https://example.com' } } },
   ];
   assert.equal(latestBrowserCall(events.slice(0, 2)), 0);
   assert.equal(latestBrowserCall(events), 3);
@@ -45,19 +45,18 @@ test('a lazy browser tool called through tools drives the browser, and a search 
   assert.equal(latestBrowserCall([at(10, 'tools', via('docs_open', { id: 'browser' }))]), 0);
 });
 
-test('a browser behind the MCP adapter drives the browser, by the server or the tool it is asked for, in every spelling', () => {
-  for (const wrapped of spellings('mcp', { server: 'browser', tool: 'navigate', args: { url: 'https://example.com/a' } })) {
+test('a Playwright MCP\'s tool, called by its name as pi gives it, drives the browser in every spelling of the call', () => {
+  for (const wrapped of spellings('mcp__playwright__browser_navigate', { url: 'https://example.com/a' })) {
     assert.equal(latestBrowserCall([{ seq: 6, type: 'tool_execution_start', payload: wrapped }]), 6, JSON.stringify(wrapped));
   }
-  for (const input of [{ connect: 'browser' }, { describe: 'browser' }, { tool: 'browser_click' }]) assert.equal(isBrowserCall('mcp', input), true, JSON.stringify(input));
-  assert.equal(isBrowserCall('mcp', { server: 'jira', tool: 'get_issue' }), false);
-  // A Playwright MCP's tool, called by itself, and one under a prefix.
-  assert.equal(isBrowserCall('browser_take_screenshot', {}), true);
-  assert.equal(isBrowserCall('playwright_browser_type', {}), true);
-  assert.equal(isBrowserCall('browserless', {}), false);
+  assert.equal(isBrowserCall('mcp__jira__get_issue'), false);
+  assert.equal(isBrowserCall('mcp'), false, 'the old adapter\'s tool is no browser\'s, whatever it was asked for');
+  assert.equal(isBrowserCall('browser_take_screenshot'), true);
+  assert.equal(isBrowserCall('playwright_browser_type'), true);
+  assert.equal(isBrowserCall('browserless'), false);
 });
 
-test('a card of a browser call says what it does, by the part of its name after browser_, or the tool an mcp call names', () => {
+test('a card of a browser call says what it does, by the part of its name after browser_', () => {
   const view = (name: string, input: Record<string, unknown>) => ({ name, status: 'running' as const, input });
   assert.deepEqual(describeBrowserCall(view('browser_navigate', { url: 'https://example.com/a?b' })), { label: 'Opening a page', detail: 'example.com' });
   assert.deepEqual(describeBrowserCall(view('browser_take_screenshot', {})), { label: 'Taking a screenshot', detail: '' });
@@ -69,5 +68,5 @@ test('a card of a browser call says what it does, by the part of its name after 
   assert.deepEqual(describeBrowserCall(view('browser_snapshot', {})), { label: 'Reading the page', detail: '' });
   assert.deepEqual(describeBrowserCall(view('browser_back', {})), { label: 'Using the browser', detail: '' });
   assert.deepEqual(describeBrowserCall(view('browser.open_tab', { url: 'https://docs.example.com/x' })), { label: 'Opening a page', detail: 'docs.example.com' });
-  assert.deepEqual(describeBrowserCall(view('mcp', { connect: 'browser', url: 'https://example.com' })), { label: 'Using the browser', detail: 'example.com' });
+  assert.deepEqual(describeBrowserCall(view('mcp__playwright__browser_navigate', { url: 'https://example.com' })), { label: 'Opening a page', detail: 'example.com' });
 });

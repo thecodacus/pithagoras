@@ -58,11 +58,10 @@ export function lazyCall(name: string, args: unknown): { name: string; input: Re
 }
 
 /**
- * The call as the agent made it. The MCP adapter puts every server's tools
- * behind one `mcp` tool, so a web search and a database query would both read
- * "mcp": the tool it was asked to call, and what it was asked to call it with,
- * are what say what happened. A lazy tool is called through `tool_search` in the
- * same way, and is the tool it calls (see lazyCall).
+ * The call as the agent made it. A lazy tool is called through `tool_search`, so a web search and
+ * a database query would both read "tool_search": the tool it was asked to call, and what it was
+ * asked to call it with, are what say what happened (see lazyCall). A chat from before pi's own MCP
+ * support has its servers' tools behind one `mcp` tool, which is read the same way.
  */
 export function unwrapCall(name: string, args: unknown): { name: string; input: Record<string, any> } {
   const lazy = lazyCall(name, args);

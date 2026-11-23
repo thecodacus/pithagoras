@@ -24,7 +24,7 @@ test('a tool call reads as its parameters, closed and opened, not as JSON', asyn
   await expect(edit.locator('.chat-tool-body')).not.toContainText('{');
 
   // An MCP tool that answers in JSON: its answer is read the same way.
-  const mcp = page.locator('.chat-tool', { hasText: 'github_list_issues' });
+  const mcp = page.locator('.chat-tool', { hasText: 'mcp__github__list_issues' });
   await expect(mcp.locator('.chat-tool-detail')).toHaveText('Owner: octo-org · Repo: pithagoras · State: open · Labels: bug, ui');
   await mcp.locator('.chat-tool-head').click();
   const output = mcp.locator('.chat-tool-output');
@@ -65,7 +65,7 @@ test('the answer to an earlier question keeps its Copy when another is asked, on
 
 test('the way back to the end steps aside for a menu opened from the composer', async ({ page }) => {
   await page.goto('/tests/chat.html?phase=args');
-  for (const name of ['web_search', 'github_list_issues']) await page.locator('.chat-tool-head', { hasText: name }).click();
+  for (const name of ['web_search', 'mcp__github__list_issues']) await page.locator('.chat-tool-head', { hasText: name }).click();
   await page.mouse.move(500, 400);
   await page.mouse.wheel(0, -4000);
   const jump = page.getByRole('button', { name: 'Jump to the end' });

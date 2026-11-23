@@ -65,29 +65,51 @@ test("the raw editor refuses what is not JSON, and the file is as it was", async
   assert.equal(read(mcpFile), MCP);
 });
 
-test("the raw editor takes what the adapter reads, comments too, and puts it in place as typed for its owner alone", async () => {
-  const content = '{\n  // the one server\n  "mcpServers": { "notes": { "command": "notes-mcp" } /* kept */ }\n}';
+test("the raw editor refuses a server that is on with a key pi does not read, as the form and the toggle do, and takes it while it is off", async () => {
+  writeFileSync(mcpFile, MCP);
+  const on = JSON.stringify({ mcpServers: { gated: { command: "notes-mcp", excludeTools: ["delete"] } } });
+  refused(await send("/api/mcp/raw", "PUT", { content: on }), 400, /gated: pi does not read excludeTools/);
+  assert.equal(read(mcpFile), MCP);
+  const off = JSON.stringify({ mcpServers: { gated: { command: "notes-mcp", excludeTools: ["delete"], enabled: false } } });
+  assert.equal((await send("/api/mcp/raw", "PUT", { content: off })).status, 200);
+  writeFileSync(mcpFile, MCP);
+});
+
+test("the raw editor takes what pi reads and puts it in place as typed for its owner alone; a comment is refused, as pi would skip every server of a file with one", async () => {
+  refused(await send("/api/mcp/raw", "PUT", { content: '{\n  // the one server\n  "mcpServers": { "notes": { "command": "notes-mcp" } }\n}' }), 400, /Not valid JSON/);
+  const content = '{\n  "mcpServers": { "notes": { "command": "notes-mcp" } }\n}';
   assert.equal((await send("/api/mcp/raw", "PUT", { content })).status, 200);
-  assert.equal(read(mcpFile), content + "\n", "the comments stay, and the file ends in a newline");
+  assert.equal(read(mcpFile), content + "\n", "as typed, and the file ends in a newline");
   assert.equal(statSync(mcpFile).mode & 0o777, 0o600);
   const shown = (await send("/api/mcp")).body;
   assert.equal(shown.parseError, null);
   assert.deepEqual(shown.servers.map((s) => s.name), ["notes"]);
 });
 
-test("a server is refused a name the adapter would not take, and the file is as it was", async () => {
+test("a server is refused a name pi would not take, and the file is as it was", async () => {
   writeFileSync(mcpFile, MCP);
   // Express hands the route the name decoded, so a slash and a space reach it as they were typed.
-  for (const name of ["-dash", ".dot", "_under", "a%20b", "a%2Fb", "a%3Bb"]) {
-    refused(await send(`/api/mcp/servers/${name}`, "PUT", { entry: { command: "x" } }), 400, /Name must be/);
+  for (const name of [".dot", "a%20b", "a%2Fb", "a%3Bb", "docs.v2"]) {
+    refused(await send(`/api/mcp/servers/${name}`, "PUT", { entry: { command: "x" } }), 400, /letters, digits/);
   }
   assert.equal(read(mcpFile), MCP);
-  assert.equal((await send("/api/mcp/servers/Fine-name_1.2", "PUT", { entry: { command: "x" } })).status, 200);
+  assert.equal((await send("/api/mcp/servers/Fine-name_1", "PUT", { entry: { command: "x" } })).status, 200);
+});
+
+test("two names that differ only by a dash and an underscore are not both taken: pi connects one, and the tools of both would be named alike", async () => {
+  writeFileSync(mcpFile, JSON.stringify({ mcpServers: { "my-notes": { command: "x" } } }));
+  const clash = await send("/api/mcp/servers/my_notes", "PUT", { entry: { command: "y" } });
+  assert.equal(clash.status, 409);
+  assert.equal(clash.body.code, "exists");
+  assert.deepEqual(Object.keys(JSON.parse(read(mcpFile)).mcpServers), ["my-notes"]);
+  // Renamed into its own namespace, or changed under its own name, it is fine.
+  assert.equal((await send("/api/mcp/servers/my_notes", "PUT", { entry: { command: "y" }, from: "my-notes" })).status, 200);
 });
 
 test("an entry that is not one server is refused, and the file is as it was", async () => {
   writeFileSync(mcpFile, MCP);
-  const entries = [undefined, null, "notes-mcp", [], {}, { command: "  " }, { command: "a", url: "https://mcp.example.test" }, { url: "https://x.test", socket: "/s" }, { command: "a", args: "--fast" }];
+  // pi's own check: a command or a URL (not a socket, nor SSE), arguments a list, a URL that is http(s), exposure and timeout in range.
+  const entries = [undefined, null, "notes-mcp", [], {}, { socket: "/s" }, { url: "ftp://x.test" }, { url: "https://x.test", type: "sse" }, { command: "a", args: "--fast" }, { command: "a", enabled: "no" }, { command: "a", exposure: "everywhere" }, { command: "a", timeout: -1 }];
   for (const entry of entries) {
     const res = await send("/api/mcp/servers/fresh", "PUT", { entry });
     assert.equal(res.status, 400, JSON.stringify(entry));
@@ -100,7 +122,6 @@ test("a file that does not parse is not written over by any of the forms, and is
   for (const [url, method, body] of [
     ["/api/mcp/servers/fresh", "PUT", { entry: { command: "x" } }],
     ["/api/mcp/servers/notes", "DELETE"],
-    ["/api/mcp/settings", "PUT", { settings: { toolPrefix: "short" } }],
     ["/api/mcp/import", "POST", { text: '{ "other": { "command": "x" } }' }],
   ]) {
     refused(await send(url, method, body), 409, /Fix the file first/);
@@ -112,18 +133,6 @@ test("a file that does not parse is not written over by any of the forms, and is
   // The raw editor is the way out, and it works over the broken file.
   assert.equal((await send("/api/mcp/raw", "PUT", { content: MCP })).status, 200);
   assert.equal((await send("/api/mcp/servers/fresh", "PUT", { entry: { command: "x" } })).status, 200);
-});
-
-test("the adapter's settings are an object, and an empty one takes them out", async () => {
-  writeFileSync(mcpFile, MCP);
-  for (const settings of [undefined, null, [], "short"]) {
-    refused(await send("/api/mcp/settings", "PUT", { settings }), 400, /settings must be an object/);
-  }
-  assert.equal(read(mcpFile), MCP);
-  await send("/api/mcp/settings", "PUT", { settings: { toolPrefix: "short" } });
-  assert.deepEqual(JSON.parse(read(mcpFile)).settings, { toolPrefix: "short" });
-  await send("/api/mcp/settings", "PUT", { settings: {} });
-  assert.equal("settings" in JSON.parse(read(mcpFile)), false);
 });
 
 test("a pasted config adds what is usable, says what it left out, and writes nothing when there is none", async () => {
@@ -140,15 +149,93 @@ test("a pasted config adds what is usable, says what it left out, and writes not
   assert.deepEqual(only.body.skipped.map((s) => s.name).sort(), ["bad name", "empty"]);
   assert.equal(read(mcpFile), MCP, "nothing was usable, so nothing is written");
 
-  // The blob a server's README hands out, with its comments, and the keys that are not servers.
-  const text = '{\n  // from the README\n  "mcpServers": { "github": { "url": "https://mcp.example.test" }, "bad name": { "command": "x" }, "settings": { "command": "x" } }\n}';
+  // The blob a server's README hands out, and the key that is no server: pi's own check says what it takes.
+  const text = '{ "autoEnableCodemode": false, "mcpServers": { "github": { "url": "https://mcp.example.test" }, "bad name": { "command": "x" }, "socketed": { "socket": "/s" } } }';
   const mixed = await send("/api/mcp/import", "POST", { text });
   assert.deepEqual(mixed.body.added, ["github"]);
-  assert.deepEqual(mixed.body.skipped.map((s) => s.name), ["bad name"]);
+  assert.deepEqual(mixed.body.skipped.map((s) => s.name).sort(), ["bad name", "socketed"]);
   assert.deepEqual(Object.keys(JSON.parse(read(mcpFile)).mcpServers).sort(), ["github", "notes"]);
 });
 
+test("what would send a model provider's key to a server is not written by a form or an import, and pi-mcp-adapter is not installed", async () => {
+  writeFileSync(mcpFile, MCP);
+  const entry = { url: "https://docs.example.test/mcp", auth: { provider: "anthropic" } };
+  refused(await send("/api/mcp/servers/docs", "PUT", { entry }), 400, /auth\.provider/);
+  const imported = await send("/api/mcp/import", "POST", { text: JSON.stringify({ mcpServers: { docs: entry } }) });
+  assert.deepEqual(imported.body.skipped.map((s) => s.name), ["docs"]);
+  assert.match(imported.body.skipped[0].reason, /auth\.provider/);
+  assert.equal(read(mcpFile), MCP, "nothing was written");
+  // By hand it is still there for whoever means it.
+  assert.equal((await send("/api/mcp/raw", "PUT", { content: JSON.stringify({ mcpServers: { docs: entry } }) })).status, 200);
+  for (const spec of ["npm:pi-mcp-adapter", "npm:pi-mcp-adapter@2.18.0", "git:github.com/nicobailon/pi-mcp-adapter"]) {
+    refused(await send("/api/packages", "POST", { spec }), 400, /not used any more/);
+  }
+  assert.deepEqual(runs(), [], "pi was not run for it");
+});
+
 // --- settings.json ---
+
+test("a server is not switched on with a gate or an exclusion that pi does not read, and is switched off or edited without them as before", async () => {
+  const kept = { command: "gh-mcp", excludeTools: ["delete_repo"], enabled: false };
+  // The entry a move from the adapter leaves: off, with the keys. Switching it on would run it without them.
+  for (const extra of [{ excludeTools: ["delete_repo"] }, { includeTools: ["read"] }, { exposeResources: false }, { socket: "/run/x.sock" }]) {
+    refused(await send("/api/mcp/servers/gh", "PUT", { entry: { command: "gh-mcp", ...extra, enabled: true } }), 400, /pi does not read/);
+    refused(await send("/api/mcp/servers/gh", "PUT", { entry: { command: "gh-mcp", ...extra } }), 400, /pi does not read/);
+  }
+  assert.equal(existsSync(mcpFile), false, "nothing was written");
+  assert.equal((await send("/api/mcp/servers/gh", "PUT", { entry: kept })).status, 200, "off, with the keys, it is written as it is");
+  // An empty list is no exclusion: the keys pi's own entry does not have.
+  const none = { command: "gh-mcp", excludeTools: [], includeTools: [] };
+  assert.equal((await send("/api/mcp/servers/other", "PUT", { entry: none })).status, 200);
+  refused(await send("/api/mcp/servers/gh", "PUT", { entry: { ...kept, enabled: true } }), 400, /excludeTools/);
+  // Settings -> MCP says why in the row: the keys, for the server that has them and none for the other.
+  const view = (await send("/api/mcp")).body.servers;
+  assert.match(view.find((server) => server.name === "gh").ignored, /excludeTools/);
+  assert.equal(view.find((server) => server.name === "other").ignored, null, "an empty list is no exclusion");
+});
+
+test("the adapter's approveTools is not written by the form, the import, the toggle or an extension, whatever it holds, and the refusal names the approve option; a raw edit keeps a server that is off", async () => {
+  rmSync(mcpFile, { force: true });
+  for (const approveTools of [true, false, [], ["delete_*"]]) {
+    for (const extra of [{}, { enabled: false }]) {
+      refused(await send("/api/mcp/servers/gh", "PUT", { entry: { command: "gh-mcp", approveTools, ...extra } }), 400, /approveTools.*`approve` option.*portal\.mcp\.set/s);
+    }
+  }
+  const imported = await send("/api/mcp/import", "POST", { text: JSON.stringify({ mcpServers: { gh: { command: "gh-mcp", approveTools: true }, fine: { command: "fine" } } }) });
+  assert.deepEqual(imported.body.added, ["fine"]);
+  assert.match(imported.body.skipped[0].reason, /`approve` option/);
+  // By hand: a server that is on with it is refused (nothing would ask), one that is off is kept as it is.
+  refused(await send("/api/mcp/raw", "PUT", { content: JSON.stringify({ mcpServers: { gh: { command: "gh-mcp", approveTools: true } } }) }), 400, /gh: approveTools.*`approve` option/s);
+  assert.equal((await send("/api/mcp/raw", "PUT", { content: JSON.stringify({ mcpServers: { gh: { command: "gh-mcp", approveTools: true, enabled: false } } }) })).status, 200);
+  // The adapter's key is no longer among the keys pi does not read: the row names none of it, and the gate the portal keeps is the row's `approve`.
+  assert.equal((await send("/api/mcp")).body.servers.find((server) => server.name === "gh").ignored, null);
+  assert.deepEqual((await send("/api/mcp")).body.servers.find((server) => server.name === "gh").approve, []);
+});
+
+test("an `approve` inside an entry is refused where approveTools is: nothing would ask, and the refusal names the option", async () => {
+  rmSync(mcpFile, { force: true });
+  refused(await send("/api/mcp/servers/mail", "PUT", { entry: { command: "mail-mcp", approve: ["send_*"] } }), 400, /approve is not a key of pi's.*`approve` option/s);
+  refused(await send("/api/mcp/raw", "PUT", { content: JSON.stringify({ mcpServers: { mail: { command: "mail-mcp", approve: ["send_*"] } } }) }), 400, /mail: approve is not a key of pi's/);
+  assert.equal((await send("/api/mcp/raw", "PUT", { content: JSON.stringify({ mcpServers: { mail: { command: "mail-mcp", approve: ["send_*"], enabled: false } } }) })).status, 200, "a server that is off is kept as it is");
+});
+
+test("a server that keeps the adapter's bearer token, OAuth block or `$env:` variable is not switched on, and the row says why", async () => {
+  rmSync(mcpFile, { force: true });
+  const left = [
+    ["tok", { url: "https://x.example.test/mcp", bearerToken: "abc" }, /bearerToken/],
+    ["tokenv", { url: "https://x.example.test/mcp", bearerTokenEnv: "X_TOKEN" }, /bearerTokenEnv/],
+    ["blocked", { url: "https://x.example.test/mcp", oauth: { clientId: "x" } }, /oauth/],
+    ["envish", { command: "node", env: { KEY: "$env:KEY" } }, /\$env:NAME/],
+  ];
+  for (const [name, entry, why] of left) {
+    refused(await send(`/api/mcp/servers/${name}`, "PUT", { entry }), 400, why);
+    assert.equal((await send(`/api/mcp/servers/${name}`, "PUT", { entry: { ...entry, enabled: false } })).status, 200, "off, it is written as it is");
+  }
+  const view = (await send("/api/mcp")).body.servers;
+  for (const [name, , why] of left) assert.match(view.find((server) => server.name === name).ignored, why);
+  // `oauth: false` and pi's own `${NAME}` say nothing of the kind.
+  assert.equal((await send("/api/mcp/servers/fine", "PUT", { entry: { command: "node", env: { KEY: "${KEY}" }, oauth: false } })).status, 200);
+});
 
 test("an extension setting is written only under a key that is a name, and the file is as it was", async () => {
   const text = JSON.stringify({ packages: ["npm:pi-example"] }, null, 2) + "\n";

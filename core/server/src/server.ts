@@ -67,7 +67,6 @@ import {
   dismissLazyNotice,
   agentDirect,
   setAgentDirect,
-  noticeMcpEdits,
   setToolMarks,
   toolGroupNames,
   updateSession,
@@ -88,8 +87,9 @@ import { deleteNotesOf } from "./activity.js";
 import { EXECUTOR_KIND } from "./executor-kind.js";
 import { sessions, CodemodeHeld, CommandFailed, IMAGE_ROOT } from "./session-manager.js";
 import { ImageError, MAX_IMAGE_BYTES, MAX_IMAGES, imagePath, mimeOf, parseImages, saveImages } from "./prompt-images.js";
-import { defaultsFor, toolSource } from "./tool-policy.js";
-import { mcpRouter, mcpServerNames, onMcpWritten } from "./api/mcp.js";
+import { defaultsFor } from "./tool-policy.js";
+import { mcpRouter, onMcpWritten } from "./api/mcp.js";
+import { moveFromAdapter } from "./mcp-migration.js";
 import { authMode, changePassword, checkPassword, isAuthed, issueCookie, passwordRefused, requireAuth, setUpPassword, shortPassword, signOut } from "./auth.js";
 import { activeSso, endSessionUrl, oidcRouter, providerFor, rememberProvider } from "./oidc-login.js";
 import { CALLBACK_PATH, OidcConfigError, discover, parseOidcConfig, shownForm } from "./oidc.js";
@@ -1301,22 +1301,17 @@ app.get("/api/tools", (_req, res) => {
   // and answers every flip with an error is the switch that looks like it works.
   if (EXECUTOR_KIND === "container") return res.status(400).json(toolsUnsupported);
   const off = new Set(toolDefaultsOff());
-  const servers = mcpServerNames();
   const lazy = lazyMarks();
   res.json({
-    tools: shownTools().map((tool) => {
-      const marks = lazy(tool);
-      return {
-        ...tool,
-        source: toolSource(tool.name, tool.source, servers),
-        defaultOn: !off.has(tool.name),
-        // Not offered one by one: found through `tool_search`, or for an MCP server's tool through `mcp`, where `mcp` is the server whose setting says so.
-        // `mark` is what somebody set on the tool or its set, and `auto` that nothing is, so the threshold decides.
-        ...marks,
-        // Neither marked nor set on a server: pi's own tools and the adapter's `mcp` tool, which the page offers no lazy mark for.
-        ...(lazyAllowed(tool, servers) || marks.mcp !== undefined ? {} : { noLazy: true as const }),
-      };
-    }),
+    tools: shownTools().map((tool) => ({
+      ...tool,
+      defaultOn: !off.has(tool.name),
+      // Not offered one by one: found through `tool_search`.
+      // `mark` is what somebody set on the tool or its set, and `auto` that nothing is, so the threshold decides.
+      ...lazy(tool),
+      // pi's own tools, which the page offers no lazy mark for.
+      ...(lazyAllowed(tool) ? {} : { noLazy: true as const }),
+    })),
     off: [...off].sort(),
     names: toolGroupNames(),
     marks: toolMarks(),
@@ -1370,9 +1365,8 @@ app.put("/api/tools", async (req, res) => {
  * What is lazy and what is not: marks on tool sets, named as the boxes of the tools list name them, and on single tools
  * (`<tool>name`), each `lazy` (behind `tool_search`) or `direct` (always in the model's list). What has no mark is `auto`:
  * the threshold decides. A lazy tool is on like any other. The marks reach the chats that start afterwards, and a chat that
- * is running when it is asked to read its tools again (a chat keeps what was lazy in it, see LazyHead). An MCP server's
- * tools are lazy by the server's own setting (`PUT /api/mcp/servers/:name/direct`) and pi's own cannot be lazy, and a
- * `lazy` mark that names them is refused.
+ * is running when it is asked to read its tools again (a chat keeps what was lazy in it, see LazyHead). An MCP server is a
+ * group like any other. pi's own tools cannot be lazy, and a `lazy` mark that names them is refused.
  */
 app.put("/api/tools/marks", (req, res) => {
   if (EXECUTOR_KIND === "container") return res.status(400).json(toolsUnsupported);
@@ -1385,7 +1379,7 @@ app.put("/api/tools/marks", (req, res) => {
   const added = Object.fromEntries(Object.entries(given as Record<string, "lazy" | "direct">).filter(([entry, mark]) => before[entry] !== mark));
   const refused = lazyRefused(added);
   if (refused.length) {
-    return res.status(400).json({ error: `Cannot be lazy: ${refused.join(", ")}. An MCP server's tools are lazy by the server's own setting (Register tools directly), and pi's built-in tools are always offered.`, code: "lazy-refused" });
+    return res.status(400).json({ error: `Cannot be lazy: ${refused.join(", ")}. pi's built-in tools are always offered.`, code: "lazy-refused" });
   }
   const stored = setToolMarks(given as Record<string, "lazy" | "direct">);
   res.json({ marks: stored, resolved: resolvedLazy() });
@@ -1777,12 +1771,11 @@ app.use("/api", agentsRouter());
 app.use("/api", routinesRouter());
 app.use("/api", skillsRouter());
 app.use("/api", filesRouter());
-// What the configuration offers is what a running chat may use: told at once, as a default is.
-onMcpWritten(() => {
-  sessions.applyToolDefaults().catch((e) => console.error(`[portal] could not apply the MCP configuration to running chats: ${(e as Error).message}`));
+// pi reads mcp.json when a chat starts or reloads: a change made in Settings reaches the chats that are running by reloading them.
+// An extension that writes a server says when it reloads them itself (`portal.mcp.set`).
+onMcpWritten((_before, by) => {
+  if (by === "settings") sessions.reloadIdle().catch((e) => console.error(`[portal] could not reload the running chats for the MCP configuration: ${(e as Error).message}`));
 });
-// An edit made to mcp.json while the portal was not running, taken in before anything lists the tools or starts a chat.
-noticeMcpEdits();
 app.use("/api", mcpRouter());
 app.use("/api", providersRouter());
 app.use("/api", peopleRouter());
@@ -1861,6 +1854,8 @@ const tls =
     : null;
 
 const host = bindHost(authMode() !== "open", process.env.ALLOW_OPEN);
+// The servers pi-mcp-adapter ran, carried over to pi's own MCP support, once: before a chat reads the file (see mcp-migration.ts).
+await moveFromAdapter().catch((e) => console.error(`[portal] MCP: the servers of pi-mcp-adapter could not be carried over: ${(e as Error).message}`));
 // Before anything can start a run: a catch-up routine marked running in the same
 // moment would be taken for one the last server left.
 const cutOff = sessions.recoverOrphans();

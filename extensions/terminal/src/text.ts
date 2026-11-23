@@ -31,8 +31,7 @@ function calledThrough(args: unknown): { name: string; input: Record<string, any
 /**
  * The call as the agent made it, from a tool event's payload. pi has spelled the
  * name `toolName` and `name`, and the arguments `input`, `args` and `parameters`.
- * A call through `tool_search` is a call of the tool it calls, and one through the
- * MCP adapter's `mcp` tool a call of the tool inside.
+ * A call through `tool_search` is a call of the tool it calls.
  */
 export function unwrap(payload: any): { name: string; input: Record<string, any> } {
   const name = String(payload?.toolName ?? payload?.name ?? "tool");
@@ -40,7 +39,6 @@ export function unwrap(payload: any): { name: string; input: Record<string, any>
   const lazy = SEARCH_TOOLS.includes(name) ? calledThrough(args) : undefined;
   if (lazy) return lazy;
   const input = plain(args) ? args : {};
-  if (name === "mcp" && typeof input.tool === "string" && input.tool) return { name: input.tool, input: plain(input.args) ? input.args : {} };
   return { name, input };
 }
 

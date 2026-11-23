@@ -255,7 +255,7 @@ test("in Code mode the code tool is on as the mode's layer, the chat is listed a
   await assert.rejects(sessions.setTools(id, ["codemode"]), CodemodeHeld);
   assert.deepEqual(sessionTools(id), { off: [], on: [] });
   assert.equal((await codemodeOf(id)).enabled, true);
-  assert.ok(!sessions.piOff(id).includes("codemode"), "pi still has it");
+  assert.ok(!sessions.offFor(id).includes("codemode"), "pi still has it");
 });
 
 test("in Code mode only the code tool is declared, and a script reaches a lazy tool, also after a reload; in Standard the lazy tool is behind the tool_search tool", async () => {
@@ -296,7 +296,7 @@ test("a chat whose own switches had the code tool off before Code mode was chose
   assert.deepEqual([codemode.enabled, codemode.byMode], [true, true]);
   assert.deepEqual(sessionTools(id), { off: [], on: [] }, "the chat's own off does not count");
   assert.ok(toolExceptions(["codemode"]).chats.some((row) => row.id === id), "listed with the code tool on");
-  assert.ok(!sessions.piOff(id).includes("codemode"));
+  assert.ok(!sessions.offFor(id).includes("codemode"));
   await assert.rejects(sessions.setTools(id, ["codemode", "bash"]), CodemodeHeld);
   assert.equal(getDb().prepare("SELECT tools_off FROM sessions WHERE id = ?").get(id).tools_off, "codemode", "kept, and nothing of the list written");
   // Another switch saved while the mode holds the code tool: the page's list says nothing of it, and the stored off stays.

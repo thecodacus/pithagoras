@@ -94,16 +94,16 @@ test("a tool its extension no longer registers leaves Settings → Tools, and on
   assert.ok((await listed()).includes("web_find"), "registered and inactive is still there");
 });
 
-test("forgetGoneTools by the extension's file: one of the same name in another folder, one that did not load, and pi-mcp-adapter's are another chat's", () => {
+test("forgetGoneTools by the extension's file: one of the same name in another folder, one that did not load, and an MCP server's are another chat's", () => {
   db.rememberTools([
     db.remembered({ name: "a_tool", source: "tools", origin: "/projects/a/.pi/extensions/tools.ts" }),
     db.remembered({ name: "b_tool", source: "tools", origin: "/projects/b/.pi/extensions/tools/index.ts" }),
-    db.remembered({ name: "notes_read", source: "pi-mcp-adapter", package: "npm:pi-mcp-adapter@2.18.0", origin: "/agent/npm/node_modules/pi-mcp-adapter/index.ts" }),
+    db.remembered({ name: "list_mcp_resources", source: "MCP resources", origin: "<inline:mcp>" }),
   ]);
-  const gone = db.forgetGoneTools({ names: [], sources: ["tools", "pi-mcp-adapter"], origins: ["/projects/a/.pi/extensions/tools.ts", "/agent/npm/node_modules/pi-mcp-adapter/index.ts"] });
+  const gone = db.forgetGoneTools({ names: [], sources: ["tools", "MCP resources"], origins: ["/projects/a/.pi/extensions/tools.ts", "<inline:mcp>"] });
   assert.deepEqual(gone, ["a_tool"]);
   const known = db.knownTools().map((t) => t.name);
-  assert.ok(known.includes("b_tool") && known.includes("notes_read"));
+  assert.ok(known.includes("b_tool") && known.includes("list_mcp_resources"));
   assert.equal(db.knownTools().find((t) => t.name === "b_tool").origin, "/projects/b/.pi/extensions/tools/index.ts", "the file is remembered with the tool");
   assert.ok(db.goneToolNames().includes("a_tool"));
 });

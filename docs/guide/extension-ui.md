@@ -1915,35 +1915,29 @@ container.
 
 An extension whose tools are an MCP server's (a service of its own that speaks
 MCP, say) writes the server into pi's mcp.json with `portal.mcp.set`.
-pi-mcp-adapter then makes its tools the chats', named `<server>_<tool>`, and
+pi then makes its tools the chats', named `mcp__<server>__<tool>`, and
 they are switched in Settings → MCP and Settings → Tools as any server's are.
 
 ```js
 // Switched on from the extension's own page.
-await portal.mcp.set("notes", { url: "http://127.0.0.1:3900/mcp", lifecycle: "lazy", directTools: true }, { trusted: true });
-portal.mcp.get("notes");   // { entry: { url: …, lifecycle: "lazy", directTools: true }, on: true }
+await portal.mcp.set("notes", { url: "http://127.0.0.1:3900/mcp" }, { trusted: true, direct: true });
+portal.mcp.get("notes");   // { entry: { url: … }, on: true, approve: [] }
 // Switched off.
 await portal.mcp.set("notes", undefined);
 ```
 
-- `get(name)` is the server of that name, `{ entry, on }`, or nothing where
+- `get(name)` is the server of that name, `{ entry, on, approve }`, or nothing where
   there is none or the file cannot be read. `on` says the chats have its tools
-  now: it is there, not switched off (`disabled`), and pi-mcp-adapter is
-  installed and on. The file is read again only when it, or pi's settings,
-  changed, so `get` can be asked each time a prompt is built. `entry` is a
-  copy.
+  now: it is there, and not switched off (`enabled: false`) or hidden
+  (`exposure: "hidden"`). The file is read each time, which is quick, so `get`
+  can be asked each time a prompt is built. `entry` is a copy.
 - `set(name, entry)` writes the entry in place of what is there under that
   name; to keep what the person added to it by hand, read it with `get` first.
   The file is for the portal's user alone (mode 0600), as an entry may hold a
-  token. Writing an entry installs pi-mcp-adapter, in the version the portal
-  pins, where it is not installed, and switches it on where it is off.
-  `set(name, undefined)` removes the server. Either way the open chats are
-  loaded again, as `chats.reload` does, to have the change, and `set` answers
-  what that does: `{ reloaded, waiting }`, for a page that says how many chats
-  have it now and how many at their next step. Installing the
-  adapter waits for the server halves to follow what is installed, this one's
-  start among them: call `set` when the person switches the server on, not
-  while the half starts.
+  token. `set(name, undefined)` removes the server. Either way the open chats
+  are loaded again, as `chats.reload` does, to have the change, and `set`
+  answers what that does: `{ reloaded, waiting }`, for a page that says how many
+  chats have it now and how many at their next step.
 - `trusted: true` says the person counts what its tools return as their own
   words, which the guard then neither wraps nor checks (see
   [Prompt injection](/guide/security#marking-untrusted-output)). The name is
@@ -1952,10 +1946,38 @@ await portal.mcp.set("notes", undefined);
   person's word on its page. `set(name, undefined)` takes the name out of the
   trusted servers again: Settings → Guard lists only the servers there are, and
   a server given that name later has to be trusted anew.
+- `direct: true` says the server's tools are to be in the model's list from the
+  start, not found through `tool_search`: a `direct` mark on the server in
+  Settings → Tools, which the person can change and which is not set where they
+  have set a mark already. For a server whose tools the agent has to have at hand,
+  such as its memory. Removing the server takes the mark away.
+- `approve` is a list of patterns of the server's own tool names, `*` for any
+  characters (`["send_*", "delete_mail"]`): every call of a tool that matches
+  (`mcp__<server>__<tool>`) is put to the person before it runs, which pi itself
+  does not do (Nextcloud asks it for what goes out to other people). It holds in
+  every path of a call: by name, through `tool_search`, from a script, in a
+  subagent's chat. The person answers in the chat; where nobody can (a chat nobody
+  attends, a routine's run, somebody who is not the primary user) the call is
+  refused. The patterns are kept by the portal and not in mcp.json, so the file stays
+  pi's alone: each `set` replaces them, `set(name, entry)` without `approve` (or with
+  `[]`) and `set(name, undefined)` drop them, and so does a server's removal from
+  Settings → MCP, so a server given that name later is not asked about by an old list.
+  `get(name).approve` says what is stored, and the server's row in Settings → MCP
+  shows it, read only (see [Calls that ask you first](/guide/mcp#calls-that-ask-you-first)).
+  An `approveTools` in the entry, the old adapter's key, which pi does not read, is
+  rejected with this option named, and so is an `approve` in the entry (the option is
+  beside the entry, not in it). The question shows the call with all its arguments (a
+  long text is cut by itself, so every key shows). A pattern is the server's own tool
+  name: `mcp__<server>__send_mail` and `<server>/send_mail` are rejected, they would never
+  match. Any extension can write any server's name, so a `set` that leaves `approve` out
+  drops what another wrote: pass it again whenever you write a server that has it (the
+  portal logs a change or drop of patterns that were there).
 - It rejects while mcp.json cannot be read, which is the person's to fix in
   Settings → MCP (nothing is written over it), for a name that is not letters,
-  digits, dots, dashes and underscores, and for an entry the adapter would not
-  take: one with none, or more than one, of `url`, `command` and `socket`.
+  digits, dashes and underscores, and for an entry pi would not take (pi's own
+  check, whose message is the rejection's): one that has neither a `command` nor
+  a `url`, an `args` that is not a list, a `timeout` that is not a positive
+  number, and so on; and for an `approve` that is not a list of texts.
 
 Understory (`extensions/understory`) writes its server so, trusted, when it is
 switched on from its page in Settings.

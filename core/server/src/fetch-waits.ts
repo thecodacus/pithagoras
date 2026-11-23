@@ -14,7 +14,7 @@ export const waitMs = (raw: string | undefined, fallback: number): number => {
 
 /** How long Node's own fetch may go quiet on an answer. Its five quiet minutes are no wait the portal chose:
  * they cut an MCP server's tool calls off mid-thought — one whose model moves no byte between the ask and the
- * one JSON it answers with — and everything else that reaches out from this process, pi's MCP adapters among
+ * one JSON it answers with — and everything else that reaches out from this process, pi's MCP support among
  * them (pi runs in it), ran on them too. These are the waits it takes: long enough for one run by default,
  * settable from where the portal starts, `0` turning the wait off. The timer is between bytes, not against the
  * clock: a flowing answer may go on as long as it flows.

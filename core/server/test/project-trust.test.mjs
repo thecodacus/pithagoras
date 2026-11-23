@@ -8,7 +8,7 @@ import { inProcessHome } from "./server-harness.mjs";
 
 /**
  * While the sandbox is on, the folder a chat works in is the agent's to write,
- * and pi and the MCP adapter run inside the portal, as root: what they would run
+ * and pi runs inside the portal, as root: what they would run
  * from the folder is not taken from it, and its skills are. The MCP part needs
  * no root and runs anywhere; a chat's pi, as the portal runs it, needs the
  * sandbox, and runs as root on Linux.
@@ -17,11 +17,11 @@ inProcessHome("pithagoras-project-trust-");
 
 const { withoutFolderMcp } = await import("../dist/sandbox/project-trust.js");
 
-test("the MCP adapter's handlers and commands are given a folder of the portal's, and nothing else's are", async () => {
+test("pi's MCP support, the portal's inline extension of that name, is given a folder of the portal's, and nothing else's is", async () => {
   const seen = {};
   const ctx = { cwd: "/workspaces/project", answer() { return this.cwd; } };
   const adapter = {
-    resolvedPath: "/data/home/.pi/agent/npm/node_modules/pi-mcp-adapter/index.ts",
+    resolvedPath: "<inline:mcp>",
     handlers: new Map([["session_start", [(_event, c) => { seen.start = c.cwd; seen.bound = c.answer(); }]]]),
     commands: new Map([["mcp", { name: "mcp", handler: (_args, c) => { seen.command = c.cwd; } }]]),
   };

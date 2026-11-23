@@ -19,7 +19,7 @@ const answers: Record<string, unknown> = {
   '/api/pi-settings': { path: '/a/settings.json', content: '{ "theme": "dark" }' },
   '/api/providers': { presets: [], apis: [], hosted: [], providers: [{ id: 'llama-swap', kind: 'llama-swap', label: 'llama-swap', baseUrl: 'http://gpu:8080/v1', key: { set: false }, models: [{ id: 'model-a', name: 'Model A' }], endpoint: true }] },
   '/api/providers/status': { status: {} },
-  '/api/mcp': { path: '/a/mcp.json', exists: true, adapterInstalled: true, adapterSpec: 'npm:pi-mcp-adapter', settings: {}, raw: '{}', parseError: null, servers: [{ name: 'notes', entry: { command: 'notes-mcp' }, transport: 'stdio', disabled: false }] },
+  '/api/mcp': { path: '/a/mcp.json', exists: true, raw: '{}', parseError: null, servers: [{ name: 'notes', entry: { command: 'notes-mcp' }, transport: 'stdio', enabled: true, problem: null }] },
   '/api/people': { people: [{ key: 'telegram:1', name: 'Ada', role: 'primary', channel: 'telegram' }] },
   '/api/tool-rules': { rules: [] },
   '/api/channels': { channels: [], kinds: [], agentHome: '/a/home' },

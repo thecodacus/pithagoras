@@ -14,7 +14,7 @@ test('a call with no command, file or search in it says its parameters, not thei
     detail('web_search', { queries: ['a'], numResults: 5, includeContent: false }),
     'Queries: a · Num results: 5 · Include content: false',
   );
-  // Through the MCP adapter, what the tool inside was given.
+  // Through `tool_search` or an old chat's MCP adapter, what the tool inside was given.
   assert.equal(detail('mcp', { tool: 'github_list_issues', args: { owner: 'me', state: 'open' } }), 'Owner: me · State: open');
   // A list of objects is counted, an object inside left to the opened view.
   assert.equal(detail('plan', { steps: [{ a: 1 }, { a: 2 }], options: { deep: true }, title: 'Ship it' }), 'Steps: 2 items · Title: Ship it');
@@ -41,9 +41,8 @@ test('a long summary is cut, and labels read as words', () => {
 test('a channel says a call the way the chat does', () => {
   // One module for both: two copies were kept alike only by this test's few inputs.
   assert.equal(argsSummary, serverSummary);
-  // It said "⚙ web_search · {"queries":[…]}", and "⚙ mcp · {"tool":…}" for anything behind the adapter.
+  // It said "⚙ web_search · {"queries":[…]}".
   assert.deepEqual(describeToolCall({ toolName: 'web_search', args: { queries: ['a', 'b'] } }), { name: 'web_search', detail: 'Queries: a, b' });
-  assert.deepEqual(describeToolCall({ toolName: 'mcp', args: { tool: 'github_list_issues', args: { state: 'open' } } }), { name: 'github_list_issues', detail: 'State: open' });
 });
 
 test('nothing in the page is written in a way older Safari cannot read', async () => {
