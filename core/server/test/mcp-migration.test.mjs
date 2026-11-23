@@ -515,6 +515,23 @@ test("tools of a server that sanitize to one name are switched off under the has
   assert.equal(off.includes("mcp__notes__get_item"), false, "the plain name is no tool of pi's here");
 });
 
+test("the servers' tools the adapter had cached are listed under pi's names at once, before a chat has connected them: not the hidden ones, nor those of a server that is off", async () => {
+  const pi = await piMcp();
+  reset();
+  logs.length = 0;
+  writeFileSync(mcpFile, JSON.stringify({ mcpServers: { github: { command: "gh", excludeTools: ["github_delete_repo"] }, paused: { command: "p", disabled: true } } }));
+  writeFileSync(
+    path.join(agent, "mcp-cache.json"),
+    JSON.stringify({ servers: { github: { tools: [{ name: "list", description: "Lists the repositories." }, { name: "delete_repo", description: "Deletes one." }] }, paused: { tools: [{ name: "pause" }] } } }),
+  );
+  listed([{ source: ADAPTER, extensions: ["extensions/index.ts"] }]);
+  await moveFromAdapter();
+  const mine = db.knownTools().filter((tool) => tool.mcp === "github" || tool.mcp === "paused");
+  assert.deepEqual(mine, [{ name: pi.createMcpToolName("github", "list"), source: "github", description: "Lists the repositories.", package: null, mcp: "github" }]);
+  assert.ok(db.shownTools().some((tool) => tool.name === pi.createMcpToolName("github", "list")), "Settings → Tools shows it");
+  assert.equal(db.unseenMcpServers().includes("github"), false, "and the server's size is known for the lazy threshold");
+});
+
 test("a copy an earlier start kept is not written over, and a file the move does not change gets none", async () => {
   reset();
   logs.length = 0;

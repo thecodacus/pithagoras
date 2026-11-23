@@ -1388,7 +1388,10 @@ big one goes behind `tool_search` by itself: mark one **Direct** where you had i
 tools registered directly. A bearer token becomes the `Authorization` header pi takes
 (Understory's entry among them). A list of the tools a server offers or leaves out
 (`includeTools`, `excludeTools`) becomes pi's `toolExposure`, with the tools it left
-out `hidden`, and the server stays on. A server pi cannot take as it was (a Unix socket,
+out `hidden`, and the server stays on. The tools the adapter had listed for a server
+are in Settings → Tools at once, under pi's names (`mcp__<server>__<tool>`), so you can
+switch them before a chat has connected the server; the first chat that does puts what
+the server offers now in their place. A server pi cannot take as it was (a Unix socket,
 `$env:NAME` variables, a `$` or a leading
 `!!` in a value of `env` or `headers`, a name with a
 dot, an address that ends in `/sse`) stays in the file as it was, switched off, and is

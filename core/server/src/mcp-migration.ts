@@ -3,10 +3,10 @@ import os from "node:os";
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { NAME_RE, ignoredByPi, mcpConfigPath, writeMcpFile, type McpFile } from "./api/mcp.js";
-import { getDb, getSetting, knownTools, packageRemoved, parseToolsOff, putSetting, setMcpApprove, setToolDefaultsOff, toolDefaultsOff } from "./db.js";
+import { getDb, getSetting, knownTools, packageRemoved, parseToolsOff, putSetting, rememberTools, setMcpApprove, setToolDefaultsOff, toolDefaultsOff, type KnownTool } from "./db.js";
 import { isSwitchedOff, sourceOf } from "./extension-switch.js";
 import { MCP_RESOURCE_TOOLS } from "./pi/mcp-origin.js";
-import { piMcp, type PiMcp } from "./pi/mcp-config.js";
+import { forChat, piMcp, type PiMcp } from "./pi/mcp-config.js";
 import { piAgentDir, readPiSettings, updatePiSettingsNow } from "./pi-settings.js";
 import { listProjects } from "./projects.js";
 import { workspaceRoot } from "./workspaces.js";
@@ -273,18 +273,52 @@ const GATEWAY = ["mcp", "mcp_script", "mcpScript"];
 /** The tables of switches that hold a list off and a list on for each row (the portal-wide default is a setting, and is handled beside them). */
 const SWITCH_TABLES = ["sessions", "project_tools", "agent_tools", "routines", "chat_modes"] as const;
 
+/** One tool the adapter had cached of a server: the name the server gave it, and what it says of itself. */
+interface CachedTool {
+  name: string;
+  description?: string;
+}
+
 /** The tools the adapter had cached for each server, by the names the servers gave them: it wrote this file once it had connected. */
-function adapterCache(): Map<string, string[]> {
-  const out = new Map<string, string[]>();
+function adapterCache(): Map<string, CachedTool[]> {
+  const out = new Map<string, CachedTool[]>();
   try {
     const cache = JSON.parse(readFileSync(path.join(piAgentDir(), "mcp-cache.json"), "utf8")) as { servers?: Record<string, { tools?: unknown }> };
     for (const [server, entry] of Object.entries(cache.servers ?? {})) {
-      if (Array.isArray(entry?.tools)) out.set(server, entry.tools.flatMap((tool: { name?: unknown }) => (typeof tool?.name === "string" ? [tool.name] : [])));
+      if (!Array.isArray(entry?.tools)) continue;
+      out.set(
+        server,
+        entry.tools.flatMap((tool: { name?: unknown; description?: unknown }) =>
+          typeof tool?.name === "string" ? [{ name: tool.name, ...(typeof tool.description === "string" && tool.description.trim() ? { description: tool.description } : {}) }] : [],
+        ),
+      );
     }
   } catch {
     /* no file, or not one: the servers have no tools to name */
   }
   return out;
+}
+
+/**
+ * The servers' tools as the lists remember them (rememberTools), under pi's names, for the tools the adapter had cached: a chat
+ * reports them once it has connected the servers, and until then Settings → Tools would have none of them to show or switch.
+ * The first chat's report takes their place (what a chat last saw of a server is what is remembered). Not the tools the
+ * server's entry hides, which pi registers for no chat; a server that is off has none remembered (rememberTools).
+ */
+function seenTools(pi: PiMcp, file: McpFile, known: ReadonlyMap<string, ReadonlyMap<string, string>>, cached: ReadonlyMap<string, CachedTool[]>): KnownTool[] {
+  return Object.entries(file.mcpServers).flatMap(([server, raw]) => {
+    const config = pi.validateMcpServerConfig(server, raw);
+    const names = known.get(server);
+    if (typeof config === "string" || !names) return [];
+    // As a chat has the server: on, its tools `direct` for pi, but for what the entry hides or gives to scripts.
+    const chat = forChat(config);
+    return (cached.get(server) ?? []).flatMap((tool) => {
+      const how = pi.getMcpToolExposure(chat, tool.name);
+      const name = names.get(tool.name);
+      if (how === "hidden" || !name) return [];
+      return [{ name, source: server, mcp: server, package: null, ...(tool.description ? { description: tool.description } : {}), ...(how === "codemode" ? { scriptsOnly: true } : {}) }];
+    });
+  });
 }
 
 /** A server's tools as pi names them: where two sanitize to one name, every one of them gets pi's hash suffix (see assignName in pi's mcp extension). */
@@ -478,7 +512,8 @@ export async function moveFromAdapter(): Promise<void> {
   const adapterTools = new Set(knownTools().filter((tool) => (typeof tool.package === "string" ? ADAPTER_PACKAGE.test(tool.package) : tool.source === "pi-mcp-adapter")).map((tool) => tool.name));
   const adapterOff = adapter === undefined || isSwitchedOff(adapter);
   // Before the adapter's cache goes: the tools of the servers it knew, by their own names, which the switches and the patterns of `approveTools` are carried over with.
-  const cache = adapterCache();
+  const cached = adapterCache();
+  const cache = new Map([...cached].map(([server, tools]) => [server, tools.map((tool) => tool.name)]));
   const moved = carryOver(pi, text, adapterOff, cache);
   if ("error" in moved) {
     console.warn(`[portal] MCP: mcp.json cannot be read (${moved.error}), so the adapter's servers are not carried over to pi's own MCP support yet: fix the file in Settings → MCP, and restart.`);
@@ -543,6 +578,8 @@ export async function moveFromAdapter(): Promise<void> {
     await packageRemoved(source);
   }
   if (moved.changed) writeMcpFile(moved.file, "extension");
+  // Once the file is pi's: the lists know the servers' tools before a chat has connected them.
+  rememberTools(seenTools(pi, moved.file, known, cached));
   // What the adapter kept beside the file, which pi's MCP support does not use.
   for (const leftover of ["mcp-cache.json", "mcp-npx-cache.json"]) rmSync(path.join(piAgentDir(), leftover), { force: true });
   putSetting(MOVED, "1");

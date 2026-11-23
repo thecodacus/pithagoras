@@ -19,6 +19,8 @@ export interface PiMcp {
   createMcpToolName(server: string, tool: string, isTaken?: (candidate: string) => boolean): string;
   /** Whether a tool name matches any of the entries, each an exact name or a pattern where `*` matches any characters (as `toolExposure`'s keys). */
   createToolNameMatcher(entries: readonly string[]): (name: string) => boolean;
+  /** How one tool of a server reaches the model, by the server's own name of it: its `toolExposure` (an exact name, else the first pattern that matches), else the server's `exposure`. */
+  getMcpToolExposure(config: McpServerConfig, tool: string): string;
 }
 
 let loaded: PiMcp | undefined;
@@ -32,7 +34,7 @@ export async function piMcp(): Promise<PiMcp> {
     import(new URL("./core/mcp-servers.js", root).href),
     import(new URL("./extensions/mcp/tools.js", root).href),
   ]);
-  loaded = { loadMcpConfig: config.loadMcpConfig, validateMcpServerConfig: servers.validateMcpServerConfig, createMcpToolName: tools.createMcpToolName, createToolNameMatcher: servers.createToolNameMatcher };
+  loaded = { loadMcpConfig: config.loadMcpConfig, validateMcpServerConfig: servers.validateMcpServerConfig, createMcpToolName: tools.createMcpToolName, createToolNameMatcher: servers.createToolNameMatcher, getMcpToolExposure: servers.getMcpToolExposure };
   return loaded;
 }
 
