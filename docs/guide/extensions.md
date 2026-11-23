@@ -491,6 +491,13 @@ A mode an extension offers says the same with `keepDirect` (see [Chat modes](/gu
 An MCP server's tools do not take part: they are lazy by the server's own setting (see below), and the threshold
 counts the ones that are in the list and does not take them out.
 
+pi-web-access, the web search package, has a lazy way of its own: its `toolActivation` (`auto` by default) can keep
+its tools out of the model's list behind a tool of its own, `web_enable`, which the model has to find and call before
+it can search. In a row with the portal's way that is two steps, past what the marks say. So the portal sets
+`toolActivation` to `eager` in its `web-search.json` (in pi's agent folder) once: as it starts with the package
+installed, or as the package is installed, and the log says so. From then on the marks decide for its tools as for any
+others. What you set in the file after that stands.
+
 ### Setting the marks
 
 **Settings → Tools** has a button on the header of each group and one beside each tool that shows the mark: **auto**,

@@ -5,6 +5,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import express, { type Router } from "express";
 import { piSettingsPath, readPiSettings, updatePiSettings } from "../pi-settings.js";
+import { eagerWebAccess } from "../web-access.js";
 import { extensionStash, installNotes, setExtensionStash } from "../db.js";
 import { dataOwner } from "../extension-data.js";
 import { isFiltered, isSwitchedOff, setPackageEnabled, sourceOf } from "../extension-switch.js";
@@ -422,6 +423,13 @@ export const extensionsRevision = (): string => installed && digest([installed, 
  * updated or switched.
  */
 export async function syncExtensionServers(): Promise<void> {
+  // Before a chat loads it: pi-web-access's tools as the portal's marks say (see web-access.ts). Its failure is no reason
+  // for the server halves to stay as they were.
+  try {
+    eagerWebAccess();
+  } catch (e) {
+    console.error("[portal] pi-web-access: its tools could not be made eager:", e);
+  }
   const found = await halves();
   await syncServerHalves(found.servers);
   // The packages too: one with nothing for the pages (a pi half, skills, prompts) is still listed in Settings.
