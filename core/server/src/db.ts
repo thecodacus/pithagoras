@@ -3534,6 +3534,8 @@ export interface KnownTool {
    * entry remembered before this was recorded.
    */
   package?: string | null;
+  /** The file of the extension that registered it, as the latest report said; absent in an entry remembered before this was recorded. See forgetGoneTools. */
+  origin?: string;
   /**
    * The MCP server that brought it, by the name it is configured under: the set it is filed under (`source`) is the same.
    * What a chat last saw of a server's tools is what is remembered of them (rememberTools): a count and a size for the
@@ -3568,11 +3570,12 @@ export function approvalFilesOf(toolName: string): string[] | undefined {
 }
 
 /** A tool a session reported, as it is remembered. */
-export const remembered = (t: { name: string; source: string; description?: string; package?: string; mcp?: string; inline?: true; scriptsOnly?: true; offByDefault?: true; approvalFiles?: string[]; tokens?: number; outside?: true; voice?: string[] }): KnownTool => ({
+export const remembered = (t: { name: string; source: string; description?: string; package?: string; origin?: string; mcp?: string; inline?: true; scriptsOnly?: true; offByDefault?: true; approvalFiles?: string[]; tokens?: number; outside?: true; voice?: string[] }): KnownTool => ({
   name: t.name,
   source: t.source,
   description: t.description,
   package: t.package ?? null,
+  ...(t.origin ? { origin: t.origin } : {}),
   ...(t.mcp !== undefined ? { mcp: t.mcp } : {}),
   inline: t.inline === true,
   ...(t.scriptsOnly ? { scriptsOnly: true } : {}),
@@ -3635,6 +3638,7 @@ export function knownTools(): KnownTool[] {
         source: String(t.source ?? ""),
         ...(typeof t.description === "string" && t.description ? { description: t.description } : {}),
         ...(typeof t.package === "string" && t.package ? { package: t.package } : t.package === null ? { package: null } : {}),
+        ...(typeof t.origin === "string" && t.origin ? { origin: t.origin } : {}),
         ...(typeof t.mcp === "string" && t.mcp ? { mcp: t.mcp } : {}),
         ...(typeof t.inline === "boolean" ? { inline: t.inline } : {}),
         ...(t.scriptsOnly === true ? { scriptsOnly: true } : {}),
@@ -3700,7 +3704,7 @@ export function shownTools(folder?: string): (Omit<KnownTool, "package" | "inlin
     tools.filter((t) => !listed.has(t.name)).map((t) => ({ name: t.name, source, package: null, inline: true, ...(t.description ? { description: t.description } : {}) })),
   );
   return [...remembered, ...fromHalves].map((known) => {
-    const { package: _package, inline, ...tool } = known;
+    const { package: _package, origin: _origin, inline, ...tool } = known;
     return { ...tool, ...(inline ? { inline: true as const } : {}) };
   });
 }
@@ -3791,6 +3795,65 @@ export async function packageRemoved(source: string): Promise<void> {
   });
 }
 
+/** The setting that keeps the names of the tools forgetGoneTools took out of the lists: one that comes back is not new (rememberTools). */
+const TOOLS_GONE = "tools_gone";
+
+function goneTools(): Set<string> {
+  try {
+    const parsed = JSON.parse(getSetting(TOOLS_GONE) ?? "[]");
+    return new Set(Array.isArray(parsed) ? parsed.filter((name): name is string => typeof name === "string") : []);
+  } catch {
+    return new Set();
+  }
+}
+
+/** The names of the tools forgetGoneTools took out of the lists: a chat counts them as seen, so that one that comes back is as its switches say (see unseenOff in sdk-client.ts). */
+export function goneToolNames(): string[] {
+  return [...goneTools()];
+}
+
+/**
+ * What a chat whose extensions have just loaded says is gone: a remembered tool of an extension the chat loaded that pi has
+ * not registered in it. The lists remembered every tool a chat ever reported, and a tool its package stopped registering
+ * (pi-web-access's `web_enable`, once its tools are eager) stayed in Settings → Tools for good. Registered is not active: a
+ * tool pi leaves inactive until something switches it on is still there.
+ *
+ * The extension is told by its file (`origin`), not by the name the lists give its source, which two extensions share where
+ * their files are called alike (`tools.ts` in two projects): an extension the chat did not load (another project's, one
+ * left out of a narrowed package, one that failed to load, one switched off) is another chat's to say. A tool remembered
+ * before its file was recorded goes by its source's name, and a package narrowed in the user's settings keeps it. Not the
+ * tools of the MCP servers, nor those of the portal's inline extensions, whose server halves say what they offer
+ * themselves (portal.tools.offer).
+ *
+ * What was switched for a tool is kept, as for any tool that is not loaded, and its name is kept aside: one that comes back
+ * is not taken for a new one, so an `offByDefault` is not switched off a second time.
+ */
+export function forgetGoneTools(loaded: { names: readonly string[]; sources: readonly string[]; origins?: readonly string[] }): string[] {
+  const sources = new Set(loaded.sources);
+  const origins = new Set(loaded.origins ?? []);
+  const names = new Set(loaded.names);
+  const index = packageIndex(readPiSettings().packages);
+  const narrowed = (t: KnownTool) => {
+    const entry = typeof t.package === "string" ? index?.byKey.get(packageKey(t.package)) : undefined;
+    const extensions = entry && typeof entry === "object" ? (entry as { extensions?: unknown }).extensions : undefined;
+    return Array.isArray(extensions) && extensions.length > 0;
+  };
+  const all = knownTools();
+  const gone = all
+    .filter((t) => {
+      // An MCP server's tools and pi's resource tools come as pi connects the servers, after a chat started (`<inline:mcp>`):
+      // a server's are replaced as a chat reports them (rememberTools), and a server taken out of the file takes them along.
+      if (t.inline || t.mcp !== undefined || t.origin?.startsWith("<inline:") || names.has(t.name)) return false;
+      if (t.origin) return origins.has(t.origin);
+      return sources.has(t.source) && !narrowed(t);
+    })
+    .map((t) => t.name);
+  if (!gone.length) return [];
+  putSetting("tools_seen", JSON.stringify(all.filter((t) => !gone.includes(t.name))));
+  putSetting(TOOLS_GONE, JSON.stringify([...new Set([...goneTools(), ...gone])].sort()));
+  return gone;
+}
+
 /**
  * Take up what a session reported. Merged rather than replaced: another
  * session may have extensions this one does not, and an extension that is
@@ -3823,7 +3886,10 @@ export function rememberTools(reported: KnownTool[]): string[] {
   for (const server of new Set(tools.flatMap((t) => (t.mcp !== undefined ? [t.mcp] : [])))) {
     for (const [name, known] of merged) if (known.mcp === server && !reportedNames.has(name)) merged.delete(name);
   }
-  const fresh = tools.map((t) => t.name).filter((name) => !merged.has(name));
+  // One that forgetGoneTools took out and that is registered again is no new tool: what was switched for it stands.
+  const back = goneTools();
+  const fresh = tools.map((t) => t.name).filter((name) => !merged.has(name) && !back.has(name));
+  if (tools.some((t) => back.has(t.name))) putSetting(TOOLS_GONE, JSON.stringify([...back].filter((name) => !tools.some((t) => t.name === name))));
   for (const tool of tools) {
     const before = merged.get(tool.name);
     // Kept short: it is a hint beside a checkbox, and the catalogue is one settings row.
@@ -3842,6 +3908,8 @@ export function rememberTools(reported: KnownTool[]): string[] {
       source: tool.source,
       ...(description ? { description } : {}),
       ...(pkg !== undefined ? { package: pkg } : {}),
+      // As its latest report says: a tool that moved to another file is that file's now.
+      ...((tool.origin ?? before?.origin) ? { origin: tool.origin ?? before?.origin } : {}),
       ...(tool.mcp !== undefined ? { mcp: tool.mcp } : {}),
       ...(tool.inline !== undefined ? { inline: tool.inline } : {}),
       ...(tool.scriptsOnly ? { scriptsOnly: true } : {}),

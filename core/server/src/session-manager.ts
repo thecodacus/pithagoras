@@ -82,6 +82,8 @@ import {
   type AgentHome,
   routineOf,
   remembered,
+  forgetGoneTools,
+  goneToolNames,
   rememberTools,
   knownTools,
   recordAudit,
@@ -1315,7 +1317,11 @@ class SessionManager extends EventEmitter {
           // A session that cannot list its tools still works; the catalogue
           // simply stays as it was.
         });
-    rememberRegistered();
+    // As it starts: what its extensions no longer register leaves the lists, and what it registered is remembered.
+    void this.noteTools(client).catch(() => {
+      // A session that cannot list its tools still works; the catalogue
+      // simply stays as it was.
+    });
 
     // A new pi process knows nothing of what the last one was retrying.
     this.modelErrors.forget(sessionId);
@@ -2847,7 +2853,8 @@ class SessionManager extends EventEmitter {
       toolsOff,
       lazy: this.lazyHeadFor(sessionId),
       rememberLazy: (head) => setLazyHead(sessionId, head),
-      toolsSeen: () => new Set(knownTools().map((t) => t.name)),
+      // With the tools taken out of the lists as gone: one that comes back is as the switches say, not off as a new one.
+      toolsSeen: () => new Set([...knownTools().map((t) => t.name), ...goneToolNames()]),
     };
   }
 
@@ -2891,6 +2898,22 @@ class SessionManager extends EventEmitter {
     // off since it started is no more out of date than one that started with them on, and one that started with them off is not.
     const same = (head: LazyHead) => JSON.stringify(was.lazy) === JSON.stringify(head.lazy) && JSON.stringify(was.direct) === JSON.stringify(head.direct);
     return !same(this.freshLazyHead(sessionId)) && !same(this.freshLazyHead(sessionId, new Set()));
+  }
+
+  /**
+   * What a chat has registered, written down, as it starts and after its extensions were reloaded: what the extensions it
+   * loaded no longer register leaves the lists (forgetGoneTools), and what it offers is remembered. Only then, when what it
+   * loaded is what is installed: a chat that has run since may have an older version of a package, which says nothing of
+   * what the newer one registers. The settings page
+   * offers a default per tool, and needing to open a chat before you can say "off everywhere" would be the wrong way
+   * round. A tool that this chat was started with, because nobody had seen it before, and that is off by default, is
+   * taken out of its list again.
+   */
+  private async noteTools(client: PiClient): Promise<void> {
+    const tools = client.getTools ? await client.getTools() : [];
+    const loaded = client.registered?.();
+    if (loaded) forgetGoneTools(loaded);
+    if (rememberTools(tools.map(remembered)).length) await this.applyToolDefaults();
   }
 
   /**
@@ -3070,6 +3093,8 @@ class SessionManager extends EventEmitter {
         }
         try {
           await this.withEdit(sessionId, () => client.reload());
+          // The extensions changed: what they register now is what the lists have.
+          void this.noteTools(client).catch(() => {});
           return true;
         } catch (e) {
           // Due still, as a reload that fails leaves it: see PiClient.reloadDue.
@@ -3110,6 +3135,7 @@ class SessionManager extends EventEmitter {
     if (client.isIdle?.() === false || this.reloadCutsOff(sessionId)) return;
     try {
       await this.withEdit(sessionId, () => client.reload());
+      void this.noteTools(client).catch(() => {});
     } catch (e) {
       console.error(`[portal] could not reload ${sessionId}: ${(e as Error).message}`);
     }

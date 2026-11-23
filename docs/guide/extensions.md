@@ -359,7 +359,11 @@ alone, in a chat in Standard mode, keeps pi's own setting for that, which is
 others.
 
 Before a chat has started, and in Settings → Tools, the list is what the portal
-has seen registered. The tools of a package that is switched off, narrowed to
+has seen registered. A tool an extension no longer registers leaves it once a chat
+that loads the extension has started or reloaded (pi-web-access's `web_enable`, once
+its tools are eager); what was switched for it is kept, and it is not taken for a new
+tool when it comes back. One the extension registers and leaves inactive until it is
+switched on stays listed. The tools of a package that is switched off, narrowed to
 none of its extensions, or uninstalled are left out of it, since nothing
 registers them any more. A switched-off package's are remembered and come back
 with it; an uninstalled one's are forgotten. The tools an extension's
@@ -479,6 +483,17 @@ the mode's or the agent's tools page. Without it the largest-first rule could le
 A mode an extension offers says the same with `keepDirect` (see [Chat modes](/guide/extension-ui#chat-modes)).
 
 An MCP server is a group like any other: its tools are counted, and the threshold can leave it out of the list.
+
+pi-web-access, the web search package, has a lazy way of its own: its `toolActivation` (`auto` by default) can keep
+its tools out of the model's list behind a tool of its own, `web_enable`, which the model has to find and call before
+it can search. In a row with the portal's way that is two steps, past what the marks say. So the portal sets
+`toolActivation` to `eager` in its `web-search.json` (in pi's agent folder) once: as it starts with the package
+installed, or as the package is installed, and the log says so. From then on the marks decide for its tools as for any
+others. What you set in the file after that stands. pi-web-access is updated apart from pi (a version you name is
+kept, one without a version takes the newest when you update the packages), so the portal goes by the version installed:
+before 0.33.0 the setting does not exist, and it waits for an update. A file that takes pi's own deferred route
+(`"toolExposure": "deferred"`, or `"toolActivation": "none"`) is left as it is, since pi-web-access does not load that
+with `eager`.
 
 ### Setting the marks
 
