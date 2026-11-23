@@ -3528,6 +3528,8 @@ export interface KnownTool {
    * entry remembered before this was recorded.
    */
   package?: string | null;
+  /** The file of the extension that registered it, as the latest report said; absent in an entry remembered before this was recorded. See forgetGoneTools. */
+  origin?: string;
   /**
    * Registered by one of the portal's own inline extensions, which nothing of anyone's can be mistaken for.
    * Every report says it, one way or the other; absent only in an entry remembered before this was recorded.
@@ -3556,11 +3558,12 @@ export function approvalFilesOf(toolName: string): string[] | undefined {
 }
 
 /** A tool a session reported, as it is remembered. */
-export const remembered = (t: { name: string; source: string; description?: string; package?: string; inline?: true; scriptsOnly?: true; offByDefault?: true; approvalFiles?: string[]; tokens?: number; outside?: true; voice?: string[] }): KnownTool => ({
+export const remembered = (t: { name: string; source: string; description?: string; package?: string; origin?: string; inline?: true; scriptsOnly?: true; offByDefault?: true; approvalFiles?: string[]; tokens?: number; outside?: true; voice?: string[] }): KnownTool => ({
   name: t.name,
   source: t.source,
   description: t.description,
   package: t.package ?? null,
+  ...(t.origin ? { origin: t.origin } : {}),
   inline: t.inline === true,
   ...(t.scriptsOnly ? { scriptsOnly: true } : {}),
   ...(t.offByDefault ? { offByDefault: true } : {}),
@@ -3622,6 +3625,7 @@ export function knownTools(): KnownTool[] {
         source: String(t.source ?? ""),
         ...(typeof t.description === "string" && t.description ? { description: t.description } : {}),
         ...(typeof t.package === "string" && t.package ? { package: t.package } : t.package === null ? { package: null } : {}),
+        ...(typeof t.origin === "string" && t.origin ? { origin: t.origin } : {}),
         ...(typeof t.inline === "boolean" ? { inline: t.inline } : {}),
         ...(t.scriptsOnly === true ? { scriptsOnly: true } : {}),
         ...(Array.isArray(t.approvalFiles) && t.approvalFiles.length && t.approvalFiles.every((n: unknown) => typeof n === "string") ? { approvalFiles: t.approvalFiles as string[] } : {}),
@@ -3692,7 +3696,7 @@ export function shownTools(folder?: string, view: McpView = mcpView()): (Omit<Kn
   return [...remembered, ...fromHalves].flatMap((known) => {
     const offer = offers(known);
     if (unlisted(offer)) return [];
-    const { package: _package, inline, ...tool } = known;
+    const { package: _package, origin: _origin, inline, ...tool } = known;
     return [{
       ...tool,
       ...(inline ? { inline: true as const } : {}),
@@ -4065,21 +4069,31 @@ function goneTools(): Set<string> {
   }
 }
 
+/** The names of the tools forgetGoneTools took out of the lists: a chat counts them as seen, so that one that comes back is as its switches say (see unseenOff in sdk-client.ts). */
+export function goneToolNames(): string[] {
+  return [...goneTools()];
+}
+
 /**
- * What a chat whose tools are registered says is gone: a remembered tool of a source the chat loaded (a package, an
- * extension file, pi itself) that pi has not registered in it. The lists remembered every tool a chat ever reported, and a
- * tool its package stopped registering (pi-web-access's `web_enable`, once its tools are eager) stayed in Settings → Tools
- * for good. Registered is not active: a tool pi leaves inactive until something switches it on is still there.
+ * What a chat whose extensions have just loaded says is gone: a remembered tool of an extension the chat loaded that pi has
+ * not registered in it. The lists remembered every tool a chat ever reported, and a tool its package stopped registering
+ * (pi-web-access's `web_enable`, once its tools are eager) stayed in Settings → Tools for good. Registered is not active: a
+ * tool pi leaves inactive until something switches it on is still there.
  *
- * Not the tools of a source the chat did not load (another project's package, one switched off, one that failed to load),
- * which are another chat's to say, nor those of a package narrowed to some of its extensions, nor those of the portal's inline extensions, whose server halves say what they offer
- * themselves (portal.tools.offer). What was switched for a tool is kept, as for any tool that is not loaded, and its name
- * is kept aside: one that comes back is not taken for a new one, so an `offByDefault` is not switched off a second time.
+ * The extension is told by its file (`origin`), not by the name the lists give its source, which two extensions share where
+ * their files are called alike (`tools.ts` in two projects): an extension the chat did not load (another project's, one
+ * left out of a narrowed package, one that failed to load, one switched off) is another chat's to say. A tool remembered
+ * before its file was recorded goes by its source's name, and a package narrowed in the user's settings keeps it. Not the
+ * tools of pi-mcp-adapter, whose servers differ from chat to chat (a project's own), nor those of the portal's inline
+ * extensions, whose server halves say what they offer themselves (portal.tools.offer).
+ *
+ * What was switched for a tool is kept, as for any tool that is not loaded, and its name is kept aside: one that comes back
+ * is not taken for a new one, so an `offByDefault` is not switched off a second time.
  */
-export function forgetGoneTools(loaded: { names: readonly string[]; sources: readonly string[] }): string[] {
+export function forgetGoneTools(loaded: { names: readonly string[]; sources: readonly string[]; origins?: readonly string[] }): string[] {
   const sources = new Set(loaded.sources);
+  const origins = new Set(loaded.origins ?? []);
   const names = new Set(loaded.names);
-  // A package narrowed to some of its extensions keeps all its tools listed: the others' are left out of the chat, not gone.
   const index = packageIndex(readPiSettings().packages);
   const narrowed = (t: KnownTool) => {
     const entry = typeof t.package === "string" ? index?.byKey.get(packageKey(t.package)) : undefined;
@@ -4087,7 +4101,13 @@ export function forgetGoneTools(loaded: { names: readonly string[]; sources: rea
     return Array.isArray(extensions) && extensions.length > 0;
   };
   const all = knownTools();
-  const gone = all.filter((t) => !t.inline && sources.has(t.source) && !names.has(t.name) && !narrowed(t)).map((t) => t.name);
+  const gone = all
+    .filter((t) => {
+      if (t.inline || adapterTool(t) || names.has(t.name)) return false;
+      if (t.origin) return origins.has(t.origin);
+      return sources.has(t.source) && !narrowed(t);
+    })
+    .map((t) => t.name);
   if (!gone.length) return [];
   putSetting("tools_seen", JSON.stringify(all.filter((t) => !gone.includes(t.name))));
   putSetting(TOOLS_GONE, JSON.stringify([...new Set([...goneTools(), ...gone])].sort()));
@@ -4153,6 +4173,8 @@ export function rememberTools(reported: KnownTool[]): string[] {
       source: tool.source,
       ...(description ? { description } : {}),
       ...(pkg !== undefined ? { package: pkg } : {}),
+      // As its latest report says: a tool that moved to another file is that file's now.
+      ...((tool.origin ?? before?.origin) ? { origin: tool.origin ?? before?.origin } : {}),
       ...(tool.inline !== undefined ? { inline: tool.inline } : {}),
       ...(tool.scriptsOnly ? { scriptsOnly: true } : {}),
       // As its latest report says: a tool that stopped declaring its files is approved whole again.

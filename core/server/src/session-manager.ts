@@ -84,6 +84,7 @@ import {
   routineOf,
   remembered,
   forgetGoneTools,
+  goneToolNames,
   rememberTools,
   knownTools,
   recordAudit,
@@ -2854,7 +2855,8 @@ class SessionManager extends EventEmitter {
       toolsOff,
       lazy: this.lazyHeadFor(sessionId),
       rememberLazy: (head) => setLazyHead(sessionId, head),
-      toolsSeen: () => new Set(knownTools().map((t) => t.name)),
+      // With the tools taken out of the lists as gone: one that comes back is as the switches say, not off as a new one.
+      toolsSeen: () => new Set([...knownTools().map((t) => t.name), ...goneToolNames()]),
     };
   }
 
@@ -2919,8 +2921,10 @@ class SessionManager extends EventEmitter {
   }
 
   /**
-   * What a chat has registered, written down, as it starts and after its extensions were reloaded: what the sources it
-   * loaded no longer register leaves the lists (forgetGoneTools), and what it offers is remembered. The settings page
+   * What a chat has registered, written down, as it starts and after its extensions were reloaded: what the extensions it
+   * loaded no longer register leaves the lists (forgetGoneTools), and what it offers is remembered. Only then, when what it
+   * loaded is what is installed: a chat that has run since may have an older version of a package, which says nothing of
+   * what the newer one registers. The settings page
    * offers a default per tool, and needing to open a chat before you can say "off everywhere" would be the wrong way
    * round. A tool that this chat was started with, because nobody had seen it before, and that is off by default, is
    * taken out of its list again.
@@ -2947,8 +2951,6 @@ class SessionManager extends EventEmitter {
   async getTools(sessionId: string): Promise<{ tools: PiTool[]; live: boolean }> {
     const client = this.live.get(sessionId)?.client;
     const reported = client?.getTools ? await client.getTools() : [];
-    const loaded = client?.registered?.();
-    if (loaded) forgetGoneTools(loaded);
     if (reported.length && rememberTools(reported.map(remembered)).length) await this.applyToolDefaults();
     const session = getSession(sessionId);
     const workspace = session?.workspace;

@@ -15,11 +15,11 @@ mkdirSync(agent, { recursive: true });
 const config = path.join(agent, "web-search.json");
 const listed = (packages) => writeFileSync(path.join(agent, "settings.json"), JSON.stringify({ packages }));
 /** What `pi list` says of an installed pi-web-access of this version: its spec and its folder, with the package's own package.json. */
-const installed = (version) => {
-  const dir = path.join(home, "pkgs", version, "pi-web-access");
+const installed = (version, spec = "npm:pi-web-access", name = "pi-web-access") => {
+  const dir = path.join(home, "pkgs", name, version);
   mkdirSync(dir, { recursive: true });
-  writeFileSync(path.join(dir, "package.json"), JSON.stringify({ name: "pi-web-access", version }));
-  return [{ spec: "npm:pi-web-access", path: dir, scope: "User" }];
+  writeFileSync(path.join(dir, "package.json"), JSON.stringify({ name, version }));
+  return [{ spec, path: dir, scope: "User" }];
 };
 
 const db = await import("../dist/db.js");
@@ -43,10 +43,8 @@ test("where pi looks for it: the agent folder pi is given", () => {
 });
 
 test("nothing while the package is not installed, and it is done once it is", () => {
-  listed(["npm:pi-other@1.0.0"]);
-  eagerWebAccess(installed("0.35.0"));
+  eagerWebAccess(installed("1.0.0", "npm:pi-other", "pi-other"));
   assert.equal(existsSync(config), false);
-  listed(["npm:pi-web-access@0.35.0"]);
   eagerWebAccess(installed("0.35.0"));
   assert.deepEqual(JSON.parse(readFileSync(config, "utf8")), { toolActivation: "eager" });
   assert.equal(statSync(config).mode & 0o777, 0o600, "it holds the services' keys: the person's alone");
@@ -88,6 +86,19 @@ test("only a version that knows \"eager\": none before 0.33.0 or where pi cannot
   assert.ok(!db.getSetting("web_access_eager"), "not done: tried again");
   eagerWebAccess(installed("0.33.0"));
   assert.equal(JSON.parse(readFileSync(config, "utf8")).toolActivation, "eager");
+});
+
+test("one installed from git, a URL or a folder is known by its package.json; a config folder that is not there yet is made", () => {
+  const before = process.env.PI_CODING_AGENT_DIR;
+  process.env.PI_CODING_AGENT_DIR = path.join(home, "not-yet", "agent");
+  try {
+    eagerWebAccess(installed("0.48.0", "git:github.com/nicobailon/pi-web-access"));
+    const made = path.join(process.env.PI_CODING_AGENT_DIR, "web-search.json");
+    assert.deepEqual(JSON.parse(readFileSync(made, "utf8")), { toolActivation: "eager" });
+    assert.equal(statSync(made).mode & 0o777, 0o600);
+  } finally {
+    process.env.PI_CODING_AGENT_DIR = before;
+  }
 });
 
 test("pi's own deferred route is left as it is: pi-web-access refuses to load it with \"eager\"", () => {

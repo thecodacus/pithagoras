@@ -87,10 +87,25 @@ test("a tool its extension no longer registers leaves Settings → Tools, and on
   assert.ok(eager.includes("far_tool"), "a tool of an extension the chat did not load is another chat's to say");
 
   mode("lazy");
-  await started();
+  const back = await started();
   await until(async () => (await listed()).includes("web_risky"), "back with the extension that registers it");
   assert.ok(!db.toolDefaultsOff().includes("web_risky"), "not new: on, as somebody switched it");
+  assert.equal((await json(`/api/sessions/${back.id}/tools`)).tools.find((t) => t.name === "web_risky")?.enabled, true, "and on in the chat it came back in");
   assert.ok((await listed()).includes("web_find"), "registered and inactive is still there");
+});
+
+test("forgetGoneTools by the extension's file: one of the same name in another folder, one that did not load, and pi-mcp-adapter's are another chat's", () => {
+  db.rememberTools([
+    db.remembered({ name: "a_tool", source: "tools", origin: "/projects/a/.pi/extensions/tools.ts" }),
+    db.remembered({ name: "b_tool", source: "tools", origin: "/projects/b/.pi/extensions/tools/index.ts" }),
+    db.remembered({ name: "notes_read", source: "pi-mcp-adapter", package: "npm:pi-mcp-adapter@2.18.0", origin: "/agent/npm/node_modules/pi-mcp-adapter/index.ts" }),
+  ]);
+  const gone = db.forgetGoneTools({ names: [], sources: ["tools", "pi-mcp-adapter"], origins: ["/projects/a/.pi/extensions/tools.ts", "/agent/npm/node_modules/pi-mcp-adapter/index.ts"] });
+  assert.deepEqual(gone, ["a_tool"]);
+  const known = db.knownTools().map((t) => t.name);
+  assert.ok(known.includes("b_tool") && known.includes("notes_read"));
+  assert.equal(db.knownTools().find((t) => t.name === "b_tool").origin, "/projects/b/.pi/extensions/tools/index.ts", "the file is remembered with the tool");
+  assert.ok(db.goneToolNames().includes("a_tool"));
 });
 
 test("forgetGoneTools: only the tools of what the chat loaded, not the portal's inline ones, and their names are kept aside", () => {

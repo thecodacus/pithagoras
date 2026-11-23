@@ -369,6 +369,11 @@ function packageOf(info: any): string | undefined {
   return info?.origin === "package" && info?.scope === "user" && typeof info.source === "string" ? info.source : undefined;
 }
 
+/** The file of the extension a tool or an extension came from, as pi records it: two extensions of one name (`tools.ts` in two projects) are two files. */
+function originOf(info: any): string | undefined {
+  return typeof info?.path === "string" && info.path ? info.path : undefined;
+}
+
 /** Whether the portal's own inline extension registered it: pi names those <inline:name>, which no file's path is. */
 function isInline(info: any): boolean {
   return typeof info?.path === "string" && /^<inline:[^>]+>$/.test(info.path);
@@ -1761,6 +1766,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       description: typeof tool.description === "string" ? tool.description : undefined,
       source: sourceLabel(tool.sourceInfo),
       package: packageOf(tool.sourceInfo),
+      ...((origin) => (origin ? { origin } : {}))(originOf(tool.sourceInfo)),
       ...(isInline(tool.sourceInfo) ? { inline: true as const } : {}),
       ...(forScripts(tool) ? { scriptsOnly: true as const } : {}),
       ...(this.offByDefault(String(tool.name)) ? { offByDefault: true as const } : {}),
@@ -1776,12 +1782,14 @@ export class SdkPiClient extends EventEmitter implements PiClient {
    * `web_enable`), and the sources of what it loaded, by the names getTools gives them: an extension that loaded and
    * registered nothing is one. Undefined where pi cannot say.
    */
-  registered(): { names: string[]; sources: string[] } | undefined {
+  registered(): { names: string[]; sources: string[]; origins: string[] } | undefined {
     try {
       const all: any[] = this.session.getAllTools?.() ?? [];
+      // What loaded: an extension that failed to is not among them, and what it registers elsewhere is not gone.
       const loaded = asArray(this.session.resourceLoader?.getExtensions?.()?.extensions);
       const sources = new Set([...all.map((tool) => sourceLabel(tool.sourceInfo)), ...loaded.map((ext) => sourceLabel(ext?.sourceInfo ?? { path: ext?.path }))]);
-      return { names: all.map((tool) => String(tool.name)), sources: [...sources] };
+      const origins = new Set([...all.map((tool) => originOf(tool.sourceInfo)), ...loaded.map((ext) => originOf(ext?.sourceInfo ?? { path: ext?.path }))].filter((origin): origin is string => origin !== undefined));
+      return { names: all.map((tool) => String(tool.name)), sources: [...sources], origins: [...origins] };
     } catch {
       return undefined;
     }
