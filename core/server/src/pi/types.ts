@@ -36,6 +36,8 @@ export interface PiTool {
   source: string;
   /** The entry in pi's settings that brought it, where a package of the user's did. */
   package?: string;
+  /** The file of the extension that registered it (pi's `sourceInfo.path`), which tells two extensions of one name apart (see forgetGoneTools). */
+  origin?: string;
   /** One of the portal's own, from an inline extension: no file or package of anyone's has a path like that, so it is not mistaken for an extension's of the same name. */
   inline?: true;
   /** Offered to scripts only (pi's `codemode` and `deferred` exposure): never in what the model is offered, so it has no lazy mark to give. */
@@ -184,6 +186,13 @@ export interface PiClient extends EventEmitter {
    * Optional: an executor that cannot ask pi leaves it out.
    */
   getTools?(): Promise<PiTool[]>;
+  /**
+   * The names of every tool pi has registered in this session, active or not, and what it loaded (an extension that
+   * registered none among them), by the names of the sources and by the extensions' files: what an extension it loaded does
+   * not register any more is gone (forgetGoneTools).
+   * Optional: an executor that cannot ask pi leaves it out, and nothing is forgotten on its word.
+   */
+  registered?(): { names: string[]; sources: string[]; origins: string[] } | undefined;
   /** The MCP servers pi was given for this chat, by the namespace of their tools. */
   readonly mcpServers?: ReadonlyMap<string, string>;
   /** Switch tools off by name. Everything not named is on. */
