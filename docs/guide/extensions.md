@@ -496,7 +496,11 @@ its tools out of the model's list behind a tool of its own, `web_enable`, which 
 it can search. In a row with the portal's way that is two steps, past what the marks say. So the portal sets
 `toolActivation` to `eager` in its `web-search.json` (in pi's agent folder) once: as it starts with the package
 installed, or as the package is installed, and the log says so. From then on the marks decide for its tools as for any
-others. What you set in the file after that stands.
+others. What you set in the file after that stands. pi-web-access is updated apart from pi (a version you name is
+kept, one without a version takes the newest when you update the packages), so the portal goes by the version installed:
+before 0.33.0 the setting does not exist, and it waits for an update. A file that takes pi's own deferred route
+(`"toolExposure": "deferred"`, or `"toolActivation": "none"`) is left as it is, since pi-web-access does not load that
+with `eager`.
 
 ### Setting the marks
 

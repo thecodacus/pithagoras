@@ -423,14 +423,14 @@ export const extensionsRevision = (): string => installed && digest([installed, 
  * updated or switched.
  */
 export async function syncExtensionServers(): Promise<void> {
-  // Before a chat loads it: pi-web-access's tools as the portal's marks say (see web-access.ts). Its failure is no reason
-  // for the server halves to stay as they were.
+  const found = await halves();
+  // pi-web-access's tools as the portal's marks say (see web-access.ts), by the version pi has installed. Its failure is
+  // no reason for the server halves to stay as they were.
   try {
-    eagerWebAccess();
+    eagerWebAccess(await listInstalledPackages().catch(() => undefined));
   } catch (e) {
     console.error("[portal] pi-web-access: its tools could not be made eager:", e);
   }
-  const found = await halves();
   await syncServerHalves(found.servers);
   // The packages too: one with nothing for the pages (a pi half, skills, prompts) is still listed in Settings.
   installed = digest([readPiSettings().packages ?? null, found]);

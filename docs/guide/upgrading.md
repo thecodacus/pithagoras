@@ -1350,7 +1350,9 @@ a portal at 16 that goes back to a build without the column keeps it, unused.
 pi-web-access can keep its tools out of the model's list behind a tool of its own, `web_enable` (its `toolActivation`,
 `auto` by default). The first start with it installed, or its install, sets `toolActivation` to `eager` in its
 `web-search.json` once, keeps the rest of the file, and says so in the log: the portal's lazy marks decide for its
-tools now ([Lazy tools](/guide/extensions#lazy-tools)). A value you set in the file after that stands.
+tools now ([Lazy tools](/guide/extensions#lazy-tools)). A value you set in the file after that stands. A version before
+0.33.0 has no such setting: it is done after an update. A file with `"toolExposure": "deferred"` or
+`"toolActivation": "none"` is left as it is.
 
 The tools Settings → Tools lists are the ones the chats register: a tool an extension no longer registers (such as
 `web_enable` once the tools are eager) leaves the list when a chat that loads the extension starts. What you switched
