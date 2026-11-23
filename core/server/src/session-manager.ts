@@ -83,6 +83,7 @@ import {
   type AgentHome,
   routineOf,
   remembered,
+  forgetGoneTools,
   rememberTools,
   knownTools,
   recordAudit,
@@ -1307,16 +1308,10 @@ class SessionManager extends EventEmitter {
     // What this session registered, written down as soon as it exists. The
     // settings page offers a default per tool, and needing to open a chat
     // before you can say "off everywhere" would be the wrong way round.
-    void client
-      .getTools?.()
-      .then((tools) => {
-        // A tool that this chat was started with, because nobody had seen it before, and that is off by default, is taken out of its list again.
-        if (rememberTools(tools.map(remembered)).length) return this.applyToolDefaults();
-      })
-      .catch(() => {
-        // A session that cannot list its tools still works; the catalogue
-        // simply stays as it was.
-      });
+    void this.noteTools(client).catch(() => {
+      // A session that cannot list its tools still works; the catalogue
+      // simply stays as it was.
+    });
 
     // A new pi process knows nothing of what the last one was retrying.
     this.modelErrors.forget(sessionId);
@@ -2924,6 +2919,20 @@ class SessionManager extends EventEmitter {
   }
 
   /**
+   * What a chat has registered, written down, as it starts and after its extensions were reloaded: what the sources it
+   * loaded no longer register leaves the lists (forgetGoneTools), and what it offers is remembered. The settings page
+   * offers a default per tool, and needing to open a chat before you can say "off everywhere" would be the wrong way
+   * round. A tool that this chat was started with, because nobody had seen it before, and that is off by default, is
+   * taken out of its list again.
+   */
+  private async noteTools(client: PiClient): Promise<void> {
+    const tools = client.getTools ? await client.getTools() : [];
+    const loaded = client.registered?.();
+    if (loaded) forgetGoneTools(loaded);
+    if (rememberTools(tools.map(remembered)).length) await this.applyToolDefaults();
+  }
+
+  /**
    * Every tool this conversation could use, and whether it is on.
    *
    * A running session lists its own: pi builds the registry when it starts.
@@ -2938,6 +2947,8 @@ class SessionManager extends EventEmitter {
   async getTools(sessionId: string): Promise<{ tools: PiTool[]; live: boolean }> {
     const client = this.live.get(sessionId)?.client;
     const reported = client?.getTools ? await client.getTools() : [];
+    const loaded = client?.registered?.();
+    if (loaded) forgetGoneTools(loaded);
     if (reported.length && rememberTools(reported.map(remembered)).length) await this.applyToolDefaults();
     const session = getSession(sessionId);
     const workspace = session?.workspace;
@@ -3107,6 +3118,8 @@ class SessionManager extends EventEmitter {
         }
         try {
           await this.withEdit(sessionId, () => client.reload());
+          // The extensions changed: what they register now is what the lists have.
+          void this.noteTools(client).catch(() => {});
           return true;
         } catch (e) {
           // Due still, as a reload that fails leaves it: see PiClient.reloadDue.
@@ -3147,6 +3160,7 @@ class SessionManager extends EventEmitter {
     if (client.isIdle?.() === false || this.reloadCutsOff(sessionId)) return;
     try {
       await this.withEdit(sessionId, () => client.reload());
+      void this.noteTools(client).catch(() => {});
     } catch (e) {
       console.error(`[portal] could not reload ${sessionId}: ${(e as Error).message}`);
     }

@@ -365,7 +365,11 @@ alone, in a chat in Standard mode, keeps pi's own setting for that, which is
 others.
 
 Before a chat has started, and in Settings → Tools, the list is what the portal
-has seen registered. The tools of a package that is switched off, narrowed to
+has seen registered. A tool an extension no longer registers leaves it once a chat
+that loads the extension has started or reloaded (pi-web-access's `web_enable`, once
+its tools are eager); what was switched for it is kept, and it is not taken for a new
+tool when it comes back. One the extension registers and leaves inactive until it is
+switched on stays listed. The tools of a package that is switched off, narrowed to
 none of its extensions, or uninstalled are left out of it, since nothing
 registers them any more. A switched-off package's are remembered and come back
 with it; an uninstalled one's are forgotten. The tools an extension's

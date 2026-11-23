@@ -1772,6 +1772,22 @@ export class SdkPiClient extends EventEmitter implements PiClient {
   }
 
   /**
+   * Every tool pi has registered here, active or not (pi-web-access registers its tools and leaves them inactive until
+   * `web_enable`), and the sources of what it loaded, by the names getTools gives them: an extension that loaded and
+   * registered nothing is one. Undefined where pi cannot say.
+   */
+  registered(): { names: string[]; sources: string[] } | undefined {
+    try {
+      const all: any[] = this.session.getAllTools?.() ?? [];
+      const loaded = asArray(this.session.resourceLoader?.getExtensions?.()?.extensions);
+      const sources = new Set([...all.map((tool) => sourceLabel(tool.sourceInfo)), ...loaded.map((ext) => sourceLabel(ext?.sourceInfo ?? { path: ext?.path }))]);
+      return { names: all.map((tool) => String(tool.name)), sources: [...sources] };
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
    * What a tool says of itself that a chat it is lazy in keeps in its head from the start: that it returns outside content,
    * and the lines for a spoken turn. Remembered with the tool, so that the head of the next chat is made with them, and a
    * lazy tool that registers late changes nothing in the prompt (see buildLazyHead).

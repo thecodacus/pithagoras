@@ -4053,6 +4053,47 @@ export async function packageRemoved(source: string): Promise<void> {
   });
 }
 
+/** The setting that keeps the names of the tools forgetGoneTools took out of the lists: one that comes back is not new (rememberTools). */
+const TOOLS_GONE = "tools_gone";
+
+function goneTools(): Set<string> {
+  try {
+    const parsed = JSON.parse(getSetting(TOOLS_GONE) ?? "[]");
+    return new Set(Array.isArray(parsed) ? parsed.filter((name): name is string => typeof name === "string") : []);
+  } catch {
+    return new Set();
+  }
+}
+
+/**
+ * What a chat whose tools are registered says is gone: a remembered tool of a source the chat loaded (a package, an
+ * extension file, pi itself) that pi has not registered in it. The lists remembered every tool a chat ever reported, and a
+ * tool its package stopped registering (pi-web-access's `web_enable`, once its tools are eager) stayed in Settings → Tools
+ * for good. Registered is not active: a tool pi leaves inactive until something switches it on is still there.
+ *
+ * Not the tools of a source the chat did not load (another project's package, one switched off, one that failed to load),
+ * which are another chat's to say, nor those of a package narrowed to some of its extensions, nor those of the portal's inline extensions, whose server halves say what they offer
+ * themselves (portal.tools.offer). What was switched for a tool is kept, as for any tool that is not loaded, and its name
+ * is kept aside: one that comes back is not taken for a new one, so an `offByDefault` is not switched off a second time.
+ */
+export function forgetGoneTools(loaded: { names: readonly string[]; sources: readonly string[] }): string[] {
+  const sources = new Set(loaded.sources);
+  const names = new Set(loaded.names);
+  // A package narrowed to some of its extensions keeps all its tools listed: the others' are left out of the chat, not gone.
+  const index = packageIndex(readPiSettings().packages);
+  const narrowed = (t: KnownTool) => {
+    const entry = typeof t.package === "string" ? index?.byKey.get(packageKey(t.package)) : undefined;
+    const extensions = entry && typeof entry === "object" ? (entry as { extensions?: unknown }).extensions : undefined;
+    return Array.isArray(extensions) && extensions.length > 0;
+  };
+  const all = knownTools();
+  const gone = all.filter((t) => !t.inline && sources.has(t.source) && !names.has(t.name) && !narrowed(t)).map((t) => t.name);
+  if (!gone.length) return [];
+  putSetting("tools_seen", JSON.stringify(all.filter((t) => !gone.includes(t.name))));
+  putSetting(TOOLS_GONE, JSON.stringify([...new Set([...goneTools(), ...gone])].sort()));
+  return gone;
+}
+
 /**
  * Take up what a session reported. Merged rather than replaced: another
  * session may have extensions this one does not, and an extension that is
@@ -4090,7 +4131,10 @@ export function rememberTools(reported: KnownTool[]): string[] {
   );
   if (!tools.length) return [];
   const merged = new Map(knownTools().map((t) => [t.name, t]));
-  const fresh = tools.map((t) => t.name).filter((name) => !merged.has(name));
+  // One that forgetGoneTools took out and that is registered again is no new tool: what was switched for it stands.
+  const back = goneTools();
+  const fresh = tools.map((t) => t.name).filter((name) => !merged.has(name) && !back.has(name));
+  if (tools.some((t) => back.has(t.name))) putSetting(TOOLS_GONE, JSON.stringify([...back].filter((name) => !tools.some((t) => t.name === name))));
   for (const tool of tools) {
     const before = merged.get(tool.name);
     // Kept short: it is a hint beside a checkbox, and the catalogue is one settings row.

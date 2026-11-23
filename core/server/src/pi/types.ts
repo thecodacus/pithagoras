@@ -184,6 +184,12 @@ export interface PiClient extends EventEmitter {
    * Optional: an executor that cannot ask pi leaves it out.
    */
   getTools?(): Promise<PiTool[]>;
+  /**
+   * The names of every tool pi has registered in this session, active or not, and the sources of what it loaded (an
+   * extension that registered none among them): what a source it loaded does not register any more is gone (forgetGoneTools).
+   * Optional: an executor that cannot ask pi leaves it out, and nothing is forgotten on its word.
+   */
+  registered?(): { names: string[]; sources: string[] } | undefined;
   /** Switch tools off by name. Everything not named is on. */
   setToolsOff?(names: string[]): Promise<void>;
   /**
